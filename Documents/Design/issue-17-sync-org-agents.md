@@ -12,7 +12,7 @@ Replace all 15 template agent definitions with their org-level equivalents from 
 
 ### 1. Agent File Format ✅
 
-**Decision**: Convert from `` ```chatagent `` code fence wrapping to standard `---` YAML frontmatter.
+**Decision**: Convert from `chatagent` code fence wrapping to standard `---` YAML frontmatter.
 
 **Rationale**: The org repo uses standard `---` frontmatter, which is the canonical VS Code Copilot Chat agent format. The `chatagent` fencing was an older convention.
 
