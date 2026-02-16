@@ -114,21 +114,21 @@ This template is **production-ready** and includes everything you need to start 
 
 Complete set of agent definitions in `.github/agents/`:
 
-- **Issue Designer** - Picks up issues, creates design docs
-- **Research Agent** - Deep research on changes
-- **Code Conductor** - Orchestrates implementation
-- **Code-Smith** - Writes production code
-- **Test-Writer** - Creates comprehensive tests
-- **Refactor-Specialist** - Improves code quality
-- **Plan-Architect** - Designs implementation plans
-- **Doc-Keeper** - Maintains documentation
-- **Code-Critic** - Reviews implementations
-- **Code-Review-Response** - Categorizes review feedback
-- **Janitor** - Handles file cleanup and organization
-- **Plan-General** - General planning assistance
-- **Process-Review** - Reviews process compliance
-- **Specification** - Helps define specifications
-- **UI-Iterator** - Polishes UI implementation
+- **Issue-Designer** - Design exploration and issue management for new features
+- **Research-Agent** - Comprehensive technical analysis and pattern discovery
+- **Code-Conductor** - Plan-driven workflow orchestration across implementation steps
+- **Code-Smith** - Focused code implementation using TDD or plan-driven execution
+- **Test-Writer** - Behavior-focused test writing and validation
+- **Refactor-Specialist** - Proactive refactoring and code quality improvement
+- **Plan-Architect** - Implementation plan architecture and specialist constraints
+- **Doc-Keeper** - Documentation finalization and accuracy verification
+- **Code-Critic** - Adversarial code review and risk discovery
+- **Code-Review-Response** - Adjudicates review findings and delegates execution
+- **Janitor** - Cleanup and technical debt remediation
+- **Issue-Planner** - Multi-step planning and implementation outline creation
+- **Process-Review** - Workflow compliance and process improvement analysis
+- **Specification** - Specification document creation and updates
+- **UI-Iterator** - Screenshot-based UI polish and visual iteration
 
 ### 🎯 Skills Framework (8 Skills)
 
@@ -199,6 +199,7 @@ examples/
 
 Documents/
 ├── Design/              # Design documents (created by agents)
+├── Decisions/           # Architecture Decision Records (ADRs)
 └── Development/         # Project documentation templates
 ```
 
@@ -273,6 +274,17 @@ This template follows a **copy-and-adapt** model:
 2. **Flexibility** - Adapt freely to your specific needs
 3. **Stability** - Upgrade on your schedule
 4. **Control** - You decide what changes to incorporate
+
+## Organization-Level Setup
+
+You can define shared Agent definitions at the organization level in either:
+
+- An organization `.github-private` repository
+- An organization `.github` repository
+
+For organization repositories, place definitions in an `agents/` folder at repository root.
+
+Organization-level Agents apply across repositories in that organization. Repository-level Agents in this template (`.github/agents/`) can override organization defaults when project-specific behavior is needed.
 
 ## Example Projects
 

@@ -61,6 +61,8 @@ Review each agent in `.github/agents/` and consider:
 - **Are the interaction patterns appropriate?**
 - **Do you need additional specialized agents?**
 
+Agent definition files use YAML frontmatter delimited by `---`. Common fields include `name`, `description`, `argument-hint`, `tools`, and `handoffs`.
+
 Common customizations:
 
 - Adjust code standards references
@@ -199,7 +201,12 @@ If you develop improvements:
 
 - Ensure `copilot-instructions.md` is in `.github/`
 - Check that agent definitions are properly formatted
+- Verify each agent file has valid YAML frontmatter using `---` delimiters and expected fields (for example: `name`, `description`, `tools`, `handoffs`)
 - Verify instructions aren't conflicting
+
+### Organization-Level Agents
+
+You can also maintain shared Agent definitions at the organization level and use repository-level Agent files for project-specific overrides. See the Organization-Level Setup section in [README.md](README.md) for details.
 
 ### Skills Not Being Used
 
