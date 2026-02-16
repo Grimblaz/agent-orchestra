@@ -1,7 +1,7 @@
 ---
 name: Test-Writer
-description: 'Test writing and validation specialist for high-quality behavior-focused tests'
-argument-hint: 'Write tests, validate coverage, or fix test failures'
+description: "Test writing and validation specialist for high-quality behavior-focused tests"
+argument-hint: "Write tests, validate coverage, or fix test failures"
 tools:
   - execute/getTerminalOutput
   - execute/runInTerminal

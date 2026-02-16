@@ -14,7 +14,8 @@ tools: [
     "edit",
     "search",
     "web",
-    "playwright/*", # Optional: remove if not using Playwright MCP,
+    # Optional: remove if not using Playwright MCP
+    "playwright/*",
     "github/*",
   ]
 handoffs:

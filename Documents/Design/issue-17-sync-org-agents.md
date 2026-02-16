@@ -6,7 +6,7 @@
 
 ## Summary
 
-Replace all 15 template agent definitions with their org-level equivalents from `Grimblaz-and-Friends/.github-private`, adding Issue-Planner (replaces Plan-General), and adjusting all agents to remain generic and usable by any project — including backend-only projects without Playwright.
+Replace all 15 template agent definitions with their org-level equivalents from `Grimblaz-and-Friends/.github-private`, adding Issue-Planner to replace the previous lightweight planning agent, and adjusting all agents to remain generic and usable by any project — including backend-only projects without Playwright.
 
 ## Design Decisions
 
@@ -16,15 +16,15 @@ Replace all 15 template agent definitions with their org-level equivalents from 
 
 **Rationale**: The org repo uses standard `---` frontmatter, which is the canonical VS Code Copilot Chat agent format. The `chatagent` fencing was an older convention.
 
-### 2. Issue-Planner Replaces Plan-General ✅
+### 2. Issue-Planner Replaces the Legacy Lightweight Planner ✅
 
-**Decision**: Remove Plan-General agent, add Issue-Planner agent.
+**Decision**: Remove the legacy lightweight planning agent and add Issue-Planner.
 
-**Rationale**: Issue-Planner is significantly more sophisticated — handles GitHub branch setup, research subagent discovery, iterative alignment via `askQuestions`, TDD per step, visual verification pipeline, reconciliation loops, and plan persistence. Plan-General's functionality is fully subsumed.
+**Rationale**: Issue-Planner is significantly more sophisticated — handles GitHub branch setup, research subagent discovery, iterative alignment via `askQuestions`, TDD per step, visual verification pipeline, reconciliation loops, and plan persistence. The legacy lightweight planner's functionality is fully subsumed.
 
 ### 3. Role Title: "technical lead" ✅
 
-**Decision**: Replace "engineering manager" with "technical lead" in Code-Conductor.
+**Decision**: Replace the prior managerial role wording with "technical lead" in Code-Conductor.
 
 **Rationale**: "Technical lead" conveys ownership and accountability without corporate hierarchy connotations. More universally applicable across team structures.
 
@@ -36,9 +36,9 @@ Replace all 15 template agent definitions with their org-level equivalents from 
 
 | Agent | Adjustment |
 |---|---|
-| Code-Conductor | YAML comment on `playwright/*` tool; intro note on Visual Verification Gate section; remove `webapp-testing` from Skill Mapping; "browser MCP usage guidance" → "(if configured)" |
-| Code-Critic | YAML comment on `playwright/*` tool; intro note on Browser-Based Review; `browser-mcp.instructions.md` → "(if present)" in Required Reading |
-| Issue-Designer | YAML comment on `playwright/*` tool; strengthen "(Optional)" note on View Current App; `browser-mcp.instructions.md` → "(if present)" |
+| Code-Conductor | YAML comment on `playwright/*` tool; intro note on Visual Verification Gate section; remove the legacy UI-testing skill row from Skill Mapping; "browser MCP usage guidance" → "(if configured)" |
+| Code-Critic | YAML comment on `playwright/*` tool; intro note on Browser-Based Review; `browser-mcp.instructions.md (if present)` in Required Reading |
+| Issue-Designer | YAML comment on `playwright/*` tool; strengthen "(Optional)" note on View Current App; `browser-mcp.instructions.md (if present)` |
 | Issue-Planner | Conditional framing: "If the project has a UI layer..." for UI detection and visual verification |
 | UI-Iterator | Add top-of-body note about UI-only applicability; no other changes (agent is inherently UI-focused) |
 | Plan-Architect | No change needed — Phase 5b already says "(if UI work)" |
@@ -50,8 +50,8 @@ Replace all 15 template agent definitions with their org-level equivalents from 
 | Reference | Change |
 |---|---|
 | `eslint.config.js` in Code-Review-Response | → "project lint configuration" |
-| `webapp-testing` skill in Code-Conductor | Remove from Skill Mapping (doesn't exist in template skills dir) |
-| `browser-mcp.instructions.md` everywhere | Add "(if present)" |
+| legacy UI-testing skill entry in Code-Conductor | Remove from Skill Mapping (doesn't exist in template skills dir) |
+| `browser-mcp.instructions.md (if present)` references | Ensure optionality is explicit |
 | `npm test` in Code-Conductor | Already generic in org version: "for example `npm test` when applicable" |
 
 ### 6. MIT License ✅
@@ -88,7 +88,7 @@ All agents wholesale replaced from org versions with adjustments noted above:
 4. **Code-Smith** — Parallel Workflow Contract, Bad Test Detection, Requirements Verification
 5. **Doc-Keeper** — streamlined, Documentation Maintenance Responsibilities
 6. **Issue-Designer** — askQuestions workflow, End-to-End Description, Testing Scope, Completion Gate
-7. **Issue-Planner** (NEW) — replaces Plan-General
+7. **Issue-Planner** (NEW) — replaces the legacy lightweight planning agent
 8. **Janitor** — Post-Merge Git Workflow, Knowledge Capture
 9. **Plan-Architect** — Issue Reading mandatory, Data+Integration rule, Test Scenario Handling
 10. **Process-Review** — Terminal Stall Audit, expanded metrics
