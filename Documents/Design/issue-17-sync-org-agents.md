@@ -36,11 +36,11 @@ Replace all 15 template agent definitions with their org-level equivalents from 
 
 | Agent | Adjustment |
 |---|---|
-| Code-Conductor | YAML comment on `playwright/*` tool; intro note on Visual Verification Gate section; remove the legacy UI-testing skill row from Skill Mapping; "browser MCP usage guidance" → "(if configured)" |
+| Code-Conductor | Playwright optionality note in Overview (no `playwright/*` tool declaration in final org version); intro note on Visual Verification Gate section; remove the legacy UI-testing skill row from Skill Mapping; "browser MCP usage guidance" → "(if configured)" |
 | Code-Critic | YAML comment on `playwright/*` tool; intro note on Browser-Based Review; `browser-mcp.instructions.md (if present)` in Required Reading |
 | Issue-Designer | YAML comment on `playwright/*` tool; strengthen "(Optional)" note on View Current App; `browser-mcp.instructions.md (if present)` |
 | Issue-Planner | Conditional framing: "If the project has a UI layer..." for UI detection and visual verification |
-| UI-Iterator | Add top-of-body note about UI-only applicability; no other changes (agent is inherently UI-focused) |
+| UI-Iterator | YAML comment on `playwright/*` tool and add top-of-body note about UI-only applicability |
 | Plan-Architect | No change needed — Phase 5b already says "(if UI work)" |
 
 ### 5. Repo-Specific References Genericized ✅
