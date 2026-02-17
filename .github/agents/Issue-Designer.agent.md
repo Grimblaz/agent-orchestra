@@ -57,8 +57,8 @@ Design exploration happens in **conversation**, not documents. Discuss first, do
 
 Before researching domain topics, load the appropriate skill:
 
-- **Domain rules and terminology**: load the project-relevant skill from `.claude/skills/` when available
-- **Design trade-offs**: `.claude/skills/brainstorming/SKILL.md`
+- **Domain rules and terminology**: load the project-relevant skill from `.github/skills/` when available
+- **Design trade-offs**: `.github/skills/brainstorming/SKILL.md`
 - **Browser MCP patterns**: `.github/instructions/browser-mcp.instructions.md (if present)` (when viewing the running app)
 
 ### View Current App (Optional)

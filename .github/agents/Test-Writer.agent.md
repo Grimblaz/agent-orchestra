@@ -118,7 +118,7 @@ Promote to broader layers only after Domain PBT shows stable signal and low flak
 
 **UI Component Tests (`*.test.tsx`)**:
 
-- **ALWAYS load `.claude/skills/ui-testing/SKILL.md` before writing UI tests**
+- **ALWAYS load `.github/skills/ui-testing/SKILL.md` before writing UI tests**
 - Query by `aria-label` (semantic intent), NOT by DOM structure (`role="list"`)
 - Test behavior ("target communicated"), NOT implementation ("uses `<ul>` element")
 - Avoid emoji matching, position-based assertions, specific CSS classes
@@ -275,20 +275,20 @@ it("calculates internal delay value", () => {
 
 **When writing tests (TDD workflow):**
 
-- Load `.claude/skills/tdd-workflow/SKILL.md` for red-green-refactor process
+- Load `.github/skills/test-driven-development/SKILL.md` for red-green-refactor process
 
 **When writing UI component tests:**
 
-- Load `.claude/skills/ui-testing/SKILL.md` for Testing Library patterns and query strategies
+- Load `.github/skills/ui-testing/SKILL.md` for Testing Library patterns and query strategies
 
 **When tests fail unexpectedly:**
 
-- Load `.claude/skills/systematic-debugging/SKILL.md` before attempting fixes
+- Load `.github/skills/systematic-debugging/SKILL.md` before attempting fixes
 - Use the 4-phase process: Root Cause → Pattern Analysis → Hypothesis → Implementation
 
 **When verifying test coverage:**
 
-- Reference `.claude/skills/verification-before-completion/SKILL.md`
+- Reference `.github/skills/verification-before-completion/SKILL.md`
 - Evidence before claims: run the repository's configured coverage command from `.github/copilot-instructions.md` before claiming coverage is sufficient
 
 ---

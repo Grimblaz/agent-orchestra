@@ -551,7 +551,7 @@ Get-ChildItem -Recurse -Include *.md | Where-Object {(Select-String -Path $_ -Pa
 
 **When verifying process completion:**
 
-- Reference `.claude/skills/verification-before-completion/SKILL.md` for evidence-based checks
+- Reference `.github/skills/verification-before-completion/SKILL.md` for evidence-based checks
 
 ---
 

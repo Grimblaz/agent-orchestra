@@ -71,7 +71,7 @@ Common customizations:
 
 ### 4. Add Project Skills
 
-Create skills in `.claude/skills/` for domain-specific knowledge.
+Create skills in `.github/skills/` for domain-specific knowledge.
 
 **Use the skill-creator skill for guidance:**
 
@@ -82,7 +82,7 @@ Create skills in `.claude/skills/` for domain-specific knowledge.
 **Required structure:**
 
 ```text
-.claude/skills/
+.github/skills/
 ├── your-skill/
 │   ├── SKILL.md          # Required: Router with frontmatter
 │   ├── workflows/        # Step-by-step procedures
@@ -90,7 +90,7 @@ Create skills in `.claude/skills/` for domain-specific knowledge.
 │   └── templates/        # Output structures
 ```
 
-**Required SKILL.md frontmatter (VS Code 1.107+):**
+**Required SKILL.md frontmatter (VS Code 1.108+):**
 
 ```yaml
 ---
@@ -211,8 +211,8 @@ You can also maintain shared Agent definitions at the organization level and use
 ### Skills Not Being Used
 
 - Confirm skill has `SKILL.md` with valid frontmatter (`name` + `description`)
-- Check skill is in the `.claude/skills/` directory
-- Ensure `description` field is meaningful (triggers VS Code 1.107+ discovery)
+- Check skill is in the `.github/skills/` directory
+- Ensure `description` field is meaningful (triggers VS Code 1.108+ discovery with `chat.useAgentSkills`)
 - Reference skill with `@skill-name` in prompts
 
 ### CI/CD Failures

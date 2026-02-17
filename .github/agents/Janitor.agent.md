@@ -361,7 +361,7 @@ Concise and action-oriented. Report what was done, where files moved, what was d
 
 **When verifying cleanup completeness:**
 
-- Reference `.claude/skills/verification-before-completion/SKILL.md` for evidence-based verification
+- Reference `.github/skills/verification-before-completion/SKILL.md` for evidence-based verification
 - Run validation commands before claiming cleanup is complete
 
 ## Model Recommendations

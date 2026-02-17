@@ -121,7 +121,7 @@ For dev server lifecycle, navigation defaults, cleanup, and deterministic error 
 
 **For aesthetic evaluation and design decisions:**
 
-- Load `.claude/skills/frontend-design/SKILL.md` for distinctive UI guidelines
+- Load `.github/skills/frontend-design/SKILL.md` for distinctive UI guidelines
 - Avoid generic "AI slop" aesthetics - commit to bold, intentional design choices
 
 ---

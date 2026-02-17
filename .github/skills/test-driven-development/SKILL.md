@@ -1,15 +1,19 @@
 ---
-name: tdd-workflow
-description: Test-Driven Development process knowledge, quality standards, and workflow guidance
+name: test-driven-development
+description: Test-Driven Development workflow guidance, quality standards, and practical patterns. Use when writing tests first, implementing to pass tests, validating quality gates, or refactoring safely.
 ---
 
-# TDD Workflow Skill
+# Test-Driven Development Skill
 
 ## Overview
 
 This skill module provides comprehensive TDD workflow guidance, including the RED-GREEN-REFACTOR cycle, quality gates, test patterns, and anti-patterns to avoid.
 
-> **Note**: Examples use Java/Spring Boot conventions (JUnit 5, Gradle). Adapt commands for your stack while following the same patterns.
+> **[CUSTOMIZE]** Examples may use a sample stack. Adapt commands and tooling for your project while preserving the same TDD principles.
+
+## Iron Law of TDD
+
+> A behavior is not done until a failing test proves the need, passing tests prove correctness, and refactoring preserves green tests.
 
 <essential_principles>
 
@@ -23,11 +27,11 @@ This skill module provides comprehensive TDD workflow guidance, including the RE
 
 Quality gates are enforced in priority order:
 
-| Priority     | Gate             | Tool                   | Threshold | Enforcement     |
-| ------------ | ---------------- | ---------------------- | --------- | --------------- |
-| 🥇 PRIMARY   | Mutation Testing | PIT (pitest)           | ≥80%      | Blocks merge    |
-| 🥈 SECONDARY | Code Coverage    | JaCoCo                 | ≥80%      | Blocks merge    |
-| 🥉 BASELINE  | Tests Pass       | JUnit 5                | 100%      | Always required |
+| Priority     | Gate             | Tool                      | Threshold | Enforcement     |
+| ------------ | ---------------- | ------------------------- | --------- | --------------- |
+| 🥇 PRIMARY   | Mutation Testing | [CUSTOMIZE] Mutation tool | ≥80%      | Blocks merge    |
+| 🥈 SECONDARY | Code Coverage    | [CUSTOMIZE] Coverage tool | ≥80%      | Blocks merge    |
+| 🥉 BASELINE  | Tests Pass       | [CUSTOMIZE] Test runner   | 100%      | Always required |
 
 **Why this order?**
 
@@ -105,7 +109,7 @@ Quality gates are enforced in priority order:
 ## Quick Reference
 
 ```bash
-# CUSTOMIZE: Replace with your project's test commands
+# [CUSTOMIZE] Replace with your project's test commands
 
 # Run tests
 ./gradlew test

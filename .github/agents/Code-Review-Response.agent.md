@@ -410,7 +410,7 @@ Categorize and respond to each review item with clear acknowledgment, honest ass
 
 **When review identifies bugs:**
 
-- Reference `.claude/skills/systematic-debugging/SKILL.md` approach
+- Reference `.github/skills/systematic-debugging/SKILL.md` approach
 - Ensure fixes follow root cause investigation, not symptom patching
 
 ---

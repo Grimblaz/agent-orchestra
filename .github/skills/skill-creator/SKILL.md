@@ -5,7 +5,7 @@ description: Guide for creating new skills in this system with proper frontmatte
 
 # Skill Creator
 
-Guide for creating new skills with proper structure and VS Code 1.107+ compatible frontmatter.
+Guide for creating new skills with proper structure and VS Code 1.108+ compatible frontmatter.
 
 ## When to Use
 
@@ -23,7 +23,8 @@ description: What the skill does AND when to use it. This description triggers s
 ---
 ```
 
-**Important**: 
+**Important**:
+
 - `name` and `description` are the only supported frontmatter fields
 - No `allowed-tools` or other fields—they will be ignored
 - Description should include usage triggers for discoverability
@@ -31,7 +32,7 @@ description: What the skill does AND when to use it. This description triggers s
 ## Directory Structure
 
 ```
-.claude/skills/
+.github/skills/
 └── {skill-name}/
     ├── SKILL.md          # Required: Main skill file with frontmatter
     ├── reference.md      # Optional: Detailed reference material
@@ -39,6 +40,21 @@ description: What the skill does AND when to use it. This description triggers s
     └── examples/         # Optional: Example files
         └── ...
 ```
+
+## Discovery in VS Code (1.108+)
+
+- Skill discovery in chat is available in VS Code 1.108+
+- Ensure agent skills are enabled via `chat.useAgentSkills`
+- Discovery quality depends on clear trigger phrasing in `description` (for example: "Use when ...")
+
+## Minimal vs Full Skill Pattern
+
+Use the smallest structure that solves the need:
+
+- **Minimal Skill**: Single `SKILL.md` with frontmatter, "When to Use," and concise process/checklist
+- **Full Skill**: `SKILL.md` plus supporting references/templates/examples when topic depth or reuse requires it
+
+Start minimal, then split into supporting files only when the core document becomes hard to navigate.
 
 ## Skill Template
 
@@ -69,14 +85,15 @@ Organize by user goals, not by internal structure.
 ## Project-Specific Configuration
 
 [CUSTOMIZE] Add project-specific details:
+
 - Configuration files to modify
 - Team conventions to follow
 - Tools and paths used
 
 ## Quick Reference
 
-| Item | Description |
-|------|-------------|
+| Item        | Description       |
+| ----------- | ----------------- |
 | Key concept | Brief explanation |
 
 ## See Also
@@ -92,6 +109,7 @@ Organize by user goals, not by internal structure.
 The description determines when the skill appears in suggestions.
 
 **Good descriptions**:
+
 ```yaml
 description: Structured debugging process using observe-hypothesize-test-fix methodology. Use when debugging complex issues, investigating flaky tests, or tracking down root causes.
 
@@ -99,11 +117,20 @@ description: Guide for resilient UI component testing. Use when writing React te
 ```
 
 **Bad descriptions**:
+
 ```yaml
 description: Debugging guide.  # Too vague, poor discoverability
 
 description: This skill helps with testing things.  # Unclear scope
 ```
+
+### Frontmatter Validation
+
+| Field         | Required | Rule                                  | Validation Guidance                                                               |
+| ------------- | -------- | ------------------------------------- | --------------------------------------------------------------------------------- |
+| `name`        | Yes      | kebab-case                            | Use lowercase words separated by hyphens (for example: `test-driven-development`) |
+| `description` | Yes      | Include what it does + usage triggers | Include explicit trigger phrasing such as "Use when ..." for discovery            |
+| Other fields  | No       | Unsupported                           | Do not add extra fields (for example `allowed-tools`) because they are ignored    |
 
 ### Content Principles
 
@@ -121,6 +148,7 @@ Use `[CUSTOMIZE]` for sections that need project adaptation:
 ## Project Configuration
 
 [CUSTOMIZE] Add your project's specific:
+
 - File paths and locations
 - Naming conventions
 - Team-specific practices
@@ -128,11 +156,11 @@ Use `[CUSTOMIZE]` for sections that need project adaptation:
 
 ## Skill Sizing Guidelines
 
-| Size | SKILL.md Lines | Supporting Files | Use Case |
-|------|----------------|------------------|----------|
-| Small | 50-100 | 0 | Simple process or checklist |
-| Medium | 100-200 | 0-1 | Standard methodology |
-| Large | 150-250 | 1-3 | Complex topic with patterns |
+| Size   | SKILL.md Lines | Supporting Files | Use Case                    |
+| ------ | -------------- | ---------------- | --------------------------- |
+| Small  | 50-100         | 0                | Simple process or checklist |
+| Medium | 100-200        | 0-1              | Standard methodology        |
+| Large  | 150-250        | 1-3              | Complex topic with patterns |
 
 **Rule**: If SKILL.md exceeds 300 lines, split into supporting files.
 
@@ -171,19 +199,23 @@ Systematic approach to reviewing code changes.
 ## Review Process
 
 ### 1. Understand Context
+
 - Read PR description and linked issues
 - Understand the goal before reading code
 
 ### 2. High-Level Review
+
 - Does the approach make sense?
 - Are there architectural concerns?
 
 ### 3. Detailed Review
+
 - Security: Input validation, auth, data exposure
 - Correctness: Edge cases, error handling
 - Maintainability: Readability, naming, complexity
 
 ### 4. Provide Feedback
+
 - Be specific and actionable
 - Suggest alternatives, don't just criticize
 - Distinguish blocking vs. non-blocking
@@ -191,6 +223,7 @@ Systematic approach to reviewing code changes.
 ## Project Standards
 
 [CUSTOMIZE] Add your team's review requirements:
+
 - Required reviewers by area
 - Review checklist items
 - Auto-merge criteria

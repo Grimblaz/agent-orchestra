@@ -25,7 +25,7 @@ This template provides a proven framework for working with AI coding agents, fea
 
 Get up and running in under 5 minutes:
 
-> **Requirements**: VS Code 1.107+ recommended for automatic skill discovery from `.claude/skills/`. See [CONTRIBUTING.md](CONTRIBUTING.md#setup) for setup details.
+> **Requirements**: VS Code 1.108+ recommended for automatic skill discovery from `.github/skills/` with `chat.useAgentSkills` enabled. See [CONTRIBUTING.md](CONTRIBUTING.md#setup) for setup details.
 
 ### 1. Get the Template
 
@@ -50,7 +50,7 @@ Before using agents, customize these key files:
 |----------|------|---------|-----------|
 | **HIGH** | `.github/copilot-instructions.md` | Your project context & tech stack | ✅ Yes |
 | **HIGH** | `.github/architecture-rules.md` | Your architecture patterns | ✅ Yes |
-| Medium | `.claude/skills/` | Add domain-specific skills | Recommended |
+| Medium | `.github/skills/` | Add domain-specific skills | Recommended |
 | Low | `.github/agents/` | Tweak agent behaviors | Optional |
 
 > 📖 **See [CUSTOMIZATION.md](CUSTOMIZATION.md)** for detailed step-by-step guidance.
@@ -60,7 +60,7 @@ Before using agents, customize these key files:
 - [ ] Create `.github/copilot-instructions.md` (use `examples/spring-boot-microservice/copilot-instructions.md` as reference)
 - [ ] Create `.github/architecture-rules.md` (use `examples/spring-boot-microservice/architecture-rules.md` as reference)
 - [ ] Review `.github/agents/` - familiarize yourself with available agents
-- [ ] Optionally add project-specific skills to `.claude/skills/`
+- [ ] Optionally add project-specific skills to `.github/skills/`
 
 ### 3. Your First Agent Conversation
 
@@ -130,22 +130,23 @@ Complete set of agent definitions in `.github/agents/`:
 - **Specification** - Specification document creation and updates
 - **UI-Iterator** - Screenshot-based UI polish and visual iteration
 
-### 🎯 Skills Framework (8 Skills)
+### 🎯 Skills Framework (9 Skills)
 
-Reusable skill definitions in `.claude/skills/`:
+Reusable skill definitions in `.github/skills/`:
 
 | Skill | Purpose |
 |-------|---------|
-| **tdd-workflow** | TDD process knowledge and workflow guidance |
+| **test-driven-development** | TDD process knowledge and workflow guidance |
 | **brainstorming** | Structured Socratic questioning for exploring ideas |
 | **frontend-design** | Distinctive UI design guidance |
+| **webapp-testing** | End-to-end and integration testing for web applications |
 | **ui-testing** | Resilient React component testing |
 | **skill-creator** | Guide for creating new skills |
 | **systematic-debugging** | 4-phase debugging process |
 | **verification-before-completion** | Evidence-based verification checklist |
 | **software-architecture** | Clean Architecture and SOLID principles |
 
-> **VS Code 1.107+**: Skills are auto-discovered from `.claude/skills/` via the `description` frontmatter field.
+> **VS Code 1.108+**: Skills are auto-discovered from `.github/skills/` when `chat.useAgentSkills` is enabled, via the `description` frontmatter field.
 
 ### 📋 Templates & Instructions
 
@@ -183,11 +184,12 @@ Complete Spring Boot microservice example in `examples/`:
 ├── scripts/             # Validation scripts
 └── workflows/           # CI/CD workflow templates
 
-.claude/skills/          # Reusable skill definitions (8 skills)
+.github/skills/          # Reusable skill definitions (9 skills)
 ├── README.md            # Skills framework documentation
-├── tdd-workflow/        # Test-Driven Development
+├── test-driven-development/        # Test-Driven Development
 ├── brainstorming/       # Socratic questioning
 ├── frontend-design/     # UI design guidance
+├── webapp-testing/      # Web app testing guidance
 ├── ui-testing/          # React component testing
 ├── skill-creator/       # Creating new skills
 ├── systematic-debugging/ # 4-phase debugging
@@ -215,7 +217,7 @@ Agents are specialized AI personas defined in `.github/agents/`. Each agent has:
 
 ### Skills
 
-Skills are domain-specific knowledge packages in `.claude/skills/`. They provide:
+Skills are domain-specific knowledge packages in `.github/skills/`. They provide:
 
 - Contextual information for agents
 - Best practices for specific workflows
@@ -236,10 +238,10 @@ Instructions in `.github/instructions/` guide agent behavior:
 ### Quick Reference: Files to Customize
 
 | File | What to Customize | When |
-|------|-------------------|------|
+| ------ | ------------------- | ------ |
 | `.github/copilot-instructions.md` | Project overview, tech stack, conventions | **Before first use** |
 | `.github/architecture-rules.md` | Layer structure, package organization, dependency rules | **Before first use** |
-| `.claude/skills/your-domain/` | Domain-specific patterns, examples, best practices | As needed |
+| `.github/skills/your-domain/` | Domain-specific patterns, examples, best practices | As needed |
 | `.github/agents/*.md` | Agent behaviors, responsibilities, interaction patterns | Optional refinement |
 | `.github/templates/*.md` | Implementation plan structure, issue templates | Optional refinement |
 | `.github/workflows/*.yml` | CI/CD pipelines, automation | When setting up CI |

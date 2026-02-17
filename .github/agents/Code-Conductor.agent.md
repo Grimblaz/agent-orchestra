@@ -87,7 +87,7 @@ BEFORE calling the agent tool, you MUST:
    - **Check GitHub Issue**: Design docs are linked in issue comments (look for "Design Phase Complete" comment with doc path)
    - **Turn the design into detailed research**: A design doc is not the detailed research needed for implementation; ask Research-Agent to create a research document, then Plan-Architect to create plan
 3. **Track Current Phase**: Identify active phase and extract context
-4. **Check Skills**: Skills in `.claude/skills/` may provide relevant guidance for specialists
+4. **Check Skills**: Skills in `.github/skills/` may provide relevant guidance for specialists
 5. **Execute Phase**: For each phase:
    - **Update plan**: Mark phase as "IN PROGRESS" before starting
    - Identify appropriate specialist agent

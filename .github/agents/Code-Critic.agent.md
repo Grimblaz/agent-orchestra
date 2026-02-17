@@ -277,7 +277,7 @@ For any **new data field, constant, or map** added:
 - [ ] Anti-patterns avoided (God classes, spaghetti)
 - [ ] DRY principle followed
 - [ ] SOLID principles applied
-- [ ] UI tests query by `aria-label`/behavior, NOT DOM structure (see `.claude/skills/ui-testing/SKILL.md`)
+- [ ] UI tests query by `aria-label`/behavior, NOT DOM structure (see `.github/skills/ui-testing/SKILL.md`)
 
 ### 5. Simplicity Perspective
 
@@ -385,11 +385,11 @@ Use browser-based review only when PR changes touch UI implementation.
 
 **When reviewing architecture compliance:**
 
-- Load `.claude/skills/software-architecture/SKILL.md` for project architecture rules and SOLID principles
+- Load `.github/skills/software-architecture/SKILL.md` for project architecture rules and SOLID principles
 
 **When verifying quality gates:**
 
-- Load `.claude/skills/verification-before-completion/SKILL.md` for evidence-based verification
+- Load `.github/skills/verification-before-completion/SKILL.md` for evidence-based verification
 
 ---
 

@@ -144,7 +144,7 @@ For each file modified in the PR, evaluate:
 
 **When found**: Refactor to inject dependency and delegate. See `.github/architecture-rules.md` → "Extraction & Extension Principles".
 
-**🔧 Before any extraction/split**: Load `.claude/skills/software-architecture/SKILL.md` and apply full architecture review:
+**🔧 Before any extraction/split**: Load `.github/skills/software-architecture/SKILL.md` and apply full architecture review:
 
 - Layer placement (Replaceability Test)
 - SOLID principles (SRP, DIP especially)
@@ -237,11 +237,11 @@ For each file modified in the PR, evaluate:
 
 **When applying design patterns or SOLID principles:**
 
-- Load `.claude/skills/software-architecture/SKILL.md` for Clean Architecture guidance
+- Load `.github/skills/software-architecture/SKILL.md` for Clean Architecture guidance
 
 **When debugging issues during refactoring:**
 
-- Load `.claude/skills/systematic-debugging/SKILL.md` for root cause investigation
+- Load `.github/skills/systematic-debugging/SKILL.md` for root cause investigation
 
 ---
 

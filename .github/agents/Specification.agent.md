@@ -158,11 +158,11 @@ tags: [Optional: List of relevant tags or categories, e.g., `infrastructure`, `p
 
 **When specifying domain rules:**
 
-- Load project-relevant domain skills from `.claude/skills/` when available
+- Load project-relevant domain skills from `.github/skills/` when available
 
 **When defining technical architecture:**
 
-- Load `.claude/skills/software-architecture/SKILL.md` and follow `.github/architecture-rules.md` for architecture and layer placement
+- Load `.github/skills/software-architecture/SKILL.md` and follow `.github/architecture-rules.md` for architecture and layer placement
 
 ## Model Recommendations
 

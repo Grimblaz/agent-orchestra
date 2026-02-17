@@ -417,7 +417,7 @@ You MUST maintain focused research scope:
 
 **When exploring design options or unclear requirements:**
 
-- Load `.claude/skills/brainstorming/SKILL.md` for structured Socratic questioning
+- Load `.github/skills/brainstorming/SKILL.md` for structured Socratic questioning
 
 ---
 
