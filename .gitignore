@@ -1,2 +1,2 @@
-.copilot-tracking/*
-!.copilot-tracking/.gitkeep
+.copilot-tracking/
+.copilot-tracking-archive/

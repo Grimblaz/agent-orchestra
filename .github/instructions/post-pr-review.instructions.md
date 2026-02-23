@@ -17,29 +17,23 @@ Execute this workflow **after**:
 
 ### 1. Archive Tracking Files
 
-**Action**: Move completed tracking files to archive, then **commit and push the cleanup itself**.
+**Action**: Move completed tracking files into the local archive. These directories are gitignored — they stay on your machine only.
 
 ```bash
 # Create archive directory for this issue
-mkdir -p .copilot-tracking-archive/YYYY/MM/issue-{ID}/
+mkdir -p .copilot-tracking/archived/issue-{ID}/
 
 # Move plan and research files
-mv .copilot-tracking/plans/issue-{ID}-*.md .copilot-tracking-archive/YYYY/MM/issue-{ID}/
-mv .copilot-tracking/research/*{ID}*.md .copilot-tracking-archive/YYYY/MM/issue-{ID}/
-
-# REQUIRED: commit and push the archive move
-git add -A
-git commit -m "chore: archive tracking files for issue-{ID}"
-git push
+mv .copilot-tracking/plans/issue-{ID}-*.md .copilot-tracking/archived/issue-{ID}/
+mv .copilot-tracking/research/*{ID}*.md .copilot-tracking/archived/issue-{ID}/
 ```
 
-**Critical**: The archive move is a working-tree change. Without `git add` + `git commit` + `git push`, the moved files remain as untracked local changes that are never reflected in the remote repository.
+**Note**: Both `.copilot-tracking/` and `.copilot-tracking-archive/` are gitignored. These files are agent scaffolding — the durable record lives in GitHub issues, PRs, commits, and `Documents/Design/`. Do not commit tracking files.
 
 **Verify**:
 
-- Files moved to `.copilot-tracking-archive/YYYY/MM/issue-{ID}/`
-- Commit pushed: `git status` shows clean working tree
-- No untracked files in `.copilot-tracking-archive/`
+- Files moved to `.copilot-tracking/archived/issue-{ID}/`
+- No tracking files remain in `.copilot-tracking/plans/` or `.copilot-tracking/research/` for this issue
 
 ### 2. Update Documentation
 
@@ -171,7 +165,7 @@ Before considering work fully complete, verify:
 
 - [ ] All tests passing in main branch
 - [ ] No merge conflicts or issues
-- [ ] Tracking files archived and **committed + pushed** (`git status` clean)
+- [ ] Tracking files moved to `.copilot-tracking/archived/issue-{ID}/` (local only — do not commit)
 - [ ] Documentation is current and accurate
 - [ ] Version badge updated (if version bumped) via `replace_string_in_file` + git — not GitHub file API
 - [ ] Release tagged (if applicable) via `git tag` + `git push origin <tag>`
@@ -183,11 +177,11 @@ Before considering work fully complete, verify:
 
 ## Common Pitfalls to Avoid
 
-1. **Archiving tracking files without committing**
+1. **Committing tracking files to git**
 
-   - The `mv` or `Move-Item` only changes the local working tree
-   - Always follow with `git add -A && git commit -m "chore: archive tracking files" && git push`
-   - Verify with `git status` — working tree should be clean
+   - `.copilot-tracking/` and `.copilot-tracking-archive/` are gitignored — keep them that way
+   - These are agent scaffolding, not team artifacts; the durable record is in GitHub issues, PRs, and `Documents/Design/`
+   - If you ever see tracking files in `git status` as untracked, do **not** `git add` them
 
 2. **Using the GitHub file API to edit existing files**
 
