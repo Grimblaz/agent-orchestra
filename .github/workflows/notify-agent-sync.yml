@@ -16,7 +16,7 @@ jobs:
     if: vars.DOWNSTREAM_REPOS != '' && vars.DOWNSTREAM_REPOS != 'null'
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false  # Allow other dispatches to continue if one target fails.
+      fail-fast: false # Allow other dispatches to continue if one target fails.
       # DOWNSTREAM_REPOS must be a JSON array of "owner/repo" strings, e.g.
       # ["my-org/.github-private", "my-org/another-repo"]
       # Each entry becomes one parallel matrix job.
