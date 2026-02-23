@@ -17,22 +17,29 @@ Execute this workflow **after**:
 
 ### 1. Archive Tracking Files
 
-**Action**: Move completed tracking files to archive.
+**Action**: Move completed tracking files to archive, then **commit and push the cleanup itself**.
 
 ```bash
-# Move tracking file to archived directory
-mv .copilot-tracking/issue-{ID}-{description}.md .copilot-tracking/archived/
+# Create archive directory for this issue
+mkdir -p .copilot-tracking-archive/YYYY/MM/issue-{ID}/
 
-# Update status in archived file
-# Change status to: complete
-# Add completed: YYYY-MM-DD field
+# Move plan and research files
+mv .copilot-tracking/plans/issue-{ID}-*.md .copilot-tracking-archive/YYYY/MM/issue-{ID}/
+mv .copilot-tracking/research/*{ID}*.md .copilot-tracking-archive/YYYY/MM/issue-{ID}/
+
+# REQUIRED: commit and push the archive move
+git add -A
+git commit -m "chore: archive tracking files for issue-{ID}"
+git push
 ```
+
+**Critical**: The archive move is a working-tree change. Without `git add` + `git commit` + `git push`, the moved files remain as untracked local changes that are never reflected in the remote repository.
 
 **Verify**:
 
-- File moved to `.copilot-tracking/archived/`
-- YAML frontmatter updated with `status: complete`
-- Completion date recorded
+- Files moved to `.copilot-tracking-archive/YYYY/MM/issue-{ID}/`
+- Commit pushed: `git status` shows clean working tree
+- No untracked files in `.copilot-tracking-archive/`
 
 ### 2. Update Documentation
 
@@ -54,7 +61,29 @@ mv .copilot-tracking/issue-{ID}-{description}.md .copilot-tracking/archived/
 - Link to related issues or PRs
 - Update any diagrams or visual documentation
 
-### 3. Tag Releases (If Applicable)
+### 3. Version Badge Updates (If Applicable)
+
+**Action**: If a version badge in `README.md` (or equivalent) needs updating, use a targeted line edit — **never** the GitHub file API.
+
+```bash
+# CORRECT: targeted replace + git commit
+# Use replace_string_in_file tool to change only the badge line, then:
+git add README.md
+git commit -m "chore: bump version badge to vX.Y.Z"
+git push
+```
+
+**WRONG** (do not use):
+
+```
+# mcp_github_create_or_update_file with partial file content
+# This tool REPLACES the entire file. Only use it for net-new files.
+# Using it with partial content silently truncates the rest of the file.
+```
+
+**Rule**: `mcp_github_create_or_update_file` is only safe for **new files**. For any edit to an existing file, use `replace_string_in_file` + `git commit` + `git push`.
+
+### 4. Tag Releases (If Applicable)
 
 **Action**: Create version tags for significant releases.
 
@@ -86,7 +115,7 @@ git push origin v1.2.0
 - Highlight breaking changes
 - Include upgrade instructions if needed
 
-### 4. Clean Up Branches
+### 5. Clean Up Branches
 
 **Action**: Remove merged feature branches.
 
@@ -100,7 +129,7 @@ git push origin --delete feature/issue-{ID}-description
 
 **Note**: Some projects auto-delete branches on PR merge. Verify your project settings.
 
-### 5. Update Project Tracking
+### 6. Update Project Tracking
 
 **Action**: Update external project management tools if used.
 
@@ -117,7 +146,7 @@ git push origin --delete feature/issue-{ID}-description
 - [ ] Project board reflects current state
 - [ ] No orphaned or stale references
 
-### 6. Notify Stakeholders (If Applicable)
+### 7. Notify Stakeholders (If Applicable)
 
 **Action**: Communicate completion to relevant parties.
 
@@ -142,36 +171,52 @@ Before considering work fully complete, verify:
 
 - [ ] All tests passing in main branch
 - [ ] No merge conflicts or issues
-- [ ] Tracking files archived properly
+- [ ] Tracking files archived and **committed + pushed** (`git status` clean)
 - [ ] Documentation is current and accurate
-- [ ] Release tagged (if applicable)
+- [ ] Version badge updated (if version bumped) via `replace_string_in_file` + git — not GitHub file API
+- [ ] Release tagged (if applicable) via `git tag` + `git push origin <tag>`
+- [ ] GitHub release created with release notes
 - [ ] Branches cleaned up
 - [ ] Project tracking updated
 - [ ] Stakeholders notified (if needed)
+- [ ] Working tree clean: `git status` shows no untracked or modified files
 
 ## Common Pitfalls to Avoid
 
-1. **Forgetting to archive tracking files**
+1. **Archiving tracking files without committing**
 
-   - Leads to cluttered tracking directory
-   - Makes it hard to see active work
+   - The `mv` or `Move-Item` only changes the local working tree
+   - Always follow with `git add -A && git commit -m "chore: archive tracking files" && git push`
+   - Verify with `git status` — working tree should be clean
 
-2. **Incomplete documentation updates**
+2. **Using the GitHub file API to edit existing files**
+
+   - `mcp_github_create_or_update_file` replaces the **entire file**
+   - Passing partial content silently truncates the file in the repo
+   - Always use `replace_string_in_file` + `git commit` + `git push` for existing files
+
+3. **Using `Set-Content` / `Out-File` to restore files from git history**
+
+   - PowerShell file-write cmdlets may introduce CRLF endings or BOM characters
+   - This creates a trivial but visible `+1 -1` diff that VS Code surfaces for review
+   - Use `git restore --source=<sha> <file>` instead — git handles encoding correctly
+
+4. **Incomplete documentation updates**
 
    - Causes confusion for future contributors
    - Creates technical debt
 
-3. **Skipping release tags**
+5. **Skipping release tags**
 
    - Makes version history unclear
    - Complicates rollback procedures
 
-4. **Leaving stale branches**
+6. **Leaving stale branches**
 
    - Clutters repository
    - May cause confusion about active work
 
-5. **Not closing related issues**
+7. **Not closing related issues**
    - Leaves project tracking inaccurate
    - May cause duplicate work
 
