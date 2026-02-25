@@ -111,19 +111,21 @@ Identify specific integration test scenarios ([System A] + [System B] → [Expec
 
 After user confirms decisions (not during exploration):
 
-- Create/update design docs in `Documents/Design/` or `Documents/Decisions/`
+- Prepare design content for the **issue body** (full design details, decisions, rationale, acceptance criteria)
+- Decisions documents in `Documents/Decisions/` may still be created if needed for standalone decision records
 - No TypeScript, no implementation phases — those belong in Issue-Planner
 - Pseudo-code only when prose is unclear, keep abstract (e.g., "BaseValue × Modifier × ConstraintFactor")
+- **Note**: The `Documents/Design/` file is committed with the implementation code (same PR by Code-Conductor), not during design phase
 
 ## Stage 3: Update Issue
 
-Update the GitHub issue body with design outcomes:
+Update the GitHub issue body with **full design details**:
 
 - Design decisions with rationale
 - Acceptance criteria (as checkboxes)
 - Integration/E2E test scenarios identified
 - Testing scope decision with rationale
-- Link to design document
+- Full design content (this is the durable record — no separate design doc file is created during design)
 
 Add comment: "Design Phase Complete — ready for planning"
 
@@ -133,17 +135,18 @@ Add comment: "Design Phase Complete — ready for planning"
 
 Before ending a design session, verify ALL of the following:
 
-- [ ] **Design document exists**: A design doc has been created or updated in `Documents/Design/` or `Documents/Decisions/`
-- [ ] **GitHub issue updated**: The associated issue body has been updated with design outcomes, acceptance criteria, and a link to the design document (skip only if no associated issue exists)
+- [ ] **GitHub issue updated**: The associated issue body has been updated with full design details, decisions, and acceptance criteria (skip only if no associated issue exists)
 - [ ] **Completion comment posted**: A comment has been added to the issue: "Design Phase Complete — ready for planning" (skip only if no associated issue exists)
 
 If any of these are incomplete, **do not end the session**. Complete them first, then confirm completion to the user.
+
+**Note**: A design doc file under `Documents/Design/` is **not** required during the design phase — it is created and committed by Code-Conductor as part of the implementation PR. The issue body is the durable design record used for cloud agent handoffs.
 
 **Exception**: If the session was purely exploratory (user explicitly said "just brainstorming, no docs needed"), note this exception in the conversation and skip documentation. This must be an explicit user request, not an assumption.
 
 ## Boundaries
 
-**DO**: Research patterns, present options with trade-offs, document decisions, manage GitHub issues/branches, create/edit design docs in `Documents/`, update roadmap documentation where present
+**DO**: Research patterns, present options with trade-offs, document decisions in issue body, manage GitHub issues/branches, create/edit decision docs in `Documents/Decisions/`, update roadmap documentation where present
 
 **DON'T**: Edit source/test/config files, write TypeScript, implement features, create implementation plans, create PRs (Code-Conductor handles that)
 
