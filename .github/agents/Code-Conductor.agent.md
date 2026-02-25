@@ -92,10 +92,12 @@ Quick checklist before declaring mode for a step:
    - If both are unnecessary, explicitly note "Step 0 skipped: no cleanup/planning transition required" and continue.
 
 1. **Locate Plan & Context**:
-   - Find plan in `.copilot-tracking/plans/*.md` or user-provided path
-   - Look for supporting docs in `Documents/Design/`, `Documents/Decisions/`, `.copilot-tracking/research/` — read whatever exists for context
+   - Find plan in issue comments (look for a comment with `## Plan` heading posted by Issue-Planner), `.copilot-tracking/plans/*.md`, or user-provided path — **issue comments are authoritative** for cloud agent handoffs
+   - Read design details from the **issue body** (Issue-Designer outputs full design to the issue body)
+   - Look for supporting docs in `Documents/Design/`, `Documents/Decisions/`, `.copilot-tracking/research/` — read whatever exists for additional context
    - Check `.github/skills/` for relevant domain expertise
    - **If no plan exists**: Escalate via `ask_questions` to request plan path/options (with a recommended option). Do not proceed without a plan.
+   - **Commit `Documents/Design/` file**: As part of the implementation PR, create/update the `Documents/Design/` file from the design content in the issue body. This is the durable record committed with the code.
 
 2. **Determine Resume Point & Validate Plan**:
    - Check plan/progress artifacts and branch state to determine completed steps. Resume from the first incomplete step.

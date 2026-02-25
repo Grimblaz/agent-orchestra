@@ -192,19 +192,24 @@ Before considering work fully complete, verify:
    - This creates a trivial but visible `+1 -1` diff that VS Code surfaces for review
    - Use `git restore --source=<sha> <file>` instead — git handles encoding correctly
 
-4. **Incomplete documentation updates**
+4. **Expecting `Documents/Design/` to exist before implementation**
+   - Issue-Designer outputs design to the **issue body**, not to a committed file
+   - The `Documents/Design/` file is created by Code-Conductor as part of the implementation PR
+   - If you're reviewing a PR and this file is missing, check whether Code-Conductor committed it alongside the code changes
+
+5. **Incomplete documentation updates**
    - Causes confusion for future contributors
    - Creates technical debt
 
-5. **Skipping release tags**
+6. **Skipping release tags**
    - Makes version history unclear
    - Complicates rollback procedures
 
-6. **Leaving stale branches**
+7. **Leaving stale branches**
    - Clutters repository
    - May cause confusion about active work
 
-7. **Not closing related issues**
+8. **Not closing related issues**
    - Leaves project tracking inaccurate
    - May cause duplicate work
 
