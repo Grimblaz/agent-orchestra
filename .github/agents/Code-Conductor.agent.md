@@ -97,7 +97,7 @@ Quick checklist before declaring mode for a step:
    - Look for supporting docs in `Documents/Design/`, `Documents/Decisions/`, `.copilot-tracking/research/` — read whatever exists for additional context
    - Check `.github/skills/` for relevant domain expertise
    - **If no plan exists**: Escalate via `ask_questions` to request plan path/options (with a recommended option). Do not proceed without a plan.
-   - **Commit `Documents/Design/` file**: As part of the implementation PR, create/update the `Documents/Design/` file from the design content in the issue body. This is the durable record committed with the code.
+   - **Commit design doc file under `Documents/Design/`**: As part of the implementation PR, create or update a markdown design document file (for example, `Documents/Design/issue-{id}-{slug}.md`) populated from the design content in the issue body. This file is the durable record committed with the code.
 
 2. **Determine Resume Point & Validate Plan**:
    - Check plan/progress artifacts and branch state to determine completed steps. Resume from the first incomplete step.
