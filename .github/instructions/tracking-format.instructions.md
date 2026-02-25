@@ -151,14 +151,14 @@ When using a cloud agent (e.g., Codex) for implementation, it creates its own br
 | --- | --- | --- |
 | Design | Issue Designer | Updates **issue body** with full design details |
 | Planning | Issue Planner | Adds plan as a **structured issue comment** |
-| Implementation | Code Conductor | Reads issue body + comments; commits `Documents/Design/` with the code |
+| Implementation | Code Conductor | Reads issue body + comments; commits a design doc file under `Documents/Design/` (e.g., `Documents/Design/issue-{id}-{slug}.md`) along with the code |
 
 ### Rules
 
-- **Design doc** (`Documents/Design/`) is committed during implementation, not during design
+- **Design doc file** under `Documents/Design/` (e.g., `Documents/Design/issue-{id}-{slug}.md`) is committed during implementation, not during design
 - **Plan** lives on the issue comment only — no `.copilot-tracking/plans/` file required (though local files may be created as a convenience)
 - One branch, one PR — no prerequisite branch needed for context sharing
-- For local-only workflows (no cloud agent), agents may still commit design docs to the feature branch first — the issue-based flow works for both
+- For local-only workflows (no cloud agent), agents may still commit design doc files under `Documents/Design/` to the feature branch first — the issue-based flow works for both
 
 ### Tracking Files vs. Issue Coordination
 
