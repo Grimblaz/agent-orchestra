@@ -2,18 +2,7 @@
 name: Issue-Designer
 description: "Design exploration and issue management for new features — explores options, documents decisions, updates GitHub issues"
 argument-hint: "Start design work for a new GitHub issue"
-tools:
-  - vscode/openSimpleBrowser
-  - vscode/askQuestions
-  - execute/getTerminalOutput
-  - execute/runInTerminal
-  - read
-  - agent
-  - edit
-  - search
-  - web
-  - github/*
-  - memory
+tools: [vscode, execute, read, edit, search, web, 'github/*', memory, todo]
 handoffs:
   - label: Research Details
     agent: Research-Agent
