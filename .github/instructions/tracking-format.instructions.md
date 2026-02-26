@@ -143,6 +143,27 @@ When work reaches `complete` status:
 3. Add `completed` date field
 4. Keep file for historical reference
 
+## Cloud Agent Handoff Protocol
+
+When using a cloud agent (e.g., Codex) for implementation, it creates its own branch from `main` and cannot read local `.copilot-tracking/` files. Use the GitHub issue as the coordination layer instead:
+
+| Phase | Agent | Output Location |
+| --- | --- | --- |
+| Design | Issue Designer | Updates **issue body** with full design details |
+| Planning | Issue Planner | Adds plan as a **structured issue comment** |
+| Implementation | Code Conductor | Reads issue body + comments; commits a design doc file under `Documents/Design/` (e.g., `Documents/Design/issue-{id}-{slug}.md`) along with the code |
+
+### Rules
+
+- **Design doc file** under `Documents/Design/` (e.g., `Documents/Design/issue-{id}-{slug}.md`) is committed during implementation, not during design
+- **Plan** lives on the issue comment only — no `.copilot-tracking/plans/` file required (though local files may be created as a convenience)
+- One branch, one PR — no prerequisite branch needed for context sharing
+- For local-only workflows (no cloud agent), agents may still commit design doc files under `Documents/Design/` to the feature branch first — the issue-based flow works for both
+
+### Tracking Files vs. Issue Coordination
+
+`.copilot-tracking/` files are local scaffolding for tracking agent state across sessions on the **same machine**. They are gitignored and not suitable for cross-agent handoffs where a new branch is created (e.g., cloud agent workflows). Use GitHub issues for durable, cross-agent coordination.
+
 ## Customization
 
 This format is a template. Projects may add custom fields as needed:
