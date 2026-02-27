@@ -1,3 +1,5 @@
+> **Superseded**: The dispatch workflow was removed in issue #31. This document is retained as historical context.
+
 # Design: Genericize Dispatch Workflow and Remove Org References
 
 **Issue**: #27
@@ -61,6 +63,7 @@ The template repo is a public product for any team. PR #26 introduced a dispatch
 ### 6. Sync Documentation
 
 **Decision**: Add a "Downstream Sync" section to documentation explaining:
+
 - How to configure `DOWNSTREAM_REPOS` and `AGENT_SYNC_PAT`
 - Streaming vs stable event types
 - Consumer-side workflow pattern
