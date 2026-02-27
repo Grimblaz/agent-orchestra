@@ -2,7 +2,19 @@
 name: Issue-Designer
 description: "Design exploration and issue management for new features — explores options, documents decisions, updates GitHub issues"
 argument-hint: "Start design work for a new GitHub issue"
-tools: [vscode, execute, read, edit, search, web, 'github/*', memory, todo, 'playwright/*']
+tools:
+  [
+    vscode,
+    execute,
+    read,
+    edit,
+    search,
+    web,
+    "github/*",
+    memory,
+    todo,
+    "playwright/*",
+  ]
 handoffs:
   - label: Research Details
     agent: Research-Agent
@@ -75,7 +87,7 @@ Before wrapping up design, present a complete picture:
 
 1. **Summary**: What we're building, key decisions made
 2. **User Experience**: What users see/do differently, where in UI, and what feedback they receive
-3. **System Touchpoints**: Screens/components, domain/application systems, data model changes, interactions with existing features
+3. **System Touchpoints**: Screens/components, domain/application systems, data model changes, interactions with existing features. **Customer surface**: Identify the customer-facing surface type (Web UI, REST/GraphQL API, CLI, SDK, Batch pipeline, or none) and the appropriate CE Gate verification approach (Playwright MCP, curl/httpie, terminal invocation, or skip with reason).
 4. **Edge Cases**: Unusual scenarios and conflicts with existing behavior
 
 ### Testing Scope
@@ -92,6 +104,17 @@ Decide testing requirements using this guide:
 
 Identify specific integration test scenarios ([System A] + [System B] → [Expected Outcome]) and E2E user journeys.
 
+### Customer Experience Readiness
+
+Before finalizing the design, assess CE Gate readiness:
+
+1. **Identify the customer surface**: What type of surface does this change expose? (Web UI / REST/GraphQL API / CLI / SDK / Batch pipeline / None)
+2. **Verify tool availability**: Is the appropriate CE Gate tool available in the project? (Playwright MCP configured? API accessible locally? CLI invocable?)
+3. **Document manual fallback**: If the primary CE Gate tool is unavailable, what is the fallback approach? (Document this in the design so Issue-Planner can include it in the `[CE GATE]` step)
+4. **Draft CE Gate scenarios**: Identify 2–4 customer-perspective scenarios that should be exercised at the CE Gate (natural language, e.g., "Authenticate as a new user and verify the welcome flow completes without error")
+
+Include this assessment when updating the GitHub issue body.
+
 ### Document Decisions
 
 After user confirms decisions (not during exploration):
@@ -107,7 +130,8 @@ After user confirms decisions (not during exploration):
 Update the GitHub issue body with **full design details**:
 
 - Design decisions with rationale
-- Acceptance criteria (as checkboxes)
+- Acceptance criteria (as checkboxes) — include CE-visible AC (what a customer should observe when the feature is working correctly)
+- CE Gate readiness assessment (surface type, tool availability, fallback, draft scenarios)
 - Integration/E2E test scenarios identified
 - Testing scope decision with rationale
 - Full design content (this is the durable record — no separate design doc file is created during design)

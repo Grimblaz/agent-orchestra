@@ -66,8 +66,9 @@ MANDATORY: Instruct the subagent to work autonomously following <research_instru
 - Start with high-level code searches before reading specific files.
 - Check `Documents/Design/` and `Documents/Decisions/` for existing design docs relevant to the task.
 - Pay special attention to instructions and skills made available by the developers to understand best practices and intended usage.
-- If the project has a UI layer, detect UI/presentation-layer impact by checking for UI-specific files (for example, known UI/presentation directories, style assets, or JSX/TSX/Tailwind markup changes), and identify affected routes/pages for per-step visual checkpoints.
-- For backend/non-UI/CLI projects, explicitly skip UI-route checkpoint discovery and note why.
+- Identify the customer-facing surface of the change (Web UI, REST/GraphQL API, CLI, SDK, Batch pipeline, or none) and note the appropriate CE Gate verification tool (Playwright MCP, curl/httpie, terminal invocation, or skip with reason).
+- Check the issue body for Issue-Designer's CE Gate readiness assessment (customer surface identification, tool availability notes, and pre-drafted CE Gate scenarios) — use these directly in the `[CE GATE]` step rather than re-deriving them from scratch.
+- For backend/non-UI/CLI projects, identify the API/CLI surface and note how scenarios should be exercised from a customer perspective.
 - Identify missing information, conflicting requirements, or technical unknowns.
 - DO NOT draft a full plan yet — focus on discovery and feasibility.
   </research_instructions>
@@ -104,8 +105,8 @@ The plan should reflect:
 - Deferral handling should be explicit: significant non-blocking improvements (>1 day) should be marked `DEFERRED-SIGNIFICANT` and tracked via automatically created follow-up issues.
 - Include a short post-issue process retrospective checkpoint (slowdowns, late-failing checks, one workflow guardrail improvement).
 - Changes should only be pushed to another issue if they are quite significant.
-- For projects with UI components, UI-touching plans must include `visual_verification: true` in frontmatter and insert a **dedicated `[VISUAL GATE]` step** immediately after each UI-touching implementation step. Each `[VISUAL GATE]` step must list affected route(s)/page(s) and the specific AC being verified (e.g., `/settings/profile` + "avatar upload preview updates immediately"). These must be **first-class numbered plan steps — not sub-bullets** — so Code-Conductor encounters them as blocking checkpoints in its step iteration loop.
-- For backend/non-UI/CLI projects, skip visual-verification checkpoints and set expectations accordingly.
+- All plans must include `ce_gate: {true|false}` in frontmatter (set `true` if the change has a customer-facing surface). Insert a **dedicated `[CE GATE]` step** as the final numbered step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Each `[CE GATE]` step must identify the surface type, list the specific scenarios to exercise (natural language descriptions, e.g., "Submit the login form with valid credentials and verify the dashboard loads"), and specify the exercise method (how Conductor should exercise each scenario, e.g., "use Playwright to navigate to /login and submit the form", "use curl to POST /api/orders with valid payload"). These must be **first-class numbered plan steps — not sub-bullets** — so Code-Conductor encounters them as blocking checkpoints in its step iteration loop. Set `ce_gate: false` and omit the `[CE GATE]` step only when the change has no customer-facing surface; document the reason.
+- For backend/non-UI/CLI projects, the CE Gate surface is typically the API or CLI — identify the surface and scenarios accordingly.
 
 Present the plan as a **DRAFT**, then **IMMEDIATELY** use #tool:vscode/askQuestions to ask for approval. NEVER end your turn after presenting a draft without calling #tool:vscode/askQuestions — this wastes the user's premium requests by forcing a new turn just to say "looks good."
 
@@ -138,7 +139,7 @@ Format the comment with a `## Plan` heading and include the full plan content wi
 status: ready
 issue_id: {issue-id}
 created: {date}
-visual_verification: {true|false}
+ce_gate: {true|false}
 ```
 
 The comment serves as the single source of truth for implementing agents. For local-only workflows, a `.copilot-tracking/plans/` file may also be saved as a convenience, but the issue comment is authoritative.
@@ -170,7 +171,7 @@ Rules:
 - NO code blocks — describe changes, link to files/symbols
 - NO questions at the end — ask during workflow via #tool:vscode/askQuestions
 - Include execution metadata in plan steps (mode + requirement contract expectations) so implementers can execute without re-deriving process rules.
-- If the project has a UI layer, insert a dedicated **`[VISUAL GATE]`** numbered step immediately after each UI-touching implementation step. Format: `N. [VISUAL GATE] — Route: /path/to/route — AC: {what to verify}`. These are blocking steps; Code-Conductor must not advance past them without completing the Visual Verification Gate or emitting the documented skip warning.
-- For backend/non-UI/CLI projects, omit UI-specific checkpoints and include equivalent non-UI validation steps instead.
+- Insert a dedicated **`[CE GATE]`** numbered step as the final implementation step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Format: `N. [CE GATE] — Surface: {type} — Scenarios: {what to exercise and verify} — Method: {how Conductor exercises each scenario}`. This is a blocking step; Code-Conductor must not advance past it without completing the CE Gate or emitting the documented skip marker. Omit only when `ce_gate: false` in frontmatter.
+- For backend/non-UI/CLI projects, the CE Gate surface is the API or CLI — identify appropriate scenarios for customer-perspective verification.
 - Keep scannable
   </plan_style_guide>

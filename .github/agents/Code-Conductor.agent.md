@@ -112,7 +112,6 @@ Quick checklist before declaring mode for a step:
    - **Goal check**: Does this output actually advance the feature goal, or did the specialist complete the letter of the task while missing its intent? If the latter, provide corrective guidance and re-delegate.
    - **Per-step refactor**: After GREEN, clean up code introduced in that step (extract helpers, reduce duplication, simplify conditionals) — distinct from the dedicated Refactor-Specialist pass
    - **Incremental validation**: Run project validation commands (see `.github/copilot-instructions.md`), then the project test command (for example `npm test` when applicable)
-   - **Visual Verification Gate**: For UI-touching steps with `visual_verification: true`, run the canonical procedure in `## Visual Verification Gate (UI-Touching Steps)`
    - If specialist does a task outside their responsibility, retry with clearer instructions (max 2 retries)
 
 4. **Create PR (MANDATORY, review-ready gate)**: After all steps complete (including documentation):
@@ -121,7 +120,7 @@ Quick checklist before declaring mode for a step:
    - **Validation evidence**: run required validation commands from plan/repo instructions and capture pass results for PR body
    - `git push -u origin {branch-name}`
    - Create PR via `github-pull-request/*` tools or `gh pr create`
-   - PR body MUST include: summary, changed files, validation evidence, and `Closes #{issue}`
+   - PR body MUST include: summary, changed files, validation evidence, CE Gate result, process gaps found (if any), and `Closes #{issue}`
 
 5. **Report Completion**: Summarize work done, link the PR URL, and hand off to user for review
 
@@ -152,6 +151,7 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 | File moves, deletes, archives                        | cleanup, archive, rename, remove       | Janitor              |
 | Code review (read-only)                              | review, risks, quality, critique       | Code-Critic          |
 | Categorize review feedback (read-only)               | adjudicate, disposition, rebuttal      | Code-Review-Response |
+| Process/systemic gap analysis                        | ce-gate-defect, process-gap, systemic  | Process-Review       |
 
 ## Review Reconciliation Loop (Mandatory)
 
@@ -231,7 +231,7 @@ Validation must run in this **graduated 7-tier order** (cheap-to-expensive, then
 4. **Tier 4 — Static quality gates** (project lint/typecheck commands; see `.github/copilot-instructions.md`)
 5. **Tier 5 — Structural validation** (project architecture validation commands; see `.github/architecture-rules.md` and `.github/copilot-instructions.md`)
 6. **Tier 6 — Strength validation** (project coverage/robustness commands as configured; see `.github/copilot-instructions.md`)
-7. **Tier 7 — Independent review + visual/manual verification** (Code-Critic, then LAST manual/dev-server verification)
+7. **Tier 7 — Independent review + Customer Experience Gate** (Code-Critic review, then CE Gate — see the Customer Experience Gate (CE Gate) section below)
 
 Do not skip ahead when an earlier tier fails. Resolve failures at the current tier, then continue upward.
 
@@ -245,28 +245,67 @@ When any validation tier fails, classify first, then route:
 
 Always include failure evidence, attempted diagnosis, and next action in the handoff prompt. Avoid blind retries.
 
-## Visual Verification Gate (UI-Touching Steps)
+## Customer Experience Gate (CE Gate)
 
-Run this gate only when both conditions are true:
+Run this gate as the final step before PR creation (Tier 7, after Code-Critic).
 
-- Plan frontmatter sets `visual_verification: true`
-- The current implementation step is UI-touching (deterministic rule: it modifies UI/presentation-layer files, or includes Tailwind/JSX/TSX markup changes)
+### Surface Identification
 
-Execution requirements:
+Read the plan's `[CE GATE]` step to identify the customer surface. If no `[CE GATE]` step exists, infer from the change type:
 
-- **Route source**: Use only routes declared in the current step's visual checkpoint (do not invent additional routes)
-- **Checkpoint route validity**: If checkpoint routes are missing/invalid, escalate via `ask_questions`; if the issue is tooling/configuration-driven, classify as `harness/env defect` and route per Failure Triage Rule
-- **Dev server lifecycle**: Start/stop and environment handling must follow project instructions in `.github/copilot-instructions.md` and browser MCP usage guidance (if configured)
-- **Startup failure branch**: If the dev server fails to start, skip this gate for the step and emit warning text: `⚠️ Visual verification skipped — dev server failed to start`
-- **Screenshot procedure**: For each checkpoint route, run `browser_navigate` to the route, then capture evidence with `browser_take_screenshot`
-- **Comparison scope**: Perform a shallow acceptance-criteria correctness gate (critical layout/state/content expectations), not pixel-perfect polish
-- **Failure routing**: On obvious visual failure, route back to Code-Smith with screenshot evidence and AC mismatch notes before proceeding
-- **Graceful degradation**: If Playwright MCP is unavailable, continue with warning text exactly: `⚠️ Visual verification skipped — Playwright MCP unavailable`
+| Surface Type        | Tool / Method                                                        |
+| ------------------- | -------------------------------------------------------------------- |
+| Web UI              | Playwright MCP (`browser_navigate` + screenshot)                     |
+| REST / GraphQL      | `curl` or `httpie` in terminal                                       |
+| CLI                 | Invoke command in terminal with test args                            |
+| SDK                 | Example invocation in terminal                                       |
+| Batch / pipeline    | Invoke with representative test data                                 |
+| No customer surface | Skip with documented reason (`⏭️ CE Gate not applicable — {reason}`) |
 
-Explicit boundaries:
+### Scenario Exercise Protocol
 
-- This gate is **not** a UI polish pass (that remains UI-Iterator scope)
-- This gate is **not** a deep independent review (Tier 7 Code-Critic/manual verification remains mandatory)
+1. Read the `[CE GATE]` scenarios from the plan step (natural language descriptions)
+2. Exercise each scenario using the appropriate tool
+3. Apply judgment: does each scenario behave as expected from a customer perspective?
+4. Emit one of these output markers:
+   - `✅ CE Gate passed` — all scenarios exercised, no defects found
+   - `✅ CE Gate passed after fix (N defects found and resolved)` — defects found and resolved within loop budget
+   - `⚠️ CE Gate skipped — {reason}` — tool unavailable or environment issue
+   - `⏭️ CE Gate not applicable — {reason}` — no customer surface for this change
+
+### Two-Track Defect Response
+
+When a CE Gate scenario fails:
+
+**Track 1 — Fix the defect (always):**
+
+- Route to Code-Smith (implementation defect) or Test-Writer (test gap) with scenario failure evidence
+- Require regression test for the defect
+- Re-exercise the failing scenario after fix
+- Loop budget: **2 fix-revalidate cycles maximum**, then escalate via `ask_questions` with options: "Retry with different approach", "Skip CE Gate with documented risk", "Abort and investigate manually"
+
+**Track 2 — Systemic analysis (always, after Track 1 fix is complete):**
+
+- Call Process-Review subagent with: the defect description, what scenario revealed it, and which agent/file/instruction likely caused the gap
+- Process-Review will emit a structured CE Gate Defect Analysis (gap description, affected agent/file, recommended fix, ready-to-use issue title + body)
+- If a systemic gap is confirmed: create a follow-up GitHub issue in the workflow-template repository (or fallback to current repo with label `process-gap-upstream`)
+- "No systemic gap found" is a valid Process-Review outcome — log it in the PR body
+- Track 2 is non-blocking: do not hold up Track 1 fix or PR creation
+
+### Graceful Degradation
+
+- If Playwright MCP is unavailable for a Web UI surface: attempt `curl`/terminal alternatives; if still blocked, emit `⚠️ CE Gate skipped — Playwright MCP unavailable` and continue
+- If the dev environment is not running and cannot be started: emit `⚠️ CE Gate skipped — dev environment unavailable` and continue
+- For any surface type, if the designated tool cannot be invoked after one retry: emit `⚠️ CE Gate skipped — {surface} tool unavailable ({reason})` and continue
+- Skipped CE Gates must be noted in the PR body with the skip reason
+
+### PR Body CE Gate Entry
+
+Always include in the PR body:
+
+- CE Gate result marker (one of the four markers above)
+- Scenarios exercised (brief list)
+- Track 2 outcome: "Process-Review: no systemic gap found" or link to created follow-up issue
 
 ---
 
