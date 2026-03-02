@@ -68,8 +68,8 @@ Run before every PR:
 
 ```bash
 # No references to deleted agents
-grep -r "Plan-Architect" .github/ --include="*.md" | wc -l  # must be 0
-grep -r "Janitor" .github/ --include="*.md" | wc -l  # must be 0
+grep -r "Plan-Architect" .github/ --include="*.md" | grep -v "architecture-rules.md" | wc -l  # must be 0
+grep -r "Janitor" .github/ --include="*.md" | grep -v "architecture-rules.md" | wc -l  # must be 0
 
 # Correct agent count
 ls .github/agents/*.agent.md | wc -l  # must be 13

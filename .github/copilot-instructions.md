@@ -69,6 +69,6 @@ ls .github/agents/*.agent.md | wc -l  # should be 13
 ## Quick-validate (used by agents before every PR)
 
 ```bash
-grep -r "Plan-Architect" .github/ --include="*.md" | wc -l  # 0
-grep -r "Janitor" .github/ --include="*.md" | wc -l  # 0
+grep -r "Plan-Architect" .github/ --include="*.md" | grep -v "copilot-instructions.md" | wc -l  # 0
+grep -r "Janitor" .github/ --include="*.md" | grep -v "copilot-instructions.md" | wc -l  # 0
 ```

@@ -36,6 +36,7 @@ if ($trackingFiles.Count -eq 0) {
 
 # Extract issue IDs from frontmatter
 $issueIds = @()
+$unknownFiles = @()
 foreach ($file in $trackingFiles) {
     $content = Get-Content -Path $file.FullName -Raw -ErrorAction SilentlyContinue
     if ($content -match '(?m)^issue_id:\s*["\x27]?(\d+)["\x27]?') {
@@ -44,11 +45,13 @@ foreach ($file in $trackingFiles) {
             $issueIds += $id
         }
     }
+    else {
+        $unknownFiles += $file.FullName
+    }
 }
 
-if ($issueIds.Count -eq 0) {
-    # Tracking files exist but no issue IDs found — still worth noting
-    $issueIds = @('unknown')
+if ($unknownFiles.Count -gt 0 -and $issueIds -notcontains 'unknown') {
+    $issueIds += 'unknown'
 }
 
 # Check each issue: is the remote branch gone?
@@ -56,7 +59,11 @@ $cleanupNeeded = @()
 foreach ($id in $issueIds) {
     if ($id -eq 'unknown') {
         # Can't check branch state; include as generic cleanup candidate
-        $cleanupNeeded += @{ IssueId = $id; BranchName = $null }
+        $cleanupNeeded += @{
+            IssueId      = $id
+            BranchName   = $null
+            UnknownFiles = $unknownFiles
+        }
         continue
     }
 
@@ -88,8 +95,12 @@ $lines += ''
 
 foreach ($item in $cleanupNeeded) {
     if ($item.IssueId -eq 'unknown') {
-        $lines += '- Tracking files with no issue ID found in `.copilot-tracking/`'
-    } else {
+        $count = $item.UnknownFiles.Count
+        $fileList = ($item.UnknownFiles | ForEach-Object { "  - ``$_``" }) -join "`n"
+        $lines += "- $count tracking file(s) with no issue ID found in ```.copilot-tracking/```:"
+        $lines += $fileList
+    }
+    else {
         $extra = if ($item.AllBranches.Count -gt 1) { " +$($item.AllBranches.Count - 1) more" } else { '' }
         $branchInfo = if ($item.BranchName) { " (local branch: ``$($item.BranchName)``$extra)" } else { '' }
         $lines += "- Issue #$($item.IssueId)$branchInfo — remote branch merged/deleted"
@@ -103,12 +114,14 @@ foreach ($item in $cleanupNeeded) {
     if ($item.IssueId -ne 'unknown') {
         if ($item.BranchName) {
             foreach ($b in $item.AllBranches) {
-                $lines += "pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber $($item.IssueId) -FeatureBranch '$b'"
+                $lines += "pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber $($item.IssueId) -FeatureBranch '$($b -replace "'", "''")'"
             }
-        } else {
-            $lines += "pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber $($item.IssueId)  # Note: local branch not found — branch deletion must be done manually"
         }
-    } else {
+        else {
+            $lines += "pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete  # branch not found locally; archives tracking files only"
+        }
+    }
+    else {
         $lines += '# Unknown issue ID — manually inspect and archive files in .copilot-tracking/'
     }
 }
@@ -120,7 +133,7 @@ $additionalContext = $lines -join "`n"
 
 $output = @{
     hookSpecificOutput = @{
-        hookEventName    = 'SessionStart'
+        hookEventName     = 'SessionStart'
         additionalContext = $additionalContext
     }
 } | ConvertTo-Json -Depth 3 -Compress
