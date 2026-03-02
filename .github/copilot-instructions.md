@@ -2,62 +2,64 @@
 applyTo: "**"
 ---
 
-# Project: <!-- TODO: Your project name -->
-
-<!-- TODO: Delete this block when done -->
-> **Setup**: Replace all `<!-- TODO: ... -->` markers. Type `/setup` in GitHub Copilot Chat to run the setup wizard.
+# Project: Copilot Workflow Template
 
 ## Overview
 
-<!-- TODO: 1-2 sentence description of what this project does. Example: "REST API that manages customer orders for an e-commerce platform." -->
+Multi-agent workflow system for GitHub Copilot. Provides 14 specialized agent definitions, 11 skills, instruction files, and prompt templates that orchestrate AI-assisted software development.
 
 ## Technology Stack
 
-<!-- TODO: List your primary language, framework, database, build tool, and test framework. Example:
-- **Language**: TypeScript 5.x
-- **Framework**: Express 4.x
-- **Database**: PostgreSQL 15
-- **Build Tool**: npm / tsc
-- **Testing**: Jest, Supertest
--->
+- **Language**: Markdown (agent definitions, skills, instructions, documentation)
+- **Framework**: VS Code Custom Agents (`.agent.md` format with YAML frontmatter)
+- **Build Tool**: None (no compiled code)
+- **Testing**: Manual verification, grep-based validation
 
 ## Architecture
 
-<!-- TODO: Describe your architecture style (layered, hexagonal, microservices, etc.) and include a simple text diagram showing the layers and their relationships. See `examples/` for complete filled-in references (spring-boot-microservice, nodejs-typescript, python). -->
+Pipeline-based agent orchestration:
+
+```text
+Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
+                                                ↓
+                              Code-Smith, Test-Writer, Refactor-Specialist,
+                              Doc-Keeper, Research-Agent, Process-Review,
+                              Specification, UI-Iterator
+```
+
+- **User-facing agents** (6): Issue-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, Janitor
+- **Internal agents** (8): Called automatically by Code-Conductor as subagents (`user-invokable: false`)
+- **Skills** (11): Loaded on demand by agents from `.github/skills/`
+- **Instructions** (3): Shared rules loaded by agents from `.github/instructions/`
 
 ## Key Conventions
 
-<!-- TODO: List naming conventions, patterns, and rules that all contributors and agents must follow. Be specific — vague conventions are ignored. Examples:
-- Use constructor injection, never field injection
-- All public functions must have JSDoc comments
-- Error responses use the `ApiError` class in `src/errors/`
--->
+- Agent files use `.agent.md` extension with YAML frontmatter (`name`, `description`, `tools`, `handoffs`, `user-invokable`)
+- Skills use `SKILL.md` with `name` and `description` frontmatter in `.github/skills/{skill-name}/`
+- Instruction files use `.instructions.md` extension in `.github/instructions/`
+- Design documents go in `Documents/Design/`, decision records in `Documents/Decisions/`
+- No auto-commit behavior in any agent — users commit manually
+- Plans are posted as structured issue comments (authoritative for cloud agent handoffs)
+- Design content goes in the GitHub issue body (Issue-Designer outputs there)
+- `Documents/Design/` files are committed with the implementation PR by Code-Conductor
+- CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience verification
 
 ## Build & Run
 
-<!-- TODO: Fill in the commands to build, run, and test the project. These are used by agents to validate changes. -->
+No build step. This is a configuration/documentation template.
 
 ### Commands
 
 ```bash
-# Install dependencies
-# e.g., npm install
+# Validate no broken references
+grep -r "Plan-Architect" .github/ --include="*.md" | wc -l  # should be 0
 
-# Build
-# e.g., npm run build
-
-# Run development server
-# e.g., npm run dev
-
-# Run tests
-# e.g., npm test
-
-# Lint / type-check
-# e.g., npm run lint && npm run typecheck
+# Check agent count
+ls .github/agents/*.agent.md | wc -l  # should be 14
 ```
 
 ## Quick-validate (used by agents before every PR)
 
 ```bash
-# e.g., npm run build && npm run lint
+grep -r "Plan-Architect" .github/ --include="*.md" | wc -l  # 0
 ```

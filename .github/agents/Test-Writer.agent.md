@@ -3,7 +3,20 @@ name: Test-Writer
 description: "Test writing and validation specialist for high-quality behavior-focused tests"
 argument-hint: "Write tests, validate coverage, or fix test failures"
 user-invokable: false
-tools: [execute/testFailure, execute/getTerminalOutput, execute/runInTerminal, read/problems, read/readFile, read/terminalSelection, read/terminalLastCommand, agent, edit, search, memory]
+tools:
+  [
+    execute/testFailure,
+    execute/getTerminalOutput,
+    execute/runInTerminal,
+    read/problems,
+    read/readFile,
+    read/terminalSelection,
+    read/terminalLastCommand,
+    agent,
+    edit,
+    search,
+    memory,
+  ]
 handoffs:
   - label: Implement Code
     agent: Code-Smith

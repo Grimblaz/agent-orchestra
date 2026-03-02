@@ -4,13 +4,13 @@ This guide explains how to configure the workflow template for your project.
 
 ## Quick Option: Setup Wizard
 
-Open GitHub Copilot Chat, press **`@`**, choose the **`setup`** prompt, and answer the questions. Copilot will fill in your config files automatically.
+Open GitHub Copilot Chat, press **`@`**, choose the **`setup`** prompt, and answer the questions. Copilot will generate your config files automatically.
 
-## Manual Option: Edit the Config Files
+## Manual Option: Create the Config Files
 
 ### 1. `.github/copilot-instructions.md`
 
-This file tells agents about your project. It is pre-created with `<!-- TODO: ... -->` markers for every required field. Open it and replace the markers:
+This file tells agents about your project. Create it with the following sections:
 
 - **Project name** and **overview** — what your project does
 - **Technology stack** — language, framework, database, build tool, test framework
@@ -22,7 +22,7 @@ See `examples/` for three complete filled-in examples (Spring Boot, TypeScript, 
 
 ### 2. `.github/architecture-rules.md`
 
-This file defines structural rules for your codebase. Pre-created with `<!-- TODO: ... -->` markers:
+This file defines structural rules for your codebase. Include:
 
 - **Layer structure** — a table of layers and their responsibilities
 - **Dependency rules** — what's allowed and forbidden
@@ -59,7 +59,7 @@ To share agents across all repositories in your org:
 
 **Agents not following instructions?**
 
-- Verify `.github/copilot-instructions.md` exists and has content (no remaining TODO markers)
+- Verify `.github/copilot-instructions.md` exists and has real project content
 - Check agent files have valid YAML frontmatter with `---` delimiters
 
 **Skills not being used?**

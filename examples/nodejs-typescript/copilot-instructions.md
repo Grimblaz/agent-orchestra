@@ -1,4 +1,4 @@
-```instructions
+````instructions
 # Project: Task Manager API
 
 ## Overview
@@ -31,7 +31,7 @@ Layered architecture with strict top-down dependency flow:
 │                 Repositories                     │
 │              (Data Access Layer)                │
 └─────────────────────────────────────────────────┘
-```
+````
 
 ## Directory Structure
 
@@ -129,4 +129,7 @@ npm run build && npm run lint
 
 - [Architecture Rules](architecture-rules.md)
 - [TDD Workflow](../../.github/skills/test-driven-development/SKILL.md)
+
+```
+
 ```

@@ -1,11 +1,11 @@
 ---
 agent: ask
-description: "Interactive setup wizard — answer a few questions to configure your project for multi-agent workflows."
+description: "Interactive setup wizard — answer a few questions to generate project configuration files for multi-agent workflows."
 ---
 
 # Project Setup Wizard
 
-I'll ask you a few questions and then update your project's configuration files so the multi-agent workflow is ready to use.
+I'll ask you a few questions and then generate your project's configuration files so the multi-agent workflow knows about your codebase.
 
 ## Questions
 
@@ -32,8 +32,8 @@ Please answer all of the following. You can adjust the output after:
 
 Once you've provided all answers above, I will:
 
-1. **Update `.github/copilot-instructions.md`** — fill in all `<!-- TODO: ... -->` markers with your answers and remove the setup notice block
-2. **Update `.github/architecture-rules.md`** — fill in the Layer Structure, Dependency Rules, Testing Rules, and Naming Conventions sections based on your architecture style and conventions
-3. **Confirm** what was changed so you can review or adjust
+1. **Generate `.github/copilot-instructions.md`** — create this file with your project overview, tech stack, architecture, conventions, and build commands so agents understand your codebase
+2. **Generate `.github/architecture-rules.md`** — create this file with layer structure, dependency rules, testing rules, and naming conventions based on your architecture style and conventions
+3. **Confirm** what was created so you can review or adjust
 
-> **Tip**: If you're unsure about any question, give your best guess — you can always edit the files manually afterward. See `examples/` for complete filled-in references (spring-boot-microservice for Java, nodejs-typescript for TypeScript, python for Python).
+> **Note**: If these files already exist, I'll replace them with your new answers. If you're unsure about any question, give your best guess — you can always edit the files manually afterward. See `examples/` for complete filled-in references (spring-boot-microservice for Java, nodejs-typescript for TypeScript, python for Python).
