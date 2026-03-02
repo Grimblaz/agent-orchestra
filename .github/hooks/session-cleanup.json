@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "sh -c 'command -v pwsh >/dev/null 2>&1 && pwsh -NoProfile -NonInteractive -File .github/scripts/session-cleanup-detector.ps1 || echo {}'",
+        "windows": "pwsh -NoProfile -NonInteractive -File .github\\scripts\\session-cleanup-detector.ps1",
+        "timeout": 30
+      }
+    ]
+  }
+}

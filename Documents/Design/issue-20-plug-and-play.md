@@ -64,9 +64,9 @@ Shipping skeleton TODO files at `.github/copilot-instructions.md` caused a confl
 
 ## Agents: Visible vs Hidden
 
-### Visible (6) — appear in VS Code chat picker
+### Visible (5) — appear in VS Code chat picker
 
-Issue-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, Janitor
+Issue-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response
 
 ### Hidden (8) — `user-invokable: false`, available as subagents
 

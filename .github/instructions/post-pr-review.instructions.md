@@ -19,21 +19,28 @@ Execute this workflow **after**:
 
 **Action**: Move completed tracking files into the local archive. These directories are gitignored — they stay on your machine only.
 
-```bash
-# Create archive directory for this issue
-mkdir -p .copilot-tracking/archived/issue-{ID}/
+```powershell
+# Preferred: use the cleanup script (handles archival, branch deletion, git sync)
+pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description
 
-# Move plan and research files
-mv .copilot-tracking/plans/issue-{ID}-*.md .copilot-tracking/archived/issue-{ID}/
-mv .copilot-tracking/research/*{ID}*.md .copilot-tracking/archived/issue-{ID}/
+# Or manual archive only (PowerShell):
+$archivePath = ".copilot-tracking-archive\$(Get-Date -Format 'yyyy\MM')\issue-{ID}"
+New-Item -Path $archivePath -ItemType Directory -Force
+Get-ChildItem .copilot-tracking -Recurse -File |
+    Where-Object { (Get-Content $_.FullName -Raw) -match 'issue_id:\s*{ID}' } |
+    ForEach-Object { Move-Item -LiteralPath $_.FullName -Destination $archivePath }
 ```
 
 **Note**: Both `.copilot-tracking/` and `.copilot-tracking-archive/` are gitignored. These files are agent scaffolding — the durable record lives in GitHub issues, PRs, commits, and `Documents/Design/`. Do not commit tracking files.
 
 **Verify**:
 
-- Files moved to `.copilot-tracking/archived/issue-{ID}/`
+- Files moved to `.copilot-tracking-archive/{year}/{month}/issue-{ID}/`
 - No tracking files remain in `.copilot-tracking/plans/` or `.copilot-tracking/research/` for this issue
+
+> **Automation**: The `SessionStart` hook detects stale tracking files and prompts you at the start of your next VS Code session — cleanup requires one manual confirmation. You can also run the script directly: `pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description`
+>
+> **Note**: The hook fires every session start until cleanup is run (by design — persistent reminder).
 
 ### 2. Update Documentation
 
@@ -123,6 +130,8 @@ git push origin --delete feature/issue-{ID}-description
 
 **Note**: Some projects auto-delete branches on PR merge. Verify your project settings.
 
+> **Automation**: Branch deletion is also handled by `.github/scripts/post-merge-cleanup.ps1` when invoked via the `SessionStart` hook cleanup flow (see Section 1 above).
+
 ### 6. Update Project Tracking
 
 **Action**: Update external project management tools if used.
@@ -165,7 +174,7 @@ Before considering work fully complete, verify:
 
 - [ ] All tests passing in main branch
 - [ ] No merge conflicts or issues
-- [ ] Tracking files moved to `.copilot-tracking/archived/issue-{ID}/` (local only — do not commit)
+- [ ] Tracking files moved to `.copilot-tracking-archive/{year}/{month}/issue-{ID}/` (local only — do not commit)
 - [ ] Documentation is current and accurate
 - [ ] Version badge updated (if version bumped) via `replace_string_in_file` + git — not GitHub file API
 - [ ] Release tagged (if applicable) via `git tag` + `git push origin <tag>`

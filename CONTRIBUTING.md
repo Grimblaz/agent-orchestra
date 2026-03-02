@@ -9,6 +9,7 @@ For the best experience with this workflow template:
 ### Required
 
 - **VS Code 1.107+** (November 2025 release or later) — required for custom agents
+- **VS Code 1.109.3+** — required for the `SessionStart` hook (Preview feature). On earlier versions, agents work normally but the automated cleanup hook will not fire.
 - GitHub Copilot extension
 
 ### Recommended Settings
@@ -31,7 +32,7 @@ To make agents available globally across all VS Code workspaces (not just repos 
 }
 ```
 
-Replace the path with the absolute path to where you cloned this repository. This makes all agents available globally — 6 user-facing agents in the chat picker, plus 8 internal subagents used automatically by Code-Conductor.
+Replace the path with the absolute path to where you cloned this repository. This makes all agents available globally — 5 user-facing agents in the chat picker, plus 8 internal subagents used automatically by Code-Conductor.
 
 To enable automatic skill discovery from `.github/skills/` (VS Code 1.108+):
 
@@ -42,6 +43,10 @@ To enable automatic skill discovery from `.github/skills/` (VS Code 1.108+):
 ```
 
 This enables agents to interact directly with GitHub issues and PRs without external MCP server configuration.
+
+### Session Cleanup Hook
+
+This template includes a VS Code `SessionStart` hook (`.github/hooks/session-cleanup.json`) that automatically detects post-merge cleanup work at the start of each session. When merged feature branches have stale tracking files in `.copilot-tracking/`, the hook injects a prompt and the active agent asks you to confirm cleanup. Requires VS Code 1.109.3+ (Preview).
 
 ## Ways to Contribute
 
