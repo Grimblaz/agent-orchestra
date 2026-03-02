@@ -44,6 +44,14 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 - `Documents/Design/` files are committed with the implementation PR by Code-Conductor
 - CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience verification
 
+## Agent Workflow Settings
+
+```yaml
+critic_passes: 3
+```
+
+This repo uses 3 independent Code-Critic passes per review cycle. Each pass surfaces complementary findings; they are not duplicates.
+
 ## Build & Run
 
 No build step. This is a configuration/documentation template.

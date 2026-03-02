@@ -161,6 +161,16 @@ Use this loop for code review phases to drive evidence-based alignment before ex
 
 Default is **1 full-scope Code-Critic pass** per review cycle. This is configurable via `.github/copilot-instructions.md` (for example `critic_passes: 3`).
 
+**Multi-pass execution protocol** (when `critic_passes > 1`):
+
+Each pass is an **independent invocation** of Code-Critic — not a duplicate. LLM-based review has inherent coverage variance: the same code surface reviewed separately will surface complementary issues. Multiple passes increase defect detection probability without changing the review scope.
+
+- Call Code-Critic once per configured pass, labeling each call: `"This is adversarial review pass N of M. Prior passes have already been run. Look for anything they may have missed."`
+- Do NOT skip passes because a prior pass "already covered" the code. That reasoning defeats the purpose.
+- Do NOT merge passes into one call — each must be a separate subagent invocation.
+- After all passes complete, merge all findings into a single ledger before calling Code-Review-Response. Deduplicate only when two passes flag **identical evidence at the same file/line** — different framing of the same issue counts as one finding. Complementary findings from different passes are additive.
+- Present the merged ledger to Code-Review-Response as a single unified review, not as separate per-pass reviews.
+
 ### GitHub Review Intake & Adjudication
 
 For `github review` / `review github` / `cr review`, follow `.github/instructions/code-review-intake.instructions.md`.
