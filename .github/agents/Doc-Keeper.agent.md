@@ -13,11 +13,6 @@ tools:
   - web
   - github/*
   - memory
-handoffs:
-  - label: Cleanup & Archive
-    agent: Janitor
-    prompt: Archive completed task tracking files to .copilot-tracking-archive/ and confirm successful archival.
-    send: false
 ---
 
 # Doc Keeper Agent
@@ -78,7 +73,7 @@ Keep all documentation accurate, up-to-date, and free of obsolete content. Value
 - No "TBD"/"not yet implemented", entity schemas match code, formulas match
 - File paths validated, cross-references checked, obsolete content removed
 
-**Goal**: Obsolete documentation is worse than no documentation - value deletion as much as addition. After complete, use "Cleanup & Archive" handoff to janitor.
+**Goal**: Obsolete documentation is worse than no documentation - value deletion as much as addition.
 
 ## Documentation Maintenance Responsibilities
 

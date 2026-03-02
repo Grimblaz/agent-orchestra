@@ -87,9 +87,9 @@ Quick checklist before declaring mode for a step:
 ## Core Workflow
 
 0. **Issue Transition (Step 0, before implementation)**:
-   - Optional cleanup lane: Call Janitor to archive completed tracking artifacts and clean stale execution debris when prior issue residue exists.
+   - Cleanup note: The `SessionStart` hook detects stale tracking files from merged branches and prompts you at the start of your next session — cleanup requires one manual confirmation. If stale artifacts persist, run `.github/scripts/post-merge-cleanup.ps1 -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly.
    - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
-   - If both are unnecessary, explicitly note "Step 0 skipped: no cleanup/planning transition required" and continue.
+   - If planning is unnecessary, explicitly note "Step 0 skipped: no planning transition required" and continue.
 
 1. **Locate Plan & Context**:
    - Find plan in issue comments (look for a comment with `## Plan` heading posted by Issue-Planner), `.copilot-tracking/plans/*.md`, or user-provided path — **issue comments are authoritative** for cloud agent handoffs
@@ -148,7 +148,6 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 | UI source files (visual polish)                      | ui polish, spacing, alignment, styling | UI-Iterator          |
 | `*.md`, `README.*`, `CHANGELOG.*`                    | docs, guide, changelog                 | Doc-Keeper           |
 | `.copilot-tracking/plans/*.md`                       | plan, acceptance criteria, sequencing  | Issue-Planner        |
-| File moves, deletes, archives                        | cleanup, archive, rename, remove       | Janitor              |
 | Code review (read-only)                              | review, risks, quality, critique       | Code-Critic          |
 | Categorize review feedback (read-only)               | adjudicate, disposition, rebuttal      | Code-Review-Response |
 | Process/systemic gap analysis                        | ce-gate-defect, process-gap, systemic  | Process-Review       |
@@ -200,7 +199,7 @@ If the user gives `github review` / `review github` / `cr review`, run GitHub in
 - **MANDATORY**: After Code-Critic returns, ALWAYS call Code-Review-Response to categorize findings. Then delegate fixes to appropriate specialists.
 - **MANDATORY**: During review phases, run the Review Reconciliation Loop until convergence (or loop-budget escalation) before implementing accepted fixes.
 - **SIGNIFICANT IMPROVEMENT RULE**: For out-of-scope/non-blocking improvements estimated >1 day, create a follow-up GitHub issue automatically (with links back to the PR/review comment). Do not block in-scope fixes on that work unless it is an AC requirement.
-- **Janitor cleanup prompts** MUST specify: "Archive ALL files from `.copilot-tracking/` and verify it's empty after archiving"
+- **Tech-debt closure**: When the plan resolves a GitHub issue labeled `tech-debt`, include `Closes #tech-debt-N` in the PR body alongside the main `Closes #{issue}` — GitHub will auto-close both on merge.
 - **Mixed tasks** (e.g., review feedback): Split by file type — test changes → Test-Writer, source changes → Code-Smith, doc changes → Doc-Keeper
 
 ### Skill Mapping

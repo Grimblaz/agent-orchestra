@@ -10,6 +10,8 @@ These rules define the structural constraints for the Copilot Workflow Template.
 | `.github/skills/{name}/` | Domain-specific knowledge                            | `SKILL.md` with frontmatter, supporting files                 |
 | `.github/instructions/`  | Shared rules loaded by agents                        | `*.instructions.md` files                                     |
 | `.github/prompts/`       | Prompt files and workflow templates                  | `*.prompt.md` with frontmatter; supporting `*.md` templates   |
+| `.github/hooks/`         | VS Code Copilot hook configurations                 | `*.json` hook files (e.g., `session-cleanup.json`)            |
+| `.github/scripts/`       | Automation scripts invoked by hooks or agents        | `*.ps1` PowerShell scripts                                    |
 | `Documents/Design/`      | Design documents (committed with implementation PRs) | `issue-{N}-{slug}.md`                                         |
 | `Documents/Decisions/`   | Standalone decision records                          | Markdown files                                                 |
 | `examples/`              | Example configurations for different tech stacks     | Subdirectories per stack                                       |
@@ -39,7 +41,7 @@ These rules define the structural constraints for the Copilot Workflow Template.
 Required frontmatter fields: `name`, `description`, `tools`
 Optional frontmatter: `handoffs`, `user-invokable` (defaults to `true` if omitted)
 
-- User-facing agents (6): Must have `user-invokable: true` or omit the field
+- User-facing agents (5): Must have `user-invokable: true` or omit the field
 - Internal agents (8): Must have `user-invokable: false`
 
 ### Skill Files (`SKILL.md`)
@@ -67,7 +69,8 @@ Run before every PR:
 ```bash
 # No references to deleted agents
 grep -r "Plan-Architect" .github/ --include="*.md" | wc -l  # must be 0
+grep -r "Janitor" .github/ --include="*.md" | wc -l  # must be 0
 
 # Correct agent count
-ls .github/agents/*.agent.md | wc -l  # must be 14
+ls .github/agents/*.agent.md | wc -l  # must be 13
 ```

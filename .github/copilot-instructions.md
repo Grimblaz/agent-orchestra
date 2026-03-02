@@ -27,7 +27,7 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
                               Specification, UI-Iterator
 ```
 
-- **User-facing agents** (6): Issue-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, Janitor
+- **User-facing agents** (5): Issue-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response
 - **Internal agents** (8): Called automatically by Code-Conductor as subagents (`user-invokable: false`)
 - **Skills** (11): Loaded on demand by agents from `.github/skills/`
 - **Instructions** (3): Shared rules loaded by agents from `.github/instructions/`
@@ -63,11 +63,12 @@ No build step. This is a configuration/documentation template.
 grep -r "Plan-Architect" .github/ --include="*.md" | wc -l  # should be 0
 
 # Check agent count
-ls .github/agents/*.agent.md | wc -l  # should be 14
+ls .github/agents/*.agent.md | wc -l  # should be 13
 ```
 
 ## Quick-validate (used by agents before every PR)
 
 ```bash
 grep -r "Plan-Architect" .github/ --include="*.md" | wc -l  # 0
+grep -r "Janitor" .github/ --include="*.md" | wc -l  # 0
 ```
