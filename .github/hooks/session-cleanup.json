@@ -3,8 +3,8 @@
     "SessionStart": [
       {
         "type": "command",
-        "command": "sh -c 'command -v pwsh >/dev/null 2>&1 && pwsh -NoProfile -NonInteractive -File .github/scripts/session-cleanup-detector.ps1 || echo {}'",
-        "windows": "pwsh -NoProfile -NonInteractive -File .github\\scripts\\session-cleanup-detector.ps1",
+        "command": "sh -c 'command -v pwsh >/dev/null 2>&1 && { if [ -n \"$WORKFLOW_TEMPLATE_ROOT\" ]; then pwsh -NoProfile -NonInteractive -File \"$WORKFLOW_TEMPLATE_ROOT/.github/scripts/session-cleanup-detector.ps1\"; else printf \"%s\" \"{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"SessionStart\\\",\\\"additionalContext\\\":\\\"WORKFLOW_TEMPLATE_ROOT is not set. Set this env var to your local workflow-template repo path so the SessionStart hook can locate its scripts.\\\"}}\"; fi } || echo {}'",
+        "windows": "pwsh -NoProfile -NonInteractive -Command \"if ($env:WORKFLOW_TEMPLATE_ROOT) { & pwsh -NoProfile -NonInteractive -File \\\"$($env:WORKFLOW_TEMPLATE_ROOT)/.github/scripts/session-cleanup-detector.ps1\\\" } else { Write-Output '{\\\"hookSpecificOutput\\\":{\\\"hookEventName\\\":\\\"SessionStart\\\",\\\"additionalContext\\\":\\\"WORKFLOW_TEMPLATE_ROOT is not set. Set this env var to your local workflow-template repo path so the SessionStart hook can locate its scripts.\\\"}}' }\"",
         "timeout": 30
       }
     ]

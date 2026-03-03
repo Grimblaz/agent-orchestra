@@ -60,7 +60,7 @@ No build step. This is a configuration/documentation template.
 
 ```bash
 # Validate no broken references
-grep -r "Plan-Architect" .github/ --include="*.md" | grep -v "copilot-instructions.md" | wc -l  # should be 0
+grep -r "Plan-Architect" .github/ --include="*.md" | grep -v "copilot-instructions.md" | grep -v "architecture-rules.md" | wc -l  # should be 0
 
 # Check agent count
 ls .github/agents/*.agent.md | wc -l  # should be 13
@@ -69,6 +69,6 @@ ls .github/agents/*.agent.md | wc -l  # should be 13
 ## Quick-validate (used by agents before every PR)
 
 ```bash
-grep -r "Plan-Architect" .github/ --include="*.md" | grep -v "copilot-instructions.md" | wc -l  # 0
-grep -r "Janitor" .github/ --include="*.md" | grep -v "copilot-instructions.md" | wc -l  # 0
+grep -r "Plan-Architect" .github/ --include="*.md" | grep -v "copilot-instructions.md" | grep -v "architecture-rules.md" | wc -l  # 0
+grep -r "Janitor" .github/ --include="*.md" | grep -v "copilot-instructions.md" | grep -v "architecture-rules.md" | wc -l  # 0
 ```

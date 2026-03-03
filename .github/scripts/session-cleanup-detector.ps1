@@ -180,11 +180,11 @@ function Get-TrackingCommands {
         if ($item.IssueId -ne 'unknown') {
             if ($item.BranchName) {
                 foreach ($b in $item.AllBranches) {
-                    $out += "pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber $($item.IssueId) -FeatureBranch '$($b -replace "'", "''")'"
+                    $out += "pwsh `"`$($env:WORKFLOW_TEMPLATE_ROOT)/.github/scripts/post-merge-cleanup.ps1`" -IssueNumber $($item.IssueId) -FeatureBranch '$($b -replace "'", "''")'"
                 }
             }
             else {
-                $out += "pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete  # branch not found locally; archives tracking files only"
+                $out += "pwsh `"`$($env:WORKFLOW_TEMPLATE_ROOT)/.github/scripts/post-merge-cleanup.ps1`" -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete  # branch not found locally; archives tracking files only"
             }
         }
         else {
@@ -206,7 +206,7 @@ if ($null -ne $staleBranch -and $cleanupNeeded.Count -eq 0) {
     $lines += 'To clean up, run:'
     $lines += '```powershell'
     if ($staleBranch.IssueId) {
-        $lines += "pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
+        $lines += "pwsh `"`$($env:WORKFLOW_TEMPLATE_ROOT)/.github/scripts/post-merge-cleanup.ps1`" -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
     }
     else {
         $lines += "git checkout '$escapedDefault' && git pull && git branch -d '$escaped'  # use -D to force if already confirmed merged"
@@ -231,7 +231,7 @@ elseif ($null -ne $staleBranch -and $cleanupNeeded.Count -gt 0) {
     $lines += 'To clean up, run:'
     $lines += '```powershell'
     if ($staleBranch.IssueId) {
-        $lines += "pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
+        $lines += "pwsh `"`$($env:WORKFLOW_TEMPLATE_ROOT)/.github/scripts/post-merge-cleanup.ps1`" -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
         if ($dedupedCleanup.Count -gt 0) {
             $lines += (Get-TrackingCommands -Items $dedupedCleanup)
         }

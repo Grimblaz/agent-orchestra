@@ -55,6 +55,38 @@ To share agents across all repositories in your org:
 - Place agent files in an `agents/` folder at the root of your org's `.github` or `.github-private` repository
 - Repository-level agents in `.github/agents/` override org defaults
 
+### 6. Session Cleanup Hook (Optional)
+
+The workflow-template includes a `SessionStart` hook that detects stale feature branches and leftover tracking files after a PR is merged, and prompts you to run cleanup at the start of your next VS Code Copilot session.
+
+**Setup — two steps:**
+
+**Step 1**: Add to your user or workspace VS Code settings:
+
+```json
+"chat.hookFilesLocations": ["/absolute/path/to/workflow-template/.github/hooks"]
+```
+
+**Step 2**: Set the `WORKFLOW_TEMPLATE_ROOT` environment variable to the absolute path of your local workflow-template clone. Without this, the hook will display an error message instead of running.
+
+**Windows (PowerShell profile)**:
+
+```powershell
+$env:WORKFLOW_TEMPLATE_ROOT = "C:\path\to\workflow-template"
+```
+
+Or set it permanently via System > Advanced System Settings > Environment Variables.
+
+**macOS/Linux (shell profile)**:
+
+```bash
+export WORKFLOW_TEMPLATE_ROOT="/path/to/workflow-template"
+```
+
+**What it does**: On each VS Code session start, the hook checks whether your current branch's remote has been deleted (indicating a merged PR) or whether `.copilot-tracking/` files exist for merged issues. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`.
+
+**Requires**: PowerShell 7+ (`pwsh`) installed on PATH.
+
 ## Troubleshooting
 
 **Agents not following instructions?**
