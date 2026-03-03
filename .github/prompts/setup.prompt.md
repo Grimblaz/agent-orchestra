@@ -15,14 +15,15 @@ Setup has six phases. Each phase includes a skip gate so you can jump to exactly
 
 Run the following checks automatically before asking any questions. Report all results clearly, warn on anything missing or outdated, then continue to Phase 1.
 
-| Check | Command | Minimum |
-|-------|---------|---------|
-| VS Code version | `code --version` | 1.109.3 |
-| PowerShell (pwsh) | `pwsh --version` in terminal | 7.0+ |
-| Git | `git --version` in terminal | any recent version |
-| GitHub CLI (gh) | `gh --version` in terminal | optional, recommended for issue operations |
+| Check             | Command                      | Minimum                                    |
+| ----------------- | ---------------------------- | ------------------------------------------ |
+| VS Code version   | `code --version`             | 1.109.3                                    |
+| PowerShell (pwsh) | `pwsh --version` in terminal | 7.0+                                       |
+| Git               | `git --version` in terminal  | any recent version                         |
+| GitHub CLI (gh)   | `gh --version` in terminal   | optional, recommended for issue operations |
 
 **Reporting format**:
+
 - ✅ — installed and meets minimum
 - ⚠️ — installed but below minimum (include the version found and what's required)
 - ❌ — not found on PATH (include install link)
@@ -49,17 +50,20 @@ Once you have those answers:
 **Step 1.1** — Show the exact command to set `WORKFLOW_TEMPLATE_ROOT` permanently:
 
 For **Windows** (recommended — persists across all sessions):
+
 ```powershell
 [System.Environment]::SetEnvironmentVariable('WORKFLOW_TEMPLATE_ROOT', 'C:\path\to\workflow-template', 'User')
 ```
 
 For **Windows** (PowerShell profile — session-scope only, not recommended for VS Code GUI launch):
+
 ```powershell
 # Add to $PROFILE:
 $env:WORKFLOW_TEMPLATE_ROOT = "C:\path\to\workflow-template"
 ```
 
 For **macOS/Linux**:
+
 ```bash
 # Add to ~/.zshrc or ~/.bashrc:
 export WORKFLOW_TEMPLATE_ROOT="/path/to/workflow-template"
@@ -85,13 +89,13 @@ export WORKFLOW_TEMPLATE_ROOT="/path/to/workflow-template"
 
 Replace `<your-path>` with the absolute path from Step 1.1.
 
-| Setting | What it enables |
-|---------|----------------|
-| `chat.hookFilesLocations` | Session cleanup hook (detects stale branches after PR merge) |
-| `chat.agentFilesLocations` | All workflow agents available in every repository |
-| `chat.agentSkillsLocations` | All workflow skills available in every repository |
-| `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories |
-| `chat.promptFilesLocations` | Shared prompt files (e.g. `/setup`) available in every repository |
+| Setting                           | What it enables                                                   |
+| --------------------------------- | ----------------------------------------------------------------- |
+| `chat.hookFilesLocations`         | Session cleanup hook (detects stale branches after PR merge)      |
+| `chat.agentFilesLocations`        | All workflow agents available in every repository                 |
+| `chat.agentSkillsLocations`       | All workflow skills available in every repository                 |
+| `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories       |
+| `chat.promptFilesLocations`       | Shared prompt files (e.g. `/setup`) available in every repository |
 
 > **Windows path format**: Use forward slashes or escaped backslashes: `"C:/Users/you/workflow-template/.github/hooks"` or `"C:\\Users\\you\\workflow-template\\.github\\hooks"`.
 
@@ -156,10 +160,12 @@ If generating scaffolding:
 **5a. `.gitignore` additions**
 
 Check whether `.gitignore` exists in the workspace root.
+
 - If it does not exist → create it with the workflow-template lines below plus a comment.
 - If it exists → read the current contents. Append ONLY the lines that are not already present. Do not add duplicates.
 
 Lines to ensure are present:
+
 ```
 # Copilot workflow-template tracking (agent scaffolding — local only)
 /.copilot-tracking/
@@ -181,10 +187,12 @@ testResults.xml
 **5b. `.vscode/settings.json`**
 
 Check whether `.vscode/settings.json` exists.
+
 - If it does not exist → create it with these defaults.
 - If it exists → ask: "`.vscode/settings.json` already exists. Overwrite with defaults, or skip?" If skip, move on.
 
 Content to generate:
+
 ```json
 {
   "editor.formatOnSave": true,
@@ -206,10 +214,12 @@ Content to generate:
 **5c. `.vscode/extensions.json`**
 
 Check whether `.vscode/extensions.json` exists.
+
 - If it does not exist → create it with an empty recommendations array (user can populate per their stack).
 - If it exists → skip.
 
 Content to generate:
+
 ```json
 {
   "recommendations": []
@@ -221,6 +231,7 @@ Content to generate:
 Ask: "Is this a web project with a browser-based dev server?" Options: (a) Yes, (b) No.
 
 If yes:
+
 - Ask: "What port does your dev server run on?" (default: infer from run command in Phase 4, or suggest 3000)
 - Check whether `.vscode/mcp.json` already exists. If it exists, ask: "`.vscode/mcp.json` already exists. Overwrite with Playwright MCP defaults, or skip?" If skip → skip 5d entirely.
 - Generate `.vscode/mcp.json`:
@@ -239,7 +250,7 @@ If yes:
 
 - Generate `.github/instructions/browser-mcp.instructions.md` with the user's actual port and run command substituted:
 
-````markdown
+```markdown
 # Browser MCP Instructions
 
 ## Port convention
@@ -271,7 +282,7 @@ If yes:
 - Close browser sessions created for MCP work when done.
 - Stop any dev server process started by the agent if the task no longer needs it.
 - Avoid leaving orphaned browser or server processes.
-````
+```
 
 Replace `{PORT}` with the user's dev server port, `{FRAMEWORK}` with the framework name from Phase 2, and `{RUN_COMMAND}` with the run command from Phase 4.
 
@@ -288,6 +299,7 @@ Once all phases are complete (or skipped), generate the config files:
 **If Phase 2 was completed or regenerated** → Generate `.github/copilot-instructions.md`:
 
 Use the answers from Phases 2, 3, and 4 to fill in:
+
 - Project name and overview (Phase 2 answers 1–2)
 - Technology stack (Phase 2 answers 3–5 + Phase 3 answer 8)
 - Architecture description (Phase 3 answers 6–7)

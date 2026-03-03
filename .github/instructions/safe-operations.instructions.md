@@ -1,4 +1,4 @@
-```instructions
+````instructions
 # Safe Operations Instructions
 
 ## Purpose
@@ -55,10 +55,11 @@ gh issue create --title "..." --body "..." --label "priority: medium"
 
 # WRONG — missing priority label:
 gh issue create --title "..." --body "..."
-```
+````
 
 > **Prerequisite — Priority labels must exist in the target repository.**
 > If they do not yet exist, run these commands once per repository:
+>
 > ```powershell
 > gh label create "priority: high"   --color "#D93F0B" --description "Critical — must fix this sprint"
 > gh label create "priority: medium" --color "#FBCA04" --description "Strong improvement — schedule soon"
@@ -67,11 +68,14 @@ gh issue create --title "..." --body "..."
 
 #### Priority Labels
 
-| Label              | Description                                    | When to use                                                   |
-| ------------------ | ---------------------------------------------- | ------------------------------------------------------------- |
-| `priority: high`   | Critical — highest impact, must fix            | Correctness bugs, security issues, broken builds              |
-| `priority: medium` | Strong improvement — depth and polish          | Deferred improvements, notable refactors, non-urgent features |
-| `priority: low`    | Nice-to-have — cosmetic or optional            | Cosmetic, optional, or speculative work                       |
+| Label              | Description                           | When to use                                                   |
+| ------------------ | ------------------------------------- | ------------------------------------------------------------- |
+| `priority: high`   | Critical — highest impact, must fix   | Correctness bugs, security issues, broken builds              |
+| `priority: medium` | Strong improvement — depth and polish | Deferred improvements, notable refactors, non-urgent features |
+| `priority: low`    | Nice-to-have — cosmetic or optional   | Cosmetic, optional, or speculative work                       |
 
 **Default for automatically-created follow-up issues**: `priority: medium`
+
+```
+
 ```
