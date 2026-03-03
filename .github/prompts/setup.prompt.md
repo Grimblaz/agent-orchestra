@@ -1,81 +1,344 @@
 ---
 agent: ask
-description: "Interactive setup wizard — Stage 1 configures your machine (one-time), Stage 2 configures this repo for multi-agent workflows."
+description: "Interactive setup wizard — 6 phases. Phase 0 checks prerequisites, Phase 1 configures your machine (one-time), Phases 2–4 configure this repo, Phase 5 generates project scaffolding. Skip any phase you've already completed."
 ---
 
 # Project Setup Wizard
 
-Setup has two stages. **Stage 1** is a one-time machine configuration — skip it if you've already done it for another repo. **Stage 2** generates project-specific config files for this repository.
+Setup has six phases. Each phase includes a skip gate so you can jump to exactly what you need.
+**Phase 0** always runs automatically (prerequisites check — no input required).
+**Phases 1–5** each ask whether to skip before showing questions.
 
 ---
 
-## Stage 1 — User Setup (one-time, machine-level)
+## Phase 0 — Prerequisites Check (automatic)
 
-First, check whether your machine is already configured:
+Run the following checks automatically before asking any questions. Report all results clearly, warn on anything missing or outdated, then continue to Phase 1.
 
-- **VS Code version**: Open *Help > About* — confirm you are on **1.109.3 or later**. If not, update before continuing.
-- **`WORKFLOW_TEMPLATE_ROOT`**: Run `echo $env:WORKFLOW_TEMPLATE_ROOT` (Windows) or `echo $WORKFLOW_TEMPLATE_ROOT` (macOS/Linux) in a terminal. If it prints a path, Stage 1 is already done — skip to Stage 2.
+| Check | Command | Minimum |
+|-------|---------|---------|
+| VS Code version | Open *Help > About* | 1.109.3 |
+| PowerShell (pwsh) | `pwsh --version` in terminal | 7.0+ |
+| Git | `git --version` in terminal | any recent version |
+| GitHub CLI (gh) | `gh --version` in terminal | optional, recommended for issue operations |
 
-If not yet configured, please provide:
+**Reporting format**:
+- ✅ — installed and meets minimum
+- ⚠️ — installed but below minimum (include the version found and what's required)
+- ❌ — not found on PATH (include install link)
+
+After reporting, continue to Phase 1 regardless of warnings. A failed prerequisite is a warning, not a hard stop (except VS Code version, which is required for agents to function).
+
+---
+
+## Phase 1 — User Setup (one-time, machine-level)
+
+> **Skip gate**: Run `echo $env:WORKFLOW_TEMPLATE_ROOT` (Windows) or `echo $WORKFLOW_TEMPLATE_ROOT` (macOS/Linux) in a terminal and report the result.
+>
+> - If it prints a valid path to an existing directory → ask: "WORKFLOW_TEMPLATE_ROOT is already set to `<path>`. Skip Phase 1?" If yes, skip to Phase 2.
+> - If it prints a path but the directory no longer exists → inform the user the path is stale and offer to update it.
+> - If it is empty or not set → continue with Phase 1 below.
+
+If not configured, ask:
 
 1. **Absolute path to your workflow-template clone** — the folder where you cloned this repository (e.g., `C:\Users\you\workflow-template` or `/Users/you/workflow-template`)
 2. **Your OS** — Windows, macOS, or Linux
 
-Once you answer those two questions I will:
+Once you have those answers:
 
-1. **Show the exact command** to set `WORKFLOW_TEMPLATE_ROOT` permanently on your machine
-2. **Show the VS Code settings** to add to your user `settings.json`:
-   - `chat.hookFilesLocations` — enables the session cleanup hook
-   - `chat.agentFilesLocations` — makes the workflow agents available in all your repositories without copying them
-   - `chat.agentSkillsLocations` — makes the workflow skills available in all your repositories without copying them
-   - `chat.instructionsFilesLocations` — makes the shared instruction files available across all your repositories
-   - `chat.promptFilesLocations` — makes shared prompts (like `/setup`) available in all your repositories
-   ```json
-   {
-     "chat.hookFilesLocations": ["<your-path>/workflow-template/.github/hooks"],
-     "chat.agentFilesLocations": ["<your-path>/workflow-template/.github/agents"],
-     "chat.agentSkillsLocations": ["<your-path>/workflow-template/.github/skills"],
-     "chat.instructionsFilesLocations": {
-       "<your-path>/workflow-template/.github/instructions": true
-     },
-     "chat.promptFilesLocations": {
-       "<your-path>/workflow-template/.github/prompts": true
-     }
-   }
-   ```
-3. **Confirm** the steps are complete before proceeding to Stage 2
+**Step 1.1** — Show the exact command to set `WORKFLOW_TEMPLATE_ROOT` permanently:
 
-> **What this enables**: Agents, skills, and instruction files become available in every repo you work in. A `SessionStart` hook detects stale feature branches and leftover tracking files after a PR is merged, and prompts you to clean up at the start of your next VS Code session. Without `WORKFLOW_TEMPLATE_ROOT` set, the hook will display a configuration error instead of running.
+For **Windows** (recommended — persists across all sessions):
+```powershell
+[System.Environment]::SetEnvironmentVariable('WORKFLOW_TEMPLATE_ROOT', 'C:\path\to\workflow-template', 'User')
+```
+
+For **Windows** (PowerShell profile — session-scope only, not recommended for VS Code GUI launch):
+```powershell
+# Add to $PROFILE:
+$env:WORKFLOW_TEMPLATE_ROOT = "C:\path\to\workflow-template"
+```
+
+For **macOS/Linux**:
+```bash
+# Add to ~/.zshrc or ~/.bashrc:
+export WORKFLOW_TEMPLATE_ROOT="/path/to/workflow-template"
+```
+
+> **Important**: VS Code launched from the Start Menu or a desktop shortcut may not run your PowerShell profile. Use the permanent approach if the hook displays a "not set" error.
+
+**Step 1.2** — Show the VS Code settings to add to your user `settings.json` (`Ctrl+,` → open `settings.json`):
+
+```json
+{
+  "chat.hookFilesLocations": ["<your-path>/workflow-template/.github/hooks"],
+  "chat.agentFilesLocations": ["<your-path>/workflow-template/.github/agents"],
+  "chat.agentSkillsLocations": ["<your-path>/workflow-template/.github/skills"],
+  "chat.instructionsFilesLocations": {
+    "<your-path>/workflow-template/.github/instructions": true
+  },
+  "chat.promptFilesLocations": {
+    "<your-path>/workflow-template/.github/prompts": true
+  }
+}
+```
+
+Replace `<your-path>` with the absolute path from Step 1.1.
+
+| Setting | What it enables |
+|---------|----------------|
+| `chat.hookFilesLocations` | Session cleanup hook (detects stale branches after PR merge) |
+| `chat.agentFilesLocations` | All workflow agents available in every repository |
+| `chat.agentSkillsLocations` | All workflow skills available in every repository |
+| `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories |
+| `chat.promptFilesLocations` | Shared prompt files (e.g. `/setup`) available in every repository |
+
+> **Windows path format**: Use forward slashes or escaped backslashes: `"C:/Users/you/workflow-template/.github/hooks"` or `"C:\\Users\\you\\workflow-template\\.github\\hooks"`.
+
+**Step 1.3** — Confirm: "Have you applied the command and settings above?" Wait for confirmation before continuing to Phase 2.
 
 ---
 
-## Stage 2 — Repo Setup (per-project)
+## Phase 2 — Project Basics
 
-Answer the following questions about the project you have open. You can adjust the output after.
+> **Skip gate**: Check whether `.github/copilot-instructions.md` exists in the current workspace.
+>
+> - If it exists → ask: "`.github/copilot-instructions.md` already exists. What would you like to do?" Options: (a) Skip Phase 2 (keep existing file), (b) Regenerate it (answer questions and overwrite). If skip, jump to Phase 3.
+> - If it does not exist → continue with Phase 2 questions below.
+
+Answer these questions about the project:
 
 1. **Project name** — What is this project called? (e.g., "Order Service")
 2. **What does it do?** — 1–2 sentences describing the purpose. (e.g., "REST API that manages customer orders for an e-commerce platform.")
 3. **Primary language + version** — (e.g., TypeScript 5.x, Java 21, Python 3.12)
-4. **Framework + version** — (e.g., Express 4.x, Spring Boot 3.2, FastAPI 0.110)
+4. **Framework + version** — (e.g., Express 4.x, Spring Boot 3.2, FastAPI 0.110, none)
 5. **Database** — (e.g., PostgreSQL 15, MongoDB 7, SQLite, none)
-6. **Build tool** — (e.g., npm / tsc, Gradle 8, Poetry)
-7. **Test framework** — (e.g., Jest + Supertest, JUnit 5, pytest)
-8. **Architecture style** — (e.g., layered MVC, hexagonal, microservices, monolith)
-9. **Key conventions** — Any naming rules, patterns, or standards your project must follow? (e.g., "Use constructor injection; all public functions need JSDoc; errors use ApiError class")
-10. **Build command** — How do you build? (e.g., `npm run build`)
-11. **Run command** — How do you start the dev server? (e.g., `npm run dev`)
-12. **Test command** — How do you run tests? (e.g., `npm test`)
-13. **Lint/type-check command** — (e.g., `npm run lint && npm run typecheck`)
-14. **Quick-validate command** — Fastest check before a PR (usually build + lint combined). (e.g., `npm run build && npm run lint`)
+
+Collect all answers before proceeding to Phase 3.
 
 ---
 
-## What I'll do with your Stage 2 answers
+## Phase 3 — Architecture & Conventions
 
-Once you've provided all answers above, I will:
+> **Skip gate**: Check whether `.github/architecture-rules.md` exists in the current workspace.
+>
+> - If it exists → ask: "`.github/architecture-rules.md` already exists. What would you like to do?" Options: (a) Skip Phase 3 (keep existing file), (b) Regenerate it (answer questions and overwrite). If skip, jump to Phase 4.
+> - If it does not exist → continue with Phase 3 questions below.
 
-1. **Generate `.github/copilot-instructions.md`** — project overview, tech stack, architecture, conventions, and build commands so agents understand your codebase
-2. **Generate `.github/architecture-rules.md`** — layer structure, dependency rules, testing rules, and naming conventions based on your architecture style and conventions
-3. **Confirm** what was created so you can review or adjust
+6. **Architecture style** — (e.g., layered MVC, hexagonal, microservices, monolith, feature-based)
+7. **Key conventions** — Any naming rules, patterns, or standards? (e.g., "Use constructor injection; all public functions need JSDoc; errors use ApiError class")
+8. **Build tool** — (e.g., npm / tsc, Gradle 8, Poetry, Maven)
 
-> **Note**: If these files already exist, I'll ask you before overwriting — you can choose to overwrite, or I'll create draft files like `.github/copilot-instructions.new.md` for you to compare and merge manually. If you're unsure about any question, give your best guess — you can always edit the files manually afterward. See `examples/` for complete filled-in references (spring-boot-microservice for Java, nodejs-typescript for TypeScript, python for Python).
+Collect all answers before proceeding to Phase 4.
+
+---
+
+## Phase 4 — Commands
+
+> **Note**: No skip gate — command answers are used to generate both config files and scaffolding in Phase 5.
+
+9. **Build command** — How do you build? (e.g., `npm run build`)
+10. **Run command** — How do you start the dev server or application? (e.g., `npm run dev`, `./gradlew bootRun`)
+11. **Test command** — How do you run tests? (e.g., `npm test`, `pytest`)
+12. **Lint/type-check command** — (e.g., `npm run lint && npm run typecheck`, `./gradlew check`)
+13. **Quick-validate command** — Fastest check before a PR (usually build + lint combined). (e.g., `npm run build && npm run lint`)
+
+---
+
+## Phase 5 — Project Scaffolding
+
+> **Skip gate**: Ask: "Would you like me to generate project scaffolding files (`.gitignore` additions, `.vscode/` defaults, `Documents/` structure)?" Options: (a) Yes — generate scaffolding, (b) Skip — I'll manage these files myself. If skip, jump to Generation.
+
+If generating scaffolding:
+
+**5a. `.gitignore` additions**
+
+Check whether `.gitignore` exists in the workspace root.
+- If it does not exist → create it with the workflow-template lines below plus a comment.
+- If it exists → read the current contents. Append ONLY the lines that are not already present. Do not add duplicates.
+
+Lines to ensure are present:
+```
+# Copilot workflow-template tracking (agent scaffolding — local only)
+/.copilot-tracking/
+/.copilot-tracking-archive/
+
+# Visual verification screenshots (local only)
+screenshots/
+
+# Playwright MCP working directory
+/.playwright-mcp/
+
+# Loose PNGs in project root (e.g. CE-gate screenshots)
+/*.png
+
+# Pester test output
+testResults.xml
+```
+
+**5b. `.vscode/settings.json`**
+
+Check whether `.vscode/settings.json` exists.
+- If it does not exist → create it with these defaults.
+- If it exists → ask: "`.vscode/settings.json` already exists. Overwrite with defaults, or skip?" If skip, move on.
+
+Content to generate:
+```json
+{
+  "editor.formatOnSave": true,
+  "files.exclude": {
+    "**/.git": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/coverage": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/coverage": true,
+    "**/package-lock.json": true
+  }
+}
+```
+
+**5c. `.vscode/extensions.json`**
+
+Check whether `.vscode/extensions.json` exists.
+- If it does not exist → create it with an empty recommendations array (user can populate per their stack).
+- If it exists → skip.
+
+Content to generate:
+```json
+{
+  "recommendations": []
+}
+```
+
+**5d. Web project extras (conditional)**
+
+Ask: "Is this a web project with a browser-based dev server?" Options: (a) Yes, (b) No.
+
+If yes:
+- Ask: "What port does your dev server run on?" (default: infer from run command in Phase 4, or suggest 3000)
+- Generate `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@playwright/mcp", "--block-service-workers"]
+    }
+  }
+}
+```
+
+- Generate `.github/instructions/browser-mcp.instructions.md` with the user's actual port and run command substituted:
+
+````markdown
+# Browser MCP Instructions
+
+## Port convention
+
+- Dev server runs on `localhost:{PORT}` ({FRAMEWORK} default).
+- Start all MCP navigation from `http://localhost:{PORT}` unless a task explicitly requires another URL.
+
+## Dev server startup check (port {PORT})
+
+1. Check whether `localhost:{PORT}` is already healthy.
+2. If not healthy, run `{RUN_COMMAND}` to start the dev server.
+3. Poll health until ready or timeout at 30 seconds.
+4. If timeout is reached, stop and report startup failure.
+
+## Error handling
+
+- If port `{PORT}` is in use by a non-dev-server process, report it and stop.
+- If startup times out, report the timeout and do not continue browser actions.
+- If the MCP browser crashes, relaunch once and retry the current step once.
+- MCP is configured with `--block-service-workers` in `.vscode/mcp.json`; keep it enabled.
+
+## Screenshots
+
+- Save transient screenshots to `screenshots/`.
+- Do not treat `screenshots/` as a durable artifact folder.
+
+## Cleanup
+
+- Close browser sessions created for MCP work when done.
+- Stop any dev server process started by the agent if the task no longer needs it.
+- Avoid leaving orphaned browser or server processes.
+````
+
+Replace `{PORT}` with the user's dev server port, `{FRAMEWORK}` with the framework name from Phase 2, and `{RUN_COMMAND}` with the run command from Phase 4.
+
+**5e. `Documents/` directory structure**
+
+Check whether `Documents/Design/`, `Documents/Decisions/`, and `Documents/Development/` exist. Create any that are missing, adding a `.gitkeep` file in each.
+
+---
+
+## Generation
+
+Once all phases are complete (or skipped), generate the config files:
+
+**If Phase 2 was completed or regenerated** → Generate `.github/copilot-instructions.md`:
+
+Use the answers from Phases 2, 3, and 4 to fill in:
+- Project name and overview (Phase 2 answers 1–2)
+- Technology stack (Phase 2 answers 3–5 + Phase 3 answer 8)
+- Architecture description (Phase 3 answers 6–7)
+- Build, run, and test commands (Phase 4 answers 9–13)
+
+Follow the format in `examples/nodejs-typescript/copilot-instructions.md` (or the appropriate stack example). Include all standard sections: Overview, Technology Stack, Architecture, Key Conventions, Build & Run, Quick-Validate.
+
+**If Phase 3 was completed or regenerated** → Generate `.github/architecture-rules.md`:
+
+Use Phase 3 answers to fill in layer structure, dependency rules, testing rules, and naming conventions.
+
+**If pre-existing files were present and user chose to regenerate** → Overwrite the existing file with the new content.
+
+**If pre-existing files were present and user chose to skip** → Do not overwrite. Confirm that the existing file was preserved.
+
+> **Alternative for conflicts**: If the user is unsure about overwriting, offer to create `.github/copilot-instructions.new.md` as a draft for manual comparison and merging.
+
+> **Reference**: See `examples/` for three complete filled-in examples showing format and depth: `examples/spring-boot-microservice/` (Java), `examples/nodejs-typescript/` (TypeScript), `examples/python/` (Python).
+
+---
+
+## Setup Summary
+
+After all phases and generation, print a summary:
+
+```
+## Setup Summary
+
+### Phase 0 — Prerequisites
+✅ VS Code: [version]
+✅/⚠️/❌ pwsh: [version or status]
+✅/⚠️/❌ git: [version or status]
+✅/⚠️/❌ gh: [version or status]
+
+### Phase 1 — User Setup
+[Completed / Skipped]
+
+### Phase 2 — Project Basics
+[Completed / Skipped — existing file preserved]
+
+### Phase 3 — Architecture & Conventions
+[Completed / Skipped — existing file preserved]
+
+### Phase 4 — Commands
+[Completed]
+
+### Phase 5 — Scaffolding
+[Completed / Skipped]
+Files generated: [list each file created or "none"]
+Files skipped: [list each file that already existed and was skipped]
+
+### Generated Config Files
+[List: copilot-instructions.md, architecture-rules.md — created / updated / skipped]
+
+---
+You're ready to use agents. Try: `@Issue-Designer`, `@Issue-Planner`, or `@Code-Conductor`.
+```

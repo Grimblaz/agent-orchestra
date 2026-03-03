@@ -4,7 +4,18 @@ This guide explains how to configure the workflow template for your project.
 
 ## Quick Option: Setup Wizard
 
-Open GitHub Copilot Chat, run the **`/setup`** command, and answer the questions. Copilot will generate your config files automatically.
+Open GitHub Copilot Chat, run the **`/setup`** command. Setup runs in six phases:
+
+| Phase | What it does | Skip available? |
+|-------|-------------|------------------|
+| **Phase 0** — Prerequisites | Auto-detects VS Code version, pwsh, git, and gh CLI | No — runs automatically |
+| **Phase 1** — User Setup | Sets `WORKFLOW_TEMPLATE_ROOT` and VS Code settings (one-time, machine-level) | Yes — skips if already configured |
+| **Phase 2** — Project Basics | Collects project name, language, framework, database | Yes — skips if `copilot-instructions.md` already exists |
+| **Phase 3** — Architecture | Collects architecture style, conventions, build tool | Yes — skips if `architecture-rules.md` already exists |
+| **Phase 4** — Commands | Collects build, run, test, lint, and quick-validate commands | No |
+| **Phase 5** — Scaffolding | Generates `.gitignore` additions, `.vscode/` defaults, `Documents/` structure | Yes — opt-in |
+
+If you've already completed user setup (Phase 1) for another repo, the wizard detects this and skips straight to Phase 2.
 
 ## Manual Option: Create the Config Files
 
@@ -56,6 +67,10 @@ To share agents across all repositories in your org:
 - Repository-level agents in `.github/agents/` override org defaults
 
 ### 6. Session Cleanup Hook (Optional)
+
+> **Tip**: If you're using the setup wizard (`/setup`), Phase 1 handles `WORKFLOW_TEMPLATE_ROOT` and the `chat.hookFilesLocations` setting automatically.
+>
+> The steps below are the manual equivalent — follow them if you prefer to configure without the wizard, or if you need to adjust an existing configuration.
 
 The workflow-template includes a `SessionStart` hook that detects stale feature branches and leftover tracking files after a PR is merged, and prompts you to run cleanup at the start of your next VS Code Copilot session.
 
@@ -118,6 +133,21 @@ export WORKFLOW_TEMPLATE_ROOT="/path/to/workflow-template"
 **What it does**: On each VS Code session start, the hook checks whether your current branch's remote has been deleted (indicating a merged PR) or whether `.copilot-tracking/` files exist for merged issues. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`.
 
 **Requires**: PowerShell 7+ (`pwsh`) installed on PATH and VS Code 1.109.3+.
+
+### 7. Project Scaffolding (Phase 5 of Setup Wizard)
+
+When you run `/setup` and opt into Phase 5, the wizard can generate starter files for your project:
+
+| File | What it does |
+|------|-------------|
+| `.gitignore` additions | Appends workflow-template tracking dirs (`/.copilot-tracking/`, `/.copilot-tracking-archive/`) and optional entries (`screenshots/`, `/.playwright-mcp/`) — additive only, never removes existing lines |
+| `.vscode/settings.json` | Editor defaults: `formatOnSave`, `files.exclude`, `search.exclude` |
+| `.vscode/extensions.json` | Empty recommendations array for you to populate |
+| `.vscode/mcp.json` *(web projects)* | Playwright MCP config for browser automation in CE Gate scenarios |
+| `.github/instructions/browser-mcp.instructions.md` *(web projects)* | Dev server startup rules for Playwright MCP, with your port and run command substituted |
+| `Documents/` structure | Creates `Design/`, `Decisions/`, `Development/` subdirectories |
+
+If any file already exists, Phase 5 asks before overwriting (`.vscode/settings.json`) or skips silently (`.vscode/extensions.json`). `.gitignore` additions are always additive — no existing lines are removed.
 
 ## Troubleshooting
 
