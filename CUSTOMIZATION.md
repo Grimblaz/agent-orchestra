@@ -12,7 +12,7 @@ Open GitHub Copilot Chat, run the **`/setup`** command. Setup runs in six phases
 | **Phase 1** — User Setup | Sets `WORKFLOW_TEMPLATE_ROOT` and VS Code settings (one-time, machine-level) | Yes — skips if already configured |
 | **Phase 2** — Project Basics | Collects project name, language, framework, database | Yes — skips if `copilot-instructions.md` already exists |
 | **Phase 3** — Architecture | Collects architecture style, conventions, build tool | Yes — skips if `architecture-rules.md` already exists |
-| **Phase 4** — Commands | Collects build, run, test, lint, and quick-validate commands | No |
+| **Phase 4** — Commands | Collects build, run, test, lint, and quick-validate commands | Yes — offered when Phases 2, 3, and 5 are all skipped |
 | **Phase 5** — Scaffolding | Generates `.gitignore` additions, `.vscode/` defaults, `Documents/` structure | Yes — opt-in |
 
 If you've already completed user setup (Phase 1) for another repo, the wizard detects this and skips straight to Phase 2.

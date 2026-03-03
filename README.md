@@ -24,7 +24,7 @@ Type `/setup` in GitHub Copilot Chat. It runs in six phases with skip gates:
 - **Phase 1** — One-time user setup: sets `WORKFLOW_TEMPLATE_ROOT` and adds agents, skills, hooks, and instructions to your VS Code settings. Skip if already configured.
 - **Phase 2** — Collects project basics (name, language, framework, database). Skip if `copilot-instructions.md` already exists.
 - **Phase 3** — Collects architecture and conventions. Skip if `architecture-rules.md` already exists.
-- **Phase 4** — Collects build, run, test, lint, and quick-validate commands.
+- **Phase 4** — Collects build, run, test, lint, and quick-validate commands. Skip offered if Phases 2, 3, and 5 are all skipped.
 - **Phase 5** — Generates project scaffolding (`.gitignore` additions, `.vscode/` defaults, `Documents/` structure). Opt-in.
 
 > **Prefer to do it manually?** Create `.github/copilot-instructions.md` and `.github/architecture-rules.md` yourself. See `examples/` for complete filled-in references. For user-level setup, follow [CUSTOMIZATION.md](CUSTOMIZATION.md).
