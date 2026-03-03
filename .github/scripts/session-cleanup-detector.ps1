@@ -17,6 +17,16 @@
 
 $ErrorActionPreference = 'SilentlyContinue'
 
+if (-not $env:WORKFLOW_TEMPLATE_ROOT) {
+    [pscustomobject]@{
+        hookSpecificOutput = [pscustomobject]@{
+            hookEventName     = 'SessionStart'
+            additionalContext = 'WORKFLOW_TEMPLATE_ROOT is not set. Set this environment variable to your local workflow-template repo path so the SessionStart hook can locate its scripts.'
+        }
+    } | ConvertTo-Json -Depth 3 -Compress
+    exit 1
+}
+
 function Write-NoOp {
     Write-Output '{}'
 }
@@ -179,6 +189,7 @@ $safeRoot = $env:WORKFLOW_TEMPLATE_ROOT -replace "'", "''"
 function Get-TrackingCommands {
     param([array]$Items)
     $out = @()
+    $out += '# Run in a PowerShell (pwsh) terminal:'
     foreach ($item in $Items) {
         if ($item.IssueId -ne 'unknown') {
             if ($item.BranchName) {
@@ -210,6 +221,7 @@ if ($null -ne $staleBranch -and $cleanupNeeded.Count -eq 0) {
     $lines += 'To clean up, run:'
     $lines += '```powershell'
     if ($staleBranch.IssueId) {
+        $lines += '# Run in a PowerShell (pwsh) terminal:'
         $lines += "pwsh '$safeRoot/.github/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
     }
     else {
@@ -235,6 +247,7 @@ elseif ($null -ne $staleBranch -and $cleanupNeeded.Count -gt 0) {
     $lines += 'To clean up, run:'
     $lines += '```powershell'
     if ($staleBranch.IssueId) {
+        $lines += '# Run in a PowerShell (pwsh) terminal:'
         $lines += "pwsh '$safeRoot/.github/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
         if ($dedupedCleanup.Count -gt 0) {
             $lines += (Get-TrackingCommands -Items $dedupedCleanup)

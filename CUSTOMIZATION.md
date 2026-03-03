@@ -64,14 +64,16 @@ The workflow-template includes a `SessionStart` hook that detects stale feature 
 **Step 1**: Add to your user VS Code settings (`settings.json`):
 
 ```json
-"chat.hookFilesLocations": ["/absolute/path/to/workflow-template/.github/hooks"],
-"chat.agentFilesLocations": ["/absolute/path/to/workflow-template/.github/agents"],
-"chat.agentSkillsLocations": ["/absolute/path/to/workflow-template/.github/skills"],
-"chat.instructionsFilesLocations": {
-  "/absolute/path/to/workflow-template/.github/instructions": true
-},
-"chat.promptFilesLocations": {
-  "/absolute/path/to/workflow-template/.github/prompts": true
+{
+  "chat.hookFilesLocations": ["/absolute/path/to/workflow-template/.github/hooks"],
+  "chat.agentFilesLocations": ["/absolute/path/to/workflow-template/.github/agents"],
+  "chat.agentSkillsLocations": ["/absolute/path/to/workflow-template/.github/skills"],
+  "chat.instructionsFilesLocations": {
+    "/absolute/path/to/workflow-template/.github/instructions": true
+  },
+  "chat.promptFilesLocations": {
+    "/absolute/path/to/workflow-template/.github/prompts": true
+  }
 }
 ```
 
@@ -83,7 +85,7 @@ The workflow-template includes a `SessionStart` hook that detects stale feature 
 | `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories |
 | `chat.promptFilesLocations` | Shared prompt files (e.g. `/setup`) available in every repository |
 
-> **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/workflow-template/.github/hooks"` or `"C:\\Users\\you\\workflow-template\\.github\\hooks"`. Apply the same format to all four paths above.
+> **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/workflow-template/.github/hooks"` or `"C:\\Users\\you\\workflow-template\\.github\\hooks"`. Apply the same format to all five settings above.
 
 **Step 2**: Set the `WORKFLOW_TEMPLATE_ROOT` environment variable to the absolute path of your local workflow-template clone. Without this, the hook will display an error message instead of running.
 
