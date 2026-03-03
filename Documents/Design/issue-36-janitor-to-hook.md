@@ -80,7 +80,7 @@ The Janitor agent was invoked manually (or by Code-Conductor as a subagent in St
 
 ## Post-Ship Enhancement (Issue #40)
 
-**Problem found**: The original hook silently no-oped when `.copilot-tracking/` was empty (no tracking files created during the issue lifecycle), even when the user was still on the merged feature branch.
+**Problem found**: The original hook silently no-op'd when `.copilot-tracking/` was empty (no tracking files created during the issue lifecycle), even when the user was still on the merged feature branch.
 
 **Fix shipped**: `session-cleanup-detector.ps1` now runs two independent detection paths:
 

@@ -50,7 +50,7 @@ function Get-DefaultBranch {
 # ============================================================
 # STEP 1: BRANCH CHECK (runs before tracking-file gate)
 # ============================================================
-$staleBranch  = $null
+$staleBranch = $null
 $defaultBranch = 'main'   # initialise; resolved below only if needed
 
 $currentBranch = (git branch --show-current 2>$null)
@@ -64,8 +64,10 @@ if ($currentBranch) {
         $upstreamRef = (git rev-parse --abbrev-ref '@{u}' 2>$null)
         if ($LASTEXITCODE -eq 0) {
             # Has upstream — check whether the remote branch still exists
-            $remoteName  = ($upstreamRef -split '/')[0]
-            $remoteHeads = (git ls-remote --heads $remoteName $currentBranch 2>$null)
+            $remoteName        = ($upstreamRef -split '/', 2)[0]
+            $remoteBranchName  = ($upstreamRef -split '/', 2)[1]
+            if ([string]::IsNullOrWhiteSpace($remoteBranchName)) { $remoteBranchName = $currentBranch }
+            $remoteHeads = (git ls-remote --heads $remoteName $remoteBranchName 2>$null)
             if ($LASTEXITCODE -eq 0) {
                 if ([string]::IsNullOrWhiteSpace($remoteHeads)) {
                     # Remote branch is gone — stale branch detected
@@ -87,14 +89,14 @@ if ($currentBranch) {
 # STEP 2: TRACKING FILE CHECK (existing logic, intact)
 # ============================================================
 $cleanupNeeded = @()
-$trackingRoot  = '.copilot-tracking'
+$trackingRoot = '.copilot-tracking'
 
 if (Test-Path $trackingRoot) {
     $trackingFiles = @(Get-ChildItem -Path $trackingRoot -Recurse -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch '^\.gitkeep$' })
 
     if ($trackingFiles.Count -gt 0) {
-        $issueIds    = @()
+        $issueIds = @()
         $unknownFiles = @()
         foreach ($file in $trackingFiles) {
             $content = Get-Content -Path $file.FullName -Raw -ErrorAction SilentlyContinue
@@ -156,13 +158,13 @@ function Get-TrackingLines {
     $out = @()
     foreach ($item in $Items) {
         if ($item.IssueId -eq 'unknown') {
-            $count    = $item.UnknownFiles.Count
+            $count = $item.UnknownFiles.Count
             $fileList = ($item.UnknownFiles | ForEach-Object { "  - ``$_``" }) -join "`n"
             $out += "- $count tracking file(s) with no issue ID found in ```.copilot-tracking/```:"
             $out += $fileList
         }
         else {
-            $extra      = if ($item.AllBranches.Count -gt 1) { " +$($item.AllBranches.Count - 1) more" } else { '' }
+            $extra = if ($item.AllBranches.Count -gt 1) { " +$($item.AllBranches.Count - 1) more" } else { '' }
             $branchInfo = if ($item.BranchName) { " (local branch: ``$($item.BranchName)``$extra)" } else { '' }
             $out += "- Issue #$($item.IssueId)$branchInfo — remote branch merged/deleted"
         }
@@ -192,7 +194,8 @@ function Get-TrackingCommands {
     return $out
 }
 
-$escaped = if ($null -ne $staleBranch) { $staleBranch.BranchName -replace "'", "''" } else { $null }
+$escaped        = if ($null -ne $staleBranch) { $staleBranch.BranchName -replace "'", "''" } else { $null }
+$escapedDefault = $defaultBranch -replace "'", "''"
 
 if ($null -ne $staleBranch -and $cleanupNeeded.Count -eq 0) {
     # ── Branch-only signal ─────────────────────────────────────────────────────
@@ -206,7 +209,7 @@ if ($null -ne $staleBranch -and $cleanupNeeded.Count -eq 0) {
         $lines += "pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
     }
     else {
-        $lines += "git checkout '$defaultBranch' && git pull && git branch -D '$escaped'"
+        $lines += "git checkout '$escapedDefault' && git pull && git branch -d '$escaped'  # use -D to force if already confirmed merged"
     }
     $lines += '```'
     $lines += ''
@@ -234,7 +237,7 @@ elseif ($null -ne $staleBranch -and $cleanupNeeded.Count -gt 0) {
         }
     }
     else {
-        $lines += "git checkout '$defaultBranch' && git pull && git branch -D '$escaped'"
+        $lines += "git checkout '$escapedDefault' && git pull && git branch -d '$escaped'  # use -D to force if already confirmed merged"
         if ($dedupedCleanup.Count -gt 0) {
             $lines += (Get-TrackingCommands -Items $dedupedCleanup)
         }
@@ -266,6 +269,5 @@ $output = @{
     }
 } | ConvertTo-Json -Depth 3 -Compress
 
-if ([string]::IsNullOrEmpty($output)) { Write-NoOp; exit 0 }
 Write-Output $output
 exit 0
