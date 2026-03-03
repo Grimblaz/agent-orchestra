@@ -50,7 +50,7 @@ The Janitor agent was invoked manually (or by Code-Conductor as a subagent in St
 | File | Purpose |
 |------|---------|
 | `.github/hooks/session-cleanup.json` | `SessionStart` hook configuration |
-| `.github/scripts/session-cleanup-detector.ps1` | Fast detection script — no-op if nothing to clean |
+| `.github/scripts/session-cleanup-detector.ps1` | Dual-path detection: (1) current branch stale check, (2) stale `.copilot-tracking/` file check — no-op if nothing to clean |
 | `.github/scripts/post-merge-cleanup.ps1` | Archives tracking files, deletes branches, syncs default branch |
 
 ---
@@ -60,9 +60,9 @@ The Janitor agent was invoked manually (or by Code-Conductor as a subagent in St
 1. Code-Conductor creates PR with `Closes #N` → session ends
 2. User reviews and merges PR on GitHub (issue auto-closes)
 3. User starts a new agent session (any agent)
-4. `SessionStart` hook fires silently — detects stale `.copilot-tracking/` files from the merged branch
+4. `SessionStart` hook fires silently — checks (a) whether the current branch's remote was deleted and (b) stale `.copilot-tracking/` files from the merged branch; either signal triggers cleanup context
 5. Injects `additionalContext`: describes what needs cleanup
-6. Agent asks user via `ask_questions`: "Found stale tracking files from issue #N. Clean up?"
+6. Agent asks user via `ask_questions`: context message reflects which signal(s) fired — stale remote branch (e.g. "Still on merged branch `feature/issue-N`"), stale tracking files (e.g. "Found stale tracking files from issue #N"), or both when both are detected simultaneously; message ends with "Clean up?"
 7. If confirmed → runs `post-merge-cleanup.ps1`
 8. Script archives files, deletes local/remote branch, syncs default branch
 
@@ -75,6 +75,19 @@ The Janitor agent was invoked manually (or by Code-Conductor as a subagent in St
 | `Stop` hook | PR is not merged yet when Code-Conductor finishes |
 | `PostToolUse` hook | `matchers` field is ignored; fires for ALL tools |
 | Git `post-merge` hook | Not integrated with agent workflow context |
+
+---
+
+## Post-Ship Enhancement (Issue #40)
+
+**Problem found**: The original hook silently no-op'd when `.copilot-tracking/` was empty (no tracking files created during the issue lifecycle), even when the user was still on the merged feature branch.
+
+**Fix shipped**: `session-cleanup-detector.ps1` now runs two independent detection paths:
+
+1. **Branch check** (new, runs first): Detects when the current branch has upstream tracking configured but no remote — indicating the branch was merged and the remote deleted. Guards against false positives on local-only branches (no upstream = never pushed = skip).
+2. **Tracking file check** (original, unchanged): Detects stale `.copilot-tracking/` files for issues whose remote branch is gone.
+
+When both signals fire, the branch signal leads the cleanup prompt. When only the branch signal fires (no tracking files), the cleanup command still correctly invokes `post-merge-cleanup.ps1` with the issue number (extracted best-effort from the branch name) or falls back to plain git commands for non-convention branch names.
 
 ---
 
