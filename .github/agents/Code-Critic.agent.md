@@ -219,7 +219,7 @@ Performs a final review for architecture, security, and overall quality.
 
 ## Review Perspectives
 
-Every review MUST cover all 5 perspectives in sequence:
+Every review MUST cover all 6 perspectives in sequence:
 
 ### 1. Architecture Perspective
 
@@ -286,6 +286,15 @@ For any **new data field, constant, or map** added:
 - [ ] Unnecessary complexity removed
 - [ ] Comments explain "why", not "what"
 
+### 6. Script & Automation Files (.ps1, .sh, .py)
+
+**When to apply**: PR includes `.ps1`, `.sh`, `.py`, or `.yml` (for `run:` shell blocks) files.
+
+- [ ] Native executable calls (`git`, `gh`, `curl`, `pwsh`, etc.) have explicit exit-code checks immediately after the call — do NOT rely on shell error modes (`set -e`, `$ErrorActionPreference = 'Stop'`, `try/catch`, `trap`) to catch them — none of these capture native-executable exit codes; only `$LASTEXITCODE`/`$?` checks or `|| exit` are reliable
+- [ ] Dynamic values are NOT passed to `Invoke-Expression`, `& $dynamicVar`, `Start-Process` with runtime-constructed argument strings, or equivalent constructs (`eval`, `subprocess.Popen(shell=True)`); if unavoidable, input is allowlist-validated — not merely escaped
+- [ ] Any string constructed from dynamic values and emitted to an output sink (Markdown, JSON, terminal display) is sanitized for that medium's metacharacters (e.g., backtick and triple-backtick sequences break Markdown code-block rendering; unescaped `"` breaks JSON structure)
+- [ ] Regex patterns involving domain-specific character sets (repo names, branch names, file paths) are validated against known edge cases (dotted names, slashes, special chars)
+
 ## Browser-Based Review (UI-Touching PRs)
 
 Use browser-based review only when PR changes touch UI implementation.
@@ -344,6 +353,10 @@ Use browser-based review only when PR changes touch UI implementation.
 ### ✅ Simplicity: PASS/FAIL
 
 [Specific findings]
+
+### ✅ Script & Automation: PASS/FAIL/N-A
+
+[Specific findings — mark N/A when PR has no script files]
 
 ## Summary
 
