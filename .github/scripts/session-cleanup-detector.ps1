@@ -64,8 +64,8 @@ if ($currentBranch) {
         $upstreamRef = (git rev-parse --abbrev-ref '@{u}' 2>$null)
         if ($LASTEXITCODE -eq 0) {
             # Has upstream — check whether the remote branch still exists
-            $remoteName        = ($upstreamRef -split '/', 2)[0]
-            $remoteBranchName  = ($upstreamRef -split '/', 2)[1]
+            $remoteName = ($upstreamRef -split '/', 2)[0]
+            $remoteBranchName = ($upstreamRef -split '/', 2)[1]
             if ([string]::IsNullOrWhiteSpace($remoteBranchName)) { $remoteBranchName = $currentBranch }
             $remoteHeads = (git ls-remote --heads $remoteName $remoteBranchName 2>$null)
             if ($LASTEXITCODE -eq 0) {
@@ -194,7 +194,7 @@ function Get-TrackingCommands {
     return $out
 }
 
-$escaped        = if ($null -ne $staleBranch) { $staleBranch.BranchName -replace "'", "''" } else { $null }
+$escaped = if ($null -ne $staleBranch) { $staleBranch.BranchName -replace "'", "''" } else { $null }
 $escapedDefault = $defaultBranch -replace "'", "''"
 
 if ($null -ne $staleBranch -and $cleanupNeeded.Count -eq 0) {
@@ -213,7 +213,7 @@ if ($null -ne $staleBranch -and $cleanupNeeded.Count -eq 0) {
     }
     $lines += '```'
     $lines += ''
-    $lines += 'Or skip by continuing with your request.'
+    $lines += '**Agent instruction**: Before responding to the user''s request, use `ask_questions` to confirm: "You''re on a stale feature branch — run branch cleanup now? (yes / skip)". If confirmed, run the command above, then continue. If skipped, continue with the user''s request.'
 }
 elseif ($null -ne $staleBranch -and $cleanupNeeded.Count -gt 0) {
     $dedupedCleanup = @($cleanupNeeded | Where-Object { $_.IssueId -ne $staleBranch.IssueId })
@@ -244,7 +244,7 @@ elseif ($null -ne $staleBranch -and $cleanupNeeded.Count -gt 0) {
     }
     $lines += '```'
     $lines += ''
-    $lines += 'Or skip by continuing with your request.'
+    $lines += '**Agent instruction**: Before responding to the user''s request, use `ask_questions` to confirm: "You''re on a stale feature branch with leftover tracking files — run full cleanup now? (yes / skip)". If confirmed, run the commands above, then continue. If skipped, continue with the user''s request.'
 }
 else {
     # ── Tracking-files-only signal (existing behaviour) ───────────────────────
@@ -257,7 +257,7 @@ else {
     $lines += (Get-TrackingCommands -Items $cleanupNeeded)
     $lines += '```'
     $lines += ''
-    $lines += 'Or skip by continuing with your request.'
+    $lines += '**Agent instruction**: Before responding to the user''s request, use `ask_questions` to confirm: "Stale tracking files found from a merged branch — run tracking file cleanup now? (yes / skip)". If confirmed, run the commands above, then continue. If skipped, continue with the user''s request.'
 }
 
 $additionalContext = $lines -join "`n"

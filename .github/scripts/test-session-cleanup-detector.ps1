@@ -15,7 +15,7 @@
 param([switch]$Verbose)
 
 $ErrorActionPreference = 'Stop'
-$scriptDir  = Split-Path -Parent $PSCommandPath
+$scriptDir = Split-Path -Parent $PSCommandPath
 $detectorPath = Join-Path $scriptDir 'session-cleanup-detector.ps1'
 
 $script:passed = 0
@@ -153,7 +153,7 @@ function Invoke-Scenario {
 
     $mockDir = New-MockGitDir -Config $GitConfig
     $oldPath = $env:PATH
-    $oldCwd  = (Get-Location).Path
+    $oldCwd = (Get-Location).Path
 
     try {
         # Prepend mock dir so our git.cmd wins over the real git
@@ -207,7 +207,7 @@ function Assert-HasCleanupContext {
     param([string]$Output, [string[]]$Contains)
     try {
         $json = $Output | ConvertFrom-Json -ErrorAction Stop
-        $ctx  = $json.hookSpecificOutput.additionalContext
+        $ctx = $json.hookSpecificOutput.additionalContext
         if (-not $ctx) {
             return @{ Pass = $false; Reason = "additionalContext absent or empty. Output: $Output" }
         }
@@ -227,12 +227,12 @@ function Assert-BranchFirstInContext {
     param([string]$Output, [string]$BranchContains, [string]$TrackingContains)
     try {
         $json = $Output | ConvertFrom-Json -ErrorAction Stop
-        $ctx  = $json.hookSpecificOutput.additionalContext
+        $ctx = $json.hookSpecificOutput.additionalContext
         if (-not $ctx) {
             return @{ Pass = $false; Reason = "No additionalContext. Output: $Output" }
         }
 
-        $branchIdx   = ([string]$ctx).IndexOf($BranchContains,   [System.StringComparison]::OrdinalIgnoreCase)
+        $branchIdx = ([string]$ctx).IndexOf($BranchContains, [System.StringComparison]::OrdinalIgnoreCase)
         $trackingIdx = ([string]$ctx).IndexOf($TrackingContains, [System.StringComparison]::OrdinalIgnoreCase)
 
         if ($branchIdx -lt 0) {
@@ -294,9 +294,9 @@ Write-Host "`nRunning session-cleanup-detector.ps1 verification (issue #40)`n"
 Invoke-Scenario `
     -Name 'S1: On main — no-op (fast exit, no tracking files)' `
     -GitConfig @{
-        'branch--show-current'    = 'main'
-        'symbolic-ref-origin-HEAD'= 'refs/remotes/origin/main'
-    } `
+    'branch--show-current'     = 'main'
+    'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+} `
     -WorkDir $emptyWorkDir `
     -Assert { param($o) Assert-NoOp $o }
 
@@ -304,44 +304,44 @@ Invoke-Scenario `
 Invoke-Scenario `
     -Name 'S2: Stale branch feature/issue-36-stale (remote gone) → cleanup JSON' `
     -GitConfig @{
-        'branch--show-current'              = 'feature/issue-36-stale'
-        'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
-        'rev-parse-exit'                    = 0
-        'rev-parse-upstream'                = 'origin/feature/issue-36-stale'
-        'ls-remote-feature/issue-36-stale'  = ''   # empty = remote gone
-        'ls-remote-feature/issue-36-*'      = ''
-        'branch-list-feature/issue-36-*'    = '  feature/issue-36-stale'
-    } `
+    'branch--show-current'             = 'feature/issue-36-stale'
+    'symbolic-ref-origin-HEAD'         = 'refs/remotes/origin/main'
+    'rev-parse-exit'                   = 0
+    'rev-parse-upstream'               = 'origin/feature/issue-36-stale'
+    'ls-remote-feature/issue-36-stale' = ''   # empty = remote gone
+    'ls-remote-feature/issue-36-*'     = ''
+    'branch-list-feature/issue-36-*'   = '  feature/issue-36-stale'
+} `
     -WorkDir $emptyWorkDir `
     -Assert {
-        param($o)
-        Assert-HasCleanupContext $o -Contains @('issue-36', 'post-merge-cleanup.ps1')
-    }
+    param($o)
+    Assert-HasCleanupContext $o -Contains @('issue-36', 'post-merge-cleanup.ps1')
+}
 
 # S3 — On my-experiment, upstream set, remote gone → cleanup JSON with git checkout fallback
 Invoke-Scenario `
     -Name 'S3: Stale branch my-experiment (no issue number, remote gone) → cleanup JSON with checkout fallback' `
     -GitConfig @{
-        'branch--show-current'          = 'my-experiment'
-        'symbolic-ref-origin-HEAD'      = 'refs/remotes/origin/main'
-        'rev-parse-exit'                = 0
-        'rev-parse-upstream'            = 'origin/my-experiment'
-        'ls-remote-my-experiment'       = ''   # remote gone
-    } `
+    'branch--show-current'     = 'my-experiment'
+    'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+    'rev-parse-exit'           = 0
+    'rev-parse-upstream'       = 'origin/my-experiment'
+    'ls-remote-my-experiment'  = ''   # remote gone
+} `
     -WorkDir $emptyWorkDir `
     -Assert {
-        param($o)
-        # Expects cleanup context mentioning the branch and a checkout fallback (no issue number)
-        Assert-HasCleanupContext $o -Contains @('my-experiment', 'git checkout')
-    }
+    param($o)
+    # Expects cleanup context mentioning the branch and a checkout fallback (no issue number)
+    Assert-HasCleanupContext $o -Contains @('my-experiment', 'git checkout')
+}
 
 # S4 — Local branch with NO upstream tracking → no-op (never pushed)
 Invoke-Scenario `
     -Name 'S4: Local branch no-upstream → no-op (never pushed)' `
     -GitConfig @{
-        'branch--show-current'  = 'local-only-branch'
-        'rev-parse-exit'        = 128   # no upstream
-    } `
+    'branch--show-current' = 'local-only-branch'
+    'rev-parse-exit'       = 128   # no upstream
+} `
     -WorkDir $emptyWorkDir `
     -Assert { param($o) Assert-NoOp $o }
 
@@ -349,9 +349,9 @@ Invoke-Scenario `
 Invoke-Scenario `
     -Name 'S5: Detached HEAD (empty branch --show-current) → no-op' `
     -GitConfig @{
-        'branch--show-current'  = ''    # empty = detached HEAD
-        'rev-parse-exit'        = 128
-    } `
+    'branch--show-current' = ''    # empty = detached HEAD
+    'rev-parse-exit'       = 128
+} `
     -WorkDir $emptyWorkDir `
     -Assert { param($o) Assert-NoOp $o }
 
@@ -359,14 +359,14 @@ Invoke-Scenario `
 Invoke-Scenario `
     -Name 'S6: Active branch feature/issue-99-active (remote exists) → no-op' `
     -GitConfig @{
-        'branch--show-current'              = 'feature/issue-99-active'
-        'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
-        'rev-parse-exit'                    = 0
-        'rev-parse-upstream'                = 'origin/feature/issue-99-active'
-        'ls-remote-feature/issue-99-active' = 'abc123def456 refs/heads/feature/issue-99-active'  # remote exists
-        'ls-remote-feature/issue-99-*'      = 'abc123def456 refs/heads/feature/issue-99-active'
-        'branch-list-feature/issue-99-*'    = '  feature/issue-99-active'
-    } `
+    'branch--show-current'              = 'feature/issue-99-active'
+    'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+    'rev-parse-exit'                    = 0
+    'rev-parse-upstream'                = 'origin/feature/issue-99-active'
+    'ls-remote-feature/issue-99-active' = 'abc123def456 refs/heads/feature/issue-99-active'  # remote exists
+    'ls-remote-feature/issue-99-*'      = 'abc123def456 refs/heads/feature/issue-99-active'
+    'branch-list-feature/issue-99-*'    = '  feature/issue-99-active'
+} `
     -WorkDir $emptyWorkDir `
     -Assert { param($o) Assert-NoOp $o }
 
@@ -375,72 +375,72 @@ Invoke-Scenario `
 Invoke-Scenario `
     -Name 'S7: Stale branch (issue-36) + tracking file (issue-40) → branch info first in cleanup JSON' `
     -GitConfig @{
-        'branch--show-current'                        = 'feature/issue-36-janitor-to-hook'
-        'symbolic-ref-origin-HEAD'                    = 'refs/remotes/origin/main'
-        'rev-parse-exit'                              = 0
-        'rev-parse-upstream'                          = 'origin/feature/issue-36-janitor-to-hook'
-        'ls-remote-feature/issue-36-janitor-to-hook'  = ''   # remote gone (branch stale)
-        'ls-remote-feature/issue-40-*'                = ''   # tracking file issue-40 also stale
-        'branch-list-feature/issue-40-*'              = '  feature/issue-40-stale-branch'
-    } `
+    'branch--show-current'                       = 'feature/issue-36-janitor-to-hook'
+    'symbolic-ref-origin-HEAD'                   = 'refs/remotes/origin/main'
+    'rev-parse-exit'                             = 0
+    'rev-parse-upstream'                         = 'origin/feature/issue-36-janitor-to-hook'
+    'ls-remote-feature/issue-36-janitor-to-hook' = ''   # remote gone (branch stale)
+    'ls-remote-feature/issue-40-*'               = ''   # tracking file issue-40 also stale
+    'branch-list-feature/issue-40-*'             = '  feature/issue-40-stale-branch'
+} `
     -WorkDir $s7WorkDir `
     -Assert {
-        param($o)
-        # Combined-signal header must be present, branch info before tracking section
-        Assert-BranchFirstInContext $o `
-            -BranchContains 'feature/issue-36-janitor-to-hook' `
-            -TrackingContains 'stale tracking artifacts also found'
-    }
+    param($o)
+    # Combined-signal header must be present, branch info before tracking section
+    Assert-BranchFirstInContext $o `
+        -BranchContains 'feature/issue-36-janitor-to-hook' `
+        -TrackingContains 'stale tracking artifacts also found'
+}
 
 # S8 — Master-branch repository: symbolic-ref fails, show-ref main fails, show-ref master succeeds
 # Branch has no issue number → fallback uses 'git checkout master'
 Invoke-Scenario `
     -Name 'S8: Master-branch repo (show-ref master) → cleanup uses master in fallback command' `
     -GitConfig @{
-        'branch--show-current'       = 'feature/my-experiment-master'
-        'show-ref-main-exitcode'     = 1    # main not found
-        'show-ref-master-exitcode'   = 0    # master found
-        'rev-parse-exit'             = 0
-        'rev-parse-upstream'         = 'origin/feature/my-experiment-master'
-        # ls-remote default = '' (empty = stale branch)
-    } `
+    'branch--show-current'     = 'feature/my-experiment-master'
+    'show-ref-main-exitcode'   = 1    # main not found
+    'show-ref-master-exitcode' = 0    # master found
+    'rev-parse-exit'           = 0
+    'rev-parse-upstream'       = 'origin/feature/my-experiment-master'
+    # ls-remote default = '' (empty = stale branch)
+} `
     -WorkDir $emptyWorkDir `
     -Assert {
-        param($o)
-        # Cleanup context must exist and reference 'master' in the fallback checkout command
-        Assert-HasCleanupContext $o -Contains @('my-experiment-master', 'master')
-    }
+    param($o)
+    # Cleanup context must exist and reference 'master' in the fallback checkout command
+    Assert-HasCleanupContext $o -Contains @('my-experiment-master', 'master')
+}
 
 # S9 — HEAD-fallback strategy: symbolic-ref origin/HEAD fails, both show-ref fail,
 # git symbolic-ref HEAD returns refs/heads/develop → default branch = develop
 Invoke-Scenario `
     -Name 'S9: HEAD-fallback (symbolic-ref HEAD) → stale branch still fires cleanup' `
     -GitConfig @{
-        'branch--show-current'       = 'feature/my-experiment-head-fallback'
-        'show-ref-main-exitcode'     = 1    # main not found
-        'show-ref-master-exitcode'   = 1    # master not found
-        'symbolic-ref-HEAD'          = 'refs/heads/develop'
-        'rev-parse-exit'             = 0
-        'rev-parse-upstream'         = 'origin/feature/my-experiment-head-fallback'
-        # ls-remote default = '' (empty = stale branch)
-    } `
+    'branch--show-current'     = 'feature/my-experiment-head-fallback'
+    'show-ref-main-exitcode'   = 1    # main not found
+    'show-ref-master-exitcode' = 1    # master not found
+    'symbolic-ref-HEAD'        = 'refs/heads/develop'
+    'rev-parse-exit'           = 0
+    'rev-parse-upstream'       = 'origin/feature/my-experiment-head-fallback'
+    # ls-remote default = '' (empty = stale branch)
+} `
     -WorkDir $emptyWorkDir `
     -Assert {
-        param($o)
-        # Cleanup context must be non-empty — branch detected as stale
-        Assert-HasCleanupContext $o -Contains @('my-experiment-head-fallback')
-    }
+    param($o)
+    # Cleanup context must be non-empty — branch detected as stale
+    Assert-HasCleanupContext $o -Contains @('my-experiment-head-fallback')
+}
 
 # S10 — ls-remote network failure → Assert-NoOp (PAT-4)
 Invoke-Scenario `
     -Name 'S10: ls-remote network failure (exit 1) → no-op (guard prevents false positive)' `
     -GitConfig @{
-        'branch--show-current'       = 'feature/issue-40-net-fail'
-        'symbolic-ref-origin-HEAD'   = 'refs/remotes/origin/main'
-        'rev-parse-exit'             = 0
-        'rev-parse-upstream'         = 'origin/feature/issue-40-net-fail'
-        'ls-remote-exitcode'         = 1    # network failure
-    } `
+    'branch--show-current'     = 'feature/issue-40-net-fail'
+    'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+    'rev-parse-exit'           = 0
+    'rev-parse-upstream'       = 'origin/feature/issue-40-net-fail'
+    'ls-remote-exitcode'       = 1    # network failure
+} `
     -WorkDir $emptyWorkDir `
     -Assert { param($o) Assert-NoOp $o }
 
@@ -448,38 +448,38 @@ Invoke-Scenario `
 Invoke-Scenario `
     -Name 'S11: Same-issue dual-signal (issue-40 branch + tracking file) → single cleanup command, no tracking section' `
     -GitConfig @{
-        'branch--show-current'                     = 'feature/issue-40-stale-branch'
-        'symbolic-ref-origin-HEAD'                 = 'refs/remotes/origin/main'
-        'rev-parse-exit'                           = 0
-        'rev-parse-upstream'                       = 'origin/feature/issue-40-stale-branch'
-        'ls-remote-feature/issue-40-stale-branch'  = ''   # branch stale
-        'ls-remote-feature/issue-40-*'             = ''   # tracking file issue-40 also stale
-        'branch-list-feature/issue-40-*'           = '  feature/issue-40-stale-branch'
-    } `
+    'branch--show-current'                    = 'feature/issue-40-stale-branch'
+    'symbolic-ref-origin-HEAD'                = 'refs/remotes/origin/main'
+    'rev-parse-exit'                          = 0
+    'rev-parse-upstream'                      = 'origin/feature/issue-40-stale-branch'
+    'ls-remote-feature/issue-40-stale-branch' = ''   # branch stale
+    'ls-remote-feature/issue-40-*'            = ''   # tracking file issue-40 also stale
+    'branch-list-feature/issue-40-*'          = '  feature/issue-40-stale-branch'
+} `
     -WorkDir $s11WorkDir `
     -Assert {
-        param($o)
-        try {
-            $json = $o | ConvertFrom-Json -ErrorAction Stop
-            $ctx  = $json.hookSpecificOutput.additionalContext
-            if (-not $ctx) {
-                return @{ Pass = $false; Reason = "Expected cleanup context but additionalContext is empty. Output: $o" }
-            }
-            # Exactly one reference to post-merge-cleanup.ps1 (dedup removed the tracking entry)
-            $cmdMatches = ([regex]::Matches($ctx, 'post-merge-cleanup\.ps1')).Count
-            if ($cmdMatches -ne 1) {
-                return @{ Pass = $false; Reason = "Expected exactly 1 post-merge-cleanup.ps1 reference, found $cmdMatches. ctx=[$ctx]" }
-            }
-            # Tracking-file sub-section must be absent (deduplicated away)
-            if ($ctx -like '*stale tracking artifacts also found*') {
-                return @{ Pass = $false; Reason = "Tracking-file section should be absent after dedup but was found. ctx=[$ctx]" }
-            }
-            return @{ Pass = $true }
+    param($o)
+    try {
+        $json = $o | ConvertFrom-Json -ErrorAction Stop
+        $ctx = $json.hookSpecificOutput.additionalContext
+        if (-not $ctx) {
+            return @{ Pass = $false; Reason = "Expected cleanup context but additionalContext is empty. Output: $o" }
         }
-        catch {
-            return @{ Pass = $false; Reason = "JSON parse error: $_. Output: $o" }
+        # Exactly one reference to post-merge-cleanup.ps1 (dedup removed the tracking entry)
+        $cmdMatches = ([regex]::Matches($ctx, 'post-merge-cleanup\.ps1')).Count
+        if ($cmdMatches -ne 1) {
+            return @{ Pass = $false; Reason = "Expected exactly 1 post-merge-cleanup.ps1 reference, found $cmdMatches. ctx=[$ctx]" }
         }
+        # Tracking-file sub-section must be absent (deduplicated away)
+        if ($ctx -like '*stale tracking artifacts also found*') {
+            return @{ Pass = $false; Reason = "Tracking-file section should be absent after dedup but was found. ctx=[$ctx]" }
+        }
+        return @{ Pass = $true }
     }
+    catch {
+        return @{ Pass = $false; Reason = "JSON parse error: $_. Output: $o" }
+    }
+}
 
 # ---------------------------------------------------------------------------
 # Cleanup temp directories
