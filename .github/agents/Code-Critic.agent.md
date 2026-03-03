@@ -299,8 +299,8 @@ For any **new data field, constant, or map** added:
 
 **When to apply**: PR modifies `.md` files that contain shell or PowerShell code blocks (fenced ` ```bash `, ` ```sh `, ` ```powershell `, or unlabeled fenced blocks containing shell commands such as `grep`, `ls`, `wc`, `pwsh`, `git`).
 
-- [ ] Every `grep`, `ls`, `wc`, or similar validation command listed in documentation is runnable against the current file contents and produces the documented result (do not accept "should be 0" without verifying the expected count is achievable)
-- [ ] Commands expected to return `0` cannot self-match the file they are defined in — verify: does the searched pattern appear in the file hosting the command? If yes, a `grep -v <filename>` exclusion is required for each self-matching file
+- [ ] Every `grep`, `ls`, `wc`, or similar validation command listed in documentation is runnable against the current file contents **from the repository root** and produces the documented result (do not accept "should be 0" without verifying the expected count is achievable)
+- [ ] Commands expected to return `0` cannot self-match — verify: does the searched pattern appear in the file hosting the command **or in any other `.md` file not already excluded by a `grep -v` filter**? If yes, a `grep -v <filename>` exclusion is required for every matching file (covers both same-file self-match and cross-file matches)
 - [ ] Expected counts (agent counts, file counts, etc.) reflect the post-change state, not the pre-change state
 
 ## Browser-Based Review (UI-Touching PRs)

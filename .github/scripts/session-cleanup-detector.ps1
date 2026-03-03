@@ -172,6 +172,9 @@ function Get-TrackingLines {
     return $out
 }
 
+# Safe root: single-quoted in emitted commands handles $ and " characters in the path
+$safeRoot = $env:WORKFLOW_TEMPLATE_ROOT -replace "'", "''"
+
 # Helper: emit cleanup command lines for tracking-file items
 function Get-TrackingCommands {
     param([array]$Items)
@@ -180,11 +183,12 @@ function Get-TrackingCommands {
         if ($item.IssueId -ne 'unknown') {
             if ($item.BranchName) {
                 foreach ($b in $item.AllBranches) {
-                    $out += "pwsh `"`$($env:WORKFLOW_TEMPLATE_ROOT)/.github/scripts/post-merge-cleanup.ps1`" -IssueNumber $($item.IssueId) -FeatureBranch '$($b -replace "'", "''")'"
+                    $safeB = $b -replace "'", "''"
+                    $out += "pwsh '$safeRoot/.github/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -FeatureBranch '$safeB'"
                 }
             }
             else {
-                $out += "pwsh `"`$($env:WORKFLOW_TEMPLATE_ROOT)/.github/scripts/post-merge-cleanup.ps1`" -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete  # branch not found locally; archives tracking files only"
+                $out += "pwsh '$safeRoot/.github/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete  # branch not found locally; archives tracking files only"
             }
         }
         else {
@@ -206,7 +210,7 @@ if ($null -ne $staleBranch -and $cleanupNeeded.Count -eq 0) {
     $lines += 'To clean up, run:'
     $lines += '```powershell'
     if ($staleBranch.IssueId) {
-        $lines += "pwsh `"`$($env:WORKFLOW_TEMPLATE_ROOT)/.github/scripts/post-merge-cleanup.ps1`" -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
+        $lines += "pwsh '$safeRoot/.github/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
     }
     else {
         $lines += "git checkout '$escapedDefault' && git pull && git branch -d '$escaped'  # use -D to force if already confirmed merged"
@@ -231,7 +235,7 @@ elseif ($null -ne $staleBranch -and $cleanupNeeded.Count -gt 0) {
     $lines += 'To clean up, run:'
     $lines += '```powershell'
     if ($staleBranch.IssueId) {
-        $lines += "pwsh `"`$($env:WORKFLOW_TEMPLATE_ROOT)/.github/scripts/post-merge-cleanup.ps1`" -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
+        $lines += "pwsh '$safeRoot/.github/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
         if ($dedupedCleanup.Count -gt 0) {
             $lines += (Get-TrackingCommands -Items $dedupedCleanup)
         }

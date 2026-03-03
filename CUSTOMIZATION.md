@@ -67,15 +67,29 @@ The workflow-template includes a `SessionStart` hook that detects stale feature 
 "chat.hookFilesLocations": ["/absolute/path/to/workflow-template/.github/hooks"]
 ```
 
+> **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/workflow-template/.github/hooks"` or `"C:\\Users\\you\\workflow-template\\.github\\hooks"`.
+
 **Step 2**: Set the `WORKFLOW_TEMPLATE_ROOT` environment variable to the absolute path of your local workflow-template clone. Without this, the hook will display an error message instead of running.
 
-**Windows (PowerShell profile)**:
+**Windows (permanent — recommended)**:
+
+Set via System Properties > Advanced > Environment Variables, or from an elevated PowerShell session:
+
+```powershell
+[System.Environment]::SetEnvironmentVariable('WORKFLOW_TEMPLATE_ROOT', 'C:\path\to\workflow-template', 'User')
+```
+
+This persists across all sessions, including VS Code launched from the Start Menu or GUI.
+
+**Windows (PowerShell profile — session-scope only)**:
+
+Add to your PowerShell profile (`$PROFILE`):
 
 ```powershell
 $env:WORKFLOW_TEMPLATE_ROOT = "C:\path\to\workflow-template"
 ```
 
-Or set it permanently via System > Advanced System Settings > Environment Variables.
+> **Note**: Profile-set variables are only available in shells where the profile is loaded. VS Code launched from the Start Menu or a desktop shortcut may not run your PowerShell profile, causing the hook to display a "not set" error. Use the permanent approach above if this happens.
 
 **macOS/Linux (shell profile)**:
 
@@ -85,7 +99,7 @@ export WORKFLOW_TEMPLATE_ROOT="/path/to/workflow-template"
 
 **What it does**: On each VS Code session start, the hook checks whether your current branch's remote has been deleted (indicating a merged PR) or whether `.copilot-tracking/` files exist for merged issues. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`.
 
-**Requires**: PowerShell 7+ (`pwsh`) installed on PATH.
+**Requires**: PowerShell 7+ (`pwsh`) installed on PATH and VS Code 1.109.3+.
 
 ## Troubleshooting
 
