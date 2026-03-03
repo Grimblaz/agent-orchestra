@@ -20,7 +20,7 @@ Or click **"Use this template"** &rarr; **"Create a new repository"** on GitHub.
 
 Type `/setup` in GitHub Copilot Chat. It runs in two stages:
 
-- **Stage 1 — User setup** (one-time): sets `WORKFLOW_TEMPLATE_ROOT`, adds `chat.hookFilesLocations` and `chat.agentFilesLocations` to VS Code settings so agents and the cleanup hook are available across all your repositories.
+- **Stage 1 — User setup** (one-time): sets `WORKFLOW_TEMPLATE_ROOT`, adds `chat.hookFilesLocations`, `chat.agentFilesLocations`, `chat.agentSkillsLocations`, and `chat.instructionsFilesLocations` to VS Code settings so agents, skills, instructions, and the cleanup hook are available across all your repositories.
 - **Stage 2 — Repo setup**: answers 14 questions about your project and generates `.github/copilot-instructions.md` and `.github/architecture-rules.md` tailored to your codebase.
 
 If you've already done Stage 1 for another repo, skip straight to Stage 2.

@@ -27,13 +27,19 @@ Once you answer those two questions I will:
 2. **Show the VS Code settings** to add to your user `settings.json`:
    - `chat.hookFilesLocations` — enables the session cleanup hook
    - `chat.agentFilesLocations` — makes the workflow agents available in all your repositories without copying them
+   - `chat.agentSkillsLocations` — makes the workflow skills available in all your repositories without copying them
+   - `chat.instructionsFilesLocations` — makes the shared instruction files available across all your repositories
    ```json
    "chat.hookFilesLocations": ["<your-path>/workflow-template/.github/hooks"],
-   "chat.agentFilesLocations": ["<your-path>/workflow-template/.github/agents"]
+   "chat.agentFilesLocations": ["<your-path>/workflow-template/.github/agents"],
+   "chat.agentSkillsLocations": ["<your-path>/workflow-template/.github/skills"],
+   "chat.instructionsFilesLocations": {
+     "<your-path>/workflow-template/.github/instructions": true
+   }
    ```
 3. **Confirm** the steps are complete before proceeding to Stage 2
 
-> **What this enables**: Agents become available in every repo you work in. A `SessionStart` hook detects stale feature branches and leftover tracking files after a PR is merged, and prompts you to clean up at the start of your next VS Code session. Without `WORKFLOW_TEMPLATE_ROOT` set, the hook will display a configuration error instead of running.
+> **What this enables**: Agents, skills, and instruction files become available in every repo you work in. A `SessionStart` hook detects stale feature branches and leftover tracking files after a PR is merged, and prompts you to clean up at the start of your next VS Code session. Without `WORKFLOW_TEMPLATE_ROOT` set, the hook will display a configuration error instead of running.
 
 ---
 

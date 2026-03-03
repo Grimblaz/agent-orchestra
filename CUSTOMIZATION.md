@@ -65,12 +65,21 @@ The workflow-template includes a `SessionStart` hook that detects stale feature 
 
 ```json
 "chat.hookFilesLocations": ["/absolute/path/to/workflow-template/.github/hooks"],
-"chat.agentFilesLocations": ["/absolute/path/to/workflow-template/.github/agents"]
+"chat.agentFilesLocations": ["/absolute/path/to/workflow-template/.github/agents"],
+"chat.agentSkillsLocations": ["/absolute/path/to/workflow-template/.github/skills"],
+"chat.instructionsFilesLocations": {
+  "/absolute/path/to/workflow-template/.github/instructions": true
+}
 ```
 
-`chat.agentFilesLocations` makes all workflow agents available in every repository without copying them. `chat.hookFilesLocations` enables the session cleanup hook.
+| Setting | What it enables |
+|---|---|
+| `chat.hookFilesLocations` | Session cleanup hook (detects stale branches after PR merge) |
+| `chat.agentFilesLocations` | All workflow agents available in every repository |
+| `chat.agentSkillsLocations` | All workflow skills available in every repository |
+| `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories |
 
-> **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/workflow-template/.github/hooks"` or `"C:\\Users\\you\\workflow-template\\.github\\hooks"`.
+> **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/workflow-template/.github/hooks"` or `"C:\\Users\\you\\workflow-template\\.github\\hooks"`. Apply the same format to all four paths above.
 
 **Step 2**: Set the `WORKFLOW_TEMPLATE_ROOT` environment variable to the absolute path of your local workflow-template clone. Without this, the hook will display an error message instead of running.
 
