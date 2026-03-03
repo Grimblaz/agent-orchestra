@@ -69,6 +69,9 @@ The workflow-template includes a `SessionStart` hook that detects stale feature 
 "chat.agentSkillsLocations": ["/absolute/path/to/workflow-template/.github/skills"],
 "chat.instructionsFilesLocations": {
   "/absolute/path/to/workflow-template/.github/instructions": true
+},
+"chat.promptFilesLocations": {
+  "/absolute/path/to/workflow-template/.github/prompts": true
 }
 ```
 
@@ -78,6 +81,7 @@ The workflow-template includes a `SessionStart` hook that detects stale feature 
 | `chat.agentFilesLocations` | All workflow agents available in every repository |
 | `chat.agentSkillsLocations` | All workflow skills available in every repository |
 | `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories |
+| `chat.promptFilesLocations` | Shared prompt files (e.g. `/setup`) available in every repository |
 
 > **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/workflow-template/.github/hooks"` or `"C:\\Users\\you\\workflow-template\\.github\\hooks"`. Apply the same format to all four paths above.
 

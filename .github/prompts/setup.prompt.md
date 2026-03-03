@@ -29,12 +29,16 @@ Once you answer those two questions I will:
    - `chat.agentFilesLocations` — makes the workflow agents available in all your repositories without copying them
    - `chat.agentSkillsLocations` — makes the workflow skills available in all your repositories without copying them
    - `chat.instructionsFilesLocations` — makes the shared instruction files available across all your repositories
+   - `chat.promptFilesLocations` — makes shared prompts (like `/setup`) available in all your repositories
    ```json
    "chat.hookFilesLocations": ["<your-path>/workflow-template/.github/hooks"],
    "chat.agentFilesLocations": ["<your-path>/workflow-template/.github/agents"],
    "chat.agentSkillsLocations": ["<your-path>/workflow-template/.github/skills"],
    "chat.instructionsFilesLocations": {
      "<your-path>/workflow-template/.github/instructions": true
+   },
+   "chat.promptFilesLocations": {
+     "<your-path>/workflow-template/.github/prompts": true
    }
    ```
 3. **Confirm** the steps are complete before proceeding to Stage 2
