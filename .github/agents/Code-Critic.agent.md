@@ -286,11 +286,11 @@ For any **new data field, constant, or map** added:
 - [ ] Unnecessary complexity removed
 - [ ] Comments explain "why", not "what"
 
-### 6. Script & Automation Files (.ps1, .sh, .py)
+### 6. Script & Automation Files
 
-**When to apply**: PR includes `.ps1`, `.sh`, `.py`, or `.yml` (for `run:` shell blocks) files.
+**When to apply**: PR includes `.ps1`, `.sh`, `.py`, `.yml`, or `.yaml` (for `run:` shell blocks) files.
 
-- [ ] Native executable calls (`git`, `gh`, `curl`, `pwsh`, etc.) have explicit exit-code checks immediately after the call — do NOT rely on shell error modes (`set -e`, `$ErrorActionPreference = 'Stop'`, `try/catch`, `trap`) to catch them — none of these capture native-executable exit codes; only `$LASTEXITCODE`/`$?` checks or `|| exit` are reliable
+- [ ] Native executable calls (`git`, `gh`, `curl`, `pwsh`, etc.) have explicit exit-code checks immediately after the call — do NOT rely on `$ErrorActionPreference = 'Stop'`, `try/catch`, or `trap` in PowerShell (these do not catch non-zero native exit codes); in POSIX shells, `set -e` / `trap ERR` can intercept exit codes but carry well-known caveats (subshells, pipelines, `&&` chains) — always prefer explicit `$LASTEXITCODE` (PowerShell) or `$?` / `|| exit` (POSIX) checks for each call
 - [ ] Dynamic values are NOT passed to `Invoke-Expression`, `& $dynamicVar`, `Start-Process` with runtime-constructed argument strings, or equivalent constructs (`eval`, `subprocess.Popen(shell=True)`); if unavoidable, input is allowlist-validated — not merely escaped
 - [ ] Any string constructed from dynamic values and emitted to an output sink (Markdown, JSON, terminal display) is sanitized for that medium's metacharacters (e.g., backtick and triple-backtick sequences break Markdown code-block rendering; unescaped `"` breaks JSON structure)
 - [ ] Regex patterns involving domain-specific character sets (repo names, branch names, file paths) are validated against known edge cases (dotted names, slashes, special chars)
