@@ -28,7 +28,10 @@ Run the following checks automatically before asking any questions. Report all r
 - ⚠️ — installed but below minimum (include the version found and what's required)
 - ❌ — not found on PATH (include install link)
 
-After reporting, continue to Phase 1 regardless of warnings. A failed prerequisite is a warning, not a hard stop (except VS Code version, which is required for agents to function).
+After reporting:
+
+- **If VS Code is not found or is below the minimum version**: stop here and ask the user to install or update VS Code before continuing — agents cannot function without it.
+- **For all other prerequisites** below minimum or not found: continue to Phase 1. These are warnings only.
 
 ---
 

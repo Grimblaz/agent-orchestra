@@ -31,14 +31,16 @@ Ask-before-overwrite guards make re-runs safe.
 
 **Decision**: 6 phases with skip gates at Phases 1, 2, 3, 4 (conditional), and 5.
 
-| Phase | Action | Skip Gate |
-|-------|--------|-----------|
-| 0 | Prerequisite detection (code, pwsh, git, gh CLI) | None — always runs |
-| 1 | .gitignore (additive only) | Skipped if block already present |
-| 2 | .vscode/settings.json | Ask if file exists |
-| 3 | .vscode/extensions.json | Skip if file exists |
-| 4 | .vscode/mcp.json (web projects only) | Ask if file exists |
-| 5 | Documents/ structure + browser-mcp.instructions.md (web only) | Skip if directory exists |
+| Phase | Name | Focus | Skip Gate |
+|-------|------|-------|-----------|
+| 0 | Prerequisites Check | Detect code, pwsh, git, gh CLI versions | None — always runs |
+| 1 | User Setup | Set `WORKFLOW_TEMPLATE_ROOT` env var (machine-level) | Already set to a valid path |
+| 2 | Project Basics | Generate `.github/copilot-instructions.md` | File already exists (keep or regenerate) |
+| 3 | Architecture & Conventions | Generate `.github/architecture-rules.md` | File already exists (keep or regenerate) |
+| 4 | Commands | Collect build / run / test / lint commands | All of Phases 2, 3, and 5 are skipped |
+| 5 | Project Scaffolding | Generate `.gitignore`, `.vscode/`, `Documents/` files | User opts out of scaffolding |
+
+> **Phase 5 sub-steps**: 5a `.gitignore` additions · 5b `.vscode/settings.json` · 5c `.vscode/extensions.json` · 5d `.vscode/mcp.json` (web only) · 5e `Documents/` structure + `browser-mcp.instructions.md` (web only)
 
 Phase 0 uses `code --version`, `pwsh --version`, `git --version`, and `gh --version` to detect
 prerequisites automatically rather than requiring the user to check manually.

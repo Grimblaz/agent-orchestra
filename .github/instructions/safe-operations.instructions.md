@@ -1,4 +1,3 @@
-````instructions
 # Safe Operations Instructions
 
 ## Purpose
@@ -75,7 +74,3 @@ gh issue create --title "..." --body "..."
 | `priority: low`    | Nice-to-have — cosmetic or optional   | Cosmetic, optional, or speculative work                       |
 
 **Default for automatically-created follow-up issues**: `priority: medium`
-
-```
-
-```
