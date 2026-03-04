@@ -6,7 +6,7 @@ This guide explains how to configure the workflow template for your project.
 
 Open GitHub Copilot Chat, run the **`/setup`** command. Setup runs in six phases:
 
-> **Recommended model**: Claude Opus — the setup wizard benefits from deep reasoning for architecture and tech stack decisions.
+> **Recommended model**: Claude Opus — the setup wizard benefits from deep reasoning for architecture and tech stack decisions. *(o3 or GPT-4o also work well if Opus is unavailable.)*
 
 | Phase | What it does | Skip available? |
 |-------|-------------|------------------|

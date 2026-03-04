@@ -22,7 +22,7 @@ Or click **"Use this template"** &rarr; **"Create a new repository"** on GitHub.
 
 Type `/setup` in GitHub Copilot Chat. It runs in six phases with skip gates:
 
-> **Recommended model**: Claude Opus — the setup wizard benefits from deep reasoning for architecture and tech stack decisions.
+> **Recommended model**: Claude Opus — the setup wizard benefits from deep reasoning for architecture and tech stack decisions. *(o3 or GPT-4o also work well if Opus is unavailable.)*
 
 - **Phase 0** — Auto-detects prerequisites (VS Code version, pwsh, git, gh CLI)
 - **Phase 1** — One-time user setup: sets `WORKFLOW_TEMPLATE_ROOT` and adds agents, skills, hooks, and instructions to your VS Code settings. Skip if already configured.

@@ -22,8 +22,8 @@ Issue #51 was opened after the setup wizard failed for a user in two ways:
    access. Phase 0 needs terminal commands (`code --version`, etc.) and Phase 5 needs file
    creation tools — neither is available in Ask mode.
 
-The frontmatter fix (`mode: ask` → `agent: agent`) was applied immediately on `main` to unblock
-testing. This PR completes the remaining hardening work.
+This PR applies the frontmatter fix (`mode: ask` → `agent: agent`) and completes all remaining
+hardening work.
 
 ## Design Decisions
 
