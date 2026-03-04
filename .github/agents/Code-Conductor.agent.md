@@ -117,10 +117,11 @@ Quick checklist before declaring mode for a step:
 4. **Create PR (MANDATORY, review-ready gate)**: After all steps complete (including documentation):
    - **End-to-end check**: Does this PR actually resolve the issue? Not "all steps executed" but "the feature works." Review the full diff against the issue's acceptance criteria.
    - **Scope check**: `git diff --name-status main..HEAD` must match planned scope (no unrelated files)
+   - **Migration completeness check** (migration-type issues only): Run a final scan for remaining old-form references (e.g., `Select-String -Path ".github/**/*.md" -Recurse -Pattern "old-pattern"`) and confirm count is 0. If non-zero, fix remaining occurrences before proceeding. Include scan output as validation evidence in the PR body.
    - **Validation evidence**: run required validation commands from plan/repo instructions and capture pass results for PR body
    - `git push -u origin {branch-name}`
    - Create PR via `github-pull-request/*` tools or `gh pr create`
-   - PR body MUST include: summary, changed files, validation evidence, CE Gate result, process gaps found (if any), and `Closes #{issue}`
+   - PR body MUST include: summary, changed files, validation evidence, migration-scan result (migration-type issues only), CE Gate result, process gaps found (if any), and `Closes #{issue}`
 
 5. **Report Completion**: Summarize work done, link the PR URL, and hand off to user for review
 
