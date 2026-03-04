@@ -12,6 +12,7 @@ Setup has six phases. Each phase includes a skip gate so you can jump to exactly
 ---
 
 > **Before you start**
+>
 > - Run `/setup` in your **target project workspace** (the repo you want to configure) — not inside the workflow-template repo itself.
 > - If your workspace is brand-new and completely empty, create at least one file first (e.g., a `README.md`) before running `/setup`. VS Code's workspace context provider will crash on a zero-file workspace.
 > - **Recommended model**: Claude Opus — this wizard benefits from deep reasoning for architecture and tech stack decisions.
@@ -27,6 +28,7 @@ Display the current working directory (using `Get-Location` or `pwd`) and confir
 **Pre-flight check 1 — Empty workspace**
 
 List the user-visible (non-hidden) files in the workspace root, excluding `.git/`. If no such files exist:
+
 - Create a `README.md` file with placeholder content (e.g., `# Project`).
 - Inform the user: "Your workspace was empty — I've created a `README.md` placeholder so VS Code's context provider can function. You can update this file with your project name after setup."
 - Continue to the version checks below.
@@ -34,6 +36,7 @@ List the user-visible (non-hidden) files in the workspace root, excluding `.git/
 **Pre-flight check 2 — Wrong workspace**
 
 Check whether `.github/agents/` exists and contains 10 or more `.agent.md` files. If it does:
+
 - Warn: "⚠️ This workspace looks like the workflow-template repo itself, not a target project. `/setup` should be run in the repo you want to configure, not in the template."
 - Ask: "Would you like to continue anyway (e.g., you're intentionally reconfiguring this repo), or stop here?"
 - If the user chooses to stop: end the wizard.
@@ -145,14 +148,16 @@ Answer these questions about the project:
 
 1. **Project name** — What is this project called? (e.g., "Order Service")
 2. **What does it do?** — 1–2 sentences describing the purpose. (e.g., "REST API that manages customer orders for an e-commerce platform.")
-3. **Primary language + version** — (e.g., TypeScript 5.x, Java 21, Python 3.12) *(or say "not sure" for help choosing)*
-   > *Not sure?* If the user indicates uncertainty, ask 2–3 clarifying questions about their project (e.g., team experience, deployment target, performance needs). Then use the project description from question 2 to generate 2–3 language recommendations with reasoning and pros/cons. Use `ask_questions` for the user to select. Experienced users who answer directly skip this step.
+3. **Primary language + version** — (e.g., TypeScript 5.x, Java 21, Python 3.12) _(or say "not sure" for help choosing)_
 
-4. **Framework + version** — (e.g., Express 4.x, Spring Boot 3.2, FastAPI 0.110, none) *(or say "not sure" for help choosing)*
-   > *Not sure?* If the user indicates uncertainty, generate 2–3 framework recommendations based on the language chosen in question 3 and the project description from question 2. Include reasoning and pros/cons. Use `ask_questions` for selection.
+   > _Not sure?_ If the user indicates uncertainty, ask 2–3 clarifying questions about their project (e.g., team experience, deployment target, performance needs). Then use the project description from question 2 to generate 2–3 language recommendations with reasoning and pros/cons. Use `ask_questions` for the user to select. Experienced users who answer directly skip this step.
 
-5. **Database** — (e.g., PostgreSQL 15, MongoDB 7, SQLite, none) *(or say "not sure" for help choosing)*
-   > *Not sure?* If the user indicates uncertainty, generate 2–3 database recommendations based on the project type, scale, and stack from prior answers. Include reasoning and pros/cons. Use `ask_questions` for selection.
+4. **Framework + version** — (e.g., Express 4.x, Spring Boot 3.2, FastAPI 0.110, none) _(or say "not sure" for help choosing)_
+
+   > _Not sure?_ If the user indicates uncertainty, generate 2–3 framework recommendations based on the language chosen in question 3 and the project description from question 2. Include reasoning and pros/cons. Use `ask_questions` for selection.
+
+5. **Database** — (e.g., PostgreSQL 15, MongoDB 7, SQLite, none) _(or say "not sure" for help choosing)_
+   > _Not sure?_ If the user indicates uncertainty, generate 2–3 database recommendations based on the project type, scale, and stack from prior answers. Include reasoning and pros/cons. Use `ask_questions` for selection.
 
 Once all Phase 2 questions have been answered (including any "Not sure?" branches), proceed to Phase 3.
 
