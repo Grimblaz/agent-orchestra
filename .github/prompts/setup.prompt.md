@@ -15,7 +15,7 @@ Setup has six phases. Each phase includes a skip gate so you can jump to exactly
 >
 > - Run `/setup` in your **target project workspace** (the repo you want to configure) — not inside the workflow-template repo itself.
 > - If your workspace is brand-new and completely empty, don't worry — Phase 0 will automatically create a `README.md` placeholder. (VS Code's workspace context provider crashes on zero-file workspaces; Phase 0 handles this.)
-> - **Recommended model**: Claude Opus — this wizard benefits from deep reasoning for architecture and tech stack decisions.
+> - **Recommended model**: Claude Opus — this wizard benefits from deep reasoning for architecture and tech stack decisions. _(o3 or GPT-4o also work well if Opus is unavailable.)_
 
 ## Phase 0 — Prerequisites Check (automatic)
 
