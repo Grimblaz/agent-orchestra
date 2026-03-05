@@ -8,11 +8,13 @@ This document defines the standard YAML frontmatter format for tracking files st
 
 ```
 .copilot-tracking/
-├── issue-001-feature-name.md
-├── issue-002-bug-fix.md
-└── archived/
-    └── completed-issue-001.md
+├── archived/
+│   └── issue-001-feature-name.md
+└── plans/
+    └── issue-001-feature-name.md
 ```
+
+> **Note**: Only plan files (in `plans/`) are created automatically by agents. Archived files are plan files moved here when work is complete.
 
 ## YAML Frontmatter Format
 
@@ -68,6 +70,17 @@ Use one of these standardized priority levels:
 - **`p2`** - High - Important but not blocking
 - **`p3`** - Normal - Standard priority work
 - **`p4`** - Low - Nice-to-have, can be deferred
+
+#### GitHub Label Mapping
+
+When deriving priority from a GitHub issue label, use this mapping:
+
+| GitHub label | Frontmatter value |
+| --- | --- |
+| `priority: high` | `p1` |
+| `priority: medium` | `p2` |
+| `priority: low` | `p3` |
+| (unlabeled) | `p2` (default) |
 
 ## File Naming Convention
 
@@ -138,25 +151,25 @@ Database queries in the reporting module are taking too long. Need to add indexe
 
 When work reaches `complete` status:
 
-1. Move file to `.copilot-tracking/archived/`
+1. Move plan file from `.copilot-tracking/plans/` to `.copilot-tracking/archived/`
 2. Update `status` to `complete`
 3. Add `completed` date field
 4. Keep file for historical reference
 
 ## Cloud Agent Handoff Protocol
 
-When using a cloud agent (e.g., Codex) for implementation, it creates its own branch from `main` and cannot read local `.copilot-tracking/` files. Use the GitHub issue as the coordination layer instead:
+When using a cloud agent (e.g., Codex) for implementation, it creates its own branch from `main` and cannot read local `.copilot-tracking/` files. In this case, the user may paste the plan into the GitHub issue body so the cloud agent can read it:
 
 | Phase | Agent | Output Location |
 | --- | --- | --- |
 | Design | Issue Designer | Updates **issue body** with full design details |
-| Planning | Issue Planner | Adds plan as a **structured issue comment** |
-| Implementation | Code Conductor | Reads issue body + comments; commits a design doc file under `Documents/Design/` (e.g., `Documents/Design/issue-{id}-{slug}.md`) along with the code |
+| Planning | Issue Planner | Saves plan to `.copilot-tracking/plans/` |
+| Implementation | Code Conductor | Reads local plan file from `.copilot-tracking/plans/`; reads issue body for design details only. For cloud agent handoffs, user pastes plan into issue body before handing off to the cloud agent. Commits design doc to `Documents/Design/{domain-slug}.md` with the implementation PR |
 
 ### Rules
 
-- **Design doc file** under `Documents/Design/` (e.g., `Documents/Design/issue-{id}-{slug}.md`) is committed during implementation, not during design
-- **Plan** lives on the issue comment only — no `.copilot-tracking/plans/` file required (though local files may be created as a convenience)
+- **Design doc file** under `Documents/Design/` (e.g., `Documents/Design/{domain-slug}.md`) is committed during implementation, not during design
+- **Plan** lives in `.copilot-tracking/plans/` — for cloud agent handoffs, the user may paste the plan into the GitHub issue body if needed
 - One branch, one PR — no prerequisite branch needed for context sharing
 - For local-only workflows (no cloud agent), agents may still commit design doc files under `Documents/Design/` to the feature branch first — the issue-based flow works for both
 

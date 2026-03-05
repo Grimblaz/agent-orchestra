@@ -32,9 +32,9 @@ Please complete the following setup steps:
    - Command: `git checkout -b feature/issue-[ISSUE_NUMBER]-[descriptive-name]`
 
 4. **Initialize Tracking**
-   - Create tracking file: `.copilot-tracking/issue-[ISSUE_NUMBER].md`
-   - Set initial status: `pending`
-   - Add issue metadata (priority, tags, dates)
+   - Confirm `.copilot-tracking/plans/` directory exists (create if absent)
+   - Note the plan file path for Issue-Planner: `.copilot-tracking/plans/issue-[ISSUE_NUMBER]-[descriptive-name].md`
+   - Issue-Planner (Step 6) will create and populate the plan file after research and approval
 
 5. **Project-Specific Setup**
    [CUSTOMIZE: Add any project-specific setup steps, such as:]
@@ -44,7 +44,7 @@ Please complete the following setup steps:
    - Service dependencies to start
 
 6. **Create Implementation Plan**
-   - Use template: `.github/templates/implementation-plan.md`
+   - Delegate to @Issue-Planner to research and draft a structured plan.
    - Assess complexity: MINIMAL | MORE | A LOT
    - Break down into phases
    - Assign agents to phases
@@ -151,28 +151,12 @@ Adjust the branch naming pattern to match your project:
 After completing setup with this prompt:
 
 1. **Issue-Designer** → **Issue-Planner**: Pass issue details for planning
-2. **Issue-Planner** → **Code-Conductor**: Issue-Planner posts the implementation plan as an authoritative GitHub issue comment; Code-Conductor reads from the issue comments to execute
+2. **Issue-Planner** → **Code-Conductor**: Issue-Planner saves the implementation plan to `.copilot-tracking/plans/`; Code-Conductor reads from the local plan file to execute
 3. **Code-Conductor** → **Specialized Agents**: Execute phases sequentially
 
-### Tracking File Format
+### Plan File Format
 
-The tracking file created should follow the format in `.github/instructions/tracking-format.instructions.md`:
-
-```yaml
----
-status: pending
-priority: p1
-issue_id: "[ISSUE_NUMBER]"
-tags: [feature]
-created: YYYY-MM-DD
----
-
-# Issue #[ISSUE_NUMBER] Tracking
-
-## Status: Pending Setup
-
-[Updates and progress tracking will be added here]
-```
+Issue-Planner creates the plan file at `.copilot-tracking/plans/issue-[NUMBER]-[slug].md` with YAML frontmatter (see `.github/instructions/tracking-format.instructions.md` for field definitions) and a `## Plan` heading containing the full implementation steps. This file is the source of truth Code-Conductor reads during implementation.
 
 ---
 
@@ -182,8 +166,8 @@ For a rapid start without the full prompt, ensure these minimum requirements:
 
 - [ ] Issue read and understood
 - [ ] Feature branch created: `feature/issue-[NUMBER]-[name]`
-- [ ] Tracking file created: `.copilot-tracking/issue-[NUMBER].md`
-- [ ] Implementation plan started: use `.github/templates/implementation-plan.md`
+- [ ] Implementation plan delegated to @Issue-Planner
+- [ ] Plan file saved by Issue-Planner: `.copilot-tracking/plans/issue-[NUMBER]-[descriptive-name].md`
 - [ ] No blocking dependencies
 
 Then proceed to Phase 1: Research & Planning.

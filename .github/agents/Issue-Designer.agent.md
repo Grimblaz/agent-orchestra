@@ -133,7 +133,7 @@ After user confirms decisions (not during exploration):
 - Decisions documents in `Documents/Decisions/` may still be created if needed for standalone decision records
 - No TypeScript, no implementation phases — those belong in Issue-Planner
 - Pseudo-code only when prose is unclear, keep abstract (e.g., "BaseValue × Modifier × ConstraintFactor")
-- **Note**: The `Documents/Design/` file is committed with the implementation code (same PR by Code-Conductor), not during design phase
+- **Note**: A domain-based design doc under `Documents/Design/{domain-slug}.md` is committed with the implementation code (same PR by Code-Conductor, delegated to Doc-Keeper), not during design phase
 
 ## Stage 3: Update Issue
 
@@ -159,7 +159,7 @@ Before ending a design session, verify ALL of the following:
 
 If any of these are incomplete, **do not end the session**. Complete them first, then confirm completion to the user.
 
-**Note**: A design doc file under `Documents/Design/` is **not** required during the design phase — it is created and committed by Code-Conductor as part of the implementation PR. The issue body is the durable design record used for cloud agent handoffs.
+**Note**: A design doc file under `Documents/Design/` is **not** required during the design phase — it is created or updated by Code-Conductor (via Doc-Keeper) as part of the implementation PR using domain-based naming (`{domain-slug}.md`). The issue body is the durable design record.
 
 **Exception**: If the session was purely exploratory (user explicitly said "just brainstorming, no docs needed"), note this exception in the conversation and skip documentation. This must be an explicit user request, not an assumption.
 
