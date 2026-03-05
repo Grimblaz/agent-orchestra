@@ -128,19 +128,24 @@ Keep iterating until explicit approval or handoff.
 
 ## 6. Persist Plan
 
-Approval was given in Section 5. Save the plan to `.copilot-tracking/plans/issue-{id}-{slug}.md`. The local tracking file is the source of truth.
+Approval was given in Section 5. Save the plan to session memory at `/memories/session/plan-issue-{id}.md` using the `memory` tool (`create` command). If the file already exists (e.g., second approval after refinement), use `delete` followed by `create` to replace the full plan. Session memory is the source of truth for same-conversation execution.
 
 Format with a `## Plan` heading and include the full plan content with YAML metadata block at the top:
 
 ```
+---
 status: pending
 priority: {priority}  # GitHub label → p value: "priority: high"→p1, "priority: medium"→p2, "priority: low"→p3; unlabeled→p2
 issue_id: {issue-id}
 created: {date}
 ce_gate: {true|false}
+---
 ```
 
-For cloud agent handoffs (e.g., Codex) that cannot read local `.copilot-tracking/` files, the user may paste the plan into the GitHub issue body if needed.
+After saving to session memory, immediately use #tool:vscode/askQuestions to ask: **"Persist this plan as a GitHub issue comment?"** (default: No — session memory only)
+
+- **No (default)**: Session memory only. Plan is available for the current conversation. Session memory is cleared when this conversation ends — choose **Yes** for multi-session work.
+- **Yes**: Post the plan as a GitHub issue comment using the MCP `mcp_github_add_issue_comment` tool, with `<!-- plan-issue-{id} -->` as the first line of the body. Recommended for cross-session work or cloud agent handoff.
 </workflow>
 
 <plan_style_guide>

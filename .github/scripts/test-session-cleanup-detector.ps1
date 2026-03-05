@@ -261,7 +261,7 @@ New-Item -ItemType Directory -Path $emptyWorkDir | Out-Null
 # S7 work directory — has stale tracking files
 # ---------------------------------------------------------------------------
 $s7WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "detector-test-s7-$([System.IO.Path]::GetRandomFileName())"
-$s7TrackingFile = Join-Path $s7WorkDir '.copilot-tracking' 'plans' 'issue-40-stale.md'
+$s7TrackingFile = Join-Path $s7WorkDir '.copilot-tracking' 'research' 'issue-40-stale.md'
 New-Item -ItemType Directory -Path (Split-Path -Parent $s7TrackingFile) | Out-Null
 Set-Content -Path $s7TrackingFile -Value @'
 ---
@@ -275,7 +275,7 @@ title: "Test tracking file for S7"
 # S11 work directory — has issue-40 tracking file (same issue as stale branch)
 # ---------------------------------------------------------------------------
 $s11WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "detector-test-s11-$([System.IO.Path]::GetRandomFileName())"
-$s11TrackingFile = Join-Path $s11WorkDir '.copilot-tracking' 'plans' 'issue-40-stale.md'
+$s11TrackingFile = Join-Path $s11WorkDir '.copilot-tracking' 'research' 'issue-40-stale.md'
 New-Item -ItemType Directory -Path (Split-Path -Parent $s11TrackingFile) | Out-Null
 Set-Content -Path $s11TrackingFile -Value @'
 ---

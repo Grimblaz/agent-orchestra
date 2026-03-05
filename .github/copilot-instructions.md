@@ -39,7 +39,7 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 - Instruction files use `.instructions.md` extension in `.github/instructions/`
 - Design documents go in `Documents/Design/`, decision records in `Documents/Decisions/`
 - No auto-commit behavior in any agent — users commit manually
-- Plans are saved to `.copilot-tracking/plans/` files (local source of truth)
+- Plans are saved to session memory (`/memories/session/plan-issue-{ID}.md`), optionally persisted as GitHub issue comments
 - Design content goes in the GitHub issue body (Issue-Designer outputs there)
 - `Documents/Design/` files use domain-based naming (`{domain-slug}.md`) and are committed with the implementation PR by Code-Conductor (delegated to Doc-Keeper)
 - CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience verification

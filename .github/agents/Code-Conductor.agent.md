@@ -103,7 +103,7 @@ Quick checklist before declaring mode for a step:
    - If planning is unnecessary, explicitly note "Step 0 skipped: no planning transition required" and continue.
 
 1. **Locate Plan & Context**:
-   - Find plan in `.copilot-tracking/plans/*.md`, Copilot memory, or user-provided path
+   - Find plan using this lookup chain: (1) session memory — `view /memories/session/plan-issue-{ID}.md` via the `memory` tool; (2) GitHub issue comments — use `mcp_github_issue_read` with `method: get_comments` to find a comment containing `<!-- plan-issue-{ID} -->`; (3) escalate via `vscode/askQuestions` if neither found
    - Read design details from the **issue body** (Issue-Designer outputs full design to the issue body)
    - Look for supporting docs in `Documents/Design/`, `Documents/Decisions/`, `.copilot-tracking/research/` — read whatever exists for additional context
    - Check `.github/skills/` for relevant domain expertise
@@ -160,7 +160,7 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 | `src/**/*.ts`, `src/**/*.tsx` (restructure existing) | refactor, simplify, extract, dedupe    | Refactor-Specialist  |
 | UI source files (visual polish)                      | ui polish, spacing, alignment, styling | UI-Iterator          |
 | `*.md`, `README.*`, `CHANGELOG.*`                    | docs, guide, changelog                 | Doc-Keeper           |
-| `.copilot-tracking/plans/*.md`                       | plan, acceptance criteria, sequencing  | Issue-Planner        |
+| Session memory `/memories/session/plan-issue-{ID}.md` or GitHub issue comment with `<!-- plan-issue-{ID} -->` marker | plan, acceptance criteria, sequencing  | Issue-Planner        |
 | Code review (read-only)                              | review, risks, quality, critique       | Code-Critic          |
 | Categorize review feedback (read-only)               | adjudicate, disposition, rebuttal      | Code-Review-Response |
 | Process/systemic gap analysis                        | ce-gate-defect, process-gap, systemic  | Process-Review       |
@@ -414,7 +414,7 @@ All terminal execution must be non-interactive and automation-safe:
 
 For long orchestration sessions spanning many implementation steps, if the context window is getting full, tell the user: "Type `/compact` in the chat to reclaim context window space."
 
-**What survives compaction**: Plans in `.copilot-tracking/plans/` remain accessible when resuming on the same branch. Session memory notes also survive compaction.
+**What survives compaction**: Session memory (`/memories/session/`) notes survive compaction. If the plan was persisted as a GitHub issue comment, it is also accessible after compaction.
 
 **When to compact**: After completing a major phase (e.g., after all implementation steps complete and before starting the review cycle).
 

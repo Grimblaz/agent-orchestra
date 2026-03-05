@@ -32,9 +32,8 @@ Please complete the following setup steps:
    - Command: `git checkout -b feature/issue-[ISSUE_NUMBER]-[descriptive-name]`
 
 4. **Initialize Tracking**
-   - Confirm `.copilot-tracking/plans/` directory exists (create if absent)
-   - Note the plan file path for Issue-Planner: `.copilot-tracking/plans/issue-[ISSUE_NUMBER]-[descriptive-name].md`
-   - Issue-Planner (Step 6) will create and populate the plan file after research and approval
+   - Confirm `.copilot-tracking/` directory exists for research notes and archived tracking files (create if absent)
+   - Issue-Planner (Step 6) will save the plan to session memory at `/memories/session/plan-issue-[ISSUE_NUMBER].md` after research and approval
 
 5. **Project-Specific Setup**
    [CUSTOMIZE: Add any project-specific setup steps, such as:]
@@ -151,12 +150,12 @@ Adjust the branch naming pattern to match your project:
 After completing setup with this prompt:
 
 1. **Issue-Designer** → **Issue-Planner**: Pass issue details for planning
-2. **Issue-Planner** → **Code-Conductor**: Issue-Planner saves the implementation plan to `.copilot-tracking/plans/`; Code-Conductor reads from the local plan file to execute
+2. **Issue-Planner** → **Code-Conductor**: Issue-Planner saves the implementation plan to session memory (`/memories/session/plan-issue-[ISSUE_NUMBER].md`); Code-Conductor reads from session memory (or GitHub issue comment if the plan was persisted there) to execute
 3. **Code-Conductor** → **Specialized Agents**: Execute phases sequentially
 
-### Plan File Format
+### Plan Storage
 
-Issue-Planner creates the plan file at `.copilot-tracking/plans/issue-[NUMBER]-[slug].md` with YAML frontmatter (see `.github/instructions/tracking-format.instructions.md` for field definitions) and a `## Plan` heading containing the full implementation steps. This file is the source of truth Code-Conductor reads during implementation.
+Issue-Planner saves the plan to session memory at `/memories/session/plan-issue-[NUMBER].md` using the `memory` tool's `create` command. The plan includes YAML frontmatter (see Issue-Planner Section 6 in `.github/agents/Issue-Planner.agent.md` for field definitions) and a `## Plan` heading with the full implementation steps. Session memory is the source of truth Code-Conductor reads during implementation. For cross-session or cloud agent handoffs, Issue-Planner can optionally post the plan as a GitHub issue comment with a `<!-- plan-issue-[NUMBER] -->` marker.
 
 ---
 
@@ -167,7 +166,7 @@ For a rapid start without the full prompt, ensure these minimum requirements:
 - [ ] Issue read and understood
 - [ ] Feature branch created: `feature/issue-[NUMBER]-[name]`
 - [ ] Implementation plan delegated to @Issue-Planner
-- [ ] Plan file saved by Issue-Planner: `.copilot-tracking/plans/issue-[NUMBER]-[descriptive-name].md`
+- [ ] Plan saved by Issue-Planner to session memory: `/memories/session/plan-issue-[NUMBER].md`
 - [ ] No blocking dependencies
 
 Then proceed to Phase 1: Research & Planning.

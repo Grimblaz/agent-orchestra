@@ -36,7 +36,7 @@ Get-ChildItem .copilot-tracking -Recurse -File |
 **Verify**:
 
 - Files moved to `.copilot-tracking-archive/{year}/{month}/issue-{ID}/`
-- No tracking files remain in `.copilot-tracking/plans/` or `.copilot-tracking/research/` for this issue
+- No tracking files remain in `.copilot-tracking/research/` for this issue
 
 > **Automation**: The `SessionStart` hook detects stale tracking files and prompts you at the start of your next VS Code session — cleanup requires one manual confirmation. You can also run the script directly: `pwsh "$env:WORKFLOW_TEMPLATE_ROOT/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description`
 >

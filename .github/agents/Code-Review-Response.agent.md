@@ -267,7 +267,7 @@ Delegation guidance:
 
 **Before categorizing ANY finding as 📋 DEFERRED-SIGNIFICANT or ❌ REJECT, you MUST**:
 
-1. **Read the parent issue's acceptance criteria** (use `gh issue view {N} --json body` or read from plan file)
+1. **Read the parent issue's acceptance criteria** (use `gh issue view {N} --json body` or read from the plan in session memory or a plan issue comment)
 2. **Check**: Does this finding relate to an explicit acceptance criterion?
 3. **If YES**: The finding **CANNOT be deferred or rejected** — it is a feature gap, not tech debt. Reclassify as ✅ ACCEPT regardless of effort estimate.
 4. **If NO**: Proceed with normal categorization.

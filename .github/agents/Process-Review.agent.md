@@ -51,8 +51,8 @@ A meta-cognitive agent that analyzes workflow execution to identify deviations f
 - ❌ Test files (`**/*.test.ts`, `**/*.test.tsx`)
 - ❌ Project documentation (`Documents/**`)
 - ❌ Configuration files (`package.json`, `tsconfig.json`, etc.)
-- ❌ Plan files (`.copilot-tracking/plans/*.md`)
 - ❌ Changes files (`.copilot-tracking/changes/*.md`)
+- ❌ Session memory plan files (`/memories/session/plan-issue-*.md`)
 
 **Why**: Process review identifies issues and suggests improvements. Implementation is delegated to appropriate agents (doc-keeper for documentation, code-smith for code, etc.) via handoffs.
 
@@ -82,7 +82,7 @@ Performs retrospective analysis of development process to improve future executi
 
 **Deviation Detection**:
 
-- Compare actual execution vs intended workflow (plan files vs git history)
+- Compare actual execution vs intended workflow (plan in session memory or issue comment vs git history)
 - Identify agent boundary violations (e.g., code-smith writing tests)
 - Flag premature phase transitions (e.g., implementing before RED tests)
 - Detect role confusion (e.g., issue-planner providing pseudo-code)
@@ -116,13 +116,13 @@ Performs retrospective analysis of development process to improve future executi
 
 - Suggest specific agent instruction updates
 - Recommend process simplifications or new guardrails
-- Propose template improvements for plan files
+- Propose improvements for plan content
 - Identify training needs or clarifications
 
 **Evidence-Based Analysis**:
 
 - Use git history (commits, file changes, timestamps)
-- Reference plan files (intended workflow)
+- Reference plan (intended workflow)
 - Examine changes files (actual progress tracking)
 - Review conversation logs (agent usage patterns)
 - Cite quality metrics (test results, coverage, mutation scores)
@@ -193,7 +193,7 @@ Get-ChildItem -Recurse -File | Where-Object {$_.LastWriteTime -gt (Get-Date).Add
 
 **Compare**:
 
-- Plan file tasks vs actual git commits
+- Plan tasks vs actual git commits
 - Intended phases vs actual execution order
 - Agent assignments vs conversation history
 - Success criteria vs final metrics
@@ -437,7 +437,7 @@ Emit exactly this structure when returning results to Code-Conductor:
 **Analysis**:
 
 - Review agent descriptions: Are boundaries clear?
-- Check plan file: Were agent assignments explicit?
+- Check plan: Were agent assignments explicit?
 - Examine handoffs: Were handoff buttons used?
 
 **Recommendations**:
