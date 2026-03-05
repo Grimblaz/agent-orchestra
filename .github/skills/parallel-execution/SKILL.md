@@ -57,7 +57,7 @@ Do not advance phase until Test-Writer explicitly confirms:
 ## Loop Budget
 
 - Maximum 3 correction cycles per step.
-- If exceeded, perform root-cause review and escalate via `ask_questions` with a recommended option.
+- If exceeded, perform root-cause review and escalate via `vscode/askQuestions` with a recommended option.
 
 ## Anti-Test-Chasing Guardrail
 

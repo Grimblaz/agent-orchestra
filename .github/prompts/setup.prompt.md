@@ -150,14 +150,14 @@ Answer these questions about the project:
 2. **What does it do?** — 1–2 sentences describing the purpose. (e.g., "REST API that manages customer orders for an e-commerce platform.")
 3. **Primary language + version** — (e.g., TypeScript 5.x, Java 21, Python 3.12) _(or say "not sure" for help choosing)_
 
-   > _Not sure?_ If the user indicates uncertainty, ask 2–3 clarifying questions about their project (e.g., team experience, deployment target, performance needs). Then use the project description from question 2 to generate 2–3 language recommendations with reasoning and pros/cons. Use `ask_questions` for the user to select. Experienced users who answer directly skip this step.
+   > _Not sure?_ If the user indicates uncertainty, ask 2–3 clarifying questions about their project (e.g., team experience, deployment target, performance needs). Then use the project description from question 2 to generate 2–3 language recommendations with reasoning and pros/cons. Use `vscode/askQuestions` for the user to select. Experienced users who answer directly skip this step.
 
 4. **Framework + version** — (e.g., Express 4.x, Spring Boot 3.2, FastAPI 0.110, none) _(or say "not sure" for help choosing)_
 
-   > _Not sure?_ If the user indicates uncertainty, generate 2–3 framework recommendations based on the language chosen in question 3 and the project description from question 2. Include reasoning and pros/cons. Use `ask_questions` for selection.
+   > _Not sure?_ If the user indicates uncertainty, generate 2–3 framework recommendations based on the language chosen in question 3 and the project description from question 2. Include reasoning and pros/cons. Use `vscode/askQuestions` for selection.
 
 5. **Database** — (e.g., PostgreSQL 15, MongoDB 7, SQLite, none) _(or say "not sure" for help choosing)_
-   > _Not sure?_ If the user indicates uncertainty, generate 2–3 database recommendations based on the project type, scale, and stack from prior answers. Include reasoning and pros/cons. Use `ask_questions` for selection.
+   > _Not sure?_ If the user indicates uncertainty, generate 2–3 database recommendations based on the project type, scale, and stack from prior answers. Include reasoning and pros/cons. Use `vscode/askQuestions` for selection.
 
 Once all Phase 2 questions have been answered (including any "Not sure?" branches), proceed to Phase 3.
 

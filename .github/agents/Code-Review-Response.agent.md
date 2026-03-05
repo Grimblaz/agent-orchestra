@@ -3,6 +3,7 @@ name: Code-Review-Response
 description: "Referee for code review findings — adjudicate, challenge weak evidence, accept only what is defensible"
 argument-hint: "Analyze code review feedback and create response plan"
 tools: [
+    "vscode/askQuestions",
     "vscode",
     "execute",
     "read",

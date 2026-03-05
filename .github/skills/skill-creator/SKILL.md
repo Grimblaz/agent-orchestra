@@ -14,6 +14,24 @@ Guide for creating new skills with proper structure and VS Code 1.108+ compatibl
 - Updating skill templates
 - Onboarding contributors to skill creation
 
+## Built-in Creation Commands (VS Code 1.110+)
+
+> If you are on VS Code 1.108 or 1.109, skip this section and proceed directly to [Required Frontmatter Format](#required-frontmatter-format) below.
+
+VS Code 1.110 ships built-in slash commands for scaffolding customization files:
+
+- `/create-skill` — generates a new skill file
+- `/create-agent` — generates a new `.agent.md` file
+- `/create-prompt` — generates a new `.prompt.md` file
+- `/create-instruction` — generates a new `.instructions.md` file
+
+**Recommended workflow**: Use the built-in `/create-skill` (or equivalent) to generate the initial scaffold, then apply this skill to validate and refine the output against project conventions:
+
+- Kebab-case `name` in frontmatter (e.g., `my-skill`, not `MySkill`)
+- `description` must include usage triggers ("Use when ..." phrasing) for discoverability
+- Directory structure: `.github/skills/{skill-name}/SKILL.md`
+- Required frontmatter fields: `name` and `description` only — no unsupported fields
+
 ## Required Frontmatter Format
 
 ```markdown

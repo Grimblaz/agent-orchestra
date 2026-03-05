@@ -164,3 +164,12 @@ If any file already exists, Phase 5 asks before overwriting (`.vscode/settings.j
 
 - Confirm `SKILL.md` has `name` and `description` frontmatter
 - Enable `chat.useAgentSkills` in VS Code settings (requires VS Code 1.108+)
+
+**Need to debug agent behavior in detail?**
+
+VS Code 1.110+ includes an Agent Debug panel that gives real-time visibility into agent execution:
+
+- Open it with: `Developer: Open Agent Debug Panel`
+- Shows loaded customizations (instructions, skills, agent files), tool calls, system prompts, and agent events as they happen
+- Available since VS Code 1.110 (supersedes the earlier Diagnostics chat action)
+- Especially useful when agents appear to ignore instructions or tools — confirm the relevant files are actually loaded
