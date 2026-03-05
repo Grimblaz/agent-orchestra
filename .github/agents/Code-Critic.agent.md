@@ -409,7 +409,7 @@ Use browser-based review only when PR changes touch UI implementation.
 - `.github/architecture-rules.md` - Architecture boundaries and enforcement
 - `.github/copilot-instructions.md` - Project coding standards
 - `.github/instructions/browser-tools.instructions.md` (if present) - Native browser tools workflow and constraints (primary)
-- `.github/instructions/browser-mcp.instructions.md` (if present) - Playwright MCP browser workflow and constraints (fallback)
+- `.github/instructions/browser-mcp.instructions.md` (if present — legacy from pre-#55 project setups) - Playwright MCP browser workflow and constraints (fallback)
 - `Documents/Development/TestingStrategy.md` - Test coverage requirements
 - `npm audit` output - Security vulnerability report
 

@@ -77,7 +77,7 @@ Before researching domain topics, load the appropriate skill:
 
 - **Domain rules and terminology**: load the project-relevant skill from `.github/skills/` when available
 - **Design trade-offs**: `.github/skills/brainstorming/SKILL.md`
-- **Browser tools patterns**: `.github/instructions/browser-tools.instructions.md` (if present); `.github/instructions/browser-mcp.instructions.md` (if present — Playwright MCP fallback)
+- **Browser tools patterns**: `.github/instructions/browser-tools.instructions.md` (if present); `.github/instructions/browser-mcp.instructions.md` (if present — legacy from pre-#55 project setups; Playwright MCP fallback)
 
 ### View Current App (Optional)
 

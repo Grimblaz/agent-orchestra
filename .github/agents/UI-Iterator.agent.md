@@ -79,7 +79,7 @@ A systematic UI refinement mode using screenshot-based iteration. Evaluates curr
 For dev server lifecycle, navigation defaults, cleanup, and deterministic error handling, follow:
 
 - `.github/instructions/browser-tools.instructions.md` (if present) — native browser tools (primary)
-- `.github/instructions/browser-mcp.instructions.md` (if present) — Playwright MCP fallback
+- `.github/instructions/browser-mcp.instructions.md` (if present — legacy from pre-#55 project setups) — Playwright MCP fallback
 
 ---
 
