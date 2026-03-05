@@ -8,15 +8,17 @@ This document defines the standard YAML frontmatter format for tracking files st
 
 ```
 .copilot-tracking/
-├── archived/
-│   └── issue-001-feature-name.md
-└── plans/
+├── research/
+│   └── {date}-{topic}.md
+└── archived/
     └── issue-001-feature-name.md
 ```
 
-> **Note**: Only plan files (in `plans/`) are created automatically by agents. Archived files are plan files moved here when work is complete.
+> **Note**: `.copilot-tracking/` stores research notes and archived tracking files. Plans are now stored in session memory at `/memories/session/plan-issue-{ID}.md`, not as local files.
 
 ## YAML Frontmatter Format
+
+> **Scope**: The following format applies to `.copilot-tracking/` research and tracking files only — not to session memory plan files. For session memory plan YAML fields, see Issue-Planner Section 6 in `.github/agents/Issue-Planner.agent.md`.
 
 All tracking files **MUST** include YAML frontmatter at the top of the file:
 
@@ -149,33 +151,35 @@ Database queries in the reporting module are taking too long. Need to add indexe
 
 ## Archiving Completed Work
 
-When work reaches `complete` status:
+For any tracking files (research notes, prompt output) in `.copilot-tracking/` that reach `complete` status:
 
-1. Move plan file from `.copilot-tracking/plans/` to `.copilot-tracking/archived/`
+1. Move the file to `.copilot-tracking/archived/`
 2. Update `status` to `complete`
 3. Add `completed` date field
 4. Keep file for historical reference
 
+Plans saved to session memory (`/memories/session/plan-issue-{ID}.md`) do not need archiving — session memory is scoped to the conversation.
+
 ## Cloud Agent Handoff Protocol
 
-When using a cloud agent (e.g., Codex) for implementation, it creates its own branch from `main` and cannot read local `.copilot-tracking/` files. In this case, the user may paste the plan into the GitHub issue body so the cloud agent can read it:
+When using a cloud agent (e.g., Codex) for implementation, it creates its own branch from `main` and cannot read local files or VS Code session memory. Issue-Planner can optionally post the plan as a GitHub issue comment so the cloud agent can read it:
 
 | Phase | Agent | Output Location |
 | --- | --- | --- |
 | Design | Issue Designer | Updates **issue body** with full design details |
-| Planning | Issue Planner | Saves plan to `.copilot-tracking/plans/` |
-| Implementation | Code Conductor | Reads local plan file from `.copilot-tracking/plans/`; reads issue body for design details only. For cloud agent handoffs, user pastes plan into issue body before handing off to the cloud agent. Commits design doc to `Documents/Design/{domain-slug}.md` with the implementation PR |
+| Planning | Issue Planner | Saves plan to session memory (`/memories/session/plan-issue-{ID}.md`); optionally posts as a GitHub issue comment with `<!-- plan-issue-{ID} -->` marker (user opt-in) |
+| Implementation | Code Conductor | Reads plan from session memory; falls back to GitHub issue comment; reads issue body for design details only. Commits design doc to `Documents/Design/{domain-slug}.md` with the implementation PR |
 
 ### Rules
 
 - **Design doc file** under `Documents/Design/` (e.g., `Documents/Design/{domain-slug}.md`) is committed during implementation, not during design
-- **Plan** lives in `.copilot-tracking/plans/` — for cloud agent handoffs, the user may paste the plan into the GitHub issue body if needed
+- **Plan** lives in session memory (`/memories/session/plan-issue-{ID}.md`); for cross-session or cloud agent handoffs, Issue-Planner can optionally post the plan as a GitHub issue comment with `<!-- plan-issue-{ID} -->` marker
 - One branch, one PR — no prerequisite branch needed for context sharing
 - For local-only workflows (no cloud agent), agents may still commit design doc files under `Documents/Design/` to the feature branch first — the issue-based flow works for both
 
 ### Tracking Files vs. Issue Coordination
 
-`.copilot-tracking/` files are local scaffolding for tracking agent state across sessions on the **same machine**. They are gitignored and not suitable for cross-agent handoffs where a new branch is created (e.g., cloud agent workflows). Use GitHub issues for durable, cross-agent coordination.
+`.copilot-tracking/` files are local scaffolding for tracking agent state (research notes, prompt output) across sessions on the **same machine**. They are gitignored and not suitable for cross-agent handoffs where a new branch is created (e.g., cloud agent workflows). Use GitHub issues for durable, cross-agent coordination. Plans use session memory, not `.copilot-tracking/`.
 
 ## Customization
 

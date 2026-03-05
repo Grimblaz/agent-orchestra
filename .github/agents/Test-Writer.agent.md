@@ -56,7 +56,7 @@ A specialized mode for writing high-quality, behavior-focused tests that follow 
 
 **Key Rules**:
 
-- Read plan file FIRST before any work
+- Read plan FIRST before any work
 - Focus on testing tasks specified in current phase
 - Respect phase boundaries (STOP if next phase requires different agent)
 - Report coverage and mutation results clearly

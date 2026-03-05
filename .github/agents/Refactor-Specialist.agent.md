@@ -190,7 +190,7 @@ For each file modified in the PR, evaluate:
 
 **Key Rules**:
 
-- Read plan file FIRST before any refactoring work
+- Read plan FIRST before any refactoring work. Find plan using: (1) `memory` tool — `view /memories/session/plan-issue-{ID}.md`; (2) GitHub issue comment with `<!-- plan-issue-{ID} -->` marker; (3) Code-Conductor context passed with this task. Derive `{ID}` from the current branch name pattern `feature/issue-{N}-*`.
 - If the plan explicitly marks a file or phase as out of scope, skip it.
 - Otherwise, analyze ALL files modified in the PR (not just those mentioned in the plan).
 - Respect phase boundaries (STOP if next phase requires different agent)

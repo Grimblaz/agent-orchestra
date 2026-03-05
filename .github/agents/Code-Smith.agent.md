@@ -50,7 +50,7 @@ A focused implementation mode that executes code changes following approved plan
 
 **Key Rules**:
 
-- Read plan file FIRST before any work
+- Read plan FIRST before any work
 - Focus on implementation tasks specified in current phase
 - Respect phase boundaries (STOP if next phase requires different agent)
 - Only implement code required by existing tests (no speculative features)

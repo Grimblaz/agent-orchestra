@@ -167,7 +167,7 @@ In GitHub Review Intake Mode, convert categories into the improvement decision:
 
 **Key Rules**:
 
-- Read plan file FIRST before any review work
+- Read plan FIRST before any review work
 - Focus on code quality analysis and evidence-based feedback
 - Respect phase boundaries (STOP if next phase requires different agent)
 - Provide actionable feedback (cite specific files/lines)
