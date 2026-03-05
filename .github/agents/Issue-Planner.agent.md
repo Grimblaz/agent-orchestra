@@ -128,16 +128,18 @@ Keep iterating until explicit approval or handoff.
 
 ## 6. Persist Plan
 
-Approval was given in Section 5. Save the plan to session memory at `/memories/session/plan-issue-{id}.md` using the `memory` tool (`create` command). If the file already exists (e.g., second approval after refinement), use `str_replace` to update the plan content, or `delete` followed by `create`. Session memory is the source of truth for same-conversation execution.
+Approval was given in Section 5. Save the plan to session memory at `/memories/session/plan-issue-{id}.md` using the `memory` tool (`create` command). If the file already exists (e.g., second approval after refinement), use `delete` followed by `create` to replace the full plan. Session memory is the source of truth for same-conversation execution.
 
 Format with a `## Plan` heading and include the full plan content with YAML metadata block at the top:
 
 ```
+---
 status: pending
 priority: {priority}  # GitHub label → p value: "priority: high"→p1, "priority: medium"→p2, "priority: low"→p3; unlabeled→p2
 issue_id: {issue-id}
 created: {date}
 ce_gate: {true|false}
+---
 ```
 
 After saving to session memory, immediately use #tool:vscode/askQuestions to ask: **"Persist this plan as a GitHub issue comment?"** (default: No — session memory only)

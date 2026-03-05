@@ -32,10 +32,10 @@ Plans are stored in VS Code session memory at `/memories/session/plan-issue-{ID}
 ```markdown
 ---
 status: pending
-priority: p1|p2|p3|p4
+priority: p2          # p1=high, p2=medium, p3=low; no label → p2
 issue_id: "NNN"
 created: YYYY-MM-DD
-ce_gate: false|true
+ce_gate: false        # true if CE Gate is required
 ---
 
 ## Plan: {Title}
@@ -78,4 +78,4 @@ Only the `plans/` subdirectory was removed. The `research/` subdirectory and any
 
 - `.github/agents/Issue-Planner.agent.md` — Section 6: plan persistence
 - `.github/agents/Code-Conductor.agent.md` — Step 1: plan retrieval
-- `.github/instructions/tracking-format.instructions.md` — plan YAML frontmatter spec
+- `.github/instructions/tracking-format.instructions.md` — YAML frontmatter spec for `.copilot-tracking/` research files (does not cover session-memory plan YAML; see Issue-Planner Section 6 above)
