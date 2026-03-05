@@ -32,7 +32,7 @@ Please complete the following setup steps:
    - Command: `git checkout -b feature/issue-[ISSUE_NUMBER]-[descriptive-name]`
 
 4. **Initialize Tracking**
-   - Create tracking file: `.copilot-tracking/issue-[ISSUE_NUMBER].md`
+   - Plan file created: `.copilot-tracking/plans/issue-[ISSUE_NUMBER]-[descriptive-name].md`
    - Set initial status: `pending`
    - Add issue metadata (priority, tags, dates)
 
@@ -44,7 +44,7 @@ Please complete the following setup steps:
    - Service dependencies to start
 
 6. **Create Implementation Plan**
-   - Use template: `.github/templates/implementation-plan.md`
+   - Delegate to @Issue-Planner to research and draft a structured plan.
    - Assess complexity: MINIMAL | MORE | A LOT
    - Break down into phases
    - Assign agents to phases
@@ -151,7 +151,7 @@ Adjust the branch naming pattern to match your project:
 After completing setup with this prompt:
 
 1. **Issue-Designer** → **Issue-Planner**: Pass issue details for planning
-2. **Issue-Planner** → **Code-Conductor**: Issue-Planner posts the implementation plan as an authoritative GitHub issue comment; Code-Conductor reads from the issue comments to execute
+2. **Issue-Planner** → **Code-Conductor**: Issue-Planner saves the implementation plan to `.copilot-tracking/plans/`; Code-Conductor reads from the local plan file to execute
 3. **Code-Conductor** → **Specialized Agents**: Execute phases sequentially
 
 ### Tracking File Format
@@ -182,8 +182,8 @@ For a rapid start without the full prompt, ensure these minimum requirements:
 
 - [ ] Issue read and understood
 - [ ] Feature branch created: `feature/issue-[NUMBER]-[name]`
-- [ ] Tracking file created: `.copilot-tracking/issue-[NUMBER].md`
-- [ ] Implementation plan started: use `.github/templates/implementation-plan.md`
+- [ ] Plan file created: `.copilot-tracking/plans/issue-[NUMBER]-[descriptive-name].md`
+- [ ] Implementation plan delegated to @Issue-Planner
 - [ ] No blocking dependencies
 
 Then proceed to Phase 1: Research & Planning.

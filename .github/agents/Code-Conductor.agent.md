@@ -93,12 +93,11 @@ Quick checklist before declaring mode for a step:
    - If planning is unnecessary, explicitly note "Step 0 skipped: no planning transition required" and continue.
 
 1. **Locate Plan & Context**:
-   - Find plan in issue comments (look for a comment with `## Plan` heading posted by Issue-Planner), `.copilot-tracking/plans/*.md`, or user-provided path — **issue comments are authoritative** for cloud agent handoffs
+   - Find plan in `.copilot-tracking/plans/*.md`, Copilot memory, or user-provided path
    - Read design details from the **issue body** (Issue-Designer outputs full design to the issue body)
    - Look for supporting docs in `Documents/Design/`, `Documents/Decisions/`, `.copilot-tracking/research/` — read whatever exists for additional context
    - Check `.github/skills/` for relevant domain expertise
    - **If no plan exists**: Escalate via `vscode/askQuestions` to request plan path/options (with a recommended option). Do not proceed without a plan.
-   - **Commit design doc file under `Documents/Design/`**: As part of the implementation PR, create or update a markdown design document file (for example, `Documents/Design/issue-{id}-{slug}.md`) populated from the design content in the issue body. This file is the durable record committed with the code.
 
 2. **Determine Resume Point & Validate Plan**:
    - Check plan/progress artifacts and branch state to determine completed steps. Resume from the first incomplete step.
@@ -120,6 +119,7 @@ Quick checklist before declaring mode for a step:
    - **End-to-end check**: Does this PR actually resolve the issue? Not "all steps executed" but "the feature works." Review the full diff against the issue's acceptance criteria.
    - **Scope check**: `git diff --name-status main..HEAD` must match planned scope (no unrelated files)
    - **Migration completeness check** (migration-type issues only — pattern replacement, rename/move, API migration; see Issue-Planner `<plan_style_guide>` for full definition): Run a final scan for remaining old-form references using `Get-ChildItem -Path "." -Recurse -Include "*.md","*.json" | Select-String -Pattern "old-pattern"` (adjust path and `-Include` filters to the migration scope). Confirm match count is 0 AND that at least 1 file was scanned — a 0-match result with 0 files examined indicates a misconfigured glob, not a clean repo. If count is non-zero, fix remaining occurrences before proceeding. Include scan output as validation evidence in the PR body.
+   - **Design doc (before pushing)**: Add or update a domain-based design document in `Documents/Design/`. Logic: (1) List existing files in `Documents/Design/`, excluding any `issue-{N}-*.md`-named files from domain-match candidates, (2) read their headings to find domain overlap with the current feature, (3) if exactly one match, delegate an **update** to Doc-Keeper targeting that file, (4) if two or more matches, prompt via `vscode/askQuestions`: "Multiple design docs match this feature — which should be updated?" and wait for selection before delegating, (5) if no match, delegate **creation** of a new `{domain-slug}.md` file to Doc-Keeper. **Legacy detection (idempotent)**: if `Documents/Design/` contains any `issue-{N}-*.md` pattern files, first run `gh issue list --search "Migrate Documents/Design/ to domain-based files" --state open --json number --jq length` — if the result is `0`, prompt the user via `vscode/askQuestions`: "Legacy per-issue design docs detected — create a cleanup issue to migrate them to domain-based files?" If confirmed, run `gh issue create --title "Migrate Documents/Design/ to domain-based files" --body "Legacy issue-{N}-*.md design files in Documents/Design/ should be consolidated into domain-based design files per the architecture-rules.md naming convention." --label "priority: medium"`, then continue with the current task. If result is `> 0`, skip creation silently.
    - **Validation evidence**: run required validation commands from plan/repo instructions and capture pass results for PR body
    - `git push -u origin {branch-name}`
    - Create PR via `github-pull-request/*` tools or `gh pr create`
@@ -159,15 +159,16 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 
 Use this loop for code review phases to drive evidence-based alignment before execution.
 
-### Critic Pass Default
+### Critic Pass Protocol (Fixed)
 
-Default is **1 full-scope Code-Critic pass** per review cycle. This is configurable via `.github/copilot-instructions.md` (for example `critic_passes: 3`).
+**3 independent Code-Critic passes** run per review cycle. This is hard-coded and not configurable.
 
-**Multi-pass execution protocol** (when `critic_passes > 1`):
+**Multi-pass execution protocol** (3 passes per cycle, parallel):
 
 Each pass is an **independent invocation** of Code-Critic — not a duplicate. LLM-based review has inherent coverage variance: the same code surface reviewed separately will surface complementary issues. Multiple passes increase defect detection probability without changing the review scope.
 
-- Call Code-Critic once per configured pass, labeling each call: `"This is adversarial review pass N of M. Prior passes have already been run. Look for anything they may have missed."`
+- Launch all 3 passes **in parallel** as independent subagent invocations.
+- Label each call: `"This is adversarial review pass N of M. Conduct your review independently. Prior passes have already been run. Look for anything they may have missed."`
 - Do NOT skip passes because a prior pass "already covered" the code. That reasoning defeats the purpose.
 - Do NOT merge passes into one call — each must be a separate subagent invocation.
 - After all passes complete, merge all findings into a single ledger before calling Code-Review-Response. Deduplicate only when two passes flag **identical evidence at the same file/line** — different framing of the same issue counts as one finding. Complementary findings from different passes are additive.
@@ -403,7 +404,7 @@ All terminal execution must be non-interactive and automation-safe:
 
 For long orchestration sessions spanning many implementation steps, if the context window is getting full, tell the user: "Type `/compact` in the chat to reclaim context window space."
 
-**What survives compaction**: Plans posted as GitHub issue comments remain fully accessible — this is one reason posting the plan to the issue is required. Session memory notes also survive compaction.
+**What survives compaction**: Plans in `.copilot-tracking/plans/` remain accessible when resuming on the same branch. Session memory notes also survive compaction.
 
 **When to compact**: After completing a major phase (e.g., after all implementation steps complete and before starting the review cycle).
 

@@ -128,18 +128,19 @@ Keep iterating until explicit approval or handoff.
 
 ## 6. Persist Plan
 
-Ask for user approval using #tool:vscode/askQuestions; once approved, post the plan as a **structured issue comment** on the associated GitHub issue. This ensures the plan is accessible to cloud agents (e.g., Codex) that work from their own branch and cannot read local `.copilot-tracking/` files.
+Approval was given in Section 5. Save the plan to `.copilot-tracking/plans/issue-{id}-{slug}.md`. The local tracking file is the source of truth.
 
-Format the comment with a `## Plan` heading and include the full plan content with YAML metadata block at the top:
+Format with a `## Plan` heading and include the full plan content with YAML metadata block at the top:
 
 ```
-status: ready
+status: pending
+priority: {priority}  # derive from issue priority label; default p2 if unlabeled
 issue_id: {issue-id}
 created: {date}
 ce_gate: {true|false}
 ```
 
-The comment serves as the single source of truth for implementing agents. For local-only workflows, a `.copilot-tracking/plans/` file may also be saved as a convenience, but the issue comment is authoritative.
+For cloud agent handoffs (e.g., Codex) that cannot read local `.copilot-tracking/` files, the user may paste the plan into the GitHub issue body if needed.
 </workflow>
 
 <plan_style_guide>

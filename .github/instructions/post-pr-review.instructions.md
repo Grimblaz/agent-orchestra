@@ -203,7 +203,7 @@ Before considering work fully complete, verify:
 
 4. **Expecting a `Documents/Design/...` design doc to exist before implementation**
    - Issue-Designer outputs design to the **issue body**, not to a committed file
-   - The `Documents/Design/...` design doc file is created by Code-Conductor as part of the implementation PR
+   - The design doc (a domain-based `Documents/Design/{domain-slug}.md` file) is created or updated by Code-Conductor (via Doc-Keeper) as part of the implementation PR
    - If you're reviewing a PR and the expected design doc is missing, check whether Code-Conductor committed it alongside the code changes
 
 5. **Incomplete documentation updates**

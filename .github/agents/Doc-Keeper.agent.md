@@ -43,6 +43,13 @@ Keep all documentation accurate, up-to-date, and free of obsolete content. Value
 
 3. **Decision Docs** (ADRs): Keep date-prefixed ADRs accurate; remove obsolete decision docs
 
+4. **Design Document Authorship** (when delegated by Code-Conductor)
+   - Create new domain-based design files under `Documents/Design/{domain-slug}.md` when no existing design doc in `Documents/Design/` covers this feature area
+   - Update existing domain design files when a feature extends or modifies an existing design area
+   - Use domain-slug naming: lowercase with hyphens, representing the feature area (e.g., `review-pipeline.md`, `hook-system.md`, `setup-wizard.md`)
+   - Content: reflect the **current design state** of the domain — not a per-issue changelog; incorporate design details from the issue body
+   - Target 150–250 lines per file; split by sub-domain if a file grows beyond 500 lines
+
 **Quality Checks**:
 
 - Remove obsolete content (value deletion), consolidate duplicates, validate file paths/cross-references

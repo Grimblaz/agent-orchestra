@@ -56,7 +56,7 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 ```
 
 1. **@Issue-Designer** — picks up the issue, explores the design space, updates the issue body with a design
-2. **@Issue-Planner** — creates a step-by-step implementation plan as an issue comment
+2. **@Issue-Planner** — creates a step-by-step implementation plan
 3. **@Code-Conductor** — reads the plan, delegates to internal specialist agents, creates a merge-ready PR
 
 ### Example: Start a feature from scratch

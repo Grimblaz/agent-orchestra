@@ -12,7 +12,7 @@ These rules define the structural constraints for the Copilot Workflow Template.
 | `.github/prompts/`       | Prompt files and workflow templates                  | `*.prompt.md` with frontmatter; supporting `*.md` templates   |
 | `.github/hooks/`         | VS Code Copilot hook configurations                 | `*.json` hook files (e.g., `session-cleanup.json`)            |
 | `.github/scripts/`       | Automation scripts invoked by hooks or agents        | `*.ps1` PowerShell scripts                                    |
-| `Documents/Design/`      | Design documents (committed with implementation PRs) | `issue-{N}-{slug}.md`                                         |
+| `Documents/Design/`      | Design documents (committed with implementation PRs) | `{domain-slug}.md`                                            |
 | `Documents/Decisions/`   | Standalone decision records                          | Markdown files                                                 |
 | `examples/`              | Example configurations for different tech stacks     | Subdirectories per stack                                       |
 
@@ -59,7 +59,10 @@ Must live in `.github/instructions/`
 - Agent files: `{Agent-Name}.agent.md` (PascalCase with hyphens)
 - Skill directories: `{skill-name}/` (lowercase with hyphens)
 - Instruction files: `{topic}.instructions.md` (lowercase with hyphens)
-- Design documents: `issue-{number}-{slug}.md` (lowercase with hyphens)
+- Design documents: `{domain-slug}.md` (lowercase with hyphens)
+
+  > **Transition**: Existing files using the legacy `issue-{N}-{slug}.md` naming are pending migration to domain-based names. New files must use `{domain-slug}.md` naming.
+
 - Prompt files: `{name}.prompt.md` (lowercase with hyphens)
 
 ## Validation

@@ -39,18 +39,14 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 - Instruction files use `.instructions.md` extension in `.github/instructions/`
 - Design documents go in `Documents/Design/`, decision records in `Documents/Decisions/`
 - No auto-commit behavior in any agent — users commit manually
-- Plans are posted as structured issue comments (authoritative for cloud agent handoffs)
+- Plans are saved to `.copilot-tracking/plans/` files (local source of truth)
 - Design content goes in the GitHub issue body (Issue-Designer outputs there)
-- `Documents/Design/` files are committed with the implementation PR by Code-Conductor
+- `Documents/Design/` files use domain-based naming (`{domain-slug}.md`) and are committed with the implementation PR by Code-Conductor (delegated to Doc-Keeper)
 - CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience verification
 
-## Agent Workflow Settings
+## Code-Critic Review Protocol
 
-```yaml
-critic_passes: 3
-```
-
-This repo uses 3 independent Code-Critic passes per review cycle. Each pass surfaces complementary findings; they are not duplicates.
+This repo runs **3 independent parallel Code-Critic passes** per review cycle. Passes are hard-coded — not configurable. Each pass surfaces complementary findings; they are not duplicates.
 
 ## Build & Run
 
