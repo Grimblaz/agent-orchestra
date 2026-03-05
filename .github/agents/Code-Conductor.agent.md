@@ -102,6 +102,7 @@ Quick checklist before declaring mode for a step:
 2. **Determine Resume Point & Validate Plan**:
    - Check plan/progress artifacts and branch state to determine completed steps. Resume from the first incomplete step.
    - **Reality check**: Before resuming, verify the plan still matches the codebase. If interfaces moved, files were renamed, or assumptions no longer hold, adapt the plan rather than executing steps that won't land correctly.
+   - **Migration-type plan check**: If the issue is migration-type (pattern replacement, rename/move, API migration), verify that Step 1 of the plan is an exhaustive repo scan. If the scan step is absent, insert it before any implementation step and re-validate scope.
 
 3. **Execute Each Step**:
    - Identify appropriate specialist agent (see Agent Selection below)
@@ -117,7 +118,7 @@ Quick checklist before declaring mode for a step:
 4. **Create PR (MANDATORY, review-ready gate)**: After all steps complete (including documentation):
    - **End-to-end check**: Does this PR actually resolve the issue? Not "all steps executed" but "the feature works." Review the full diff against the issue's acceptance criteria.
    - **Scope check**: `git diff --name-status main..HEAD` must match planned scope (no unrelated files)
-   - **Migration completeness check** (migration-type issues only): Run a final scan for remaining old-form references (e.g., `Select-String -Path ".github/**/*.md" -Recurse -Pattern "old-pattern"`) and confirm count is 0. If non-zero, fix remaining occurrences before proceeding. Include scan output as validation evidence in the PR body.
+   - **Migration completeness check** (migration-type issues only — pattern replacement, rename/move, API migration; see Issue-Planner `<plan_style_guide>` for full definition): Run a final scan for remaining old-form references using `Get-ChildItem -Path "." -Recurse -Include "*.md","*.json" | Select-String -Pattern "old-pattern"` (adjust path and `-Include` filters to the migration scope). Confirm match count is 0 AND that at least 1 file was scanned — a 0-match result with 0 files examined indicates a misconfigured glob, not a clean repo. If count is non-zero, fix remaining occurrences before proceeding. Include scan output as validation evidence in the PR body.
    - **Validation evidence**: run required validation commands from plan/repo instructions and capture pass results for PR body
    - `git push -u origin {branch-name}`
    - Create PR via `github-pull-request/*` tools or `gh pr create`
@@ -235,7 +236,7 @@ Include in prompt: _"Use the `{skill-name}` skill (`.github/skills/{skill-name}/
 
 Validation must run in this **graduated 7-tier order** (cheap-to-expensive, then manual):
 
-1. **Tier 1 — Quick sanity checks** (project quick-validate commands; see `.github/copilot-instructions.md`)
+1. **Tier 1 — Quick sanity checks** (project quick-validate commands; see `.github/copilot-instructions.md`; for migration-type issues, also run the migration completeness scan described in Step 4)
 2. **Tier 2 — Changed-scope test pass** (targeted tests for touched modules)
 3. **Tier 3 — Full automated test suite** (project test command; see `.github/copilot-instructions.md`)
 4. **Tier 4 — Static quality gates** (project lint/typecheck commands; see `.github/copilot-instructions.md`)
