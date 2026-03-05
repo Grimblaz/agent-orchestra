@@ -56,4 +56,4 @@ Plus:
 
 ## Loop Budget
 
-Maximum 3 reconciliation rounds. If disputes remain, escalate via `ask_questions` with recommended options.
+Maximum 3 reconciliation rounds. If disputes remain, escalate via `vscode/askQuestions` with recommended options.

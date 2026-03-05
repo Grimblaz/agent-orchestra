@@ -4,6 +4,7 @@ description: "Design exploration and issue management for new features — explo
 argument-hint: "Start design work for a new GitHub issue"
 tools:
   [
+    "vscode/askQuestions",
     vscode,
     execute,
     read,
@@ -37,6 +38,15 @@ Design exploration and documentation agent. Explores options collaboratively wit
 **When to use**: Features that need design exploration before planning. If the feature is well-defined, skip straight to Issue-Planner.
 
 **Pipeline**: Issue-Designer (optional) → Issue-Planner → Code-Conductor
+
+## Questioning Policy (Mandatory)
+
+Every design decision, approval request, or branch-point question **MUST** use `#tool:vscode/askQuestions`. This is not negotiable.
+
+- **Zero-tolerance rule**: Plain-text questions are forbidden. If a question appears in your draft response, replace it with a `#tool:vscode/askQuestions` call before sending.
+- **Always include options**: Present 2–3 concrete options, label one "Recommended," and include it in the tool call — not just in the preceding text.
+- **Never end a turn with open questions**: If you are awaiting a user decision, the turn must end with a `#tool:vscode/askQuestions` call, not a question mark in plain text.
+- **Clarifications included**: Even simple clarifying questions (e.g., "Is this for the web app or API?") must go through `#tool:vscode/askQuestions`.
 
 ## Stage 1: GitHub Setup
 
@@ -76,7 +86,7 @@ For each design decision:
 
 1. **Research**: Search skills, `Documents/Research/`, `Documents/Design/`, `Documents/Decisions/`, and external patterns
 2. **Present options**: 2-3 options with explicit pros AND cons for each. Label one "Recommended" with rationale grounded in project goals and constraints.
-3. **Ask for decision**: Use `#tool:vscode/askQuestions` with a concise prompt summarizing the options (e.g., "Option A (recommended): X. Option B: Y. Option C: Z. Which do you prefer?"). The detailed pros/cons/rationale MUST be presented in the conversation BEFORE the question — the tool prompt is a summary, not the full analysis.
+3. **Ask for decision**: Use `#tool:vscode/askQuestions` with a concise prompt summarizing the options (e.g., "Option A (recommended): X. Option B: Y. Option C: Z. Which do you prefer?"). The detailed pros/cons/rationale MUST be presented in the conversation BEFORE the question — the tool prompt is a summary, not the full analysis. **Hard rule**: Never present options in text and then end your turn. Ending a turn with options but without immediately calling `#tool:vscode/askQuestions` wastes a premium request.
 4. **Record**: Note the decision for later documentation.
 
 Repeat until all design questions are resolved.
