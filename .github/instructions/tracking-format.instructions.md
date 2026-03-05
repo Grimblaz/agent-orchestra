@@ -8,12 +8,13 @@ This document defines the standard YAML frontmatter format for tracking files st
 
 ```
 .copilot-tracking/
-├── issue-001-feature-name.md
 ├── archived/
-│   └── completed-issue-001.md
+│   └── issue-001-feature-name.md
 └── plans/
     └── issue-001-feature-name.md
 ```
+
+> **Note**: Only plan files (in `plans/`) are created automatically by agents. Archived files are plan files moved here when work is complete.
 
 ## YAML Frontmatter Format
 
@@ -69,6 +70,17 @@ Use one of these standardized priority levels:
 - **`p2`** - High - Important but not blocking
 - **`p3`** - Normal - Standard priority work
 - **`p4`** - Low - Nice-to-have, can be deferred
+
+#### GitHub Label Mapping
+
+When deriving priority from a GitHub issue label, use this mapping:
+
+| GitHub label | Frontmatter value |
+| --- | --- |
+| `priority: high` | `p1` |
+| `priority: medium` | `p2` |
+| `priority: low` | `p3` |
+| (unlabeled) | `p2` (default) |
 
 ## File Naming Convention
 
@@ -139,7 +151,7 @@ Database queries in the reporting module are taking too long. Need to add indexe
 
 When work reaches `complete` status:
 
-1. Move file to `.copilot-tracking/archived/`
+1. Move plan file from `.copilot-tracking/plans/` to `.copilot-tracking/archived/`
 2. Update `status` to `complete`
 3. Add `completed` date field
 4. Keep file for historical reference
@@ -152,7 +164,7 @@ When using a cloud agent (e.g., Codex) for implementation, it creates its own br
 | --- | --- | --- |
 | Design | Issue Designer | Updates **issue body** with full design details |
 | Planning | Issue Planner | Saves plan to `.copilot-tracking/plans/` |
-| Implementation | Code Conductor | Reads issue body + local plan files; commits a domain-based design doc under `Documents/Design/` (e.g., `Documents/Design/{domain-slug}.md`) along with the code |
+| Implementation | Code Conductor | Reads local plan file from `.copilot-tracking/plans/`; reads issue body for design details only. For cloud agent handoffs, user pastes plan into issue body before handing off to the cloud agent. Commits design doc to `Documents/Design/{domain-slug}.md` with the implementation PR |
 
 ### Rules
 

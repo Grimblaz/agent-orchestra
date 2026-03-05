@@ -134,7 +134,7 @@ Format with a `## Plan` heading and include the full plan content with YAML meta
 
 ```
 status: pending
-priority: {priority}  # derive from issue priority label; default p2 if unlabeled
+priority: {priority}  # GitHub label → p value: "priority: high"→p1, "priority: medium"→p2, "priority: low"→p3; unlabeled→p2
 issue_id: {issue-id}
 created: {date}
 ce_gate: {true|false}
