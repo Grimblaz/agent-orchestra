@@ -14,7 +14,18 @@ tools:
     "github/*",
     memory,
     todo,
-    "playwright/*",
+    # Native browser tools (VS Code 1.110+, enabled via workbench.browser.enableChatTools) — for viewing current app state during design exploration
+    "browser/openBrowserPage",
+    "browser/readPage",
+    "browser/screenshotPage",
+    "browser/clickElement",
+    "browser/hoverElement",
+    "browser/dragElement",
+    "browser/typeInPage",
+    "browser/handleDialog",
+    "browser/runPlaywrightCode",
+    # Optional: Playwright MCP fallback — uncomment if using @playwright/mcp instead
+    # "playwright/*",
   ]
 handoffs:
   - label: Create Plan
@@ -66,16 +77,16 @@ Before researching domain topics, load the appropriate skill:
 
 - **Domain rules and terminology**: load the project-relevant skill from `.github/skills/` when available
 - **Design trade-offs**: `.github/skills/brainstorming/SKILL.md`
-- **Browser MCP patterns**: `.github/instructions/browser-mcp.instructions.md` (if present)
+- **Browser tools patterns**: `.github/instructions/browser-tools.instructions.md` (if present); `.github/instructions/browser-mcp.instructions.md` (if present — legacy from pre-#55 project setups; Playwright MCP fallback)
 
 ### View Current App (Optional)
 
-When the design involves UI changes, new screens, or modifications to existing views, and Playwright MCP is available, use Playwright MCP to see what currently exists before proposing changes.
+When the design involves UI changes, new screens, or modifications to existing views, and browser tools are available, use them to see what currently exists before proposing changes.
 
-1. **Check dev server**: Verify the project's configured local preview URL is running (see `.github/copilot-instructions.md` and `browser-mcp.instructions.md (if present)` for startup details)
-2. **Navigate**: Use `browser_navigate` to visit relevant routes or screens for the feature under design
-3. **Capture**: Use `browser_take_screenshot` to capture current state; save to `screenshots/` (gitignored, transient)
-4. **Inspect**: Use `browser_snapshot` for accessibility tree / DOM structure when layout details matter
+1. **Check dev server**: Verify the project's configured local preview URL is running (see `.github/copilot-instructions.md` and `.github/instructions/browser-tools.instructions.md` (if present) for startup details)
+2. **Navigate**: Use `openBrowserPage` to visit relevant routes or screens for the feature under design
+3. **Capture**: Use `screenshotPage` to capture current state; save to `screenshots/` (gitignored, transient)
+4. **Inspect**: Use `readPage` for accessibility tree / DOM structure when layout details matter
 5. **Share**: Include screenshots in conversation to ground design discussions in reality rather than assumptions
 
 This is optional context-gathering — skip if the design is purely backend/domain logic or the change is well-understood.
@@ -97,7 +108,7 @@ Before wrapping up design, present a complete picture:
 
 1. **Summary**: What we're building, key decisions made
 2. **User Experience**: What users see/do differently, where in UI, and what feedback they receive
-3. **System Touchpoints**: Screens/components, domain/application systems, data model changes, interactions with existing features. **Customer surface**: Identify the customer-facing surface type (Web UI, REST/GraphQL API, CLI, SDK, Batch pipeline, or none) and the appropriate CE Gate verification approach (Playwright MCP, curl/httpie, terminal invocation, or skip with reason).
+3. **System Touchpoints**: Screens/components, domain/application systems, data model changes, interactions with existing features. **Customer surface**: Identify the customer-facing surface type (Web UI, REST/GraphQL API, CLI, SDK, Batch pipeline, or none) and the appropriate CE Gate verification approach (native browser tools/Playwright MCP fallback for Web UI, curl/httpie for REST/GraphQL, terminal invocation for CLI/SDK, or skip with reason).
 4. **Edge Cases**: Unusual scenarios and conflicts with existing behavior
 
 ### Testing Scope
@@ -119,7 +130,7 @@ Identify specific integration test scenarios ([System A] + [System B] → [Expec
 Before finalizing the design, assess CE Gate readiness:
 
 1. **Identify the customer surface**: What type of surface does this change expose? (Web UI / REST/GraphQL API / CLI / SDK / Batch pipeline / None)
-2. **Verify tool availability**: Is the appropriate CE Gate tool available in the project? (Playwright MCP configured? API accessible locally? CLI invocable?)
+2. **Verify tool availability**: Is the appropriate CE Gate tool available in the project? (Native browser tools enabled via `workbench.browser.enableChatTools`? Playwright MCP configured as fallback? API accessible locally? CLI invocable?)
 3. **Document manual fallback**: If the primary CE Gate tool is unavailable, what is the fallback approach? (Document this in the design so Issue-Planner can include it in the `[CE GATE]` step)
 4. **Draft CE Gate scenarios**: Identify 2–4 customer-perspective scenarios that should be exercised at the CE Gate (natural language, e.g., "Authenticate as a new user and verify the welcome flow completes without error")
 

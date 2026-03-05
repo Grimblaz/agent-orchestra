@@ -14,8 +14,18 @@ tools:
   - search
   - web
   - github/*
-  # Optional: remove if not using Playwright MCP
-  - "playwright/*"
+  # Native browser tools (VS Code 1.110+, enabled via workbench.browser.enableChatTools) — for visual verification during review
+  - "browser/openBrowserPage"
+  - "browser/readPage"
+  - "browser/screenshotPage"
+  - "browser/clickElement"
+  - "browser/hoverElement"
+  - "browser/dragElement"
+  - "browser/typeInPage"
+  - "browser/handleDialog"
+  - "browser/runPlaywrightCode"
+  # Optional: Playwright MCP fallback — uncomment if using @playwright/mcp instead
+  # - "playwright/*"
   - memory
 # NOTE: 'edit' tool intentionally EXCLUDED - Code-Critic is READ-ONLY.
 # Fixes are delegated via handoff to Code-Review-Response → Code-Smith.
@@ -314,12 +324,12 @@ Use browser-based review only when PR changes touch UI implementation.
 
 **Visual inspection (evidence via screenshots)**:
 
-- Navigate to issue-relevant routes and capture evidence with `browser_take_screenshot`
+- Navigate to issue-relevant routes and capture evidence with `screenshotPage`
 - Use screenshots to support visual findings (spacing, hierarchy, color/contrast consistency, layout regressions)
 
 **Issue-scoped exploratory testing**:
 
-- Perform targeted interactions tied to issue acceptance criteria using `browser_click` and `browser_type`
+- Perform targeted interactions tied to issue acceptance criteria using `clickElement` and `typeInPage`
 - Expand to adjacent affected functionality only when changes appear to impact it
 
 **Scoping rule (strict)**:
@@ -398,7 +408,8 @@ Use browser-based review only when PR changes touch UI implementation.
 
 - `.github/architecture-rules.md` - Architecture boundaries and enforcement
 - `.github/copilot-instructions.md` - Project coding standards
-- `.github/instructions/browser-mcp.instructions.md` (if present) - Shared Playwright MCP browser workflow and constraints
+- `.github/instructions/browser-tools.instructions.md` (if present) - Native browser tools workflow and constraints (primary)
+- `.github/instructions/browser-mcp.instructions.md` (if present — legacy from pre-#55 project setups) - Playwright MCP browser workflow and constraints (fallback)
 - `Documents/Development/TestingStrategy.md` - Test coverage requirements
 - `npm audit` output - Security vulnerability report
 

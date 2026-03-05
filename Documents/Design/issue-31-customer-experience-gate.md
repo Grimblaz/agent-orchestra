@@ -7,7 +7,7 @@
 
 ## Summary
 
-Introduces a formal **Customer Experience Gate (CE Gate)** as a named, first-class concept replacing the per-step Visual Verification Gate. The CE Gate verifies changes work from the customer's perspective using the right tool for the surface under change (Playwright MCP for Web UI, curl/httpie for REST/GraphQL, terminal for CLI/SDK). When defects are found, a two-track response handles both the immediate fix and any systemic process gap.
+Introduces a formal **Customer Experience Gate (CE Gate)** as a named, first-class concept replacing the per-step Visual Verification Gate. The CE Gate verifies changes work from the customer's perspective using the right tool for the surface under change (native browser tools/Playwright MCP fallback for Web UI, curl/httpie for REST/GraphQL, terminal for CLI/SDK). When defects are found, a two-track response handles both the immediate fix and any systemic process gap.
 
 Also removes the `notify-agent-sync.yml` dispatch workflow and its CUSTOMIZATION.md documentation, as users now consume agents via VS Code file location settings.
 
@@ -39,7 +39,7 @@ Code-Conductor exercises CE scenarios itself — the plan describes them in natu
 
 | Surface Type | Tool |
 |---|---|
-| Web UI / SPA | Playwright MCP: navigate, interact, verify state |
+| Web UI / SPA | Native browser tools (`openBrowserPage`, `screenshotPage`) — primary; Playwright MCP as fallback |
 | REST / GraphQL API | Terminal: curl/httpie commands, verify responses |
 | CLI tool | Terminal: invoke with realistic inputs, check stdout/exit codes |
 | SDK / library | Terminal: run example invocation |

@@ -14,8 +14,18 @@ tools:
   - github/*
   - memory
   - todo
-  # Optional: remove if not using Playwright MCP
-  - "playwright/*"
+  # Native browser tools (VS Code 1.110+, enabled via workbench.browser.enableChatTools) — primary CE Gate path for web UI surfaces
+  - "browser/openBrowserPage"
+  - "browser/readPage"
+  - "browser/screenshotPage"
+  - "browser/clickElement"
+  - "browser/hoverElement"
+  - "browser/dragElement"
+  - "browser/typeInPage"
+  - "browser/handleDialog"
+  - "browser/runPlaywrightCode"
+  # Optional: Playwright MCP fallback — uncomment if using @playwright/mcp instead
+  # - "playwright/*"
 ---
 
 # Code Conductor Agent
@@ -268,7 +278,7 @@ Read the plan's `[CE GATE]` step to identify the customer surface. If no `[CE GA
 
 | Surface Type        | Tool / Method                                                        |
 | ------------------- | -------------------------------------------------------------------- |
-| Web UI              | Playwright MCP (`browser_navigate` + screenshot)                     |
+| Web UI              | Native browser tools (`openBrowserPage` + `screenshotPage`); Playwright MCP as fallback |
 | REST / GraphQL      | `curl` or `httpie` in terminal                                       |
 | CLI                 | Invoke command in terminal with test args                            |
 | SDK                 | Example invocation in terminal                                       |
@@ -307,7 +317,7 @@ When a CE Gate scenario fails:
 
 ### Graceful Degradation
 
-- If Playwright MCP is unavailable for a Web UI surface: attempt `curl`/terminal alternatives; if still blocked, emit `⚠️ CE Gate skipped — Playwright MCP unavailable` and continue
+- If native browser tools are unavailable for a Web UI surface (verify `workbench.browser.enableChatTools: true` is set in `.vscode/settings.json`): try Playwright MCP as fallback; if still blocked, emit `⚠️ CE Gate skipped — browser tools unavailable` and continue
 - If the dev environment is not running and cannot be started: emit `⚠️ CE Gate skipped — dev environment unavailable` and continue
 - For any surface type, if the designated tool cannot be invoked after one retry: emit `⚠️ CE Gate skipped — {surface} tool unavailable ({reason})` and continue
 - Skipped CE Gates must be noted in the PR body with the skip reason

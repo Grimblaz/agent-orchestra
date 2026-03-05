@@ -14,8 +14,18 @@ tools: [
     "github/*",
     "memory",
     "todo",
-    # Optional: remove if not using Playwright MCP
-    "playwright/*",
+    # Native browser tools (VS Code 1.110+, enabled via workbench.browser.enableChatTools) — for browser verification during review response
+    "browser/openBrowserPage",
+    "browser/readPage",
+    "browser/screenshotPage",
+    "browser/clickElement",
+    "browser/hoverElement",
+    "browser/dragElement",
+    "browser/typeInPage",
+    "browser/handleDialog",
+    "browser/runPlaywrightCode",
+    # Optional: Playwright MCP fallback — uncomment if using @playwright/mcp instead
+    # "playwright/*",
   ]
 # Note: 'edit' tool present ONLY for TECH-DEBT.md and documentation updates. DO NOT use for fix execution.
 handoffs:

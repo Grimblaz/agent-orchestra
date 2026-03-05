@@ -213,7 +213,7 @@ Lines to ensure are present:
 # Visual verification screenshots (local only)
 screenshots/
 
-# Playwright MCP working directory
+# Playwright MCP working directory (fallback — native browser tools don't need this)
 /.playwright-mcp/
 
 # Loose PNGs in project root (e.g. CE-gate screenshots)
@@ -265,15 +265,64 @@ Content to generate:
 }
 ```
 
-**5d. Web project extras (conditional)**
+**5d. Web project browser tools configuration (conditional)**
 
 Ask: "Is this a web project with a browser-based dev server?" Options: (a) Yes, (b) No.
 
 If yes:
 
 - Ask: "What port does your dev server run on?" (default: infer from run command in Phase 4, or suggest 3000)
-- Check whether `.vscode/mcp.json` already exists. If it exists, ask: "`.vscode/mcp.json` already exists. Overwrite with Playwright MCP defaults, or skip?" If skip → skip 5d entirely.
-- Generate `.vscode/mcp.json`:
+- Add `"workbench.browser.enableChatTools": true` to `.vscode/settings.json` (merge into existing file if present, or note that this key must be added). This enables VS Code 1.110+ native browser tools — zero MCP setup required.
+- Generate `.github/instructions/browser-tools.instructions.md` with the user's actual port, framework name, and run command substituted:
+
+```markdown
+# Browser Tools Instructions
+
+## Port convention
+
+- Dev server runs on `localhost:{PORT}` ({FRAMEWORK} default).
+- Start all browser navigation from `http://localhost:{PORT}` unless a task explicitly requires another URL.
+
+## Dev server startup check (port {PORT})
+
+1. Check whether `localhost:{PORT}` is already healthy.
+2. If not healthy, run `{RUN_COMMAND}` to start the dev server.
+3. Poll health until ready or timeout at 30 seconds.
+4. If timeout is reached, stop and report startup failure.
+
+## Browser tool selection
+
+Use tools in this priority order:
+
+1. **VS Code native browser tools** (`openBrowserPage`, `screenshotPage`, `clickElement`, `typeInPage`, `readPage`, etc.) — enabled via `workbench.browser.enableChatTools: true` in `.vscode/settings.json`; zero setup
+2. **Playwright MCP** (`playwright/*` tools) — if `.vscode/mcp.json` is configured; requires VS Code restart after adding
+3. **Manual fallback** — use `vscode/openSimpleBrowser` and request user-pasted screenshots
+
+## Error handling
+
+- If port `{PORT}` is in use by a non-dev-server process, report it and stop.
+- If startup times out, report the timeout and do not continue browser actions.
+- If native browser tools fail, try Playwright MCP; if still failing, use `vscode/openSimpleBrowser` manual fallback.
+
+## Screenshots
+
+- Save transient screenshots to `screenshots/`.
+- Do not treat `screenshots/` as a durable artifact folder.
+
+## Cleanup
+
+- Close browser sessions when done.
+- Stop any dev server process started by the agent if the task no longer needs it.
+- Avoid leaving orphaned browser or server processes.
+```
+
+Replace `{PORT}` with the user's dev server port, `{FRAMEWORK}` with the framework name from Phase 2, and `{RUN_COMMAND}` with the run command from Phase 4.
+
+- Ask: "Also configure Playwright MCP as a fallback? (needed only if you prefer it over native browser tools, or require capabilities not yet in VS Code built-in tools)" Options: (a) Yes, (b) No (recommended: No — native tools are sufficient for most projects).
+
+  If yes (Playwright MCP fallback):
+  - Check whether `.vscode/mcp.json` already exists. If it exists, ask: "`.vscode/mcp.json` already exists. Overwrite with Playwright MCP defaults, or skip?" If skip → skip Playwright MCP config.
+  - Generate `.vscode/mcp.json`:
 
 ```json
 {
@@ -286,44 +335,7 @@ If yes:
   }
 }
 ```
-
-- Generate `.github/instructions/browser-mcp.instructions.md` with the user's actual port and run command substituted:
-
-```markdown
-# Browser MCP Instructions
-
-## Port convention
-
-- Dev server runs on `localhost:{PORT}` ({FRAMEWORK} default).
-- Start all MCP navigation from `http://localhost:{PORT}` unless a task explicitly requires another URL.
-
-## Dev server startup check (port {PORT})
-
-1. Check whether `localhost:{PORT}` is already healthy.
-2. If not healthy, run `{RUN_COMMAND}` to start the dev server.
-3. Poll health until ready or timeout at 30 seconds.
-4. If timeout is reached, stop and report startup failure.
-
-## Error handling
-
-- If port `{PORT}` is in use by a non-dev-server process, report it and stop.
-- If startup times out, report the timeout and do not continue browser actions.
-- If the MCP browser crashes, relaunch once and retry the current step once.
-- MCP is configured with `--block-service-workers` in `.vscode/mcp.json`; keep it enabled.
-
-## Screenshots
-
-- Save transient screenshots to `screenshots/`.
-- Do not treat `screenshots/` as a durable artifact folder.
-
-## Cleanup
-
-- Close browser sessions created for MCP work when done.
-- Stop any dev server process started by the agent if the task no longer needs it.
-- Avoid leaving orphaned browser or server processes.
-```
-
-Replace `{PORT}` with the user's dev server port, `{FRAMEWORK}` with the framework name from Phase 2, and `{RUN_COMMAND}` with the run command from Phase 4.
+  - Inform the user: "Playwright MCP also requires uncommenting `# - \"playwright/*\"` in the `tools:` list in the frontmatter of each agent used for browser workflows (e.g. `UI-Iterator.agent.md`, `Code-Conductor.agent.md`). Without this step, agents cannot invoke `playwright/*` tools even with `.vscode/mcp.json` configured."
 
 **5e. `Documents/` directory structure**
 

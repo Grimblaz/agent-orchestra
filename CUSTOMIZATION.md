@@ -145,10 +145,10 @@ When you run `/setup` and opt into Phase 5, the wizard can generate starter file
 | File | What it does |
 |------|-------------|
 | `.gitignore` additions | Appends workflow-template tracking dirs (`/.copilot-tracking/`, `/.copilot-tracking-archive/`) and optional entries (`screenshots/`, `/.playwright-mcp/`) — additive only, never removes existing lines |
-| `.vscode/settings.json` | Editor defaults: `formatOnSave`, `files.exclude`, `search.exclude` |
+| `.vscode/settings.json` | Editor defaults: `formatOnSave`, `files.exclude`, `search.exclude`; web projects also add `workbench.browser.enableChatTools: true` for VS Code 1.110+ native browser tools |
 | `.vscode/extensions.json` | Empty recommendations array for you to populate |
-| `.vscode/mcp.json` *(web projects)* | Playwright MCP config for browser automation (UI iteration, visual testing, CE Gate verification) |
-| `.github/instructions/browser-mcp.instructions.md` *(web projects)* | Dev server startup rules for Playwright MCP, with your port and run command substituted |
+| `.vscode/mcp.json` *(web projects, optional)* | Playwright MCP config — optional fallback for users who prefer it over VS Code 1.110+ native browser tools |
+| `.github/instructions/browser-tools.instructions.md` *(web projects)* | Dev server startup rules and browser tool selection priority (native tools primary, Playwright MCP fallback), with your port and run command substituted |
 | `Documents/` structure | Creates `Design/`, `Decisions/`, `Development/` subdirectories |
 
 If any file already exists, Phase 5 asks before overwriting (`.vscode/settings.json`, `.vscode/mcp.json`) or skips silently (`.vscode/extensions.json`). `.gitignore` additions are always additive — no existing lines are removed.

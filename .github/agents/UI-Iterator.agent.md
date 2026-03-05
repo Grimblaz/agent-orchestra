@@ -17,8 +17,18 @@ tools:
   - web
   - vscode/extensions
   - todo
-  # Requires Playwright MCP — this agent is UI-focused
-  - "playwright/*"
+  # Native browser tools (VS Code 1.110+, enabled via workbench.browser.enableChatTools) — primary path
+  - "browser/openBrowserPage"
+  - "browser/readPage"
+  - "browser/screenshotPage"
+  - "browser/clickElement"
+  - "browser/hoverElement"
+  - "browser/dragElement"
+  - "browser/typeInPage"
+  - "browser/handleDialog"
+  - "browser/runPlaywrightCode"
+  # Optional: Playwright MCP fallback — uncomment if using @playwright/mcp instead
+  # - "playwright/*"
   - memory
   - agent
 handoffs:
@@ -38,7 +48,7 @@ handoffs:
 
 A systematic UI refinement mode using screenshot-based iteration. Evaluates current UI state against aesthetic criteria, proposes improvements, and implements changes through iterative polish passes.
 
-**Core Workflow**: Agent autonomously manages browser-based polish using Playwright MCP tools (`browser_navigate`, `browser_take_screenshot`) with iterative analyze→implement→verify loops, and falls back to `vscode/openSimpleBrowser` + user-pasted screenshots when MCP is unavailable.
+**Core Workflow**: Agent autonomously manages browser-based polish using VS Code native browser tools (`openBrowserPage`, `screenshotPage`) with iterative analyze→implement→verify loops, and falls back to `vscode/openSimpleBrowser` + user-pasted screenshots when browser tools are unavailable.
 
 **Applicability**: This agent is for projects with UI surfaces. For backend-only or CLI-only projects, this agent is not applicable; use Code-Smith/Refactor-Specialist for non-UI improvements, then follow standard validation and review workflow.
 
@@ -47,11 +57,11 @@ A systematic UI refinement mode using screenshot-based iteration. Evaluates curr
 ### Step-by-Step Process
 
 1. **User Initiates**: Invokes UI-Iterator with target (page or component name)
-2. **Agent Prepares Environment**: Follows shared browser MCP instructions for the project-configured dev URL and startup command; if unavailable, starts the repo-defined dev server and waits for readiness.
-3. **Agent Navigates**: Opens target route with Playwright MCP `browser_navigate`.
-4. **Agent Captures Baseline**: Takes screenshot with `browser_take_screenshot` and analyzes against aesthetic criteria.
+2. **Agent Prepares Environment**: Follows shared browser tools instructions for the project-configured dev URL and startup command; if unavailable, starts the repo-defined dev server and waits for readiness.
+3. **Agent Navigates**: Opens target route with `openBrowserPage`.
+4. **Agent Captures Baseline**: Takes screenshot with `screenshotPage` and analyzes against aesthetic criteria.
 5. **Agent Proposes + Implements**: Selects 3-5 specific improvements and applies Tailwind/JSX changes (directly or via Code-Smith handoff).
-6. **Agent Verifies**: Takes a new screenshot with `browser_take_screenshot` and validates visual improvement.
+6. **Agent Verifies**: Takes a new screenshot with `screenshotPage` and validates visual improvement.
 7. **Autonomous Loop**: Repeats steps 3-6 for N iterations without per-iteration user approval.
 8. **Complete**: Presents final before/after summary across all iterations.
 
@@ -61,14 +71,15 @@ A systematic UI refinement mode using screenshot-based iteration. Evaluates curr
 - **Scope**: Target component/page only (not full desktop)
 - **State**: Representative populated state (avoid empty or placeholder-only screens)
 - **Resolution**: Standard browser width (~1200px) preferred
-- **Capture Mode**: If MCP tools are available, take screenshots programmatically (`browser_take_screenshot`) with no manual user capture needed.
-- **Fallback Mode**: If MCP is unavailable, use `vscode/openSimpleBrowser` and follow manual screenshot paste workflow.
+- **Capture Mode**: If browser tools are available, take screenshots programmatically (`screenshotPage`) with no manual user capture needed.
+- **Fallback Mode**: If both native tools and Playwright MCP are unavailable, use `vscode/openSimpleBrowser` and follow manual screenshot paste workflow.
 
-## Browser MCP Reference
+## Browser Tools Reference
 
 For dev server lifecycle, navigation defaults, cleanup, and deterministic error handling, follow:
 
-- `.github/instructions/browser-mcp.instructions.md` (if present)
+- `.github/instructions/browser-tools.instructions.md` (if present) — native browser tools (primary)
+- `.github/instructions/browser-mcp.instructions.md` (if present — legacy from pre-#55 project setups) — Playwright MCP fallback
 
 ---
 
