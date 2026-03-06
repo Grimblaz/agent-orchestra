@@ -94,4 +94,4 @@ Read the relevant `SKILL.md` when working in that domain:
 
 - [Architecture Rules](architecture-rules.md)
 - [Tech Debt Tracking](TECH-DEBT.md)
-- [TDD Workflow](../../.github/skills/test-driven-development/SKILL.md)
+- [TDD Workflow](.github/skills/test-driven-development/SKILL.md)

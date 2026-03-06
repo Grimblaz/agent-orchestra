@@ -19,8 +19,8 @@ Begin work on a GitHub issue with proper setup and planning.
    - Identify external dependencies
 
 3. **Create feature branch**
-   - Ensure you are on `main` and up to date: `git checkout main && git pull`
-   - Create branch: `git checkout -b feature/issue-$ARGUMENTS-{descriptive-slug}`
+   - Ensure you are on `main` and up to date: `git checkout main && git pull` (replace `main` with `master`, `develop`, or `trunk` if that is the project's default branch)
+   - Create branch: `git checkout -b feature/issue-$ARGUMENTS-{descriptive-slug}` (`$ARGUMENTS` is pre-interpolated by Claude Code with the issue number before you read this file; `{descriptive-slug}` is an instruction for you to replace with a meaningful slug from the issue title)
 
 4. **Research the codebase**
    - Search for relevant files, patterns, and existing implementations
@@ -35,7 +35,8 @@ Begin work on a GitHub issue with proper setup and planning.
    - Present the plan for user approval before proceeding
 
 6. **Save the plan**
-   - Save as a file on the branch (e.g., `plan-issue-$ARGUMENTS.md`) or post as a GitHub issue comment with `<!-- plan-issue-$ARGUMENTS -->` marker
+   - **Preferred**: Post as a GitHub issue comment with `<!-- plan-issue-$ARGUMENTS -->` marker — durable, does not pollute the repo
+   - **Fallback**: Save as `.copilot-tracking/plan-issue-$ARGUMENTS.md` (this directory is gitignored — do not save plan files at repo root or they will be committed)
    - The plan is the single source of truth for implementation
 
 ## After Planning

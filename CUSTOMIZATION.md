@@ -159,7 +159,7 @@ This template supports both GitHub Copilot agents and Claude Code (CLI). They us
 
 ### How It Works
 
-Claude Code uses `CLAUDE.md` (project root) instead of `.github/copilot-instructions.md`. The `CLAUDE.md` file references the same agent definitions, skills, and instructions that Copilot agents use — no content is duplicated.
+Claude Code uses `CLAUDE.md` (project root) instead of `.github/copilot-instructions.md`. The `.github/agents/`, `.github/skills/`, and `.github/instructions/` files are shared — both tools reference them without duplication. However, project metadata (overview, tech stack, build commands, architecture summary, and conventions) is intentionally included in both `CLAUDE.md` and `.github/copilot-instructions.md` because each tool needs this context independently.
 
 | Copilot | Claude Code |
 |---------|-------------|

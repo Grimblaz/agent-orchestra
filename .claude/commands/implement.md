@@ -11,8 +11,8 @@ Run this after `/project:start-issue` has created a plan and the user has approv
 ## Locate the Plan
 
 Check these sources in order:
-1. A `plan-issue-*.md` file on the current branch
-2. GitHub issue comments with a `<!-- plan-issue-{ID} -->` marker
+1. GitHub issue comments with a `<!-- plan-issue-{ID} -->` marker
+2. A `.copilot-tracking/plan-issue-*.md` file on the current branch
 3. If no plan is found, ask the user for the plan location
 
 ## Execution Workflow
@@ -65,6 +65,14 @@ Run `/project:review` or apply the 7 review perspectives from `.github/agents/Co
 
 Address any findings before proceeding.
 
+### 5a. CE Gate (if applicable)
+
+If the plan includes `ce_gate: true` in its frontmatter or a `[CE GATE]` step:
+- Identify the customer surface from the plan (Web UI, REST/GraphQL, CLI, SDK, Batch)
+- Exercise each scenario described in the `[CE GATE]` step and verify expected behavior
+- Present results to the user and wait for approval before proceeding
+- If a defect is found, fix it and re-run the scenario (max 2 cycles)
+
 ### 6. Document
 
 Read `.github/agents/Doc-Keeper.agent.md` for documentation standards:
@@ -80,4 +88,5 @@ Read `.github/agents/Doc-Keeper.agent.md` for documentation standards:
   ```
   gh pr create --title "{concise title}" --body "## Summary\n...\n\n## Validation Evidence\n...\n\nCloses #{issue}"
   ```
+  (Replace `main` in any `git diff main...HEAD` comparisons with the project's default branch if different.)
 - PR body must include: summary, changed files, validation evidence, and `Closes #{issue}`

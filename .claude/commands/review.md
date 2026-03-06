@@ -8,11 +8,13 @@ Perform an adversarial self-review of the current branch changes.
 
 ## Scope
 
-Review all changes on the current branch relative to main:
+Review all changes on the current branch relative to the default branch:
 
 ```bash
 git diff main...HEAD
 ```
+
+(Replace `main` with `master`, `develop`, or `trunk` if that is the project's default branch.)
 
 ## Stance
 
@@ -58,7 +60,7 @@ For `.md` files with shell code blocks:
 
 ## Output Format
 
-For each perspective, report PASS or FAIL with specific findings.
+For each perspective, report PASS, FAIL, or N/A (N/A is valid for perspectives 6 and 7 when no scripts or `.md` files with shell blocks are present in the diff) with specific findings.
 
 ### Finding Categories
 

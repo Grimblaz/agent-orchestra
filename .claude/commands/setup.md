@@ -12,7 +12,7 @@ Run this in a target project (not in the workflow-template repo itself) to gener
 
 Verify these are available:
 - `git` — version control
-- `gh` — GitHub CLI (optional but recommended)
+- `gh` — GitHub CLI (required — used by `/project:start-issue` and `/project:implement` for issue read and PR creation)
 
 Check what already exists:
 - `.github/copilot-instructions.md` — skip Copilot config if present

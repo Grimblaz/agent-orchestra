@@ -99,4 +99,4 @@ Read the relevant `SKILL.md` when working in that domain:
 ## Related Documentation
 
 - [Architecture Rules](architecture-rules.md)
-- [TDD Workflow](../../.github/skills/test-driven-development/SKILL.md)
+- [TDD Workflow](.github/skills/test-driven-development/SKILL.md)
