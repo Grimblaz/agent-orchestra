@@ -5,13 +5,13 @@ description: VS Code native browser tool behavior for canvas-based games (Phaser
 
 # Browser Canvas Testing
 
-Domain knowledge for using VS Code 1.110 native browser tools against HTML canvas applications verified via VS Code source code review.
+Domain knowledge for using VS Code native browser tools against HTML canvas applications verified via VS Code source code review.
 
 ## When to Use
 
 - Clicking game objects or UI elements rendered inside an HTML `<canvas>`
 - Verifying canvas visual state with `screenshotPage`
-- Discovering why `read_page` returns empty on a canvas-only page
+- Discovering why `readPage` returns empty on a canvas-only page
 - Any Phaser 3 / WebGL / 2D canvas game interaction in browser tools
 
 ---
@@ -46,6 +46,7 @@ Canvas games use an internal game-space coordinate system that does not map dire
 // 1. Query canvas bounding rect (accounts for scaling and letterboxing)
 const rect = await page.evaluate(() => {
   const c = document.querySelector('canvas');
+  if (!c) throw new Error('Canvas element not found');
   const r = c.getBoundingClientRect();
   return { left: r.left, top: r.top, width: r.width, height: r.height };
 });
