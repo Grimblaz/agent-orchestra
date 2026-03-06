@@ -53,5 +53,5 @@ Migrates UI verification, CE Gate scenarios, and UI-Iterator workflows from Play
 | `.github/agents/Issue-Planner.agent.md` | Body: CE Gate tool reference |
 | `.github/prompts/setup.prompt.md` | Phase 5d rework: native tools default, Playwright MCP optional; file renamed |
 | `CUSTOMIZATION.md` | Phase 5 table updated |
-| `Documents/Design/issue-31-customer-experience-gate.md` | CE Gate tool table updated |
-| `Documents/Design/issue-49-setup-wizard-overhaul.md` | Section 4 updated with migration note |
+| `Documents/Design/customer-experience-gate.md` | CE Gate tool table updated |
+| `Documents/Design/setup-wizard.md` | Phase 5d updated with native browser tools migration note |
