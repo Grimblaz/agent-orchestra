@@ -160,6 +160,18 @@ Replace `/path/to/your/workflow-template` with the absolute path to where you cl
 
 ---
 
+## Claude Code Support
+
+This template also supports [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (CLI agent). Both tools coexist — they use separate configuration paths and do not interfere with each other.
+
+- `CLAUDE.md` at the project root provides Claude Code with project context and a phased workflow
+- `.claude/commands/` contains slash commands: `start-issue`, `implement`, `review`, `setup`
+- Agent definitions and skills in `.github/` are referenced as role guides — no duplication
+
+See [CUSTOMIZATION.md](CUSTOMIZATION.md#claude-code-support) for details on the file mapping, slash commands, and how to set up Claude Code for your target project.
+
+---
+
 ## Customization
 
 See **[CUSTOMIZATION.md](CUSTOMIZATION.md)** for:
@@ -176,8 +188,11 @@ See **[CONTRIBUTING.md](CONTRIBUTING.md)** for recommended VS Code settings.
 ## Repository Structure
 
 ```text
+.claude/
+└── commands/            # Claude Code slash commands (start-issue, implement, review, setup)
+
 .github/
-├── agents/              # Agent definitions
+├── agents/              # Agent definitions (used by Copilot, referenced by Claude Code)
 ├── copilot-instructions.md  # Your project context (generate via /setup)
 ├── architecture-rules.md    # Your architecture rules (generate via /setup)
 ├── hooks/               # Session lifecycle hooks (SessionStart)
@@ -196,6 +211,8 @@ Documents/
 ├── Design/              # Design documents (created by agents)
 ├── Decisions/           # Architecture Decision Records
 └── Development/         # Testing strategy and development guides
+
+CLAUDE.md                # Claude Code project instructions
 ```
 
 ---

@@ -153,6 +153,53 @@ When you run `/setup` and opt into Phase 5, the wizard can generate starter file
 
 If any file already exists, Phase 5 asks before overwriting (`.vscode/settings.json`, `.vscode/mcp.json`) or skips silently (`.vscode/extensions.json`). `.gitignore` additions are always additive — no existing lines are removed.
 
+## Claude Code Support
+
+This template supports both GitHub Copilot agents and Claude Code (CLI). They use separate configuration paths and coexist without conflict.
+
+### How It Works
+
+Claude Code uses `CLAUDE.md` (project root) instead of `.github/copilot-instructions.md`. The `CLAUDE.md` file references the same agent definitions, skills, and instructions that Copilot agents use — no content is duplicated.
+
+| Copilot | Claude Code |
+|---------|-------------|
+| `.github/copilot-instructions.md` | `CLAUDE.md` (project root) |
+| `.github/agents/*.agent.md` | Referenced as role guides in `CLAUDE.md` workflow |
+| `.github/skills/*/SKILL.md` | Referenced directly — Claude Code reads them on demand |
+| `.github/instructions/*.instructions.md` | Referenced directly — listed in `CLAUDE.md` |
+| `.github/prompts/setup.prompt.md` | `.claude/commands/setup.md` |
+| `.github/prompts/start-issue.md` | `.claude/commands/start-issue.md` |
+| `@Code-Conductor` (multi-agent) | `/project:implement` (phased single-agent) |
+
+### Slash Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/project:start-issue {number}` | Begin work on a GitHub issue (branch, research, plan) |
+| `/project:implement` | Execute an approved implementation plan |
+| `/project:review` | Adversarial self-review across 7 perspectives |
+| `/project:setup` | Configure a target project (generates both Copilot and Claude Code files) |
+
+### Setting Up Claude Code for a Target Project
+
+**Option A**: Run `/project:setup` in Claude Code. It collects your project details and generates both `.github/copilot-instructions.md` and `CLAUDE.md`.
+
+**Option B**: Create `CLAUDE.md` manually. See `examples/` for three filled-in examples (Spring Boot, TypeScript, Python) — each directory contains both `copilot-instructions.md` (Copilot) and `CLAUDE.md` (Claude Code).
+
+### Key Difference: Single-Agent Workflow
+
+Copilot uses multiple specialized agents (Code-Conductor delegates to Code-Smith, Test-Writer, etc.). Claude Code is a single agent that follows a phased workflow:
+
+1. **Plan** — research and draft implementation plan
+2. **Implement** — execute the plan step by step
+3. **Test** — ensure test coverage
+4. **Refactor** — review modified files for improvements
+5. **Review** — adversarial self-review (7 perspectives)
+6. **Document** — update design docs and changelog
+7. **Create PR** — push and open PR with evidence
+
+Each phase references the corresponding `.github/agents/*.agent.md` file as a role guide for standards and checklists.
+
 ## Troubleshooting
 
 **Agents not following instructions?**
