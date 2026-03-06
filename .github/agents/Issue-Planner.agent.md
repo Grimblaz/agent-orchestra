@@ -109,6 +109,19 @@ The plan should reflect:
 - All plans must include `ce_gate: {true|false}` in frontmatter (set `true` if the change has a customer-facing surface). Insert a **dedicated `[CE GATE]` step** as the final numbered step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Each `[CE GATE]` step must identify the surface type, list the specific scenarios to exercise (natural language descriptions, e.g., "Submit the login form with valid credentials and verify the dashboard loads"), and specify the exercise method (how Conductor should exercise each scenario, e.g., "use native browser tools to navigate to /login and submit the form", "use curl to POST /api/orders with valid payload"). These must be **first-class numbered plan steps — not sub-bullets** — so Code-Conductor encounters them as blocking checkpoints in its step iteration loop. Set `ce_gate: false` and omit the `[CE GATE]` step only when the change has no customer-facing surface; document the reason.
 - For backend/non-UI/CLI projects, the CE Gate surface is typically the API or CLI — identify the surface and scenarios accordingly.
 
+Before presenting the plan for approval, call Code-Critic as a subagent to stress-test it:
+
+**Prompt to use**:
+> "Stress-test this implementation plan for feasibility risks, scope gaps, and integration conflicts. Use design review perspectives. Here is the plan: {paste the full plan content}"
+
+**What to do with the findings**:
+- Code-Critic returns a challenge report with 3 perspectives: Feasibility & Risk, Scope & Completeness, Integration & Impact.
+- For each challenge: decide to incorporate it (revise the plan), dismiss it with rationale, or escalate it for user decision. **If escalated**, use #tool:vscode/askQuestions to present the flagged item(s) and obtain a response before presenting the plan draft.
+- Revise the plan steps as needed to address accepted challenges.
+- After incorporating or dismissing all findings, append a **`Plan Stress-Test`** summary block at the end of the plan draft showing: challenges found, how each was addressed (incorporated / dismissed / escalated), and overall confidence assessment.
+
+**Challenges are non-blocking** — they are presented alongside the plan for user consideration. This is a single-pass review, not the 3-pass protocol used for code review.
+
 Present the plan as a **DRAFT**, then **IMMEDIATELY** use #tool:vscode/askQuestions to ask for approval. NEVER end your turn after presenting a draft without calling #tool:vscode/askQuestions — this wastes the user's premium requests by forcing a new turn just to say "looks good."
 
 ## 5. Refinement
@@ -171,6 +184,11 @@ After saving to session memory, immediately use #tool:vscode/askQuestions to ask
 **Decisions** (if applicable)
 
 - {Decision: chose X over Y}
+
+**Plan Stress-Test** (summary of Code-Critic design review)
+
+- Challenge: {finding} — Disposition: incorporated | dismissed with rationale | escalated for user decision
+- Overall confidence: {high | medium | low} — {one-sentence rationale}
 ```
 
 Rules:

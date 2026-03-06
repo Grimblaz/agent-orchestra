@@ -71,3 +71,43 @@ VS Code 1.110 renamed the questioning tool from `ask_questions` to `vscode/askQu
 - Code-Conductor Step 4 includes migration completeness check
 - PR body template includes `migration-scan result (migration-type issues only)`
 - Quick-validate: Plan-Architect refs = 0, Janitor refs = 0, agent count = 13
+
+---
+
+## Design Review Mode
+
+Added in issue #73. Code-Critic gains a second operating mode triggered by the marker `"Use design review perspectives"`.
+
+### Decision Summary
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|-----------|
+| D7 | Activation mechanism | Marker string in prompt | Avoids runtime ambiguity; callers always know which mode they're requesting |
+| D8 | Pass count for design review | Single-pass only | Design reviews are lightweight quality gates, not adversarial loops; 3-pass would over-index on plans |
+| D9 | Review perspectives | 3 (Feasibility & Risk, Scope & Completeness, Integration & Impact) | Covers the three most common plan failure modes without overlap |
+| D10 | Blocking behavior | Non-blocking (caller decides) | Code-Critic has no veto over design decisions; findings inform, not gate |
+| D11 | Callers | Issue-Designer, Issue-Planner, Claude Code via start-issue.md | All three entry points to the planning phase need the same quality gate |
+
+### Design Review Mode Behavior
+
+- **Trigger**: Prompt contains the literal string `"Use design review perspectives"`
+- **Output format**: `## Design Challenge Report` with three perspective sections (§D1, §D2, §D3) and a Summary
+- **Finding format**: Same as code review (Issue / Concern / Nit with severity, confidence, failure_mode)
+- **Scope**: Designs and implementation plans only — not code diffs
+- **Read-only**: Same constraint as code review mode; no files are modified
+
+### Caller Responsibility
+
+Each caller decides how to handle the challenge report:
+
+- **Issue-Designer**: incorporate / dismiss / escalate for user decision (with `vscode/askQuestions` gate before writing to GitHub if any item is escalated)
+- **Issue-Planner**: incorporate / dismiss / escalate for user decision; append `**Plan Stress-Test**` summary block to plan
+- **Claude Code (start-issue.md)**: follow Issue-Planner.agent.md Phase 4 guidance
+
+### Vocabulary Standardization
+
+Both Issue-Designer and Issue-Planner use a three-way disposition for challenge findings:
+
+1. **incorporate** — refine the design/plan to address the challenge
+2. **dismiss** — reject the challenge with documented rationale
+3. **escalate for user decision** — surface to user via `vscode/askQuestions` before proceeding

@@ -13,6 +13,7 @@ tools: [
     "github/*",
     "vscode/memory",
     "vscode/todo",
+    agent,
     # Native browser tools (VS Code 1.110+, enabled via workbench.browser.enableChatTools) — for viewing current app state during design exploration
     "browser/openBrowserPage",
     "browser/readPage",
@@ -154,6 +155,24 @@ After user confirms decisions (not during exploration):
 - No TypeScript, no implementation phases — those belong in Issue-Planner
 - Pseudo-code only when prose is unclear, keep abstract (e.g., "BaseValue × Modifier × ConstraintFactor")
 - **Note**: A domain-based design doc under `Documents/Design/{domain-slug}.md` is committed with the implementation code (same PR by Code-Conductor, delegated to Doc-Keeper), not during design phase
+
+## Adversarial Design Challenge
+
+After design decisions are confirmed with the user, call Code-Critic as a subagent to stress-test the design before committing it to the issue body:
+
+**Prompt to use**:
+> "Review this design for feasibility risks, scope gaps, and integration conflicts. Use design review perspectives. Here is the design: {paste the key design decisions, acceptance criteria, scope, and any constraints confirmed in this session}"
+
+**What to do with the findings**:
+- Code-Critic will return a challenge report with 3 perspectives: Feasibility & Risk, Scope & Completeness, Integration & Impact.
+- Review each challenge. For each one, decide: incorporate (refine the design), dismiss with rationale, or escalate for user decision.
+- Incorporate or note your disposition for each challenge **before** updating the issue body.
+- **If any challenge is escalated for user decision**: Use #tool:vscode/askQuestions to present the flagged item(s) explicitly and obtain a response **before** proceeding to Stage 3.
+- Present the challenge report summary alongside the design at the Stage 3 update step so the user can see what was challenged and how it was addressed.
+
+**Challenges are non-blocking** — they inform the design, they do not gate it. You (Issue-Designer) decide how to handle them. The user may also override any challenge.
+
+**Note**: This is a single-pass review, not the 3-pass protocol used for code review.
 
 ## Stage 3: Update Issue
 
