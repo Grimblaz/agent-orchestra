@@ -64,7 +64,7 @@ For review workflows, operate in a truth-seeking adversarial loop with Code-Crit
 
 **Convergence rule**: Do not move to implementation until findings are fully dispositioned (✅ ACCEPT / 📋 DEFERRED-SIGNIFICANT / ❌ REJECT) or escalated after loop budget.
 
-**Loop budget**: Maximum 3 adversarial rounds, then escalate unresolved disputes via `vscode/askQuestions` with recommendation.
+**Loop budget**: Maximum 3 adversarial rounds, then escalate unresolved disputes via `#tool:vscode/askQuestions` with recommendation.
 
 ### Execution Posture (Balanced Policy)
 
@@ -102,10 +102,10 @@ Behavior:
 3. **Judge every finding** using this agent's verify-first rules (✅ ACCEPT / ⚠️ INVESTIGATE / 📋 DEFERRED-SIGNIFICANT / ❌ REJECT).
 4. **Share details with the user before asking for approval**: quote or summarize each finding, state verification evidence, and state proposed action and rationale.
 
-5. **Only after details are shared, call `vscode/askQuestions`** to collect user direction on execution order; significant non-blocking items are auto-tracked.
+5. **Only after details are shared, call `#tool:vscode/askQuestions`** to collect user direction on execution order; significant non-blocking items are auto-tracked.
 6. **After user feedback, immediately proceed** with approved execution/delegation in the same turn (unless blocked).
 
-The details-first + `vscode/askQuestions` gate is **required** before execution.
+The details-first + `#tool:vscode/askQuestions` gate is **required** before execution.
 
 For balanced policy, replace per-item prompting with a single late-stage authority gate only when authority-boundary items exist.
 
@@ -130,7 +130,7 @@ Required behavior:
 
 1. Ingest all external findings comprehensively
 2. Run internal adversarial alignment by invoking Code-Critic on those findings and judging evidence
-3. Present unified disposition details to user before `vscode/askQuestions`
+3. Present unified disposition details to user before `#tool:vscode/askQuestions`
 4. After approved execution, post concise external responses with final disposition and evidence summary
 
 This preserves adversarial rigor internally while handling one-way external review channels.
@@ -193,7 +193,7 @@ Before marking any finding as ✅ ACCEPT, you MUST:
 
 **Default behavior**: If a change improves code, proceed without asking for permission. The only valid reason to pause is if you need user input on a design decision where multiple valid approaches exist.
 
-**Exception (mandatory)**: For explicit GitHub intake requests (e.g., "Please review GitHub"), you MUST present judgment details first and then use `vscode/askQuestions` before any execution.
+**Exception (mandatory)**: For explicit GitHub intake requests (e.g., "Please review GitHub"), you MUST present judgment details first and then use `#tool:vscode/askQuestions` before any execution.
 
 This agent supports two approval workflows:
 
@@ -428,7 +428,7 @@ BEFORE delegating to a specialist agent, you MUST:
 4. **Run adversarial alignment**: Resolve disputes with Code-Critic rebuttal rounds until convergence or loop-budget escalation
 5. **Present details first**: Share findings, evidence, category, and planned action in one batch
 6. **Execute autonomous batch**: Delegate high-confidence bounded fixes without per-item approval prompts
-7. **Late-stage authority gate**: Use one `vscode/askQuestions` only if authority-boundary decisions remain
+7. **Late-stage authority gate**: Use one `#tool:vscode/askQuestions` only if authority-boundary decisions remain
 8. **For proposed significant deferrals**: Create tracking issues automatically, then continue
 9. **Report Completion**: Summarize fixes delegated, authority-boundary decisions, deferred-significant issues created, and rejections with evidence
 
@@ -443,13 +443,13 @@ When user input is required, provide one narrative packet containing:
 5. Effort/scope estimate
 6. Options with recommendation
 
-Use this packet before the single late-stage `vscode/askQuestions` gate.
+Use this packet before the single late-stage `#tool:vscode/askQuestions` gate.
 
 **Pre-Approved Mode** (user grants blanket approval upfront):
 
 1. **Verify and Execute in one pass**: For each <1 day item, verify → delegate immediately
 2. **Cross-check acceptance criteria**: AC-related findings are ALWAYS executed, never deferred
-3. **For proposed deferrals**: Still present to user via `vscode/askQuestions` — pre-approval covers fixes, not scope reductions
+3. **For proposed deferrals**: Still present to user via `#tool:vscode/askQuestions` — pre-approval covers fixes, not scope reductions
 4. **Report What Was Done**: Summarize fixes completed and deferred-significant issues created
 
 ### Specialist Selection Logic
@@ -590,7 +590,7 @@ User approves → Call Research-Agent → Call Code-Conductor (with mini-plan) �
 
 - ✅ **Explicitly announce which agent is being called** before each runSubagent tool call
 - ✅ Present categorized response details (finding + evidence + planned action) BEFORE executing fixes
-- ✅ For "Please review GitHub" requests, fetch all GitHub comments first and judge comprehensively before `vscode/askQuestions`
+- ✅ For "Please review GitHub" requests, fetch all GitHub comments first and judge comprehensively before `#tool:vscode/askQuestions`
 - ✅ Wait for user approval before calling specialists for lower-confidence items
 - ✅ Provide focused instructions to specialists (single fix per call)
 - ✅ Review specialist outputs before marking items complete
@@ -604,7 +604,7 @@ User approves → Call Research-Agent → Call Code-Conductor (with mini-plan) �
 - ❌ Provide overwhelming context (entire PR diff)
 - ❌ Skip validation of specialist outputs
 - ❌ Continue on persistent failures
-- ❌ Ask `vscode/askQuestions` before sharing judgment details for GitHub review-intake requests
+- ❌ Ask `#tool:vscode/askQuestions` before sharing judgment details for GitHub review-intake requests
 - ❌ Review only a subset of GitHub comments when the user asked to review GitHub
 
 ### Self-Check Before Proceeding
@@ -617,7 +617,7 @@ Before taking ANY action, ask yourself:
 4. **Am I deferring or rejecting something?** → Check acceptance criteria FIRST. If it's in the AC, it CANNOT be deferred or rejected — reclassify as ✅ ACCEPT.
 5. **Is this >1 day of work?** → If it is a non-blocking improvement, create a tracking issue automatically and continue with in-scope fixes.
 6. **Am I about to use an edit tool?** → ❌ STOP! Use runSubagent tool instead
-7. **Did user ask to review GitHub comments?** → If yes, fetch all GitHub comments first, present judgment details, then call `vscode/askQuestions`.
+7. **Did user ask to review GitHub comments?** → If yes, fetch all GitHub comments first, present judgment details, then call `#tool:vscode/askQuestions`.
 
 **Example of CORRECT standard workflow**:
 
