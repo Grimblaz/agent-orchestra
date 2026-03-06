@@ -38,7 +38,7 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 - Plans are saved as GitHub issue comments with `<!-- plan-issue-{ID} -->` markers (preferred for Claude Code — durable and does not pollute the repo); if a local file is needed, save it inside `.copilot-tracking/` which is already gitignored. Note: GitHub Copilot agents store plans in VS Code session memory at `/memories/session/plan-issue-{ID}.md` — Claude Code has no access to session memory, so the issue comment is the equivalent durable storage.
 - Design content goes in the GitHub issue body (Issue-Designer outputs there)
 - `Documents/Design/` files use domain-based naming (`{domain-slug}.md`) and are committed with the implementation PR
-- CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience verification
+- CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience and design-intent verification
 
 ## Workflow for Claude Code
 

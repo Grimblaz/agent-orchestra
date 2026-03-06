@@ -280,13 +280,13 @@ Get-ChildItem -Recurse -Include *.md | Where-Object {(Select-String -Path $_ -Pa
 
 ### 4.6 CE Gate Defect Analysis (Track 2)
 
-**Purpose**: Determine whether a CE Gate defect—a customer-facing failure found during Code-Conductor's CE Gate exercise—reveals a systemic process or guidance gap, or is an isolated implementation defect.
+**Purpose**: Determine whether a CE Gate defect or intent mismatch—a customer-facing failure or design intent shortfall found during Code-Conductor's CE Gate exercise—reveals a systemic process or guidance gap, or is an isolated implementation defect.
 
 **When invoked**: Code-Conductor calls Process-Review as a subagent (via `runSubagent`) for Track 2 systemic analysis after a CE Gate defect has been fixed, providing the defect description, the failing scenario, and which agent/file/instruction was likely involved.
 
 **Analysis Steps**:
 
-1. **Classify the defect**: Is this an isolated implementation bug, or does it reflect a gap in agent instructions, plan templates, or process guardrails?
+1. **Classify the defect**: Is this an isolated implementation bug, an intent mismatch (design intent not achieved despite functional correctness), or does it reflect a gap in agent instructions, plan templates, or process guardrails?
 2. **Trace the root cause**: Which agent instruction file, plan template, or process rule should have prevented this scenario from failing?
 3. **Assess scope**: Is this a one-off miss, or would the same gap cause similar failures in future issues?
 
@@ -298,7 +298,7 @@ Emit exactly this structure when returning results to Code-Conductor:
 ## CE Gate Defect Analysis
 
 **Failing scenario**: [description from Code-Conductor]
-**Classification**: [isolated implementation defect | systemic process gap]
+**Classification**: [isolated implementation defect | intent mismatch | systemic process gap]
 **Gap description**: [what guidance was missing or insufficient — or "N/A, no systemic gap found"]
 **Affected file/instruction**: [file path and section — or "N/A"]
 **Recommended fix**: [specific instruction update or process change — or "N/A"]
@@ -307,6 +307,8 @@ Emit exactly this structure when returning results to Code-Conductor:
 ```
 
 **Valid outcome**: "No systemic gap found" is a complete and valid outcome. Not every CE Gate defect indicates a process problem. Log this clearly so Code-Conductor can record it in the PR body.
+
+**Intent mismatch analysis**: When the defect is an intent mismatch rather than a functional failure, the gap analysis should consider: (a) whether the design intent was adequately communicated in the issue body, (b) whether Issue-Designer's CE Gate scenarios included intent scenarios (not just functional ones), and (c) whether the `[CE GATE]` plan step included a design intent reference. These are the upstream points where intent clarity could have prevented the mismatch.
 
 ### 5. Root Cause Analysis
 

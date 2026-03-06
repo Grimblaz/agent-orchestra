@@ -142,7 +142,10 @@ Before finalizing the design, assess CE Gate readiness:
 1. **Identify the customer surface**: What type of surface does this change expose? (Web UI / REST/GraphQL API / CLI / SDK / Batch pipeline / None)
 2. **Verify tool availability**: Is the appropriate CE Gate tool available in the project? (Native browser tools enabled via `workbench.browser.enableChatTools`? Playwright MCP configured as fallback? API accessible locally? CLI invocable?)
 3. **Document manual fallback**: If the primary CE Gate tool is unavailable, what is the fallback approach? (Document this in the design so Issue-Planner can include it in the `[CE GATE]` step)
-4. **Draft CE Gate scenarios**: Identify 2–4 customer-perspective scenarios that should be exercised at the CE Gate (natural language, e.g., "Authenticate as a new user and verify the welcome flow completes without error")
+4. **Draft CE Gate scenarios**: Identify 2–4 customer-perspective scenarios that should be exercised at the CE Gate. Include both types:
+   - **Functional**: verifies the feature works (e.g., "Authenticate as a new user and verify the welcome flow completes without error")
+   - **Intent**: verifies the design intent was achieved (e.g., "Verify the welcome flow communicates the product's value proposition within the first 3 steps, matching the design's onboarding intent")
+5. **Identify design intent reference**: Summarize the key user experience goal this change is meant to achieve (one to two sentences). This becomes the design intent reference in the `[CE GATE]` plan step — Code-Conductor reads it before exercising scenarios to evaluate intent match.
 
 Include this assessment when updating the GitHub issue body.
 

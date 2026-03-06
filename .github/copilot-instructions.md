@@ -42,7 +42,7 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 - Plans are saved to session memory (`/memories/session/plan-issue-{ID}.md`), optionally persisted as GitHub issue comments
 - Design content goes in the GitHub issue body (Issue-Designer outputs there)
 - `Documents/Design/` files use domain-based naming (`{domain-slug}.md`) and are committed with the implementation PR by Code-Conductor (delegated to Doc-Keeper)
-- CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience verification
+- CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience and design-intent verification
 
 ## Code-Critic Review Protocol
 

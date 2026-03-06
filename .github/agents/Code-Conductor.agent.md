@@ -302,17 +302,44 @@ Read the plan's `[CE GATE]` step to identify the customer surface. If no `[CE GA
 ### Scenario Exercise Protocol
 
 1. Read the `[CE GATE]` scenarios from the plan step (natural language descriptions)
-2. Exercise each scenario using the appropriate tool
-3. Apply judgment: does each scenario behave as expected from a customer perspective?
-4. Emit one of these output markers:
-   - `✅ CE Gate passed` — all scenarios exercised, no defects found
-   - `✅ CE Gate passed after fix (N defects found and resolved)` — defects found and resolved within loop budget
+2. Establish the **design intent reference**: read the `Design Intent` field from the plan's `[CE GATE]` step (if present); otherwise read the original issue body and design details. Understand what the change was supposed to accomplish for the user — not just what it does technically
+3. Exercise each scenario using the appropriate tool
+4. Apply judgment on two dimensions:
+   - **Functional**: does each scenario behave as expected from a customer perspective?
+   - **Intent match**: does the implementation achieve the design intent? Apply the Intent Match Rubric below.
+5. Emit one of these output markers:
+   - `✅ CE Gate passed — intent match: strong` — all scenarios exercised, no defects found, design intent fully achieved
+   - `✅ CE Gate passed — intent match: partial` — functional scenarios pass; intent partially achieved (in-PR fix routed to Code-Smith by default; follow-up issue at Code-Conductor's discretion)
+   - `✅ CE Gate passed — intent match: weak` — functional scenarios pass; intent not met (in-PR fix routed to Code-Smith by default; follow-up issue at Code-Conductor's discretion)
+   - `✅ CE Gate passed after fix — intent match: {strong|partial|weak}` — defects found and resolved within loop budget
    - `⚠️ CE Gate skipped — {reason}` — tool unavailable or environment issue
    - `⏭️ CE Gate not applicable — {reason}` — no customer surface for this change
 
+### Intent Match Rubric
+
+Apply this rubric after exercising scenarios. **Default to `strong` unless a specific, articulable criterion below is violated** — "feels off" is not sufficient.
+
+| Level | Criteria | When to emit |
+| ----- | -------- | ------------ |
+| **strong** | All of: (a) behavior matches what the design described, (b) user-facing language/feedback is clear and specific, (c) flow follows the path the design intended with no unexpected detours | Default — emit unless a specific deviation below is identified |
+| **partial** | Any of: (a) behavior works but the user path diverges from design intent (extra steps, confusing order), (b) feedback is generic where the design specified contextual messaging, (c) edge case handling exists but is rough or unhelpful | One or more specific deviations articulable; core intent still met |
+| **weak** | Any of: (a) feature works but is difficult to discover or understand without documentation, (b) error states are swallowed or show technical details instead of user guidance, (c) flow contradicts the design's stated user experience | Core intent not met; user would likely be confused or frustrated |
+
+### Surface-Specific Intent Verification
+
+Use these surface-specific criteria to identify *what* to evaluate; then apply the Intent Match Rubric above to determine *which level* to assign:
+
+| Surface | Intent verification criteria |
+| ------- | ---------------------------- |
+| **Web UI** | Flow matches design's described user journey; visual hierarchy supports intended emphasis; feedback messages match design spec |
+| **REST/GraphQL API** | Response structure is ergonomic for the consumer; error responses include actionable guidance per design; field naming conveys domain intent |
+| **CLI** | Help text accurately describes design-intended usage; output format serves the user's workflow; error messages guide correction |
+| **SDK/Library** | API surface is discoverable; method names convey intent per design; error types are domain-specific, not generic |
+| **Batch/Pipeline** | Output/logs are interpretable by the intended operator; failure modes match what the design specified |
+
 ### Two-Track Defect Response
 
-When a CE Gate scenario fails:
+When a functional defect or intent deficiency is found:
 
 **Track 1 — Fix the defect (always):**
 
@@ -321,13 +348,17 @@ When a CE Gate scenario fails:
 - Re-exercise the failing scenario after fix
 - Loop budget: **2 fix-revalidate cycles maximum**, then escalate via `#tool:vscode/askQuestions` with options: "Retry with different approach", "Skip CE Gate with documented risk", "Abort and investigate manually"
 
-**Track 2 — Systemic analysis (always, after Track 1 fix is complete):**
+**Intent deficiencies (partial or weak intent match)** also route through Track 1: route to Code-Smith with the specific rubric criterion violated and the design intent reference from the issue. When the deficiency requires a new design decision before a fix can be defined (e.g., the core interaction model contradicts the design intent rather than merely being under-polished), Code-Conductor may instead create a follow-up issue with rationale — this is a judgment call, not automatic; the default is to fix in-PR. When taking the follow-up issue path, still invoke Track 2 before PR creation and log the outcome in the PR body.
+
+**Track 2 — Systemic analysis (always, after Track 1 fix is complete or when taking the follow-up-issue path):**
 
 - Call Process-Review subagent with: the defect description, what scenario revealed it, and which agent/file/instruction likely caused the gap
 - Process-Review will emit a structured CE Gate Defect Analysis (gap description, affected agent/file, recommended fix, ready-to-use issue title + body)
 - If a systemic gap is confirmed: create a follow-up GitHub issue in the workflow-template repository (or fallback to current repo with label `process-gap-upstream`)
 - "No systemic gap found" is a valid Process-Review outcome — log it in the PR body
 - Track 2 is non-blocking: do not hold up Track 1 fix or PR creation
+
+**Intent deficiency analysis**: Process-Review also handles intent mismatches (where the implementation is functionally correct but design intent was not achieved). Provide the intent mismatch description alongside the rubric criterion violated.
 
 ### Graceful Degradation
 
@@ -340,7 +371,7 @@ When a CE Gate scenario fails:
 
 Always include in the PR body:
 
-- CE Gate result marker (one of the four markers above)
+- CE Gate result marker (one of the markers above, with intent match level for passing gates)
 - Scenarios exercised (brief list)
 - Track 2 outcome: "Process-Review: no systemic gap found" or link to created follow-up issue
 

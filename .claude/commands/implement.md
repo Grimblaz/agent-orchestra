@@ -70,6 +70,7 @@ Address any findings before proceeding.
 If the plan includes `ce_gate: true` in its frontmatter or a `[CE GATE]` step:
 - Identify the customer surface from the plan (Web UI, REST/GraphQL, CLI, SDK, Batch)
 - Exercise each scenario described in the `[CE GATE]` step and verify expected behavior
+- Evaluate intent match: does the implementation achieve the design intent described in the issue? Rate as `strong` / `partial` / `weak` and emit the appropriate marker (`✅ CE Gate passed — intent match: strong|partial|weak`); if a defect was found and fixed within the loop budget, emit `✅ CE Gate passed after fix — intent match: {strong|partial|weak}` instead
 - Present results to the user and wait for approval before proceeding
 - If a defect is found, fix it and re-run the scenario (max 2 cycles)
 
