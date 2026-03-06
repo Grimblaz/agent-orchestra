@@ -61,8 +61,6 @@ Must live in `.github/instructions/`
 - Instruction files: `{topic}.instructions.md` (lowercase with hyphens)
 - Design documents: `{domain-slug}.md` (lowercase with hyphens)
 
-  > **Transition**: Existing files using the legacy `issue-{N}-{slug}.md` naming are pending migration to domain-based names. New files must use `{domain-slug}.md` naming.
-
 - Prompt files: `{name}.prompt.md` (lowercase with hyphens)
 
 ## Validation
