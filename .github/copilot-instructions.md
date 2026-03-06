@@ -48,6 +48,8 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 
 This repo runs **3 independent parallel Code-Critic passes** per review cycle. Passes are hard-coded — not configurable. Each pass surfaces complementary findings; they are not duplicates.
 
+The 3-pass rule applies to **code reviews** only. Design reviews (when Code-Critic is invoked by Issue-Designer, Issue-Planner, or via start-issue.md) are single-pass.
+
 ## Build & Run
 
 No build step. This is a configuration/documentation template.

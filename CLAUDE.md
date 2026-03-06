@@ -44,7 +44,7 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 
 Claude Code is a single-agent system. The multi-agent Copilot pipeline translates to a phased single-agent workflow. Each phase references the corresponding agent file as a role guide — read it for standards and checklists.
 
-1. **Plan** — Research the codebase, draft an implementation plan, get approval before coding.
+1. **Plan** — Research the codebase, draft an implementation plan, stress-test it with a Code-Critic design review, get approval before coding.
    Role guide: `.github/agents/Issue-Planner.agent.md`
 
 2. **Implement** — Execute the plan step by step. Write minimal code (YAGNI). Follow TDD when applicable.
@@ -56,7 +56,7 @@ Claude Code is a single-agent system. The multi-agent Copilot pipeline translate
 4. **Refactor** — Review all modified files for extraction opportunities, DRY violations, SOLID violations. Proportionate to the change scope.
    Role guide: `.github/agents/Refactor-Specialist.agent.md`
 
-5. **Review** — Adversarial self-review across 7 perspectives: Architecture, Security, Performance, Patterns, Simplicity, Scripts, Documentation. Presume defect — hunt for flaws.
+5. **Review** — Adversarial self-review across 7 perspectives: Architecture, Security, Performance, Patterns, Simplicity, Scripts, Documentation. Presume defect — hunt for flaws. Code-Critic also performs design and plan reviews (single-pass, 3 design perspectives: Feasibility & Risk, Scope & Completeness, Integration & Impact) when invoked as a subagent by Issue-Designer, Issue-Planner, or directly via start-issue.md.
    Role guide: `.github/agents/Code-Critic.agent.md`
 
 6. **Document** — Update design docs, decision records, CHANGELOG as needed.
