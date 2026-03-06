@@ -59,7 +59,7 @@ Questioning and pausing are controlled actions, not casual conversation.
 
 ### Review Workflow Interruption Budget (Balanced Policy)
 
-- In review workflows, default to autonomous execution after adjudication and verification.
+- In review workflows, default to autonomous execution after judgment and verification.
 - Use a **single late-stage decision gate** per review cycle when user authority is required.
 - User prompts are only for true authority-boundary decisions: scope reduction, risk acceptance, or product tradeoff.
 - Do **not** prompt for routine per-finding approvals when fixes are high-confidence and bounded.
@@ -162,7 +162,7 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 | `*.md`, `README.*`, `CHANGELOG.*`                    | docs, guide, changelog                 | Doc-Keeper           |
 | Session memory `/memories/session/plan-issue-{ID}.md` or GitHub issue comment with `<!-- plan-issue-{ID} -->` marker | plan, acceptance criteria, sequencing  | Issue-Planner        |
 | Code review (read-only)                              | review, risks, quality, critique       | Code-Critic          |
-| Categorize review feedback (read-only)               | adjudicate, disposition, rebuttal      | Code-Review-Response |
+| Categorize review feedback (read-only)               | judge, disposition, rebuttal           | Code-Review-Response |
 | Process/systemic gap analysis                        | ce-gate-defect, process-gap, systemic  | Process-Review       |
 
 ## Review Reconciliation Loop (Mandatory)
@@ -184,7 +184,7 @@ Each pass is an **independent invocation** of Code-Critic — not a duplicate. L
 - After all passes complete, merge all findings into a single ledger before calling Code-Review-Response. Deduplicate only when two passes flag **identical evidence at the same file/line** — different framing of the same issue counts as one finding. Complementary findings from different passes are additive.
 - Present the merged ledger to Code-Review-Response as a single unified review, not as separate per-pass reviews.
 
-### GitHub Review Intake & Adjudication
+### GitHub Review Intake & Judgment
 
 For `github review` / `review github` / `cr review`, follow `.github/instructions/code-review-intake.instructions.md`.
 
@@ -194,7 +194,7 @@ For local/internal reviews, run the same reconciliation pattern: Code-Critic →
 
 ### Improvement-First Decision Rule (Mandatory)
 
-During adjudication and execution planning:
+During judgment and execution planning:
 
 - If a proposed change is a clear improvement, do it.
 - If improvement is uncertain or the change is not an improvement, reject it.

@@ -88,7 +88,7 @@ Read these instruction files for cross-cutting rules:
 
 - `.github/instructions/safe-operations.instructions.md` — File operation safety rules, issue creation rules (priority labels required)
 - `.github/instructions/tracking-format.instructions.md` — YAML frontmatter format for tracking files
-- `.github/instructions/code-review-intake.instructions.md` — GitHub review intake protocol (deterministic ledger-based adjudication)
+- `.github/instructions/code-review-intake.instructions.md` — GitHub review intake protocol (deterministic ledger-based judgment)
 - `.github/instructions/post-pr-review.instructions.md` — Post-merge checklist (archive tracking, update docs, tag releases)
 
 ## Validation Commands

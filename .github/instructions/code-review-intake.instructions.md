@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Provide a deterministic intake and adjudication workflow for GitHub-originated review feedback before implementation work begins.
+Provide a deterministic intake and judgment workflow for GitHub-originated review feedback before implementation work begins.
 
 ## Trigger
 
@@ -32,14 +32,14 @@ A new item may be added only for a critical correctness/security blocker discove
 - Include concrete evidence
 - Be explicitly surfaced to the user
 
-## Adjudication Guardrail
+## Judgment Guardrail
 
-Adjudication is evidence-first and deterministic:
+Judgment is evidence-first and deterministic:
 
 - Every accepted/rejected/deferred item cites code, test output, architecture constraints, or issue AC evidence.
 - Preference-only comments without evidence are rejected by default.
 - Conflicting evidence keeps an item in disputed state until resolved or escalated.
-- Do not route implementation work until adjudication states are explicit.
+- Do not route implementation work until judgment states are explicit.
 
 ## Convergence Criteria
 

@@ -32,7 +32,7 @@ tools:
 handoffs:
   - label: Respond to Review
     agent: Code-Review-Response
-    prompt: "Adjudicate the code review findings above. For each item, determine: ✅ ACCEPT (evidence solid), ⚠️ CHALLENGE (evidence weak — demand proof), 🔄 SIGNIFICANT (needs user), 📋 TECH DEBT (out of scope), or ❌ REJECT (invalid finding). Present adjudication for approval before delegating fixes."
+    prompt: "Judge the code review findings above. For each item, determine: ✅ ACCEPT (evidence solid), ⚠️ CHALLENGE (evidence weak — demand proof), 🔄 SIGNIFICANT (needs user), 📋 TECH DEBT (out of scope), or ❌ REJECT (invalid finding). Present judgment for approval before delegating fixes."
     send: false
   - label: Fix Issues
     agent: Code-Smith
@@ -93,7 +93,7 @@ If after genuine adversarial effort you find no issues, state what you checked a
 When the review input comes from GitHub comments/reviews (via Code-Conductor or Code-Review-Response):
 
 1. Treat the ingested GitHub finding list as the authoritative review scope.
-2. Adjudicate those items only; do not introduce net-new findings.
+2. Judge those items only; do not introduce net-new findings.
 3. For each item, answer: "Is this change an improvement?" with evidence.
 
 **Terminal outcomes per item**:
@@ -115,11 +115,11 @@ Trigger rebuttal mode when the incoming handoff includes either:
 
 Map those markers/tokens to a **disputed items list** and process only those items.
 
-When invoked for disputed findings after Code-Review-Response adjudication:
+When invoked for disputed findings after Code-Review-Response judgment:
 
 1. Re-evaluate only disputed items (do not relitigate settled items)
 2. Provide concrete rebuttal evidence for each challenged/rejected item:
-   exact code reference, failure mode or invariant violation, and why prior adjudication was incomplete or incorrect
+   exact code reference, failure mode or invariant violation, and why prior judgment was incomplete or incorrect
 
 3. Explicitly concede items where evidence does not hold
 4. Return a per-item verdict: `rebutted`, `conceded`, or `insufficient-evidence`
@@ -136,7 +136,7 @@ Use this exact per-item structure:
 Verdict: `rebutted | conceded | insufficient-evidence`
 Evidence: <file/symbol/test evidence>
 Failure Mode: <concrete failure or invariant risk>
-Rebuttal: <why prior adjudication is incomplete/incorrect, or concession rationale>
+Rebuttal: <why prior judgment is incomplete/incorrect, or concession rationale>
 ```
 
 ## Finding Categories
