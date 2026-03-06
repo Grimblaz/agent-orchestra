@@ -116,7 +116,7 @@ Before presenting the plan for approval, call Code-Critic as a subagent to stres
 
 **What to do with the findings**:
 - Code-Critic returns a challenge report with 3 perspectives: Feasibility & Risk, Scope & Completeness, Integration & Impact.
-- For each challenge: decide to incorporate it (revise the plan), dismiss it with rationale, or escalate it for user decision.
+- For each challenge: decide to incorporate it (revise the plan), dismiss it with rationale, or escalate it for user decision. **If escalated**, use #tool:vscode/askQuestions to present the flagged item(s) and obtain a response before presenting the plan draft.
 - Revise the plan steps as needed to address accepted challenges.
 - After incorporating or dismissing all findings, append a **`Plan Stress-Test`** summary block at the end of the plan draft showing: challenges found, how each was addressed (incorporated / dismissed / escalated), and overall confidence assessment.
 
@@ -185,7 +185,10 @@ After saving to session memory, immediately use #tool:vscode/askQuestions to ask
 
 - {Decision: chose X over Y}
 
-**Plan Stress-Test** (included after design review)
+**Plan Stress-Test** (summary of Code-Critic design review)
+
+- Challenge: {finding} — Disposition: incorporated | dismissed with rationale | escalated for user decision
+- Overall confidence: {high | medium | low} — {one-sentence rationale}
 ```
 
 Rules:

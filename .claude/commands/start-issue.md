@@ -32,7 +32,7 @@ Begin work on a GitHub issue with proper setup and planning.
    - Follow the planning guide in `.github/agents/Issue-Planner.agent.md`
    - Include: numbered steps, execution mode per step (serial/parallel), requirement contract per step, validation commands, CE Gate step (if applicable)
    - No code blocks in the plan — describe changes, link to files and symbols
-   - The plan stress-test (Code-Critic design review) is covered in Phase 4 of `.github/agents/Issue-Planner.agent.md` — follow that guide for how to invoke it, incorporate or dismiss findings, and append the Stress-Test summary block.
+   - The plan stress-test (Code-Critic design review) is covered in Phase 4 of `.github/agents/Issue-Planner.agent.md` — follow that guide for how to invoke it, incorporate or dismiss findings, and append the Plan Stress-Test summary block.
    - Present the plan (with stress-test summary) for user approval before proceeding
 
 6. **Save the plan**

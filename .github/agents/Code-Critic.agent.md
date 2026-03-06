@@ -107,6 +107,7 @@ When the prompt contains the marker **"Use design review perspectives"**, activa
 - Prompt contains "Use design review perspectives" → **Design Review Mode**
 - Default invocation (no marker present) → **Code Review Mode** (standard 7 perspectives)
 - Explicit override: "Use code review perspectives" → **Code Review Mode**
+- **Conflict rule**: If both markers appear in the same prompt, "Use code review perspectives" takes precedence → **Code Review Mode**
 
 ### When to Use
 
