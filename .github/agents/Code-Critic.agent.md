@@ -231,11 +231,12 @@ Performs a final review for architecture, security, and overall quality.
 
 Every review MUST address all 7 perspectives in sequence, using the **"When to apply" gate** for each:
 - **In scope** (gate triggered): apply the full checklist for that perspective.
-- **Out of scope** (gate not triggered): return a single-line `⏭️ N/A` marker. Do not expand the section with checklist items.
+- **Out of scope** (gate not triggered): replace the entire section with the Compact N/A heading (see **Compact N/A rule** below). Do not expand the section with checklist items.
+- **Partially in scope** (gate specifies sub-sections to skip, e.g., §1 for docs-only PRs): apply the in-scope portions of the perspective; sub-sections explicitly marked "Skip" produce no output — do not emit a sub-section N/A marker.
 
 ### 1. Architecture Perspective
 
-**When to apply**: PR includes source code files (`.ts`, `.tsx`, `.cs`, `.py`, etc.), scripts, or runtime configuration. For documentation-only PRs (`.md`/`.instructions.md`/`.agent.md` files only): skip §1b and §1c entirely; apply the §1 checklist only to verify documentation does not misrepresent architectural constraints.
+**When to apply**: PR includes source code files (`.ts`, `.tsx`, `.cs`, `.py`, etc.), scripts, or runtime configuration. For documentation-only PRs (`.md`/`.instructions.md`/`.prompt.md`/`.agent.md` files only): skip §1b and §1c entirely; apply the §1 checklist only to verify documentation does not misrepresent architectural constraints.
 
 - [ ] Project architecture compliance (see `.github/architecture-rules.md`)
 - [ ] Dependencies follow documented layer direction (e.g., interface/adapters into domain/core logic)
@@ -277,7 +278,7 @@ For any **new data field, constant, or map** added:
 
 ### 2. Security Perspective
 
-**When to apply**: PR includes source code files, scripts, or configuration with authentication/authorization/data-handling concerns. For documentation-only PRs: return `⏭️ N/A — no runtime code in this PR` and skip checklist items.
+**When to apply**: PR includes source code files, scripts, or configuration with authentication/authorization/data-handling concerns. Not triggered for documentation-only PRs — apply the Compact N/A rule.
 
 - [ ] No hardcoded secrets or credentials
 - [ ] Input validation present
@@ -286,7 +287,7 @@ For any **new data field, constant, or map** added:
 
 ### 3. Performance Perspective
 
-**When to apply**: PR includes source code files or configuration affecting runtime execution paths. For documentation-only PRs: return `⏭️ N/A — no runtime code in this PR` and skip checklist items.
+**When to apply**: PR includes source code files or configuration affecting runtime execution paths. Not triggered for documentation-only PRs — apply the Compact N/A rule.
 
 - [ ] Algorithm complexity appropriate (no O(n²) where O(n) possible)
 - [ ] No unnecessary re-renders or computations
@@ -297,11 +298,11 @@ For any **new data field, constant, or map** added:
 
 **When to apply**: PR includes source code files. For documentation-only PRs: skip code-specific checklist items; DRY across documentation sections (content repetition, contradictory guidance) remains in scope as a documentation pattern concern.
 
-- [ ] Design patterns used correctly
-- [ ] Anti-patterns avoided (God classes, spaghetti)
-- [ ] DRY principle followed
-- [ ] SOLID principles applied
-- [ ] UI tests query by `aria-label`/behavior, NOT DOM structure (see `.github/skills/ui-testing/SKILL.md`)
+- [ ] Design patterns used correctly *(code-only — skip for docs)*
+- [ ] Anti-patterns avoided (God classes, spaghetti) *(code-only — skip for docs)*
+- [ ] DRY principle followed *(docs-applicable — check for content repetition and contradictory guidance)*
+- [ ] SOLID principles applied *(code-only — skip for docs)*
+- [ ] UI tests query by `aria-label`/behavior, NOT DOM structure (see `.github/skills/ui-testing/SKILL.md`) *(code-only — skip for docs)*
 
 ### 5. Simplicity Perspective
 
@@ -394,13 +395,13 @@ Do not include checklist items. This eliminates output bloat without reducing co
 
 [Specific findings]
 
-### ✅ Script & Automation: PASS/FAIL/N-A
+### ✅ Script & Automation: PASS/FAIL
 
-[Specific findings — mark N/A when PR has no script files]
+[Specific findings — use `### ⏭️ Script & Automation: N/A — no script files in this PR` when gate not triggered]
 
-### ✅ Documentation Script Audit: PASS/FAIL/N-A
+### ✅ Documentation Script Audit: PASS/FAIL
 
-[Specific findings — mark N/A when PR has no `.md` files with shell code blocks]
+[Specific findings — use `### ⏭️ Documentation Script Audit: N/A — no .md files with shell code blocks` when gate not triggered]
 
 ## Summary
 
