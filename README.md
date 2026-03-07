@@ -1,6 +1,6 @@
 # Copilot Workflow Template
 
-[![Version](https://img.shields.io/badge/version-v1.6.0-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v1.6.1-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system for GitHub Copilot that orchestrates AI-assisted software development across specialized agents.
