@@ -24,7 +24,7 @@ Execute this workflow **after**:
 pwsh "$env:WORKFLOW_TEMPLATE_ROOT/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description
 
 # Or manual archive only (PowerShell):
-$archivePath = ".copilot-tracking-archive\$(Get-Date -Format 'yyyy\MM')\issue-{ID}"
+$archivePath = Join-Path ".copilot-tracking-archive" (Get-Date -Format 'yyyy') (Get-Date -Format 'MM') "issue-{ID}"
 New-Item -Path $archivePath -ItemType Directory -Force
 Get-ChildItem .copilot-tracking -Recurse -File |
     Where-Object { (Get-Content $_.FullName -Raw) -match 'issue_id:\s*{ID}' } |

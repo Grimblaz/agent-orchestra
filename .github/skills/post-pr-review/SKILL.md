@@ -14,6 +14,8 @@ Execute this workflow **after**:
 
 Or use the strategic assessment section only (Step 6) **before merging** to evaluate design alignment and long-term implications before approving a PR.
 
+> **Note for plugin-only users**: Step 6 (Strategic Assessment) is available without cloning — it's pure analysis using GitHub tools.
+
 ## Purpose
 
 This document provides a standardized checklist for agents to follow after a Pull Request has been reviewed, approved, and merged. These steps ensure proper cleanup, documentation, and project maintenance.
@@ -31,7 +33,7 @@ This document provides a standardized checklist for agents to follow after a Pul
 pwsh "$env:WORKFLOW_TEMPLATE_ROOT/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description
 
 # Or manual archive only (PowerShell):
-$archivePath = ".copilot-tracking-archive\$(Get-Date -Format 'yyyy\MM')\issue-{ID}"
+$archivePath = Join-Path ".copilot-tracking-archive" (Get-Date -Format 'yyyy') (Get-Date -Format 'MM') "issue-{ID}"
 New-Item -Path $archivePath -ItemType Directory -Force
 Get-ChildItem .copilot-tracking -Recurse -File |
     Where-Object { (Get-Content $_.FullName -Raw) -match 'issue_id:\s*{ID}' } |
@@ -139,7 +141,31 @@ git push origin --delete feature/issue-{ID}-description
 
 > **Automation**: Branch deletion is also handled by `.github/scripts/post-merge-cleanup.ps1` when invoked via the `SessionStart` hook cleanup flow (see Section 1 above).
 
-### 6. Update Project Tracking
+### 6. Strategic Assessment (Pre-Merge)
+
+**Action**: Before approving a PR, evaluate strategic alignment on three dimensions.
+
+**Design Alignment**:
+- Does the implementation match the design doc (`Documents/Design/{domain}.md`)?
+- Are any design decisions reversed or partially implemented?
+- If the design doc doesn't exist yet, does the implementation align with the issue's stated goals?
+
+**Roadmap Integration**:
+- Does this change fit the project's stated direction?
+- Any unintended coupling introduced that will constrain future work?
+- Are there deprecations triggered or migration concerns created?
+
+**Long-Term Implications**:
+- Tech debt introduced — is it tracked (labeled issue or comment)?
+- Are there performance, scale, or maintenance concerns not covered in tests?
+- Would this pass the "6-month-later developer" readability test?
+
+**Output**: Emit one of:
+- `✅ Strategic assessment: aligned` — no concerns
+- `⚠️ Strategic assessment: concerns noted` — list specific items; may block PR
+- `⏭️ Strategic assessment: skipped — {reason}` — e.g., documentation-only change
+
+### 7. Update Project Tracking
 
 **Action**: Update external project management tools if used.
 
@@ -156,7 +182,7 @@ git push origin --delete feature/issue-{ID}-description
 - [ ] Project board reflects current state
 - [ ] No orphaned or stale references
 
-### 7. Notify Stakeholders (If Applicable)
+### 8. Notify Stakeholders (If Applicable)
 
 **Action**: Communicate completion to relevant parties.
 

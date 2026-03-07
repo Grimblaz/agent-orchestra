@@ -153,17 +153,17 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 
 ## Agent Selection
 
-| File Type / Task                                     | Keywords                               | Agent                |
-| ---------------------------------------------------- | -------------------------------------- | -------------------- |
-| `*.test.*`, test suites, fixtures                    | test, assertion, flaky, coverage       | Test-Writer          |
-| `src/**/*.ts`, `src/**/*.tsx` (new behavior)         | implement, feature, bugfix, logic      | Code-Smith           |
-| `src/**/*.ts`, `src/**/*.tsx` (restructure existing) | refactor, simplify, extract, dedupe    | Refactor-Specialist  |
-| UI source files (visual polish)                      | ui polish, spacing, alignment, styling | UI-Iterator          |
-| `*.md`, `README.*`, `CHANGELOG.*`                    | docs, guide, changelog                 | Doc-Keeper           |
+| File Type / Task                                                                                                     | Keywords                               | Agent                |
+| -------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | -------------------- |
+| `*.test.*`, test suites, fixtures                                                                                    | test, assertion, flaky, coverage       | Test-Writer          |
+| `src/**/*.ts`, `src/**/*.tsx` (new behavior)                                                                         | implement, feature, bugfix, logic      | Code-Smith           |
+| `src/**/*.ts`, `src/**/*.tsx` (restructure existing)                                                                 | refactor, simplify, extract, dedupe    | Refactor-Specialist  |
+| UI source files (visual polish)                                                                                      | ui polish, spacing, alignment, styling | UI-Iterator          |
+| `*.md`, `README.*`, `CHANGELOG.*`                                                                                    | docs, guide, changelog                 | Doc-Keeper           |
 | Session memory `/memories/session/plan-issue-{ID}.md` or GitHub issue comment with `<!-- plan-issue-{ID} -->` marker | plan, acceptance criteria, sequencing  | Issue-Planner        |
-| Code review (read-only)                              | review, risks, quality, critique       | Code-Critic          |
-| Categorize review feedback (read-only)               | judge, disposition, rebuttal           | Code-Review-Response |
-| Process/systemic gap analysis                        | ce-gate-defect, process-gap, systemic  | Process-Review       |
+| Code review (read-only)                                                                                              | review, risks, quality, critique       | Code-Critic          |
+| Categorize review feedback (read-only)                                                                               | judge, disposition, rebuttal           | Code-Review-Response |
+| Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic  | Process-Review       |
 
 ## Review Reconciliation Loop (Mandatory)
 
@@ -181,11 +181,11 @@ Each pass is an **independent invocation** of Code-Critic — not a duplicate. L
 
 Classify the PR change type using `git diff --name-only main..HEAD` and include the classification in each pass prompt:
 
-| Change type | Condition | Active perspectives |
-|---|---|---|
+| Change type          | Condition                                                                     | Active perspectives                                                                                                                                                                  |
+| -------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `documentation-only` | All changed files are `.md`, `.instructions.md`, `.prompt.md`, or `.agent.md` | Architecture (§1, docs-misrepresentation check only), Simplicity (§5), Documentation Script Audit (§7, if `.md` files contain shell blocks), Patterns doc-clarity angle (§4 partial) |
-| `mixed` | Changed files include both source/scripts AND docs | All 7 perspectives |
-| `code` (default) | Changed files include source code, scripts, or runtime config | All 7 perspectives |
+| `mixed`              | Changed files include both source/scripts AND docs                            | All 7 perspectives                                                                                                                                                                   |
+| `code` (default)     | Changed files include source code, scripts, or runtime config                 | All 7 perspectives                                                                                                                                                                   |
 
 > **Precedence**: Evaluate rows in order; the first matching condition applies. `mixed` takes priority over `code` for source+docs PRs.
 
@@ -290,14 +290,14 @@ Run this gate as the final step before PR creation (Tier 7, after Code-Critic).
 
 Read the plan's `[CE GATE]` step to identify the customer surface. If no `[CE GATE]` step exists, infer from the change type:
 
-| Surface Type        | Tool / Method                                                        |
-| ------------------- | -------------------------------------------------------------------- |
+| Surface Type        | Tool / Method                                                                           |
+| ------------------- | --------------------------------------------------------------------------------------- |
 | Web UI              | Native browser tools (`openBrowserPage` + `screenshotPage`); Playwright MCP as fallback |
-| REST / GraphQL      | `curl` or `httpie` in terminal                                       |
-| CLI                 | Invoke command in terminal with test args                            |
-| SDK                 | Example invocation in terminal                                       |
-| Batch / pipeline    | Invoke with representative test data                                 |
-| No customer surface | Skip with documented reason (`⏭️ CE Gate not applicable — {reason}`) |
+| REST / GraphQL      | `curl` or `httpie` in terminal                                                          |
+| CLI                 | Invoke command in terminal with test args                                               |
+| SDK                 | Example invocation in terminal                                                          |
+| Batch / pipeline    | Invoke with representative test data                                                    |
+| No customer surface | Skip with documented reason (`⏭️ CE Gate not applicable — {reason}`)                    |
 
 ### Scenario Exercise Protocol
 
@@ -319,23 +319,23 @@ Read the plan's `[CE GATE]` step to identify the customer surface. If no `[CE GA
 
 Apply this rubric after exercising scenarios. **Default to `strong` unless a specific, articulable criterion below is violated** — "feels off" is not sufficient.
 
-| Level | Criteria | When to emit |
-| ----- | -------- | ------------ |
-| **strong** | All of: (a) behavior matches what the design described, (b) user-facing language/feedback is clear and specific, (c) flow follows the path the design intended with no unexpected detours | Default — emit unless a specific deviation below is identified |
+| Level       | Criteria                                                                                                                                                                                                                                  | When to emit                                                       |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| **strong**  | All of: (a) behavior matches what the design described, (b) user-facing language/feedback is clear and specific, (c) flow follows the path the design intended with no unexpected detours                                                 | Default — emit unless a specific deviation below is identified     |
 | **partial** | Any of: (a) behavior works but the user path diverges from design intent (extra steps, confusing order), (b) feedback is generic where the design specified contextual messaging, (c) edge case handling exists but is rough or unhelpful | One or more specific deviations articulable; core intent still met |
-| **weak** | Any of: (a) feature works but is difficult to discover or understand without documentation, (b) error states are swallowed or show technical details instead of user guidance, (c) flow contradicts the design's stated user experience | Core intent not met; user would likely be confused or frustrated |
+| **weak**    | Any of: (a) feature works but is difficult to discover or understand without documentation, (b) error states are swallowed or show technical details instead of user guidance, (c) flow contradicts the design's stated user experience   | Core intent not met; user would likely be confused or frustrated   |
 
 ### Surface-Specific Intent Verification
 
-Use these surface-specific criteria to identify *what* to evaluate; then apply the Intent Match Rubric above to determine *which level* to assign:
+Use these surface-specific criteria to identify _what_ to evaluate; then apply the Intent Match Rubric above to determine _which level_ to assign:
 
-| Surface | Intent verification criteria |
-| ------- | ---------------------------- |
-| **Web UI** | Flow matches design's described user journey; visual hierarchy supports intended emphasis; feedback messages match design spec |
+| Surface              | Intent verification criteria                                                                                                                 |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Web UI**           | Flow matches design's described user journey; visual hierarchy supports intended emphasis; feedback messages match design spec               |
 | **REST/GraphQL API** | Response structure is ergonomic for the consumer; error responses include actionable guidance per design; field naming conveys domain intent |
-| **CLI** | Help text accurately describes design-intended usage; output format serves the user's workflow; error messages guide correction |
-| **SDK/Library** | API surface is discoverable; method names convey intent per design; error types are domain-specific, not generic |
-| **Batch/Pipeline** | Output/logs are interpretable by the intended operator; failure modes match what the design specified |
+| **CLI**              | Help text accurately describes design-intended usage; output format serves the user's workflow; error messages guide correction              |
+| **SDK/Library**      | API surface is discoverable; method names convey intent per design; error types are domain-specific, not generic                             |
+| **Batch/Pipeline**   | Output/logs are interpretable by the intended operator; failure modes match what the design specified                                        |
 
 ### Two-Track Defect Response
 
