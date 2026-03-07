@@ -1,3 +1,8 @@
+---
+agent: agent
+description: "Start work on a GitHub issue — sets up the feature branch, initializes tracking, and delegates to Issue-Planner for a structured implementation plan."
+---
+
 # Start Issue Prompt
 
 Use this prompt when beginning work on a new issue to ensure proper setup and workflow initialization.

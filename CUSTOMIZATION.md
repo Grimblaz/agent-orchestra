@@ -2,6 +2,32 @@
 
 This guide explains how to configure the workflow template for your project.
 
+## Distribution Options
+
+This template supports two distribution models:
+
+| Model | How to Install | What You Get |
+|-------|---------------|--------------|
+| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 13 agents, 14 skills, 2 slash commands — instantly available |
+| **Clone/Fork** | `git clone` or use as template | Everything above PLUS instruction files (auto-loaded by VS Code), session cleanup hook, project templates, and examples |
+
+### Plugin Installation
+
+1. Add to VS Code user settings:
+
+   ```json
+   {
+     "chat.plugins.enabled": true,
+     "chat.plugins.marketplaces": ["Grimblaz/workflow-template"]
+   }
+   ```
+
+2. Open Extensions view (`Ctrl+Shift+X`), search `@agentPlugins workflow-template`, install.
+
+> **Note**: If you use the plugin, you will not receive automatic loading of `.github/instructions/` files or the `SessionStart` hook. For those features, use the clone/fork model instead.
+
+---
+
 ## Quick Option: Setup Wizard
 
 Open GitHub Copilot Chat, run the **`/setup`** command. Setup runs in six phases:

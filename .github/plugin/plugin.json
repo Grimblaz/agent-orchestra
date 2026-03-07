@@ -1,0 +1,41 @@
+{
+  "name": "workflow-template",
+  "description": "Multi-agent workflow system for GitHub Copilot. Pipeline-based agent orchestration: Issue → Design → Plan → Implement → Review → PR.",
+  "version": "1.5.0",
+  "author": {
+    "name": "Grimblaz"
+  },
+  "repository": "https://github.com/Grimblaz/workflow-template",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "agents",
+    "orchestration",
+    "code-review",
+    "planning",
+    "tdd",
+    "multi-agent",
+    "pipeline"
+  ],
+  "agents": ["./.github/agents"],
+  "skills": [
+    "./.github/skills/brainstorming/",
+    "./.github/skills/browser-canvas-testing/",
+    "./.github/skills/code-review-intake/",
+    "./.github/skills/frontend-design/",
+    "./.github/skills/parallel-execution/",
+    "./.github/skills/post-pr-review/",
+    "./.github/skills/property-based-testing/",
+    "./.github/skills/skill-creator/",
+    "./.github/skills/software-architecture/",
+    "./.github/skills/systematic-debugging/",
+    "./.github/skills/test-driven-development/",
+    "./.github/skills/ui-testing/",
+    "./.github/skills/verification-before-completion/",
+    "./.github/skills/webapp-testing/"
+  ],
+  "commands": [
+    "./.github/prompts/setup.prompt.md",
+    "./.github/prompts/start-issue.prompt.md"
+  ]
+}

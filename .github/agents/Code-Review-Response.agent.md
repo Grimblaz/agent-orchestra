@@ -397,7 +397,7 @@ Categorize and respond to each review item with clear acknowledgment, honest ass
 
 **Validation Note (Default Behavior)**: After any fixes or doc updates are executed, you MUST run the appropriate project validation command(s) documented in `.github/copilot-instructions.md` based on the files changed, and report the actual results with evidence (command + exit status + summary). Only skip running validation if explicitly asked by the user or blocked by environment/tooling, and in that case state the reason.
 
-**After Fixes Complete**: Consider using `post-pr-review` mode (`.github/instructions/post-pr-review.instructions.md`) for strategic assessment before merge - evaluates design alignment, roadmap integration, and long-term implications.
+**After Fixes Complete**: Consider using `post-pr-review` mode (`.github/skills/post-pr-review/SKILL.md` — also available as `.github/instructions/post-pr-review.instructions.md` in clone/fork setups) for strategic assessment before merge - evaluates design alignment, roadmap integration, and long-term implications.
 
 ---
 

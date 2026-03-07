@@ -200,7 +200,7 @@ Include in each pass prompt: `"Change type: {classification}. Per Code-Critic's 
 
 ### GitHub Review Intake & Judgment
 
-For `github review` / `review github` / `cr review`, follow `.github/instructions/code-review-intake.instructions.md`.
+For `github review` / `review github` / `cr review`, follow `.github/skills/code-review-intake/SKILL.md` (also available as `.github/instructions/code-review-intake.instructions.md` in clone/fork setups).
 
 ### Non-GitHub Review Mode
 

@@ -20,7 +20,7 @@ Each skill should use this flow:
 
 This keeps prompts concise while preserving depth when needed.
 
-## Available Skills (12)
+## Available Skills (14)
 
 | Skill | Purpose | Status |
 | ----- | ------- | ------ |
@@ -36,6 +36,8 @@ This keeps prompts concise while preserving depth when needed.
 | `parallel-execution` | Build-test orchestration: parallel/serial lanes with convergence gates | ✅ Included |
 | `property-based-testing` | Incremental randomized property-based verification | ✅ Included |
 | `browser-canvas-testing` | VS Code native browser tool behavior for canvas games | ✅ Included |
+| `code-review-intake` | GitHub review intake workflow with ledger-based judgment | ✅ Included |
+| `post-pr-review` | Post-merge checklist: archive, document, version, release | ✅ Included |
 
 ## How to Use a Skill
 

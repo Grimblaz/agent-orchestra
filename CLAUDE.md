@@ -25,7 +25,7 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 
 - **User-facing agents** (5): Issue-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response
 - **Internal agents** (8): Called automatically by Code-Conductor as subagents (`user-invokable: false`)
-- **Skills** (12): Loaded on demand by agents from `.github/skills/`
+- **Skills** (14): Loaded on demand by agents from `.github/skills/`
 - **Instructions** (4): Shared rules loaded by agents from `.github/instructions/`
 
 ## Key Conventions
@@ -82,6 +82,8 @@ Read the relevant `SKILL.md` when working in that domain:
 | verification-before-completion | `.github/skills/verification-before-completion/SKILL.md` | Pre-PR readiness checks |
 | skill-creator | `.github/skills/skill-creator/SKILL.md` | Adding new skills to the framework |
 | browser-canvas-testing | `.github/skills/browser-canvas-testing/SKILL.md` | Canvas game browser interaction (VS Code native tools) |
+| code-review-intake | `.github/skills/code-review-intake/SKILL.md` | GitHub review intake mode, processing Code-Critic findings |
+| post-pr-review | `.github/skills/post-pr-review/SKILL.md` | Post-merge cleanup, archiving tracking files, pre-merge strategic assessment |
 
 ## Shared Instructions
 
@@ -89,8 +91,8 @@ Read these instruction files for cross-cutting rules:
 
 - `.github/instructions/safe-operations.instructions.md` — File operation safety rules, issue creation rules (priority labels required)
 - `.github/instructions/tracking-format.instructions.md` — YAML frontmatter format for tracking files
-- `.github/instructions/code-review-intake.instructions.md` — GitHub review intake protocol (deterministic ledger-based judgment)
-- `.github/instructions/post-pr-review.instructions.md` — Post-merge checklist (archive tracking, update docs, tag releases)
+- `.github/instructions/code-review-intake.instructions.md` — GitHub review intake protocol (deterministic ledger-based judgment) _(also available as skill: `.github/skills/code-review-intake/SKILL.md`)_
+- `.github/instructions/post-pr-review.instructions.md` — Post-merge checklist (archive tracking, update docs, tag releases) _(also available as skill: `.github/skills/post-pr-review/SKILL.md`)_
 
 ## Validation Commands
 

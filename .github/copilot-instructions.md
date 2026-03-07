@@ -29,7 +29,7 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 
 - **User-facing agents** (5): Issue-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response
 - **Internal agents** (8): Called automatically by Code-Conductor as subagents (`user-invokable: false`)
-- **Skills** (12): Loaded on demand by agents from `.github/skills/`
+- **Skills** (14): Loaded on demand by agents from `.github/skills/`
 - **Instructions** (4): Shared rules loaded by agents from `.github/instructions/`
 
 ## Key Conventions

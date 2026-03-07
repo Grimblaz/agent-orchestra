@@ -5,6 +5,30 @@
 
 A multi-agent workflow system for GitHub Copilot that orchestrates AI-assisted software development across specialized agents.
 
+## Install as Plugin (VS Code 1.110+)
+
+> **Experimental**: Agent plugins are available in VS Code 1.110 as an experimental feature. Plugin distribution is the fastest way to get started with no cloning required.
+
+### Quick Setup (Plugin)
+
+1. **Enable plugins** — Add to VS Code user settings (`Ctrl+Shift+P` → "Open User Settings (JSON)"):
+
+   ```json
+   {
+     "chat.plugins.enabled": true,
+     "chat.plugins.marketplaces": ["Grimblaz/workflow-template"]
+   }
+   ```
+
+2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins workflow-template` and install.
+3. **Use** — All 13 agents and 14 skills are immediately available in VS Code Chat.
+
+**What's included in the plugin**: 13 agents, 14 skills, and 2 slash commands (`/setup`, `/start-issue`).
+
+**What requires clone/fork**: Instruction files (`.github/instructions/`), hooks (`session-cleanup.json`), and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo.
+
+---
+
 ## Quick Start — Two Steps
 
 ### Step 1: Clone or fork this template
@@ -113,6 +137,8 @@ Skills are domain-specific knowledge packages in `.github/skills/` that agents l
 | **verification-before-completion** | Pre-PR readiness checks |
 | **skill-creator** | Adding new skills to the framework |
 | **browser-canvas-testing** | Canvas game browser interaction (VS Code native tools) |
+| **code-review-intake** | GitHub review intake mode, Code-Critic finding reconciliation |
+| **post-pr-review** | Post-merge cleanup, archiving tracking files, pre-merge assessment |
 
 > **VS Code 1.108+**: Skills are auto-discovered from `.github/skills/` when `chat.useAgentSkills` is enabled.
 

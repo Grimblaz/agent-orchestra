@@ -87,8 +87,8 @@ Read the relevant `SKILL.md` when working in that domain:
 
 - `.github/instructions/safe-operations.instructions.md` — File operation safety, issue creation rules
 - `.github/instructions/tracking-format.instructions.md` — Tracking file format
-- `.github/instructions/code-review-intake.instructions.md` — GitHub review intake protocol
-- `.github/instructions/post-pr-review.instructions.md` — Post-merge checklist
+- `.github/instructions/code-review-intake.instructions.md` — GitHub review intake protocol _(also available as skill: `.github/skills/code-review-intake/SKILL.md`)_
+- `.github/instructions/post-pr-review.instructions.md` — Post-merge checklist _(also available as skill: `.github/skills/post-pr-review/SKILL.md`)_
 
 ## Related Documentation
 

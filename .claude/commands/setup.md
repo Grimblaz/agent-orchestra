@@ -54,7 +54,7 @@ Follow the format in the workflow-template's `examples/` directory. Include: Pro
 Follow the same structure but adapted for Claude Code:
 - Same project overview, tech stack, architecture, conventions, and commands
 - Add the **Workflow for Claude Code** section (plan → implement → test → refactor → review → document → PR) with role guide references to `.github/agents/` files
-- Add the **Skills Reference** table pointing to `.github/skills/` files
+- Add the **Skills Reference** table pointing to `.github/skills/` files (currently 14 skills: brainstorming, browser-canvas-testing, code-review-intake, frontend-design, parallel-execution, post-pr-review, property-based-testing, skill-creator, software-architecture, systematic-debugging, test-driven-development, ui-testing, verification-before-completion, webapp-testing)
 - Add the **Shared Instructions** list pointing to `.github/instructions/` files
 
 ### `.github/architecture-rules.md`

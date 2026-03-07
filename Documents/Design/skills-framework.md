@@ -2,7 +2,7 @@
 
 ## Summary
 
-The skills framework provides domain-specific knowledge modules loaded on demand by agents from `.github/skills/`. Skills use a `SKILL.md` format with YAML frontmatter and supply procedural guidance, quality standards, and example patterns — but no orchestration logic. The current inventory contains 11 skills.
+The skills framework provides domain-specific knowledge modules loaded on demand by agents from `.github/skills/`. Skills use a `SKILL.md` format with YAML frontmatter and supply procedural guidance, quality standards, and example patterns — but no orchestration logic. The current inventory contains 14 skills.
 
 ---
 
@@ -18,7 +18,7 @@ The skills framework provides domain-specific knowledge modules loaded on demand
 
 ---
 
-## Skill Inventory (11 Skills)
+## Skill Inventory (14 Skills)
 
 | Skill | Directory | Purpose |
 |-------|-----------|---------|
@@ -33,6 +33,9 @@ The skills framework provides domain-specific knowledge modules loaded on demand
 | `ui-testing` | `.github/skills/ui-testing/` | Resilient React component testing strategies |
 | `verification-before-completion` | `.github/skills/verification-before-completion/` | Evidence-based verification checklist before marking work complete |
 | `webapp-testing` | `.github/skills/webapp-testing/` | Playwright end-to-end testing guidance for web apps |
+| `browser-canvas-testing` | `.github/skills/browser-canvas-testing/` | VS Code native browser tool behavior for canvas-based games |
+| `code-review-intake` | `.github/skills/code-review-intake/` | Deterministic GitHub review intake workflow with ledger-based judgment |
+| `post-pr-review` | `.github/skills/post-pr-review/` | Post-merge checklist for archiving, documentation, versioning, and release tagging |
 
 ---
 
@@ -83,8 +86,8 @@ Supporting files (e.g., `patterns.md`, `playwright-setup.md`) may live alongside
 
 ## Acceptance Criteria
 
-- `grep -r ".claude/skills" .` returns zero results (excluding git history)
+- `grep -r ".claude/skills" . --exclude-dir=Documents` returns zero results (excluding git history and this design doc)
 - Each `SKILL.md` has valid frontmatter with `name` and `description`
 - `validate-architecture.ps1` checks `.github/skills` path
 - VS Code skill discovery works with `chat.useAgentSkills` enabled
-- 11 skills present and correctly named
+- 14 skills present and correctly named
