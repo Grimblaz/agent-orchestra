@@ -45,9 +45,22 @@ The `.github/plugin/` directory was chosen (rather than root) to keep plugin inf
 
 ```json
 {
-  "plugins": [{ "source": ".", "version": "1.5.0" }]
+  "name": "workflow-template",
+  "metadata": {
+    "description": "...",
+    "version": "X.Y.Z"
+  },
+  "plugins": [
+    {
+      "name": "workflow-template",
+      "source": ".",
+      "version": "X.Y.Z"
+    }
+  ]
 }
 ```
+
+> **Note**: `marketplace.json` contains **two** `version` fields — `metadata.version` (top-level registry entry) and `plugins[0].version` (the plugin itself). Both must be kept in sync. The `bump-version.ps1` script updates both automatically; do not remove the `metadata` block as it will cause the script to fail.
 
 `source: "."` refers to the repo root, where VS Code will look for `plugin.json`. The file lives at `.github/plugin/marketplace.json` — VS Code is pointed here via `chat.plugins.marketplaces: ["Grimblaz/workflow-template"]` (lookup path is experimental/unconfirmed).
 

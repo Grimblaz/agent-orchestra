@@ -103,7 +103,7 @@ When adding skills:
 
 This repo is distributed as a VS Code agent plugin (VS Code 1.110+). When you add or change agents, skills, or commands (prompt files), those changes are automatically distributed to plugin users when they update. Instruction files, hooks, and repository templates are **not** distributed via the plugin.
 
-When contributing new skills, the skill will appear in the plugin `plugin.json` — update `.github/plugin/plugin.json` to add the new skill path to the `"skills"` array. Also bump the `"version"` field in both `.github/plugin/plugin.json` and `.github/plugin/marketplace.json` to match the current project version shown in the README badge whenever you publish a new release.
+When contributing new skills, the skill will appear in the plugin `plugin.json` — update `.github/plugin/plugin.json` to add the new skill path to the `"skills"` array. To bump the version across all files consistently when publishing a new release, run: `pwsh .github/scripts/bump-version.ps1 -Version X.Y.Z` (replacing `X.Y.Z` with the new version).
 
 ### Documentation
 

@@ -64,15 +64,16 @@ Get-ChildItem .copilot-tracking -Recurse -File |
 
 ### 3. Version Badge Updates (If Applicable)
 
-**Action**: If a version badge in `README.md` (or equivalent) needs updating, use a targeted line edit — **never** the GitHub file API.
+**Action**: Use the bump-version script to update version strings consistently across all files in one invocation:
 
-```bash
-# CORRECT: targeted replace + git commit
-# Use replace_string_in_file tool to change only the badge line, then:
-git add README.md
-git commit -m "chore: bump version badge to vX.Y.Z"
-git push
+```powershell
+pwsh .github/scripts/bump-version.ps1 -Version X.Y.Z -DryRun  # preview first
+pwsh .github/scripts/bump-version.ps1 -Version X.Y.Z           # apply
 ```
+
+The script updates `plugin.json`, `marketplace.json` (2 occurrences), and `README.md` (badge line) — 4 occurrences total. It validates pre-bump consistency and exits with an error if any file has drifted.
+
+**Plugin-only users** (scripts not distributed via plugin): If you're using this workflow as a plugin install without cloning, use targeted `replace_string_in_file` edits for each file individually, then commit and push.
 
 **WRONG** (do not use):
 
@@ -82,7 +83,7 @@ git push
 # Using it with partial content silently truncates the rest of the file.
 ```
 
-**Rule**: `mcp_github_create_or_update_file` is only safe for **new files**. For any edit to an existing file, use `replace_string_in_file` + `git commit` + `git push`.
+**Rule**: `mcp_github_create_or_update_file` is only safe for **new files**. For any edit to an existing file, use the bump script (cloned repo) or `replace_string_in_file` + `git commit` + `git push` (plugin-only).
 
 ### 4. Tag Releases (If Applicable)
 
@@ -176,7 +177,7 @@ Before considering work fully complete, verify:
 - [ ] No merge conflicts or issues
 - [ ] Tracking files moved to `.copilot-tracking-archive/{year}/{month}/issue-{ID}/` (local only — do not commit)
 - [ ] Documentation is current and accurate
-- [ ] Version badge updated (if version bumped) via `replace_string_in_file` + git — not GitHub file API
+- [ ] Version badge updated (if version bumped) via bump script (`pwsh .github/scripts/bump-version.ps1 -Version X.Y.Z`); plugin-only installs: `replace_string_in_file` + git — not GitHub file API
 - [ ] Release tagged (if applicable) via `git tag` + `git push origin <tag>`
 - [ ] GitHub release created with release notes
 - [ ] Branches cleaned up
