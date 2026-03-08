@@ -252,6 +252,8 @@ When delegating to subagents, instruct them to use the relevant skill(s):
 | `parallel-execution`             | Applying build-test orchestration protocol in parallel/serial lanes       |
 | `property-based-testing`         | Applying incremental PBT rollout policy and constraints                   |
 
+<!-- Keep in sync: when adding or removing a delegation skill in .github/skills/, update this table (delegation-scoped: only skills Code-Conductor instructs subagents to use). Always also update Process-Review's Skill Mapping Reference table (all-skills scope). -->
+
 Include in prompt: _"Use the `{skill-name}` skill (`.github/skills/{skill-name}/SKILL.md`) to guide your work."_
 
 **Skill-specific instructions**:

@@ -428,7 +428,7 @@ You MUST maintain focused research scope:
 
 **When researching domain-specific business rules:**
 
-- Load the project's domain-reference skill (if available) for canonical rules and terminology
+- Load relevant skills from `.github/skills/` for project-specific domain context (if available)
 
 **When exploring design options or unclear requirements:**
 
