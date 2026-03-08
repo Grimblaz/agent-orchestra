@@ -110,7 +110,7 @@ Quick checklist before declaring mode for a step:
    - **If no plan exists**: Escalate via `#tool:vscode/askQuestions` to request plan path/options (with a recommended option). Do not proceed without a plan.
 
 2. **Determine Resume Point & Validate Plan**:
-   - Check plan/progress artifacts and branch state to determine completed steps. Resume from the first incomplete step.
+   - Scan the session memory plan file for title lines not ending in `— ✅ DONE` — this is the primary resume mechanism. Resume from the first such incomplete step. If annotations are absent (e.g., first session reset after recovery from GitHub comment), fall back to branch-state inference to determine completed steps.
    - **Reality check**: Before resuming, verify the plan still matches the codebase. If interfaces moved, files were renamed, or assumptions no longer hold, adapt the plan rather than executing steps that won't land correctly.
    - **Migration-type plan check**: If the issue is migration-type (pattern replacement, rename/move, API migration), verify that Step 1 of the plan is an exhaustive repo scan. If the scan step is absent, insert it before any implementation step and re-validate scope.
 
@@ -125,6 +125,7 @@ Quick checklist before declaring mode for a step:
    - **Per-step refactor**: After GREEN, clean up code introduced in that step (extract helpers, reduce duplication, simplify conditionals) — distinct from the dedicated Refactor-Specialist pass
    - **Incremental validation**: Run project validation commands (see `.github/copilot-instructions.md`), then the project test command (for example `npm test` when applicable)
    - If specialist does a task outside their responsibility, retry with clearer instructions (max 2 retries)
+   - **Progress checkpoint**: After all quality checks pass (validation + scope check), update the plan in session memory — use `vscode/memory str_replace` to append exactly `— ✅ DONE` to the step's title line in `/memories/session/plan-issue-{ID}.md`. If the session memory plan file doesn't exist (plan was loaded from a GitHub issue comment), first use `vscode/memory create` to write the full plan content, then apply the annotation.
 
 4. **Create PR (MANDATORY, review-ready gate)**: After all steps complete (including documentation):
    - **End-to-end check**: Does this PR actually resolve the issue? Not "all steps executed" but "the feature works." Review the full diff against the issue's acceptance criteria.
@@ -165,6 +166,8 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 | Code review (read-only)                                                                                              | review, risks, quality, critique       | Code-Critic          |
 | Categorize review feedback (read-only)                                                                               | judge, disposition, rebuttal           | Code-Review-Response |
 | Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic  | Process-Review       |
+
+> **native Explore vs Research-Agent**: Use the native Explore subagent for lightweight read-only fact-finding (runs on a fast model in a short-lived context — the returned summary is typically smaller than running equivalent tool calls inline). Use Research-Agent when analysis is deep/multi-file and the result needs to be persisted to a research document for future reference. When in doubt: Explore for discovery, Research-Agent for output that must survive compaction.
 
 ## Review Reconciliation Loop (Mandatory)
 
@@ -458,9 +461,19 @@ All terminal execution must be non-interactive and automation-safe:
 
 ## Context Management for Long Sessions
 
-For long orchestration sessions spanning many implementation steps, if the context window is getting full, tell the user: "Type `/compact` in the chat to reclaim context window space."
+VS Code 1.110+ auto-compacts conversation context automatically when the context window fills. This can happen silently mid-orchestration — do not wait for the user to notice.
 
-**What survives compaction**: Session memory (`/memories/session/`) notes survive compaction. If the plan was persisted as a GitHub issue comment, it is also accessible after compaction.
+**Context window indicator**: When approaching capacity (the context window indicator in the chat UI shows this to you or the user), proactively compact at a phase boundary rather than letting auto-compaction interrupt mid-step.
+
+**What survives compaction**: Session memory (`/memories/session/`) notes survive compaction automatically. If the plan was persisted as a GitHub issue comment, it is also accessible after compaction.
+
+**Custom `/compact` instructions**: When recommending compaction, generate the command with actual values from the current context — do not use a generic reminder. Fill in this template with real values:
+
+```
+/compact focus on: issue #[ID], step [N] of [M] complete ([brief outcome per step]), branch [branch-name], design intent: [key design intent], open items: [unresolved decisions or blockers]
+```
+
+For plans with many completed steps, summarize in 3–5 words per step or list step numbers only (e.g., `steps 1-4: done, step 5: in progress`).
 
 **When to compact**: After completing a major phase (e.g., after all implementation steps complete and before starting the review cycle).
 

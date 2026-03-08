@@ -169,6 +169,18 @@ After saving to session memory, immediately use #tool:vscode/askQuestions to ask
 - **Yes**: Post the plan as a GitHub issue comment using the MCP `mcp_github_add_issue_comment` tool, with `<!-- plan-issue-{ID} -->` as the first line of the body. Then post a second GitHub issue comment using `mcp_github_add_issue_comment`, with `<!-- design-issue-{ID} -->` as the first line of the body, followed by the full issue body content, followed by `---\n**Source**: Snapshot of issue #{ID} body at plan creation. Design changes require a new plan.` as the closing line. Recommended for cross-session work or cloud agent handoff. Single "Yes" creates both comments — no second prompt.
   </workflow>
 
+## Context Management
+
+For long or complex planning sessions, proactively manage context before auto-compaction silently degrades orchestration state.
+
+**When to suggest compaction**: After completing a long discovery phase (multiple file reads, research subagent calls) and before drafting the plan — this preserves the research outcomes while freeing space for plan generation.
+
+**Custom `/compact` instructions**: Use this template (fill in actual values from the planning session):
+
+```
+/compact focus on: decisions: [list key decisions made], rejected: [alternatives + why each was not chosen], AC: [brief list], questions: [list], CE Gate: [assessment]
+```
+
 <plan_style_guide>
 
 ```markdown

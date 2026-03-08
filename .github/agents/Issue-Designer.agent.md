@@ -108,6 +108,7 @@ For each design decision:
 1. **Research**: Search skills, `Documents/Research/`, `Documents/Design/`, `Documents/Decisions/`, and external patterns
 2. **Present options**: 2-3 options with explicit pros AND cons for each. Label one "Recommended" with rationale grounded in project goals and constraints.
 3. **Ask for decision**: Use `#tool:vscode/askQuestions` with a concise prompt summarizing the options (e.g., "Option A (recommended): X. Option B: Y. Option C: Z. Which do you prefer?"). The detailed pros/cons/rationale MUST be presented in the conversation BEFORE the question — the tool prompt is a summary, not the full analysis. **Hard rule**: Never present options in text and then end your turn. Ending a turn with options but without immediately calling `#tool:vscode/askQuestions` wastes a premium request.
+   - **`/fork` for significant trade-offs**: When an alternative option has substantial trade-offs worth exploring in depth, and exploring it in-thread would pollute the main design path, suggest `/fork` to branch the conversation. Example: "I can explore Option B in depth in a parallel thread — type `/fork` and describe what you want to explore there. We'll continue refining Option A here." Note: fork findings don't return automatically — share key discoveries back in this thread before finalizing.
 4. **Record**: Note the decision for later documentation.
 
 Repeat until all design questions are resolved.
@@ -164,9 +165,11 @@ After user confirms decisions (not during exploration):
 After design decisions are confirmed with the user, call Code-Critic as a subagent to stress-test the design before committing it to the issue body:
 
 **Prompt to use**:
+
 > "Review this design for feasibility risks, scope gaps, and integration conflicts. Use design review perspectives. Here is the design: {paste the key design decisions, acceptance criteria, scope, and any constraints confirmed in this session}"
 
 **What to do with the findings**:
+
 - Code-Critic will return a challenge report with 3 perspectives: Feasibility & Risk, Scope & Completeness, Integration & Impact.
 - Review each challenge. For each one, decide: incorporate (refine the design), dismiss with rationale, or escalate for user decision.
 - Incorporate or note your disposition for each challenge **before** updating the issue body.
@@ -187,6 +190,7 @@ Update the GitHub issue body with **full design details**:
 - Integration/E2E test scenarios identified
 - Testing scope decision with rationale
 - Full design content (this is the durable record — no separate design doc file is created during design)
+- Rejected alternatives with brief rationale (why each was not chosen) — critical for future maintainers and post-compaction recovery
 
 Add comment: "Design Phase Complete — ready for planning"
 
@@ -197,6 +201,7 @@ Add comment: "Design Phase Complete — ready for planning"
 Before ending a design session, verify ALL of the following:
 
 - [ ] **GitHub issue updated**: The associated issue body has been updated with full design details, decisions, and acceptance criteria (skip only if no associated issue exists)
+- [ ] **Rejected alternatives documented**: Issue body includes rejected alternatives with brief rationale (why each was not chosen)
 - [ ] **Completion comment posted**: A comment has been added to the issue: "Design Phase Complete — ready for planning" (skip only if no associated issue exists)
 
 If any of these are incomplete, **do not end the session**. Complete them first, then confirm completion to the user.

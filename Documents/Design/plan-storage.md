@@ -144,3 +144,48 @@ Design should be settled before implementation begins. Mid-implementation design
 - `.github/agents/Refactor-Specialist.agent.md` — Plan Tracking: design cache read
 - `.github/agents/Doc-Keeper.agent.md` — Plan Tracking: design cache read
 - `.github/agents/Code-Critic.agent.md` — Plan Tracking: design cache read
+
+---
+
+## VS Code 1.110 Compaction Resilience
+
+VS Code 1.110 introduced **automatic context compaction** — when the context window fills, VS Code compacts conversation history automatically without user intervention. This is distinct from the manual `/compact` command. The interaction with the plan and design cache strategy is documented here.
+
+### How 1.110 Auto-Compaction Interacts with the Storage Strategy
+
+The session memory strategy (primary plan store at `/memories/session/plan-issue-{ID}.md`, design cache at `/memories/session/design-issue-{ID}.md`) was designed specifically to survive compaction. VS Code 1.110 confirms this design remains correct:
+
+| Event | Plan/design cache outcome |
+|-------|--------------------------|
+| Manual `/compact` (user-initiated) | Session memory files survive — accessible immediately after compaction |
+| Auto-compaction (VS Code 1.110+ trigger) | Session memory files survive — same durable store, same outcome |
+| Session end (conversation closed) | Session memory cleared — plan/design cache lost |
+| Cross-session or cloud agent handoff | Requires GitHub issue comment persistence (opt-in "Yes" at plan creation) |
+
+### Progress Checkpointing (1.110 Addition)
+
+Code-Conductor now maintains progress annotations in the session memory plan file: each completed step's title line is annotated with `— ✅ DONE`. This ensures:
+
+1. **Deterministic post-compaction resume**: Code-Conductor can identify the first incomplete step by scanning for title lines not ending in `— ✅ DONE`, without re-deriving progress from git state.
+2. **Cross-session recovery**: If the plan was persisted as a GitHub issue comment, Code-Conductor recreates the session memory plan file from the comment on session reset, then uses branch-state inference to determine the resume point (the persisted comment does not contain `— ✅ DONE` annotations; those exist only in the live session memory file).
+
+**Implementation**: Code-Conductor's Step 3 execution loop uses `vscode/memory str_replace` to append exactly `— ✅ DONE` to the completed step's title line. This is atomic (no risk of double annotation), preserves all other step content, and produces a scannable text marker.
+
+### Custom `/compact` Instructions
+
+VS Code 1.110 allows agents to supply custom instructions to the compaction summarizer via `/compact focus on: ...`. This feature complements session memory by ensuring the auto-generated summary retains orchestration-critical context (issue ID, step progress, design intent, open decisions) alongside the durable plan file.
+
+- **Code-Conductor** template: preserves issue number, step progress, branch name, design intent summary, and open blockers (see `.github/agents/Code-Conductor.agent.md`)
+- **Issue-Planner** template: preserves design decisions, rejected alternatives with rationale, acceptance criteria, open questions, CE Gate assessment (see `.github/agents/Issue-Planner.agent.md`)
+
+These templates use bracket-token substitution so each invocation carries session-specific values, not static categories.
+
+### Design Validation
+
+The existing storage strategy (session memory primary, GitHub issue comment secondary, issue body as source of truth) remains sound under 1.110's auto-compaction model. The 1.110 addition improves the strategy in three ways:
+
+1. Proactive compaction at phase boundaries (reduces probability of mid-step auto-compaction)
+2. Progress annotation for deterministic step tracking after compaction
+3. Custom compaction instructions to preserve orchestration context across compaction events
+
+No changes to the storage architecture, lookup chain, or fallback logic were required.
