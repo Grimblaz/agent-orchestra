@@ -106,7 +106,7 @@ The design cache stores the full design content from the GitHub issue body in a 
 {Full issue body content verbatim}
 
 ---
-**Source**: Full design from issue #{ID} body. Re-read issue for any updates.
+**Source**: Snapshot of issue #{ID} body at plan creation. Design changes require a new plan.
 ```
 
 The cache stores the complete issue body content — no curation or summarization. Curation risks filtering out exactly the details that matter during implementation.
