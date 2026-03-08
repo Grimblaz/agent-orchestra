@@ -100,6 +100,8 @@ Examples of integration gaps to FIX NOW (not defer):
 
 4. **Report findings** even if not acting on all of them
 
+5. **Symmetric fix check (post-fix, before closing)**: When applying a fix to a recurring pattern (validation commands, grep exclusions, path references, agent instruction fragments), grep the full repo for the same pattern. Fix all symmetric occurrences in the same PR if the transformation is mechanical (same change, no new design decisions needed). Create a follow-up issue only if the fix in other files requires different logic or design judgment.
+
 ## Refactoring Checklist
 
 For each file modified in the PR, evaluate:

@@ -610,22 +610,29 @@ When reviewing a completed workflow, audit skill usage:
 
 1. **List agents called**: Which agents were invoked during the workflow?
 2. **List skills instructed**: Which skills were explicitly mentioned in delegation prompts?
-3. **Cross-reference with mapping**: Per Code-Conductor's skill mapping table, which skills SHOULD have been used?
+3. **Cross-reference with mapping**: Per the Skill Mapping Reference table below, which skills SHOULD have been used?
 4. **Identify gaps**: Any applicable skills that weren't instructed?
 
-### Skill Mapping Reference (from Code-Conductor)
+### Skill Mapping Reference
 
-| Skill                            | When Applicable                          |
-| -------------------------------- | ---------------------------------------- |
-| `domain-reference`               | Domain rules, terminology research       |
-| `brainstorming`                  | Design exploration, unclear requirements |
-| `frontend-design`                | UI components, styling                   |
-| `software-architecture`          | Layer placement, design patterns         |
-| `test-driven-development`        | Writing tests, TDD workflow              |
-| `ui-testing`                     | Component tests, Testing Library         |
-| `systematic-debugging`           | Bug investigation, test failures         |
-| `verification-before-completion` | Pre-commit checks, quality gates         |
-| `webapp-testing`                 | E2E tests, Playwright                    |
+| Skill                            | When Applicable                                  |
+| -------------------------------- | ------------------------------------------------ |
+| `brainstorming`                  | Design exploration, unclear requirements         |
+| `browser-canvas-testing`         | Canvas game browser interaction                  |
+| `code-review-intake`             | GitHub review intake, ledger-based judgment      |
+| `frontend-design`                | UI components, styling                           |
+| `parallel-execution`             | Parallel/serial build-test orchestration         |
+| `post-pr-review`                 | Post-merge cleanup, archiving, releases          |
+| `property-based-testing`         | Incremental PBT rollout                          |
+| `skill-creator`                  | Creating or updating skills                      |
+| `software-architecture`          | Layer placement, design patterns                 |
+| `systematic-debugging`           | Bug investigation, test failures                 |
+| `test-driven-development`        | Writing tests, TDD workflow                      |
+| `ui-testing`                     | Component tests, Testing Library                 |
+| `verification-before-completion` | Pre-commit checks, quality gates                 |
+| `webapp-testing`                 | E2E tests, Playwright                            |
+
+<!-- Keep in sync: when adding or removing any skill in .github/skills/, update this table (all-skills scope). Update Code-Conductor's Skill Mapping table only if the skill is a delegation target (a skill Code-Conductor instructs a subagent to use). -->
 
 ### Output Format
 
@@ -634,6 +641,6 @@ When reviewing a completed workflow, audit skill usage:
 
 | Phase | Agent          | Skills Instructed         | Should Have Used          | Gap? |
 | ----- | -------------- | ------------------------- | ------------------------- | ---- |
-| 1     | Research-Agent | None                      | `domain-reference`        | ⚠️   |
+| 1     | Research-Agent | None                      | `brainstorming`           | ⚠️   |
 | 2     | Test-Writer    | `test-driven-development` | `test-driven-development` | ✅   |
 ```
