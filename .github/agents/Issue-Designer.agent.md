@@ -165,9 +165,11 @@ After user confirms decisions (not during exploration):
 After design decisions are confirmed with the user, call Code-Critic as a subagent to stress-test the design before committing it to the issue body:
 
 **Prompt to use**:
+
 > "Review this design for feasibility risks, scope gaps, and integration conflicts. Use design review perspectives. Here is the design: {paste the key design decisions, acceptance criteria, scope, and any constraints confirmed in this session}"
 
 **What to do with the findings**:
+
 - Code-Critic will return a challenge report with 3 perspectives: Feasibility & Risk, Scope & Completeness, Integration & Impact.
 - Review each challenge. For each one, decide: incorporate (refine the design), dismiss with rationale, or escalate for user decision.
 - Incorporate or note your disposition for each challenge **before** updating the issue body.

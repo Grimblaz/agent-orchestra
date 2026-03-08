@@ -167,7 +167,7 @@ The session memory strategy (primary plan store at `/memories/session/plan-issue
 Code-Conductor now maintains progress annotations in the session memory plan file: each completed step's title line is annotated with `— ✅ DONE`. This ensures:
 
 1. **Deterministic post-compaction resume**: Code-Conductor can identify the first incomplete step by scanning for title lines not ending in `— ✅ DONE`, without re-deriving progress from git state.
-2. **Cross-session recovery**: If the plan was persisted as a GitHub issue comment, Code-Conductor recreates the session memory plan file from the comment on session reset, then reads the annotations.
+2. **Cross-session recovery**: If the plan was persisted as a GitHub issue comment, Code-Conductor recreates the session memory plan file from the comment on session reset, then uses branch-state inference to determine the resume point (the persisted comment does not contain `— ✅ DONE` annotations; those exist only in the live session memory file).
 
 **Implementation**: Code-Conductor's Step 3 execution loop uses `vscode/memory str_replace` to append exactly `— ✅ DONE` to the completed step's title line. This is atomic (no risk of double annotation), preserves all other step content, and produces a scannable text marker.
 
@@ -175,8 +175,8 @@ Code-Conductor now maintains progress annotations in the session memory plan fil
 
 VS Code 1.110 allows agents to supply custom instructions to the compaction summarizer via `/compact focus on: ...`. This feature complements session memory by ensuring the auto-generated summary retains orchestration-critical context (issue ID, step progress, design intent, open decisions) alongside the durable plan file.
 
-- **Code-Conductor** template: preserves issue number, step progress, branch name, design intent summary, and open blockers
-- **Issue-Planner** template: preserves design decisions, rejected alternatives with rationale, acceptance criteria, open questions, CE Gate assessment
+- **Code-Conductor** template: preserves issue number, step progress, branch name, design intent summary, and open blockers (see `.github/agents/Code-Conductor.agent.md`)
+- **Issue-Planner** template: preserves design decisions, rejected alternatives with rationale, acceptance criteria, open questions, CE Gate assessment (see `.github/agents/Issue-Planner.agent.md`)
 
 These templates use bracket-token substitution so each invocation carries session-specific values, not static categories.
 

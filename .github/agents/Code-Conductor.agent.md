@@ -110,7 +110,7 @@ Quick checklist before declaring mode for a step:
    - **If no plan exists**: Escalate via `#tool:vscode/askQuestions` to request plan path/options (with a recommended option). Do not proceed without a plan.
 
 2. **Determine Resume Point & Validate Plan**:
-   - Check plan/progress artifacts and branch state to determine completed steps. Resume from the first incomplete step.
+   - Scan the session memory plan file for title lines not ending in `— ✅ DONE` — this is the primary resume mechanism. Resume from the first such incomplete step. If annotations are absent (e.g., first session reset after recovery from GitHub comment), fall back to branch-state inference to determine completed steps.
    - **Reality check**: Before resuming, verify the plan still matches the codebase. If interfaces moved, files were renamed, or assumptions no longer hold, adapt the plan rather than executing steps that won't land correctly.
    - **Migration-type plan check**: If the issue is migration-type (pattern replacement, rename/move, API migration), verify that Step 1 of the plan is an exhaustive repo scan. If the scan step is absent, insert it before any implementation step and re-validate scope.
 
