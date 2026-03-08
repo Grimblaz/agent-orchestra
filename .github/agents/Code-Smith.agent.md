@@ -133,7 +133,7 @@ Your job is NOT just "make tests pass" — you must ensure the solution meets re
 1. **New components are wired in**: Search for imports in production code (not just tests). If you create `NewProcessor.ts`, verify it's imported and used somewhere.
 2. **Integration points connected**: If component A should call component B, verify the call exists in production code.
 3. **Design requirements met**: Review the design doc/issue — does your implementation satisfy all acceptance criteria?
-4. **Serialized output correctness**: When the change edits, creates, or produces a JSON file (including JSON embedded via string interpolation in scripts), verify the output is parseable before handing off. Prefer structured serializers over manual quoting — e.g., `ConvertTo-Json` in PowerShell, `json.dumps()` in Python. Validate with `ConvertFrom-Json` (PowerShell) or the language's native JSON parser.
+4. **Serialized output correctness**: When the change edits, creates, or produces a JSON file (including JSON embedded via string interpolation in scripts), verify the output is parseable before handing off. Prefer structured serializers over manual quoting — e.g., `JSON.stringify()` in TypeScript/JavaScript, `ConvertTo-Json` in PowerShell, or `json.dumps()` in Python. Validate with `JSON.parse()` (TypeScript/JavaScript), `ConvertFrom-Json` (PowerShell), or the language's native JSON parser.
 
 **If you find gaps not covered by tests**:
 
