@@ -112,6 +112,7 @@ When the prompt contains the marker **"Use design review perspectives"**, activa
 ### When to Use
 
 Design Review Mode is for reviewing designs and implementation plans — not code diffs. Callers should include the "Use design review perspectives" marker when the input is:
+
 - A feature design (decisions, scope, acceptance criteria, constraints)
 - An implementation plan (steps, Requirement Contracts, assumptions)
 
@@ -169,6 +170,7 @@ Return a **Design Challenge Report** with this structure:
 ```
 
 Each finding uses the standard format:
+
 - **[Issue/Concern/Nit]** {description} — {file or design element cited} — Failure mode: {what breaks} — Severity: {critical/high/medium/low} — Confidence: {high/medium/low}
 
 ### Non-Blocking Constraint
@@ -261,6 +263,7 @@ In GitHub Review Intake Mode, convert categories into the improvement decision:
 **Key Rules**:
 
 - Read plan FIRST before any review work
+- Read design context from `/memories/session/design-issue-{ID}.md` via the `vscode/memory` tool if the file exists — this provides full design requirements (decisions, acceptance criteria, constraints, CE Gate scenarios). Derive `{ID}` from the current branch name pattern `feature/issue-{N}-*` or from the plan's `issue_id` frontmatter.
 - Focus on code quality analysis and evidence-based feedback
 - Respect phase boundaries (STOP if next phase requires different agent)
 - Provide actionable feedback (cite specific files/lines)

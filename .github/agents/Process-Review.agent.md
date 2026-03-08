@@ -63,6 +63,7 @@ A meta-cognitive agent that analyzes workflow execution to identify deviations f
 - ❌ Configuration files (`package.json`, `tsconfig.json`, etc.)
 - ❌ Changes files (`.copilot-tracking/changes/*.md`)
 - ❌ Session memory plan files (`/memories/session/plan-issue-*.md`)
+- ❌ Session memory design cache files (`/memories/session/design-issue-*.md`)
 
 **Why**: Process review identifies issues and suggests improvements. Implementation is delegated to appropriate agents (doc-keeper for documentation, code-smith for code, etc.) via handoffs.
 
