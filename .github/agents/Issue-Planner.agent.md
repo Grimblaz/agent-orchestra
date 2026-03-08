@@ -112,9 +112,11 @@ The plan should reflect:
 Before presenting the plan for approval, call Code-Critic as a subagent to stress-test it:
 
 **Prompt to use**:
+
 > "Stress-test this implementation plan for feasibility risks, scope gaps, and integration conflicts. Use design review perspectives. Here is the plan: {paste the full plan content}"
 
 **What to do with the findings**:
+
 - Code-Critic returns a challenge report with 3 perspectives: Feasibility & Risk, Scope & Completeness, Integration & Impact.
 - For each challenge: decide to incorporate it (revise the plan), dismiss it with rationale, or escalate it for user decision. **If escalated**, use #tool:vscode/askQuestions to present the flagged item(s) and obtain a response before presenting the plan draft.
 - Revise the plan steps as needed to address accepted challenges.
@@ -159,11 +161,13 @@ ce_gate: {true|false}
 ---
 ```
 
+After creating the plan file, immediately create a design cache file: use `mcp_github_issue_read` with `method: get` to read the full issue body, then use the `vscode/memory` tool (`create` command) to write the full issue body content to `/memories/session/design-issue-{id}.md`. Wrap with a header line `<!-- design-issue-{id} -->` and a footer `---\n**Source**: Full design from issue #{id} body. Re-read issue for any updates.`. If the file already exists (refinement cycle), use `delete` followed by `create` to replace it.
+
 After saving to session memory, immediately use #tool:vscode/askQuestions to ask: **"Persist this plan as a GitHub issue comment?"** (default: No — session memory only)
 
 - **No (default)**: Session memory only. Plan is available for the current conversation. Session memory is cleared when this conversation ends — choose **Yes** for multi-session work.
-- **Yes**: Post the plan as a GitHub issue comment using the MCP `mcp_github_add_issue_comment` tool, with `<!-- plan-issue-{id} -->` as the first line of the body. Recommended for cross-session work or cloud agent handoff.
-</workflow>
+- **Yes**: Post the plan as a GitHub issue comment using the MCP `mcp_github_add_issue_comment` tool, with `<!-- plan-issue-{id} -->` as the first line of the body. Then post a second GitHub issue comment using `mcp_github_add_issue_comment`, with `<!-- design-issue-{id} -->` as the first line of the body, followed by the full issue body content, followed by `---\n**Source**: Full design from issue #{id} body. Re-read issue for any updates.` as the closing line. Recommended for cross-session work or cloud agent handoff. Single "Yes" creates both comments — no second prompt.
+  </workflow>
 
 <plan_style_guide>
 

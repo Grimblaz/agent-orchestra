@@ -40,6 +40,7 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 - Design documents go in `Documents/Design/`, decision records in `Documents/Decisions/`
 - No auto-commit behavior in any agent — users commit manually
 - Plans are saved to session memory (`/memories/session/plan-issue-{ID}.md`), optionally persisted as GitHub issue comments
+- Design context is cached in session memory (`/memories/session/design-issue-{ID}.md`), created by Issue-Planner alongside the plan — full design content from the issue body, surviving conversation compaction; optionally persisted as a GitHub issue comment with `<!-- design-issue-{ID} -->` marker
 - Design content goes in the GitHub issue body (Issue-Designer outputs there)
 - `Documents/Design/` files use domain-based naming (`{domain-slug}.md`) and are committed with the implementation PR by Code-Conductor (delegated to Doc-Keeper)
 - CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience and design-intent verification

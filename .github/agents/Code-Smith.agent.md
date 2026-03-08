@@ -61,6 +61,7 @@ A focused implementation mode that executes code changes following approved plan
 **Key Rules**:
 
 - Read plan FIRST before any work
+- Read design context from `/memories/session/design-issue-{ID}.md` via the `vscode/memory` tool if the file exists — this provides full design requirements (decisions, acceptance criteria, constraints, CE Gate scenarios). Derive `{ID}` from the current branch name pattern `feature/issue-{N}-*` or from the plan's `issue_id` frontmatter.
 - Focus on implementation tasks specified in current phase
 - Respect phase boundaries (STOP if next phase requires different agent)
 - Only implement code required by existing tests (no speculative features)

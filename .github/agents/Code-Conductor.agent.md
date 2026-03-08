@@ -104,7 +104,7 @@ Quick checklist before declaring mode for a step:
 
 1. **Locate Plan & Context**:
    - Find plan using this lookup chain: (1) session memory — `view /memories/session/plan-issue-{ID}.md` via the `vscode/memory` tool; (2) GitHub issue comments — use `mcp_github_issue_read` with `method: get_comments` to find a comment containing `<!-- plan-issue-{ID} -->`; (3) escalate via `#tool:vscode/askQuestions` if neither found
-   - Read design details from the **issue body** (Issue-Designer outputs full design to the issue body)
+   - Find design context using this lookup chain: (1) session memory — `view /memories/session/design-issue-{ID}.md` via the `vscode/memory` tool; (2) GitHub issue comments — use `mcp_github_issue_read` with `method: get_comments` to find a comment containing `<!-- design-issue-{ID} -->`; (3) fall back to reading the issue body directly and create the design cache: use `mcp_github_issue_read` with `method: get` to read the issue body, then use `vscode/memory` `create` to write the full issue body content to `/memories/session/design-issue-{ID}.md`, wrapped with header `<!-- design-issue-{ID} -->` and footer `---\n**Source**: Full design from issue #{ID} body. Re-read issue for any updates.` (fallback creator role — Issue-Planner is the primary creator; Code-Conductor recreates only on session reset recovery)
    - Look for supporting docs in `Documents/Design/`, `Documents/Decisions/`, `.copilot-tracking/research/` — read whatever exists for additional context
    - Check `.github/skills/` for relevant domain expertise
    - **If no plan exists**: Escalate via `#tool:vscode/askQuestions` to request plan path/options (with a recommended option). Do not proceed without a plan.
@@ -121,6 +121,7 @@ Quick checklist before declaring mode for a step:
    - Call specialist with focused instructions for the current step only (not the entire plan)
    - **Spot-check**: Use grep_search or read_file to verify key changes
    - **Goal check**: Does this output actually advance the feature goal, or did the specialist complete the letter of the task while missing its intent? If the latter, provide corrective guidance and re-delegate.
+   - **Design alignment check** (at major phase boundaries — after all RED/GREEN steps complete, before refactoring phase, before code review): Re-read `/memories/session/design-issue-{ID}.md` via `vscode/memory` and confirm implementation aligns with acceptance criteria and key design decisions. Output: brief `✅ Design-aligned` confirmation, or `⚠️ Design drift detected: {description}` with corrective action taken before proceeding (adapt implementation, or flag for user decision via `#tool:vscode/askQuestions`). Note: this is distinct from the CE Gate — this check verifies design conformance mid-implementation; the CE Gate verifies customer experience post-implementation.
    - **Per-step refactor**: After GREEN, clean up code introduced in that step (extract helpers, reduce duplication, simplify conditionals) — distinct from the dedicated Refactor-Specialist pass
    - **Incremental validation**: Run project validation commands (see `.github/copilot-instructions.md`), then the project test command (for example `npm test` when applicable)
    - If specialist does a task outside their responsibility, retry with clearer instructions (max 2 retries)
@@ -302,7 +303,7 @@ Read the plan's `[CE GATE]` step to identify the customer surface. If no `[CE GA
 ### Scenario Exercise Protocol
 
 1. Read the `[CE GATE]` scenarios from the plan step (natural language descriptions)
-2. Establish the **design intent reference**: read the `Design Intent` field from the plan's `[CE GATE]` step (if present); otherwise read the original issue body and design details. Understand what the change was supposed to accomplish for the user — not just what it does technically
+2. Establish the **design intent reference**: read the `Design Intent` field from the plan's `[CE GATE]` step (if present); otherwise read `/memories/session/design-issue-{ID}.md` via `vscode/memory` (falling back to the issue body if the cache is absent). Understand what the change was supposed to accomplish for the user — not just what it does technically
 3. Exercise each scenario using the appropriate tool
 4. Apply judgment on two dimensions:
    - **Functional**: does each scenario behave as expected from a customer perspective?
@@ -348,7 +349,7 @@ When a functional defect or intent deficiency is found:
 - Re-exercise the failing scenario after fix
 - Loop budget: **2 fix-revalidate cycles maximum**, then escalate via `#tool:vscode/askQuestions` with options: "Retry with different approach", "Skip CE Gate with documented risk", "Abort and investigate manually"
 
-**Intent deficiencies (partial or weak intent match)** also route through Track 1: route to Code-Smith with the specific rubric criterion violated and the design intent reference from the `[CE GATE]` step's `Design Intent` field (falling back to the issue body if that field is missing). When the deficiency requires a new design decision before a fix can be defined (e.g., the core interaction model contradicts the design intent rather than merely being under-polished), Code-Conductor may instead create a follow-up issue with rationale — this is a judgment call, not automatic; the default is to fix in-PR. When taking the follow-up issue path, still invoke Track 2 before PR creation and log the outcome in the PR body.
+**Intent deficiencies (partial or weak intent match)** also route through Track 1: route to Code-Smith with the specific rubric criterion violated and the design intent reference from the `[CE GATE]` step's `Design Intent` field (falling back to `/memories/session/design-issue-{ID}.md`, then to the issue body if the cache is also absent). When the deficiency requires a new design decision before a fix can be defined (e.g., the core interaction model contradicts the design intent rather than merely being under-polished), Code-Conductor may instead create a follow-up issue with rationale — this is a judgment call, not automatic; the default is to fix in-PR. When taking the follow-up issue path, still invoke Track 2 before PR creation and log the outcome in the PR body.
 
 **Track 2 — Systemic analysis (always, after Track 1 fix is complete or when taking the follow-up-issue path):**
 

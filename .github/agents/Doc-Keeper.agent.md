@@ -33,7 +33,12 @@ Documentation specialist focused on keeping project documentation accurate, comp
 
 ## Plan Tracking
 
-**Key Rules**: Read plan FIRST, focus on documentation accuracy and deletion of obsolete content, respect phase boundaries.
+**Key Rules**:
+
+- Read plan FIRST before any documentation work
+- Read design context from `/memories/session/design-issue-{ID}.md` via the `vscode/memory` tool if the file exists — this provides full design requirements (decisions, acceptance criteria, constraints, CE Gate scenarios). Derive `{ID}` from the current branch name pattern `feature/issue-{N}-*` or from the plan's `issue_id` frontmatter.
+- Focus on documentation accuracy and deletion of obsolete content
+- Respect phase boundaries (STOP if next phase requires different agent)
 
 ## Core Responsibilities
 
