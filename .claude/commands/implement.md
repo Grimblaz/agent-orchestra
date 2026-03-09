@@ -70,9 +70,9 @@ Address any findings before proceeding.
 If the plan includes `ce_gate: true` in its frontmatter or a `[CE GATE]` step:
 - Identify the customer surface from the plan (Web UI, REST/GraphQL, CLI, SDK, Batch)
 - Exercise each scenario described in the `[CE GATE]` step and verify expected behavior
-- Evaluate intent match: does the implementation achieve the design intent captured in the plan's `[CE GATE]` step `Design Intent` field (falling back to the issue body only if that field is missing)? Rate as `strong` / `partial` / `weak` and emit the appropriate marker (`✅ CE Gate passed — intent match: {strong|partial|weak}`); if a defect was found and fixed within the loop budget, emit `✅ CE Gate passed after fix — intent match: {strong|partial|weak}` instead
+- Evaluate intent match using Code-Critic's CE prosecution perspectives (`"Use CE review perspectives"` — Functional, Intent, Error States) as a self-review checklist against the scenario results. Does the implementation achieve the design intent captured in the plan's `[CE GATE]` step `Design Intent` field (falling back to the issue body only if that field is missing)? Rate as `strong` / `partial` / `weak` and emit the appropriate marker (`✅ CE Gate passed — intent match: {strong|partial|weak}`); if a defect was found and fixed within the loop budget, emit `✅ CE Gate passed after fix — intent match: {strong|partial|weak}` instead. Note: in the multi-agent Copilot workflow, Code-Conductor invokes Code-Critic as a separate agent for this step; the CE perspectives checklist above is the single-agent equivalent.
 - Present results to the user and wait for approval before proceeding
-- If a defect is found, fix it and re-run the scenario (max 2 cycles)
+- If a defect is found, fix it and re-run the scenario — apply the CE perspectives checklist again (max 2 cycles)
 
 ### 6. Document
 

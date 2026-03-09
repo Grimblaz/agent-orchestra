@@ -99,15 +99,14 @@ The plan should reflect:
 - Since we follow TDD, we should follow red-green-refactor for each step.
 - A larger refactor stage is beneficial; implementers should be encouraged to even take on larger refactors in this stage, as long as they are related to the feature being implemented. This is because it is much easier to do refactors when the context of the change is fresh in the implementer's mind, and it can help reduce technical debt in the long run.
 - Each step should end with the project's quick validation and test commands as defined in `.github/copilot-instructions.md`.
-- Code review and code review response stages should be included, with a mandatory reconciliation loop (Code-Critic → Code-Review-Response, rebuttal rounds for disputes up to loop budget).
-- Define loop budget explicitly for the reconciliation loop (Code-Critic → Code-Review-Response, rebuttal rounds): default **2 rebuttal rounds**, configurable via plan metadata key `review_loop_budget` (or environment variable `REVIEW_LOOP_BUDGET` when available).
-- Selection guideline for loop budget: use 1 for minor wording/nit disputes, 2 for normal mixed findings, and 3 only for high-complexity or high-risk architectural disputes.
+- Code review and code review response stages should be included. Use the full adversarial pipeline: 3 prosecution passes (parallel) → merge ledger → 1 defense pass → 1 judge pass (Code-Review-Response). No `review_loop_budget` is needed — the pipeline structure is fixed.
 - Deferral handling should be explicit: significant non-blocking improvements (>1 day) should be marked `DEFERRED-SIGNIFICANT` and tracked via automatically created follow-up issues.
 - Include a short post-issue process retrospective checkpoint (slowdowns, late-failing checks, one workflow guardrail improvement).
 - Changes should only be pushed to another issue if they are quite significant.
 - For migration-type issues (pattern replacement, rename/move, API migration — see migration rule in `<plan_style_guide>`), verify that Step 1 of the plan is an exhaustive repo scan before finalizing the draft.
 - All plans must include `ce_gate: {true|false}` in frontmatter (set `true` if the change has a customer-facing surface). Insert a **dedicated `[CE GATE]` step** as the final numbered step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Each `[CE GATE]` step must: identify the surface type, include a design intent reference (link to the issue body section or a brief summary of the intended user experience), list the specific scenarios to exercise — both functional (e.g., "Submit the login form with valid credentials and verify the dashboard loads") and intent (e.g., "Verify the confirmation message is specific to what was submitted, not generic") — and specify the exercise method (how Conductor should exercise each scenario, e.g., "use native browser tools to navigate to /login and submit the form", "use curl to POST /api/orders with valid payload"). These must be **first-class numbered plan steps — not sub-bullets** — so Code-Conductor encounters them as blocking checkpoints in its step iteration loop. Set `ce_gate: false` and omit the `[CE GATE]` step only when the change has no customer-facing surface; document the reason.
 - For backend/non-UI/CLI projects, the CE Gate surface is typically the API or CLI — identify the surface and scenarios accordingly.
+- Note: CE Gate execution uses the CE prosecution pipeline (Code-Critic CE prosecution → defense → judge) — do not describe Conductor's judgment in the CE Gate step; describe only the scenarios and surface.
 
 Before presenting the plan for approval, call Code-Critic as a subagent to stress-test it:
 
@@ -122,7 +121,12 @@ Before presenting the plan for approval, call Code-Critic as a subagent to stres
 - Revise the plan steps as needed to address accepted challenges.
 - After incorporating or dismissing all findings, append a **`Plan Stress-Test`** summary block at the end of the plan draft showing: challenges found, how each was addressed (incorporated / dismissed / escalated), and overall confidence assessment.
 
-**Challenges are non-blocking** — they are presented alongside the plan for user consideration. This is a single-pass review, not the 3-pass protocol used for code review.
+**Challenges are non-blocking** — they are presented alongside the plan for user consideration. This prosecution pass is single-pass (not the 3-pass parallel protocol used for code review).
+
+After incorporating or dismissing prosecution findings, complete the full pipeline:
+
+- Call Code-Critic with `"Use defense review perspectives"` and pass the prosecution findings ledger. Code-Critic will produce a Defense Report conceding, disproving, or marking each finding as insufficient-to-disprove.
+- Call Code-Review-Response (judge) with both the prosecution ledger and the Defense Report. Code-Review-Response will rule on each finding, emit a score summary, and identify any accepted items to incorporate into the plan.
 
 Present the plan as a **DRAFT**, then **IMMEDIATELY** use #tool:vscode/askQuestions to ask for approval. NEVER end your turn after presenting a draft without calling #tool:vscode/askQuestions — this wastes the user's premium requests by forcing a new turn just to say "looks good."
 

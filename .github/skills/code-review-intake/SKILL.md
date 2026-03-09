@@ -15,13 +15,13 @@ Activate this skill when the request includes any of the following trigger phras
 
 Provide a deterministic intake and judgment workflow for GitHub-originated review feedback before implementation work begins.
 
-## GitHub Review Mode
+## GitHub Review Mode (Proxy Prosecution Pipeline)
 
 1. Ingest all review items from GitHub (threads, top-level comments, review summaries).
 2. Build a finding ledger where each item maps to its GitHub comment/review ID.
-3. Call Code-Critic to evaluate ledger items only.
-4. Call Code-Review-Response to disposition the same ledger items.
-5. Run rebuttal rounds only on disputed ledger items until convergence or loop-budget escalation.
+3. **Proxy prosecution**: Call Code-Critic with `"Score and represent GitHub review"` marker. Code-Critic validates and scores each GitHub comment (critical/high→10 pts, medium→5 pts, low→1 pt). Output: scored prosecution ledger.
+4. **Defense pass**: Call Code-Critic with `"Use defense review perspectives"` marker, passing the prosecution ledger.
+5. **Judge pass**: Call Code-Review-Response with both prosecution ledger and defense report. Judge rules final and emits score summary.
 
 ## Hard Guardrail
 
@@ -57,6 +57,6 @@ Plus:
 - No unresolved evidence disputes remain.
 - User has visibility before any authority-boundary decision gate.
 
-## Loop Budget
+## Convergence
 
-Maximum 3 reconciliation rounds. If disputes remain, escalate via `vscode/askQuestions` with recommended options.
+The proxy prosecution pipeline is single-shot: prosecution → defense → judge, with no rebuttal rounds. Judge rules final on all items. Unresolved items at low judge confidence are surfaced for user scoring via GitHub issue comment (async, non-blocking).

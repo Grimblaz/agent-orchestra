@@ -135,7 +135,7 @@ Quick checklist before declaring mode for a step:
    - **Validation evidence**: run required validation commands from plan/repo instructions and capture pass results for PR body
    - `git push -u origin {branch-name}`
    - Create PR via `github-pull-request/*` tools or `gh pr create`
-   - PR body MUST include: summary, changed files, validation evidence, migration-scan result (migration-type issues only), CE Gate result, process gaps found (if any), and `Closes #{issue}`
+   - PR body MUST include: summary, changed files, validation evidence, migration-scan result (migration-type issues only), CE Gate result, adversarial review score table, process gaps found (if any), and `Closes #{issue}`
 
 5. **Report Completion**: Summarize work done, link the PR URL, and hand off to user for review
 
@@ -164,7 +164,7 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 | `*.md`, `README.*`, `CHANGELOG.*`                                                                                    | docs, guide, changelog                 | Doc-Keeper           |
 | Session memory `/memories/session/plan-issue-{ID}.md` or GitHub issue comment with `<!-- plan-issue-{ID} -->` marker | plan, acceptance criteria, sequencing  | Issue-Planner        |
 | Code review (read-only)                                                                                              | review, risks, quality, critique       | Code-Critic          |
-| Categorize review feedback (read-only)                                                                               | judge, disposition, rebuttal           | Code-Review-Response |
+| Categorize review feedback (read-only)                                                                               | judge, score, prosecution, defense     | Code-Review-Response |
 | Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic  | Process-Review       |
 
 > **native Explore vs Research-Agent**: Use the native Explore subagent for lightweight read-only fact-finding (runs on a fast model in a short-lived context — the returned summary is typically smaller than running equivalent tool calls inline). Use Research-Agent when analysis is deep/multi-file and the result needs to be persisted to a research document for future reference. When in doubt: Explore for discovery, Research-Agent for output that must survive compaction.
@@ -199,16 +199,17 @@ Include in each pass prompt: `"Change type: {classification}. Per Code-Critic's 
 - Label each call: `"This is adversarial review pass N of M. Conduct your review independently. Prior passes have already been run. Look for anything they may have missed."`
 - Do NOT skip passes because a prior pass "already covered" the code. That reasoning defeats the purpose.
 - Do NOT merge passes into one call — each must be a separate subagent invocation.
-- After all passes complete, merge all findings into a single ledger before calling Code-Review-Response. Deduplicate only when two passes flag **identical evidence at the same file/line** — different framing of the same issue counts as one finding. Complementary findings from different passes are additive.
-- Present the merged ledger to Code-Review-Response as a single unified review, not as separate per-pass reviews.
+- After all passes complete, merge all findings into a single ledger. Deduplicate only when two passes flag **identical evidence at the same file/line** — different framing of the same issue counts as one finding. Complementary findings from different passes are additive.
+- **Defense pass**: Invoke Code-Critic with the merged prosecution ledger and the marker `"Use defense review perspectives"`. Defense reviews the full ledger in a single pass and emits a Defense Report.
+- **Judge pass**: Invoke Code-Review-Response with both the merged prosecution ledger and the defense report. Judge rules final on all items and emits a score summary.
 
 ### GitHub Review Intake & Judgment
 
-For `github review` / `review github` / `cr review`, follow `.github/skills/code-review-intake/SKILL.md` (also available as `.github/instructions/code-review-intake.instructions.md` in clone/fork setups).
+For `github review` / `review github` / `cr review`, follow `.github/skills/code-review-intake/SKILL.md` (also available as `.github/instructions/code-review-intake.instructions.md` in clone/fork setups). GitHub intake uses proxy prosecution: Code-Critic validates and scores each GitHub comment, then defense → judge pipeline runs as normal.
 
 ### Non-GitHub Review Mode
 
-For local/internal reviews, run the same reconciliation pattern: Code-Critic → Code-Review-Response → rebuttal rounds on disputed items until convergence or loop budget.
+For local/internal reviews, run the same pipeline: 3 prosecution passes (parallel) → merge ledger → 1 defense pass → 1 judge pass (Code-Review-Response).
 
 ### Improvement-First Decision Rule (Mandatory)
 
@@ -229,7 +230,7 @@ If the user gives `github review` / `review github` / `cr review`, run GitHub in
 - **UI-Iterator is user-invoked** for polish passes, NOT part of standard implementation flow
 - **PRE-REVIEW GATE**: Before calling Code-Critic, run project validation commands (see `.github/copilot-instructions.md`) to clear trivial lint/type issues
 - **MANDATORY**: After Code-Critic returns, ALWAYS call Code-Review-Response to categorize findings. Then delegate fixes to appropriate specialists.
-- **MANDATORY**: During review phases, run the Review Reconciliation Loop until convergence (or loop-budget escalation) before implementing accepted fixes.
+- **MANDATORY**: During review phases, run the full prosecution → defense → judge pipeline to completion before implementing accepted fixes.
 - **SIGNIFICANT IMPROVEMENT RULE**: For out-of-scope/non-blocking improvements estimated >1 day, create a follow-up GitHub issue automatically (with links back to the PR/review comment). Do not block in-scope fixes on that work unless it is an AC requirement.
 - **Tech-debt closure**: When the plan resolves a GitHub issue labeled `tech-debt`, include `Closes #tech-debt-N` in the PR body alongside the main `Closes #{issue}` — GitHub will auto-close both on merge.
 - **Mixed tasks** (e.g., review feedback): Split by file type — test changes → Test-Writer, source changes → Code-Smith, doc changes → Doc-Keeper
@@ -274,7 +275,7 @@ Validation must run in this **graduated 7-tier order** (cheap-to-expensive, then
 4. **Tier 4 — Static quality gates** (project lint/typecheck commands; see `.github/copilot-instructions.md`)
 5. **Tier 5 — Structural validation** (project architecture validation commands; see `.github/architecture-rules.md` and `.github/copilot-instructions.md`)
 6. **Tier 6 — Strength validation** (project coverage/robustness commands as configured; see `.github/copilot-instructions.md`)
-7. **Tier 7 — Independent review + Customer Experience Gate** (Code-Critic review, then CE Gate — see the Customer Experience Gate (CE Gate) section below)
+7. **Tier 7 — Independent review + Customer Experience Gate** (prosecution → defense → judge pipeline, then CE Gate — see the Customer Experience Gate (CE Gate) and Review Reconciliation Loop sections below)
 
 Do not skip ahead when an earlier tier fails. Resolve failures at the current tier, then continue upward.
 
@@ -309,14 +310,14 @@ Read the plan's `[CE GATE]` step to identify the customer surface. If no `[CE GA
 
 1. Read the `[CE GATE]` scenarios from the plan step (natural language descriptions)
 2. Establish the **design intent reference**: read the `Design Intent` field from the plan's `[CE GATE]` step (if present); otherwise read `/memories/session/design-issue-{ID}.md` via `vscode/memory` (falling back to the issue body if the cache is absent). Understand what the change was supposed to accomplish for the user — not just what it does technically
-3. Exercise each scenario using the appropriate tool
-4. Apply judgment on two dimensions:
-   - **Functional**: does each scenario behave as expected from a customer perspective?
-   - **Intent match**: does the implementation achieve the design intent? Apply the Intent Match Rubric below.
-5. Emit one of these output markers:
-   - `✅ CE Gate passed — intent match: strong` — all scenarios exercised, no defects found, design intent fully achieved
-   - `✅ CE Gate passed — intent match: partial` — functional scenarios pass; intent partially achieved (in-PR fix routed to Code-Smith by default; follow-up issue at Code-Conductor's discretion)
-   - `✅ CE Gate passed — intent match: weak` — functional scenarios pass; intent not met (in-PR fix routed to Code-Smith by default; follow-up issue at Code-Conductor's discretion)
+3. Exercise each scenario using the appropriate tool and **capture evidence** (screenshots, terminal output, API response bodies)
+4. **Invoke CE prosecution pipeline**: Pass the evidence to Code-Critic with the marker `"Use CE review perspectives"`. Code-Critic reviews adversarially across 3 lenses (Functional + Intent + Error States) and emits a prosecution findings ledger.
+5. **Defense pass**: Invoke Code-Critic with the CE prosecution ledger and marker `"Use defense review perspectives"`.
+6. **Judge pass**: Invoke Code-Review-Response with both the CE prosecution ledger and defense report. Judge rules final and emits score summary with CE intent match level.
+7. CE Gate result markers (emitted by the judge in conjunction with Code-Conductor's read of the verdict):
+   - `✅ CE Gate passed — intent match: strong` — all scenarios passed, no defects found, design intent fully achieved
+   - `✅ CE Gate passed — intent match: partial` — scenarios pass; intent partially achieved (in-PR fix routed to Code-Smith by default; follow-up issue at Code-Conductor's discretion)
+   - `✅ CE Gate passed — intent match: weak` — scenarios pass; intent not met (in-PR fix routed to Code-Smith by default; follow-up issue at Code-Conductor's discretion)
    - `✅ CE Gate passed after fix — intent match: {strong|partial|weak}` — defects found and resolved within loop budget
    - `⚠️ CE Gate skipped — {reason}` — tool unavailable or environment issue
    - `⏭️ CE Gate not applicable — {reason}` — no customer surface for this change
@@ -380,6 +381,21 @@ Always include in the PR body:
 - CE Gate result marker (one of the markers above, with intent match level for passing gates)
 - Scenarios exercised (brief list)
 - Track 2 outcome: "Process-Review: no systemic gap found" or link to created follow-up issue
+
+### PR Body Adversarial Review Scores
+
+Always include the adversarial review score summary table from the judge's score summary output:
+
+```markdown
+## Adversarial Review Scores
+
+| Stage       | Prosecutor                | Defense                                 | Judge rulings |
+| ----------- | ------------------------- | --------------------------------------- | ------------- |
+| Code Review | {pts} pts ({N} sustained) | {pts} pts ({N} disproved, {N} rejected) | {N} rulings   |
+| CE Review   | {pts} pts ({N} sustained) | {pts} pts ({N} disproved, {N} rejected) | {N} ruling(s) |
+```
+
+If a stage did not run (e.g., CE Gate not applicable), note it as `⏭️ N/A`.
 
 ---
 

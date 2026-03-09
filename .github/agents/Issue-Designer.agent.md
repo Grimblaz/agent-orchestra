@@ -149,6 +149,7 @@ Before finalizing the design, assess CE Gate readiness:
 5. **Identify design intent reference**: Summarize the key user experience goal this change is meant to achieve (one to two sentences). This becomes the design intent reference in the `[CE GATE]` plan step — Code-Conductor reads it before exercising scenarios to evaluate intent match.
 
 Include this assessment when updating the GitHub issue body.
+Note: CE Gate execution at implementation time uses CE prosecution (Code-Critic reviews Conductor's captured evidence adversarially). The scenarios and surface you document here become the input to that prosecution step.
 
 ### Document Decisions
 
@@ -178,7 +179,7 @@ After design decisions are confirmed with the user, call Code-Critic as a subage
 
 **Challenges are non-blocking** — they inform the design, they do not gate it. You (Issue-Designer) decide how to handle them. The user may also override any challenge.
 
-**Note**: This is a single-pass review, not the 3-pass protocol used for code review.
+**Note**: This is a **design prosecution** pass (single-pass, non-blocking). Issue-Designer invokes only prosecution here. The full pipeline (prosecution → defense → judge) is used by Issue-Planner when stress-testing the implementation plan. Design challenges from Issue-Designer are non-gatekeeping.
 
 ## Stage 3: Update Issue
 

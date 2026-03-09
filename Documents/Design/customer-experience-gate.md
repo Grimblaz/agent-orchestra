@@ -12,7 +12,7 @@ This design also retired the `notify-agent-sync.yml` dispatch workflow, as agent
 
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
-| D1 | CE Gate executor | Code-Conductor exercises scenarios itself | CE scenarios are natural language descriptions; no new test artifacts created. CE Gate = "step back and use it like a customer." |
+| D1 | CE Gate executor | Code-Conductor exercises scenarios and captures evidence; Code-Critic (CE prosecution) evaluates adversarially | Separation of execution (Code-Conductor) and review (Code-Critic) avoids the fox-guarding-henhouse problem. CE Gate = "exercise then prosecute." |
 | D2 | Fix-revalidate loop budget | 2 cycles, then escalate via `vscode/askQuestions` | Consistent with review reconciliation loop budget pattern; prevents infinite fix loops |
 | D3 | Process-Review invocation | Add to Agent Selection table; call via subagent for Track 2 | Fits existing delegation pattern; two-track response happens in the same flow without user intervention |
 | D4 | Visual Verification Gate | **Remove entirely.** CE Gate at end-of-PR replaces it. | CE Gate subsumes Visual Gate's purpose; per-step regression handled by automated tests (Tiers 2–3); one concept instead of two |
@@ -80,7 +80,7 @@ Issue #72 extended the CE Gate to evaluate **intent** as a second dimension alon
 
 ### What Intent Verification Adds
 
-Code-Conductor now judges two dimensions after exercising scenarios:
+Code-Conductor exercises scenarios and captures evidence on two dimensions; Code-Critic (CE prosecution mode) evaluates that evidence adversarially; Code-Review-Response judges:
 
 1. **Functional** — does each scenario behave as expected from a customer perspective? (unchanged)
 2. **Intent match** — does the implementation achieve the design intent the issue described?
@@ -136,3 +136,50 @@ Intent criteria are surface-dependent. A surface-specific table in Code-Conducto
 | `CLAUDE.md` | CE Gate description updated to include "design-intent verification" |
 | `Documents/Design/customer-experience-gate.md` | Intent match architecture documented: D15 decision, Intent Match Rubric, Surface-Specific Intent Verification, Two-Track intent deficiency routing |
 | `.claude/commands/implement.md` | `after fix` marker variant added; placeholder notation standardized to `{strong\|partial\|weak}`; intent evaluation updated to reference `[CE GATE]` Design Intent field |
+
+---
+
+## CE Prosecution Pipeline
+
+*Implemented in issue #96.*
+
+### What Changed
+
+D1 (above) was updated: Code-Conductor no longer evaluates CE scenarios internally. Instead:
+
+1. **Code-Conductor exercises scenarios** — navigates the surface, captures evidence (screenshots, response bodies, CLI output)
+2. **Code-Critic evaluates adversarially** — runs in CE prosecution mode (`"Use CE review perspectives"`)
+3. **Code-Critic is invoked for defense** — in a separate pass, it challenges the prosecution findings
+4. **Code-Review-Response judges** — rules on each finding, emits score summary, delegates fixes
+
+This change was motivated by the "fox-guarding-henhouse" finding in issue #96: Code-Conductor was both the executor and judge of CE quality, creating a conflict of interest.
+
+### CE Prosecution Perspectives
+
+| Lens | What it checks | How |
+|------|---------------|-----|
+| **Functional** | Do scenarios pass from customer perspective? | Review Code-Conductor's captured evidence |
+| **Intent** | Does implementation match design intent? (strong/partial/weak) | Compare evidence against design-issue cache |
+| **Error states** | What happens with bad input, edge cases? | Active adversarial testing via browser tools |
+
+### Read-Only Clarification
+
+"Read-only" means no source/config file modifications. Browser interaction (filling forms, clicking, navigating) is permitted — it's observational testing, not code mutation.
+
+### CE Review Pipeline
+
+```text
+Code-Conductor exercises CE scenarios (captures evidence)
+  → Code-Critic (CE prosecution: Functional + Intent + Error States lenses)
+    → Code-Critic (defense, 1 pass)
+      → Code-Review-Response (judge)
+        → Score summary → Fixes routed via existing Track 1/2
+```
+
+### Design Decisions (Issue #96)
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|----------|
+| D16 | CE evaluation actor | Code-Critic (CE prosecution mode) | Separates scenario execution from quality judgment; eliminates conflict of interest |
+| D17 | Active testing in CE mode | Browser interaction permitted | Observational testing (not code mutation) is needed for Error States lens; passive evidence review is insufficient |
+| D18 | CE pipeline structure | Same prosecution → defense → judge as code review | Consistency: same adversarial pipeline at all review stages |

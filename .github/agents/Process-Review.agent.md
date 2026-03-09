@@ -108,7 +108,7 @@ Performs retrospective analysis of development process to improve future executi
 - Track prompt frequency per PR/review cycle and flag interruption-heavy workflows
 - Verify prompt timing is late-stage for authority-boundary decisions
 - Check escalation packet completeness when user input is requested
-- Measure reconciliation loop depth and identify excessive rounds
+- Measure prosecution → defense → judge pipeline completion and identify pipeline short-circuits or skipped stages
 
 **Documentation Audit**:
 
@@ -247,7 +247,7 @@ Get-ChildItem -Recurse -Include *.md | Where-Object {(Select-String -Path $_ -Pa
 - **Prompt Frequency**: Count of decision prompts per PR/review cycle
 - **Prompt Timing**: % of prompts occurring late-stage vs early-stage
 - **Escalation Packet Completeness**: % including summary/evidence/impact/AC/scope/options+recommendation
-- **Reconciliation Loop Depth**: Number of adversarial rounds before convergence
+- **Adversarial Pipeline Completion**: Stages completed per review cycle (prosecution passes, defense pass, judge pass); flag any skipped stages
 
 **Scoring** (0-10 scale):
 
@@ -615,22 +615,22 @@ When reviewing a completed workflow, audit skill usage:
 
 ### Skill Mapping Reference
 
-| Skill                            | When Applicable                                  |
-| -------------------------------- | ------------------------------------------------ |
-| `brainstorming`                  | Design exploration, unclear requirements         |
-| `browser-canvas-testing`         | Canvas game browser interaction                  |
-| `code-review-intake`             | GitHub review intake, ledger-based judgment      |
-| `frontend-design`                | UI components, styling                           |
-| `parallel-execution`             | Parallel/serial build-test orchestration         |
-| `post-pr-review`                 | Post-merge cleanup, archiving, releases          |
-| `property-based-testing`         | Incremental PBT rollout                          |
-| `skill-creator`                  | Creating or updating skills                      |
-| `software-architecture`          | Layer placement, design patterns                 |
-| `systematic-debugging`           | Bug investigation, test failures                 |
-| `test-driven-development`        | Writing tests, TDD workflow                      |
-| `ui-testing`                     | Component tests, Testing Library                 |
-| `verification-before-completion` | Pre-commit checks, quality gates                 |
-| `webapp-testing`                 | E2E tests, Playwright                            |
+| Skill                            | When Applicable                             |
+| -------------------------------- | ------------------------------------------- |
+| `brainstorming`                  | Design exploration, unclear requirements    |
+| `browser-canvas-testing`         | Canvas game browser interaction             |
+| `code-review-intake`             | GitHub review intake, ledger-based judgment |
+| `frontend-design`                | UI components, styling                      |
+| `parallel-execution`             | Parallel/serial build-test orchestration    |
+| `post-pr-review`                 | Post-merge cleanup, archiving, releases     |
+| `property-based-testing`         | Incremental PBT rollout                     |
+| `skill-creator`                  | Creating or updating skills                 |
+| `software-architecture`          | Layer placement, design patterns            |
+| `systematic-debugging`           | Bug investigation, test failures            |
+| `test-driven-development`        | Writing tests, TDD workflow                 |
+| `ui-testing`                     | Component tests, Testing Library            |
+| `verification-before-completion` | Pre-commit checks, quality gates            |
+| `webapp-testing`                 | E2E tests, Playwright                       |
 
 <!-- Keep in sync: when adding or removing any skill in .github/skills/, update this table (all-skills scope). Update Code-Conductor's Skill Mapping table only if the skill is a delegation target (a skill Code-Conductor instructs a subagent to use). -->
 

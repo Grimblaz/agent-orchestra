@@ -46,11 +46,29 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 - `Documents/Design/` files use domain-based naming (`{domain-slug}.md`) and are committed with the implementation PR by Code-Conductor (delegated to Doc-Keeper)
 - CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience and design-intent verification
 
-## Code-Critic Review Protocol
+## Code-Critic Adversarial Review Protocol
 
-This repo runs **3 independent parallel Code-Critic passes** per review cycle. Passes are hard-coded — not configurable. Each pass surfaces complementary findings; they are not duplicates.
+This repo uses a **scored prosecution → defense → judge pipeline** across all review stages.
 
-The 3-pass rule applies to **code reviews** only. Design reviews (when Code-Critic is invoked by Issue-Designer, Issue-Planner, or via start-issue.md) are single-pass.
+**Code review** (3× prosecution, 1× defense, 1× judge):
+
+- 3 independent parallel Code-Critic prosecution passes (hard-coded, not configurable)
+- 1 Code-Critic defense pass over the merged findings ledger
+- 1 Code-Review-Response judge pass with confidence scoring + score summary
+
+**Design/plan review** (1× prosecution, 1× defense, 1× judge): full pipeline invoked by Issue-Planner or via start-issue.md. Issue-Designer runs prosecution only (non-blocking, no defense or judge step).
+
+**CE review**: Code-Conductor exercises scenarios and captures evidence; Code-Critic then reviews adversarially (CE prosecution → defense → judge).
+
+**GitHub review**: proxy prosecution (Code-Critic validates/scores each GitHub comment) → defense → judge.
+
+**Code-Critic modes** — activated by marker in the prompt:
+
+- _(none)_ — code prosecution (3 passes)
+- `"Use design review perspectives"` — design/plan prosecution (1 pass)
+- `"Use defense review perspectives"` — defense
+- `"Use CE review perspectives"` — CE prosecution
+- `"Score and represent GitHub review"` — proxy prosecution
 
 ## Build & Run
 

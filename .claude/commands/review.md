@@ -20,6 +20,10 @@ git diff main...HEAD
 
 Presume defect. Assume every change introduces bugs until personally verified. Hunt for flaws — do not scan passively. "Tests pass" is a starting point, not a conclusion.
 
+## Adversarial Pipeline
+
+This repo uses prosecution → defense → judge: 3 prosecution passes (parallel) → merge ledger → 1 defense pass → 1 judge pass (Code-Review-Response). Each pass is independent. After the judge's score summary, accepted findings are delegated to appropriate specialists.
+
 ## Required Reading Before Review
 
 - `.github/architecture-rules.md` (if it exists)
