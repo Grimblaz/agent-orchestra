@@ -22,7 +22,7 @@ Presume defect. Assume every change introduces bugs until personally verified. H
 
 ## Adversarial Pipeline
 
-This repo uses prosecution → defense → judge: 3 prosecution passes (parallel) → merge ledger → 1 defense pass → 1 judge pass (Code-Review-Response). Each pass is independent. After the judge's score summary, accepted findings are delegated to appropriate specialists.
+This repo uses prosecution → defense → judge: 3 prosecution passes (parallel) → merge ledger → 1 defense pass → 1 judge pass (Code-Review-Response). Each pass is independent. After the judge's score summary, Code-Conductor routes accepted findings to appropriate specialists.
 
 ## Required Reading Before Review
 

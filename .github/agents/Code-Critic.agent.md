@@ -28,23 +28,11 @@ tools:
   # - "playwright/*"
   - vscode/memory
 # NOTE: 'edit' tool intentionally EXCLUDED - Code-Critic is READ-ONLY.
-# Fixes are delegated via handoff to Code-Review-Response → Code-Smith.
+# Findings are judged by Code-Review-Response; fixes are routed by Code-Conductor.
 handoffs:
   - label: Judge Review
     agent: Code-Review-Response
-    prompt: "Judge the prosecution and defense findings above. Rule on each item: ✅ SUSTAINED (finding upheld), ❌ DEFENSE SUSTAINED (disproof accepted), 🔄 SIGNIFICANT (needs user), 📋 TECH DEBT (out of scope). Emit score summary after judgment. Delegate accepted fixes."
-    send: false
-  - label: Fix Issues
-    agent: Code-Smith
-    prompt: Fix the issues identified in the code review above.
-    send: false
-  - label: Refactor for Quality
-    agent: Refactor-Specialist
-    prompt: Improve code quality based on the review findings above.
-    send: false
-  - label: Finalize Documentation
-    agent: Doc-Keeper
-    prompt: Update all documentation to reflect the implemented changes (NEXT-STEPS.md, design docs, domain docs).
+    prompt: "Judge the prosecution and defense findings above. Rule on each item: ✅ SUSTAINED (finding upheld), ❌ DEFENSE SUSTAINED (disproof accepted), 🔄 SIGNIFICANT (auto-tracked), 📋 TECH DEBT (out of scope). Emit score summary and categorization after judgment."
     send: false
 ---
 
@@ -81,7 +69,7 @@ This agent is a **reviewer**, NOT an implementer.
 
 - ✅ Analyze code and identify issues
 - ✅ Document findings with evidence
-- ✅ Use handoff to delegate fixes to Code-Review-Response or Code-Smith
+- ✅ Use handoff to send findings to Code-Review-Response for judgment
 
 **If you feel the urge to fix something**: STOP. Write it as a finding instead and hand off.
 

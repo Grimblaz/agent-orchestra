@@ -150,7 +150,7 @@ D1 (above) was updated: Code-Conductor no longer evaluates CE scenarios internal
 1. **Code-Conductor exercises scenarios** — navigates the surface, captures evidence (screenshots, response bodies, CLI output)
 2. **Code-Critic evaluates adversarially** — runs in CE prosecution mode (`"Use CE review perspectives"`)
 3. **Code-Critic is invoked for defense** — in a separate pass, it challenges the prosecution findings
-4. **Code-Review-Response judges** — rules on each finding, emits score summary, delegates fixes
+4. **Code-Review-Response judges** — rules on each finding, emits score summary and categorization
 
 This change was motivated by the "fox-guarding-henhouse" finding in issue #96: Code-Conductor was both the executor and judge of CE quality, creating a conflict of interest.
 
@@ -173,7 +173,7 @@ Code-Conductor exercises CE scenarios (captures evidence)
   → Code-Critic (CE prosecution: Functional + Intent + Error States lenses)
     → Code-Critic (defense, 1 pass)
       → Code-Review-Response (judge)
-        → Score summary → Fixes routed via existing Track 1/2
+        → Score summary → Code-Conductor routes fixes via Track 1/2
 ```
 
 ### Design Decisions (Issue #96)

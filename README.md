@@ -107,7 +107,7 @@ Then, once the design is in the issue:
 | **Issue-Planner** | Multi-step implementation plan creation |
 | **Code-Conductor** | End-to-end orchestration of implementation |
 | **Code-Critic** | Adversarial code review and risk discovery |
-| **Code-Review-Response** | Judges review feedback and delegates fixes |
+| **Code-Review-Response** | Judges review feedback, scores findings, and emits categorization |
 
 ### Internal agents (called automatically by Code-Conductor)
 

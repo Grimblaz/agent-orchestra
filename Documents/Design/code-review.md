@@ -136,6 +136,8 @@ Replaced the rebuttal-based adversarial review pipeline with a structured Prosec
 | D16 | Opt-out for lightweight issues | Not supported | Quality is non-negotiable — full pipeline always runs |
 | D17 | `review_loop_budget` | Removed from plan format | No longer needed; pipeline stages are fixed (3 prosecution + 1 defense + 1 judge) |
 | D18 | Mode conflict resolution | Priority order: defense > CE > proxy > design > code | Most-specific mode wins; avoids ambiguous multi-marker prompts |
+| D19 | Judge-only CRR separation | Code-Review-Response stops at judgment — no fix delegation | Conductor is the orchestrator; CRR doing delegation created conflicting responsibility chains |
+| D20 | Post-judgment routing in Conductor | All post-judgment fix routing logic lives in Code-Conductor | Single responsibility: CRR judges, Conductor executes. Gaps addressed: AC cross-check, effort estimation, auto-tracking, GitHub response posting |
 
 ---
 
@@ -181,8 +183,8 @@ Code-Conductor invokes →
   Code-Critic (prosecution, pass 2) ─┼→ Merge into deduplicated ledger
   Code-Critic (prosecution, pass 3) ─┘
     → Code-Critic (defense, 1 pass over merged ledger)
-      → Code-Review-Response (judge, rules + delegates fixes)
-        → Score summary emitted
+      → Code-Review-Response (judge, rules + emits score summary)
+        → Score summary → Code-Conductor routes accepted fixes to specialists
 ```
 
 **Design/plan review** (1× each):
@@ -212,7 +214,7 @@ Code-Conductor exercises CE scenarios (captures evidence)
   → Code-Critic (CE prosecution, reviews evidence + active adversarial error-state testing)
     → Code-Critic (defense, 1 pass)
       → Code-Review-Response (judge)
-        → Score summary → Fixes routed via Track 1/2
+        → Score summary → Code-Conductor routes fixes via Track 1/2
 ```
 
 **GitHub review** (proxy prosecutor):
@@ -222,7 +224,7 @@ GitHub comments arrive → Code-Conductor routes →
   Code-Critic (proxy prosecution — validates, scores each GitHub comment)
     → Code-Critic (defense, 1 pass)
       → Code-Review-Response (judge)
-        → Score summary → Fixes delegated → Responses posted to GitHub
+        → Score summary → Code-Conductor routes fixes + posts responses to GitHub
 ```
 
 ---

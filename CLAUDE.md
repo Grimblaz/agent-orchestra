@@ -57,7 +57,7 @@ Claude Code is a single-agent system. The multi-agent Copilot pipeline translate
 4. **Refactor** — Review all modified files for extraction opportunities, DRY violations, SOLID violations. Proportionate to the change scope.
    Role guide: `.github/agents/Refactor-Specialist.agent.md`
 
-5. **Review** — Scored adversarial pipeline: prosecution → defense → judge. Code-Critic runs 3 prosecution passes (code review), 1 defense pass, then Code-Review-Response judges with confidence scoring and emits a score summary. Design/plan reviews use single-pass prosecution + defense + judge. CE review: Conductor exercises scenarios, Code-Critic prosecutes adversarially (3 lenses), then defense + judge. GitHub review: proxy prosecution → defense → judge.
+5. **Review** — Scored adversarial pipeline: prosecution → defense → judge. Code-Critic runs 3 prosecution passes (code review), 1 defense pass, then Code-Review-Response judges with confidence scoring and emits a score summary; Code-Conductor routes accepted findings to specialists. Design/plan reviews use single-pass prosecution + defense + judge. CE review: Conductor exercises scenarios, Code-Critic prosecutes adversarially (3 lenses), then defense + judge. GitHub review: proxy prosecution → defense → judge.
    Role guide: `.github/agents/Code-Critic.agent.md`
 
 6. **Document** — Update design docs, decision records, CHANGELOG as needed.

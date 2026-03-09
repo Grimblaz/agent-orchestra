@@ -164,10 +164,12 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 | `*.md`, `README.*`, `CHANGELOG.*`                                                                                    | docs, guide, changelog                 | Doc-Keeper           |
 | Session memory `/memories/session/plan-issue-{ID}.md` or GitHub issue comment with `<!-- plan-issue-{ID} -->` marker | plan, acceptance criteria, sequencing  | Issue-Planner        |
 | Code review (read-only)                                                                                              | review, risks, quality, critique       | Code-Critic          |
-| Categorize review feedback (read-only)                                                                               | judge, score, prosecution, defense     | Code-Review-Response |
+| Categorize review feedback (read-only)                                                                               | judge, score, prosecution, defense, categorize | Code-Review-Response |
 | Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic  | Process-Review       |
 
 > **native Explore vs Research-Agent**: Use the native Explore subagent for lightweight read-only fact-finding (runs on a fast model in a short-lived context — the returned summary is typically smaller than running equivalent tool calls inline). Use Research-Agent when analysis is deep/multi-file and the result needs to be persisted to a research document for future reference. When in doubt: Explore for discovery, Research-Agent for output that must survive compaction.
+
+> **Doc-Keeper parallel documentation batches**: When delegating multiple documentation file updates to Doc-Keeper in a single batch, include a per-file self-check instruction in the delegation prompt: after writing each file, Doc-Keeper should run that file's own Requirement Contract validation grep before proceeding to the next file. The global final validation scan is then a confirmation pass, not the first opportunity to detect gaps.
 
 ## Review Reconciliation Loop (Mandatory)
 
@@ -211,6 +213,10 @@ For `github review` / `review github` / `cr review`, follow `.github/skills/code
 
 For local/internal reviews, run the same pipeline: 3 prosecution passes (parallel) → merge ledger → 1 defense pass → 1 judge pass (Code-Review-Response).
 
+#### Short-Trigger Routing
+
+If the user gives `github review` / `review github` / `cr review`, run GitHub intake first (resolve PR from active context when omitted), then route into the same Review Reconciliation Loop.
+
 ### Improvement-First Decision Rule (Mandatory)
 
 During judgment and execution planning:
@@ -220,16 +226,28 @@ During judgment and execution planning:
 - Out-of-scope/non-blocking improvements should still be done when small.
 - If an out-of-scope/non-blocking improvement is significant (>1 day), create a follow-up issue automatically and continue with in-scope fixes.
 
-#### Short-Trigger Routing
+### Post-Judgment Fix Routing
 
-If the user gives `github review` / `review github` / `cr review`, run GitHub intake first (resolve PR from active context when omitted), then route into the same Review Reconciliation Loop.
+After Code-Review-Response emits the judgment and score summary, Code-Conductor routes accepted fixes per the following rules:
+
+#### AC Cross-Check Gate
+Before treating any DEFERRED-SIGNIFICANT or REJECT categorization as final, read the parent issue's acceptance criteria (`gh issue view {N} --json body`). If the finding relates to an explicit AC item, reclassify as ✅ ACCEPT regardless of effort estimate. Acceptance criteria violations cannot be deferred or rejected — they are incomplete features.
+
+#### Effort Estimation Checklist (Cross-Reference)
+Default to <1 day. Only defer if ALL of these apply: 5+ files, new subsystem design, unknown patterns, non-incremental testing. Quick checklist — any of these alone means <1 day: adding data to existing maps/constants, integrating data added in this PR, adding a field + consumers, modifying 1-3 functions in 1-3 files, adding validation/filtering, fixing a single-system design flaw. (Authoritative source: Code-Review-Response Effort Estimation section.)
+
+#### Auto-Tracking
+For DEFERRED-SIGNIFICANT items, create a GitHub tracking issue automatically — no user approval required. Include PR link, review comment reference, and acceptance target in the issue body.
+
+#### GitHub Response Posting
+When the review originated from GitHub (proxy prosecution pipeline), Code-Conductor posts concise responses to GitHub review comments with final disposition and score evidence after routing accepted fixes to specialists.
 
 **Non-obvious rules**:
 
 - **NEVER use Code-Smith for test files** — always use Test-Writer, even for "simple" fixes
 - **UI-Iterator is user-invoked** for polish passes, NOT part of standard implementation flow
 - **PRE-REVIEW GATE**: Before calling Code-Critic, run project validation commands (see `.github/copilot-instructions.md`) to clear trivial lint/type issues
-- **MANDATORY**: After Code-Critic returns, ALWAYS call Code-Review-Response to categorize findings. Then delegate fixes to appropriate specialists.
+- **MANDATORY**: After Code-Critic returns, ALWAYS call Code-Review-Response to judge and categorize findings. Code-Conductor then routes accepted fixes to appropriate specialists per the Agent Selection table.
 - **MANDATORY**: During review phases, run the full prosecution → defense → judge pipeline to completion before implementing accepted fixes.
 - **SIGNIFICANT IMPROVEMENT RULE**: For out-of-scope/non-blocking improvements estimated >1 day, create a follow-up GitHub issue automatically (with links back to the PR/review comment). Do not block in-scope fixes on that work unless it is an AC requirement.
 - **Tech-debt closure**: When the plan resolves a GitHub issue labeled `tech-debt`, include `Closes #tech-debt-N` in the PR body alongside the main `Closes #{issue}` — GitHub will auto-close both on merge.
