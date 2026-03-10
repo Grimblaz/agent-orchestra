@@ -32,7 +32,7 @@ tools:
 handoffs:
   - label: Judge Review
     agent: Code-Review-Response
-    prompt: "Judge the prosecution and defense findings above. Rule on each item: ✅ SUSTAINED (finding upheld), ❌ DEFENSE SUSTAINED (disproof accepted), 🔄 SIGNIFICANT (auto-tracked), 📋 TECH DEBT (out of scope). Emit score summary and categorization after judgment."
+    prompt: "Judge the prosecution and defense findings above. Rule on each item: ✅ SUSTAINED (finding upheld), ❌ DEFENSE SUSTAINED (disproof accepted), 🔄 SIGNIFICANT (clear improvement, auto-tracked as DEFERRED-SIGNIFICANT). Emit score summary and categorization after judgment."
     send: false
 ---
 

@@ -155,17 +155,17 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 
 ## Agent Selection
 
-| File Type / Task                                                                                                     | Keywords                               | Agent                |
-| -------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | -------------------- |
-| `*.test.*`, test suites, fixtures                                                                                    | test, assertion, flaky, coverage       | Test-Writer          |
-| `src/**/*.ts`, `src/**/*.tsx` (new behavior)                                                                         | implement, feature, bugfix, logic      | Code-Smith           |
-| `src/**/*.ts`, `src/**/*.tsx` (restructure existing)                                                                 | refactor, simplify, extract, dedupe    | Refactor-Specialist  |
-| UI source files (visual polish)                                                                                      | ui polish, spacing, alignment, styling | UI-Iterator          |
-| `*.md`, `README.*`, `CHANGELOG.*`                                                                                    | docs, guide, changelog                 | Doc-Keeper           |
-| Session memory `/memories/session/plan-issue-{ID}.md` or GitHub issue comment with `<!-- plan-issue-{ID} -->` marker | plan, acceptance criteria, sequencing  | Issue-Planner        |
-| Code review (read-only)                                                                                              | review, risks, quality, critique       | Code-Critic          |
+| File Type / Task                                                                                                     | Keywords                                       | Agent                |
+| -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------- |
+| `*.test.*`, test suites, fixtures                                                                                    | test, assertion, flaky, coverage               | Test-Writer          |
+| `src/**/*.ts`, `src/**/*.tsx` (new behavior)                                                                         | implement, feature, bugfix, logic              | Code-Smith           |
+| `src/**/*.ts`, `src/**/*.tsx` (restructure existing)                                                                 | refactor, simplify, extract, dedupe            | Refactor-Specialist  |
+| UI source files (visual polish)                                                                                      | ui polish, spacing, alignment, styling         | UI-Iterator          |
+| `*.md`, `README.*`, `CHANGELOG.*`                                                                                    | docs, guide, changelog                         | Doc-Keeper           |
+| Session memory `/memories/session/plan-issue-{ID}.md` or GitHub issue comment with `<!-- plan-issue-{ID} -->` marker | plan, acceptance criteria, sequencing          | Issue-Planner        |
+| Code review (read-only)                                                                                              | review, risks, quality, critique               | Code-Critic          |
 | Categorize review feedback (read-only)                                                                               | judge, score, prosecution, defense, categorize | Code-Review-Response |
-| Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic  | Process-Review       |
+| Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic          | Process-Review       |
 
 > **native Explore vs Research-Agent**: Use the native Explore subagent for lightweight read-only fact-finding (runs on a fast model in a short-lived context — the returned summary is typically smaller than running equivalent tool calls inline). Use Research-Agent when analysis is deep/multi-file and the result needs to be persisted to a research document for future reference. When in doubt: Explore for discovery, Research-Agent for output that must survive compaction.
 
@@ -231,15 +231,19 @@ During judgment and execution planning:
 After Code-Review-Response emits the judgment and score summary, Code-Conductor routes accepted fixes per the following rules:
 
 #### AC Cross-Check Gate
-Before treating any DEFERRED-SIGNIFICANT or REJECT categorization as final, read the parent issue's acceptance criteria (`gh issue view {N} --json body`). If the finding relates to an explicit AC item, reclassify as ✅ ACCEPT regardless of effort estimate. Acceptance criteria violations cannot be deferred or rejected — they are incomplete features.
+
+Before treating any DEFERRED-SIGNIFICANT or REJECT categorization as final, read the parent issue's acceptance criteria (`gh issue view {N} --json body`). If no parent issue exists (e.g., standalone GitHub review PR), skip this gate. If the finding relates to an explicit AC item, reclassify as ✅ ACCEPT regardless of effort estimate. Acceptance criteria violations cannot be deferred or rejected — they are incomplete features.
 
 #### Effort Estimation Checklist (Cross-Reference)
+
 Default to <1 day. Only defer if ALL of these apply: 5+ files, new subsystem design, unknown patterns, non-incremental testing. Quick checklist — any of these alone means <1 day: adding data to existing maps/constants, integrating data added in this PR, adding a field + consumers, modifying 1-3 functions in 1-3 files, adding validation/filtering, fixing a single-system design flaw. (Authoritative source: Code-Review-Response Effort Estimation section.)
 
 #### Auto-Tracking
+
 For DEFERRED-SIGNIFICANT items, create a GitHub tracking issue automatically — no user approval required. Include PR link, review comment reference, and acceptance target in the issue body.
 
 #### GitHub Response Posting
+
 When the review originated from GitHub (proxy prosecution pipeline), Code-Conductor posts concise responses to GitHub review comments with final disposition and score evidence after routing accepted fixes to specialists.
 
 **Non-obvious rules**:

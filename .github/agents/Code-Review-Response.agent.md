@@ -2,7 +2,8 @@
 name: Code-Review-Response
 description: "Single-shot Judge for prosecution/defense findings — rule, score, categorize"
 argument-hint: "Judge prosecution/defense findings and emit scored categorization"
-tools: [
+tools:
+  [
     "vscode/askQuestions",
     "vscode",
     "read",
@@ -48,9 +49,9 @@ For review workflows, receive the prosecution findings ledger AND the defense re
 
 **No rebuttal rounds.** Judge rules final. Uncertain items get your best call with `low` confidence — user scoring provides the async correction mechanism.
 
-**Convergence rule**: All findings reach a final disposition (✅ SUSTAINED / ❌ DEFENSE SUSTAINED / 🔄 SIGNIFICANT / 📋 TECH DEBT) before implementation begins.
+**Convergence rule**: All findings reach a final disposition (✅ SUSTAINED / ❌ DEFENSE SUSTAINED / 🔄 SIGNIFICANT) before implementation begins.
 
-> **Vocabulary note**: The judgment protocol uses `SUSTAINED / DEFENSE SUSTAINED` for prosecution vs. defense rulings. The categorization output uses `ACCEPT / REJECT / DEFERRED-SIGNIFICANT / TECH-DEBT` labels. These map directly: SUSTAINED = ACCEPT, DEFENSE SUSTAINED = REJECT, SIGNIFICANT (clear improvement, in-scope but >1 day effort) = DEFERRED-SIGNIFICANT, TECH DEBT (existing quality debt, out of scope for this cycle) = TECH-DEBT (tracked separately). Code-Review-Response outputs categorization; Code-Conductor routes accepted fixes to specialists.
+> **Vocabulary note**: The judgment protocol uses `SUSTAINED / DEFENSE SUSTAINED` for prosecution vs. defense rulings. The categorization output uses `ACCEPT / REJECT / DEFERRED-SIGNIFICANT` labels. These map directly: SUSTAINED = ACCEPT, DEFENSE SUSTAINED = REJECT, SIGNIFICANT (clear improvement) = DEFERRED-SIGNIFICANT. Out-of-scope or quality-debt findings that would otherwise be "TECH DEBT" categorize as 📋 DEFERRED-SIGNIFICANT (with a note indicating the tech-debt nature). Code-Review-Response outputs categorization; Code-Conductor routes accepted fixes to specialists.
 
 ## Response Location Policy
 
