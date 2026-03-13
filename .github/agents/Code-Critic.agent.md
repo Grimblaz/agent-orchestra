@@ -191,7 +191,7 @@ The GitHub reviewer is the prosecutor. Your job is to validate and score their f
    - `low` / nit → minor (1 pt) — assign 1 pt for ledger completeness even if stylistic; pure advisory nits with no defect pattern may be noted informational-only only if the GitHub comment itself is explicitly labeled "nit" and raises no correctness concern
 3. No-net-new constraint: do NOT introduce findings the GitHub reviewer did not raise. Exception: `NEW-CRITICAL` security/correctness blockers that are impossible to ignore — mark explicitly and justify.
 
-**Output**: A scored findings ledger (identical format to code prosecution), attributed to the GitHub reviewer. This ledger is the input to the defense pass.
+**Output**: A scored findings ledger (identical format to code prosecution, except `pass: N` is omitted — proxy prosecution is not part of the 3-pass structure), attributed to the GitHub reviewer. This ledger is the input to the defense pass.
 
 ## Defense Mode (`"Use defense review perspectives"`)
 
@@ -260,7 +260,7 @@ CE prosecution is **one pass only**. Code-Conductor exercises the CE scenarios f
 
 **Read-only clarification**: CE Mode is observational only — no source or configuration file modifications. Browser interaction (filling forms, clicking buttons, navigating) is permitted — it is testing, not mutation. If testing mutates app state, note this for subsequent scenarios.
 
-**Output**: Standard prosecution findings ledger with severity/points + CE intent match level. This ledger is the input to the defense pass.
+**Output**: Standard prosecution findings ledger with severity/points + CE intent match level (`pass: N` omitted — CE prosecution is not part of the 3-pass structure). This ledger is the input to the defense pass.
 
 ## Finding Categories
 
@@ -275,6 +275,8 @@ Every finding must also include these automation-routing fields:
 - `severity`: critical | high | medium | low
 - `points`: 10 (critical/high) | 5 (medium) | 1 (low) — assigned by prosecutor; judge may override
 - `confidence`: high | medium | low
+- `id`: F1 | F2 | F3 | … — sequential label within this review cycle; used by defense and judge to cross-reference findings by ID. Assign in order of appearance.
+- `pass`: 1 | 2 | 3 — prosecution pass number that originated this finding. Code prosecution only; omit in design review, CE review, and proxy prosecution modes.
 - `blast_radius`: localized | module | cross-module | system-wide
 - `authority_needed`: yes | no
 - `defense_verdict`: disproved | conceded | insufficient-to-disprove — filled in by defense pass
