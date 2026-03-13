@@ -161,11 +161,21 @@ After all rulings, emit a score summary table:
 ```markdown
 ### Adversarial Review Score Summary
 
-| Finding     | Prosecution (severity, pts) | Defense verdict | Ruling                   | Confidence | Points    |
-| ----------- | --------------------------- | --------------- | ------------------------ | ---------- | --------- |
-| F1: {title} | {severity} ({pts} pts)      | conceded        | ✅ Sustained             | high       | P+{pts}   |
-| F2: {title} | {severity} ({pts} pts)      | disproved       | ❌ Defense sustained     | medium     | D+{pts}   |
-| F3: {title} | {severity} ({pts} pts)      | disproved       | ✅ Prosecution sustained | high       | D-{2×pts} |
+**Code prosecution mode** (`pass: N` populated from ledger):
+
+| Finding     | Pass | Prosecution (severity, pts) | Defense verdict | Ruling                   | Confidence | Points    |
+| ----------- | ---- | --------------------------- | --------------- | ------------------------ | ---------- | --------- |
+| F1: {title} | 1    | {severity} ({pts} pts)      | conceded        | ✅ Sustained             | high       | P+{pts}   |
+| F2: {title} | 2    | {severity} ({pts} pts)      | disproved       | ❌ Defense sustained     | medium     | D+{pts}   |
+| F3: {title} | 1    | {severity} ({pts} pts)      | disproved       | ✅ Prosecution sustained | high       | D-{2×pts} |
+
+**Non-code-prosecution mode** (CE review, design review, proxy prosecution — Pass column always `—`):
+
+| Finding     | Pass | Prosecution (severity, pts) | Defense verdict | Ruling               | Confidence | Points  |
+| ----------- | ---- | --------------------------- | --------------- | -------------------- | ---------- | ------- |
+| F1: {title} | —    | {severity} ({pts} pts)      | conceded        | ✅ Sustained             | high       | P+{pts}   |
+| F2: {title} | —    | {severity} ({pts} pts)      | disproved       | ❌ Defense sustained     | medium     | D+{pts}   |
+| F3: {title} | —    | {severity} ({pts} pts)      | disproved       | ✅ Prosecution sustained | high       | D-{2×pts} |
 
 **Totals**
 
@@ -173,6 +183,8 @@ After all rulings, emit a score summary table:
 - Defense: {net points after subtracting rejected-disproof penalties} pts
 - Judge rulings: {total} ({N} pending user scoring)
 ```
+
+> **Pass column**: Pull the pass-origin value (`pass: N`) from the prosecution ledger by finding ID. For non-code-prosecution modes (design review, CE review, proxy prosecution), emit `—` in the Pass column.
 
 **Judge confidence levels**:
 

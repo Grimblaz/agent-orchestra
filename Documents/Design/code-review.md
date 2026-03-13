@@ -276,6 +276,8 @@ Points at risk: {-2× sum of disproved finding values, if judge rejects}
 | CE Review | 5 pts (1 sustained) | 0 pts | 1 ruling |
 ```
 
+> **Finding-level score summary** (Code-Review-Response output): The per-finding score table now includes a `Pass` column showing which prosecution pass originated each finding. Populated from `pass: N` tags in the prosecution ledger. Non-code-prosecution modes (CE review, design review, proxy prosecution) emit `—` in the Pass column.
+
 **Tracking file** — `.copilot-tracking/review-scores-issue-{ID}.yaml` (gitignored, machine-parsable):
 
 ```yaml
@@ -304,6 +306,31 @@ stages:
           user_ruling: null
       user_scored: false
 ```
+
+### Pipeline Metrics (PR body)
+
+In addition to the human-readable score table and the tracking-file YAML, Code-Conductor includes a machine-parseable pipeline metrics block in the PR body. This block is a hidden HTML comment containing flat YAML:
+
+```markdown
+<!-- pipeline-metrics
+prosecution_findings: N          # post-dedup total; equals pass_1_findings+pass_2_findings+pass_3_findings
+pass_1_findings: N               # findings credited to pass 1
+pass_2_findings: N               # findings credited to pass 2
+pass_3_findings: N               # findings credited to pass 3
+defense_disproved: N             # findings successfully disproved by defense
+judge_accepted: N                # findings ruled ✅ Sustained by judge
+judge_rejected: N                # findings ruled ❌ Defense sustained by judge
+judge_deferred: N                # findings ruled 📋 DEFERRED-SIGNIFICANT
+ce_gate_result: passed|skipped|not-applicable
+ce_gate_intent: strong|partial|weak|n/a
+ce_gate_defects_found: N         # (n/a when CE Gate not applicable)
+rework_cycles: N                 # code review fix loops only (not CE Gate loops)
+-->
+```
+
+**Purpose**: Enables cross-PR analytics (e.g., per-pass marginal yield: does pass 3 justify its cost?). Invisible in rendered Markdown. Parseable via `Select-String -Pattern "pipeline-metrics"`.
+
+**Deduplication credit**: When the same finding appears in multiple prosecution passes, the earliest pass gets credit (lowest pass number). `pass_1_findings + pass_2_findings + pass_3_findings = prosecution_findings` (code prosecution only; in proxy prosecution, per-pass fields are `n/a`).
 
 **User scoring** (async, non-blocking) — post a GitHub issue comment:
 
@@ -347,3 +374,6 @@ stages:
 | `.github/skills/code-review-intake/SKILL.md` | Mirror of instructions file changes |
 | `.claude/commands/implement.md` | CE Gate cycle reference updated |
 | `.claude/commands/review.md` | Adversarial Pipeline section added |
+| `.github/agents/Code-Critic.agent.md` | Added `id` and `pass` fields to automation-routing fields in Finding Categories; added `pass: N` omission notes to proxy prosecution and CE prosecution output descriptions |
+| `.github/agents/Code-Conductor.agent.md` | Added `pass: N` tagging to prosecution pass prompts; added earliest-pass dedup credit rule; added `### PR Body Pipeline Metrics` section with 12-field metrics template and default value rules |
+| `.github/agents/Code-Review-Response.agent.md` | Added `Pass` column to score summary table template; added `id` field to finding schema; split example into code-prosecution and non-code-prosecution variants |

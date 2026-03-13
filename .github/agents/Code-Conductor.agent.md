@@ -135,7 +135,7 @@ Quick checklist before declaring mode for a step:
    - **Validation evidence**: run required validation commands from plan/repo instructions and capture pass results for PR body
    - `git push -u origin {branch-name}`
    - Create PR via `github-pull-request/*` tools or `gh pr create`
-   - PR body MUST include: summary, changed files, validation evidence, migration-scan result (migration-type issues only), CE Gate result, adversarial review score table, process gaps found (if any), and `Closes #{issue}`
+   - PR body MUST include: summary, changed files, validation evidence, migration-scan result (migration-type issues only), CE Gate result, adversarial review score table, pipeline metrics, process gaps found (if any), and `Closes #{issue}`
 
 5. **Report Completion**: Summarize work done, link the PR URL, and hand off to user for review
 
@@ -198,10 +198,10 @@ Classify the PR change type using `git diff --name-only main..HEAD` and include 
 Include in each pass prompt: `"Change type: {classification}. Per Code-Critic's 'When to apply' gates, mark out-of-scope perspectives as ⏭️ N/A — do not expand them."` For `documentation-only` reviews, include only the changed files in the file reading list — do not include supporting context files (exception: always include `.github/architecture-rules.md` for the §1 docs-misrepresentation check).
 
 - Launch all 3 passes **in parallel** as independent subagent invocations.
-- Label each call: `"This is adversarial review pass N of M. Conduct your review independently. Prior passes have already been run. Look for anything they may have missed."`
+- Label each call: `"This is adversarial review pass N of M. Conduct your review independently. Prior passes have already been run. Look for anything they may have missed. Tag each finding with 'pass: N' in the automation-routing fields (where N is your pass number, e.g. pass: 1, pass: 2, pass: 3)."`
 - Do NOT skip passes because a prior pass "already covered" the code. That reasoning defeats the purpose.
 - Do NOT merge passes into one call — each must be a separate subagent invocation.
-- After all passes complete, merge all findings into a single ledger. Deduplicate only when two passes flag **identical evidence at the same file/line** — different framing of the same issue counts as one finding. Complementary findings from different passes are additive.
+- After all passes complete, merge all findings into a single ledger. Deduplicate only when two passes flag **identical evidence at the same file/line** — different framing of the same issue counts as one finding. Complementary findings from different passes are additive. Preserve `pass: N` tags in the merged ledger. For deduplicated findings, the **earliest pass** gets credit (lowest pass number).
 - **Defense pass**: Invoke Code-Critic with the merged prosecution ledger and the marker `"Use defense review perspectives"`. Defense reviews the full ledger in a single pass and emits a Defense Report.
 - **Judge pass**: Invoke Code-Review-Response with both the merged prosecution ledger and the defense report. Judge rules final on all items and emits a score summary.
 
@@ -415,6 +415,35 @@ Always include the adversarial review score summary table from the judge's score
 ```
 
 If a stage did not run (e.g., CE Gate not applicable), note it as `⏭️ N/A`.
+
+### PR Body Pipeline Metrics
+
+Always include a `## Pipeline Metrics` section in the PR body with a hidden HTML comment block containing pipeline telemetry. Emit this at PR creation time after the full pipeline completes. Count values from the post-deduplication merged ledger (not raw per-pass totals). `pass_1_findings + pass_2_findings + pass_3_findings = prosecution_findings`.
+
+```markdown
+## Pipeline Metrics
+
+<!-- pipeline-metrics
+prosecution_findings: {N}
+pass_1_findings: {N}
+pass_2_findings: {N}
+pass_3_findings: {N}
+defense_disproved: {N}
+judge_accepted: {N}
+judge_rejected: {N}
+judge_deferred: {N}
+ce_gate_result: {passed|skipped|not-applicable}
+ce_gate_intent: {strong|partial|weak|n/a}
+ce_gate_defects_found: {N}
+rework_cycles: {N}
+-->
+```
+
+**Default values**: `0` for numeric fields when the stage ran but found nothing. `n/a` for categorical fields when the stage was skipped entirely (e.g., `ce_gate_result: not-applicable`, `ce_gate_intent: n/a` when `ce_gate: false`). `ce_gate_defects_found: n/a` when the CE Gate did not run (`ce_gate: false` or `⏭️ CE Gate not applicable`). For proxy prosecution (GitHub review intake): `pass_1_findings`, `pass_2_findings`, `pass_3_findings` → `n/a` (3-pass structure replaced by proxy pass); route total findings count to `prosecution_findings` only.
+
+**Verdict mapping**: `✅ Sustained` findings → `judge_accepted`; `❌ Defense sustained` findings → `judge_rejected`; `📋 DEFERRED-SIGNIFICANT` findings → `judge_deferred`. Count each verdict type from the judge's score summary table.
+
+**`rework_cycles`**: Count of fix-revalidate loops after routing accepted review findings to specialists (code review fix loops only — not CE Gate loops). Each route-to-specialist → implement → re-validate cycle = 1. If no findings accepted, `rework_cycles: 0`.
 
 ---
 
