@@ -38,11 +38,10 @@ For each step in the plan:
 
 ### 3. Validate
 
-Run the project's validation commands after each step:
-- Quick sanity checks (lint/typecheck)
-- Changed-scope test pass
-- Full test suite
-- Fix failures before moving to the next step
+Run all validation checks together and report all failures before fixing:
+- Quick-validate commands (see `.github/copilot-instructions.md`), lint/typecheck, and the full test suite — run as a combined pass
+- Fix all failures, then re-run to confirm
+- _(For projects with slow test suites, see `.github/copilot-instructions.md` for the targeted→full split override.)_
 
 ### 4. Refactor
 

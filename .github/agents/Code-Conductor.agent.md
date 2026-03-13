@@ -289,15 +289,12 @@ Include in prompt: _"Use the `{skill-name}` skill (`.github/skills/{skill-name}/
 
 ## Validation Ladder (Mandatory)
 
-Validation must run in this **graduated 7-tier order** (cheap-to-expensive, then manual):
+Validation must run in this **graduated 4-tier order** (fail-fast to comprehensive, then manual):
 
-1. **Tier 1 — Quick sanity checks** (project quick-validate commands; see `.github/copilot-instructions.md`; for migration-type issues, also run the migration completeness scan described in Step 4)
-2. **Tier 2 — Changed-scope test pass** (targeted tests for touched modules)
-3. **Tier 3 — Full automated test suite** (project test command; see `.github/copilot-instructions.md`)
-4. **Tier 4 — Static quality gates** (project lint/typecheck commands; see `.github/copilot-instructions.md`)
-5. **Tier 5 — Structural validation** (project architecture validation commands; see `.github/architecture-rules.md` and `.github/copilot-instructions.md`)
-6. **Tier 6 — Strength validation** (project coverage/robustness commands as configured; see `.github/copilot-instructions.md`)
-7. **Tier 7 — Independent review + Customer Experience Gate** (prosecution → defense → judge pipeline, then CE Gate — see the Customer Experience Gate (CE Gate) and Review Reconciliation Loop sections below)
+1. **Tier 1 — Build & Validate** (run all automated checks together and report all failures before fixing): quick-validate commands (see `.github/copilot-instructions.md`), lint/typecheck, and the full test suite (project test command; see `.github/copilot-instructions.md`). Prefer running lint/typecheck before tests if the project supports it — syntax errors are cheaper to surface than test failures. For migration-type issues, also run the migration completeness scan described in Step 4 (Create PR). _Projects with slow test suites (10+ minute full runs) can override in their `.github/copilot-instructions.md` to split Tier 1 into two sub-passes: (1) quick-validate, lint/typecheck, and targeted tests (touched modules), then (2) the full test suite. To activate, add `<!-- slow-test-suite: true -->` anywhere in `.github/copilot-instructions.md`._
+2. **Tier 2 — Structural validation** (project architecture validation commands; see `.github/architecture-rules.md` and `.github/copilot-instructions.md`)
+3. **Tier 3 — Strength validation** (project coverage/robustness commands as configured; see `.github/copilot-instructions.md`)
+4. **Tier 4 — Independent review + Customer Experience Gate** (prosecution → defense → judge pipeline, then CE Gate — see the Customer Experience Gate (CE Gate) and Review Reconciliation Loop sections below)
 
 Do not skip ahead when an earlier tier fails. Resolve failures at the current tier, then continue upward.
 
@@ -313,7 +310,7 @@ Always include failure evidence, attempted diagnosis, and next action in the han
 
 ## Customer Experience Gate (CE Gate)
 
-Run this gate as the final step before PR creation (Tier 7, after Code-Critic).
+Run this gate as the final step before PR creation (Tier 4, after Code-Critic).
 
 ### Surface Identification
 
