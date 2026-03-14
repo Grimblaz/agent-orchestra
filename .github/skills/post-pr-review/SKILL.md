@@ -47,9 +47,7 @@ Get-ChildItem .copilot-tracking -Recurse -File |
 - Files moved to `.copilot-tracking-archive/{year}/{month}/issue-{ID}/`
 - No tracking files remain in `.copilot-tracking/research/` for this issue
 
-> **Automation**: The `SessionStart` hook detects stale tracking files and prompts you at the start of your next VS Code session — cleanup requires one manual confirmation. You can also run the script directly: `pwsh "$env:WORKFLOW_TEMPLATE_ROOT/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description`
->
-> **Note**: The hook fires every session start until cleanup is run (by design — persistent reminder).
+> **Automation**: The `session-startup` instruction detects stale tracking files and prompts you at the start of your next conversation — cleanup requires one confirmation. You can also run the script directly: `pwsh "$env:WORKFLOW_TEMPLATE_ROOT/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description`
 
 ### 2. Update Documentation
 
@@ -140,7 +138,7 @@ git push origin --delete feature/issue-{ID}-description
 
 **Note**: Some projects auto-delete branches on PR merge. Verify your project settings.
 
-> **Automation**: Branch deletion is also handled by `.github/scripts/post-merge-cleanup.ps1` when invoked via the `SessionStart` hook cleanup flow (see Section 1 above).
+> **Automation**: Branch deletion is also handled by `.github/scripts/post-merge-cleanup.ps1` when invoked via the session-startup instruction cleanup flow (see Section 1 above).
 
 ### 6. Strategic Assessment (Pre-Merge)
 

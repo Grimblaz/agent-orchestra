@@ -46,7 +46,7 @@ Run the following checks automatically before asking any questions. Report all r
 
 | Check             | Command                      | Minimum                                    |
 | ----------------- | ---------------------------- | ------------------------------------------ |
-| VS Code version   | `code --version`             | 1.109.3                                    |
+| VS Code version   | `code --version`             | 1.107                                      |
 | PowerShell (pwsh) | `pwsh --version` in terminal | 7.0+                                       |
 | Git               | `git --version` in terminal  | any recent version                         |
 | GitHub CLI (gh)   | `gh --version` in terminal   | optional, recommended for issue operations |
@@ -101,13 +101,12 @@ For **macOS/Linux**:
 export WORKFLOW_TEMPLATE_ROOT="/path/to/workflow-template"
 ```
 
-> **Important**: VS Code launched from the Start Menu or a desktop shortcut may not run your PowerShell profile. Use the permanent approach if the hook displays a "not set" error.
+> **Important**: VS Code launched from the Start Menu or a desktop shortcut may not run your PowerShell profile. Use the permanent approach to ensure `WORKFLOW_TEMPLATE_ROOT` is always available — the session-startup instruction silently skips if the variable is not set.
 
 **Step 1.2** — Show the VS Code settings to add to your user `settings.json` (`Ctrl+,` → open `settings.json`):
 
 ```json
 {
-  "chat.hookFilesLocations": ["<your-path>/workflow-template/.github/hooks"],
   "chat.agentFilesLocations": ["<your-path>/workflow-template/.github/agents"],
   "chat.agentSkillsLocations": ["<your-path>/workflow-template/.github/skills"],
   "chat.instructionsFilesLocations": {
@@ -123,13 +122,12 @@ Replace `<your-path>` with the absolute path from Step 1.1.
 
 | Setting                           | What it enables                                                   |
 | --------------------------------- | ----------------------------------------------------------------- |
-| `chat.hookFilesLocations`         | Session cleanup hook (detects stale branches after PR merge)      |
 | `chat.agentFilesLocations`        | All workflow agents available in every repository                 |
 | `chat.agentSkillsLocations`       | All workflow skills available in every repository                 |
 | `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories       |
 | `chat.promptFilesLocations`       | Shared prompt files (e.g. `/setup`) available in every repository |
 
-> **Windows path format**: Use forward slashes or escaped backslashes: `"C:/Users/you/workflow-template/.github/hooks"` or `"C:\\Users\\you\\workflow-template\\.github\\hooks"`.
+> **Windows path format**: Use forward slashes or escaped backslashes: `"C:/Users/you/workflow-template/.github/instructions"` or `"C:\\Users\\you\\workflow-template\\.github\\instructions"`.
 
 **Step 1.3** — Confirm: "Have you applied the command and settings above?" Wait for confirmation before continuing to Phase 2.
 

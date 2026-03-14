@@ -85,8 +85,7 @@ If VS Code resolves `chat.plugins.marketplaces: ["Grimblaz/workflow-template"]` 
 | 13 agents | ✅ | ✅ |
 | 14 skills | ✅ | ✅ |
 | `/setup`, `/start-issue` slash commands | ✅ | ✅ |
-| `.github/instructions/` (shared rules) | ❌ not distributed | ✅ auto-discovered |
-| `.github/hooks/` (SessionStart hook) | ❌ not distributed | ✅ |
+| `.github/instructions/` (shared rules, incl. `session-startup`) | ❌ not distributed | ✅ auto-discovered |
 | `.github/scripts/` (cleanup script) | ❌ not distributed | ✅ |
 
 Plugin users relying on `post-pr-review` skill Step 1 (preferred cleanup script) must use the manual archive method — the `$env:WORKFLOW_TEMPLATE_ROOT` path is unavailable in plugin-only setups. The skill's Step 1 includes a disclaimer for this case.

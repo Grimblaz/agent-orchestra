@@ -9,7 +9,6 @@ For the best experience with this workflow template:
 ### Required
 
 - **VS Code 1.107+** (November 2025 release or later) — required for custom agents
-- **VS Code 1.109.3+** — required for the `SessionStart` hook (Preview feature). On earlier versions, agents work normally but the automated cleanup hook will not fire.
 - GitHub Copilot extension
 
 ### Recommended Settings
@@ -44,9 +43,9 @@ To enable automatic skill discovery from `.github/skills/` (VS Code 1.108+):
 
 This enables agents to interact directly with GitHub issues and PRs without external MCP server configuration.
 
-### Session Cleanup Hook
+### Session Startup Instruction
 
-This template includes a VS Code `SessionStart` hook (`.github/hooks/session-cleanup.json`) that automatically detects post-merge cleanup work at the start of each session. When merged feature branches have stale tracking files in `.copilot-tracking/`, the hook injects a prompt and the active agent asks you to confirm cleanup. Requires VS Code 1.109.3+ (Preview).
+This template includes a `session-startup` instruction (`.github/instructions/session-startup.instructions.md`) that tells agents to check for post-merge cleanup work at the start of each conversation. When merged feature branches have stale tracking files in `.copilot-tracking/`, the active agent prompts you to confirm cleanup. Requires PowerShell 7+ (`pwsh`) and `WORKFLOW_TEMPLATE_ROOT` set.
 
 ## Ways to Contribute
 
@@ -101,7 +100,7 @@ When adding skills:
 
 ### Plugin Distribution
 
-This repo is distributed as a VS Code agent plugin (VS Code 1.110+). When you add or change agents, skills, or commands (prompt files), those changes are automatically distributed to plugin users when they update. Instruction files, hooks, and repository templates are **not** distributed via the plugin.
+This repo is distributed as a VS Code agent plugin (VS Code 1.110+). When you add or change agents, skills, or commands (prompt files), those changes are automatically distributed to plugin users when they update. Instruction files and repository templates are **not** distributed via the plugin.
 
 When contributing new skills, the skill will appear in the plugin `plugin.json` — update `.github/plugin/plugin.json` to add the new skill path to the `"skills"` array. To bump the version across all files consistently when publishing a new release, run: `pwsh .github/scripts/bump-version.ps1 -Version X.Y.Z` (replacing `X.Y.Z` with the new version).
 

@@ -98,7 +98,7 @@ Quick checklist before declaring mode for a step:
 ## Core Workflow
 
 0. **Issue Transition (Step 0, before implementation)**:
-   - Cleanup note: The `SessionStart` hook detects stale tracking files from merged branches and prompts you at the start of your next session — cleanup requires one manual confirmation. If stale artifacts persist, run `pwsh "$env:WORKFLOW_TEMPLATE_ROOT/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly.
+   - Cleanup note: The `session-startup` instruction detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `pwsh "$env:WORKFLOW_TEMPLATE_ROOT/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly.
    - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
    - If planning is unnecessary, explicitly note "Step 0 skipped: no planning transition required" and continue.
 

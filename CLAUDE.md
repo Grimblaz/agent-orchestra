@@ -26,7 +26,7 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 - **User-facing agents** (5): Issue-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response
 - **Internal agents** (8): Called automatically by Code-Conductor as subagents (`user-invokable: false`)
 - **Skills** (14): Loaded on demand by agents from `.github/skills/`
-- **Instructions** (4): Shared rules loaded by agents from `.github/instructions/`
+- **Instructions** (5): Shared rules loaded by agents from `.github/instructions/`
 
 ## Key Conventions
 
@@ -94,6 +94,7 @@ Read these instruction files for cross-cutting rules:
 - `.github/instructions/tracking-format.instructions.md` — YAML frontmatter format for tracking files
 - `.github/instructions/code-review-intake.instructions.md` — GitHub review intake protocol (deterministic ledger-based judgment) _(also available as skill: `.github/skills/code-review-intake/SKILL.md`)_
 - `.github/instructions/post-pr-review.instructions.md` — Post-merge checklist (archive tracking, update docs, tag releases) _(also available as skill: `.github/skills/post-pr-review/SKILL.md`)_
+- `.github/instructions/session-startup.instructions.md` — VS Code Copilot–specific: session startup check for stale tracking files (no action needed in Claude Code — no startup trigger exists)
 
 ## Validation Commands
 

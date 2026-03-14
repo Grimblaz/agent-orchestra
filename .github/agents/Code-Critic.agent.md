@@ -27,6 +27,7 @@ tools:
   # Optional: Playwright MCP fallback — uncomment if using @playwright/mcp instead
   # - "playwright/*"
   - vscode/memory
+  - vscode/askQuestions
 # NOTE: 'edit' tool intentionally EXCLUDED - Code-Critic is READ-ONLY.
 # Findings are judged by Code-Review-Response; fixes are routed by Code-Conductor.
 handoffs:

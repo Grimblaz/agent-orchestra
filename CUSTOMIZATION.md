@@ -9,7 +9,7 @@ This template supports two distribution models:
 | Model | How to Install | What You Get |
 |-------|---------------|--------------|
 | **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 13 agents, 14 skills, 2 slash commands — instantly available |
-| **Clone/Fork** | `git clone` or use as template | Everything above PLUS instruction files (auto-loaded by VS Code), session cleanup hook, project templates, and examples |
+| **Clone/Fork** | `git clone` or use as template | Everything above PLUS instruction files (auto-loaded by VS Code, incl. session-startup), project templates, and examples |
 
 ### Plugin Installation
 
@@ -24,7 +24,7 @@ This template supports two distribution models:
 
 2. Open Extensions view (`Ctrl+Shift+X`), search `@agentPlugins workflow-template`, install.
 
-> **Note**: If you use the plugin, you will not receive automatic loading of `.github/instructions/` files or the `SessionStart` hook. For those features, use the clone/fork model instead.
+> **Note**: If you use the plugin, you will not receive automatic loading of `.github/instructions/` files (including the session-startup instruction). For those features, use the clone/fork model instead.
 
 ---
 
@@ -96,13 +96,13 @@ To share agents across all repositories in your org:
 - Place agent files in an `agents/` folder at the root of your org's `.github` or `.github-private` repository
 - Repository-level agents in `.github/agents/` override org defaults
 
-### 6. Session Cleanup Hook (Optional)
+### 6. Session Startup Instruction (Optional)
 
-> **Tip**: If you're using the setup wizard (`/setup`), Phase 1 handles `WORKFLOW_TEMPLATE_ROOT` and the `chat.hookFilesLocations` setting automatically.
+> **Tip**: If you're using the setup wizard (`/setup`), Phase 1 handles `WORKFLOW_TEMPLATE_ROOT` and all VS Code settings automatically.
 >
 > The steps below are the manual equivalent — follow them if you prefer to configure without the wizard, or if you need to adjust an existing configuration.
 
-The workflow-template includes a `SessionStart` hook that detects stale feature branches and leftover tracking files after a PR is merged, and prompts you to run cleanup at the start of your next VS Code Copilot session.
+The workflow-template includes a `session-startup` instruction (`.github/instructions/session-startup.instructions.md`) that tells agents to check for stale feature branches and leftover tracking files at the start of each conversation. When cleanup is needed, the agent prompts you to confirm before running cleanup.
 
 **Setup — two steps:**
 
@@ -110,7 +110,6 @@ The workflow-template includes a `SessionStart` hook that detects stale feature 
 
 ```json
 {
-  "chat.hookFilesLocations": ["/absolute/path/to/workflow-template/.github/hooks"],
   "chat.agentFilesLocations": ["/absolute/path/to/workflow-template/.github/agents"],
   "chat.agentSkillsLocations": ["/absolute/path/to/workflow-template/.github/skills"],
   "chat.instructionsFilesLocations": {
@@ -124,15 +123,16 @@ The workflow-template includes a `SessionStart` hook that detects stale feature 
 
 | Setting | What it enables |
 |---|---|
-| `chat.hookFilesLocations` | Session cleanup hook (detects stale branches after PR merge) |
 | `chat.agentFilesLocations` | All workflow agents available in every repository |
 | `chat.agentSkillsLocations` | All workflow skills available in every repository |
-| `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories |
+| `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories (includes session-startup) |
 | `chat.promptFilesLocations` | Shared prompt files (e.g. `/setup`) available in every repository |
 
-> **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/workflow-template/.github/hooks"` or `"C:\\Users\\you\\workflow-template\\.github\\hooks"`. Apply the same format to all five settings above.
+> **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/workflow-template/.github/instructions"`. Apply the same format to all four settings above.
+>
+> **Migration note**: If you previously configured `chat.hookFilesLocations`, you can safely remove it — hooks have been replaced by the `session-startup` instruction file.
 
-**Step 2**: Set the `WORKFLOW_TEMPLATE_ROOT` environment variable to the absolute path of your local workflow-template clone. Without this, the hook will display an error message instead of running.
+**Step 2**: Set the `WORKFLOW_TEMPLATE_ROOT` environment variable to the absolute path of your local workflow-template clone. Without this, the session-startup instruction will not be able to run cleanup scripts.
 
 **Windows (permanent — recommended)**:
 
@@ -152,7 +152,7 @@ Add to your PowerShell profile (`$PROFILE`):
 $env:WORKFLOW_TEMPLATE_ROOT = "C:\path\to\workflow-template"
 ```
 
-> **Note**: Profile-set variables are only available in shells where the profile is loaded. VS Code launched from the Start Menu or a desktop shortcut may not run your PowerShell profile, causing the hook to display a "not set" error. Use the permanent approach above if this happens.
+> **Note**: Profile-set variables are only available in shells where the profile is loaded. VS Code launched from the Start Menu or a desktop shortcut may not run your PowerShell profile, causing `WORKFLOW_TEMPLATE_ROOT` to appear unset. Use the permanent approach above if this happens.
 
 **macOS/Linux (shell profile)**:
 
@@ -160,9 +160,9 @@ $env:WORKFLOW_TEMPLATE_ROOT = "C:\path\to\workflow-template"
 export WORKFLOW_TEMPLATE_ROOT="/path/to/workflow-template"
 ```
 
-**What it does**: On each VS Code session start, the hook checks whether your current branch's remote has been deleted (indicating a merged PR) or whether `.copilot-tracking/` files exist for merged issues. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`.
+**What it does**: At the start of each conversation, the agent checks whether your current branch's remote has been deleted (indicating a merged PR) or whether `.copilot-tracking/` files exist for merged issues. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`.
 
-**Requires**: PowerShell 7+ (`pwsh`) installed on PATH and VS Code 1.109.3+.
+**Requires**: PowerShell 7+ (`pwsh`) installed on PATH and `WORKFLOW_TEMPLATE_ROOT` set.
 
 ### 7. Project Scaffolding (Phase 5 of Setup Wizard)
 

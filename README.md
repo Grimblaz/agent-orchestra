@@ -25,7 +25,7 @@ A multi-agent workflow system for GitHub Copilot that orchestrates AI-assisted s
 
 **What's included in the plugin**: 13 agents, 14 skills, and 2 slash commands (`/setup`, `/start-issue`).
 
-**What requires clone/fork**: Instruction files (`.github/instructions/`), hooks (`session-cleanup.json`), and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo.
+**What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo.
 
 ---
 
@@ -49,7 +49,7 @@ Type `/setup` in GitHub Copilot Chat. It runs in six phases with skip gates:
 > **Recommended model**: Claude Opus — the setup wizard benefits from deep reasoning for architecture and tech stack decisions. *(o3 or GPT-4o also work well if Opus is unavailable.)*
 
 - **Phase 0** — Auto-detects prerequisites (VS Code version, pwsh, git, gh CLI)
-- **Phase 1** — One-time user setup: sets `WORKFLOW_TEMPLATE_ROOT` and adds agents, skills, hooks, and instructions to your VS Code settings. Skip if already configured.
+- **Phase 1** — One-time user setup: sets `WORKFLOW_TEMPLATE_ROOT` and adds agents, skills, and instructions to your VS Code settings. Skip if already configured.
 - **Phase 2** — Collects project basics (name, language, framework, database). Skip if `copilot-instructions.md` already exists.
 - **Phase 3** — Collects architecture and conventions. Skip if `architecture-rules.md` already exists.
 - **Phase 4** — Collects build, run, test, lint, and quick-validate commands. Skip offered if Phases 2, 3, and 5 are all skipped.
@@ -153,7 +153,6 @@ Skills are domain-specific knowledge packages in `.github/skills/` that agents l
 | `.github/instructions/safe-operations.instructions.md` | Universal file-operation safety rules and issue-creation patterns (priority labels, improvement-first decision) | Included — loaded automatically via `chat.instructionsFilesLocations` |
 | `.github/agents/*.agent.md` | Agent definitions | Ready to use, customize as needed |
 | `.github/skills/*/SKILL.md` | Domain knowledge | Ready to use, add your own |
-| `.github/hooks/session-cleanup.json` | VS Code `SessionStart` hook — prompts for post-merge cleanup | Ready to use |
 
 ---
 
@@ -222,7 +221,6 @@ See **[CONTRIBUTING.md](CONTRIBUTING.md)** for recommended VS Code settings.
 ├── agents/              # Agent definitions (used by Copilot, referenced by Claude Code)
 ├── copilot-instructions.md  # Your project context (generate via /setup)
 ├── architecture-rules.md    # Your architecture rules (generate via /setup)
-├── hooks/               # Session lifecycle hooks (SessionStart)
 ├── instructions/        # Output format and PR review guidelines
 ├── prompts/             # setup.prompt.md and start-issue.md
 ├── scripts/             # Post-merge cleanup and session detector
