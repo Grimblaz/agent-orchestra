@@ -145,21 +145,25 @@ git push origin --delete feature/issue-{ID}-description
 **Action**: Before approving a PR, evaluate strategic alignment on three dimensions.
 
 **Design Alignment**:
+
 - Does the implementation match the design doc (`Documents/Design/{domain}.md`)?
 - Are any design decisions reversed or partially implemented?
 - If the design doc doesn't exist yet, does the implementation align with the issue's stated goals?
 
 **Roadmap Integration**:
+
 - Does this change fit the project's stated direction?
 - Any unintended coupling introduced that will constrain future work?
 - Are there deprecations triggered or migration concerns created?
 
 **Long-Term Implications**:
+
 - Tech debt introduced — is it tracked (labeled issue or comment)?
 - Are there performance, scale, or maintenance concerns not covered in tests?
 - Would this pass the "6-month-later developer" readability test?
 
 **Output**: Emit one of:
+
 - `✅ Strategic assessment: aligned` — no concerns
 - `⚠️ Strategic assessment: concerns noted` — list specific items; may block PR
 - `⏭️ Strategic assessment: skipped — {reason}` — e.g., documentation-only change

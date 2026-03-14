@@ -31,19 +31,21 @@ Use the absolute path via `$env:WORKFLOW_TEMPLATE_ROOT` — this ensures the scr
 The detector returns one of two JSON shapes:
 
 **No stale state found** (continue silently, do not mention to user):
+
 ```json
 {}
 ```
 
 **Stale state found** (prompt the user):
-```json
+
+````json
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
     "additionalContext": "**Post-merge cleanup detected** — stale tracking artifacts found:\n\n- `.copilot-tracking/issue-42-my-feature.yml`\n\nTo clean up, run:\n```powershell\n# Run in a PowerShell (pwsh) terminal:\npwsh '/path/to/workflow-template/.github/scripts/post-merge-cleanup.ps1' -IssueNumber 42 -FeatureBranch 'feature/issue-42-my-feature'\n```\n"
   }
 }
-```
+````
 
 The `additionalContext` field is a Markdown-formatted string describing what was found and the command(s) to clean it up.
 
@@ -51,13 +53,13 @@ The `additionalContext` field is a Markdown-formatted string describing what was
 
 If the output contains `hookSpecificOutput`, present the `additionalContext` description to the user and ask for confirmation before running cleanup:
 
-> "Post-merge cleanup may be needed. [paste the description from `additionalContext`]. Would you like me to run the cleanup now?"
+> "[Paste the full content of `additionalContext` here.] Would you like me to run the cleanup now?"
 
 Use `#tool:vscode/askQuestions` with two options: "Yes — run cleanup" and "No — skip for now".
 
 ### Step 5 — Run cleanup (only if user confirms)
 
-If the user confirms, extract the PowerShell command(s) from the code block inside `additionalContext` and run them in the terminal. Example:
+If the user confirms, run all lines from the code block inside `additionalContext` in the terminal. Skip blank lines; `#`-prefixed comment lines are safe to include (they are no-ops in PowerShell). Example:
 
 ```
 pwsh '/path/to/workflow-template/.github/scripts/post-merge-cleanup.ps1' -IssueNumber 42 -FeatureBranch 'feature/issue-42-my-feature'

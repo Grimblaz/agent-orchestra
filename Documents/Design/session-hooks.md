@@ -1,6 +1,6 @@
 # Design: Session Hooks
 
-> **⚠️ Superseded — Issue #109**: The VS Code `SessionStart` hook was retired due to unreliable firing across different repositories. It has been replaced by `.github/instructions/session-startup.instructions.md`, a shared instruction file that achieves the same behavior through agent self-check at conversation start. The detector and cleanup scripts remain unchanged — only the invocation mechanism changed. Historical context below is preserved for reference.
+> **⚠️ Superseded — Issue #109**: The VS Code `SessionStart` hook was retired due to unreliable firing across different repositories. It has been replaced by `.github/instructions/session-startup.instructions.md`, a shared instruction file that achieves the same behavior through agent self-check at conversation start. The detector and cleanup scripts remain unchanged; two behavioral changes were made: (1) invocation mechanism (hook → instruction), and (2) `WORKFLOW_TEMPLATE_ROOT` unset behavior (hook era: surfaced an actionable error via `additionalContext`; instruction era: silently skips before the script runs). Historical context below is preserved for reference.
 
 ## Summary
 
@@ -12,17 +12,17 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 
 ## Design Decisions
 
-| # | Decision | Choice | Rationale |
-|---|----------|--------|-----------|
-| D1 | Cleanup mechanism | VS Code `SessionStart` hook | Fires at the natural post-merge moment; zero overhead for sessions with nothing to clean |
-| D2 | Confirmation model | Agent-mediated via `vscode/askQuestions` | `PreToolUse` is the only hook with `permissionDecision: "ask"` but does not fit the trigger pattern; agent-mediated confirmation is functionally equivalent |
-| D3 | Janitor retirement | Remove entirely; absorb all capabilities | Mechanical work moved to hook; judgment work absorbed by existing pipeline stages |
-| D4 | Implementation language | PowerShell (`.ps1`) | Cross-platform via `pwsh`; supports both parameterized invocation and hook-triggered flow |
-| D5 | Issue closure | `Closes #N` in PR body | GitHub auto-close is sufficient — no summary comment needed |
-| D6 | Knowledge capture | Dropped | Pipeline already produces durable artifacts (design in issue body, `Documents/Design/` file, PR description); rare novel insights are left as manual developer actions |
-| D7 | Hook portability | `WORKFLOW_TEMPLATE_ROOT` env var | Explicit and transparent; works across all repos; no dynamic resolution needed; unset behavior: fail with a clear actionable error, not silent no-op |
-| D8 | Hook retirement | Retire `SessionStart` hook entirely | Hook fires unreliably across different repos (works in some, silently fails in others at the OS/IDE level regardless of configuration); instruction files via `chat.instructionsFilesLocations` are more reliable and simpler to maintain |
-| D9 | Instruction-based replacement | New `session-startup.instructions.md` shared instruction | Instruction files are loaded unconditionally across all repos; same agent-mediated confirmation model (D2); no VS Code version gate; `WORKFLOW_TEMPLATE_ROOT` still required for script path resolution |
+| # | Decision | Choice | Rationale | Era |
+|---|----------|--------|-----------|-----|
+| D1 | Cleanup mechanism | VS Code `SessionStart` hook | Fires at the natural post-merge moment; zero overhead for sessions with nothing to clean | Hook |
+| D2 | Confirmation model | Agent-mediated via `vscode/askQuestions` | `PreToolUse` is the only hook with `permissionDecision: "ask"` but does not fit the trigger pattern; agent-mediated confirmation is functionally equivalent | Hook |
+| D3 | Janitor retirement | Remove entirely; absorb all capabilities | Mechanical work moved to hook; judgment work absorbed by existing pipeline stages | Hook |
+| D4 | Implementation language | PowerShell (`.ps1`) | Cross-platform via `pwsh`; supports both parameterized invocation and hook-triggered flow | Hook |
+| D5 | Issue closure | `Closes #N` in PR body | GitHub auto-close is sufficient — no summary comment needed | Hook |
+| D6 | Knowledge capture | Dropped | Pipeline already produces durable artifacts (design in issue body, `Documents/Design/` file, PR description); rare novel insights are left as manual developer actions | Hook |
+| D7 | Hook portability | `WORKFLOW_TEMPLATE_ROOT` env var | Explicit and transparent; works across all repos; no dynamic resolution needed; hook-era unset behavior: fail with a clear actionable error, not silent no-op (see D9 for instruction-era behavior) | Hook |
+| D8 | Hook retirement | Retire `SessionStart` hook entirely | Hook fires unreliably across different repos (works in some, silently fails in others at the OS/IDE level regardless of configuration); instruction files via `chat.instructionsFilesLocations` are more reliable and simpler to maintain | Instruction |
+| D9 | Instruction-based replacement | New `session-startup.instructions.md` shared instruction | Instruction files are loaded unconditionally across all repos; same agent-mediated confirmation model (D2); no VS Code version gate; `WORKFLOW_TEMPLATE_ROOT` still required for script path resolution; **unset behavior: silent-skip** (agent checks at Step 1 before running script — no error surfaced to user) | Instruction |
 
 ---
 

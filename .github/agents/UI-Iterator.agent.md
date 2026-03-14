@@ -31,6 +31,7 @@ tools:
   # - "playwright/*"
   - vscode/memory
   - agent
+  - vscode/askQuestions
 handoffs:
   - label: Implement UI Changes
     agent: Code-Smith

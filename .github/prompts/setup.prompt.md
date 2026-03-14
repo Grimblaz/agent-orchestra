@@ -342,7 +342,8 @@ Replace `{PORT}` with the user's dev server port, `{FRAMEWORK}` with the framewo
   }
 }
 ```
-  - Inform the user: "Playwright MCP also requires uncommenting `# - \"playwright/*\"` in the `tools:` list in the frontmatter of each agent used for browser workflows (e.g. `UI-Iterator.agent.md`, `Code-Conductor.agent.md`). Without this step, agents cannot invoke `playwright/*` tools even with `.vscode/mcp.json` configured."
+
+- Inform the user: "Playwright MCP also requires uncommenting `# - \"playwright/*\"` in the `tools:` list in the frontmatter of each agent used for browser workflows (e.g. `UI-Iterator.agent.md`, `Code-Conductor.agent.md`). Without this step, agents cannot invoke `playwright/*` tools even with `.vscode/mcp.json` configured."
 
 **5e. `Documents/` directory structure**
 
