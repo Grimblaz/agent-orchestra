@@ -138,6 +138,7 @@ Replaced the rebuttal-based adversarial review pipeline with a structured Prosec
 | D18 | Mode conflict resolution | Priority order: defense > CE > proxy > design > code | Most-specific mode wins; avoids ambiguous multi-marker prompts |
 | D19 | Judge-only CRR separation | Code-Review-Response stops at judgment — no fix delegation | Conductor is the orchestrator; CRR doing delegation created conflicting responsibility chains |
 | D20 | Post-judgment routing in Conductor | All post-judgment fix routing logic lives in Code-Conductor | Single responsibility: CRR judges, Conductor executes. Gaps addressed: AC cross-check, effort estimation, auto-tracking, GitHub response posting |
+| D21 | Post-fix prosecution pass | Full pipeline (3 prosecution + defense + judge), diff-scoped, triggered by Critical/High or control-flow fix, loop budget 1 | Catches fix-introduced defects missed by one-shot review; full pipeline maintains adversarial principle; tight scope keeps cost proportionate |
 
 ---
 
@@ -185,6 +186,8 @@ Code-Conductor invokes →
     → Code-Critic (defense, 1 pass over merged ledger)
       → Code-Review-Response (judge, rules + emits score summary)
         → Score summary → Code-Conductor routes accepted fixes to specialists
+          → [if triggered] Post-fix targeted prosecution (3× diff-scoped passes → defense → judge)
+              → Code-Conductor routes post-fix accepted findings (loop budget: 1)
 ```
 
 **Design/plan review** (1× each):

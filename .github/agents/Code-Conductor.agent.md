@@ -246,6 +246,35 @@ For DEFERRED-SIGNIFICANT items, create a GitHub tracking issue automatically —
 
 When the review originated from GitHub (proxy prosecution pipeline), Code-Conductor posts concise responses to GitHub review comments with final disposition and score evidence after routing accepted fixes to specialists.
 
+#### Post-Fix Targeted Prosecution Pass
+
+**Recursion guard**: This step is never triggered by another post-fix prosecution — only by a main review cycle (code review or GitHub intake proxy prosecution). It applies after both: the main 3-pass code review fix routing and GitHub review accepted-fix routing (proxy prosecution path). This is an absolute rule, not an edge case.
+
+**When to run** — Mandatory when any of the following apply after all specialists apply all accepted main-review findings:
+
+- ≥1 accepted finding was Critical or High severity
+- Any accepted fix modifies control flow — defined as: adding/changing/removing `if`/`else`/`switch` branches, loop structure changes (`for`/`while`/`forEach` — bounds, iteration variable, or `break`/`continue`), guard clause additions/removals, try/catch restructuring, early returns, or conditional short-circuit reordering (`&&`/`||` guard reordering) — inspect the fix diff computed in Diff scoping below to evaluate this condition.
+
+Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFERRED-SIGNIFICANT, no fixes committed).
+
+**Evaluation ordering**: Condition 1 (severity) is evaluable immediately from the main-review judge output. Condition 2 (control flow) requires the fix diff and is evaluated after Diff scoping below — if condition 1 does not trigger alone, proceed through Tier 1 re-validation and Diff scoping before making the final skip decision.
+
+**Tier 1 re-validation** — After specialists apply fixes, re-run Tier 1 validation (build + lint/typecheck + tests). If Tier 1 fails, route the failure via the Failure Triage Rule and resolve it before proceeding.
+
+**Diff scoping** — After Tier 1 passes, compute the fix diff: `git diff HEAD -- {files touched by specialists}` isolates the review-fix changes (the original implementation was committed by the user before this phase; only specialist fix changes are uncommitted, so HEAD points to the pre-fix commit and the diff captures only review fixes). Pass those files and hunks in each prosecution prompt. Code-Critic runs in normal code prosecution mode (no marker) with the constrained input. Include the original PR change-type classification in each post-fix prosecution prompt (same requirement as main review pass prompts).
+
+**Pipeline** — 3 parallel prosecution passes (diff-scoped) → merge deduplicated ledger → 1 defense pass → 1 judge pass (Code-Review-Response). Same protocol as main review, smaller input scope.
+
+**Routing** — Route accepted findings to specialists per the Agent Selection table. Loop budget: 1 fix-revalidate cycle. If further issues remain after one cycle, they converge through the standard terminal state (DEFERRED-SIGNIFICANT → auto-tracking issue). If the post-fix judge accepts zero findings (all DEFERRED-SIGNIFICANT or REJECTED), no specialist routing occurs; proceed directly to the CE Gate.
+
+**Out-of-diff findings** — If prosecution surfaces a finding outside the fix diff, classify as DEFERRED-SIGNIFICANT (auto-tracking applies). Exception: if the finding maps to an explicit acceptance criterion item, the AC Cross-Check Gate takes precedence — reclassify as ACCEPT and route to the appropriate specialist.
+
+**Interruption budget** — Post-fix review is a separate review cycle with its own budget (max 1 non-blocking decision prompt).
+
+**PR body** — Include a "Post-fix Review" row in the Adversarial Review Scores table (`⏭️ N/A` if not triggered). Record `postfix_triggered` in Pipeline Metrics.
+
+**Completion** — After routing completes, or the post-fix judge accepts zero findings (no routing occurred), or the overall skip rule applies — proceed to the CE Gate (see Customer Experience Gate section).
+
 **Non-obvious rules**:
 
 - **NEVER use Code-Smith for test files** — always use Test-Writer, even for "simple" fixes
@@ -294,7 +323,7 @@ Validation must run in this **graduated 4-tier order** (fail-fast to comprehensi
 1. **Tier 1 — Build & Validate** (run all automated checks together and report all failures before fixing): quick-validate commands (see `.github/copilot-instructions.md`), lint/typecheck, and the full test suite (project test command; see `.github/copilot-instructions.md`). Prefer running lint/typecheck before tests if the project supports it — syntax errors are cheaper to surface than test failures. For migration-type issues, also run the migration completeness scan described in Step 4 (Create PR). _Projects with slow test suites (10+ minute full runs) can override in their `.github/copilot-instructions.md` to split Tier 1 into two sub-passes: (1) quick-validate, lint/typecheck, and targeted tests (touched modules), then (2) the full test suite. To activate, add `<!-- slow-test-suite: true -->` anywhere in `.github/copilot-instructions.md`._
 2. **Tier 2 — Structural validation** (project architecture validation commands; see `.github/architecture-rules.md` and `.github/copilot-instructions.md`)
 3. **Tier 3 — Strength validation** (project coverage/robustness commands as configured; see `.github/copilot-instructions.md`)
-4. **Tier 4 — Independent review + Customer Experience Gate** (prosecution → defense → judge pipeline, then CE Gate — see the Customer Experience Gate (CE Gate) and Review Reconciliation Loop sections below)
+4. **Tier 4 — Independent review + Customer Experience Gate** (prosecution → defense → judge pipeline, then post-fix targeted prosecution (if triggered), then CE Gate — see the Customer Experience Gate (CE Gate), Post-Fix Targeted Prosecution Pass, and Review Reconciliation Loop sections below)
 
 Do not skip ahead when an earlier tier fails. Resolve failures at the current tier, then continue upward.
 
@@ -310,7 +339,7 @@ Always include failure evidence, attempted diagnosis, and next action in the han
 
 ## Customer Experience Gate (CE Gate)
 
-Run this gate as the final step before PR creation (Tier 4, after Code-Critic).
+Run this gate as the final step before PR creation (Tier 4, after the post-fix targeted prosecution pass — or after Code-Review-Response judgment if post-fix was not triggered).
 
 ### Surface Identification
 
@@ -412,13 +441,14 @@ Always include the adversarial review score summary table from the judge's score
 | ----------- | ------------------------- | --------------------------------------- | ------------- |
 | Code Review | {pts} pts ({N} sustained) | {pts} pts ({N} disproved, {N} rejected) | {N} rulings   |
 | CE Review   | {pts} pts ({N} sustained) | {pts} pts ({N} disproved, {N} rejected) | {N} ruling(s) |
+| Post-fix Review | {pts} pts ({N} sustained) | {pts} pts ({N} disproved, {N} rejected) | {N} ruling(s) |
 ```
 
-If a stage did not run (e.g., CE Gate not applicable), note it as `⏭️ N/A`.
+If a stage did not run (e.g., CE Gate not applicable, post-fix review not triggered), note it as `⏭️ N/A`.
 
 ### PR Body Pipeline Metrics
 
-Always include a `## Pipeline Metrics` section in the PR body with a hidden HTML comment block containing pipeline telemetry. Emit this at PR creation time after the full pipeline completes. Count values from the post-deduplication merged ledger (not raw per-pass totals). `pass_1_findings + pass_2_findings + pass_3_findings = prosecution_findings`.
+Always include a `## Pipeline Metrics` section in the PR body with a hidden HTML comment block containing pipeline telemetry. Emit this at PR creation time after the full pipeline completes. Count values from the post-deduplication merged ledger (not raw per-pass totals). `pass_1_findings + pass_2_findings + pass_3_findings = prosecution_findings`. Fields `prosecution_findings` through `rework_cycles` cover the **main review cycle only**; `postfix_*` fields cover the post-fix targeted prosecution separately.
 
 ```markdown
 ## Pipeline Metrics
@@ -436,14 +466,23 @@ ce_gate_result: {passed|skipped|not-applicable}
 ce_gate_intent: {strong|partial|weak|n/a}
 ce_gate_defects_found: {N}
 rework_cycles: {N}
+postfix_triggered: {true|false}
+postfix_prosecution_findings: {N}
+postfix_judge_accepted: {N}
+postfix_judge_rejected: {N}
+postfix_judge_deferred: {N}
+postfix_defense_disproved: {N}
+postfix_rework_cycles: {N}
 -->
 ```
 
-**Default values**: `0` for numeric fields when the stage ran but found nothing. `n/a` for categorical fields when the stage was skipped entirely (e.g., `ce_gate_result: not-applicable`, `ce_gate_intent: n/a` when `ce_gate: false`). `ce_gate_defects_found: n/a` when the CE Gate did not run (`ce_gate: false` or `⏭️ CE Gate not applicable`). For proxy prosecution (GitHub review intake): `pass_1_findings`, `pass_2_findings`, `pass_3_findings` → `n/a` (3-pass structure replaced by proxy pass); route total findings count to `prosecution_findings` only.
+**Default values**: `0` for numeric fields when the stage ran but found nothing. `n/a` for categorical fields when the stage was skipped entirely (e.g., `ce_gate_result: not-applicable`, `ce_gate_intent: n/a` when `ce_gate: false`). `ce_gate_defects_found: n/a` when the CE Gate did not run (`ce_gate: false` or `⏭️ CE Gate not applicable`). For proxy prosecution (GitHub review intake): `pass_1_findings`, `pass_2_findings`, `pass_3_findings` → `n/a` (3-pass structure replaced by proxy pass); route total findings count to `prosecution_findings` only. `postfix_*` numeric fields default to `0` when post-fix review was triggered but found nothing; `n/a` when not triggered (`postfix_triggered: false`). Set `postfix_triggered: true` when trigger conditions are met and post-fix prosecution executes (regardless of whether any findings were accepted). Set `postfix_triggered: false` when the skip rule applies or trigger criteria are not satisfied.
 
-**Verdict mapping**: `✅ Sustained` findings → `judge_accepted`; `❌ Defense sustained` findings → `judge_rejected`; `📋 DEFERRED-SIGNIFICANT` findings → `judge_deferred`. Count each verdict type from the judge's score summary table.
+**Verdict mapping**: `✅ Sustained` findings → `judge_accepted`; `❌ Defense sustained` findings → `judge_rejected`; `📋 DEFERRED-SIGNIFICANT` findings → `judge_deferred`. For post-fix prosecution: use `postfix_judge_accepted`, `postfix_judge_rejected`, `postfix_judge_deferred` respectively. Count each verdict type from the judge's score summary table.
 
-**`rework_cycles`**: Count of fix-revalidate loops after routing accepted review findings to specialists (code review fix loops only — not CE Gate loops). Each route-to-specialist → implement → re-validate cycle = 1. If no findings accepted, `rework_cycles: 0`.
+**`rework_cycles`**: Count of fix-revalidate loops after routing accepted review findings to specialists (main review fix loops only — not CE Gate loops or post-fix review loops; those are tracked in `postfix_rework_cycles`). Each route-to-specialist → implement → re-validate cycle = 1. If no findings accepted, `rework_cycles: 0`.
+
+**`postfix_rework_cycles`**: Count of fix-revalidate loops during the post-fix targeted prosecution phase (post-fix fix loops only). Each route-to-specialist → implement → re-validate cycle = 1; loop budget is 1. If post-fix prosecution was not triggered, `postfix_rework_cycles: n/a`. If judge accepted zero findings (triggered but clean), `postfix_rework_cycles: 0`.
 
 ---
 

@@ -62,6 +62,8 @@ This repo uses a **scored prosecution → defense → judge pipeline** across al
 
 **GitHub review**: proxy prosecution (Code-Critic validates/scores each GitHub comment) → defense → judge.
 
+**Post-fix review** (after accepted fixes are applied): 3× prosecution (diff-scoped), 1× defense, 1× judge — triggered by Critical/High fix or control-flow modification. Loop budget: 1.
+
 **Code-Critic modes** — activated by marker in the prompt:
 
 - _(none)_ — code prosecution (3 passes)
