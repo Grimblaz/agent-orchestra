@@ -366,7 +366,7 @@ Every review MUST address all 7 perspectives in sequence, using the **"When to a
 
 ### 1. Architecture Perspective
 
-**When to apply**: PR includes source code files (`.ts`, `.tsx`, `.cs`, `.py`, etc.), scripts, or runtime configuration. For documentation-only PRs (`.md`/`.instructions.md`/`.prompt.md`/`.agent.md` files only): skip §1b and §1c entirely; apply the §1 checklist only to verify documentation does not misrepresent architectural constraints.
+**When to apply**: PR includes source code files (`.ts`, `.tsx`, `.cs`, `.py`, etc.), scripts, or runtime configuration. For documentation-only PRs (`.md`/`.instructions.md`/`.prompt.md`/`.agent.md` files only): skip §1b, §1c, and §1d entirely; apply the §1 checklist only to verify documentation does not misrepresent architectural constraints.
 
 - [ ] Project architecture compliance (see `.github/architecture-rules.md`)
 - [ ] Dependencies follow documented layer direction (e.g., interface/adapters into domain/core logic)
@@ -405,6 +405,24 @@ For any **new data field, constant, or map** added:
 | New scoring definitions             | `ScoreCalculator` or equivalent         | Decorative data with no behavior effect              |
 
 **This is the #1 way features ship incomplete**: Data gets added and tested, but integration is "deferred" and forgotten.
+
+### 1d. Domain Alignment Verification
+
+**When to apply**: PR includes a validator, parser, converter, deserializer, or any function that constrains the accepted values of a field — and that field is also handled by another function, either in the PR diff or existing in the codebase. Skip for documentation-only PRs.
+
+_To identify peers: grep for the field name in function signatures (criterion a), consult the plan for shared-concept fields under different names (criterion b), and trace call chains for output→input relationships (criterion c)._
+
+- [ ] **Range and documentation check**: For each field with multiple consumers (new or existing), do all functions accept identical input ranges — or, if ranges differ, is the difference documented as intentional (plan step or inline code comment)?
+- [ ] **Boundary alignment**: Do all functions agree on inclusive/exclusive bounds, signed/unsigned treatment, and type coercion behavior?
+
+**Red flags**:
+
+| Pattern                                 | Example                                                 | Risk                                                  |
+| --------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------- |
+| Validator accepts values parser rejects | `validate: [-∞, ∞]` vs `parse: [0, 2³²-1]`              | Valid input silently fails at parse step              |
+| Parser accepts values validator rejects | `parse: [0, MAX]` vs `validate: [1, 3600]`              | Parsed value fails downstream validation              |
+| Signed/unsigned range mismatch          | `validate: int` vs `parse: uint32`                      | Negative values accepted then truncated/wrapped       |
+| String-to-number boundary mismatch      | `validate: "finite number"` vs `parse: [0, 4294967295]` | Edge values like `-1` or `NaN` treated inconsistently |
 
 ### 2. Security Perspective
 
