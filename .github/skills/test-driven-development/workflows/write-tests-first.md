@@ -24,7 +24,7 @@ Ask yourself: **What should this code do?** (not how it does it)
 
 ### 2. Domain Peer Check
 
-**When to complete**: If the function under test validates, parses, deserializes, or constrains an input field for which another function (new in the PR or existing in the codebase) also operates on the same field, complete this step before writing tests. Otherwise, skip to Step 3.
+**When to complete**: If the function under test validates, parses, converts, deserializes, or constrains an input field for which another function (new in the PR or existing in the codebase) also operates on the same field, complete this step before writing tests. Otherwise, skip to Step 3.
 
 **Identifying the same field**: A field is "the same" when any of the following hold:
 
@@ -110,7 +110,7 @@ git commit -m "test: add failing test for user lookup by ID"
 - [ ] Test follows AAA pattern (Arrange-Act-Assert)
 - [ ] Test fails for the right reason (missing implementation, not wrong setup)
 - [ ] No `@Disabled` or skipped tests
-- [ ] Domain Peer Check: if function shares a field with another validator, parser, deserializer, or constraining function (new or existing), input ranges confirmed identical or difference documented
+- [ ] Domain Peer Check: if function shares a field with another validator, parser, converter, deserializer, or constraining function (new or existing), input ranges confirmed identical or difference documented
 
 ## Anti-Patterns to Avoid
 

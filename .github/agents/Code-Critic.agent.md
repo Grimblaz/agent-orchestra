@@ -412,18 +412,17 @@ For any **new data field, constant, or map** added:
 
 _To identify peers: grep for the field name in function signatures (criterion a), consult the plan for shared-concept fields under different names (criterion b), and trace call chains for output→input relationships (criterion c)._
 
-- [ ] **Range check**: For each field with multiple consumers (new or existing), are accepted input ranges identical?
-- [ ] **Documentation check**: If ranges differ, is the difference documented as intentional (plan step or inline code comment)?
+- [ ] **Range and documentation check**: For each field with multiple consumers (new or existing), do all functions accept identical input ranges — or, if ranges differ, is the difference documented as intentional (plan step or inline code comment)?
 - [ ] **Boundary alignment**: Do all functions agree on inclusive/exclusive bounds, signed/unsigned treatment, and type coercion behavior?
 
 **Red flags**:
 
-| Pattern | Example | Risk |
-| ------- | ------- | ---- |
-| Validator accepts values parser rejects | `validate: [-∞, ∞]` vs `parse: [0, 2³²-1]` | Valid input silently fails at parse step |
-| Parser accepts values validator rejects | `parse: [0, MAX]` vs `validate: [1, 3600]` | Parsed value fails downstream validation |
-| Signed/unsigned range mismatch | `validate: int` vs `parse: uint32` | Negative values accepted then truncated/wrapped |
-| String-to-number boundary mismatch | `validate: "finite number"` vs `parse: [0, 4294967295]` | Edge values like `-1` or `NaN` treated inconsistently |
+| Pattern                                 | Example                                                 | Risk                                                  |
+| --------------------------------------- | ------------------------------------------------------- | ----------------------------------------------------- |
+| Validator accepts values parser rejects | `validate: [-∞, ∞]` vs `parse: [0, 2³²-1]`              | Valid input silently fails at parse step              |
+| Parser accepts values validator rejects | `parse: [0, MAX]` vs `validate: [1, 3600]`              | Parsed value fails downstream validation              |
+| Signed/unsigned range mismatch          | `validate: int` vs `parse: uint32`                      | Negative values accepted then truncated/wrapped       |
+| String-to-number boundary mismatch      | `validate: "finite number"` vs `parse: [0, 4294967295]` | Edge values like `-1` or `NaN` treated inconsistently |
 
 ### 2. Security Perspective
 
