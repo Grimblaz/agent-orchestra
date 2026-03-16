@@ -333,7 +333,7 @@ pwsh -NonInteractive .github/scripts/aggregate-review-scores.ps1
 
 - **High false-positive rate**: category `sustain_rate` < 0.5 → recommend strengthening evidence requirements in the corresponding Code-Critic prosecution perspective before filing findings
 - **Judge overconfidence**: `high` confidence level `sustain_rate` < 0.85 → recommend adding calibration caveats to Code-Review-Response's high-confidence ruling guidance
-- **Defense underreach**: `overall_success_rate` < 0.10 → recommend reviewing Code-Critic defense perspective prompts for passive acceptance bias
+- **Defense underreach**: `defense_challenge_rate` < 0.10 → recommend reviewing Code-Critic defense perspective prompts for passive acceptance bias
 - **Defense overreach**: `overreach_rate` > 0.30 → recommend adding specificity requirements to defense challenges
   > **Note**: Apply defense underreach/overreach thresholds only when `defense_sufficient_data: true` (emitted under the `defense:` output key). If `defense_sufficient_data: false`, skip these two checks and note insufficient defense data in the output.
 - **Cross-stage patterns**: consistently higher finding rates in `postfix` vs `main` → recommend improving targeted prosecution prompts in Code-Conductor's post-fix instructions
@@ -345,9 +345,11 @@ pwsh -NonInteractive .github/scripts/aggregate-review-scores.ps1
 ## Calibration Analysis ({N} issues, effective n={X:.1f})
 
 ### Signals Found
+
 {N} actionable signals identified (from categories/metrics with sufficient_data: true).
 
 ### Recommendations
+
 1. **{Signal name}: {observed rate/value}**
    Observation: {what the data shows}
    Recommendation: Update `{file path}` → {section name}: {specific change suggested}
@@ -356,9 +358,11 @@ pwsh -NonInteractive .github/scripts/aggregate-review-scores.ps1
 2. ...
 
 ### Data Summary
+
 - Overall sustain rate: {rate} ({sufficient_data})
 - Issues with sufficient per-category data: {list of categories}
-- Defense challenge rate: {overall_success_rate}
+- Defense success rate: {defense_success_rate}
+- Defense challenge rate: {defense_challenge_rate}
 - Judge calibration: high={sustain_rate}, medium={sustain_rate}, low={sustain_rate}
 ```
 

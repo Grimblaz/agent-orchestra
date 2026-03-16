@@ -436,7 +436,7 @@ CRR now emits a `<!-- judge-rulings -->` YAML block after the Markdown score sum
 The aggregation script (`.github/scripts/aggregate-review-scores.ps1`) outputs YAML to stdout with:
 
 - Weighted sustain rates per prosecution category (per-category `sufficient_data: true` when ≥ 15 effective findings)
-- Defense block includes `defense_total: N` and `defense_sufficient_data: true/false` (threshold: effective_count ≥ 5) before `overall_success_rate`
+- Defense block includes `defense_findings_count: N` (raw count), `defense_effective_count: X.X` (decay-weighted), and `defense_sufficient_data: true/false` (threshold: effective_count ≥ 5.0) before `defense_success_rate` and `defense_challenge_rate`
 - Judge confidence calibration per level (high/medium/low); each level emits `sufficient_data: true/false` (threshold: effective_count ≥ 5) before `sustain_rate`
 - `by_review_stage:` breakdown with canonical keys `main`, `postfix`, `ce`; a `review_stage_untagged: N` field counts findings that were defaulted to `main` due to a missing `review_stage` field in their pipeline-metrics block (early-adoption indicator). `design` and `proxy` findings, if tagged, appear as ad-hoc keys outside the canonical set.
 - `bias_direction` (slightly_prosecution | slightly_defense | balanced)
@@ -448,7 +448,8 @@ Process-Review §4.7 runs the aggregation script automatically. Recommendations 
 
 - Sustain rate < 0.5 → strengthen evidence requirements for that Code-Critic perspective
 - Judge high-confidence accuracy < 0.85 → add calibration caveats to CRR
-- Defense challenge rate < 10% → review defense prompts for passive acceptance
+- Defense success rate (`defense_success_rate`) < 10% → this indicates defense is challenging findings but rarely winning (ineffective defense, not passive); consider narrowing defense scope
+- Defense challenge rate (`defense_challenge_rate`) < 10% → defense is passively conceding most findings; review defense perspective prompts for passive acceptance bias
 - Defense overreach > 30% → add specificity requirements to challenges
 
 All recommendations cite the specific file, section, and suggested change. Process-Review is READ-ONLY — recommendations require human approval before application.
@@ -464,11 +465,9 @@ All recommendations cite the specific file, section, and suggested change. Proce
 | File | Change |
 |------|--------|
 | `.github/agents/Code-Critic.agent.md` | Added `category` field to automation-routing output fields |
-| `.github/agents/Code-Review-Response.agent.md` | Added `<!-- judge-rulings -->` structured YAML block requirement |
-| `.github/agents/Code-Conductor.agent.md` | Enriched `<!-- pipeline-metrics -->` with `metrics_version: 2`, `findings:` array, and population instructions |
+| `.github/agents/Code-Conductor.agent.md` | Enriched `<!-- pipeline-metrics -->` with `metrics_version: 2`, `findings:` array, and population instructions; added `pass: N` tagging to prosecution pass prompts; added earliest-pass dedup credit rule; added `### PR Body Pipeline Metrics` section with 12-field metrics template and default value rules |
 | `.github/agents/Process-Review.agent.md` | Added §4.7 Calibration Analysis section |
 | `.github/scripts/aggregate-review-scores.ps1` | New script — reads merged PRs, computes calibration profile |
 | `Documents/Design/code-review.md` | This file — cross-session learning pipeline section |
 | `CLAUDE.md` | Phase 5 updated with calibration script note |
-| `.github/agents/Code-Conductor.agent.md` | Added `pass: N` tagging to prosecution pass prompts; added earliest-pass dedup credit rule; added `### PR Body Pipeline Metrics` section with 12-field metrics template and default value rules |
-| `.github/agents/Code-Review-Response.agent.md` | Added `Pass` column to score summary table template; added `id` field to finding schema; split example into code-prosecution and non-code-prosecution variants |
+| `.github/agents/Code-Review-Response.agent.md` | Added `<!-- judge-rulings -->` structured YAML block requirement; added `Pass` column to score summary table template; added `id` field to finding schema; split example into code-prosecution and non-code-prosecution variants |

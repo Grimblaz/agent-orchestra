@@ -46,7 +46,7 @@ if ($Repo -ne '') {
     $repoArgs = @('--repo', $Repo)
 }
 else {
-    $repoJson = gh repo view --json nameWithOwner 2>&1
+    $repoJson = gh repo view --json nameWithOwner
     if ($LASTEXITCODE -ne 0) {
         Write-Output "error: Failed to detect repository (gh exit code $LASTEXITCODE): $repoJson"
         exit 1
@@ -65,7 +65,7 @@ else {
 # ---------------------------------------------------------------------------
 # 3. Fetch merged PRs
 # ---------------------------------------------------------------------------
-$prListJson = gh pr list --state merged --limit $Limit --json number,mergedAt @repoArgs 2>&1
+$prListJson = gh pr list --state merged --limit $Limit --json number,mergedAt,body @repoArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Output "error: Failed to fetch merged PR list (gh exit code $LASTEXITCODE): $prListJson"
     exit 1
@@ -82,6 +82,7 @@ if ($null -eq $mergedPRs -or $mergedPRs.Count -eq 0) {
     Write-Output "insufficient_data: true"
     Write-Output "effective_sample_size: 0"
     Write-Output "issues_analyzed: 0"
+    Write-Output "skipped_prs: 0"
     Write-Output 'message: "Minimum effective sample size of 5 required (current: 0.00)"'
     exit 0
 }
@@ -120,10 +121,11 @@ function Get-FindingsArray {
             continue
         }
 
-        # New finding entry
-        if ($line -match '^\s+-\s+id:\s*(.+)$') {
+        # New finding entry (any `  - key: value` starts a new entry; id need not be first)
+        if ($line -match '^\s+-\s+([a-z_]+):\s*(.*)$') {
             if ($null -ne $current) { $findings.Add($current) }
-            $current = @{ id = $Matches[1].Trim() }
+            $current = @{}
+            $current[$Matches[1].Trim()] = $Matches[2].Trim()
             continue
         }
 
@@ -148,16 +150,16 @@ function Get-FindingsArray {
 # 4. Per-PR processing
 # ---------------------------------------------------------------------------
 $now = Get-Date
-$requiredFindingFields = @('id', 'category', 'judge_ruling', 'judge_confidence')
+$requiredFindingFields = @('id', 'category', 'judge_ruling')
 
 # Accumulators
-$effectiveSampleSize  = 0.0
-$issuesAnalyzed       = 0
-$skippedPRs           = 0
-$totalFindings        = 0
+$effectiveSampleSize = 0.0
+$issuesAnalyzed = 0
+$skippedPRs = 0
+$totalFindings = 0
 
-$weightedAccepted     = 0.0   # judge_ruling = sustained
-$weightedTotal        = 0.0   # all findings with non-n/a category (code prosecution)
+$weightedAccepted = 0.0   # judge_ruling = sustained
+$weightedTotal = 0.0   # all findings with non-n/a category (code prosecution)
 
 # Per-category accumulators: category -> @{ findings=0; effectiveCount=0.0; sustained=0.0 }
 $categoryData = @{}
@@ -167,11 +169,13 @@ $stageData = @{}
 $reviewStageUntagged = 0   # findings where review_stage was absent and defaulted to 'main'
 
 # Defense accumulators
-$defenseTotal            = 0.0   # weighted sum of findings where defense was involved (has defense_verdict)
-$defenseTotalCount       = 0     # raw count of findings where defense verdicts were emitted
-$defenseSustained        = 0.0   # defense-sustained (defense_verdict = sustained)
-$defenseOverreach        = 0.0   # defense claimed disproved but judge sustained prosecution anyway
-$defenseChallengedTotal  = 0.0   # weighted count of findings where defense claimed disproved (overreach denominator)
+$defenseTotal = 0.0   # weighted sum of findings where defense was involved (has defense_verdict)
+$defenseTotalCount = 0     # raw count of findings where defense verdicts were emitted
+$defenseSustained = 0.0   # defense-sustained (defense_verdict = sustained)
+$defenseOverreach = 0.0   # defense claimed disproved but judge sustained prosecution anyway
+$defenseChallengedTotal = 0.0   # weighted count of findings where defense claimed disproved (overreach denominator)
+# v2 tracking
+$v2IssuesAnalyzed = 0
 
 # Judge confidence calibration: level -> @{ count=0; effectiveCount=0.0; sustained=0.0 }
 $confidenceData = @{
@@ -181,13 +185,13 @@ $confidenceData = @{
 }
 
 foreach ($pr in $mergedPRs) {
-    $prNumber  = $pr.number
-    $mergedAt  = $pr.mergedAt
+    $prNumber = $pr.number
+    $mergedAt = $pr.mergedAt
 
     # Compute decay weight
     try {
         $mergedDate = [datetime]::Parse($mergedAt)
-        $daysSince  = ($now - $mergedDate).TotalDays
+        $daysSince = ($now - $mergedDate).TotalDays
         if ($daysSince -lt 0) { $daysSince = 0 }
         $weight = [Math]::Exp(-$DecayLambda * $daysSince)
     }
@@ -197,23 +201,7 @@ foreach ($pr in $mergedPRs) {
         continue
     }
 
-    # Fetch PR body
-    $body = $null
-    $prViewJson = gh pr view $prNumber --json body @repoArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "PR #${prNumber}: gh returned exit code $LASTEXITCODE — skipping."
-        $skippedPRs++
-        continue
-    }
-    try {
-        $prView = $prViewJson | ConvertFrom-Json
-        $body   = $prView.body
-    }
-    catch {
-        Write-Warning "PR #${prNumber}: failed to parse PR body — $_"
-        $skippedPRs++
-        continue
-    }
+    $body = $pr.body
 
     if ([string]::IsNullOrWhiteSpace($body)) {
         continue
@@ -239,6 +227,8 @@ foreach ($pr in $mergedPRs) {
         continue
     }
 
+    $v2IssuesAnalyzed++
+
     # v2: parse per-finding array
     $findings = Get-FindingsArray -Block $block
 
@@ -258,12 +248,12 @@ foreach ($pr in $mergedPRs) {
 
         $totalFindings++
 
-        $category        = $finding['category'].ToLower()
-        $judgeRuling     = $finding['judge_ruling'].ToLower()
-        $judgeConfidence = $finding['judge_confidence'].ToLower()
-        $defenseVerdict  = if ($finding.ContainsKey('defense_verdict')) { $finding['defense_verdict'].ToLower() } else { '' }
+        $category = $finding['category'].ToLowerInvariant()
+        $judgeRuling = $finding['judge_ruling'].ToLowerInvariant()
+        $judgeConfidence = if ($finding.ContainsKey('judge_confidence')) { $finding['judge_confidence'].ToLowerInvariant() } else { '' }
+        $defenseVerdict = if ($finding.ContainsKey('defense_verdict')) { $finding['defense_verdict'].ToLowerInvariant() } else { '' }
         if (-not $finding.ContainsKey('review_stage')) { $reviewStageUntagged++ }
-        $reviewStage     = if ($finding.ContainsKey('review_stage')) { $finding['review_stage'].ToLower() } else { 'main' }
+        $reviewStage = if ($finding.ContainsKey('review_stage')) { $finding['review_stage'].ToLowerInvariant() } else { 'main' }
 
         $isSustained = ($judgeRuling -eq 'sustained')
 
@@ -282,10 +272,14 @@ foreach ($pr in $mergedPRs) {
 
         # Per-stage aggregation (all findings, including n/a)
         if (-not $stageData.ContainsKey($reviewStage)) {
-            $stageData[$reviewStage] = @{ findings = 0; sustained = 0 }
+            $stageData[$reviewStage] = @{ findings = 0; sustained = 0; effectiveCount = 0.0; effectiveSustained = 0.0 }
         }
         $stageData[$reviewStage].findings++
-        if ($isSustained) { $stageData[$reviewStage].sustained++ }
+        $stageData[$reviewStage].effectiveCount += $weight
+        if ($isSustained) {
+            $stageData[$reviewStage].sustained++
+            $stageData[$reviewStage].effectiveSustained += $weight
+        }
 
         # Defense analysis (gate on code prosecution only — skip n/a category)
         if ($category -ne 'n/a' -and $defenseVerdict -ne '') {
@@ -333,7 +327,8 @@ if (-not $overallSufficient) {
 $overallSustainRate = if ($weightedTotal -gt 0) { $weightedAccepted / $weightedTotal } else { 0.0 }
 
 $defenseSuccessRate = if ($defenseTotal -gt 0) { $defenseSustained / $defenseTotal } else { 0.0 }
-$overreachRate      = if ($defenseChallengedTotal -gt 0) { $defenseOverreach / $defenseChallengedTotal } else { 0.0 }
+$defenseChallengeRate = if ($defenseTotal -gt 0) { $defenseChallengedTotal / $defenseTotal } else { 0.0 }
+$overreachRate = if ($defenseChallengedTotal -gt 0) { $defenseOverreach / $defenseChallengedTotal } else { 0.0 }
 
 $biasDirection = if ($overallSustainRate -gt 0.6) {
     'slightly_prosecution'
@@ -359,6 +354,7 @@ $generated = $now.ToString('yyyy-MM-dd')
 Write-Output "calibration:"
 Write-Output "  generated: $generated"
 Write-Output "  issues_analyzed: $issuesAnalyzed"
+Write-Output "  v2_issues_analyzed: $v2IssuesAnalyzed"
 Write-Output "  skipped_prs: $skippedPRs"
 Write-Output "  total_findings: $totalFindings"
 Write-Output ("  effective_sample_size: {0:F1}" -f $effectiveSampleSize)
@@ -366,6 +362,7 @@ Write-Output "  decay_lambda: $DecayLambda"
 Write-Output "  prosecutor:"
 Write-Output ("    overall_sustain_rate: {0:F2}" -f $overallSustainRate)
 Write-Output "    sufficient_data: $($overallSufficient.ToString().ToLower())"
+if ($v2IssuesAnalyzed -gt 0) {
 Write-Output "    by_category:"
 
 foreach ($cat in $knownCategories) {
@@ -373,7 +370,7 @@ foreach ($cat in $knownCategories) {
     if ($categoryData.ContainsKey($cat)) {
         $cd = $categoryData[$cat]
         $catSustainRate = if ($cd.effectiveCount -gt 0) { $cd.sustained / $cd.effectiveCount } else { 0.0 }
-        $catSufficient  = $cd.effectiveCount -ge 15.0
+        $catSufficient = $cd.effectiveCount -ge 15.0
         Write-Output "        findings: $($cd.findings)"
         Write-Output ("        effective_count: {0:F1}" -f $cd.effectiveCount)
         Write-Output ("        sustain_rate: {0:F2}" -f $catSustainRate)
@@ -388,10 +385,12 @@ foreach ($cat in $knownCategories) {
 }
 
 Write-Output "  defense:"
-Write-Output "    defense_total: $defenseTotalCount"
-$defenseSufficientData = $defenseTotalCount -ge 5
+Write-Output "    defense_findings_count: $defenseTotalCount"
+Write-Output ("    defense_effective_count: {0:F1}" -f $defenseTotal)
+$defenseSufficientData = $defenseTotal -ge 5.0
 Write-Output "    defense_sufficient_data: $($defenseSufficientData.ToString().ToLower())"
-Write-Output ("    overall_success_rate: {0:F2}" -f $defenseSuccessRate)
+Write-Output ("    defense_success_rate: {0:F2}" -f $defenseSuccessRate)
+Write-Output ("    defense_challenge_rate: {0:F2}" -f $defenseChallengeRate)
 Write-Output ("    overreach_rate: {0:F2}" -f $overreachRate)
 Write-Output "  judge:"
 Write-Output "    confidence_calibration:"
@@ -416,11 +415,30 @@ foreach ($stage in $knownStages) {
     Write-Output "    ${stage}:"
     if ($stageData.ContainsKey($stage)) {
         $sd = $stageData[$stage]
+        $stageSustainRate = if ($sd.effectiveCount -gt 0) { $sd.effectiveSustained / $sd.effectiveCount } else { 0.0 }
         Write-Output "      findings: $($sd.findings)"
         Write-Output "      sustained: $($sd.sustained)"
+        Write-Output ("      effective_count: {0:F1}" -f $sd.effectiveCount)
+        Write-Output ("      sustain_rate: {0:F2}" -f $stageSustainRate)
     }
     else {
         Write-Output "      findings: 0"
         Write-Output "      sustained: 0"
+        Write-Output "      effective_count: 0.0"
+        Write-Output "      sustain_rate: 0.00"
     }
+}
+foreach ($stage in ($stageData.Keys | Where-Object { $knownStages -notcontains $_ } | Sort-Object)) {
+    Write-Output "    ${stage}:"
+    $sd = $stageData[$stage]
+    $stageSustainRate = if ($sd.effectiveCount -gt 0) { $sd.effectiveSustained / $sd.effectiveCount } else { 0.0 }
+    Write-Output "      findings: $($sd.findings)"
+    Write-Output "      sustained: $($sd.sustained)"
+    Write-Output ("      effective_count: {0:F1}" -f $sd.effectiveCount)
+    Write-Output ("      sustain_rate: {0:F2}" -f $stageSustainRate)
+}
+}
+else {
+    Write-Output "  has_finding_data: false"
+    Write-Output "  note: `"All analyzed PRs use v1 metrics format (no per-finding data). Upgrade to metrics_version: 2 to enable calibration.`""
 }

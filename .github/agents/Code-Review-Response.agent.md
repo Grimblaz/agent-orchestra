@@ -171,8 +171,8 @@ After all rulings, emit a score summary table:
 
 **Non-code-prosecution mode** (CE review, design review, proxy prosecution — Pass column always `—`):
 
-| Finding     | Pass | Prosecution (severity, pts) | Defense verdict | Ruling               | Confidence | Points  |
-| ----------- | ---- | --------------------------- | --------------- | -------------------- | ---------- | ------- |
+| Finding     | Pass | Prosecution (severity, pts) | Defense verdict | Ruling                   | Confidence | Points    |
+| ----------- | ---- | --------------------------- | --------------- | ------------------------ | ---------- | --------- |
 | F1: {title} | —    | {severity} ({pts} pts)      | conceded        | ✅ Sustained             | high       | P+{pts}   |
 | F2: {title} | —    | {severity} ({pts} pts)      | disproved       | ❌ Defense sustained     | medium     | D+{pts}   |
 | F3: {title} | —    | {severity} ({pts} pts)      | disproved       | ✅ Prosecution sustained | high       | D-{2×pts} |
