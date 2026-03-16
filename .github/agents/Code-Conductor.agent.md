@@ -456,6 +456,7 @@ Always include a `## Pipeline Metrics` section in the PR body with a hidden HTML
 ## Pipeline Metrics
 
 <!-- pipeline-metrics
+metrics_version: 2
 prosecution_findings: {N}
 pass_1_findings: {N}
 pass_2_findings: {N}
@@ -475,10 +476,29 @@ postfix_judge_rejected: {N}
 postfix_judge_deferred: {N}
 postfix_defense_disproved: {N}
 postfix_rework_cycles: {N}
+findings:
+  - id: F1
+    category: architecture
+    severity: high
+    points: 10
+    pass: 1
+    defense_verdict: conceded
+    judge_ruling: sustained
+    judge_confidence: high
+    review_stage: main
+  - id: F2
+    category: performance
+    severity: medium
+    points: 5
+    pass: 2
+    defense_verdict: disproved
+    judge_ruling: defense-sustained
+    judge_confidence: medium
+    review_stage: main
 -->
 ```
 
-**Default values**: `0` for numeric fields when the stage ran but found nothing. `n/a` for categorical fields when the stage was skipped entirely (e.g., `ce_gate_result: not-applicable`, `ce_gate_intent: n/a` when `ce_gate: false`). `ce_gate_defects_found: n/a` when the CE Gate did not run (`ce_gate: false` or `⏭️ CE Gate not applicable`). For proxy prosecution (GitHub review intake): `pass_1_findings`, `pass_2_findings`, `pass_3_findings` → `n/a` (3-pass structure replaced by proxy pass); route total findings count to `prosecution_findings` only. `postfix_*` numeric fields default to `0` when post-fix review was triggered but found nothing; `n/a` when not triggered (`postfix_triggered: false`). Set `postfix_triggered: true` when trigger conditions are met and post-fix prosecution executes (regardless of whether any findings were accepted). Set `postfix_triggered: false` when the skip rule applies or trigger criteria are not satisfied.
+**Default values**: `0` for numeric fields when the stage ran but found nothing. `n/a` for categorical fields when the stage was skipped entirely (e.g., `ce_gate_result: not-applicable`, `ce_gate_intent: n/a` when `ce_gate: false`). `ce_gate_defects_found: n/a` when the CE Gate did not run (`ce_gate: false` or `⏭️ CE Gate not applicable`). For proxy prosecution (GitHub review intake): `pass_1_findings`, `pass_2_findings`, `pass_3_findings` → `n/a` (3-pass structure replaced by proxy pass); route total findings count to `prosecution_findings` only. `postfix_*` numeric fields default to `0` when post-fix review was triggered but found nothing; `n/a` when not triggered (`postfix_triggered: false`). Set `postfix_triggered: true` when trigger conditions are met and post-fix prosecution executes (regardless of whether any findings were accepted). Set `postfix_triggered: false` when the skip rule applies or trigger criteria are not satisfied. For `findings:` array: emit as an empty list (`findings: []`) when no findings exist. For proxy prosecution (GitHub review intake), include all validated GitHub findings with `review_stage: proxy`.
 
 **Verdict mapping**: Map verdicts from the judge's score summary table to the corresponding metric fields:
 - **Main review**: `✅ Sustained` → `judge_accepted`; `❌ Defense sustained` → `judge_rejected`; `📋 DEFERRED-SIGNIFICANT` → `judge_deferred`
@@ -487,6 +507,12 @@ postfix_rework_cycles: {N}
 **`rework_cycles`**: Count of fix-revalidate loops after routing accepted review findings to specialists (main review fix loops only — not CE Gate loops or post-fix review loops; those are tracked in `postfix_rework_cycles`). Each route-to-specialist → implement → re-validate cycle = 1. If no findings accepted, `rework_cycles: 0`.
 
 **`postfix_rework_cycles`**: Count of fix-revalidate loops during the post-fix targeted prosecution phase (post-fix fix loops only). Each route-to-specialist → implement → re-validate cycle = 1; loop budget is 1. If post-fix prosecution was not triggered, `postfix_rework_cycles: n/a`. If judge accepted zero findings (triggered but clean), `postfix_rework_cycles: 0`.
+
+**Findings array**: Construct the `findings:` array by reading Code-Review-Response's `<!-- judge-rulings -->` YAML block and merging with prosecution ledger data (`id`, `category`, `severity`, `points`, `pass`) and defense report (`defense_verdict`). Set `review_stage` to the active pipeline stage: `main` for main code review, `postfix` for post-fix targeted prosecution, `ce` for CE prosecution, `design` for design prosecution, `proxy` for GitHub review intake (proxy prosecution). If `<!-- judge-rulings -->` is absent, parse the Markdown score summary table as fallback data source.
+
+**Backward compatibility**: PRs without a `metrics_version` field are version 1 (aggregate counts only). The aggregation script handles both formats gracefully; old PRs contribute aggregate counts, new PRs contribute per-finding detail.
+
+**Malformed entries**: If a finding entry is incomplete (missing required fields), omit the malformed entry from the array and emit a warning comment in the PR body: `<!-- warning: finding {id} omitted from metrics due to incomplete data -->`.
 
 ---
 

@@ -311,6 +311,67 @@ Emit exactly this structure when returning results to Code-Conductor:
 
 **Intent mismatch analysis**: When the defect is an intent mismatch rather than a functional failure, the gap analysis should consider: (a) whether the design intent was adequately communicated in the issue body, (b) whether Issue-Designer's CE Gate scenarios included intent scenarios (not just functional ones), and (c) whether the `[CE GATE]` plan step included a design intent reference. These are the upstream points where intent clarity could have prevented the mismatch.
 
+### 4.7 Calibration Analysis (Cross-Session Learning)
+
+**Purpose**: Aggregate review score data across merged PRs to identify systematic biases in the prosecution→defense→judge pipeline and produce actionable recommendations for improving agent instruction files.
+
+**When invoked**: Automatically whenever Process-Review runs (in both full retrospective and subagent modes). Execute the aggregation script via terminal before beginning analysis.
+
+**Step 1 — Run the aggregation script**:
+
+```powershell
+pwsh -NonInteractive .github/scripts/aggregate-review-scores.ps1
+```
+
+**Step 2 — Parse output**:
+
+- If output contains `insufficient_data: true`: emit `Calibration analysis: insufficient data ({effective_sample_size} effective issues, minimum 5.0 required). Skipping.` and proceed to §5.
+- If the script errors (non-zero exit or `error:` prefix in output): emit `Calibration analysis: aggregation script unavailable ({error message}). Skipping.` and proceed to §5.
+- Otherwise: analyze the full calibration profile.
+
+**Step 3 — Identify actionable signals** (only for categories/metrics with `sufficient_data: true`):
+
+- **High false-positive rate**: category `sustain_rate` < 0.5 → recommend strengthening evidence requirements in the corresponding Code-Critic prosecution perspective before filing findings
+- **Judge overconfidence**: `high` confidence level `sustain_rate` < 0.85 → recommend adding calibration caveats to Code-Review-Response's high-confidence ruling guidance
+- **Defense underreach**: `overall_success_rate` < 0.10 → recommend reviewing Code-Critic defense perspective prompts for passive acceptance bias
+- **Defense overreach**: `overreach_rate` > 0.30 → recommend adding specificity requirements to defense challenges
+  > **Note**: Apply defense underreach/overreach thresholds only when `defense_sufficient_data: true` (emitted under the `defense:` output key). If `defense_sufficient_data: false`, skip these two checks and note insufficient defense data in the output.
+- **Cross-stage patterns**: consistently higher finding rates in `postfix` vs `main` → recommend improving targeted prosecution prompts in Code-Conductor's post-fix instructions
+  > **Note**: `by_review_stage.main` may include findings from older PRs that lacked a `review_stage` field — those findings are silently bucketed into `main` by default. The `review_stage_untagged` field reports how many findings were defaulted this way. Treat elevated `main` rates with caution early in adoption; subtract `review_stage_untagged` from `main` counts when assessing whether a cross-stage signal is genuine.
+
+**Step 4 — Output format**:
+
+```markdown
+## Calibration Analysis ({N} issues, effective n={X:.1f})
+
+### Signals Found
+{N} actionable signals identified (from categories/metrics with sufficient_data: true).
+
+### Recommendations
+1. **{Signal name}: {observed rate/value}**
+   Observation: {what the data shows}
+   Recommendation: Update `{file path}` → {section name}: {specific change suggested}
+   Expected impact: {what improvement this should produce}
+
+2. ...
+
+### Data Summary
+- Overall sustain rate: {rate} ({sufficient_data})
+- Issues with sufficient per-category data: {list of categories}
+- Defense challenge rate: {overall_success_rate}
+- Judge calibration: high={sustain_rate}, medium={sustain_rate}, low={sustain_rate}
+```
+
+When no actionable signals are found (all categories insufficient data, or all rates within acceptable ranges):
+
+```markdown
+## Calibration Analysis ({N} issues, effective n={X:.1f})
+
+No actionable signals found. All metrics within acceptable ranges or below per-category data threshold (15 effective findings required).
+```
+
+**Guardrail**: Calibration recommendations are advisory only. This agent does NOT auto-apply changes to agent instruction files. Recommendations are presented for human review and approval. To apply an approved recommendation, use the "Update Instructions → Doc-Keeper" handoff button.
+
 ### 5. Root Cause Analysis
 
 **For each deviation, ask**:

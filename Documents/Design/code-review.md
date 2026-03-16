@@ -354,7 +354,7 @@ rework_cycles: N                 # code review fix loops only (not CE Gate loops
 | Per-pass counter-review (3×) | 3× overhead for marginal benefit; merged ledger gives defense full context |
 | Code-Critic exercises CE scenarios directly | Fox-henhouse problem; separation of execution and review is cleaner |
 | In-session calibration (mid-cycle score adjustment) | Sample sizes too small for typical PRs |
-| Full learning pipeline (day 1) | Visibility first, learn what patterns matter, then build |
+| Full learning pipeline (day 1) | Visibility first, learn what patterns matter, then build. Superseded by Issue #97 — implemented as cross-session learning pipeline with Process-Review consumer. |
 | Accessibility + performance CE lenses | Tooling insufficient for reliable evaluation currently |
 | Judge + rebuttal rounds (hybrid convergence) | Single-shot judge with user scoring provides async correction without complexity |
 | Opt-out for lightweight issues | Quality is non-negotiable — full pipeline always runs |
@@ -378,5 +378,97 @@ rework_cycles: N                 # code review fix loops only (not CE Gate loops
 | `.claude/commands/implement.md` | CE Gate cycle reference updated |
 | `.claude/commands/review.md` | Adversarial Pipeline section added |
 | `.github/agents/Code-Critic.agent.md` | Added `id` and `pass` fields to automation-routing fields in Finding Categories; added `pass: N` omission notes to proxy prosecution and CE prosecution output descriptions |
+
+---
+
+## Cross-Session Learning Pipeline
+
+**Issue**: #97 | **Depends on**: #96 (Scored Adversarial Review System)
+
+### Summary
+
+Extends the scored adversarial review system to aggregate per-finding data across merged PRs, detect systematic biases in the prosecution→defense→judge pipeline, and surface actionable recommendations via Process-Review. Human applies approved recommendations — no automated prompt rewriting.
+
+**Data flow**:
+
+```text
+PR merged → pipeline-metrics in PR body (with per-finding entries)
+                    ↓
+Process-Review invoked → runs .github/scripts/aggregate-review-scores.ps1
+                    ↓
+Script: gh pr list → gh pr view (each) → parse pipeline-metrics → compute calibration
+                    ↓
+Calibration profile → Process-Review identifies patterns → emits recommendations
+                    ↓
+User reviews → approves/rejects → applies changes to agent files
+```
+
+### Decision Log
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|-----------|
+| D22 | Data source | Enriched `<!-- pipeline-metrics -->` in PR bodies | No repo pollution; data lives with the PR; durable across session resets |
+| D23 | Category taxonomy | Code-Critic's 7 prosecution perspectives | 1:1 mapping; no ambiguity; `n/a` for CE/design/proxy modes |
+| D24 | Sample size thresholds | 5 effective issues overall; 15 effective findings per category | Balances early value against statistical noise |
+| D25 | Storage format | On-demand stdout from aggregation script | Always fresh; no stale files; no repo clutter |
+| D26 | Drift handling | Exponential decay λ=0.023 (~30-day half-life), configurable via `-DecayLambda` | Automatic adaptation as prompts evolve; avoids cliff effect of sliding window |
+| D27 | Injection mode | Auto-run within Process-Review; skip silently if insufficient data or `gh` unavailable | Zero friction; graceful degradation |
+| D28 | Consumer | Process-Review analyzes + recommends; human applies approved changes | No perverse incentives; deliberate improvement; matches visibility-first philosophy |
+
+### Enriched Pipeline-Metrics v2 Format
+
+The `<!-- pipeline-metrics -->` format is extended from 18-field flat YAML (v1) to include a `findings:` array (v2). Format detection: presence of `metrics_version: 2` field.
+
+**New fields**:
+
+- `metrics_version: 2` — format version discriminator
+- `findings:` — array with per-finding entries; each entry includes `id`, `category`, `severity`, `points`, `pass`, `defense_verdict`, `judge_ruling`, `judge_confidence`, `review_stage`
+- `review_stage` values: `main | postfix | ce | design | proxy`
+
+**Category values** (Code-Critic's 7 prosecution perspectives): `architecture | security | performance | pattern | simplicity | script-automation | documentation-audit`; `n/a` for CE, design, and proxy prosecution findings.
+
+### Code-Review-Response Structured Output
+
+CRR now emits a `<!-- judge-rulings -->` YAML block after the Markdown score summary table. Code-Conductor reads this for per-finding data; falls back to parsing the Markdown table if the block is absent.
+
+### Calibration Profile
+
+The aggregation script (`.github/scripts/aggregate-review-scores.ps1`) outputs YAML to stdout with:
+
+- Weighted sustain rates per prosecution category (per-category `sufficient_data: true` when ≥ 15 effective findings)
+- Defense block includes `defense_total: N` and `defense_sufficient_data: true/false` (threshold: effective_count ≥ 5) before `overall_success_rate`
+- Judge confidence calibration per level (high/medium/low); each level emits `sufficient_data: true/false` (threshold: effective_count ≥ 5) before `sustain_rate`
+- `by_review_stage:` breakdown with canonical keys `main`, `postfix`, `ce`; a `review_stage_untagged: N` field counts findings that were defaulted to `main` due to a missing `review_stage` field in their pipeline-metrics block (early-adoption indicator). `design` and `proxy` findings, if tagged, appear as ad-hoc keys outside the canonical set.
+- `bias_direction` (slightly_prosecution | slightly_defense | balanced)
+- `insufficient_data: true` when effective_sample_size < 5; `skipped_prs: N` emitted in both the insufficient-data block and the full calibration block (count of PRs skipped due to `gh` errors during processing)
+
+### Process-Review Integration
+
+Process-Review §4.7 runs the aggregation script automatically. Recommendations follow defined signal thresholds:
+
+- Sustain rate < 0.5 → strengthen evidence requirements for that Code-Critic perspective
+- Judge high-confidence accuracy < 0.85 → add calibration caveats to CRR
+- Defense challenge rate < 10% → review defense prompts for passive acceptance
+- Defense overreach > 30% → add specificity requirements to challenges
+
+All recommendations cite the specific file, section, and suggested change. Process-Review is READ-ONLY — recommendations require human approval before application.
+
+### Known Limitations
+
+- **No ground truth**: Calibration measures self-consistency (sustain rates, confidence calibration), not objective correctness. Ground truth requires user scoring data (async/optional).
+- **Passive improvement**: Reviews don't automatically improve — Process-Review recommends, humans apply. Deliberate design — matches the visibility-first philosophy from D15 (Issue #96).
+- **Low-volume repo cold start**: New repos need 5+ merged PRs with enriched metrics before calibration runs. This is expected.
+
+### Files Changed (Issue #97)
+
+| File | Change |
+|------|--------|
+| `.github/agents/Code-Critic.agent.md` | Added `category` field to automation-routing output fields |
+| `.github/agents/Code-Review-Response.agent.md` | Added `<!-- judge-rulings -->` structured YAML block requirement |
+| `.github/agents/Code-Conductor.agent.md` | Enriched `<!-- pipeline-metrics -->` with `metrics_version: 2`, `findings:` array, and population instructions |
+| `.github/agents/Process-Review.agent.md` | Added §4.7 Calibration Analysis section |
+| `.github/scripts/aggregate-review-scores.ps1` | New script — reads merged PRs, computes calibration profile |
+| `Documents/Design/code-review.md` | This file — cross-session learning pipeline section |
+| `CLAUDE.md` | Phase 5 updated with calibration script note |
 | `.github/agents/Code-Conductor.agent.md` | Added `pass: N` tagging to prosecution pass prompts; added earliest-pass dedup credit rule; added `### PR Body Pipeline Metrics` section with 12-field metrics template and default value rules |
 | `.github/agents/Code-Review-Response.agent.md` | Added `Pass` column to score summary table template; added `id` field to finding schema; split example into code-prosecution and non-code-prosecution variants |

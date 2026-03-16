@@ -278,6 +278,7 @@ Every finding must also include these automation-routing fields:
 - `confidence`: high | medium | low
 - `id`: F1 | F2 | F3 | … — sequential label within this review cycle; used by defense and judge to cross-reference findings by ID. Assign in order of appearance.
 - `pass`: 1 | 2 | 3 — prosecution pass number that originated this finding. Code prosecution only; omit in design review, CE review, and proxy prosecution modes.
+- `category`: architecture | security | performance | pattern | simplicity | script-automation | documentation-audit — the active prosecution perspective for this finding. Code prosecution only; use `n/a` in CE review, design review, and proxy prosecution modes. For findings that span multiple perspectives, use the primary perspective.
 - `blast_radius`: localized | module | cross-module | system-wide
 - `authority_needed`: yes | no
 - `defense_verdict`: disproved | conceded | insufficient-to-disprove — filled in by defense pass
