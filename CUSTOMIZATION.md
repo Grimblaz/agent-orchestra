@@ -26,6 +26,19 @@ This template supports two distribution models:
 
 > **Note**: If you use the plugin, you will not receive automatic loading of `.github/instructions/` files. The session-startup check (which requires `WORKFLOW_TEMPLATE_ROOT`) is a clone/fork-only feature. For full instruction support, use the clone/fork model and enable `chat.instructionsFilesLocations`.
 
+<!-- -->
+
+> **Warning**: Choose **one source** for agents and skills — either the plugin **or** a clone/global path, not both.
+>
+> | Setting | Safe with plugin? | Why |
+> |---------|-----------------|-----|
+> | `chat.agentFilesLocations` | ❌ No | Plugin already distributes agents — combining creates duplicates |
+> | `chat.agentSkillsLocations` | ❌ No | Plugin already distributes skills — combining creates duplicates |
+> | `chat.instructionsFilesLocations` | ✅ Yes | Plugin does NOT distribute instruction files — no duplication |
+> | `chat.promptFilesLocations` | ✅ Yes | Plugin does NOT distribute prompt files — no duplication |
+>
+> If you're seeing duplicate agents in the chat picker, see the **Troubleshooting** section below.
+
 ---
 
 ## Quick Option: Setup Wizard
@@ -246,3 +259,15 @@ VS Code 1.110+ includes an Agent Debug panel that gives real-time visibility int
 - Shows loaded customizations (instructions, skills, agent files), tool calls, system prompts, and agent events as they happen
 - Available since VS Code 1.110 (supersedes the earlier Diagnostics chat action)
 - Especially useful when agents appear to ignore instructions or tools — confirm the relevant files are actually loaded
+
+---
+
+**Seeing duplicate agents in the picker?**
+
+VS Code loads agents additively from all configured sources — there is no name-based deduplication. Any of these combinations will cause every agent and skill to appear twice:
+
+1. **Plugin installed + working in a cloned repo** — the plugin loads agents from GitHub; the workspace `.github/agents/` folder loads them again. Fix: uninstall the plugin or remove `.github/agents/` from the workspace (not recommended — prefer uninstalling the plugin if you want the clone experience).
+2. **Plugin installed + `chat.agentFilesLocations` in settings** — two sources, two copies of every agent. Fix: remove `chat.agentFilesLocations` and `chat.agentSkillsLocations` from your VS Code user settings (keep `chat.instructionsFilesLocations` and `chat.promptFilesLocations` — those are safe).
+3. **Global `chat.agentFilesLocations` + working in a repo with `.github/agents/`** — global path and workspace auto-discovery both find the agents. Fix: remove `chat.agentFilesLocations` from user settings if you only need agents in the workflow-template clone.
+
+> **Quick fix checklist**: Open VS Code user `settings.json` (`Ctrl+,` → open `settings.json`) and check for `chat.agentFilesLocations`, `chat.agentSkillsLocations`, and `chat.plugins.marketplaces`. Having entries for both plugin and clone-path settings is the most common cause of duplicates.

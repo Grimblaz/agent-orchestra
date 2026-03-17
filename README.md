@@ -182,7 +182,7 @@ You can make all agents available globally in VS Code — not just in repos that
 
 Replace `/path/to/your/workflow-template` with the absolute path to where you cloned this repo. VS Code will load agent definitions from that folder for all workspaces.
 
-> **Tip**: Use this when you want the workflow agents available in all your projects, even ones that haven't cloned this template. You can also add both a global path and a per-project `.github/agents/` folder — VS Code merges them.
+> **Warning**: VS Code loads agents additively from all configured sources — there is no name-based deduplication. If you add a global path **and** also have the plugin installed, or if a project workspace also has `.github/agents/`, you will see duplicate agents in the chat picker. Choose one source: either set a global path (above) **or** install the plugin, not both. If you're seeing duplicates, see [CUSTOMIZATION.md — Troubleshooting](CUSTOMIZATION.md#troubleshooting).
 
 ---
 

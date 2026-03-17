@@ -66,6 +66,36 @@ After reporting:
 
 ## Phase 1 — User Setup (one-time, machine-level)
 
+### Plugin Overlap Check
+
+Before proceeding, check whether the user has the workflow-template plugin already installed. This prevents accidentally creating duplicate agents by combining plugin distribution with clone-path settings.
+
+**Step**: Run this command in a terminal to check the user's VS Code user settings:
+
+- **Windows**: `Select-String -Path "$env:APPDATA\Code\User\settings.json" -Pattern "workflow-template" -Quiet 2>$null`
+- **macOS**: `Select-String -Path "~/Library/Application Support/Code/User/settings.json" -Pattern "workflow-template" -Quiet 2>$null`
+- **Linux**: `Select-String -Path "~/.config/Code/User/settings.json" -Pattern "workflow-template" -Quiet 2>$null`
+
+> **Important**: Use `Select-String` (string search), NOT `ConvertFrom-Json` — VS Code `settings.json` is JSONC (allows comments) and `ConvertFrom-Json` will fail on files with comments.
+
+**If the settings file does not exist or the command fails**: continue silently to the skip gate below — no warning needed.
+
+**If the command returns `True`** (plugin is installed): inform the user:
+
+> "It looks like you have the workflow-template plugin installed (`workflow-template` found in your VS Code settings). Adding `chat.agentFilesLocations` or `chat.agentSkillsLocations` at the same time will cause duplicate agents to appear in the chat picker.
+>
+> **Option 1 — Keep plugin, skip agent/skill settings (recommended if you just want to use the workflow)**:
+> Continue Phase 1, but in Step 1.2 only add `chat.instructionsFilesLocations` and `chat.promptFilesLocations`. Skip `chat.agentFilesLocations` and `chat.agentSkillsLocations` (the plugin already provides those).
+>
+> **Option 2 — Uninstall plugin, use full clone settings**:
+> Continue with all four settings. First uninstall the plugin from the Extensions view (`Ctrl+Shift+X`, search `@agentPlugins workflow-template`, uninstall).
+>
+> Which option do you prefer?"
+>
+> Wait for the user's choice before continuing to the skip gate.
+
+**If the command returns `False` or no output** (plugin not installed): continue normally to the skip gate below.
+
 > **Skip gate**: Run `echo $env:WORKFLOW_TEMPLATE_ROOT` (Windows) or `echo $WORKFLOW_TEMPLATE_ROOT` (macOS/Linux) in a terminal and report the result.
 >
 > - If it prints a valid path to an existing directory → ask: "WORKFLOW_TEMPLATE_ROOT is already set to `<path>`. Skip Phase 1?" If yes, skip to Phase 2.

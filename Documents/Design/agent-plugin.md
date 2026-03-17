@@ -76,6 +76,27 @@ The `agents` field uses a directory path `["./.github/agents"]`. If VS Code requ
 
 If VS Code resolves `chat.plugins.marketplaces: ["Grimblaz/workflow-template"]` to the repo root (GitHub convention), `marketplace.json` at `.github/plugin/` won't be found. **Mitigation**: If plugin install fails, move `marketplace.json` to the repo root and update `source` to point to `.github/plugin/`.
 
+### R3 — Agent/skill duplication when multiple configuration sources overlap (confirmed VS Code behavior)
+
+VS Code loads agents, skills, and prompt files **additively** from all configured sources — there is no name-based deduplication. If a user configures multiple sources that each distribute the same agents or skills, every agent and skill will appear multiple times in the chat picker.
+
+**Observed trigger conditions** (any combination causes duplicates):
+
+| Scenario | Affected settings | Duplicated items |
+|----------|-------------------|------------------|
+| Plugin installed + clone has `.github/agents/` (any workspace) | `chat.plugins.marketplaces` + workspace auto-discovery | All 13 agents, 14 skills |
+| Plugin installed + `chat.agentFilesLocations` pointing to clone | `chat.plugins.marketplaces` + `chat.agentFilesLocations` | All 13 agents |
+| Plugin installed + `chat.agentSkillsLocations` pointing to clone | `chat.plugins.marketplaces` + `chat.agentSkillsLocations` | All 14 skills |
+| Global `chat.agentFilesLocations` + workspace `.github/agents/` | `chat.agentFilesLocations` + workspace auto-discovery | All 13 agents |
+| Global `chat.agentFilesLocations` + per-project `chat.agentFilesLocations` | Both `chat.agentFilesLocations` entries combined | All 13 agents |
+
+**Not affected** (plugin does not distribute these):
+
+- `chat.instructionsFilesLocations` — safe to keep alongside the plugin; the plugin does not distribute `.github/instructions/` files
+- `chat.promptFilesLocations` — safe to keep alongside the plugin; the plugin does not distribute prompt files
+
+**Mitigation**: Use only one distribution source for agents and skills — either the plugin OR a clone/global path, not both. See CUSTOMIZATION.md for guidance on choosing a distribution model.
+
 ---
 
 ## Plugin vs. Clone/Fork Coverage Gap
@@ -89,6 +110,14 @@ If VS Code resolves `chat.plugins.marketplaces: ["Grimblaz/workflow-template"]` 
 | `.github/scripts/` (cleanup script) | ❌ not distributed | ✅ |
 
 Plugin users relying on `post-pr-review` skill Step 1 (preferred cleanup script) must use the manual archive method — the `$env:WORKFLOW_TEMPLATE_ROOT` path is unavailable in plugin-only setups. The skill's Step 1 includes a disclaimer for this case.
+
+### Workarounds for Plugin-Only Users
+
+| Gap | Workaround |
+|-----|------------|
+| Missing `.github/instructions/` | Add `chat.instructionsFilesLocations` pointing to your clone — this is safe to combine with the plugin since plugin does not distribute instruction files |
+| Missing `.github/scripts/` (cleanup script) | Use the manual archive method documented in the `post-pr-review` skill |
+| Choosing between plugin and clone | See [CUSTOMIZATION.md — Distribution Options](../CUSTOMIZATION.md#distribution-options) for a decision guide |
 
 ---
 
