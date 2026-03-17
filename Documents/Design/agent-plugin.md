@@ -82,7 +82,7 @@ VS Code loads agents, skills, and prompt files **additively** from all configure
 
 **Observed trigger conditions** (any combination causes duplicates):
 
-| Scenario | Affected settings | Duplicated items |
+| Scenario | Affected settings | Duplicate items |
 |----------|-------------------|------------------|
 | Plugin installed + clone has `.github/agents/` (any workspace) | `chat.plugins.marketplaces` + workspace auto-discovery | All 13 agents, 14 skills |
 | Plugin installed + `chat.agentFilesLocations` pointing to clone | `chat.plugins.marketplaces` + `chat.agentFilesLocations` | All 13 agents |

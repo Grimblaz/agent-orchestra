@@ -94,7 +94,7 @@ Before proceeding, check whether the user has the workflow-template plugin alrea
 >
 > Wait for the user's choice before continuing to the skip gate.
 
-**If the command returns `False` or no output** (plugin not installed): continue normally to the skip gate below.
+**If the command returns no output** (plugin not installed): continue normally to the skip gate below.
 
 > **Skip gate**: Run `echo $env:WORKFLOW_TEMPLATE_ROOT` (Windows) or `echo $WORKFLOW_TEMPLATE_ROOT` (macOS/Linux) in a terminal and report the result.
 >
