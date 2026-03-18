@@ -264,15 +264,18 @@ export COPILOT_ORCHESTRA_ROOT="/path/to/copilot-orchestra"
 
 ### 2. Update your VS Code plugin settings
 
-Change the `chat.plugins.marketplaces` entry in your VS Code user settings:
+Follow these steps in order:
 
-```json
-{
-  "chat.plugins.marketplaces": ["Grimblaz/copilot-orchestra"]
-}
-```
+1. **Uninstall the old plugin**: In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins workflow-template` and uninstall it.
+2. **Update settings**: Change the `chat.plugins.marketplaces` entry in your VS Code user `settings.json` to:
 
-First, uninstall the existing plugin: in the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins workflow-template`, then uninstall it. Then reinstall the plugin: search `@agentPlugins copilot-orchestra` in the Extensions view.
+   ```json
+   {
+     "chat.plugins.marketplaces": ["Grimblaz/copilot-orchestra"]
+   }
+   ```
+
+3. **Install the new plugin**: In the Extensions view, search `@agentPlugins copilot-orchestra` and install it.
 
 ### 3. Git remote (no action needed)
 

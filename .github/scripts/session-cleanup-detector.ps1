@@ -2,17 +2,17 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    SessionStart hook: detect stale post-merge branches and tracking artifacts.
+    Session startup check: detect stale post-merge branches and tracking artifacts.
 
 .DESCRIPTION
-    Runs on every VS Code Copilot SessionStart. Two independent detection paths:
+    Runs at the start of every VS Code Copilot session. Two independent detection paths:
       1. BRANCH CHECK: Is the current branch a merged/deleted remote branch?
       2. TRACKING FILE CHECK: Are there .copilot-tracking/ files for merged issues?
     If either (or both) fire, injects additionalContext so the agent can prompt
     for cleanup. No-ops silently when nothing to clean.
 
 .OUTPUTS
-    JSON to stdout conforming to VS Code SessionStart hookSpecificOutput schema.
+    JSON to stdout conforming to the hookSpecificOutput schema for session startup.
 #>
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -23,7 +23,7 @@ if (-not $rootPath) {
     [pscustomobject]@{
         hookSpecificOutput = [pscustomobject]@{
             hookEventName     = 'SessionStart'
-            additionalContext = 'Neither COPILOT_ORCHESTRA_ROOT nor WORKFLOW_TEMPLATE_ROOT is set. Set one of these environment variables to your local copilot-orchestra repo path so the SessionStart hook can locate its scripts.'
+            additionalContext = 'Neither COPILOT_ORCHESTRA_ROOT nor WORKFLOW_TEMPLATE_ROOT is set. Set one of these environment variables to your local copilot-orchestra repo path so the session startup check can locate its scripts.'
         }
     } | ConvertTo-Json -Depth 3 -Compress
     exit 1

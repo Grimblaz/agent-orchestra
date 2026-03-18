@@ -56,7 +56,7 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 
 ---
 
-## WORKFLOW_TEMPLATE_ROOT Portability
+## Root Env Var Portability
 
 The hook is consumed by downstream repos via `chat.hookFilesLocations`. The hook JSON runs in the downstream workspace, but scripts live in the copilot-orchestra repo — a relative path would not resolve.
 
