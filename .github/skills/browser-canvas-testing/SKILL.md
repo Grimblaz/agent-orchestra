@@ -27,7 +27,7 @@ pageId, selector, ref, dblClick, button
 There is **no coordinate or position parameter**. The implementation does exactly:
 
 ```js
-page.locator(selector).click()
+page.locator(selector).click();
 ```
 
 A `<canvas>` element renders its content via GPU/CPU drawing calls — there are no child DOM elements for selectors to target. Even `canvas` as a CSS selector only clicks the canvas border box center, not a specific game object inside it.
@@ -45,8 +45,8 @@ Canvas games use an internal game-space coordinate system that does not map dire
 ```js
 // 1. Query canvas bounding rect (accounts for scaling and letterboxing)
 const rect = await page.evaluate(() => {
-  const c = document.querySelector('canvas');
-  if (!c) throw new Error('Canvas element not found');
+  const c = document.querySelector("canvas");
+  if (!c) throw new Error("Canvas element not found");
   const r = c.getBoundingClientRect();
   return { left: r.left, top: r.top, width: r.width, height: r.height };
 });
@@ -84,12 +84,12 @@ This formula is verified working for Phaser 3 in **FIT scale mode** at 1920×108
 ```js
 // Wait for canvas to be rendered and sized
 await page.waitForFunction(() => {
-  const c = document.querySelector('canvas');
+  const c = document.querySelector("canvas");
   return c !== null && c.getBoundingClientRect().width > 0;
 });
 
 const rect = await page.evaluate(() => {
-  const c = document.querySelector('canvas');
+  const c = document.querySelector("canvas");
   const r = c.getBoundingClientRect();
   return { left: r.left, top: r.top, width: r.width, height: r.height };
 });
@@ -149,9 +149,9 @@ Use `runPlaywrightCode` with `page.evaluate()` to read game state from exposed J
 
 All behaviors above are verified from VS Code 1.110 source code:
 
-| Tool | Source File |
-|------|-------------|
-| `click_element` / `clickElement` | [clickBrowserTool.ts](https://github.com/microsoft/vscode/blob/3487365a09898056546f68899ee94f286a3ca915/src/vs/workbench/contrib/browserView/electron-browser/tools/clickBrowserTool.ts) |
-| `screenshot_page` / `screenshotPage` | [screenshotBrowserTool.ts](https://github.com/microsoft/vscode/blob/3487365a09898056546f68899ee94f286a3ca915/src/vs/workbench/contrib/browserView/electron-browser/tools/screenshotBrowserTool.ts) |
-| `read_page` / `readPage` | [readBrowserTool.ts](https://github.com/microsoft/vscode/blob/3487365a09898056546f68899ee94f286a3ca915/src/vs/workbench/contrib/browserView/electron-browser/tools/readBrowserTool.ts) |
-| `run_playwright_code` / `runPlaywrightCode` | VS Code native Playwright code execution (no single tool source file — functionality available when `workbench.browser.enableChatTools: true`) |
+| Tool                                        | Source File                                                                                                                                                                                        |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `click_element` / `clickElement`            | [clickBrowserTool.ts](https://github.com/microsoft/vscode/blob/3487365a09898056546f68899ee94f286a3ca915/src/vs/workbench/contrib/browserView/electron-browser/tools/clickBrowserTool.ts)           |
+| `screenshot_page` / `screenshotPage`        | [screenshotBrowserTool.ts](https://github.com/microsoft/vscode/blob/3487365a09898056546f68899ee94f286a3ca915/src/vs/workbench/contrib/browserView/electron-browser/tools/screenshotBrowserTool.ts) |
+| `read_page` / `readPage`                    | [readBrowserTool.ts](https://github.com/microsoft/vscode/blob/3487365a09898056546f68899ee94f286a3ca915/src/vs/workbench/contrib/browserView/electron-browser/tools/readBrowserTool.ts)             |
+| `run_playwright_code` / `runPlaywrightCode` | VS Code native Playwright code execution (no single tool source file — functionality available when `workbench.browser.enableChatTools: true`)                                                     |

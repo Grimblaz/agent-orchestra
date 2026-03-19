@@ -44,34 +44,38 @@ Low Confidence, High Cost → Minimize
 ## Selector Strategy (Priority Order)
 
 ### 1. Accessible Queries (Preferred)
+
 ```javascript
 // Best: How users and assistive tech find elements
-getByRole('button', { name: 'Submit' })
-getByLabelText('Email address')
-getByPlaceholderText('Search...')
-getByText('Welcome back')
-getByAltText('User avatar')
+getByRole("button", { name: "Submit" });
+getByLabelText("Email address");
+getByPlaceholderText("Search...");
+getByText("Welcome back");
+getByAltText("User avatar");
 ```
 
 ### 2. Semantic Queries (Acceptable)
+
 ```javascript
 // Good: Semantic HTML attributes
-getByTitle('Close dialog')
-getByDisplayValue('current input value')
+getByTitle("Close dialog");
+getByDisplayValue("current input value");
 ```
 
 ### 3. Test IDs (Last Resort)
+
 ```javascript
 // Fallback: When no accessible option exists
-getByTestId('complex-data-grid')
+getByTestId("complex-data-grid");
 ```
 
 ### Never Use
+
 ```javascript
 // Fragile: Breaks on any refactor
-container.querySelector('.btn-primary')
-wrapper.find('div > span:first-child')
-getByClassName('header-title')
+container.querySelector(".btn-primary");
+wrapper.find("div > span:first-child");
+getByClassName("header-title");
 ```
 
 ## Test Structure Pattern
@@ -83,10 +87,10 @@ describe('ComponentName', () => {
     it('should [expected outcome visible to user]', () => {
       // Arrange: Set up component state
       render(<Component {...props} />)
-      
+
       // Act: Simulate user behavior
       await userEvent.click(getByRole('button', { name: 'Submit' }))
-      
+
       // Assert: Check visible outcomes
       expect(getByText('Success!')).toBeInTheDocument()
     })
@@ -97,50 +101,53 @@ describe('ComponentName', () => {
 ## Common Patterns
 
 ### Testing User Input
+
 ```javascript
-it('should update display when user types', async () => {
-  render(<SearchBox />)
-  
-  const input = getByRole('searchbox')
-  await userEvent.type(input, 'query')
-  
-  expect(input).toHaveValue('query')
-})
+it("should update display when user types", async () => {
+  render(<SearchBox />);
+
+  const input = getByRole("searchbox");
+  await userEvent.type(input, "query");
+
+  expect(input).toHaveValue("query");
+});
 ```
 
 ### Testing Async Operations
+
 ```javascript
-it('should show results after search', async () => {
-  render(<SearchResults />)
-  
-  await userEvent.click(getByRole('button', { name: 'Search' }))
-  
+it("should show results after search", async () => {
+  render(<SearchResults />);
+
+  await userEvent.click(getByRole("button", { name: "Search" }));
+
   // Wait for visible change, not implementation detail
-  expect(await findByText('3 results found')).toBeInTheDocument()
-})
+  expect(await findByText("3 results found")).toBeInTheDocument();
+});
 ```
 
 ### Testing Accessibility
+
 ```javascript
-it('should be accessible', async () => {
-  const { container } = render(<Component />)
-  
-  const results = await axe(container)
-  expect(results).toHaveNoViolations()
-})
+it("should be accessible", async () => {
+  const { container } = render(<Component />);
+
+  const results = await axe(container);
+  expect(results).toHaveNoViolations();
+});
 ```
 
 See [testing-patterns.md](./testing-patterns.md) for more detailed patterns.
 
 ## Anti-Patterns to Avoid
 
-| Anti-Pattern | Problem | Better Approach |
-|--------------|---------|-----------------|
-| Testing internal state | Breaks on refactor | Test visible outcomes |
-| Snapshot overuse | Noise, false positives | Targeted assertions |
-| `waitFor` with long timeout | Hides perf issues | Fix root cause |
-| Testing library internals | Not your responsibility | Trust dependencies |
-| `act()` warnings ignored | Async issues hidden | Fix test timing |
+| Anti-Pattern                | Problem                 | Better Approach       |
+| --------------------------- | ----------------------- | --------------------- |
+| Testing internal state      | Breaks on refactor      | Test visible outcomes |
+| Snapshot overuse            | Noise, false positives  | Targeted assertions   |
+| `waitFor` with long timeout | Hides perf issues       | Fix root cause        |
+| Testing library internals   | Not your responsibility | Trust dependencies    |
+| `act()` warnings ignored    | Async issues hidden     | Fix test timing       |
 
 ## Project Configuration
 

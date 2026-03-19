@@ -10,8 +10,17 @@ For the best experience with Copilot Orchestra:
 
 - **VS Code 1.107+** (November 2025 release or later) — required for custom agents
 - GitHub Copilot extension
+- [markdownlint-cli2](https://github.com/DavidAnson/markdownlint-cli2) — Markdown auto-formatter (used in the pre-commit hook and by agents): `npm install -g markdownlint-cli2`
 
 ### Recommended Settings
+
+Enable the pre-commit hook to auto-format Markdown files before every commit (covers agents and manual edits):
+
+```sh
+git config core.hooksPath .githooks
+```
+
+The hook runs `markdownlint-cli2 --fix` on staged `.md` files and re-stages them — commits are never blocked.
 
 Enable the built-in GitHub MCP server for seamless issue and PR workflows:
 

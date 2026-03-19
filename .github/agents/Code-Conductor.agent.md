@@ -292,19 +292,19 @@ Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFE
 
 When delegating to subagents, instruct them to use the relevant skill(s):
 
-| Skill                            | When to Instruct Subagent to Use                                          |
-| -------------------------------- | ------------------------------------------------------------------------- |
-| `brainstorming`                  | Exploring new features, evaluating approaches, or complex decisions                  |
-| `frontend-design`                | Designing new UI components, screens, or evaluating for uniqueness                   |
-| `skill-creator`                  | Adding new skills, updating skill templates, or reviewing skill structure             |
-| `software-architecture`          | Evaluating layer boundaries, dependency flow, or ADR-level decisions                 |
-| `test-driven-development`        | Writing tests first, red-green-refactor, or validating quality gates                 |
-| `ui-testing`                     | Writing component-level React tests, fixing flaky tests, or establishing patterns    |
-| `systematic-debugging`           | Debugging failures, investigating flaky tests, or tracking root causes               |
-| `verification-before-completion` | Before PRs, releases, marking tickets done, or any completion declaration            |
-| `webapp-testing`                 | Creating or improving browser-based E2E coverage, test stability, or CI              |
-| `parallel-execution`             | Coordinating concurrent implementation paths, convergence gates, or triage routing   |
-| `property-based-testing`         | Adding randomized testing, validating input ranges, or verifying invariants          |
+| Skill                            | When to Instruct Subagent to Use                                                   |
+| -------------------------------- | ---------------------------------------------------------------------------------- |
+| `brainstorming`                  | Exploring new features, evaluating approaches, or complex decisions                |
+| `frontend-design`                | Designing new UI components, screens, or evaluating for uniqueness                 |
+| `skill-creator`                  | Adding new skills, updating skill templates, or reviewing skill structure          |
+| `software-architecture`          | Evaluating layer boundaries, dependency flow, or ADR-level decisions               |
+| `test-driven-development`        | Writing tests first, red-green-refactor, or validating quality gates               |
+| `ui-testing`                     | Writing component-level React tests, fixing flaky tests, or establishing patterns  |
+| `systematic-debugging`           | Debugging failures, investigating flaky tests, or tracking root causes             |
+| `verification-before-completion` | Before PRs, releases, marking tickets done, or any completion declaration          |
+| `webapp-testing`                 | Creating or improving browser-based E2E coverage, test stability, or CI            |
+| `parallel-execution`             | Coordinating concurrent implementation paths, convergence gates, or triage routing |
+| `property-based-testing`         | Adding randomized testing, validating input ranges, or verifying invariants        |
 
 <!-- Keep in sync: when adding or removing a delegation skill in .github/skills/, update this table (delegation-scoped: only skills Code-Conductor instructs subagents to use). Always also update Process-Review's Skill Mapping Reference table (all-skills scope). -->
 

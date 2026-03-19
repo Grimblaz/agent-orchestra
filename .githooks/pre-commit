@@ -1,0 +1,30 @@
+#!/bin/sh
+# Pre-commit hook: auto-format staged Markdown files with markdownlint-cli2.
+#
+# Install once per clone:
+#   git config core.hooksPath .githooks
+#
+# Requires: markdownlint-cli2 (npm install -g markdownlint-cli2)
+
+if ! command -v markdownlint-cli2 > /dev/null 2>&1; then
+  echo "⚠ markdownlint-cli2 not found — skipping Markdown auto-format."
+  echo "  Install with: npm install -g markdownlint-cli2"
+  exit 0
+fi
+
+# Collect staged .md files (added, copied, or modified — not deleted)
+staged_md=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(md|agent\.md)$')
+
+if [ -z "$staged_md" ]; then
+  exit 0
+fi
+
+echo "→ markdownlint-cli2 --fix on staged Markdown files..."
+for f in $staged_md; do
+  # --fix applies auto-fixable rules (blank lines around headings, etc.)
+  # Errors that cannot be auto-fixed are reported but do not block the commit.
+  markdownlint-cli2 --fix "$f" > /dev/null 2>&1 || true
+  git add "$f"
+done
+
+exit 0

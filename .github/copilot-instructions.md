@@ -121,6 +121,14 @@ No build step. This is a configuration/documentation template.
 
 ## Quick-validate (used by agents before every PR)
 
+After editing any `.md` files, run the Markdown auto-formatter before committing:
+
+```powershell
+markdownlint-cli2 --fix "**/*.md"
+```
+
+Then run the structural checks:
+
 ```powershell
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Plan-Architect").Count  # should be 0
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Janitor").Count  # should be 0
