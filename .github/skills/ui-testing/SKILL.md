@@ -81,21 +81,21 @@ getByClassName("header-title");
 ## Test Structure Pattern
 
 ```javascript
-describe('ComponentName', () => {
+describe("ComponentName", () => {
   // Group by user goal, not by method
-  describe('when user [does action]', () => {
-    it('should [expected outcome visible to user]', () => {
+  describe("when user [does action]", () => {
+    it("should [expected outcome visible to user]", () => {
       // Arrange: Set up component state
-      render(<Component {...props} />)
+      render(<Component {...props} />);
 
       // Act: Simulate user behavior
-      await userEvent.click(getByRole('button', { name: 'Submit' }))
+      await userEvent.click(getByRole("button", { name: "Submit" }));
 
       // Assert: Check visible outcomes
-      expect(getByText('Success!')).toBeInTheDocument()
-    })
-  })
-})
+      expect(getByText("Success!")).toBeInTheDocument();
+    });
+  });
+});
 ```
 
 ## Common Patterns

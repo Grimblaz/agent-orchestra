@@ -7,6 +7,7 @@ Extended guidance for each phase of systematic debugging.
 ### Log Analysis Techniques
 
 **Finding the needle**:
+
 ```bash
 # Search for errors around a timestamp
 grep -B 5 -A 10 "ERROR" app.log | grep -A 15 "2024-01-15T14:3"
@@ -19,6 +20,7 @@ tail -f app.log | grep --line-buffered "PaymentService"
 ```
 
 **What to look for**:
+
 - First error in the chain (not the cascade)
 - Timestamps and sequence of events
 - Request/correlation IDs to trace flow
@@ -28,12 +30,14 @@ tail -f app.log | grep --line-buffered "PaymentService"
 ### Reproduction Strategies
 
 **For intermittent bugs**:
+
 1. Identify patterns (time of day, load level, specific users)
 2. Increase logging verbosity temporarily
 3. Create stress test that amplifies the conditions
 4. Use record/replay tools if available
 
 **For environment-specific bugs**:
+
 1. Document exact differences between environments
 2. Check environment variables and configuration
 3. Compare dependency versions
@@ -42,6 +46,7 @@ tail -f app.log | grep --line-buffered "PaymentService"
 ### Bisection Technique
 
 When bug appeared "sometime":
+
 ```bash
 # Git bisect to find breaking commit
 git bisect start
@@ -55,6 +60,7 @@ git bisect good v1.2.0
 ### Hypothesis Categories
 
 **Code-level hypotheses**:
+
 - Logic error in specific function
 - Edge case not handled
 - Type coercion issue
@@ -62,18 +68,21 @@ git bisect good v1.2.0
 - Null/undefined reference
 
 **Integration hypotheses**:
+
 - API contract changed
 - Database schema mismatch
 - Message format incompatibility
 - Timeout too short
 
 **Environment hypotheses**:
+
 - Configuration difference
 - Missing environment variable
 - Permission/access issue
 - Resource exhaustion
 
 **Data hypotheses**:
+
 - Corrupt/invalid data
 - Missing required data
 - Data migration issue
@@ -98,6 +107,7 @@ What's different between working and broken cases?
 ### Isolation Techniques
 
 **Minimal reproduction**:
+
 ```javascript
 // Instead of debugging full app, isolate the function
 const result = suspectFunction(knownBadInput)
@@ -106,6 +116,7 @@ console.log('Expected:', expectedOutput)
 ```
 
 **Mock external dependencies**:
+
 ```javascript
 // Replace real service with controlled stub
 const mockService = {
@@ -115,6 +126,7 @@ const mockService = {
 ```
 
 **Binary search in code**:
+
 ```javascript
 // Add logging at midpoint of suspect code
 console.log('CHECKPOINT 1:', intermediateState)
@@ -124,6 +136,7 @@ console.log('CHECKPOINT 1:', intermediateState)
 ### Debugging Tools Reference
 
 **Browser DevTools**:
+
 - Network tab: Request/response inspection
 - Console: Runtime errors, logging
 - Sources: Breakpoints, call stack
@@ -131,6 +144,7 @@ console.log('CHECKPOINT 1:', intermediateState)
 - Application: Storage inspection
 
 **Node.js Debugging**:
+
 ```bash
 # Start with inspector
 node --inspect app.js
@@ -142,6 +156,7 @@ node --inspect-brk app.js
 ```
 
 **Database debugging**:
+
 ```sql
 -- Enable query logging
 SET log_statement = 'all';
@@ -158,18 +173,21 @@ SELECT * FROM pg_locks;
 ### Fix Quality Checklist
 
 **Correctness**:
+
 - [ ] Fix addresses root cause (not symptoms)
 - [ ] All edge cases handled
 - [ ] Error messages are helpful
 - [ ] No new errors introduced
 
 **Completeness**:
+
 - [ ] Similar code elsewhere updated
 - [ ] Documentation updated if needed
 - [ ] Configuration changes documented
 - [ ] Migration scripts if needed
 
 **Testability**:
+
 - [ ] Unit test for the specific fix
 - [ ] Integration test if applicable
 - [ ] Test covers the original failure case
@@ -225,18 +243,21 @@ For significant bugs, document learnings:
 ## Debugging Mindset
 
 ### Productive Attitudes
+
 - **Curiosity over frustration**: The bug is a puzzle to solve
 - **Humility**: Your code has bugs; accept it
 - **Patience**: Rushing leads to more bugs
 - **Methodical**: Follow the process even when tempted to guess
 
 ### When to Take a Break
+
 - You've been stuck for >1 hour
 - You're making random changes
 - You're frustrated or tired
 - You keep looking at the same code
 
 ### When to Ask for Help
+
 - Fresh eyes often spot issues quickly
 - After documenting what you've tried
 - When you need domain expertise

@@ -11,10 +11,12 @@ Run this in a target project (not in the copilot-orchestra repo itself) to gener
 ## Prerequisites
 
 Verify these are available:
+
 - `git` — version control
 - `gh` — GitHub CLI (required — used by `/project:start-issue` and `/project:implement` for issue read and PR creation)
 
 Check what already exists:
+
 - `.github/copilot-instructions.md` — skip Copilot config if present
 - `CLAUDE.md` — skip Claude Code config if present
 - `.github/architecture-rules.md` — skip architecture rules if present
@@ -22,6 +24,7 @@ Check what already exists:
 ## Phase 1: Project Basics
 
 Ask the user for:
+
 1. **Project name** — what is this project called?
 2. **Overview** — what does it do? (1-2 sentences)
 3. **Language + version** — e.g., TypeScript 5.x, Java 21, Python 3.12
@@ -48,16 +51,20 @@ Ask the user for:
 Generate the following files using the collected answers:
 
 ### `.github/copilot-instructions.md`
+
 Follow the format in the copilot-orchestra `examples/` directory. Include: Project name, Overview, Technology Stack, Architecture diagram, Directory Structure, Key Conventions, Build & Run commands, Quick-Validate command.
 
 ### `CLAUDE.md`
+
 Follow the same structure but adapted for Claude Code:
+
 - Same project overview, tech stack, architecture, conventions, and commands
 - Add the **Workflow for Claude Code** section (plan → implement → test → refactor → review → document → PR) with role guide references to `.github/agents/` files
 - Add the **Skills Reference** table pointing to `.github/skills/` files (currently 14 skills: brainstorming, browser-canvas-testing, code-review-intake, frontend-design, parallel-execution, post-pr-review, property-based-testing, skill-creator, software-architecture, systematic-debugging, test-driven-development, ui-testing, verification-before-completion, webapp-testing)
 - Add the **Shared Instructions** list pointing to `.github/instructions/` files
 
 ### `.github/architecture-rules.md`
+
 Layer structure, dependency rules, testing rules per layer, naming conventions.
 
 ## Phase 5: Scaffolding (Optional)

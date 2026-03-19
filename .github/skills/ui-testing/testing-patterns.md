@@ -5,6 +5,7 @@ Detailed patterns and examples for common UI testing scenarios.
 ## Form Testing
 
 ### Basic Form Submission
+
 ```javascript
 it('should submit form with user input', async () => {
   const onSubmit = vi.fn()
@@ -22,6 +23,7 @@ it('should submit form with user input', async () => {
 ```
 
 ### Form Validation
+
 ```javascript
 it('should show validation error for invalid email', async () => {
   render(<ContactForm />)
@@ -35,6 +37,7 @@ it('should show validation error for invalid email', async () => {
 ```
 
 ### Async Form Submission
+
 ```javascript
 it('should show loading state during submission', async () => {
   server.use(
@@ -55,6 +58,7 @@ it('should show loading state during submission', async () => {
 ## List and Table Testing
 
 ### Testing List Rendering
+
 ```javascript
 it('should render all items', () => {
   render(<UserList users={mockUsers} />)
@@ -69,6 +73,7 @@ it('should render all items', () => {
 ```
 
 ### Testing Table Sorting
+
 ```javascript
 it('should sort by column when header clicked', async () => {
   render(<DataTable data={mockData} />)
@@ -83,6 +88,7 @@ it('should sort by column when header clicked', async () => {
 ```
 
 ### Testing Pagination
+
 ```javascript
 it('should navigate pages', async () => {
   render(<PaginatedList items={manyItems} pageSize={10} />)
@@ -99,6 +105,7 @@ it('should navigate pages', async () => {
 ## Modal and Dialog Testing
 
 ### Opening and Closing
+
 ```javascript
 it('should open and close modal', async () => {
   render(<ModalTrigger />)
@@ -117,6 +124,7 @@ it('should open and close modal', async () => {
 ```
 
 ### Testing Focus Management
+
 ```javascript
 it('should trap focus in modal', async () => {
   render(<Modal isOpen={true} />)
@@ -136,6 +144,7 @@ it('should trap focus in modal', async () => {
 ## Error Handling
 
 ### Error Boundaries
+
 ```javascript
 it('should show fallback UI on error', () => {
   const ThrowingComponent = () => { throw new Error('Test error') }
@@ -151,6 +160,7 @@ it('should show fallback UI on error', () => {
 ```
 
 ### API Error States
+
 ```javascript
 it('should display error message on API failure', async () => {
   server.use(
@@ -169,6 +179,7 @@ it('should display error message on API failure', async () => {
 ## Accessibility Testing
 
 ### Role and Label Testing
+
 ```javascript
 it('should have accessible form controls', () => {
   render(<LoginForm />)
@@ -183,6 +194,7 @@ it('should have accessible form controls', () => {
 ```
 
 ### Keyboard Navigation
+
 ```javascript
 it('should be keyboard navigable', async () => {
   render(<Menu items={menuItems} />)
@@ -196,6 +208,7 @@ it('should be keyboard navigable', async () => {
 ```
 
 ### Screen Reader Announcements
+
 ```javascript
 it('should announce status changes', async () => {
   render(<SaveButton />)
@@ -244,6 +257,7 @@ const createUsers = (count, overrides = {}) =>
 ## Mock Patterns
 
 ### MSW Handlers
+
 ```javascript
 // [CUSTOMIZE] Add your API endpoints
 export const handlers = [
@@ -259,6 +273,7 @@ export const handlers = [
 ```
 
 ### Context Providers Wrapper
+
 ```javascript
 // [CUSTOMIZE] Include your app's providers
 const AllProviders = ({ children }) => (

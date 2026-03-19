@@ -20,7 +20,7 @@ Enable the pre-commit hook to auto-format Markdown files before every commit (co
 git config core.hooksPath .githooks
 ```
 
-The hook runs `markdownlint-cli2 --fix` on staged `.md` files and re-stages them — commits are never blocked.
+The hook runs `markdownlint-cli2 --fix` on staged `.md` files (including `.agent.md` agent definitions) and re-stages them — commits are never blocked.
 
 Enable the built-in GitHub MCP server for seamless issue and PR workflows:
 

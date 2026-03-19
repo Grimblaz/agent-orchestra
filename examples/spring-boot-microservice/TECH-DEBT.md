@@ -25,6 +25,7 @@ This document tracks known technical debt in the Order Service. Items are priori
 ### 🔴 Critical
 
 #### [DEBT-001] Missing Input Validation on Bulk Operations
+
 - **Location**: `OrderController.createBulkOrders()`
 - **Description**: Bulk order endpoint accepts unbounded list size, potential DoS vector
 - **Impact**: Could exhaust memory/DB connections with large payloads
@@ -37,6 +38,7 @@ This document tracks known technical debt in the Order Service. Items are priori
 ### 🟠 High
 
 #### [DEBT-002] N+1 Query in Order List Endpoint
+
 - **Location**: `OrderService.getOrdersWithItems()`
 - **Description**: Fetching orders with items causes N+1 queries due to lazy loading
 - **Impact**: ~500ms latency on list of 50 orders
@@ -45,6 +47,7 @@ This document tracks known technical debt in the Order Service. Items are priori
 - **Related**: #123
 
 #### [DEBT-003] Hardcoded Payment Service URL
+
 - **Location**: `PaymentClient`
 - **Description**: Payment service URL hardcoded, should use service discovery
 - **Impact**: Requires redeployment for environment changes
@@ -56,6 +59,7 @@ This document tracks known technical debt in the Order Service. Items are priori
 ### 🟡 Medium
 
 #### [DEBT-004] Duplicate Validation Logic
+
 - **Location**: `OrderService`, `OrderController`
 - **Description**: Order validation duplicated between controller and service layers
 - **Impact**: Maintenance burden, risk of drift
@@ -63,6 +67,7 @@ This document tracks known technical debt in the Order Service. Items are priori
 - **Added**: 2024-01-05
 
 #### [DEBT-005] Missing Retry Logic for External Calls
+
 - **Location**: `PaymentClient`, `InventoryClient`
 - **Description**: External HTTP calls have no retry mechanism
 - **Impact**: Transient failures cause immediate order failures
@@ -70,6 +75,7 @@ This document tracks known technical debt in the Order Service. Items are priori
 - **Added**: 2024-01-03
 
 #### [DEBT-006] Test Data Builders Needed
+
 - **Location**: `src/test/java`
 - **Description**: Tests create entities manually, lots of duplication
 - **Impact**: Tests are verbose, hard to maintain
@@ -81,6 +87,7 @@ This document tracks known technical debt in the Order Service. Items are priori
 ### 🟢 Low
 
 #### [DEBT-007] Inconsistent Exception Messages
+
 - **Location**: Various service classes
 - **Description**: Exception messages don't follow consistent format
 - **Impact**: Harder to parse in logs, inconsistent API error responses
@@ -88,6 +95,7 @@ This document tracks known technical debt in the Order Service. Items are priori
 - **Added**: 2023-12-15
 
 #### [DEBT-008] OpenAPI Descriptions Incomplete
+
 - **Location**: Controller classes
 - **Description**: Many endpoints missing `@Operation` descriptions
 - **Impact**: Generated API docs are sparse
@@ -99,6 +107,7 @@ This document tracks known technical debt in the Order Service. Items are priori
 ## Resolved Technical Debt
 
 ### ✅ [DEBT-000] Example Resolved Item
+
 - **Location**: `SomeClass`
 - **Description**: What was the issue
 - **Resolution**: How it was fixed

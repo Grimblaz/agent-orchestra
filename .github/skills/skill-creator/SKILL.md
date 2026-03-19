@@ -128,6 +128,7 @@ Before finalizing a skill's `description:` field, verify:
 2. **Positive triggers**: includes "Use when..." with 2–3 specific, distinct scenarios — not generic summary language
 3. **Negative signals**: includes "DO NOT USE FOR:..." with at least one adjacent skill pointer, e.g. `(use {other-skill})`
 4. **Collision check**: before finalizing, grep existing SKILL.md files for overlapping trigger words and add explicit "DO NOT USE FOR:" signals to **both** sides of any conflict:
+
    ```powershell
    Select-String -Path ".github/skills/*/SKILL.md" -Pattern "your-trigger-word" | Select-Object Path, Line
    ```

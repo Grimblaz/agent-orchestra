@@ -20,10 +20,10 @@ if [ -z "$staged_md" ]; then
 fi
 
 echo "→ markdownlint-cli2 --fix on staged Markdown files..."
-for f in $staged_md; do
+printf '%s\n' "$staged_md" | while IFS= read -r f; do
   # --fix applies auto-fixable rules (blank lines around headings, etc.)
   # Errors that cannot be auto-fixed are reported but do not block the commit.
-  markdownlint-cli2 --fix "$f" > /dev/null 2>&1 || true
+  markdownlint-cli2 --fix "$f" || true
   git add "$f"
 done
 

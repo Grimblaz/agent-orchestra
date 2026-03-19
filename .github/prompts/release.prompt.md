@@ -31,6 +31,7 @@ Run these before doing anything else:
 Ask the user:
 
 > **What type of release is this?**
+>
 > - `patch` — bug fixes, docs corrections, small tweaks (e.g., 1.9.0 → 1.9.1)
 > - `minor` — new features, new agents/skills, non-breaking changes (e.g., 1.9.0 → 1.10.0)
 > - `major` — breaking changes, architecture overhauls (e.g., 1.9.0 → 2.0.0)
