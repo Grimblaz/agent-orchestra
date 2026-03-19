@@ -1,6 +1,6 @@
 ---
 name: frontend-design
-description: Guide for creating distinctive UI designs that avoid generic templates. Use when designing new UI components, screens, or evaluating designs for uniqueness and purpose.
+description: Guide for creating distinctive UI designs that avoid generic templates. Use when designing new UI components, screens, or evaluating designs for uniqueness and purpose. DO NOT USE FOR: architecture decisions or SOLID evaluation (use software-architecture), open-ended exploration (use brainstorming), or React test strategies (use ui-testing).
 ---
 
 # Frontend Design Skill

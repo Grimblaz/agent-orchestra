@@ -1,6 +1,6 @@
 ---
 name: post-pr-review
-description: Post-merge checklist for archiving, documentation, versioning, and release tagging. Use when completing post-merge cleanup, archiving tracking files, updating docs, or running strategic assessment before merge.
+description: Post-merge checklist for archiving, documentation, versioning, and release tagging. Use when completing post-merge cleanup, archiving tracking files, updating docs, or running the pre-merge strategic assessment (Step 6). DO NOT USE FOR: pre-PR readiness checks (use verification-before-completion) or processing GitHub review comments (use code-review-intake).
 ---
 
 ## When to Use

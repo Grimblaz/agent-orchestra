@@ -1,6 +1,6 @@
 ---
 name: software-architecture
-description: Clean Architecture, SOLID principles, and architectural decision guidance. Use when designing systems, evaluating architecture, making structural decisions, or reviewing for maintainability.
+description: Clean Architecture, SOLID principles, and architectural decision guidance. Use when evaluating layer boundaries, dependency flow, design contract violations, or ADR-level decisions. DO NOT USE FOR: open-ended idea exploration (use brainstorming), UI component design (use frontend-design), writing tests (use test-driven-development), or coordinating parallel implementation lanes (use parallel-execution).
 ---
 
 # Software Architecture Skill

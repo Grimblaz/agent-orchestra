@@ -1,6 +1,6 @@
 ---
 name: property-based-testing
-description: Incremental rollout policy for property-based testing that preserves readable example-based tests while adding invariant-focused randomized verification.
+description: Incremental rollout policy for property-based testing that preserves readable example-based tests while adding invariant-focused randomized verification. Use when adding randomized testing, validating input ranges, or verifying mathematical properties. DO NOT USE FOR: example-based unit/integration tests or TDD workflow (use test-driven-development), React component tests (use ui-testing), or E2E browser tests (use webapp-testing).
 ---
 
 # Property-Based Testing Skill

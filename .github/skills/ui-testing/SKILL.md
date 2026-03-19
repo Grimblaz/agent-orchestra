@@ -1,6 +1,6 @@
 ---
 name: ui-testing
-description: Resilient React component testing strategies focusing on user behavior. Use when writing or reviewing UI tests, fixing flaky tests, or establishing testing patterns.
+description: Resilient React component testing strategies focusing on user behavior. Use when writing or reviewing component-level React tests, fixing flaky component tests, or establishing React testing patterns. DO NOT USE FOR: Playwright E2E tests (use webapp-testing), canvas game interaction (use browser-canvas-testing), TDD workflow (use test-driven-development), debugging failures (use systematic-debugging), UI component design (use frontend-design), or randomized property tests (use property-based-testing).
 ---
 
 # UI Testing Skill

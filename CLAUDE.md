@@ -73,20 +73,20 @@ Read the relevant `SKILL.md` when working in that domain:
 
 | Skill | Path | When to use |
 |-------|------|-------------|
-| test-driven-development | `.github/skills/test-driven-development/SKILL.md` | Writing tests, red-green-refactor |
-| systematic-debugging | `.github/skills/systematic-debugging/SKILL.md` | Investigating complex bugs |
-| software-architecture | `.github/skills/software-architecture/SKILL.md` | Evaluating design decisions |
-| brainstorming | `.github/skills/brainstorming/SKILL.md` | Exploring requirements or trade-offs |
-| frontend-design | `.github/skills/frontend-design/SKILL.md` | Building UI components |
-| ui-testing | `.github/skills/ui-testing/SKILL.md` | React component test strategies |
-| webapp-testing | `.github/skills/webapp-testing/SKILL.md` | Playwright end-to-end tests |
-| parallel-execution | `.github/skills/parallel-execution/SKILL.md` | Running parallel/serial implementation lanes |
-| property-based-testing | `.github/skills/property-based-testing/SKILL.md` | Incremental randomized property verification |
-| verification-before-completion | `.github/skills/verification-before-completion/SKILL.md` | Pre-PR readiness checks |
-| skill-creator | `.github/skills/skill-creator/SKILL.md` | Adding new skills to the framework |
-| browser-canvas-testing | `.github/skills/browser-canvas-testing/SKILL.md` | Canvas game browser interaction (VS Code native tools) |
-| code-review-intake | `.github/skills/code-review-intake/SKILL.md` | GitHub review intake mode, processing Code-Critic findings |
-| post-pr-review | `.github/skills/post-pr-review/SKILL.md` | Post-merge cleanup, archiving tracking files, pre-merge strategic assessment |
+| test-driven-development | `.github/skills/test-driven-development/SKILL.md` | Writing tests first, red-green-refactor, or quality gates |
+| systematic-debugging | `.github/skills/systematic-debugging/SKILL.md` | Debugging failures, flaky tests, or tracking root causes |
+| software-architecture | `.github/skills/software-architecture/SKILL.md` | Layer boundaries, dependency flow, or ADR-level decisions |
+| brainstorming | `.github/skills/brainstorming/SKILL.md` | Exploring features, evaluating approaches, or complex decisions |
+| frontend-design | `.github/skills/frontend-design/SKILL.md` | Designing new UI components or evaluating for distinctiveness |
+| ui-testing | `.github/skills/ui-testing/SKILL.md` | Component-level React tests, flaky test fixes, React patterns |
+| webapp-testing | `.github/skills/webapp-testing/SKILL.md` | Browser-based E2E coverage, test stability, CI execution |
+| parallel-execution | `.github/skills/parallel-execution/SKILL.md` | Coordinating parallel implementation lanes and convergence gates |
+| property-based-testing | `.github/skills/property-based-testing/SKILL.md` | Randomized testing, input range validation, invariant verification |
+| verification-before-completion | `.github/skills/verification-before-completion/SKILL.md` | Before PRs, releases, or any completion declaration |
+| skill-creator | `.github/skills/skill-creator/SKILL.md` | Adding new skills, updating templates, or reviewing structure |
+| browser-canvas-testing | `.github/skills/browser-canvas-testing/SKILL.md` | HTML canvas elements, game objects, or clickElement failures |
+| code-review-intake | `.github/skills/code-review-intake/SKILL.md` | Processing GitHub review comments and reconciling findings |
+| post-pr-review | `.github/skills/post-pr-review/SKILL.md` | Post-merge cleanup, archiving tracking files, strategic assessment |
 
 ## Shared Instructions
 
@@ -107,6 +107,8 @@ Run via `pwsh -Command "..."` since these are PowerShell:
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Plan-Architect").Count  # should be 0
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Janitor").Count  # should be 0
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules|setup\.prompt" } | Select-String "workflow-template").Count  # should be 0
+(Get-ChildItem .github/skills/*/SKILL.md | Where-Object { (Select-String -Path $_ -Pattern '^description:.*Use (when|before)') -eq $null }).Count  # should be 0
+(Get-ChildItem .github/skills/*/SKILL.md | Where-Object { (Select-String -Path $_ -Pattern '^description:.*DO NOT USE FOR:') -eq $null }).Count  # should be 0
 
 # Check agent count
 (Get-ChildItem .github/agents/*.agent.md).Count  # should be 13

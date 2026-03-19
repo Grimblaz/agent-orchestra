@@ -24,20 +24,20 @@ This keeps prompts concise while preserving depth when needed.
 
 | Skill | Purpose | Status |
 | ----- | ------- | ------ |
-| `brainstorming` | Structured Socratic questioning for exploring ideas | ✅ Included |
-| `frontend-design` | Distinctive UI design guidance | ✅ Included |
-| `skill-creator` | Guide for creating new skills | ✅ Included |
-| `software-architecture` | Clean Architecture and SOLID principles | ✅ Included |
+| `brainstorming` | Structured Socratic questioning for exploring ideas and solutions | ✅ Included |
+| `frontend-design` | Guide for creating distinctive UI designs that avoid generic templates | ✅ Included |
+| `skill-creator` | Guide for creating new skills with proper frontmatter format | ✅ Included |
+| `software-architecture` | Clean Architecture, SOLID principles, and architectural decision guidance | ✅ Included |
 | `systematic-debugging` | 4-phase debugging process (Observe, Hypothesize, Test, Fix) | ✅ Included |
-| `test-driven-development` | TDD workflow guidance and quality gates | ✅ Included |
-| `ui-testing` | Resilient React component testing | ✅ Included |
-| `verification-before-completion` | Evidence-based verification checklist | ✅ Included |
-| `webapp-testing` | Playwright E2E setup and stability patterns | ✅ Included |
-| `parallel-execution` | Build-test orchestration: parallel/serial lanes with convergence gates | ✅ Included |
-| `property-based-testing` | Incremental randomized property-based verification | ✅ Included |
-| `browser-canvas-testing` | VS Code native browser tool behavior for canvas games | ✅ Included |
-| `code-review-intake` | GitHub review intake workflow with ledger-based judgment | ✅ Included |
-| `post-pr-review` | Post-merge checklist: archive, document, version, release | ✅ Included |
+| `test-driven-development` | TDD workflow guidance, quality standards, and practical patterns | ✅ Included |
+| `ui-testing` | Resilient React component testing strategies focusing on user behavior | ✅ Included |
+| `verification-before-completion` | Evidence-based verification checklist before marking work complete | ✅ Included |
+| `webapp-testing` | Playwright end-to-end testing guidance for web apps | ✅ Included |
+| `parallel-execution` | Build-test orchestration protocol for parallel or serial implementation lanes | ✅ Included |
+| `property-based-testing` | Incremental rollout policy for property-based testing | ✅ Included |
+| `browser-canvas-testing` | VS Code native browser tool behavior for canvas-based games | ✅ Included |
+| `code-review-intake` | Deterministic GitHub review intake workflow with ledger-based judgment | ✅ Included |
+| `post-pr-review` | Post-merge checklist for archiving, documentation, versioning, and release tagging | ✅ Included |
 
 ## How to Use a Skill
 
@@ -63,7 +63,7 @@ Skills with `name` + `description` in SKILL.md frontmatter are discoverable in V
 ```yaml
 ---
 name: my-skill
-description: What this skill does and when to use it. Use when...
+description: What this skill does. Use when {trigger conditions}. DO NOT USE FOR: {negative scenarios} (use {other-skill}).
 ---
 ```
 

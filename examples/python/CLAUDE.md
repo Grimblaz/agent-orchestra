@@ -83,11 +83,11 @@ Read the relevant `SKILL.md` when working in that domain:
 
 | Skill | Path | When to use |
 |-------|------|-------------|
-| test-driven-development | `.github/skills/test-driven-development/SKILL.md` | Writing tests, red-green-refactor |
-| systematic-debugging | `.github/skills/systematic-debugging/SKILL.md` | Investigating complex bugs |
-| software-architecture | `.github/skills/software-architecture/SKILL.md` | Evaluating design decisions |
-| property-based-testing | `.github/skills/property-based-testing/SKILL.md` | Randomized property verification |
-| verification-before-completion | `.github/skills/verification-before-completion/SKILL.md` | Pre-PR readiness checks |
+| test-driven-development | `.github/skills/test-driven-development/SKILL.md` | Writing tests first, red-green-refactor, or quality gates |
+| systematic-debugging | `.github/skills/systematic-debugging/SKILL.md` | Debugging failures, flaky tests, or tracking root causes |
+| software-architecture | `.github/skills/software-architecture/SKILL.md` | Layer boundaries, dependency flow, or ADR-level decisions |
+| property-based-testing | `.github/skills/property-based-testing/SKILL.md` | Randomized testing, input range validation, invariant verification |
+| verification-before-completion | `.github/skills/verification-before-completion/SKILL.md` | Before PRs, releases, or any completion declaration |
 
 ## Shared Instructions
 
