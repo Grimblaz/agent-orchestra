@@ -103,6 +103,11 @@ Read these instruction files for cross-cutting rules:
 Run via `pwsh -Command "..."` since these are PowerShell:
 
 ```powershell
+# Auto-format Markdown files (run before structural checks)
+markdownlint-cli2 --fix "**/*.md"
+```
+
+```powershell
 # Validate no broken references to retired agent names
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Plan-Architect").Count  # should be 0
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Janitor").Count  # should be 0
