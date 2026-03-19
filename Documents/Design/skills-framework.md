@@ -23,17 +23,17 @@ The skills framework provides domain-specific knowledge modules loaded on demand
 | Skill | Directory | Purpose |
 |-------|-----------|---------|
 | `brainstorming` | `.github/skills/brainstorming/` | Structured Socratic questioning for exploring ideas and solutions |
-| `frontend-design` | `.github/skills/frontend-design/` | Distinctive UI design guidance to avoid generic templates |
-| `parallel-execution` | `.github/skills/parallel-execution/` | Build-test orchestration protocol for parallel/serial implementation lanes |
-| `property-based-testing` | `.github/skills/property-based-testing/` | Incremental rollout policy for randomized property verification |
-| `skill-creator` | `.github/skills/skill-creator/` | Guide for creating new skills with proper frontmatter format |
+| `frontend-design` | `.github/skills/frontend-design/` | Guide for creating distinctive UI designs that avoid generic templates |
+| `parallel-execution` | `.github/skills/parallel-execution/` | Build-test orchestration protocol for choosing and running parallel or serial implementation lanes |
+| `property-based-testing` | `.github/skills/property-based-testing/` | Incremental rollout policy for property-based testing that preserves readable example-based tests |
+| `skill-creator` | `.github/skills/skill-creator/` | Guide for creating new skills in this system with proper frontmatter format |
 | `software-architecture` | `.github/skills/software-architecture/` | Clean Architecture, SOLID principles, and architectural decision guidance |
-| `systematic-debugging` | `.github/skills/systematic-debugging/` | 4-phase debugging process (Observe, Hypothesize, Test, Fix) |
-| `test-driven-development` | `.github/skills/test-driven-development/` | TDD workflow guidance, quality standards, and practical patterns |
-| `ui-testing` | `.github/skills/ui-testing/` | Resilient React component testing strategies |
+| `systematic-debugging` | `.github/skills/systematic-debugging/` | 4-phase debugging process (Observe, Hypothesize, Test, Fix) for complex issues |
+| `test-driven-development` | `.github/skills/test-driven-development/` | Test-Driven Development workflow guidance, quality standards, and practical patterns |
+| `ui-testing` | `.github/skills/ui-testing/` | Resilient React component testing strategies focusing on user behavior |
 | `verification-before-completion` | `.github/skills/verification-before-completion/` | Evidence-based verification checklist before marking work complete |
-| `webapp-testing` | `.github/skills/webapp-testing/` | Playwright end-to-end testing guidance for web apps |
-| `browser-canvas-testing` | `.github/skills/browser-canvas-testing/` | VS Code native browser tool behavior for canvas-based games |
+| `webapp-testing` | `.github/skills/webapp-testing/` | Playwright end-to-end testing guidance for web apps, with practical patterns and setup steps |
+| `browser-canvas-testing` | `.github/skills/browser-canvas-testing/` | VS Code native browser tool behavior for canvas-based games (Phaser 3, etc.) |
 | `code-review-intake` | `.github/skills/code-review-intake/` | Deterministic GitHub review intake workflow with ledger-based judgment |
 | `post-pr-review` | `.github/skills/post-pr-review/` | Post-merge checklist for archiving, documentation, versioning, and release tagging |
 

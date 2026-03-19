@@ -1,6 +1,6 @@
 ---
 name: systematic-debugging
-description: 4-phase debugging process (Observe, Hypothesize, Test, Fix) for complex issues. Use when debugging fails, investigating flaky tests, tracking root causes, or facing mysterious bugs.
+description: 4-phase debugging process (Observe, Hypothesize, Test, Fix) for complex issues. Use when debugging fails, investigating flaky tests, tracking root causes, or facing mysterious bugs. DO NOT USE FOR: writing new tests (use test-driven-development), React component test patterns (use ui-testing), or E2E test setup (use webapp-testing).
 ---
 
 # Systematic Debugging

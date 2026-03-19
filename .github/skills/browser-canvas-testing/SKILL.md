@@ -1,6 +1,6 @@
 ---
 name: browser-canvas-testing
-description: VS Code native browser tool behavior for canvas-based games (Phaser 3, etc.). Use when interacting with HTML canvas elements, clicking game objects, or verifying canvas state via browser tools. Use when `clickElement` fails on canvas or when you need coordinate-based interaction.
+description: VS Code native browser tool behavior for canvas-based games (Phaser 3, etc.). Use when interacting with HTML canvas elements, clicking game objects, verifying canvas state via browser tools, or when `clickElement` fails on canvas. DO NOT USE FOR: React component tests (use ui-testing) or Playwright E2E tests (use webapp-testing).
 ---
 
 # Browser Canvas Testing

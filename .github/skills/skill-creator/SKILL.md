@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Guide for creating new skills in this system with proper frontmatter format. Use when adding new skills, updating skill templates, or reviewing skill structure.
+description: Guide for creating new skills in this system with proper frontmatter format. Use when adding new skills, updating skill templates, or reviewing skill structure. DO NOT USE FOR: general agent or instruction file customization (use agent-customization skill) or modifying existing skill logic/content.
 ---
 
 # Skill Creator
@@ -79,7 +79,7 @@ Start minimal, then split into supporting files only when the core document beco
 ```markdown
 ---
 name: {skill-name}
-description: {What it does}. Use when {trigger conditions}.
+description: {What it does}. Use when {trigger conditions}. DO NOT USE FOR: {scenarios where adjacent skills are better} (use {other-skill}).
 ---
 
 # {Skill Title}
@@ -120,6 +120,18 @@ Organize by user goals, not by internal structure.
 - External reference links
 ```
 
+## Description Quality Checklist
+
+Before finalizing a skill's `description:` field, verify:
+
+1. **Length target**: ≤60 words total (positive triggers + negative signals combined)
+2. **Positive triggers**: includes "Use when..." with 2–3 specific, distinct scenarios — not generic summary language
+3. **Negative signals**: includes "DO NOT USE FOR:..." with at least one adjacent skill pointer, e.g. `(use {other-skill})`
+4. **Collision check**: before finalizing, grep existing SKILL.md files for overlapping trigger words and add explicit "DO NOT USE FOR" signals to **both** sides of any conflict:
+   ```powershell
+   Select-String -Path ".github/skills/*/SKILL.md" -Pattern "your-trigger-word" | Select-Object Path, Line
+   ```
+
 ## Writing Guidelines
 
 ### Description Field (Critical for Discovery)
@@ -129,9 +141,9 @@ The description determines when the skill appears in suggestions.
 **Good descriptions**:
 
 ```yaml
-description: Structured debugging process using observe-hypothesize-test-fix methodology. Use when debugging complex issues, investigating flaky tests, or tracking down root causes.
+description: 4-phase debugging process for complex issues. Use when debugging failures, investigating flaky tests, or tracking root causes. DO NOT USE FOR: writing new tests (use test-driven-development), React component test patterns (use ui-testing), or E2E test setup (use webapp-testing).
 
-description: Guide for resilient UI component testing. Use when writing React tests, fixing flaky tests, or reviewing test code.
+description: Resilient React component testing strategies focusing on user behavior. Use when writing or reviewing component-level React tests, fixing flaky tests, or establishing React testing patterns. DO NOT USE FOR: Playwright E2E tests (use webapp-testing), canvas game interaction (use browser-canvas-testing), TDD workflow (use test-driven-development), or debugging failures (use systematic-debugging).
 ```
 
 **Bad descriptions**:
@@ -147,7 +159,7 @@ description: This skill helps with testing things.  # Unclear scope
 | Field         | Required | Rule                                  | Validation Guidance                                                               |
 | ------------- | -------- | ------------------------------------- | --------------------------------------------------------------------------------- |
 | `name`        | Yes      | kebab-case                            | Use lowercase words separated by hyphens (for example: `test-driven-development`) |
-| `description` | Yes      | Include what it does + usage triggers | Include explicit trigger phrasing such as "Use when ..." for discovery            |
+| `description` | Yes      | Include what it does + usage triggers + negative signals | Include "Use when ..." for positive triggers and "DO NOT USE FOR: ... (use {skill})" for at least one negative signal |
 | Other fields  | No       | Unsupported                           | Do not add extra fields (for example `allowed-tools`) because they are ignored    |
 
 ### Content Principles
@@ -200,7 +212,7 @@ Before committing a new skill:
 ```markdown
 ---
 name: code-review
-description: Structured code review process with security and maintainability focus. Use when reviewing PRs, conducting code audits, or establishing review standards.
+description: Structured code review process with security and maintainability focus. Use when reviewing PRs, conducting code audits, or establishing review standards. DO NOT USE FOR: line-by-line debugging assistance (use systematic-debugging) or writing test cases from scratch (use test-driven-development).
 ---
 
 # Code Review Skill

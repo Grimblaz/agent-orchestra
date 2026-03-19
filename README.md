@@ -125,20 +125,20 @@ Skills are domain-specific knowledge packages in `.github/skills/` that agents l
 
 | Skill | When it's used |
 |-------|---------------|
-| **test-driven-development** | Writing tests, red-green-refactor |
-| **systematic-debugging** | Investigating complex bugs |
-| **software-architecture** | Evaluating design decisions |
-| **brainstorming** | Exploring requirements or trade-offs |
-| **frontend-design** | Building UI components |
-| **ui-testing** | React component test strategies |
-| **webapp-testing** | Playwright end-to-end tests |
-| **parallel-execution** | Running parallel/serial implementation lanes |
-| **property-based-testing** | Incremental randomized property verification |
-| **verification-before-completion** | Pre-PR readiness checks |
-| **skill-creator** | Adding new skills to the framework |
-| **browser-canvas-testing** | Canvas game browser interaction (VS Code native tools) |
-| **code-review-intake** | GitHub review intake mode, Code-Critic finding reconciliation |
-| **post-pr-review** | Post-merge cleanup, archiving tracking files, pre-merge assessment |
+| **test-driven-development** | Writing tests first, red-green-refactor, or quality gates |
+| **systematic-debugging** | Debugging failures, flaky tests, or tracking root causes |
+| **software-architecture** | Layer boundaries, dependency flow, or ADR-level decisions |
+| **brainstorming** | Exploring features, evaluating approaches, or complex decisions |
+| **frontend-design** | Designing new UI components or evaluating for distinctiveness |
+| **ui-testing** | Component-level React tests, flaky test fixes, React patterns |
+| **webapp-testing** | Browser-based E2E coverage, test stability, CI execution |
+| **parallel-execution** | Coordinating parallel implementation lanes and convergence gates |
+| **property-based-testing** | Randomized testing, input range validation, invariant verification |
+| **verification-before-completion** | Before PRs, releases, or any completion declaration |
+| **skill-creator** | Adding new skills, updating templates, or reviewing structure |
+| **browser-canvas-testing** | HTML canvas elements, game objects, or clickElement failures |
+| **code-review-intake** | Processing GitHub review comments and reconciling findings |
+| **post-pr-review** | Post-merge cleanup, archiving tracking files, strategic assessment |
 
 > **VS Code 1.108+**: Skills are auto-discovered from `.github/skills/` when `chat.useAgentSkills` is enabled.
 

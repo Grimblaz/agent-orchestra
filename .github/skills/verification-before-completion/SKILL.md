@@ -1,6 +1,6 @@
 ---
 name: verification-before-completion
-description: Evidence-based verification checklist before marking work complete. Use before PRs, releases, marking tickets done, or any "I'm finished" declaration.
+description: Evidence-based verification checklist before marking work complete. Use before PRs, releases, marking tickets done, or any "I'm finished" declaration. DO NOT USE FOR: post-merge cleanup or archival (use post-pr-review) or processing GitHub review comments (use code-review-intake).
 ---
 
 # Verification Before Completion

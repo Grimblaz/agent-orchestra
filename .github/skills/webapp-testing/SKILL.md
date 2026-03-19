@@ -1,6 +1,6 @@
 ---
 name: webapp-testing
-description: Playwright end-to-end testing guidance for web apps, with practical patterns and setup steps. Use when creating or improving browser-based E2E coverage, test stability, and CI execution.
+description: Playwright end-to-end testing guidance for web apps, with practical patterns and setup steps. Use when creating or improving browser-based E2E coverage, test stability, and CI execution. DO NOT USE FOR: React component tests (use ui-testing), canvas game interaction (use browser-canvas-testing), TDD workflow (use test-driven-development), debugging failures (use systematic-debugging), or randomized property tests (use property-based-testing).
 ---
 
 # Web App Testing Skill

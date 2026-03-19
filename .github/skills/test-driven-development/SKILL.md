@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Test-Driven Development workflow guidance, quality standards, and practical patterns. Use when writing tests first, implementing to pass tests, validating quality gates, or refactoring safely.
+description: Test-Driven Development workflow guidance, quality standards, and practical patterns. Use when writing tests first, implementing to pass tests, validating quality gates, or refactoring safely. DO NOT USE FOR: debugging existing failures (use systematic-debugging), React component test patterns (use ui-testing), E2E browser tests (use webapp-testing), randomized property verification (use property-based-testing), or architecture evaluation and design decisions (use software-architecture).
 ---
 
 # Test-Driven Development Skill

@@ -682,20 +682,20 @@ When reviewing a completed workflow, audit skill usage:
 
 | Skill                            | When Applicable                             |
 | -------------------------------- | ------------------------------------------- |
-| `brainstorming`                  | Design exploration, unclear requirements    |
-| `browser-canvas-testing`         | Canvas game browser interaction             |
-| `code-review-intake`             | GitHub review intake, ledger-based judgment |
-| `frontend-design`                | UI components, styling                      |
-| `parallel-execution`             | Parallel/serial build-test orchestration    |
-| `post-pr-review`                 | Post-merge cleanup, archiving, releases     |
-| `property-based-testing`         | Incremental PBT rollout                     |
-| `skill-creator`                  | Creating or updating skills                 |
-| `software-architecture`          | Layer placement, design patterns            |
-| `systematic-debugging`           | Bug investigation, test failures            |
-| `test-driven-development`        | Writing tests, TDD workflow                 |
-| `ui-testing`                     | Component tests, Testing Library            |
-| `verification-before-completion` | Pre-commit checks, quality gates            |
-| `webapp-testing`                 | E2E tests, Playwright                       |
+| `brainstorming`                  | Exploring features, unclear requirements, or design trade-offs          |
+| `browser-canvas-testing`         | Canvas element interaction, game objects, clickElement failures         |
+| `code-review-intake`             | GitHub review comments, Code-Critic reconciliation, intake mode         |
+| `frontend-design`                | Designing UI components, screens, or evaluating distinctiveness         |
+| `parallel-execution`             | Coordinating parallel implementation lanes, convergence gates           |
+| `post-pr-review`                 | Post-merge cleanup, tracking archival, docs, strategic assessment       |
+| `property-based-testing`         | Randomized testing, input ranges, invariant verification                |
+| `skill-creator`                  | Adding new skills, updating templates, reviewing skill structure        |
+| `software-architecture`          | Layer boundaries, dependency flow, ADR-level decisions                  |
+| `systematic-debugging`           | Debugging failures, flaky tests, tracking root causes                   |
+| `test-driven-development`        | Writing tests first, red-green-refactor, quality gates                  |
+| `ui-testing`                     | Component-level React tests, flaky test fixes, React patterns           |
+| `verification-before-completion` | Before PRs, releases, or any completion declaration                     |
+| `webapp-testing`                 | Browser-based E2E coverage, test stability, CI execution                |
 
 <!-- Keep in sync: when adding or removing any skill in .github/skills/, update this table (all-skills scope). Update Code-Conductor's Skill Mapping table only if the skill is a delegation target (a skill Code-Conductor instructs a subagent to use). -->
 
