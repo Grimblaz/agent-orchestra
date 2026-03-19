@@ -221,7 +221,7 @@ For long or complex planning sessions, proactively manage context before auto-co
 
 **Plan Stress-Test** (summary of Code-Critic design review)
 
-- Challenge: {finding} — Prosecution: {incorporated | dismissed with rationale | escalated+confirmed} — Judge: {pending → replaced with: sustained | rejected | judge-rejected/user-confirmed after post-judge reconciliation}
+- Challenge: {finding} — Prosecution: {incorporated | dismissed with rationale | escalated+confirmed | escalated+rejected} — Judge: {pending → replaced with: sustained | rejected | judge-rejected/user-confirmed after post-judge reconciliation}
 - Overall confidence: {high | medium | low} — {one-sentence rationale}
 ```
 

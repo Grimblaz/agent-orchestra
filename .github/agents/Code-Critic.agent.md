@@ -89,18 +89,18 @@ If after genuine adversarial effort you find no issues, state what you checked a
 
 ## Design Review Mode
 
-When the prompt contains the marker **"Use design review perspectives"**, activate Design Review Mode instead of the standard 7-perspective code review. Issue-Designer and Issue-Planner always include this marker when invoking Code-Critic as a subagent.
+When the prompt contains the marker **"Use design review perspectives"**, activate Design Review Mode instead of the standard 7-perspective code review. Issue-Designer and Issue-Planner include this marker for passes 1–2; pass 3 uses `"Use product-alignment perspectives"` instead.
 
 ### Mode Detection
 
-| Marker in prompt                        | Mode                          | Passes       | Perspectives                              |
-| --------------------------------------- | ----------------------------- | ------------ | ----------------------------------------- |
-| _(none / default)_                      | Code prosecution              | 3 (parallel) | 7 code perspectives                       |
-| `"Use design review perspectives"`      | Design/plan prosecution       | 2 (parallel) | 3 design perspectives (passes 1–2)        |
-| `"Use product-alignment perspectives"`  | Product-alignment prosecution | 1            | 3 product-alignment perspectives (pass 3) |
-| `"Use defense review perspectives"`     | **Defense**                   | 1            | Presume innocent; disprove each finding   |
-| `"Use CE review perspectives"`          | **CE prosecution**            | 1            | Functional + Intent + Error States        |
-| `"Score and represent GitHub review"`   | **Proxy prosecution**         | 1            | Validate/score external findings          |
+| Marker in prompt                       | Mode                          | Passes       | Perspectives                              |
+| -------------------------------------- | ----------------------------- | ------------ | ----------------------------------------- |
+| _(none / default)_                     | Code prosecution              | 3 (parallel) | 7 code perspectives                       |
+| `"Use design review perspectives"`     | Design/plan prosecution       | 2 (parallel) | 3 design perspectives (passes 1–2)        |
+| `"Use product-alignment perspectives"` | Product-alignment prosecution | 1            | 3 product-alignment perspectives (pass 3) |
+| `"Use defense review perspectives"`    | **Defense**                   | 1            | Presume innocent; disprove each finding   |
+| `"Use CE review perspectives"`         | **CE prosecution**            | 1            | Functional + Intent + Error States        |
+| `"Score and represent GitHub review"`  | **Proxy prosecution**         | 1            | Validate/score external findings          |
 
 **Conflict rule**: Priority order (most specific wins): defense > CE > proxy > product-alignment > design > code. Exception: `"Use code review perspectives"` always overrides `"Use design review perspectives"` → **Code Review Mode**.
 
@@ -170,7 +170,7 @@ Return a **Design Challenge Report** with this structure:
 
 Each finding uses the standard format:
 
-- **[Issue/Concern/Nit]** {description} — {file or design element cited} — Failure mode: {what breaks} — Severity: {critical/high/medium/low} — Confidence: {high/medium/low}
+- **[Issue/Concern/Nit]** {description} — {file or design element cited} — Failure mode: {what breaks} — Severity: {critical/high/medium/low} — Confidence: {high/medium/low} — pass: {1 | 2}
 
 ### Non-Blocking Constraint
 
@@ -343,7 +343,7 @@ Every finding must also include these automation-routing fields:
 - `confidence`: high | medium | low
 - `id`: F1 | F2 | F3 | … — sequential label within this review cycle; used by defense and judge to cross-reference findings by ID. Assign in order of appearance.
 - `pass`: 1 | 2 | 3 — prosecution pass number that originated this finding. Code prosecution and design/plan prosecution; omit in CE review, proxy prosecution, and defense mode.
-- `category`: architecture | security | performance | pattern | simplicity | script-automation | documentation-audit — the active prosecution perspective for this finding. Code prosecution only; use `n/a` in CE review, design review, and proxy prosecution modes. For findings that span multiple perspectives, use the primary perspective.
+- `category`: architecture | security | performance | pattern | simplicity | script-automation | documentation-audit — the active prosecution perspective for this finding. Code prosecution only; use `n/a` in CE review, design review, product-alignment prosecution, and proxy prosecution modes. For findings that span multiple perspectives, use the primary perspective.
 - `blast_radius`: localized | module | cross-module | system-wide
 - `authority_needed`: yes | no
 - `defense_verdict`: disproved | conceded | insufficient-to-disprove — filled in by defense pass

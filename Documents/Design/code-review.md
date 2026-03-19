@@ -338,7 +338,7 @@ rework_cycles: N                 # code review fix loops only (not CE Gate loops
 
 **Purpose**: Enables cross-PR analytics (e.g., per-pass marginal yield: does pass 3 justify its cost?). Invisible in rendered Markdown. Parseable via `Select-String -Pattern "pipeline-metrics"`.
 
-**Deduplication credit**: When the same finding appears in multiple prosecution passes, the earliest pass gets credit (lowest pass number). `pass_1_findings + pass_2_findings + pass_3_findings = prosecution_findings` (code prosecution only; in proxy prosecution, per-pass fields are `n/a`).
+**Deduplication credit**: When the same finding appears in multiple prosecution passes, the earliest pass gets credit (lowest pass number). `pass_1_findings + pass_2_findings + pass_3_findings = prosecution_findings` (code prosecution and design/plan prosecution; in proxy prosecution, per-pass fields are `n/a`).
 
 **User scoring** (async, non-blocking) — post a GitHub issue comment:
 
