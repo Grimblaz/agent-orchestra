@@ -18,20 +18,24 @@ Guide for creating distinctive, purposeful UI designs that avoid cookie-cutter p
 ## Core Principles
 
 ### 1. Purpose Over Pattern
+
 Every design decision should answer: "Why this, not something else?"
 
 - **Bad**: Using a card grid because it's common
 - **Good**: Using a card grid because content is comparable and scannable
 
 ### 2. Distinctive Identity
+
 Your UI should be recognizable without the logo.
 
 Questions to ask:
+
 - Would users recognize this as our product?
 - What makes this different from competitors?
 - Does this reflect our brand personality?
 
 ### 3. Intentional Defaults
+
 Don't accept framework defaults blindly.
 
 ```
@@ -46,6 +50,7 @@ Don't accept framework defaults blindly.
 ## Design Review Checklist
 
 ### Visual Distinction
+
 - [ ] Color palette goes beyond primary/secondary/neutral
 - [ ] Typography creates clear hierarchy (not just size changes)
 - [ ] Spacing creates intentional rhythm (not uniform gaps)
@@ -53,6 +58,7 @@ Don't accept framework defaults blindly.
 - [ ] Micro-interactions add personality
 
 ### Purposeful Patterns
+
 - [ ] Each component solves a specific user problem
 - [ ] Layout serves content structure (not vice versa)
 - [ ] Navigation reflects user mental models
@@ -60,6 +66,7 @@ Don't accept framework defaults blindly.
 - [ ] Loading states reduce perceived wait time
 
 ### Avoiding Generic Traps
+
 - [ ] Not using component library defaults unchanged
 - [ ] Headers aren't just logo-left, nav-right
 - [ ] Forms have personality beyond labels + inputs
@@ -69,28 +76,36 @@ Don't accept framework defaults blindly.
 ## Breaking Generic Patterns
 
 ### Instead of Generic Cards
+
 Consider:
+
 - Asymmetric layouts for visual interest
 - Inline expansion vs. navigation
 - Progressive disclosure of details
 - Content-specific shapes (not all rectangles)
 
 ### Instead of Generic Forms
+
 Consider:
+
 - Conversational flows for complex inputs
 - Smart defaults that reduce input
 - Inline validation with helpful context
 - Progress indication for multi-step
 
 ### Instead of Generic Tables
+
 Consider:
+
 - Is a table the right pattern at all?
 - Grouped/nested rows for hierarchy
 - Inline actions vs. row selection
 - Responsive transformations (not just scroll)
 
 ### Instead of Generic Dashboards
+
 Consider:
+
 - User goals, not data availability
 - Actionable metrics, not vanity metrics
 - Contextual insights, not just numbers
@@ -102,15 +117,19 @@ Consider:
 
 ```markdown
 ## Our Design Personality
+
 - [Define 3-5 adjectives: e.g., "Professional but approachable"]
 
 ## Signature Elements
+
 - [Unique visual elements that define your brand]
 
 ## Intentional Constraints
+
 - [Self-imposed rules that create consistency]
 
 ## Anti-Patterns
+
 - [Specific patterns to avoid in your context]
 ```
 
@@ -127,6 +146,7 @@ Before shipping any design:
 ## Resources
 
 [CUSTOMIZE] Add your project's design resources:
+
 - Design system documentation
 - Brand guidelines
 - Component library

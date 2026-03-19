@@ -18,36 +18,42 @@ Guide for structured exploration of ideas through Socratic questioning.
 ## Socratic Questioning Framework
 
 ### 1. Clarifying Questions
+
 - What do you mean by...?
 - What is the core problem we're solving?
 - Can you give an example?
 - What would success look like?
 
 ### 2. Probing Assumptions
+
 - What are we assuming here?
 - Why do we believe this is true?
 - What if the opposite were true?
 - What are we taking for granted?
 
 ### 3. Exploring Perspectives
+
 - How would [stakeholder] view this?
 - What would a user expect?
 - What would a skeptic say?
 - How have others solved similar problems?
 
 ### 4. Examining Evidence
+
 - What evidence supports this approach?
 - Are there counter-examples?
 - What data would change our mind?
 - How confident are we in this?
 
 ### 5. Considering Consequences
+
 - What happens if we do this?
 - What are the second-order effects?
 - What could go wrong?
 - What's the cost of being wrong?
 
 ### 6. Questioning the Question
+
 - Is this the right question to ask?
 - What question should we be asking instead?
 - Are we solving the right problem?
@@ -82,6 +88,7 @@ Guide for structured exploration of ideas through Socratic questioning.
 ## Project-Specific Context
 
 [CUSTOMIZE] Add domain-specific questions relevant to your project:
+
 - Industry-specific considerations
 - Technical constraints unique to your stack
 - Stakeholder perspectives to consider
@@ -98,6 +105,7 @@ Guide for structured exploration of ideas through Socratic questioning.
 ## Output Artifacts
 
 After brainstorming, document:
+
 1. Problem statement (refined)
 2. Key insights discovered
 3. Assumptions identified (and which were challenged)
