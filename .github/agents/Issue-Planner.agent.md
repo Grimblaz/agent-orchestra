@@ -108,25 +108,39 @@ The plan should reflect:
 - For backend/non-UI/CLI projects, the CE Gate surface is typically the API or CLI — identify the surface and scenarios accordingly.
 - Note: CE Gate execution uses the CE prosecution pipeline (Code-Critic CE prosecution → defense → judge) — do not describe Conductor's judgment in the CE Gate step; describe only the scenarios and surface.
 
-Before presenting the plan for approval, call Code-Critic as a subagent to stress-test it:
+Before presenting the plan for approval, call Code-Critic as a subagent **three times** to stress-test it. Run all 3 passes independently — do not share findings between passes before merging.
 
-**Prompt to use**:
+**Pass 1 prompt**:
 
-> "Stress-test this implementation plan for feasibility risks, scope gaps, and integration conflicts. Use design review perspectives. Here is the plan: {paste the full plan content}"
+> "Stress-test this implementation plan for feasibility risks, scope gaps, and integration conflicts. Use design review perspectives. This is adversarial review pass 1 of 3. Tag each finding with 'pass: 1'. Here is the plan: {paste the full plan content}"
+
+**Pass 2 prompt**:
+
+> "Stress-test this implementation plan for feasibility risks, scope gaps, and integration conflicts. Use design review perspectives. This is adversarial review pass 2 of 3. Tag each finding with 'pass: 2'. Here is the plan: {paste the full plan content}"
+
+**Pass 3 prompt** (product-alignment):
+
+> "Stress-test this implementation plan for product direction fit, customer experience coherence, and planned-work alignment. Use product-alignment perspectives. This is adversarial review pass 3 of 3. Tag each finding with 'pass: 3'. Here is the plan: {paste the full plan content}. Evidence sources: (1) the plan content above (always available), (2) issue body if present, (3) Documents/Design/ and Documents/Decisions/, (4) project guidance files (README.md, CLAUDE.md, CUSTOMIZATION.md, copilot-instructions.md), (5) planned-work artifacts (ROADMAP.md, NEXT-STEPS.md) if present. Note absence of planned-work artifacts if not found."
+
+**Merge and deduplicate findings**:
+
+After all 3 calls complete, merge findings from all 3 reports into a single deduplicated ledger. Deduplication rule: same perspective target (the specific design decision, AC, or scope element being questioned) + same failure mode = duplicate. Keep the earliest pass's finding and annotate with `also_flagged_by: [pass N]`. Cross-perspective duplicates (e.g., §D2 and §P2 flagging the same concern) are also merged.
 
 **What to do with the findings**:
 
-- Code-Critic returns a challenge report with 3 perspectives: Feasibility & Risk, Scope & Completeness, Integration & Impact.
+- Code-Critic returns 3 challenge reports (2 with standard design perspectives, 1 with product-alignment perspectives). Merge into a single deduplicated findings ledger.
 - For each challenge: decide to incorporate it (revise the plan), dismiss it with rationale, or escalate it for user decision. **If escalated**, use #tool:vscode/askQuestions to present the flagged item(s) and obtain a response before presenting the plan draft.
 - Revise the plan steps as needed to address accepted challenges.
 - After incorporating or dismissing all findings, append a **`Plan Stress-Test`** summary block at the end of the plan draft showing: challenges found, how each was addressed (incorporated / dismissed / escalated), and overall confidence assessment.
 
-**Challenges are non-blocking** — they are presented alongside the plan for user consideration. This prosecution pass is single-pass (not the 3-pass parallel protocol used for code review).
+**Challenges are non-blocking** — they are presented alongside the plan for user consideration. This uses 3 parallel prosecution passes: passes 1–2 with design review perspectives, pass 3 with product-alignment perspectives.
 
 After incorporating or dismissing prosecution findings, complete the full pipeline:
 
 - Call Code-Critic with `"Use defense review perspectives"` and pass the prosecution findings ledger. Code-Critic will produce a Defense Report conceding, disproving, or marking each finding as insufficient-to-disprove.
 - Call Code-Review-Response (judge) with both the prosecution ledger and the Defense Report. Code-Review-Response will rule on each finding and emit a score summary with categorization. Issue-Planner incorporates accepted findings into the plan.
+
+**Post-judge reconciliation**: After the judge rules, cross-check any plan changes made during the prosecution incorporation phase against the judge's final rulings. If a prosecution finding that was incorporated into the plan was subsequently disproved by defense and confirmed rejected by the judge, revert the plan change derived from that finding. Exception: if the incorporation was user-confirmed (i.e., the finding was escalated to the user via `#tool:vscode/askQuestions` and the user confirmed it), do not silently revert — instead, flag the conflict in the Plan Stress-Test entry as `judge-rejected / user-confirmed` and surface it for user reconsideration before presenting the final plan draft. Update the `Plan Stress-Test` summary block by replacing the `Judge: pending` placeholder in each entry with the judge's final ruling — keep the Prosecution field intact.
 
 Present the plan as a **DRAFT**, then **IMMEDIATELY** use #tool:vscode/askQuestions to ask for approval. NEVER end your turn after presenting a draft without calling #tool:vscode/askQuestions — this wastes the user's premium requests by forcing a new turn just to say "looks good."
 
@@ -207,7 +221,7 @@ For long or complex planning sessions, proactively manage context before auto-co
 
 **Plan Stress-Test** (summary of Code-Critic design review)
 
-- Challenge: {finding} — Disposition: incorporated | dismissed with rationale | escalated for user decision
+- Challenge: {finding} — Prosecution: {incorporated | dismissed with rationale | escalated+confirmed} — Judge: {pending → replaced with: sustained | rejected | judge-rejected/user-confirmed after post-judge reconciliation}
 - Overall confidence: {high | medium | low} — {one-sentence rationale}
 ```
 

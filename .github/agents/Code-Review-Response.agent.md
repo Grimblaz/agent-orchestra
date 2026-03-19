@@ -169,7 +169,7 @@ After all rulings, emit a score summary table:
 | F2: {title} | 2    | {severity} ({pts} pts)      | disproved       | ❌ Defense sustained     | medium     | D+{pts}   |
 | F3: {title} | 1    | {severity} ({pts} pts)      | disproved       | ✅ Prosecution sustained | high       | D-{2×pts} |
 
-**Non-code-prosecution mode** (CE review, design review, proxy prosecution — Pass column always `—`):
+**Non-code-prosecution mode** (CE review, proxy prosecution — Pass column always `—`):
 
 | Finding     | Pass | Prosecution (severity, pts) | Defense verdict | Ruling                   | Confidence | Points    |
 | ----------- | ---- | --------------------------- | --------------- | ------------------------ | ---------- | --------- |
@@ -184,7 +184,7 @@ After all rulings, emit a score summary table:
 - Judge rulings: {total} ({N} pending user scoring)
 ```
 
-> **Pass column**: Pull the pass-origin value (`pass: N`) from the prosecution ledger by finding ID. For non-code-prosecution modes (design review, CE review, proxy prosecution), emit `—` in the Pass column.
+> **Pass column**: Pull the pass-origin value (`pass: N`) from the prosecution ledger by finding ID. For CE review and proxy prosecution, emit `—` in the Pass column. For design/plan review, populate from `pass: N` tags in the prosecution ledger (same as code prosecution).
 
 **Judge confidence levels**:
 

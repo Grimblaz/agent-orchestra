@@ -83,7 +83,7 @@ Added in issue #73. Code-Critic gains a second operating mode triggered by the m
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
 | D7 | Activation mechanism | Marker string in prompt | Avoids runtime ambiguity; callers always know which mode they're requesting |
-| D8 | Pass count for design review | Single-pass only | Design reviews are lightweight quality gates, not adversarial loops; 3-pass would over-index on plans |
+| D8 | Pass count for design review | 3-pass parallel (2 standard design + 1 product-alignment) | Matches the coverage-variance rationale for code review; adds an explicit product/experience/planned-work alignment lens per issue #131 |
 | D9 | Review perspectives | 3 (Feasibility & Risk, Scope & Completeness, Integration & Impact) | Covers the three most common plan failure modes without overlap |
 | D10 | Blocking behavior | Non-blocking (caller decides) | Code-Critic has no veto over design decisions; findings inform, not gate |
 | D11 | Callers | Issue-Designer, Issue-Planner, Claude Code via start-issue.md | All three entry points to the planning phase need the same quality gate |
@@ -128,14 +128,14 @@ Replaced the rebuttal-based adversarial review pipeline with a structured Prosec
 
 | # | Decision | Choice | Rationale |
 |---|----------|--------|----------|
-| D11 | Defense mechanism | Code-Critic with `"Use defense review perspectives"` marker | Same agent with different persona is simpler than a new "Code-Defender" agent; avoids agent proliferation |
+| D11a | Defense mechanism | Code-Critic with `"Use defense review perspectives"` marker | Same agent with different persona is simpler than a new "Code-Defender" agent; avoids agent proliferation |
 | D12 | CE prosecution executor | Code-Critic (separate pass after Code-Conductor exercises scenarios) | Separation of execution (Code-Conductor) and review (Code-Critic) avoids the fox-guarding-henhouse problem of Code-Conductor evaluating its own CE work |
 | D13 | Rebuttal rounds | Removed; replaced by single defense pass + judge | Defense pass gives prosecution a structured adversarial challenge; single-shot judge with async user scoring replaces unlimited rebuttal rounds |
 | D14 | Per-pass counter-review (3×) | Not used; single defense pass | 3× defense overhead for marginal benefit; merged prosecution ledger gives defense full context in one pass |
 | D15 | Judge convergence | Single-shot; user scoring (+1/-1) provides async correction | Sample sizes too small for mid-cycle calibration; visibility first, then build learning pipeline |
 | D16 | Opt-out for lightweight issues | Not supported | Quality is non-negotiable — full pipeline always runs |
 | D17 | `review_loop_budget` | Removed from plan format | No longer needed; pipeline stages are fixed (3 prosecution + 1 defense + 1 judge) |
-| D18 | Mode conflict resolution | Priority order: defense > CE > proxy > design > code | Most-specific mode wins; avoids ambiguous multi-marker prompts |
+| D18 | Mode conflict resolution | Priority order: defense > CE > proxy > product-alignment > design > code | Most-specific mode wins; avoids ambiguous multi-marker prompts |
 | D19 | Judge-only CRR separation | Code-Review-Response stops at judgment — no fix delegation | Conductor is the orchestrator; CRR doing delegation created conflicting responsibility chains |
 | D20 | Post-judgment routing in Conductor | All post-judgment fix routing logic lives in Code-Conductor | Single responsibility: CRR judges, Conductor executes. Gaps addressed: AC cross-check, effort estimation, auto-tracking, GitHub response posting |
 | D21 | Post-fix prosecution pass | Full pipeline (3 prosecution + defense + judge), diff-scoped, triggered by Critical/High or control-flow fix, loop budget 1 | Catches fix-introduced defects missed by one-shot review; full pipeline maintains adversarial principle; tight scope keeps cost proportionate |
@@ -167,7 +167,8 @@ Prosecutor assigns severity; judge may override.
 | Marker in prompt | Mode | Passes | Perspectives |
 |-----------------|------|--------|-------------|
 | *(none / default)* | Code prosecution | 3 (parallel) | 7 code perspectives |
-| `"Use design review perspectives"` | Design/plan prosecution | 1 | 3 design perspectives |
+| `"Use design review perspectives"` | Design/plan prosecution | 2 (parallel) | 3 design perspectives (passes 1–2) |
+| `"Use product-alignment perspectives"` | Product-alignment prosecution | 1 | 3 product-alignment perspectives (pass 3) |
 | `"Use defense review perspectives"` | Defense | 1 | Presume innocent; disprove each finding |
 | `"Use CE review perspectives"` | CE prosecution | 1 | Functional + Intent + Error States |
 | `"Score and represent GitHub review"` | Proxy prosecution | 1 | Validate/score external findings |
@@ -190,14 +191,16 @@ Code-Conductor invokes →
               → Code-Conductor routes post-fix accepted findings (loop budget: 1)
 ```
 
-**Design/plan review** (1× each):
+**Design/plan review** (3× prosecution):
 
 *Issue-Planner (full pipeline)*:
 
 ```text
 Issue-Planner (or start-issue.md) invokes →
-  Code-Critic (prosecution, design perspectives, 1 pass)
-    → Code-Critic (defense, 1 pass)
+  Code-Critic (prosecution, design perspectives, pass 1) ─┐
+  Code-Critic (prosecution, design perspectives, pass 2) ─┼→ Merge into deduplicated ledger
+  Code-Critic (prosecution, product-alignment, pass 3)  ─┘
+    → Code-Critic (defense, 1 pass over merged ledger)
       → Code-Review-Response (judge)
         → Score summary returned
 ```
@@ -206,7 +209,9 @@ Issue-Planner (or start-issue.md) invokes →
 
 ```text
 Issue-Designer invokes →
-  Code-Critic (prosecution, design perspectives, 1 pass)
+  Code-Critic (prosecution, design perspectives, pass 1) ─┐
+  Code-Critic (prosecution, design perspectives, pass 2) ─┼→ Merge into deduplicated ledger
+  Code-Critic (prosecution, product-alignment, pass 3)  ─┘
     → (stops here — no defense or judge step)
 ```
 
@@ -279,7 +284,7 @@ Points at risk: {-2× sum of disproved finding values, if judge rejects}
 | CE Review | 5 pts (1 sustained) | 0 pts | 1 ruling |
 ```
 
-> **Finding-level score summary** (Code-Review-Response output): The per-finding score table now includes a `Pass` column showing which prosecution pass originated each finding. Populated from `pass: N` tags in the prosecution ledger. Non-code-prosecution modes (CE review, design review, proxy prosecution) emit `—` in the Pass column.
+> **Finding-level score summary** (Code-Review-Response output): The per-finding score table now includes a `Pass` column showing which prosecution pass originated each finding. Populated from `pass: N` tags in the prosecution ledger. Non-code-prosecution modes (CE review, proxy prosecution) emit `—` in the Pass column. Design/plan review populates from `pass: N` tags in the prosecution ledger (same as code prosecution).
 
 **Tracking file** — `.copilot-tracking/review-scores-issue-{ID}.yaml` (gitignored, machine-parsable):
 
@@ -368,7 +373,7 @@ rework_cycles: N                 # code review fix loops only (not CE Gate loops
 | `.github/agents/Code-Critic.agent.md` | Defense mode, CE prosecution mode, proxy prosecution mode, scoring output; frontmatter handoff updated |
 | `.github/agents/Code-Review-Response.agent.md` | Single-shot judge, score summary output format, judge confidence levels, rebuttal management removed |
 | `.github/agents/Code-Conductor.agent.md` | Review Reconciliation Loop rewritten (prosecution → defense → judge); CE Gate routes to CE prosecution; GitHub uses proxy prosecution; PR body includes score table; Agent Selection table updated |
-| `.github/agents/Issue-Designer.agent.md` | Adversarial Design Challenge context updated (design prosecution, single-pass) |
+| `.github/agents/Issue-Designer.agent.md` | Adversarial Design Challenge context updated (design prosecution, 3-pass parallel) |
 | `.github/agents/Issue-Planner.agent.md` | Plan template updated (prosecution → defense → judge); `review_loop_budget` removed |
 | `.github/agents/Process-Review.agent.md` | Reconciliation loop metrics updated to prosecution/defense/judge terminology |
 | `.github/copilot-instructions.md` | Code-Critic Adversarial Review Protocol section updated (5 modes, all pipeline stages) |

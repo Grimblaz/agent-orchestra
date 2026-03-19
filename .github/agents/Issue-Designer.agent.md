@@ -163,23 +163,34 @@ After user confirms decisions (not during exploration):
 
 ## Adversarial Design Challenge
 
-After design decisions are confirmed with the user, call Code-Critic as a subagent to stress-test the design before committing it to the issue body:
+After design decisions are confirmed with the user, call Code-Critic as a subagent **three times** to stress-test the design before committing it to the issue body. Run all 3 passes independently — do not share findings between passes before merging.
 
-**Prompt to use**:
+**Pass 1 prompt**:
 
-> "Review this design for feasibility risks, scope gaps, and integration conflicts. Use design review perspectives. Here is the design: {paste the key design decisions, acceptance criteria, scope, and any constraints confirmed in this session}"
+> "Review this design for feasibility risks, scope gaps, and integration conflicts. Use design review perspectives. This is adversarial review pass 1 of 3. Tag each finding with 'pass: 1'. Here is the design: {paste the key design decisions, acceptance criteria, scope, and any constraints confirmed in this session}"
 
-**What to do with the findings**:
+**Pass 2 prompt**:
 
-- Code-Critic will return a challenge report with 3 perspectives: Feasibility & Risk, Scope & Completeness, Integration & Impact.
-- Review each challenge. For each one, decide: incorporate (refine the design), dismiss with rationale, or escalate for user decision.
+> "Review this design for feasibility risks, scope gaps, and integration conflicts. Use design review perspectives. This is adversarial review pass 2 of 3. Tag each finding with 'pass: 2'. Here is the design: {paste the key design decisions, acceptance criteria, scope, and any constraints confirmed in this session}"
+
+**Pass 3 prompt** (product-alignment):
+
+> "Review this design for product direction fit, customer experience coherence, and planned-work alignment. Use product-alignment perspectives. This is adversarial review pass 3 of 3. Tag each finding with 'pass: 3'. Here is the design: {paste the key design decisions, acceptance criteria, scope, and any constraints confirmed in this session}. Evidence sources: (1) the design content above (always available), (2) issue body if present, (3) Documents/Design/ and Documents/Decisions/, (4) project guidance files (README.md, CLAUDE.md, CUSTOMIZATION.md, copilot-instructions.md), (5) planned-work artifacts (ROADMAP.md, NEXT-STEPS.md) if present. Note absence of planned-work artifacts if not found."
+
+**Merge and deduplicate findings**:
+
+After all 3 calls complete, merge findings from all 3 reports into a single ledger. Deduplication rule: same perspective target (the specific design decision, AC, or scope element being questioned) + same failure mode = duplicate. Keep the earliest pass's finding and annotate with `also_flagged_by: [pass N]`. Cross-perspective duplicates (e.g., §D2 and §P2 flagging the same concern) are also merged.
+
+**What to do with the merged findings**:
+
+- Review each finding. For each one, decide: incorporate (refine the design), dismiss with rationale, or escalate for user decision.
 - Incorporate or note your disposition for each challenge **before** updating the issue body.
 - **If any challenge is escalated for user decision**: Use #tool:vscode/askQuestions to present the flagged item(s) explicitly and obtain a response **before** proceeding to Stage 3.
 - Present the challenge report summary alongside the design at the Stage 3 update step so the user can see what was challenged and how it was addressed.
 
 **Challenges are non-blocking** — they inform the design, they do not gate it. You (Issue-Designer) decide how to handle them. The user may also override any challenge.
 
-**Note**: This is a **design prosecution** pass (single-pass, non-blocking). Issue-Designer invokes only prosecution here. The full pipeline (prosecution → defense → judge) is used by Issue-Planner when stress-testing the implementation plan. Design challenges from Issue-Designer are non-gatekeeping.
+**Note**: This is a **3-pass parallel design prosecution** (non-blocking). Issue-Designer invokes all 3 prosecution passes but stops after prosecution — no defense or judge step. The full pipeline (3 prosecution passes → merge → defense → judge) is used by Issue-Planner when stress-testing the implementation plan. Design challenges from Issue-Designer are non-gatekeeping.
 
 ## Stage 3: Update Issue
 
