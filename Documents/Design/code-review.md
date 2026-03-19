@@ -476,3 +476,43 @@ All recommendations cite the specific file, section, and suggested change. Proce
 | `Documents/Design/code-review.md` | This file — cross-session learning pipeline section |
 | `CLAUDE.md` | Phase 5 updated with calibration script note |
 | `.github/agents/Code-Review-Response.agent.md` | Added `<!-- judge-rulings -->` structured YAML block requirement; added `Pass` column to score summary table template; added `id` field to finding schema; split example into code-prosecution and non-code-prosecution variants |
+
+---
+
+## Cross-File String Constant Safeguards
+
+*Implemented in issues #121 and #122 (from Issue #97 CE Gate post-mortem).*
+
+### Root Cause
+
+`aggregate-review-scores.ps1` used `'post-fix'` and `'ce-gate'` in `$knownStages` but Code-Conductor's `<!-- pipeline-metrics -->` template defines `postfix` and `ce`. The mismatch was undetected at review time (three prosecution passes missed it) because: (a) Code-Critic §6 fires only for script-containing PRs and has no cross-file constant validation; (b) Issue-Planner's Requirement Contract rules had no requirement to name authoritative source files or enumerate exact allowed values.
+
+### Changes
+
+Three changes across two agent files:
+
+1. **Code-Critic §6 — Cross-file constant consistency check** (`Code-Critic.agent.md`): New 5th checklist item requiring reviewers to verify string constants that enumerate values defined in another file exactly match the canonical values in that authoritative source. Includes a fallback discovery hint for PRs without an explicit plan.
+
+2. **Code-Critic §1 — Docs-only producer check** (`Code-Critic.agent.md`): New checklist item in the §1 Architecture section for docs-only PRs: when a docs-only PR adds, renames, or removes string constant values defined in a template or agent, verify all known consumer scripts enumerate the same values.
+
+3. **Issue-Planner plan_style_guide — Two new Requirement Contract rules** (`Issue-Planner.agent.md`):
+   - **Cross-file constants**: bidirectional trigger — fires for plan steps that (a) implement or modify scripts consuming enumerated values, or (b) create or modify files that authoritatively define values consumed by scripts. Requires the RC to name the authoritative source file and list exact values (example format: `` `Allowed values: 'main' | 'postfix' | 'ce'` ``).
+   - **Multi-tier statistical output**: when a plan step involves a statistical output schema with multiple independent sub-sections (calibration scripts, metrics aggregators), the Requirement Contract must enumerate each output section requiring a `sufficient_data` gate rather than describing gating as a single aggregate requirement.
+
+### Decision Summary
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|-----------|
+| D29 | Code-Critic placement (consumer check) | §6 Script & Automation | §6 fires when scripts are in the PR — the most common defect vector (consumer modifying its enum array) |
+| D30 | Code-Critic placement (producer check) | §1 Architecture (docs-only path) | §1 fires for all docs-only PRs — covers the symmetric case where a template renames a value without touching any script |
+| D31 | Issue-Planner trigger scope | Bidirectional (consumer side + producer side) | One-directional (consumer-only) leaves the producer-rename scenario unguarded; design prosecution (pass 1) caught this gap |
+| D32 | Format specification for enum list | Example format in rule (`Allowed values: 'main' \| 'postfix' \| 'ce'`) | Without an example, planners diverge on PowerShell array vs. JSON vs. prose — only exact-match formats make mismatch visible at a glance |
+| D33 | Multi-tier rule trigger wording | "involves" (not "produces" or "consumes") | Direction-agnostic — fires for both producer and consumer plan steps; design adversarial prosecution finding F3 caught the "produces"-vs-"involves" gap |
+
+### Acceptance Criteria (from issues #121 and #122)
+
+- Code-Critic §6 includes a 5th checklist item with cross-file constant verification and authoritative-source discovery guidance
+- Code-Critic §1 includes a docs-only producer-side check for renamed/added enumerated constants
+- Issue-Planner `<plan_style_guide>` includes bidirectional Cross-file constants rule with format example
+- Issue-Planner `<plan_style_guide>` includes Multi-tier statistical output rule using "involves"
+- Quick-validate: Plan-Architect refs = 0, Janitor refs = 0, agent count = 13

@@ -438,6 +438,7 @@ Every review MUST address all 7 perspectives in sequence, using the **"When to a
 - [ ] Dependencies follow documented layer direction (e.g., interface/adapters into domain/core logic)
 - [ ] Interface usage for external dependencies
 - [ ] Layer boundaries respected
+- [ ] **Docs-only — enumerated constant producer check**: if this PR adds, renames, or removes string constant values authoritatively defined in a template or agent (e.g., stage names in a pipeline-metrics schema, category strings in a specification), verify all known consumer scripts enumerate the same values — search for array literals, hash table key assignments, or `$known*`-style definitions in `.ps1`, `.sh`, `.py` files (not prose matches)
 
 ### 1b. Integration Wiring Verification
 
@@ -535,6 +536,7 @@ _To identify peers: grep for the field name in function signatures (criterion a)
 - [ ] Dynamic values are NOT passed to `Invoke-Expression`, `& $dynamicVar`, `Start-Process` with runtime-constructed argument strings, or equivalent constructs (`eval`, `subprocess.Popen(shell=True)`); if unavoidable, input is allowlist-validated — not merely escaped
 - [ ] Any string constructed from dynamic values and emitted to an output sink (Markdown, JSON, terminal display) is sanitized for that medium's metacharacters (e.g., backtick and triple-backtick sequences break Markdown code-block rendering; unescaped `"` breaks JSON structure)
 - [ ] Regex patterns involving domain-specific character sets (repo names, branch names, file paths) are validated against known edge cases (dotted names, slashes, special chars)
+- [ ] String constants that enumerate values produced or consumed by another file/template (e.g., stage names from an agent template, category strings from a specification) exactly match those canonical values — verify by cross-referencing the authoritative source file (when no plan names the source, grep for the consumed constant in defining contexts — array literals, hash table key assignments, enum definitions — rather than prose mentions, to locate the authoritative producer); do not assume correctness from the plan description alone
 
 ### 7. Documentation Script Audit
 
