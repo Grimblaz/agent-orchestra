@@ -87,7 +87,7 @@ Added alongside the portability fix to close a gap found in the post-PR review o
 | File | Purpose | Status |
 |------|---------|--------|
 | `.github/hooks/session-cleanup.json` | `SessionStart` hook configuration; resolves scripts via `$WORKFLOW_TEMPLATE_ROOT`; structured JSON error when unset | **Deleted** — retired in issue #109 |
-| `.github/instructions/session-startup.instructions.md` | Agent self-check instruction; runs detector at conversation start; uses `$env:COPILOT_ORCHESTRA_ROOT` (fallback: `$env:WORKFLOW_TEMPLATE_ROOT`) for script paths | **Reference** — operational content inlined into `copilot-instructions.md` (issue #118) |
+| `.github/instructions/session-startup.instructions.md` | Agent self-check instruction; runs detector at conversation start; uses `$env:COPILOT_ORCHESTRA_ROOT` (fallback: `$env:WORKFLOW_TEMPLATE_ROOT`) for script paths | **Reference** — operational content inlined into `.github/copilot-instructions.md` (issue #118) |
 | `.github/scripts/session-cleanup-detector.ps1` | Dual-path detection: branch check + tracking file check; emits cleanup command paths using `$env:COPILOT_ORCHESTRA_ROOT` (fallback: `$env:WORKFLOW_TEMPLATE_ROOT`) | Active — updated (issue #130) |
 | `.github/scripts/post-merge-cleanup.ps1` | Archives tracking files, deletes local/remote branch, syncs default branch | Active — unchanged |
 

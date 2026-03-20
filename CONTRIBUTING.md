@@ -56,7 +56,7 @@ This enables agents to interact directly with GitHub issues and PRs without exte
 
 ### Session Startup Check
 
-This template includes a session startup check (inline in `copilot-instructions.md`) that tells agents to check for post-merge cleanup work at the start of each conversation. When merged feature branches have stale tracking files in `.copilot-tracking/`, the active agent prompts you to confirm cleanup. Requires PowerShell 7+ (`pwsh`) and `COPILOT_ORCHESTRA_ROOT` (or `WORKFLOW_TEMPLATE_ROOT`) set. See `.github/instructions/session-startup.instructions.md` for edge case details.
+This template includes a session startup check (inline in `.github/copilot-instructions.md`) that tells agents to check for post-merge cleanup work at the start of each conversation. When merged feature branches have stale tracking files in `.copilot-tracking/`, the active agent prompts you to confirm cleanup. Requires PowerShell 7+ (`pwsh`) and `COPILOT_ORCHESTRA_ROOT` (or `WORKFLOW_TEMPLATE_ROOT`) set. See `.github/instructions/session-startup.instructions.md` for edge case details.
 
 ## Ways to Contribute
 

@@ -23,8 +23,11 @@ echo "→ markdownlint-cli2 --fix on staged Markdown files..."
 printf '%s\n' "$staged_md" | while IFS= read -r f; do
   # --fix applies auto-fixable rules (blank lines around headings, etc.)
   # Errors that cannot be auto-fixed are reported but do not block the commit.
+  _hash_before=$(git hash-object -- "$f")
   markdownlint-cli2 --fix "$f" || true
-  git add "$f"
+  _hash_after=$(git hash-object -- "$f")
+  # Only re-stage if markdownlint changed the file — avoids unnecessary restaging.
+  [ "$_hash_before" != "$_hash_after" ] && git add -- "$f"
 done
 
 exit 0

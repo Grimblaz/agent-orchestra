@@ -96,7 +96,7 @@ Read these instruction files for cross-cutting rules:
 - `.github/instructions/tracking-format.instructions.md` — YAML frontmatter format for tracking files
 - `.github/instructions/code-review-intake.instructions.md` — GitHub review intake protocol (deterministic ledger-based judgment) _(also available as skill: `.github/skills/code-review-intake/SKILL.md`)_
 - `.github/instructions/post-pr-review.instructions.md` — Post-merge checklist (archive tracking, update docs, tag releases) _(also available as skill: `.github/skills/post-pr-review/SKILL.md`)_
-- `.github/instructions/session-startup.instructions.md` — detailed reference for edge cases and silent skip conditions; the startup check itself is inline in `copilot-instructions.md` "Session Startup Check" section (no action needed in Claude Code — no startup trigger exists)
+- `.github/instructions/session-startup.instructions.md` — detailed reference for edge cases and silent skip conditions; the startup check itself is inline in `.github/copilot-instructions.md` "Session Startup Check" section (no action needed in Claude Code — no startup trigger exists)
 
 ## Validation Commands
 

@@ -132,6 +132,7 @@ After all 3 calls complete, merge findings from all 3 reports into a single dedu
 - For each challenge: decide to incorporate it (revise the plan), dismiss it with rationale, or escalate it for user decision. **If escalated**, use #tool:vscode/askQuestions to present the flagged item(s) and obtain a response before presenting the plan draft.
 - Revise the plan steps as needed to address accepted challenges.
 - After incorporating or dismissing all findings, append a **`Plan Stress-Test`** summary block at the end of the plan draft showing: challenges found, how each was addressed (incorporated / dismissed / escalated), and overall confidence assessment.
+- When any plan step characterizes another agent's capabilities, permissions, or scope, verify the claim against that agent's own specification (read the agent's `.agent.md` file) before finalizing the requirement contract.
 
 **Challenges are non-blocking** — they are presented alongside the plan for user consideration. This uses 3 parallel prosecution passes: passes 1–2 with design review perspectives, pass 3 with product-alignment perspectives.
 

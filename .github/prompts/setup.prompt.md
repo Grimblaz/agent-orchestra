@@ -133,7 +133,7 @@ For **macOS/Linux**:
 export COPILOT_ORCHESTRA_ROOT="/path/to/copilot-orchestra"
 ```
 
-> **Important**: VS Code launched from the Start Menu or a desktop shortcut may not run your PowerShell profile. Use the permanent approach to ensure `COPILOT_ORCHESTRA_ROOT` is always available — the Session Startup Check (in `copilot-instructions.md`) silently skips if neither `COPILOT_ORCHESTRA_ROOT` nor `WORKFLOW_TEMPLATE_ROOT` is set.
+> **Important**: VS Code launched from the Start Menu or a desktop shortcut may not run your PowerShell profile. Use the permanent approach to ensure `COPILOT_ORCHESTRA_ROOT` is always available — the Session Startup Check (in `.github/copilot-instructions.md`) silently skips if neither `COPILOT_ORCHESTRA_ROOT` nor `WORKFLOW_TEMPLATE_ROOT` is set.
 
 **Step 1.2** — Show the VS Code settings to add to your user `settings.json` (`Ctrl+,` → open `settings.json`):
 

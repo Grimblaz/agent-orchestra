@@ -115,7 +115,7 @@ To share agents across all repositories in your org:
 >
 > The steps below are the manual equivalent — follow them if you prefer to configure without the wizard, or if you need to adjust an existing configuration.
 
-The Copilot Orchestra includes a session startup check (inline in `copilot-instructions.md`) that tells agents to check for stale feature branches and leftover tracking files at the start of each conversation. When cleanup is needed, the agent prompts you to confirm before running cleanup. The full edge-case details are in `.github/instructions/session-startup.instructions.md` (detailed reference only — the check itself runs from `copilot-instructions.md`).
+The Copilot Orchestra includes a session startup check (inline in `.github/copilot-instructions.md`) that tells agents to check for stale feature branches and leftover tracking files at the start of each conversation. When cleanup is needed, the agent prompts you to confirm before running cleanup. The full edge-case details are in `.github/instructions/session-startup.instructions.md` (detailed reference only — the check itself runs from `.github/copilot-instructions.md`).
 
 **Setup — two steps:**
 
@@ -143,7 +143,7 @@ The Copilot Orchestra includes a session startup check (inline in `copilot-instr
 
 > **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/copilot-orchestra/.github/instructions"`. Apply the same format to all four settings above.
 >
-> **Migration note**: If you previously configured `chat.hookFilesLocations`, you can safely remove it — hooks have been replaced by the session startup check (inline in `copilot-instructions.md`).
+> **Migration note**: If you previously configured `chat.hookFilesLocations`, you can safely remove it — hooks have been replaced by the session startup check (inline in `.github/copilot-instructions.md`).
 
 **Step 2**: Set the `COPILOT_ORCHESTRA_ROOT` environment variable to the absolute path of your local copilot-orchestra clone. Without this, the session startup check will not run cleanup scripts. (If you already have `WORKFLOW_TEMPLATE_ROOT` set, it works as a fallback — no immediate action needed.)
 

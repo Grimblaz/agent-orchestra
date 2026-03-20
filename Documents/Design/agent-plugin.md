@@ -106,7 +106,7 @@ VS Code loads agent files **additively** from all configured sources — there i
 | 13 agents | ✅ | ✅ |
 | 14 skills | ✅ | ✅ |
 | `/setup`, `/start-issue` slash commands | ✅ | ✅ |
-| `.github/instructions/` (shared rules; `session-startup` operational content inlined into `copilot-instructions.md`) | ❌ not distributed | ✅ auto-discovered |
+| `.github/instructions/` (shared rules; `session-startup` operational content inlined into `.github/copilot-instructions.md`) | ❌ not distributed | ✅ auto-discovered |
 | `.github/scripts/` (cleanup script) | ❌ not distributed | ✅ |
 
 Plugin users relying on `post-pr-review` skill Step 1 (preferred cleanup script) must use the manual archive method — the `$env:COPILOT_ORCHESTRA_ROOT` (or `WORKFLOW_TEMPLATE_ROOT`) path is unavailable in plugin-only setups. The skill's Step 1 includes a disclaimer for this case.
