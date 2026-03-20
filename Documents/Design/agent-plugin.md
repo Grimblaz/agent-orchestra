@@ -32,14 +32,19 @@ The `.github/plugin/` directory was chosen (rather than root) to keep plugin inf
   "skills": [ /* 14 individual skill directory paths */ ],
   "commands": [
     "./.github/prompts/setup.prompt.md",
-    "./.github/prompts/start-issue.prompt.md"
+    "./.github/prompts/start-issue.prompt.md",
+    "./.github/prompts/design.prompt.md",
+    "./.github/prompts/plan.prompt.md",
+    "./.github/prompts/implement.prompt.md",
+    "./.github/prompts/review.prompt.md",
+    "./.github/prompts/polish.prompt.md"
   ]
 }
 ```
 
 - `agents`: Points to the agents directory. VS Code is expected to discover all `*.agent.md` files within it (spec unconfirmed — experimental).
 - `skills`: Individual skill directory paths, matching the pattern used by default VS Code skill discovery.
-- `commands`: Individual `.prompt.md` files with `agent: agent` frontmatter for slash command registration.
+- `commands`: Individual `.prompt.md` files for slash command registration. Legacy commands (`/setup`, `/start-issue`) use `agent: agent` frontmatter; the 5 new commands (`/design`, `/plan`, `/implement`, `/review`, `/polish`) use `agent: {mode-name}` frontmatter to route directly to a named agent mode. See R4 below — named-agent routing is unconfirmed in the experimental plugin system.
 
 ### `marketplace.json` Design
 
@@ -93,6 +98,11 @@ VS Code loads agent files **additively** from all configured sources — there i
 
 - `chat.agentSkillsLocations` — safe to keep alongside the plugin; skills are handled by priority, no duplication
 - `chat.instructionsFilesLocations` — safe to keep alongside the plugin; the plugin does not distribute `.github/instructions/` files
+
+### R4 — Named-agent routing in slash commands (unresolvable without VS Code 1.110 runtime)
+
+The 5 new slash commands (`/design`, `/plan`, `/implement`, `/review`, `/polish`) use `agent: {mode-name}` frontmatter (e.g., `agent: Issue-Designer`) to route directly to a named agent mode. The 2 legacy commands (`/setup`, `/start-issue`) use `agent: agent`. VS Code 1.110's plugin `commands` mechanism's behavior with named-agent values is unverified. **Failure mode**: if VS Code requires `agent: agent` for slash command registration, the 5 new commands may fail to appear in the chat picker or may route incorrectly. **Mitigation**: If routing fails during testing, fall back to `agent: agent` with explicit agent-mode instructions in each prompt body — update `plugin.json` unchanged (file paths remain valid), only the frontmatter values require correction.
+
 - `chat.promptFilesLocations` — likely safe to keep alongside the plugin; the plugin distributes prompt files as slash `commands` (not via `promptFilesLocations`), and VS Code 1.110 is expected to deduplicate slash commands by ID, though this is unconfirmed for the experimental plugin system
 
 **Mitigation**: Use only one distribution source for agents — either the plugin OR a clone/global path, not both. See CUSTOMIZATION.md for guidance on choosing a distribution model.
@@ -105,7 +115,8 @@ VS Code loads agent files **additively** from all configured sources — there i
 |---------|--------|------------|
 | 13 agents | ✅ | ✅ |
 | 14 skills | ✅ | ✅ |
-| `/setup`, `/start-issue` slash commands | ✅ | ✅ |
+| `/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish` slash commands | ✅ | ✅ |
+| `/release` slash command | ❌ not in plugin.json | ✅ auto-discovered |
 | `.github/instructions/` (shared rules; `session-startup` operational content inlined into `.github/copilot-instructions.md`) | ❌ not distributed | ✅ auto-discovered |
 | `.github/scripts/` (cleanup script) | ❌ not distributed | ✅ |
 

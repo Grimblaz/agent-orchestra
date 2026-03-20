@@ -41,8 +41,8 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 Required frontmatter fields: `name`, `description`, `tools`
 Optional frontmatter: `handoffs`, `user-invokable` (defaults to `true` if omitted)
 
-- User-facing agents (5): Must have `user-invokable: true` or omit the field
-- Internal agents (8): Must have `user-invokable: false`
+- User-facing agents (6): Must have `user-invokable: true` or omit the field
+- Internal agents (7): Must have `user-invokable: false`
 
 ### Skill Files (`SKILL.md`)
 
@@ -67,11 +67,11 @@ Must live in `.github/instructions/`
 
 Run before every PR:
 
-```bash
+```powershell
 # No references to deleted agents
-grep -r "Plan-Architect" .github/ --include="*.md" | grep -v "architecture-rules.md" | grep -v "copilot-instructions.md" | wc -l  # must be 0
-grep -r "Janitor" .github/ --include="*.md" | grep -v "architecture-rules.md" | grep -v "copilot-instructions.md" | wc -l  # must be 0
+(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "architecture-rules|copilot-instructions" } | Select-String "Plan-Architect").Count  # must be 0
+(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "architecture-rules|copilot-instructions" } | Select-String "Janitor").Count  # must be 0
 
 # Correct agent count
-ls .github/agents/*.agent.md | wc -l  # must be 13
+(Get-ChildItem .github/agents/*.agent.md).Count  # must be 13
 ```

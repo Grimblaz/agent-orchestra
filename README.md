@@ -23,7 +23,7 @@ A multi-agent workflow system for GitHub Copilot that orchestrates AI-assisted s
 2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins copilot-orchestra` and install.
 3. **Use** — All 13 agents and 14 skills are immediately available in VS Code Chat.
 
-**What's included in the plugin**: 13 agents, 14 skills, and 2 slash commands (`/setup`, `/start-issue`).
+**What's included in the plugin**: 13 agents, 14 skills, and 7 slash commands (`/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish`).
 
 **What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo.
 
@@ -72,6 +72,7 @@ That's it. You're ready to use agents.
 | Implement a planned feature end-to-end | `@Code-Conductor` |
 | Review code and identify risks | `@Code-Critic` |
 | Respond to a code review | `@Code-Review-Response` |
+| Polish a UI page or component | `@UI-Iterator` |
 
 ### Core Workflow
 
@@ -99,7 +100,7 @@ Then, once the design is in the issue:
 
 ## Agent Reference
 
-### Agents you interact with directly (5)
+### Agents you interact with directly (6)
 
 | Agent | What it does |
 |-------|-------------|
@@ -108,12 +109,13 @@ Then, once the design is in the issue:
 | **Code-Conductor** | End-to-end orchestration of implementation |
 | **Code-Critic** | Adversarial code review and risk discovery |
 | **Code-Review-Response** | Judges review feedback, scores findings, and emits categorization |
+| **UI-Iterator** | Systematic UI polish through screenshot-based iteration |
 
 ### Internal agents (called automatically by Code-Conductor)
 
 These agents are hidden from the picker (`user-invokable: false`) and are used automatically during `@Code-Conductor` workflows:
 
-Code-Smith, Test-Writer, Refactor-Specialist, Doc-Keeper, Research-Agent, Process-Review, Specification, UI-Iterator
+Code-Smith, Test-Writer, Refactor-Specialist, Doc-Keeper, Research-Agent, Process-Review, Specification
 
 > See `.github/agents/` for full definitions of all 13 agents.
 
@@ -222,7 +224,7 @@ See **[CONTRIBUTING.md](CONTRIBUTING.md)** for recommended VS Code settings.
 ├── copilot-instructions.md  # Your project context (generate via /setup)
 ├── architecture-rules.md    # Your architecture rules (generate via /setup)
 ├── instructions/        # Output format and PR review guidelines
-├── prompts/             # setup.prompt.md and start-issue.md
+├── prompts/             # Slash command prompt files
 ├── scripts/             # Post-merge cleanup and session detector
 ├── skills/              # Skill definitions
 └── templates/           # Implementation plan template

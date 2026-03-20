@@ -8,7 +8,7 @@ This template supports two distribution models:
 
 | Model | How to Install | What You Get |
 |-------|---------------|--------------|
-| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 13 agents, 14 skills, 2 slash commands — instantly available |
+| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 13 agents, 14 skills, 7 slash commands — instantly available |
 | **Clone/Fork** | `git clone` or use as template | Everything above PLUS instruction files (auto-loaded by VS Code, incl. session-startup), project templates, and examples |
 
 ### Plugin Installation
@@ -207,7 +207,13 @@ Claude Code uses `CLAUDE.md` (project root) instead of `.github/copilot-instruct
 | `.github/skills/*/SKILL.md` | Referenced directly — Claude Code reads them on demand |
 | `.github/instructions/*.instructions.md` | Referenced directly — listed in `CLAUDE.md` |
 | `.github/prompts/setup.prompt.md` | `.claude/commands/setup.md` |
-| `.github/prompts/start-issue.md` | `.claude/commands/start-issue.md` |
+| `.github/prompts/start-issue.prompt.md` | `.claude/commands/start-issue.md` |
+| `.github/prompts/design.prompt.md` | *(no Claude equivalent)* |
+| `.github/prompts/plan.prompt.md` | *(no Claude equivalent)* |
+| `.github/prompts/implement.prompt.md` | `.claude/commands/implement.md` |
+| `.github/prompts/review.prompt.md` | `.claude/commands/review.md` |
+| `.github/prompts/polish.prompt.md` | *(no Claude equivalent)* |
+| `.github/prompts/release.prompt.md` | *(no Claude equivalent)* |
 | `@Code-Conductor` (multi-agent) | `/project:implement` (phased single-agent) |
 
 ### Slash Commands

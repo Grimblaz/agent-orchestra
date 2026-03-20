@@ -40,7 +40,7 @@ To make agents available globally across all VS Code workspaces (not just repos 
 }
 ```
 
-Replace the path with the absolute path to where you cloned this repository. This makes all agents available globally — 5 user-facing agents in the chat picker, plus 8 internal subagents used automatically by Code-Conductor.
+Replace the path with the absolute path to where you cloned this repository. This makes all agents available globally — 6 user-facing agents in the chat picker, plus 7 internal subagents used automatically by Code-Conductor.
 
 To enable automatic skill discovery from `.github/skills/` (VS Code 1.108+):
 
@@ -111,9 +111,9 @@ When adding skills:
 
 ### Plugin Distribution
 
-This repo is distributed as a VS Code agent plugin (VS Code 1.110+). When you add or change agents, skills, or commands (prompt files), those changes are automatically distributed to plugin users when they update. Instruction files and repository templates are **not** distributed via the plugin.
+This repo is distributed as a VS Code agent plugin (VS Code 1.110+). When you add or change **agents**, those changes are automatically distributed to plugin users when they update (agents use a directory glob in `plugin.json`). **Skills and prompt file commands require a manual `plugin.json` update** — see the arrays below. Instruction files and repository templates are **not** distributed via the plugin.
 
-When contributing new skills, the skill will appear in the plugin `plugin.json` — update `.github/plugin/plugin.json` to add the new skill path to the `"skills"` array. To bump the version across all files consistently when publishing a new release, run: `pwsh .github/scripts/bump-version.ps1 -Version X.Y.Z` (replacing `X.Y.Z` with the new version).
+When contributing new skills, update `.github/plugin/plugin.json` to add the new skill path to the `"skills"` array. When adding new slash-command prompt files, add the file path to the `"commands"` array. To bump the version across all files consistently when publishing a new release, run: `pwsh .github/scripts/bump-version.ps1 -Version X.Y.Z` (replacing `X.Y.Z` with the new version).
 
 ### Documentation
 

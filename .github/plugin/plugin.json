@@ -36,6 +36,11 @@
   ],
   "commands": [
     "./.github/prompts/setup.prompt.md",
-    "./.github/prompts/start-issue.prompt.md"
+    "./.github/prompts/start-issue.prompt.md",
+    "./.github/prompts/design.prompt.md",
+    "./.github/prompts/plan.prompt.md",
+    "./.github/prompts/implement.prompt.md",
+    "./.github/prompts/review.prompt.md",
+    "./.github/prompts/polish.prompt.md"
   ]
 }
