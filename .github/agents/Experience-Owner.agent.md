@@ -7,7 +7,6 @@ tools: [
     vscode,
     execute,
     read,
-    edit,
     search,
     web,
     "github/*",
@@ -81,6 +80,7 @@ Every decision, approval request, or branch-point question **MUST** use `#tool:v
 - **Always include options**: Present 2–3 concrete options, label one "Recommended," and include it in the tool call — not just in the preceding text.
 - **Never end a turn with open questions**: If you are awaiting a user decision, the turn must end with a `#tool:vscode/askQuestions` call, not a question mark in plain text.
 - **Clarifications included**: Even simple clarifying questions (e.g., "Is this upstream framing or downstream CE Gate?") must go through `#tool:vscode/askQuestions`.
+- **Reasoning everywhere**: For every `#tool:vscode/askQuestions` call, present full reasoning (pros, cons, trade-offs) in conversation text before the call. Also embed full reasoning in the recommended option's description; alternative options get 1-line trade-off summaries. Conversation text supports richer formatting for complex analysis and is the primary reading experience in direct invocation.
 
 ## GitHub Setup
 
@@ -102,6 +102,13 @@ When the user has not yet created an issue, Experience-Owner creates it. Follow 
 ## Upstream Phase: Customer Framing
 
 Frame the feature as a customer problem before technical design begins.
+
+### Collaboration Pattern
+
+At each major step, decide whether to proceed autonomously or pause for user input. Default to autonomous continuation within a step; pause between steps only when a user decision is required.
+
+- **Checkpoint examples**: issue number needed, ambiguous scope or persona, conflicting signals in research, architectural constraints unclear
+- **Hub-mode guidance**: When called by Code-Conductor as part of the full pipeline, target 2–3 `#tool:vscode/askQuestions` calls — one for scope or persona ambiguity, one for key framing decisions, and one to confirm CE Gate scenario drafts with the user.
 
 ### Customer Problem Statement
 

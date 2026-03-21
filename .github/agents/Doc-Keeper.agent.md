@@ -56,7 +56,7 @@ Keep all documentation accurate, up-to-date, and free of obsolete content. Value
    - Verify terminology matches (class/method names), update code examples
    - Check unlock conditions/formulas match code, remove placeholders ("TBD")
 
-3. **Decision Docs** (ADRs): Keep date-prefixed ADRs accurate; remove obsolete decision docs
+3. **Decision Docs** (ADRs): Create new decision records from issue body design content; keep date-prefixed ADRs accurate; remove obsolete decision docs
 
 4. **Design Document Authorship** (when delegated by Code-Conductor)
    - Create new domain-based design files under `Documents/Design/{domain-slug}.md` when no existing design doc in `Documents/Design/` covers this feature area
@@ -83,7 +83,7 @@ Keep all documentation accurate, up-to-date, and free of obsolete content. Value
 1. Review implementation (read plan/changes files, understand what implemented)
 2. Update development docs (current state, data/architecture notes, execution flow docs)
 3. Update design docs (feature specs, capability docs, domain behavior docs)
-4. Update decision docs (mark [DOCUMENTED])
+4. Create new decision records from issue body content where new decisions were documented; update existing ADRs and mark [DOCUMENTED].
 5. Remove obsolete content (old schemas, placeholders, duplicates)
 6. Verify terminology consistency (class/method/property names match code)
 
@@ -105,8 +105,10 @@ This agent is responsible for maintaining:
 - **CHANGELOG.md**: Update BEFORE merge - add entry during PR documentation finalization.
 - **NEXT-STEPS.md**: Update BEFORE merge - update priorities during PR finalization.
 - **QUICK-START.md**: Update when tooling or setup instructions change.
+- **Documents/Decisions/**: Create new decision records from issue body design content during the implementation phase - keep existing ADRs accurate.
+- **ROADMAP.md**: Update when present - reflect milestone and priority changes from implemented features.
 
-See also: [Solution-Designer](Solution-Designer.agent.md) for ROADMAP updates. [Experience-Owner](Experience-Owner.agent.md) for customer framing documentation.
+See also: [Experience-Owner](Experience-Owner.agent.md) for customer framing documentation.
 
 ---
 
