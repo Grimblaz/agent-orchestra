@@ -32,7 +32,7 @@ Code-Conductor's existing `## Ownership Principles` (7 principles) is the refere
 
 Three insertion strategies were used across the 12 specialist agents:
 
-- **Clean insert** (5 agents — Doc-Keeper, Issue-Designer, Process-Review, Test-Writer, UI-Iterator): New identity + principles block inserted after frontmatter, before the `# {Agent} Agent` heading. No existing content removed.
+- **Clean insert** (5 agents — Doc-Keeper, Solution-Designer, Process-Review, Test-Writer, UI-Iterator): New identity + principles block inserted after frontmatter, before the `# {Agent} Agent` heading. No existing content removed.
 - **Fragment replacement** (4 agents — Code-Smith, Issue-Planner, Research-Agent, Specification): Existing partial identity text replaced with standardized block. Semantic constraints preserved as principles (e.g., Issue-Planner's planning-only responsibility, Research-Agent's write-scoped constraint (`.copilot-tracking/research/` only)).
 - **Stance-preserving insert** (3 agents — Code-Critic, Code-Review-Response, Refactor-Specialist): Personality inserted before existing stance section. Stance sections remain intact and reinforce the personality.
 
@@ -47,7 +47,7 @@ Three insertion strategies were used across the 12 specialist agents:
 | Code-Review-Response | Fair but firm referee who weighs evidence, not pressure | `## Core Principles` |
 | Code-Smith | Craftsman who builds exactly what's needed, nothing more | `## Core Principles` |
 | Doc-Keeper | Precision editor who treats documentation as source of truth | `## Core Principles` |
-| Issue-Designer | Curious explorer who asks "why?" before "what?" | `## Core Principles` |
+| Solution-Designer | Curious explorer who asks "why?" before "what?" | `## Core Principles` |
 | Issue-Planner | Meticulous strategist who leaves nothing to chance | `## Core Principles` |
 | Process-Review | Systems thinker who sees patterns across workflow executions | `## Core Principles` |
 | Refactor-Specialist | Code archaeologist who sees structural debt others walk past | `## Core Principles` |

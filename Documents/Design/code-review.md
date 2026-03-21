@@ -44,14 +44,14 @@ Get-ChildItem -Path "." -Recurse -Include "*.md","*.json","*.ps1" |
 
 VS Code 1.110 renamed the questioning tool from `ask_questions` to `vscode/askQuestions`. Agents that reference a tool name not matching their frontmatter declaration may not have the tool available at runtime.
 
-**Gap found**: 29 stale `ask_questions` references across agent bodies, instructions, and skills. Code-Review-Response was missing the tool declaration in frontmatter entirely despite 11 body references. Code-Conductor and Issue-Designer had no frontmatter declaration despite 24 and multiple body references respectively.
+**Gap found**: 29 stale `ask_questions` references across agent bodies, instructions, and skills. Code-Review-Response was missing the tool declaration in frontmatter entirely despite 11 body references. Code-Conductor and Solution-Designer had no frontmatter declaration despite 24 and multiple body references respectively.
 
 **Changes**:
 
 | File | Change |
 |------|--------|
 | `.github/agents/Code-Conductor.agent.md` | Added `vscode/askQuestions` as first entry in tools frontmatter; replaced all 24 bare references; added `## Context Management for Long Sessions` section with `/compact` guidance |
-| `.github/agents/Issue-Designer.agent.md` | Added `"vscode/askQuestions"` to tools frontmatter; added `## Questioning Policy (Mandatory)` section with zero-tolerance pattern |
+| `.github/agents/Solution-Designer.agent.md` | Added `"vscode/askQuestions"` to tools frontmatter; added `## Questioning Policy (Mandatory)` section with zero-tolerance pattern |
 | `.github/agents/Code-Review-Response.agent.md` | Added `"vscode/askQuestions"` as first entry in tools frontmatter |
 | `.github/instructions/code-review-intake.instructions.md` | 1 reference replaced |
 | `.github/skills/parallel-execution/SKILL.md` | 1 reference replaced |
@@ -59,7 +59,7 @@ VS Code 1.110 renamed the questioning tool from `ask_questions` to `vscode/askQu
 | `.github/skills/skill-creator/SKILL.md` | Added `## Built-in Creation Commands (VS Code 1.110+)` section: `/create-skill`, `/create-agent`, `/create-prompt`, `/create-instruction`; fallback blockquote for 1.108–1.109 users |
 | `CUSTOMIZATION.md` | Added Agent Debug Panel documentation (available since VS Code 1.110, supersedes earlier Diagnostics chat action) |
 
-**Deferred**: `#tool:` prefix standardization (Issue-Planner/Issue-Designer use `#tool:vscode/askQuestions`; Code-Conductor/Code-Review-Response use plain backtick). Both styles work; unification is a separate incremental improvement.
+**Deferred**: `#tool:` prefix standardization (Issue-Planner/Solution-Designer use `#tool:vscode/askQuestions`; Code-Conductor/Code-Review-Response use plain backtick). Both styles work; unification is a separate incremental improvement.
 
 ---
 
@@ -86,7 +86,7 @@ Added in issue #73. Code-Critic gains a second operating mode triggered by the m
 | D8 | Pass count for design review | 3-pass parallel (2 standard design + 1 product-alignment) | Matches the coverage-variance rationale for code review; adds an explicit product/experience/planned-work alignment lens per issue #131 |
 | D9 | Review perspectives | 3 (Feasibility & Risk, Scope & Completeness, Integration & Impact) | Covers the three most common plan failure modes without overlap |
 | D10 | Blocking behavior | Non-blocking (caller decides) | Code-Critic has no veto over design decisions; findings inform, not gate |
-| D11 | Callers | Issue-Designer, Issue-Planner, Claude Code via start-issue.md | All three entry points to the planning phase need the same quality gate |
+| D11 | Callers | Solution-Designer, Issue-Planner, Claude Code via start-issue.md | All three entry points to the planning phase need the same quality gate |
 
 ### Design Review Mode Behavior
 
@@ -100,13 +100,13 @@ Added in issue #73. Code-Critic gains a second operating mode triggered by the m
 
 Each caller decides how to handle the challenge report:
 
-- **Issue-Designer**: incorporate / dismiss / escalate for user decision (with `vscode/askQuestions` gate before writing to GitHub if any item is escalated)
+- **Solution-Designer**: incorporate / dismiss / escalate for user decision (with `vscode/askQuestions` gate before writing to GitHub if any item is escalated)
 - **Issue-Planner**: incorporate / dismiss / escalate for user decision; append `**Plan Stress-Test**` summary block to plan
 - **Claude Code (start-issue.md)**: follow Issue-Planner.agent.md Phase 4 guidance
 
 ### Vocabulary Standardization
 
-Both Issue-Designer and Issue-Planner use a three-way disposition for challenge findings:
+Both Solution-Designer and Issue-Planner use a three-way disposition for challenge findings:
 
 1. **incorporate** — refine the design/plan to address the challenge
 2. **dismiss** — reject the challenge with documented rationale
@@ -205,10 +205,10 @@ Issue-Planner (or start-issue.md) invokes →
         → Score summary returned
 ```
 
-*Issue-Designer (prosecution only)*:
+*Solution-Designer (prosecution only)*:
 
 ```text
-Issue-Designer invokes →
+Solution-Designer invokes →
   Code-Critic (prosecution, design perspectives, pass 1) ─┐
   Code-Critic (prosecution, design perspectives, pass 2) ─┼→ Merge into deduplicated ledger
   Code-Critic (prosecution, product-alignment, pass 3)  ─┘
@@ -373,7 +373,7 @@ rework_cycles: N                 # code review fix loops only (not CE Gate loops
 | `.github/agents/Code-Critic.agent.md` | Defense mode, CE prosecution mode, proxy prosecution mode, scoring output; frontmatter handoff updated |
 | `.github/agents/Code-Review-Response.agent.md` | Single-shot judge, score summary output format, judge confidence levels, rebuttal management removed |
 | `.github/agents/Code-Conductor.agent.md` | Review Reconciliation Loop rewritten (prosecution → defense → judge); CE Gate routes to CE prosecution; GitHub uses proxy prosecution; PR body includes score table; Agent Selection table updated |
-| `.github/agents/Issue-Designer.agent.md` | Adversarial Design Challenge context updated (design prosecution, 3-pass parallel) |
+| `.github/agents/Solution-Designer.agent.md` | Adversarial Design Challenge context updated (design prosecution, 3-pass parallel) |
 | `.github/agents/Issue-Planner.agent.md` | Plan template updated (prosecution → defense → judge); `review_loop_budget` removed |
 | `.github/agents/Process-Review.agent.md` | Reconciliation loop metrics updated to prosecution/defense/judge terminology |
 | `.github/copilot-instructions.md` | Code-Critic Adversarial Review Protocol section updated (5 modes, all pipeline stages) |

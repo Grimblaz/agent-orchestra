@@ -75,7 +75,7 @@ The `.github/plugin/` directory was chosen (rather than root) to keep plugin inf
 
 ### R1 — `agents` directory vs. individual files (unresolvable without VS Code 1.110 runtime)
 
-The `agents` field uses a directory path `["./.github/agents"]`. If VS Code requires individual `.agent.md` file paths (matching the skills pattern), all 13 agents fail to load silently. **Mitigation**: Monitor first install test against VS Code 1.110 EA.
+The `agents` field uses a directory path `["./.github/agents/"]`. If VS Code requires individual `.agent.md` file paths (matching the skills pattern), all 14 agents fail to load silently. **Mitigation**: Monitor first install test against VS Code 1.110 EA.
 
 ### R2 — `marketplace.json` lookup path (unresolvable without VS Code 1.110 runtime)
 
@@ -89,10 +89,10 @@ VS Code loads agent files **additively** from all configured sources — there i
 
 | Scenario | Affected settings | Duplicate items |
 |----------|-------------------|------------------|
-| Plugin installed + clone has `.github/agents/` (any workspace) | `chat.plugins.marketplaces` + workspace auto-discovery | All 13 agents |
-| Plugin installed + `chat.agentFilesLocations` pointing to clone | `chat.plugins.marketplaces` + `chat.agentFilesLocations` | All 13 agents |
-| Global `chat.agentFilesLocations` + workspace `.github/agents/` | `chat.agentFilesLocations` + workspace auto-discovery | All 13 agents |
-| Global `chat.agentFilesLocations` + per-project `chat.agentFilesLocations` | Both `chat.agentFilesLocations` entries combined | All 13 agents |
+| Plugin installed + clone has `.github/agents/` (any workspace) | `chat.plugins.marketplaces` + workspace auto-discovery | All 14 agents |
+| Plugin installed + `chat.agentFilesLocations` pointing to clone | `chat.plugins.marketplaces` + `chat.agentFilesLocations` | All 14 agents |
+| Global `chat.agentFilesLocations` + workspace `.github/agents/` | `chat.agentFilesLocations` + workspace auto-discovery | All 14 agents |
+| Global `chat.agentFilesLocations` + per-project `chat.agentFilesLocations` | Both `chat.agentFilesLocations` entries combined | All 14 agents |
 
 **Not affected** (plugin does not distribute these):
 
@@ -101,7 +101,7 @@ VS Code loads agent files **additively** from all configured sources — there i
 
 ### R4 — Named-agent routing in slash commands (unresolvable without VS Code 1.110 runtime)
 
-The 5 new slash commands (`/design`, `/plan`, `/implement`, `/review`, `/polish`) use `agent: {mode-name}` frontmatter (e.g., `agent: Issue-Designer`) to route directly to a named agent mode. The 2 legacy commands (`/setup`, `/start-issue`) use `agent: agent`. VS Code 1.110's plugin `commands` mechanism's behavior with named-agent values is unverified. **Failure mode**: if VS Code requires `agent: agent` for slash command registration, the 5 new commands may fail to appear in the chat picker or may route incorrectly. **Mitigation**: If routing fails during testing, fall back to `agent: agent` with explicit agent-mode instructions in each prompt body — update `plugin.json` unchanged (file paths remain valid), only the frontmatter values require correction.
+The 5 new slash commands (`/design`, `/plan`, `/implement`, `/review`, `/polish`) use `agent: {mode-name}` frontmatter (e.g., `agent: Solution-Designer`) to route directly to a named agent mode. The 2 legacy commands (`/setup`, `/start-issue`) use `agent: agent`. VS Code 1.110's plugin `commands` mechanism's behavior with named-agent values is unverified. **Failure mode**: if VS Code requires `agent: agent` for slash command registration, the 5 new commands may fail to appear in the chat picker or may route incorrectly. **Mitigation**: If routing fails during testing, fall back to `agent: agent` with explicit agent-mode instructions in each prompt body — update `plugin.json` unchanged (file paths remain valid), only the frontmatter values require correction.
 
 - `chat.promptFilesLocations` — likely safe to keep alongside the plugin; the plugin distributes prompt files as slash `commands` (not via `promptFilesLocations`), and VS Code 1.110 is expected to deduplicate slash commands by ID, though this is unconfirmed for the experimental plugin system
 

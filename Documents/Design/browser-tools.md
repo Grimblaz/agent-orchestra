@@ -49,7 +49,7 @@ Migrates UI verification, CE Gate scenarios, and UI-Iterator workflows from Play
 | `.github/agents/Code-Conductor.agent.md` | Frontmatter + CE Gate table + graceful degradation |
 | `.github/agents/Code-Critic.agent.md` | Frontmatter + body: `browser_take_screenshot`→`screenshotPage`, `browser_click`/`browser_type`→`clickElement`/`typeInPage`; references updated |
 | `.github/agents/Code-Review-Response.agent.md` | Frontmatter only |
-| `.github/agents/Issue-Designer.agent.md` | Frontmatter + body: View Current App section, CE Gate readiness |
+| `.github/agents/Solution-Designer.agent.md` | Frontmatter + body: View Current App section; CE Gate readiness moved to Experience-Owner.agent.md |
 | `.github/agents/Issue-Planner.agent.md` | Body: CE Gate tool reference |
 | `.github/prompts/setup.prompt.md` | Phase 5d rework: native tools default, Playwright MCP optional; file renamed |
 | `CUSTOMIZATION.md` | Phase 5 table updated |

@@ -36,7 +36,7 @@ Three checks run before any file creation:
 
 - **Check 0**: Display working directory and confirm before any file creation — gates all subsequent file writes to prevent silent creation in the wrong repo.
 - **Check 1**: If workspace has zero user-visible files (excluding `.git/`), create a `README.md` placeholder automatically. Workaround for VS Code's workspace context provider crash on empty workspaces (`Cannot read properties of undefined (reading 'fileName')`).
-- **Check 2**: If `.github/agents/` contains 10+ `.agent.md` files, warn that this may be the copilot-orchestra repo itself (heuristic: the template ships 13 agents; target projects rarely have 10+ at setup time).
+- **Check 2**: If `.github/agents/` contains 10+ `.agent.md` files, warn that this may be the copilot-orchestra repo itself (heuristic: the template ships 14 agents; target projects rarely have 10+ at setup time).
 
 Phase 0 also runs `code --version`, `pwsh --version`, `git --version`, and `gh --version` to detect prerequisites automatically.
 

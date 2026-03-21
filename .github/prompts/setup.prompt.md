@@ -450,5 +450,5 @@ Files skipped: [list each file that already existed and was skipped]
 [List: copilot-instructions.md, architecture-rules.md — created / updated / skipped]
 
 ---
-You're ready to use agents. Try: `@Issue-Designer`, `@Issue-Planner`, or `@Code-Conductor`.
+You're ready to use agents. Try: `@Experience-Owner`, `@Solution-Designer`, `@Issue-Planner`, or `@Code-Conductor`.
 ```

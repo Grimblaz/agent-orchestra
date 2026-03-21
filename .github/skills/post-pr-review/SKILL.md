@@ -240,7 +240,7 @@ Before considering work fully complete, verify:
    - Use `git restore --source=<sha> <file>` instead — git handles encoding correctly
 
 4. **Expecting a `Documents/Design/...` design doc to exist before implementation**
-   - Issue-Designer outputs design to the **issue body**, not to a committed file
+   - Solution-Designer outputs design to the **issue body**, not to a committed file
    - The design doc (a domain-based `Documents/Design/{domain-slug}.md` file) is created or updated by Code-Conductor (via Doc-Keeper) as part of the implementation PR
    - If you're reviewing a PR and the expected design doc is missing, check whether Code-Conductor committed it alongside the code changes
 

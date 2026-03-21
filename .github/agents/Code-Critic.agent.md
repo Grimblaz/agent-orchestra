@@ -89,7 +89,7 @@ If after genuine adversarial effort you find no issues, state what you checked a
 
 ## Design Review Mode
 
-When the prompt contains the marker **"Use design review perspectives"**, activate Design Review Mode instead of the standard 7-perspective code review. Issue-Designer and Issue-Planner include this marker for passes 1–2; pass 3 uses `"Use product-alignment perspectives"` instead.
+When the prompt contains the marker **"Use design review perspectives"**, activate Design Review Mode instead of the standard 7-perspective code review. Solution-Designer and Issue-Planner include this marker for passes 1–2; pass 3 uses `"Use product-alignment perspectives"` instead.
 
 ### Mode Detection
 
@@ -113,11 +113,11 @@ Design Review Mode is for reviewing designs and implementation plans — not cod
 
 ### Multi-Pass Design Review Protocol
 
-Design/plan review uses **3 parallel prosecution passes**: passes 1–2 use `"Use design review perspectives"`; pass 3 uses `"Use product-alignment perspectives"`. The orchestrator (Issue-Designer or Issue-Planner) makes 3 separate Code-Critic subagent calls and merges results into a deduplicated findings ledger. Deduplication rule: same perspective target (the specific design decision, AC, or scope element being questioned) + same failure mode = duplicate; keep the earliest pass's finding and annotate with `also_flagged_by: [pass N]`. Cross-perspective duplicates (e.g., §D2 and §P2 flagging the same concern) are also merged.
+Design/plan review uses **3 parallel prosecution passes**: passes 1–2 use `"Use design review perspectives"`; pass 3 uses `"Use product-alignment perspectives"`. The orchestrator (Solution-Designer or Issue-Planner) makes 3 separate Code-Critic subagent calls and merges results into a deduplicated findings ledger. Deduplication rule: same perspective target (the specific design decision, AC, or scope element being questioned) + same failure mode = duplicate; keep the earliest pass's finding and annotate with `also_flagged_by: [pass N]`. Cross-perspective duplicates (e.g., §D2 and §P2 flagging the same concern) are also merged.
 
 After prosecution, callers invoke Code-Critic with `"Use defense review perspectives"` over the merged ledger, then call Code-Review-Response as judge. Full pipeline: 3 prosecution passes → merged deduplicated ledger → 1 defense pass → 1 judge pass.
 
-Note: Issue-Designer runs all 3 prosecution passes but stops after prosecution — no defense or judgment step. Issue-Planner runs the full pipeline.
+Note: Solution-Designer runs all 3 prosecution passes but stops after prosecution — no defense or judgment step. Issue-Planner runs the full pipeline.
 
 ### Design Review Perspectives (3)
 
@@ -174,7 +174,7 @@ Each finding uses the standard format:
 
 ### Non-Blocking Constraint
 
-Design review findings are **not gatekeeping**. The calling agent (Issue-Designer or Issue-Planner) presents the challenge report alongside the design/plan for user consideration. The user and calling agent decide how to respond — accept, iterate, or dismiss with rationale.
+Design review findings are **not gatekeeping**. The calling agent (Solution-Designer or Issue-Planner) presents the challenge report alongside the design/plan for user consideration. The user and calling agent decide how to respond — accept, iterate, or dismiss with rationale.
 
 Code-Critic has no veto power over design decisions. This is collaborative quality, not blocking review.
 
@@ -308,13 +308,13 @@ Points at risk: {-2× sum of disproved finding values if judge rejects the dispr
 
 When the prompt includes `"Use CE review perspectives"`, activate CE Prosecution Mode.
 
-CE prosecution is **one pass only**. Code-Conductor exercises the CE scenarios first and captures evidence. You then review that evidence adversarially and may run additional active tests.
+CE prosecution is **one pass only**. Experience-Owner exercises the CE scenarios first and captures evidence — Code-Conductor delegates CE Gate evidence capture to Experience-Owner, which returns a structured evidence summary. You then review that evidence adversarially and may run additional active tests.
 
 **Three lenses** (apply all):
 
 | Lens             | What it checks                                                    | How                                             |
 | ---------------- | ----------------------------------------------------------------- | ----------------------------------------------- |
-| **Functional**   | Do scenarios pass from the customer's perspective?                | Review Code-Conductor's captured evidence       |
+| **Functional**   | Do scenarios pass from the customer's perspective?                | Review Experience-Owner's captured evidence     |
 | **Intent**       | Does implementation match design intent? (strong/partial/weak)    | Compare evidence against the design-issue cache |
 | **Error states** | What happens with bad input, edge cases, or unexpected sequences? | Active adversarial testing via browser tools    |
 

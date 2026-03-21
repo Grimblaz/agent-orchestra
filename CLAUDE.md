@@ -16,14 +16,15 @@ Multi-agent workflow system for GitHub Copilot. Provides specialized agents, ski
 Pipeline-based agent orchestration:
 
 ```text
-Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
+@Experience-Owner → @Solution-Designer → @Issue-Planner → @Code-Conductor → PR
                                                 ↓
                               Code-Smith, Test-Writer, Refactor-Specialist,
                               Doc-Keeper, Research-Agent, Process-Review,
                               Specification
+(CE Gate: @Code-Conductor delegates evidence capture to @Experience-Owner)
 ```
 
-- **User-facing agents** (6): Issue-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
+- **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
 - **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invokable: false`)
 - **Skills** (14): Loaded on demand by agents from `.github/skills/`
 - **Instructions** (5): Shared rules loaded by agents from `.github/instructions/`
@@ -37,13 +38,16 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 - No auto-commit behavior — users commit manually
 - Plans are saved as GitHub issue comments with `<!-- plan-issue-{ID} -->` markers (preferred for Claude Code — durable and does not pollute the repo); if a local file is needed, save it inside `.copilot-tracking/` which is already gitignored. Note: GitHub Copilot agents store plans in VS Code session memory at `/memories/session/plan-issue-{ID}.md` — Claude Code has no access to session memory, so the issue comment is the equivalent durable storage.
 - Design context is cached as a GitHub issue comment with `<!-- design-issue-{ID} -->` marker (Claude Code equivalent of the session memory design cache used by VS Code Copilot agents); created by Issue-Planner when user opts-in to GitHub persistence (same "Yes" prompt as the plan comment — single prompt creates both). If missing at workflow start, read the issue body directly.
-- Design content goes in the GitHub issue body (Issue-Designer outputs there)
+- Design content goes in the GitHub issue body (Solution-Designer outputs there)
 - `Documents/Design/` files use domain-based naming (`{domain-slug}.md`) and are committed with the implementation PR
 - CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience and design-intent verification
 
 ## Workflow for Claude Code
 
 Claude Code is a single-agent system. The multi-agent Copilot pipeline translates to a phased single-agent workflow. Each phase references the corresponding agent file as a role guide — read it for standards and checklists.
+
+0. **Customer Framing** (optional upstream step) — If starting a feature from scratch, consult the Experience-Owner role guide to frame the customer problem, define user journeys, draft CE Gate scenarios, and assess surface readiness before design begins. Skip if the issue already has an Experience-Owner customer framing section.
+   Role guide: `.github/agents/Experience-Owner.agent.md`
 
 1. **Plan** — Research the codebase, draft an implementation plan, stress-test it with a Code-Critic design review, get approval before coding.
    Role guide: `.github/agents/Issue-Planner.agent.md`
@@ -57,7 +61,7 @@ Claude Code is a single-agent system. The multi-agent Copilot pipeline translate
 4. **Refactor** — Review all modified files for extraction opportunities, DRY violations, SOLID violations. Proportionate to the change scope.
    Role guide: `.github/agents/Refactor-Specialist.agent.md`
 
-5. **Review** — Scored adversarial pipeline: prosecution → defense → judge. Code-Critic runs 3 prosecution passes (code review), 1 defense pass, then Code-Review-Response judges with confidence scoring and emits a score summary; Code-Conductor routes accepted findings to specialists. Post-fix review: after accepted fixes are applied, Code-Conductor triggers 3 diff-scoped prosecution passes → defense → judge (for Critical/High fixes or control-flow modifications); loop budget 1. Design/plan reviews use 3-pass parallel prosecution (2 standard design + 1 product-alignment) + defense + judge. CE review: Conductor exercises scenarios, Code-Critic prosecutes adversarially (3 lenses), then defense + judge. GitHub review: proxy prosecution → defense → judge.
+5. **Review** — Scored adversarial pipeline: prosecution → defense → judge. Code-Critic runs 3 prosecution passes (code review), 1 defense pass, then Code-Review-Response judges with confidence scoring and emits a score summary; Code-Conductor routes accepted findings to specialists. Post-fix review: after accepted fixes are applied, Code-Conductor triggers 3 diff-scoped prosecution passes → defense → judge (for Critical/High fixes or control-flow modifications); loop budget 1. Design/plan reviews use 3-pass parallel prosecution (2 standard design + 1 product-alignment) + defense + judge. CE review: Experience-Owner exercises scenarios (delegated by Code-Conductor), Code-Critic prosecutes adversarially (3 lenses), then defense + judge. GitHub review: proxy prosecution → defense → judge.
 
    For cross-session calibration: after several merged PRs accumulate, run `pwsh -NonInteractive .github/scripts/aggregate-review-scores.ps1` to compute a time-weighted calibration profile. The script analyzes per-finding data from `<!-- pipeline-metrics -->` PR body blocks, computing sustain rates per prosecution category (architecture, security, performance, pattern, simplicity, script-automation, documentation-audit), defense success rates, and judge confidence calibration. Results are reported by Process-Review as actionable recommendations for improving Code-Critic and Code-Review-Response prompts. Apply approved recommendations manually by editing the relevant agent files.
    Role guide: `.github/agents/Code-Critic.agent.md`
@@ -112,9 +116,10 @@ markdownlint-cli2 --fix "**/*.md"
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Plan-Architect").Count  # should be 0
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Janitor").Count  # should be 0
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules|setup\.prompt" } | Select-String "workflow-template").Count  # should be 0
+(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Issue-Designer").Count  # should be 0
 (Get-ChildItem .github/skills/*/SKILL.md | Where-Object { (Select-String -Path $_ -Pattern '^description:.*Use (when|before)') -eq $null }).Count  # should be 0
 (Get-ChildItem .github/skills/*/SKILL.md | Where-Object { (Select-String -Path $_ -Pattern '^description:.*DO NOT USE FOR:') -eq $null }).Count  # should be 0
 
 # Check agent count
-(Get-ChildItem .github/agents/*.agent.md).Count  # should be 13
+(Get-ChildItem .github/agents/*.agent.md).Count  # should be 14
 ```

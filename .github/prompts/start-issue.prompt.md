@@ -68,7 +68,7 @@ If any issues are found during setup, please report them before proceeding.
 
 ## Usage Instructions
 
-### For Issue Designer Agent
+### For Solution-Designer
 
 When picking up a new issue:
 
@@ -79,10 +79,10 @@ When picking up a new issue:
    - `[CUSTOMIZE_*]`: Replace with project-specific values
 
 2. **Execute the checklist** systematically, using appropriate agents:
-   - Analysis: Issue-Designer handles initial review
+   - Analysis: Solution-Designer handles initial review
    - Dependencies: [CUSTOMIZE: Specify agent responsible for dependency checks] can check dependencies
-   - Branch creation: Issue-Designer or Code-Conductor
-   - Tracking: Issue-Designer sets up tracking
+   - Branch creation: Solution-Designer or Code-Conductor
+   - Tracking: Solution-Designer sets up tracking
    - Planning: Issue-Planner creates implementation plan
 
 3. **Document blockers**: If any dependency or setup issue is found, document it in the issue comments before proceeding.
@@ -154,7 +154,7 @@ Adjust the branch naming pattern to match your project:
 
 After completing setup with this prompt:
 
-1. **Issue-Designer** → **Issue-Planner**: Pass issue details for planning
+1. **Solution-Designer** → **Issue-Planner**: Pass issue details for planning
 2. **Issue-Planner** → **Code-Conductor**: Issue-Planner saves the implementation plan to session memory (`/memories/session/plan-issue-[ISSUE_NUMBER].md`); Code-Conductor reads from session memory (or GitHub issue comment if the plan was persisted there) to execute
 3. **Code-Conductor** → **Specialized Agents**: Execute phases sequentially
 

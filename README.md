@@ -21,9 +21,9 @@ A multi-agent workflow system for GitHub Copilot that orchestrates AI-assisted s
    ```
 
 2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins copilot-orchestra` and install.
-3. **Use** — All 13 agents and 14 skills are immediately available in VS Code Chat.
+3. **Use** — All 14 agents and 14 skills are immediately available in VS Code Chat.
 
-**What's included in the plugin**: 13 agents, 14 skills, and 7 slash commands (`/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish`).
+**What's included in the plugin**: 14 agents, 14 skills, and 8 slash commands (`/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish`, `/experience`).
 
 **What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo.
 
@@ -67,7 +67,8 @@ That's it. You're ready to use agents.
 
 | Goal | Start here |
 |------|-----------|
-| Pick up a GitHub issue and design a solution | `@Issue-Designer` |
+| Frame a feature from the customer's perspective | `@Experience-Owner` |
+| Pick up a GitHub issue and design a solution | `@Solution-Designer` |
 | Create an implementation plan for an issue | `@Issue-Planner` |
 | Implement a planned feature end-to-end | `@Code-Conductor` |
 | Review code and identify risks | `@Code-Critic` |
@@ -77,17 +78,18 @@ That's it. You're ready to use agents.
 ### Core Workflow
 
 ```text
-Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
+@Experience-Owner → @Solution-Designer → @Issue-Planner → @Code-Conductor → PR
 ```
 
-1. **@Issue-Designer** — picks up the issue, explores the design space, updates the issue body with a design
-2. **@Issue-Planner** — creates a step-by-step implementation plan
-3. **@Code-Conductor** — reads the plan, delegates to internal specialist agents, creates a merge-ready PR
+1. **@Experience-Owner** — frames the customer problem, defines user journeys and CE Gate scenarios (optional upstream step)
+2. **@Solution-Designer** — picks up the issue, explores the design space, updates the issue body with a design
+3. **@Issue-Planner** — creates a step-by-step implementation plan
+4. **@Code-Conductor** — reads the plan, delegates to internal specialist agents, creates a merge-ready PR
 
 ### Example: Start a feature from scratch
 
 ```markdown
-@Issue-Designer Please design issue #42.
+@Experience-Owner Please frame issue #42 from the customer's perspective.
 ```
 
 Then, once the design is in the issue:
@@ -100,11 +102,12 @@ Then, once the design is in the issue:
 
 ## Agent Reference
 
-### Agents you interact with directly (6)
+### Agents you interact with directly (7)
 
 | Agent | What it does |
 |-------|-------------|
-| **Issue-Designer** | Design exploration and issue management |
+| **Experience-Owner** | Customer framing, user journeys, and CE Gate scenario definition |
+| **Solution-Designer** | Design exploration and issue management |
 | **Issue-Planner** | Multi-step implementation plan creation |
 | **Code-Conductor** | End-to-end orchestration of implementation |
 | **Code-Critic** | Adversarial code review and risk discovery |
@@ -117,7 +120,7 @@ These agents are hidden from the picker (`user-invokable: false`) and are used a
 
 Code-Smith, Test-Writer, Refactor-Specialist, Doc-Keeper, Research-Agent, Process-Review, Specification
 
-> See `.github/agents/` for full definitions of all 13 agents.
+> See `.github/agents/` for full definitions of all 14 agents.
 
 ---
 

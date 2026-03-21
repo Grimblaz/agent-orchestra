@@ -115,7 +115,7 @@ The cache stores the complete issue body content — no curation or summarizatio
 
 #### DC1 — Full verbatim content, not a curated summary
 
-Summarizing introduces the same context-loss risk the cache is intended to solve — the summarizer might filter out critical details. A typical Issue-Designer output (decisions, AC, constraints, CE Gate, rationale) is small enough that full verbatim content is not a context-window concern in practice.
+Summarizing introduces the same context-loss risk the cache is intended to solve — the summarizer might filter out critical details. A typical Solution-Designer output (decisions, AC, constraints, rationale) is small enough that full verbatim content is not a context-window concern in practice.
 
 #### DC2 — Session memory as primary, issue body as source of truth
 

@@ -20,14 +20,15 @@ Multi-agent workflow system for GitHub Copilot. Provides specialized agents, ski
 Pipeline-based agent orchestration:
 
 ```text
-Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
+@Experience-Owner → @Solution-Designer → @Issue-Planner → @Code-Conductor → PR
                                                 ↓
                               Code-Smith, Test-Writer, Refactor-Specialist,
                               Doc-Keeper, Research-Agent, Process-Review,
                               Specification
+(CE Gate: @Code-Conductor delegates evidence capture to @Experience-Owner)
 ```
 
-- **User-facing agents** (6): Issue-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
+- **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
 - **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invokable: false`)
 - **Skills** (14): Loaded on demand by agents from `.github/skills/`
 - **Instructions** (5): Shared rules loaded by agents from `.github/instructions/`
@@ -42,7 +43,7 @@ Issue → @Issue-Designer → @Issue-Planner → @Code-Conductor → PR
 - Plans are saved to session memory (`/memories/session/plan-issue-{ID}.md`), optionally persisted as GitHub issue comments
 - Design context is cached in session memory (`/memories/session/design-issue-{ID}.md`), created by Issue-Planner alongside the plan — full design content from the issue body, surviving conversation compaction; optionally persisted as a GitHub issue comment with `<!-- design-issue-{ID} -->` marker
 - VS Code auto-compacts conversation when context fills; session memory (`/memories/session/`) is the durable store — plans and design context survive compaction automatically (but not session end — use GitHub issue comments for cross-session durability)
-- Design content goes in the GitHub issue body (Issue-Designer outputs there)
+- Design content goes in the GitHub issue body (Solution-Designer outputs there)
 - `Documents/Design/` files use domain-based naming (`{domain-slug}.md`) and are committed with the implementation PR by Code-Conductor (delegated to Doc-Keeper)
 - CE Gate uses `ce_gate: true` plan metadata and a `[CE GATE]` step for customer-experience and design-intent verification
 
@@ -56,9 +57,9 @@ This repo uses a **scored prosecution → defense → judge pipeline** across al
 - 1 Code-Critic defense pass over the merged findings ledger
 - 1 Code-Review-Response judge pass with confidence scoring + score summary
 
-**Design/plan review** (3× prosecution, 1× defense, 1× judge): full pipeline invoked by Issue-Planner or via start-issue.md. Issue-Designer runs all 3 prosecution passes but stops after prosecution (non-blocking, no defense or judge step).
+**Design/plan review** (3× prosecution, 1× defense, 1× judge): full pipeline invoked by Issue-Planner or via start-issue.md. Solution-Designer runs all 3 prosecution passes but stops after prosecution (non-blocking, no defense or judge step).
 
-**CE review**: Code-Conductor exercises scenarios and captures evidence; Code-Critic then reviews adversarially (CE prosecution → defense → judge).
+**CE review**: Experience-Owner exercises scenarios and captures evidence (delegated by Code-Conductor); Code-Critic then reviews adversarially (CE prosecution → defense → judge).
 
 **GitHub review**: proxy prosecution (Code-Critic validates/scores each GitHub comment) → defense → judge.
 
@@ -116,7 +117,7 @@ No build step. This is a configuration/documentation template.
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Plan-Architect").Count  # should be 0
 
 # Check agent count
-(Get-ChildItem .github/agents/*.agent.md).Count  # should be 13
+(Get-ChildItem .github/agents/*.agent.md).Count  # should be 14
 ```
 
 ## Quick-validate (used by agents before every PR)
@@ -132,6 +133,7 @@ Then run the structural checks:
 ```powershell
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Plan-Architect").Count  # should be 0
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Janitor").Count  # should be 0
+(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Issue-Designer").Count  # should be 0
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules|setup\.prompt" } | Select-String "workflow-template").Count  # should be 0
 (Get-ChildItem .github/skills/*/SKILL.md | Where-Object { (Select-String -Path $_ -Pattern '^description:.*Use (when|before)') -eq $null }).Count  # should be 0
 (Get-ChildItem .github/skills/*/SKILL.md | Where-Object { (Select-String -Path $_ -Pattern '^description:.*DO NOT USE FOR:') -eq $null }).Count  # should be 0

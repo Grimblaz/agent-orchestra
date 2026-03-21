@@ -106,7 +106,7 @@ This agent is responsible for maintaining:
 - **NEXT-STEPS.md**: Update BEFORE merge - update priorities during PR finalization.
 - **QUICK-START.md**: Update when tooling or setup instructions change.
 
-See also: [Issue-Designer](Issue-Designer.agent.md) for ROADMAP updates.
+See also: [Solution-Designer](Solution-Designer.agent.md) for ROADMAP updates. [Experience-Owner](Experience-Owner.agent.md) for customer framing documentation.
 
 ---
 

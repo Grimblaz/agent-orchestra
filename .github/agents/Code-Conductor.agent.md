@@ -57,6 +57,14 @@ Questioning and pausing are controlled actions, not casual conversation.
 - If no true user decision authority is required, continue autonomously.
 - If a pause is required, include concrete options and one recommended path so execution can resume without ambiguity.
 
+### Model-Switch Checkpoint (Authorized Hub-Mode Pause)
+
+When Code-Conductor orchestrates the full hub flow (Experience-Owner → Solution-Designer → Issue-Planner → implementation), one additional authorized pause exists — the **D9 model-switch checkpoint**. This pause is explicitly authorized and does NOT violate the zero-tolerance rule for plain-text questions because it uses `#tool:vscode/askQuestions`.
+
+- **When it fires**: After plan approval, before implementation begins — ONLY when all upstream phases were called in this session (not skipped via smart resume). Does NOT fire when the user invokes `/implement` directly.
+- **Options to present**: "Continue implementation" (recommended) / "Pause here — I'll resume with `/implement`"
+- **Interrupt budget effect**: This counts against the overall hub session interruption budget, not the review cycle budget.
+
 ### Review Workflow Interruption Budget (Balanced Policy)
 
 - In review workflows, default to autonomous execution after judgment and verification.
@@ -97,10 +105,47 @@ Quick checklist before declaring mode for a step:
 
 ## Core Workflow
 
+<!-- markdownlint-disable-next-line MD029 -->
 0. **Issue Transition (Step 0, before implementation)**:
    - Cleanup note: The `.github/copilot-instructions.md` "Session Startup Check" detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `$copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }; pwsh "$copilotRoot/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly (only if `$copilotRoot` is non-empty — requires `COPILOT_ORCHESTRA_ROOT` or `WORKFLOW_TEMPLATE_ROOT` to be set).
    - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
    - If planning is unnecessary, explicitly note "Step 0 skipped: no planning transition required" and continue.
+
+### Hub Mode & Smart Resume
+
+When the user invokes Code-Conductor without a specific slash command (e.g., `@code-conductor issue #N`), it operates in **hub mode** — orchestrating the full pipeline from customer framing through PR creation.
+
+**Smart resume**: Before calling any upstream agent, check issue state markers via `mcp_github_issue_read` with `method: get_comments` to detect completed phases:
+
+- `<!-- experience-owner-complete-{ID} -->` found → customer framing done; skip Experience-Owner upstream call
+- `<!-- design-phase-complete-{ID} -->` found → technical design done; skip Solution-Designer
+- Plan found (session memory or `<!-- plan-issue-{ID} -->` comment) → skip upstream phases, proceed to implementation
+
+Skip hub mode entirely when the user invokes a specific slash command (e.g., `/implement #N`, `/plan #N`, `/design #N`) — these execute the named phase directly; smart resume applies at the phase level, not the hub level.
+
+**Hub execution order** (call only phases not already complete):
+
+1. **Experience-Owner** (upstream customer framing) — call with issue number; wait for `<!-- experience-owner-complete-{ID} -->` completion marker in issue comments
+2. **Solution-Designer** (technical design) — call with issue number; wait for `<!-- design-phase-complete-{ID} -->` completion marker in issue comments
+3. **Issue-Planner** (implementation plan) — call with issue number; plan persisted to session memory or issue comment
+4. **D9 Checkpoint** — see below; hub-mode only
+5. **Implementation** → validation ladder → PR
+
+### D9 Model-Switch Checkpoint (Hub Mode Only)
+
+After plan approval and before implementation begins, present this checkpoint — **ONLY** when Code-Conductor is in hub mode AND called at least one upstream phase in this session (did not skip all three via smart resume):
+
+```text
+Use `#tool:vscode/askQuestions`:
+- "Continue implementation" (recommended if staying on current model) — proceed to Code-Smith and the implementation pipeline in this session
+- "Pause here — I'll resume with `/implement`" — stop cleanly; all upstream work persisted via smart resume markers; user can switch models and resume
+```
+
+**Skip D9 when**:
+
+- User invoked `/implement #N` directly (smart resume determines entry point; no hub-mode pause)
+- Smart resume skipped ALL three upstream phases (they were done before this session — nothing to pause after)
+- User already indicated intent to continue (e.g., responded "Continue" or "Approved — save and proceed" in this session)
 
 1. **Locate Plan & Context**:
    - Find plan using this lookup chain: (1) session memory — `view /memories/session/plan-issue-{ID}.md` via the `vscode/memory` tool; (2) GitHub issue comments — use `mcp_github_issue_read` with `method: get_comments` to find a comment containing `<!-- plan-issue-{ID} -->`; (3) escalate via `#tool:vscode/askQuestions` if neither found
@@ -163,6 +208,7 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 | UI source files (visual polish)                                                                                      | ui polish, spacing, alignment, styling         | UI-Iterator          |
 | `*.md`, `README.*`, `CHANGELOG.*`                                                                                    | docs, guide, changelog                         | Doc-Keeper           |
 | Session memory `/memories/session/plan-issue-{ID}.md` or GitHub issue comment with `<!-- plan-issue-{ID} -->` marker | plan, acceptance criteria, sequencing          | Issue-Planner        |
+| CE Gate evidence capture (downstream); upstream customer framing, scenarios, design intent                           | ce gate, customer, experience, journey, scenarios | Experience-Owner  |
 | Code review (read-only)                                                                                              | review, risks, quality, critique               | Code-Critic          |
 | Categorize review feedback (read-only)                                                                               | judge, score, prosecution, defense, categorize | Code-Review-Response |
 | Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic          | Process-Review       |
@@ -345,7 +391,7 @@ Run this gate as the final step before PR creation (Tier 4, after the post-fix t
 
 ### Surface Identification
 
-Read the plan's `[CE GATE]` step to identify the customer surface. If no `[CE GATE]` step exists, infer from the change type:
+Read the plan's `[CE GATE]` step to identify the customer surface. Pass this surface type information to Experience-Owner when delegating evidence capture (step 3 of the Scenario Exercise Protocol). If no `[CE GATE]` step exists, infer from the change type and include the inferred surface type in the Experience-Owner delegation:
 
 | Surface Type        | Tool / Method                                                                           |
 | ------------------- | --------------------------------------------------------------------------------------- |
@@ -360,8 +406,8 @@ Read the plan's `[CE GATE]` step to identify the customer surface. If no `[CE GA
 
 1. Read the `[CE GATE]` scenarios from the plan step (natural language descriptions)
 2. Establish the **design intent reference**: read the `Design Intent` field from the plan's `[CE GATE]` step (if present); otherwise read `/memories/session/design-issue-{ID}.md` via `vscode/memory` (falling back to the issue body if the cache is absent). Understand what the change was supposed to accomplish for the user — not just what it does technically
-3. Exercise each scenario using the appropriate tool and **capture evidence** (screenshots, terminal output, API response bodies)
-4. **Invoke CE prosecution pipeline**: Pass the evidence to Code-Critic with the marker `"Use CE review perspectives"`. Code-Critic reviews adversarially across 3 lenses (Functional + Intent + Error States) and emits a prosecution findings ledger.
+3. **Delegate CE Gate evidence capture to Experience-Owner** (subagent): Call Experience-Owner as a subagent via the `agent` tool, passing: (a) the issue number, (b) the scenarios from the `[CE GATE]` plan step, (c) the named design decisions (D1–DN) from the issue body, and (d) the design intent reference. Experience-Owner exercises scenarios using appropriate tools, performs D1–DN systematic verification, performs exploratory validation, and returns a structured evidence summary (scenario results, D1–DN verification outcomes, exploratory observations, captured screenshots/output). **Code-Conductor does NOT exercise scenarios itself — delegation is mandatory.** If Experience-Owner returns graceful-degradation output (environment unavailable), emit the appropriate `⚠️ CE Gate skipped` marker and proceed.
+4. **Invoke CE prosecution pipeline**: Pass Experience-Owner's evidence summary to Code-Critic with the marker `"Use CE review perspectives"`. Code-Critic reviews adversarially across 3 lenses (Functional + Intent + Error States) and emits a prosecution findings ledger.
 5. **Defense pass**: Invoke Code-Critic with the CE prosecution ledger and marker `"Use defense review perspectives"`.
 6. **Judge pass**: Invoke Code-Review-Response with both the CE prosecution ledger and defense report. Judge rules final and emits score summary with CE intent match level.
 7. CE Gate result markers (emitted by the judge in conjunction with Code-Conductor's read of the verdict):

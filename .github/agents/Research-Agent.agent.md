@@ -10,7 +10,7 @@ tools:
   - web
 handoffs:
   - label: Revisit Design
-    agent: Issue-Designer
+    agent: Solution-Designer
     prompt: High-level design gaps discovered during research. Need conceptual validation.
     send: false
   - label: Create Plan

@@ -8,7 +8,7 @@ This template supports two distribution models:
 
 | Model | How to Install | What You Get |
 |-------|---------------|--------------|
-| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 13 agents, 14 skills, 7 slash commands — instantly available |
+| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 14 agents, 14 skills, 8 slash commands — instantly available |
 | **Clone/Fork** | `git clone` or use as template | Everything above PLUS instruction files (auto-loaded by VS Code, incl. session-startup), project templates, and examples |
 
 ### Plugin Installation

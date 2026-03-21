@@ -40,7 +40,7 @@ To make agents available globally across all VS Code workspaces (not just repos 
 }
 ```
 
-Replace the path with the absolute path to where you cloned this repository. This makes all agents available globally — 6 user-facing agents in the chat picker, plus 7 internal subagents used automatically by Code-Conductor.
+Replace the path with the absolute path to where you cloned this repository. This makes all agents available globally — 7 user-facing agents in the chat picker, plus 7 internal subagents used automatically by Code-Conductor.
 
 To enable automatic skill discovery from `.github/skills/` (VS Code 1.108+):
 

@@ -309,7 +309,7 @@ Emit exactly this structure when returning results to Code-Conductor:
 
 **Valid outcome**: "No systemic gap found" is a complete and valid outcome. Not every CE Gate defect indicates a process problem. Log this clearly so Code-Conductor can record it in the PR body.
 
-**Intent mismatch analysis**: When the defect is an intent mismatch rather than a functional failure, the gap analysis should consider: (a) whether the design intent was adequately communicated in the issue body, (b) whether Issue-Designer's CE Gate scenarios included intent scenarios (not just functional ones), and (c) whether the `[CE GATE]` plan step included a design intent reference. These are the upstream points where intent clarity could have prevented the mismatch.
+**Intent mismatch analysis**: When the defect is an intent mismatch rather than a functional failure, the gap analysis should consider: (a) whether the design intent was adequately communicated in the issue body, (b) whether Experience-Owner's CE Gate scenarios included intent scenarios (not just functional ones), and (c) whether the `[CE GATE]` plan step included a design intent reference. These are the upstream points where intent clarity could have prevented the mismatch.
 
 ### 4.7 Calibration Analysis (Cross-Session Learning)
 
