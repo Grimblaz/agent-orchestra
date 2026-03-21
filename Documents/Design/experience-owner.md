@@ -19,6 +19,7 @@ The Experience-Owner agent bookends the pipeline with a customer-experience lens
 | D7 | Prompt file | Add `experience.prompt.md` with `agent: Experience-Owner` | Consistent with `/design` → `design.prompt.md` pattern; enables `/experience` slash command |
 | D8 | Agent count | 7 user-facing (was 6) | Experience-Owner is user-invokable; Solution-Designer replaces Issue-Designer at same user-facing count position |
 | D9 | Hub Mode + D9 Checkpoint | Code-Conductor gains Smart Resume markers and a D9 pause checkpoint after upstream phases complete | Prevents full upstream re-execution on session resume; user can pause between customer framing and implementation |
+| D10 | Collaboration Pattern for upstream interactivity | Add dedicated `### Collaboration Pattern` subsection in Upstream Phase; hub-mode budget of 2–3 `#tool:vscode/askQuestions` calls; checkpoints at scope ambiguity, key framing decisions, and CE Gate scenario drafting confirmation | Interactivity guidance was underdocumented; explicit budget prevents EO from becoming a hub-mode bottleneck |
 
 ---
 
@@ -32,6 +33,7 @@ Experience-Owner frames the customer problem before design begins:
 4. **Design Intent Reference** — distills the CE Gate `Design Intent` field for the `[CE GATE]` plan step
 5. **Surface Readiness Assessment** — Identifies which tools are available for the surface under change
 6. **Persists output** — Posts a comment to the GitHub issue with the `<!-- experience-owner-complete-{ID} -->` marker
+7. **Interactivity** — Decision-by-decision confirmation using `#tool:vscode/askQuestions`; hub-mode budget 2–3 calls. See `### Collaboration Pattern` in the agent file.
 
 ---
 
