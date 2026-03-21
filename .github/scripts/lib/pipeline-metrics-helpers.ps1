@@ -5,12 +5,15 @@
     Dot-sourced by aggregate-review-scores.ps1 and backfill-calibration.ps1.
 #>
 
+# Caller contract: dot-source this file before using Get-YamlField or Get-FindingsArray.
+# Example: . (Join-Path $PSScriptRoot 'lib\pipeline-metrics-helpers.ps1')
+
 # ---------------------------------------------------------------------------
 # Helper: extract a flat YAML field value from a text block
 # ---------------------------------------------------------------------------
 function Get-YamlField {
     param([string]$Block, [string]$FieldName)
-    $m = [regex]::Match($Block, "(?m)^${FieldName}:\s*(.+)$")
+    $m = [regex]::Match($Block, "(?m)^$([regex]::Escape($FieldName)):\s*(.+)$")
     if ($m.Success) { return $m.Groups[1].Value.Trim() }
     return $null
 }
@@ -22,9 +25,10 @@ function Get-FindingsArray {
     param([string]$Block)
 
     $findings = [System.Collections.Generic.List[hashtable]]::new()
+    $findingsKeyPattern = '^findings:\s*$'  # $ is regex end-anchor; interpolates safely in double-quoted strings
 
     # Locate start of findings: section
-    if (-not [regex]::IsMatch($Block, '(?m)^findings:\s*$')) { Write-Output -NoEnumerate $findings; return }
+    if (-not [regex]::IsMatch($Block, "(?m)$findingsKeyPattern")) { Write-Output -NoEnumerate $findings; return }
 
     $blockLines = $Block -split "`n"
     $inFindings = $false
@@ -32,7 +36,7 @@ function Get-FindingsArray {
 
     foreach ($line in $blockLines) {
         if (-not $inFindings) {
-            if ($line -match '^findings:\s*$') {
+            if ($line -match $findingsKeyPattern) {
                 $inFindings = $true
             }
             continue
@@ -46,8 +50,9 @@ function Get-FindingsArray {
             continue
         }
 
-        # Stop if we hit a top-level key
-        if ($line -match '^[a-z_]+:\s') {
+        # Stop if we hit a top-level key (note: char class excludes digits/hyphens;
+        # all current top-level keys after findings: use only [a-z_])
+        if ($line -match '^[a-z_]+:') {
             if ($null -ne $current) { $findings.Add($current) }
             $current = $null
             break

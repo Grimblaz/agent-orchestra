@@ -524,7 +524,7 @@ After creating the PR body with the `<!-- pipeline-metrics -->` block, invoke th
 if (Test-Path .github/scripts/write-calibration-entry.ps1) {
     $entryJson = @{
         pr_number  = <PR number as integer>
-        created_at = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
+        created_at = ([System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))
         findings   = @(
             # One object per finding from the judge's <!-- judge-rulings --> block:
             @{
@@ -549,7 +549,8 @@ if (Test-Path .github/scripts/write-calibration-entry.ps1) {
             judge_deferred       = <N>
         }
     } | ConvertTo-Json -Depth 10 -Compress
-    pwsh -NonInteractive -File .github/scripts/write-calibration-entry.ps1 -EntryJson $entryJson
+    # -NoProfile prevents user profile scripts from interfering with unattended execution
+    pwsh -NoProfile -NonInteractive -File .github/scripts/write-calibration-entry.ps1 -EntryJson $entryJson
     if ($LASTEXITCODE -ne 0) { Write-Warning "Calibration write failed (non-fatal) — exit code $LASTEXITCODE" }
 }
 ```

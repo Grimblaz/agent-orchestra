@@ -2,7 +2,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
 .SYNOPSIS
-    Pester 5 tests for aggregate-review-scores.ps1 -CalibrationFile feature (RED phase).
+    Pester 5 tests for aggregate-review-scores.ps1 -CalibrationFile feature.
 
 .DESCRIPTION
     Contract under test (new -CalibrationFile feature):
@@ -12,10 +12,7 @@
       - data_source field added to output when calibration file is present
       - Local entries supplement GitHub PR body entries (union merge)
       - Orphan local entries (pr_number not in GitHub merged list) are excluded
-      - GitHub mergedAt timestamp is authoritative over local merged_at
-
-    All tests covering the new feature are RED - the -CalibrationFile parameter
-    does not yet exist in aggregate-review-scores.ps1.
+      - GitHub mergedAt timestamp is authoritative over local created_at
 
     Isolation strategy:
       - Each test uses a fresh temp directory.
@@ -24,7 +21,7 @@
       - Parameter declaration tests use AST introspection (no gh needed).
 
     Calibration file schema (follows write-calibration-entry.ps1):
-      { "calibration_version": 1, "entries": [ { pr_number, merged_at, findings[], summary } ] }
+      { "calibration_version": 1, "entries": [ { pr_number, created_at, findings[], summary } ] }
 #>
 
 Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
@@ -63,7 +60,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 [ordered]@{
                     pr_number  = 9901
                     created_at = '2026-01-15T10:00:00Z'
-                    merged_at  = '2026-01-15T10:00:00Z'
                     findings   = @(
                         [ordered]@{
                             id           = 'F1'
@@ -96,7 +92,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 [ordered]@{
                     pr_number  = 99999999
                     created_at = '2026-03-01T08:00:00Z'
-                    merged_at  = '2026-03-01T08:00:00Z'
                     findings   = @()
                     summary    = [ordered]@{
                         prosecution_findings = 0
@@ -113,7 +108,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         # ------------------------------------------------------------------
-        # Stale-timestamp calibration fixture: merged_at is ancient (year 2000),
+        # Stale-timestamp calibration fixture: created_at is ancient (year 2000),
         # giving a decay weight ≈ 0 under the default lambda (0.023 * ~9500 days).
         # Used to verify that GitHub's mergedAt overrides the local value.
         # ------------------------------------------------------------------
@@ -123,7 +118,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 [ordered]@{
                     pr_number  = 9901
                     created_at = '2000-01-01T00:00:00Z'
-                    merged_at  = '2000-01-01T00:00:00Z'   # ancient; weight ≈ 0 if used
                     findings   = @(
                         [ordered]@{
                             id           = 'F1'
@@ -353,10 +347,10 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             }
         }
 
-        It 'uses GitHub mergedAt timestamp as authoritative over local merged_at' -Tag 'requires-gh' {
+        It 'uses GitHub mergedAt timestamp as authoritative over local created_at' -Tag 'requires-gh' {
             # Requires gh CLI
             # RED: -CalibrationFile not recognized; exit code non-zero.
-            # Once implemented: the local entry for pr_number=9901 has merged_at='2000-01-01'
+            # Once implemented: the local entry for pr_number=9901 has created_at='2000-01-01'
             # (ancient -> decay weight ≈ 0). If GitHub's mergedAt is used instead, the
             # effective_sample_size contribution for any real recent PR is NOT suppressed.
             # Assertion: effective_sample_size with the stale local file must be >= baseline

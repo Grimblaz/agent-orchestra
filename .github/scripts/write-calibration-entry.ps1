@@ -60,15 +60,36 @@ function ConvertTo-NormalizedObject {
 
 # ── Parse input ────────────────────────────────────────────────────────────────
 
-$entry = $EntryJson | ConvertFrom-Json -AsHashtable
+try {
+    $entry = $EntryJson | ConvertFrom-Json -AsHashtable
+}
+catch {
+    Write-Error "Failed to parse -EntryJson: $_" -ErrorAction Continue
+    exit 1
+}
 
 # ── Validate top-level required fields ────────────────────────────────────────
 
 if (-not (Test-HasProperty $entry 'pr_number')) {
     Write-ValidationError "Validation failed: required top-level field 'pr_number' is missing."
 }
+try {
+    if ([int]$entry['pr_number'] -le 0) { throw "pr_number must be a positive integer" }
+}
+catch {
+    Write-ValidationError "Validation failed: 'pr_number' must be a positive integer. Got: $($entry['pr_number'])"
+}
 if (-not (Test-HasProperty $entry 'created_at')) {
     Write-ValidationError "Validation failed: required top-level field 'created_at' is missing."
+}
+try {
+    $rawCreatedAt = $entry['created_at']
+    if ($rawCreatedAt -isnot [datetime]) {
+        [void][datetime]::Parse([string]$rawCreatedAt, [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+}
+catch {
+    Write-ValidationError "Validation failed: 'created_at' must be a parseable ISO 8601 datetime string. Got: $($entry['created_at'])"
 }
 
 # ── Validate findings ─────────────────────────────────────────────────────────
@@ -108,6 +129,11 @@ $entry = ConvertTo-NormalizedObject $entry
 $calibDir = Join-Path (Get-Location).Path '.copilot-tracking' 'calibration'
 $dataFile = Join-Path $calibDir 'review-data.json'
 $tmpFile  = "$dataFile.tmp"
+
+# Clean up any stale .tmp from a previous incomplete run
+if (Test-Path $tmpFile) {
+    Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+}
 
 # ── Ensure directory exists ───────────────────────────────────────────────────
 

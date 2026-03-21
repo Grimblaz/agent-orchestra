@@ -80,10 +80,10 @@ foreach ($pr in $prs) {
 
     # 5. Build entry
     $entry = @{
-        pr_number = [int]$pr.number
-        merged_at = $mergedAtStr
-        findings  = $findings
-        summary   = $summary
+        pr_number  = [int]$pr.number
+        created_at = $mergedAtStr  # surrogate: no pre-merge write-time; use PR mergedAt
+        findings   = $findings
+        summary    = $summary
     }
 
     # 6. Serialize and call write script in a child process (write script calls exit)

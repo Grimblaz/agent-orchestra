@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Aggregates pipeline-metrics from merged PRs and computes a time-weighted
@@ -48,6 +49,7 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
 # 2. Resolve repository
 # ---------------------------------------------------------------------------
 if ($Repo -eq '') {
+    # CWD must be the repository root for auto-detection to work correctly.
     $repoJson = gh repo view --json nameWithOwner
     if ($LASTEXITCODE -ne 0) {
         Write-Output "error: Failed to detect repository (gh exit code $LASTEXITCODE): $repoJson"
@@ -79,7 +81,13 @@ catch {
     exit 1
 }
 
+# $localEntries: dict of pr_number (int) -> calibration entry (PSObject)
+# $dataSource: 'github' | 'merged' — set based on whether any local entries contributed
+$localEntries = @{}
+$dataSource = 'github'
+
 if ($null -eq $mergedPRs -or $mergedPRs.Count -eq 0) {
+    Write-Output "data_source: $dataSource"
     Write-Output "insufficient_data: true"
     Write-Output "effective_sample_size: 0"
     Write-Output "issues_analyzed: 0"
@@ -91,10 +99,6 @@ if ($null -eq $mergedPRs -or $mergedPRs.Count -eq 0) {
 # ---------------------------------------------------------------------------
 # 3b. Load local calibration file and build union merge lookup (non-orphan entries only)
 # ---------------------------------------------------------------------------
-# $localEntries: dict of pr_number (int) -> calibration entry (PSObject)
-# $dataSource: 'github' | 'merged' — set based on whether any local entries contributed
-$localEntries = @{}
-$dataSource = 'github'
 
 if (-not [string]::IsNullOrWhiteSpace($CalibrationFile) -and (Test-Path $CalibrationFile)) {
     try {
@@ -103,7 +107,9 @@ if (-not [string]::IsNullOrWhiteSpace($CalibrationFile) -and (Test-Path $Calibra
         $githubPrNumbersSet = [System.Collections.Generic.HashSet[int]]::new()
         foreach ($pr in $mergedPRs) { [void]$githubPrNumbersSet.Add([int]$pr.number) }
         # Keep only non-orphan entries (pr_number appears in the GitHub merged list)
+        $totalLocalEntries = 0
         foreach ($entry in $calibJson.entries) {
+            $totalLocalEntries++
             $entryPrNum = [int]$entry.pr_number
             if ($githubPrNumbersSet.Contains($entryPrNum)) {
                 $localEntries[$entryPrNum] = $entry
@@ -111,6 +117,13 @@ if (-not [string]::IsNullOrWhiteSpace($CalibrationFile) -and (Test-Path $Calibra
             # else: orphan entry — skip (pr_number not in GitHub merged list)
         }
         if ($localEntries.Count -gt 0) { $dataSource = 'merged' }
+        $droppedLocalEntries = $totalLocalEntries - $localEntries.Count
+        if ($droppedLocalEntries -gt 0 -and $mergedPRs.Count -eq $Limit) {
+            Write-Warning "$droppedLocalEntries calibration entries not found in GitHub fetch results. The fetch limit ($Limit PRs) may have excluded older PRs — increase -Limit for full coverage."
+        }
+        if ($localEntries.Count -eq 0 -and $totalLocalEntries -gt 0) {
+            Write-Warning "All $totalLocalEntries calibration entries were orphaned (no matching PR in GitHub fetch results). Check -CalibrationFile path and -Repo values."
+        }
     }
     catch {
         Write-Warning "CalibrationFile '$CalibrationFile' could not be parsed: $_ — proceeding with GitHub data only."
@@ -300,12 +313,12 @@ $overallSufficient = $effectiveSampleSize -ge 5.0
 
 if (-not $overallSufficient) {
     $essFmt = '{0:F2}' -f $effectiveSampleSize
+    Write-Output "data_source: $dataSource"
     Write-Output "insufficient_data: true"
     Write-Output "effective_sample_size: $essFmt"
     Write-Output "issues_analyzed: $issuesAnalyzed"
     Write-Output "skipped_prs: $skippedPRs"
     Write-Output "message: `"Minimum effective sample size of 5 required (current: ${essFmt})`""
-    Write-Output "data_source: $dataSource"
     exit 0
 }
 
@@ -337,8 +350,8 @@ $knownCategories = @(
 # ---------------------------------------------------------------------------
 $generated = $now.ToString('yyyy-MM-dd')
 
+Write-Output "data_source: $dataSource"
 Write-Output "calibration:"
-Write-Output "  data_source: $dataSource"
 Write-Output "  generated: $generated"
 Write-Output "  issues_analyzed: $issuesAnalyzed"
 Write-Output "  v2_issues_analyzed: $v2IssuesAnalyzed"

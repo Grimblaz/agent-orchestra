@@ -2,7 +2,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
 .SYNOPSIS
-    Pester 5 unit tests for write-calibration-entry.ps1 (RED phase).
+    Pester 5 unit tests for write-calibration-entry.ps1.
 
 .DESCRIPTION
     Contract under test:
@@ -24,7 +24,6 @@
       - Output file always has calibration_version: 1
       - On success: exits 0
 
-    All tests are RED — the implementation script does not yet exist.
     Tests are written to pass once the implementation is created.
 
     Isolation strategy: each Context uses Push-Location into a fresh temp

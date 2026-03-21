@@ -2,7 +2,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
 .SYNOPSIS
-    Pester 5 unit tests for backfill-calibration.ps1 (RED phase).
+    Pester 5 tests for backfill-calibration.ps1.
 
 .DESCRIPTION
     Contract under test:
@@ -12,7 +12,7 @@
       - Skips PRs whose metrics block has no `findings:` array (v1-only PRs)
       - For v2 PRs (have `findings:` array): builds an entry JSON with:
           - pr_number  ← PR number from API
-          - merged_at  ← PR mergedAt from API
+          - created_at ← PR mergedAt from GitHub API (write script requires created_at, not merged_at)
           - findings[] ← extracted from pipeline-metrics block
           - summary    ← extracted from pipeline-metrics top-level scalar fields
       - Calls write-calibration-entry.ps1 -EntryJson $entryJson for each v2 PR
@@ -22,9 +22,6 @@
       - Exits 0 with informational message when gh returns an empty PR list
       - Exits non-zero when gh is unavailable or returns a non-zero exit code
       - Exits 0 on success
-
-    All tests are RED — the implementation script does not yet exist.
-    Tests are written to pass once the implementation is created.
 
     Isolation strategy:
       - Each test creates a fresh temp directory via $script:NewWorkDir.
@@ -309,7 +306,7 @@ Add-Content -Path '$($callsFile -replace "'", "''")' -Value `$EntryJson
             $result.CallCount | Should -Be 0 -Because 'no pipeline-metrics block means nothing to backfill'
         }
 
-        It 'passes merged_at from the GitHub API response in the entry JSON' {
+        It 'passes created_at (set to the GitHub mergedAt value) in the entry JSON' {
             # Arrange: 1 v2 PR with a known mergedAt timestamp
             $workDir   = & $script:NewWorkDir
             $mergedAt  = '2026-03-15T14:30:00Z'
@@ -323,14 +320,14 @@ Add-Content -Path '$($callsFile -replace "'", "''")' -Value `$EntryJson
             # Act
             $result = & $script:Invoke -WorkDir $workDir -GhCliPath $ghPath -WriteScriptPath $writePath
 
-            # Assert: the captured EntryJson contains merged_at matching the PR mergedAt
+            # Assert: the captured EntryJson contains created_at matching the PR mergedAt
             $result.CallCount | Should -Be 1 -Because 'one v2 PR should produce one write call'
 
             $entryJson = $result.Calls[0]
             $entry = $entryJson | ConvertFrom-Json
             # ConvertFrom-Json may auto-convert ISO dates to DateTime; normalize to UTC string for comparison
-            ([datetime]$entry.merged_at).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') | Should -Be $mergedAt `
-                -Because 'merged_at in the entry must come from the GitHub API mergedAt field'
+            ([datetime]$entry.created_at).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ') | Should -Be $mergedAt `
+                -Because 'created_at in the entry must be set to the GitHub API mergedAt value'
         }
 
         It 'passes findings from the pipeline-metrics block in the entry JSON' {
