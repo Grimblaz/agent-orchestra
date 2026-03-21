@@ -1,3 +1,4 @@
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Aggregates pipeline-metrics from merged PRs and computes a time-weighted
@@ -19,12 +20,18 @@
 .PARAMETER Repo
     Repository in owner/name format. If omitted, auto-detected via
     'gh repo view --json nameWithOwner'.
+
+.PARAMETER CalibrationFile
+    Path to the local calibration JSON file produced by write-calibration-entry.ps1.
+    Default: .copilot-tracking/calibration/review-data.json
+    When the file does not exist, the script falls back to PR-body-only mode.
 #>
 [CmdletBinding()]
 param(
     [double]$DecayLambda = 0.023,
     [int]$Limit = 100,
-    [string]$Repo = ''
+    [string]$Repo = '',
+    [string]$CalibrationFile = '.copilot-tracking/calibration/review-data.json'
 )
 
 Set-StrictMode -Version Latest
@@ -41,31 +48,27 @@ if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
 # ---------------------------------------------------------------------------
 # 2. Resolve repository
 # ---------------------------------------------------------------------------
-$repoArgs = @()
-if ($Repo -ne '') {
-    $repoArgs = @('--repo', $Repo)
-}
-else {
+if ($Repo -eq '') {
+    # CWD must be the repository root for auto-detection to work correctly.
     $repoJson = gh repo view --json nameWithOwner
     if ($LASTEXITCODE -ne 0) {
         Write-Output "error: Failed to detect repository (gh exit code $LASTEXITCODE): $repoJson"
         exit 1
     }
     try {
-        $repoInfo = $repoJson | ConvertFrom-Json
-        $Repo = $repoInfo.nameWithOwner
+        $Repo = ($repoJson | ConvertFrom-Json).nameWithOwner
     }
     catch {
         Write-Output "error: Failed to parse repository response: $_"
         exit 1
     }
-    $repoArgs = @('--repo', $Repo)
 }
+$repoArgs = @('--repo', $Repo)
 
 # ---------------------------------------------------------------------------
 # 3. Fetch merged PRs
 # ---------------------------------------------------------------------------
-$prListJson = gh pr list --state merged --limit $Limit --json number, mergedAt, body @repoArgs
+$prListJson = gh pr list --state merged --limit $Limit --json 'number,mergedAt,body' @repoArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Output "error: Failed to fetch merged PR list (gh exit code $LASTEXITCODE): $prListJson"
     exit 1
@@ -78,7 +81,13 @@ catch {
     exit 1
 }
 
+# $localEntries: dict of pr_number (int) -> calibration entry (PSObject)
+# $dataSource: 'github' | 'merged' — set based on whether any local entries contributed
+$localEntries = @{}
+$dataSource = 'github'
+
 if ($null -eq $mergedPRs -or $mergedPRs.Count -eq 0) {
+    Write-Output "data_source: $dataSource"
     Write-Output "insufficient_data: true"
     Write-Output "effective_sample_size: 0"
     Write-Output "issues_analyzed: 0"
@@ -88,63 +97,45 @@ if ($null -eq $mergedPRs -or $mergedPRs.Count -eq 0) {
 }
 
 # ---------------------------------------------------------------------------
-# Helper: extract a flat YAML field value from a text block
+# 3b. Load local calibration file and build union merge lookup (non-orphan entries only)
 # ---------------------------------------------------------------------------
-function Get-YamlField {
-    param([string]$Block, [string]$FieldName)
-    $m = [regex]::Match($Block, "(?m)^${FieldName}:\s*(.+)$")
-    if ($m.Success) { return $m.Groups[1].Value.Trim() }
-    return $null
-}
 
-# ---------------------------------------------------------------------------
-# Helper: parse the findings: array from a v2 metrics block
-# ---------------------------------------------------------------------------
-function Get-FindingsArray {
-    param([string]$Block)
-
-    $findings = [System.Collections.Generic.List[hashtable]]::new()
-
-    # Locate start of findings: section
-    $startMatch = [regex]::Match($Block, '(?m)^findings:\s*$')
-    if (-not $startMatch.Success) { return $findings }
-
-    $blockLines = $Block -split "`n"
-    $inFindings = $false
-    $current = $null
-
-    foreach ($line in $blockLines) {
-        if (-not $inFindings) {
-            if ($line -match '^findings:\s*$') {
-                $inFindings = $true
+if (-not [string]::IsNullOrWhiteSpace($CalibrationFile) -and (Test-Path $CalibrationFile)) {
+    try {
+        $calibJson = Get-Content -Path $CalibrationFile -Raw | ConvertFrom-Json
+        # Build a set of GitHub merged PR numbers for orphan filtering
+        $githubPrNumbersSet = [System.Collections.Generic.HashSet[int]]::new()
+        foreach ($pr in $mergedPRs) { [void]$githubPrNumbersSet.Add([int]$pr.number) }
+        # Keep only non-orphan entries (pr_number appears in the GitHub merged list)
+        $totalLocalEntries = 0
+        foreach ($entry in $calibJson.entries) {
+            $totalLocalEntries++
+            $entryPrNum = [int]$entry.pr_number
+            if ($githubPrNumbersSet.Contains($entryPrNum)) {
+                $localEntries[$entryPrNum] = $entry
             }
-            continue
+            # else: orphan entry — skip (pr_number not in GitHub merged list)
         }
-
-        # New finding entry (any `  - key: value` starts a new entry; id need not be first)
-        if ($line -match '^\s+-\s+([a-z_]+):\s*(.*)$') {
-            if ($null -ne $current) { $findings.Add($current) }
-            $current = @{}
-            $current[$Matches[1].Trim()] = $Matches[2].Trim()
-            continue
+        if ($localEntries.Count -gt 0) { $dataSource = 'merged' }
+        $droppedLocalEntries = $totalLocalEntries - $localEntries.Count
+        if ($droppedLocalEntries -gt 0 -and $mergedPRs.Count -eq $Limit) {
+            Write-Warning "$droppedLocalEntries calibration entries not found in GitHub fetch results. The fetch limit ($Limit PRs) may have excluded older PRs — increase -Limit for full coverage."
         }
-
-        # Stop if we hit a top-level key (no leading spaces)
-        if ($line -match '^[a-z_]+:\s') {
-            if ($null -ne $current) { $findings.Add($current) }
-            $current = $null
-            break
-        }
-
-        # Field within current entry
-        if ($null -ne $current -and $line -match '^\s{2,}([a-z_]+):\s*(.*)$') {
-            $current[$Matches[1].Trim()] = $Matches[2].Trim()
+        if ($localEntries.Count -eq 0 -and $totalLocalEntries -gt 0) {
+            Write-Warning "All $totalLocalEntries calibration entries were orphaned (no matching PR in GitHub fetch results). Check -CalibrationFile path and -Repo values."
         }
     }
-
-    if ($null -ne $current) { $findings.Add($current) }
-    return $findings
+    catch {
+        Write-Warning "CalibrationFile '$CalibrationFile' could not be parsed: $_ — proceeding with GitHub data only."
+        $localEntries = @{}
+        $dataSource = 'github'
+    }
 }
+
+# ---------------------------------------------------------------------------
+# Shared helpers (Get-YamlField, Get-FindingsArray)
+# ---------------------------------------------------------------------------
+. (Join-Path $PSScriptRoot 'lib\pipeline-metrics-helpers.ps1')
 
 # ---------------------------------------------------------------------------
 # 4. Per-PR processing
@@ -184,8 +175,57 @@ $confidenceData = @{
     low    = @{ count = 0; effectiveCount = 0.0; sustained = 0.0 }
 }
 
+# ---------------------------------------------------------------------------
+# Shared finding accumulation — dot-sourced at each call site.
+# Expects $finding (hashtable with string values) and $weight (double) in scope.
+# ---------------------------------------------------------------------------
+$accumulateFinding = {
+    $totalFindings++
+    $category        = $finding['category'].ToLowerInvariant()
+    $judgeRuling     = $finding['judge_ruling'].ToLowerInvariant()
+    $judgeConfidence = if ($finding.ContainsKey('judge_confidence')) { $finding['judge_confidence'].ToLowerInvariant() } else { '' }
+    $defenseVerdict  = if ($finding.ContainsKey('defense_verdict'))  { $finding['defense_verdict'].ToLowerInvariant()  } else { '' }
+    if (-not $finding.ContainsKey('review_stage')) { $reviewStageUntagged++ }
+    $reviewStage = if ($finding.ContainsKey('review_stage')) { $finding['review_stage'].ToLowerInvariant() } else { 'main' }
+    $isSustained = ($judgeRuling -eq 'sustained')
+
+    if ($category -ne 'n/a') {
+        $weightedTotal += $weight
+        if ($isSustained) { $weightedAccepted += $weight }
+        if (-not $categoryData.ContainsKey($category)) {
+            $categoryData[$category] = @{ findings = 0; effectiveCount = 0.0; sustained = 0.0 }
+        }
+        $categoryData[$category].findings++
+        $categoryData[$category].effectiveCount += $weight
+        if ($isSustained) { $categoryData[$category].sustained += $weight }
+    }
+    if (-not $stageData.ContainsKey($reviewStage)) {
+        $stageData[$reviewStage] = @{ findings = 0; sustained = 0; effectiveCount = 0.0; effectiveSustained = 0.0 }
+    }
+    $stageData[$reviewStage].findings++
+    $stageData[$reviewStage].effectiveCount += $weight
+    if ($isSustained) {
+        $stageData[$reviewStage].sustained++
+        $stageData[$reviewStage].effectiveSustained += $weight
+    }
+    if ($category -ne 'n/a' -and $defenseVerdict -ne '') {
+        $defenseTotal += $weight
+        $defenseTotalCount++
+        if ($judgeRuling -eq 'defense-sustained') { $defenseSustained += $weight }
+        if ($defenseVerdict -eq 'disproved') {
+            $defenseChallengedTotal += $weight
+            if ($isSustained) { $defenseOverreach += $weight }
+        }
+    }
+    if ($category -ne 'n/a' -and $confidenceData.ContainsKey($judgeConfidence)) {
+        $confidenceData[$judgeConfidence].count++
+        $confidenceData[$judgeConfidence].effectiveCount += $weight
+        if ($isSustained) { $confidenceData[$judgeConfidence].sustained += $weight }
+    }
+}
+
 foreach ($pr in $mergedPRs) {
-    $prNumber = $pr.number
+    $prNumber = [int]$pr.number
     $mergedAt = $pr.mergedAt
 
     # Compute decay weight
@@ -201,15 +241,32 @@ foreach ($pr in $mergedPRs) {
         continue
     }
 
-    $body = $pr.body
-
-    if ([string]::IsNullOrWhiteSpace($body)) {
-        continue
-    }
+    $body = if ($pr.body) { $pr.body } else { '' }
 
     # Extract <!-- pipeline-metrics ... --> block
     $metricsMatch = [regex]::Match($body, '(?s)<!--\s*pipeline-metrics\s*(.*?)-->')
+
     if (-not $metricsMatch.Success) {
+        # Union merge: fall back to local calibration entry if GitHub PR body has no metrics block
+        if ($localEntries.ContainsKey($prNumber)) {
+            $localEntry = $localEntries[$prNumber]
+            $issuesAnalyzed++
+            $effectiveSampleSize += $weight
+            $v2IssuesAnalyzed++
+            # Process local entry's findings array using GitHub's mergedAt-derived weight
+            foreach ($lf in $localEntry.findings) {
+                $finding = @{}
+                foreach ($prop in $lf.PSObject.Properties) { $finding[$prop.Name] = [string]$prop.Value }
+                $missingField = $false
+                foreach ($field in $requiredFindingFields) {
+                    if (-not $finding.ContainsKey($field) -or [string]::IsNullOrWhiteSpace($finding[$field])) {
+                        $missingField = $true; break
+                    }
+                }
+                if ($missingField) { Write-Warning "Warning: local finding entry missing required fields, skipped."; continue }
+                . $accumulateFinding
+            }
+        }
         continue
     }
 
@@ -245,66 +302,7 @@ foreach ($pr in $mergedPRs) {
             Write-Warning "Warning: finding entry missing required fields, skipped."
             continue
         }
-
-        $totalFindings++
-
-        $category = $finding['category'].ToLowerInvariant()
-        $judgeRuling = $finding['judge_ruling'].ToLowerInvariant()
-        $judgeConfidence = if ($finding.ContainsKey('judge_confidence')) { $finding['judge_confidence'].ToLowerInvariant() } else { '' }
-        $defenseVerdict = if ($finding.ContainsKey('defense_verdict')) { $finding['defense_verdict'].ToLowerInvariant() } else { '' }
-        if (-not $finding.ContainsKey('review_stage')) { $reviewStageUntagged++ }
-        $reviewStage = if ($finding.ContainsKey('review_stage')) { $finding['review_stage'].ToLowerInvariant() } else { 'main' }
-
-        $isSustained = ($judgeRuling -eq 'sustained')
-
-        # Per-category (skip n/a — non-code prosecution)
-        if ($category -ne 'n/a') {
-            $weightedTotal += $weight
-            if ($isSustained) { $weightedAccepted += $weight }
-
-            if (-not $categoryData.ContainsKey($category)) {
-                $categoryData[$category] = @{ findings = 0; effectiveCount = 0.0; sustained = 0.0 }
-            }
-            $categoryData[$category].findings++
-            $categoryData[$category].effectiveCount += $weight
-            if ($isSustained) { $categoryData[$category].sustained += $weight }
-        }
-
-        # Per-stage aggregation (all findings, including n/a)
-        if (-not $stageData.ContainsKey($reviewStage)) {
-            $stageData[$reviewStage] = @{ findings = 0; sustained = 0; effectiveCount = 0.0; effectiveSustained = 0.0 }
-        }
-        $stageData[$reviewStage].findings++
-        $stageData[$reviewStage].effectiveCount += $weight
-        if ($isSustained) {
-            $stageData[$reviewStage].sustained++
-            $stageData[$reviewStage].effectiveSustained += $weight
-        }
-
-        # Defense analysis (gate on code prosecution only — skip n/a category)
-        if ($category -ne 'n/a' -and $defenseVerdict -ne '') {
-            $defenseTotal += $weight
-            $defenseTotalCount++
-            if ($judgeRuling -eq 'defense-sustained') {
-                $defenseSustained += $weight
-            }
-            # Overreach: defense claimed disproved but judge still sustained prosecution
-            if ($defenseVerdict -eq 'disproved') {
-                $defenseChallengedTotal += $weight
-                if ($isSustained) {
-                    $defenseOverreach += $weight
-                }
-            }
-        }
-
-        # Judge confidence calibration (gate on code prosecution only — skip n/a category)
-        if ($category -ne 'n/a' -and $confidenceData.ContainsKey($judgeConfidence)) {
-            $confidenceData[$judgeConfidence].count++
-            $confidenceData[$judgeConfidence].effectiveCount += $weight
-            if ($isSustained) {
-                $confidenceData[$judgeConfidence].sustained += $weight
-            }
-        }
+        . $accumulateFinding
     }
 }
 
@@ -315,6 +313,7 @@ $overallSufficient = $effectiveSampleSize -ge 5.0
 
 if (-not $overallSufficient) {
     $essFmt = '{0:F2}' -f $effectiveSampleSize
+    Write-Output "data_source: $dataSource"
     Write-Output "insufficient_data: true"
     Write-Output "effective_sample_size: $essFmt"
     Write-Output "issues_analyzed: $issuesAnalyzed"
@@ -351,6 +350,7 @@ $knownCategories = @(
 # ---------------------------------------------------------------------------
 $generated = $now.ToString('yyyy-MM-dd')
 
+Write-Output "data_source: $dataSource"
 Write-Output "calibration:"
 Write-Output "  generated: $generated"
 Write-Output "  issues_analyzed: $issuesAnalyzed"

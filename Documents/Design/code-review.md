@@ -516,3 +516,27 @@ Three changes across two agent files:
 - Issue-Planner `<plan_style_guide>` includes bidirectional Cross-file constants rule with format example
 - Issue-Planner `<plan_style_guide>` includes Multi-tier statistical output rule using "involves"
 - Quick-validate: Plan-Architect refs = 0, Janitor refs = 0, agent count = 13
+
+---
+
+## Persistent Review Calibration Data Storage
+
+**Issue**: #141 | **Depends on**: #97 (Cross-Session Learning Pipeline)
+
+### Summary
+
+Adds a local calibration cache (`.copilot-tracking/calibration/review-data.json`) that supplements PR-body pipeline-metrics parsing for VS Code Copilot users. Claude Code continues to use PR body parsing only. Schema versioned at `calibration_version: 1`; top-level fields are extensible for downstream tooling.
+
+### Decision Log
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|----------|
+| D34 | Calibration timestamp field | `created_at` at write time (pre-merge, not `merged_at`) | The aggregate script sources `mergedAt` from GitHub API for decay weighting. Local calibration entries support downstream issues via extensible top-level schema; per-finding data quality depends on pipeline-metrics v2 adoption. |
+
+### Acceptance Criteria (from issue #141)
+
+- `write-calibration-entry.ps1` writes entries to `.copilot-tracking/calibration/review-data.json` using `created_at` timestamp
+- `backfill-calibration.ps1` backfills from existing merged PR history (VS Code Copilot only)
+- `aggregate-review-scores.ps1` accepts optional `-CalibrationFile` parameter (default: `.copilot-tracking/calibration/review-data.json`)
+- Claude Code workflow uses PR body parsing only — local calibration cache is a VS Code Copilot optimization
+- Quick-validate: Plan-Architect refs = 0, Janitor refs = 0, agent count = 13

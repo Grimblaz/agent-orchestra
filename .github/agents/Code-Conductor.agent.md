@@ -561,6 +561,50 @@ findings:
 
 **Malformed entries**: If a finding entry is incomplete (missing required fields), omit the malformed entry from the array and emit a warning comment in the PR body: `<!-- warning: finding {id} omitted from metrics due to incomplete data -->`.
 
+### Calibration Data Write (VS Code Copilot only)
+
+After creating the PR body with the `<!-- pipeline-metrics -->` block, invoke the write script to persist calibration data locally. This is a VS Code Copilot optimization — Claude Code does not run this step (calibration data accumulates via backfill or the aggregate script's GitHub PR body path).
+
+```powershell
+# Test-Path guard — template portability for downstream repos without the write script
+if (Test-Path .github/scripts/write-calibration-entry.ps1) {
+    $entryJson = @{
+        pr_number  = <PR number as integer>
+        created_at = ([System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))
+        findings   = @(
+            # One object per finding from the judge's <!-- judge-rulings --> block:
+            @{
+                id           = '<finding id>'
+                category     = '<category>'
+                judge_ruling = '<sustained|defense-sustained>'
+                # Optional fields (include when present):
+                review_stage    = '<main|postfix|ce|design|proxy>'
+                defense_verdict = '<conceded|disproved>'
+                judge_confidence = '<high|medium|low>'
+                systemic_fix_type = '<type if present>'
+            }
+        )
+        summary = @{
+            prosecution_findings = <N>
+            pass_1_findings      = <N>
+            pass_2_findings      = <N>
+            pass_3_findings      = <N>
+            defense_disproved    = <N>
+            judge_accepted       = <N>
+            judge_rejected       = <N>
+            judge_deferred       = <N>
+        }
+    } | ConvertTo-Json -Depth 10 -Compress
+    # -NoProfile prevents user profile scripts from interfering with unattended execution
+    pwsh -NoProfile -NonInteractive -File .github/scripts/write-calibration-entry.ps1 -EntryJson $entryJson
+    if ($LASTEXITCODE -ne 0) { Write-Warning "Calibration write failed (non-fatal) — exit code $LASTEXITCODE" }
+}
+```
+
+**Timing note**: Use `created_at` (current timestamp at write time — the PR is not merged yet). The aggregate script uses GitHub's `mergedAt` for decay weighting.
+
+**Write failure is non-fatal**: If the write script fails, log a warning but do not block PR creation.
+
 ---
 
 ## Refactoring Phase is MANDATORY

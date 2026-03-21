@@ -10,11 +10,16 @@ This document defines the standard YAML frontmatter format for tracking files st
 .copilot-tracking/
 ├── research/
 │   └── {date}-{topic}.md
-└── archived/
-    └── issue-001-feature-name.md
+├── archived/
+│   └── issue-001-feature-name.md
+└── calibration/
+    └── review-data.json
 ```
 
-> **Note**: `.copilot-tracking/` stores research notes and archived tracking files. Plans are now stored in session memory at `/memories/session/plan-issue-{ID}.md`, not as local files.
+- `calibration/` — persistent per-finding calibration cache (populated by `write-calibration-entry.ps1` or `backfill-calibration.ps1`)
+  - `review-data.json` — JSON calibration data (schema: `{ calibration_version: 1, entries: [{ pr_number, created_at, findings[], summary }] }`)
+
+> **Note**: `.copilot-tracking/` stores research notes, archived tracking files, and persistent calibration data. Plans are now stored in session memory at `/memories/session/plan-issue-{ID}.md`, not as local files.
 
 ## YAML Frontmatter Format
 
