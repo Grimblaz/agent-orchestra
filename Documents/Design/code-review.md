@@ -86,7 +86,7 @@ Added in issue #73. Code-Critic gains a second operating mode triggered by the m
 | D8 | Pass count for design review | 3-pass parallel (2 standard design + 1 product-alignment) | Matches the coverage-variance rationale for code review; adds an explicit product/experience/planned-work alignment lens per issue #131 |
 | D9 | Review perspectives | 3 (Feasibility & Risk, Scope & Completeness, Integration & Impact) | Covers the three most common plan failure modes without overlap |
 | D10 | Blocking behavior | Non-blocking (caller decides) | Code-Critic has no veto over design decisions; findings inform, not gate |
-| D11 | Callers | Solution-Designer, Issue-Planner, Claude Code via start-issue.md | All three entry points to the planning phase need the same quality gate |
+| D11 | Callers | Solution-Designer, Issue-Planner | Both entry points to the planning phase need the same quality gate |
 
 ### Design Review Mode Behavior
 
@@ -102,7 +102,6 @@ Each caller decides how to handle the challenge report:
 
 - **Solution-Designer**: incorporate / dismiss / escalate for user decision (with `vscode/askQuestions` gate before writing to GitHub if any item is escalated)
 - **Issue-Planner**: incorporate / dismiss / escalate for user decision; append `**Plan Stress-Test**` summary block to plan
-- **Claude Code (start-issue.md)**: follow Issue-Planner.agent.md Phase 4 guidance
 
 ### Vocabulary Standardization
 
@@ -377,11 +376,8 @@ rework_cycles: N                 # code review fix loops only (not CE Gate loops
 | `.github/agents/Issue-Planner.agent.md` | Plan template updated (prosecution → defense → judge); `review_loop_budget` removed |
 | `.github/agents/Process-Review.agent.md` | Reconciliation loop metrics updated to prosecution/defense/judge terminology |
 | `.github/copilot-instructions.md` | Code-Critic Adversarial Review Protocol section updated (5 modes, all pipeline stages) |
-| `CLAUDE.md` | Phase 5 description updated |
 | `.github/instructions/code-review-intake.instructions.md` | GitHub Review Mode → Proxy Prosecution Pipeline; loop budget → convergence section |
 | `.github/skills/code-review-intake/SKILL.md` | Mirror of instructions file changes |
-| `.claude/commands/implement.md` | CE Gate cycle reference updated |
-| `.claude/commands/review.md` | Adversarial Pipeline section added |
 | `.github/agents/Code-Critic.agent.md` | Added `id` and `pass` fields to automation-routing fields in Finding Categories; added `pass: N` omission notes to proxy prosecution and CE prosecution output descriptions |
 
 ---
@@ -474,7 +470,6 @@ All recommendations cite the specific file, section, and suggested change. Proce
 | `.github/agents/Process-Review.agent.md` | Added §4.7 Calibration Analysis section |
 | `.github/scripts/aggregate-review-scores.ps1` | New script — reads merged PRs, computes calibration profile |
 | `Documents/Design/code-review.md` | This file — cross-session learning pipeline section |
-| `CLAUDE.md` | Phase 5 updated with calibration script note |
 | `.github/agents/Code-Review-Response.agent.md` | Added `<!-- judge-rulings -->` structured YAML block requirement; added `Pass` column to score summary table template; added `id` field to finding schema; split example into code-prosecution and non-code-prosecution variants |
 
 ---
@@ -525,7 +520,7 @@ Three changes across two agent files:
 
 ### Summary
 
-Adds a local calibration cache (`.copilot-tracking/calibration/review-data.json`) that supplements PR-body pipeline-metrics parsing for VS Code Copilot users. Claude Code continues to use PR body parsing only. Schema versioned at `calibration_version: 1`; top-level fields are extensible for downstream tooling.
+Adds a local calibration cache (`.copilot-tracking/calibration/review-data.json`) that supplements PR-body pipeline-metrics parsing. Schema versioned at `calibration_version: 1`; top-level fields are extensible for downstream tooling.
 
 ### Decision Log
 
@@ -536,9 +531,8 @@ Adds a local calibration cache (`.copilot-tracking/calibration/review-data.json`
 ### Acceptance Criteria (from issue #141)
 
 - `write-calibration-entry.ps1` writes entries to `.copilot-tracking/calibration/review-data.json` using `created_at` timestamp
-- `backfill-calibration.ps1` backfills from existing merged PR history (VS Code Copilot only)
+- `backfill-calibration.ps1` backfills from existing merged PR history
 - `aggregate-review-scores.ps1` accepts optional `-CalibrationFile` parameter (default: `.copilot-tracking/calibration/review-data.json`)
-- Claude Code workflow uses PR body parsing only — local calibration cache is a VS Code Copilot optimization
 - Quick-validate: Plan-Architect refs = 0, Janitor refs = 0, agent count = 14
 
 ---
@@ -557,4 +551,4 @@ Three targeted additions to close the process gaps that allowed these defects th
 
 2. **Code-Smith item 4 — Single-element array round-trip verification** (`Code-Smith.agent.md`): Extended the serialized output correctness rule to require verifying that single-element writes preserve array type, not just that the JSON document is parseable. Added PowerShell idiom hint (`return , @(...)` / `Write-Output -NoEnumerate`).
 
-3. **copilot-instructions.md + CLAUDE.md — Pester test command**: Added `pwsh -NoProfile -NonInteractive -Command "Invoke-Pester .github/scripts/Tests/ -Output Minimal"` to the validation commands section and updated the Testing line in the Technology Stack.
+3. **copilot-instructions.md — Pester test command**: Added `pwsh -NoProfile -NonInteractive -Command "Invoke-Pester .github/scripts/Tests/ -Output Minimal"` to the validation commands section and updated the Testing line in the Technology Stack.

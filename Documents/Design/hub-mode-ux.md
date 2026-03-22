@@ -78,4 +78,3 @@ D7: The original D9 wording implied full-pipeline-only, which meant abbreviated-
 | `.github/agents/Code-Critic.agent.md` | Added post-fix prosecution scope constraint clause and out-of-diff AC exception |
 | `.github/agents/Code-Review-Response.agent.md` | Updated effort estimation language to use "high confidence" framing |
 | `.github/agents/Issue-Planner.agent.md` | Added `escalation_recommended` and `escalation_reason` YAML frontmatter fields to plan output spec |
-| `CLAUDE.md` | Added Phase 0 abbreviated-tier skip criteria: enumerated all 5 criteria explicitly |

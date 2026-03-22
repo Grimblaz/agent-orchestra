@@ -133,9 +133,7 @@ Intent criteria are surface-dependent. A surface-specific table in Code-Conducto
 | `.github/agents/Issue-Planner.agent.md` | `[CE GATE]` step template updated with `Design Intent` field |
 | `.github/agents/Experience-Owner.agent.md` | CE Gate readiness: Functional and Intent scenario types defined; design intent reference identified and summarized for `[CE GATE]` plan step |
 | `.github/copilot-instructions.md` | CE Gate description updated to include "design-intent verification" |
-| `CLAUDE.md` | CE Gate description updated to include "design-intent verification" |
 | `Documents/Design/customer-experience-gate.md` | Intent match architecture documented: D15 decision, Intent Match Rubric, Surface-Specific Intent Verification, Two-Track intent deficiency routing |
-| `.claude/commands/implement.md` | `after fix` marker variant added; placeholder notation standardized to `{strong\|partial\|weak}`; intent evaluation updated to reference `[CE GATE]` Design Intent field |
 
 ---
 

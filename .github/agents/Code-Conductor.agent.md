@@ -141,13 +141,13 @@ Before calling any upstream agent, classify the issue scope to determine the app
 
 **Two-tier table**:
 
-| Phase             | Full pipeline | Abbreviated pipeline |
-| ----------------- | ------------- | -------------------- |
-| Experience-Owner  | ✅            | ❌ (skip)            |
-| Solution-Designer | ✅            | ❌ (skip)            |
+| Phase                               | Full pipeline | Abbreviated pipeline |
+| ----------------------------------- | ------------- | -------------------- |
+| Experience-Owner                    | ✅            | ❌ (skip)            |
+| Solution-Designer                   | ✅            | ❌ (skip)            |
 | Issue-Planner (incl. design review) | ✅            | ✅ (required)        |
-| D9 Checkpoint     | ✅            | ✅ (required)        |
-| Implementation    | ✅            | ✅                   |
+| D9 Checkpoint                       | ✅            | ✅ (required)        |
+| Implementation                      | ✅            | ✅                   |
 
 **User override**: Always present both tiers as options and recommend one — the user may choose either regardless of your analysis. This is how scope override (D5) is implemented.
 
@@ -259,7 +259,7 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 | Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic             | Process-Review       |
 
 > **native Explore vs Research-Agent**: Use the native Explore subagent for lightweight read-only fact-finding (runs on a fast model in a short-lived context — the returned summary is typically smaller than running equivalent tool calls inline). Use Research-Agent when analysis is deep/multi-file and the result needs to be persisted to a research document for future reference. When in doubt: Explore for discovery, Research-Agent for output that must survive compaction.
-
+>
 > **Doc-Keeper parallel documentation batches**: When delegating multiple documentation file updates to Doc-Keeper in a single batch, include a per-file self-check instruction in the delegation prompt: after writing each file, Doc-Keeper should run that file's own Requirement Contract validation grep before proceeding to the next file. The global final validation scan is then a confirmation pass, not the first opportunity to detect gaps.
 
 ## Review Reconciliation Loop (Mandatory)
@@ -610,7 +610,7 @@ findings:
 
 ### Calibration Data Write (VS Code Copilot only)
 
-After creating the PR body with the `<!-- pipeline-metrics -->` block, invoke the write script to persist calibration data locally. This is a VS Code Copilot optimization — Claude Code does not run this step (calibration data accumulates via backfill or the aggregate script's GitHub PR body path).
+After creating the PR body with the `<!-- pipeline-metrics -->` block, invoke the write script to persist calibration data locally. This is a VS Code Copilot optimization (calibration data can instead accumulate via backfill or the aggregate script's GitHub PR body path).
 
 ```powershell
 # Test-Path guard — template portability for downstream repos without the write script
@@ -742,7 +742,7 @@ VS Code 1.110+ auto-compacts conversation context automatically when the context
 
 **Custom `/compact` instructions**: When recommending compaction, generate the command with actual values from the current context — do not use a generic reminder. Fill in this template with real values:
 
-```
+```text
 /compact focus on: issue #[ID], step [N] of [M] complete ([brief outcome per step]), branch [branch-name], design intent: [key design intent], open items: [unresolved decisions or blockers]
 ```
 

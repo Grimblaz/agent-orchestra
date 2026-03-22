@@ -120,7 +120,7 @@ Before presenting the plan for approval, call Code-Critic as a subagent **three 
 
 **Pass 3 prompt** (product-alignment):
 
-> "Stress-test this implementation plan for product direction fit, customer experience coherence, and planned-work alignment. Use product-alignment perspectives. This is adversarial review pass 3 of 3. Tag each finding with 'pass: 3'. Here is the plan: {paste the full plan content}. Evidence sources: (1) the plan content above (always available), (2) issue body if present, (3) Documents/Design/ and Documents/Decisions/, (4) project guidance files (README.md, CLAUDE.md, CUSTOMIZATION.md, copilot-instructions.md), (5) planned-work artifacts (ROADMAP.md, NEXT-STEPS.md) if present. Note absence of planned-work artifacts if not found."
+> "Stress-test this implementation plan for product direction fit, customer experience coherence, and planned-work alignment. Use product-alignment perspectives. This is adversarial review pass 3 of 3. Tag each finding with 'pass: 3'. Here is the plan: {paste the full plan content}. Evidence sources: (1) the plan content above (always available), (2) issue body if present, (3) Documents/Design/ and Documents/Decisions/, (4) project guidance files (README.md, CUSTOMIZATION.md, copilot-instructions.md), (5) planned-work artifacts (ROADMAP.md, NEXT-STEPS.md) if present. Note absence of planned-work artifacts if not found."
 
 **Merge and deduplicate findings**:
 

@@ -188,7 +188,7 @@ When the prompt contains the marker **"Use product-alignment perspectives"**, ac
 
 ### Evidence Lookup Order
 
-Evaluate using this fixed evidence order: (1) draft design/plan content (always available — passed in the prompt), (2) issue body when present, (3) `Documents/Design/` and `Documents/Decisions/`, (4) project guidance files (README.md, CLAUDE.md, CUSTOMIZATION.md, copilot-instructions.md), (5) planned-work artifacts (ROADMAP.md, NEXT-STEPS.md) when present. When no planned-work artifacts exist, note the absence and continue — this is acceptable, not an error.
+Evaluate using this fixed evidence order: (1) draft design/plan content (always available — passed in the prompt), (2) issue body when present, (3) `Documents/Design/` and `Documents/Decisions/`, (4) project guidance files (README.md, CUSTOMIZATION.md, copilot-instructions.md), (5) planned-work artifacts (ROADMAP.md, NEXT-STEPS.md) when present. When no planned-work artifacts exist, note the absence and continue — this is acceptable, not an error.
 
 ### Product-Alignment Perspectives (3)
 
@@ -196,7 +196,7 @@ Apply all 3 perspectives. For each, produce evidence-based findings using the sa
 
 #### §P1 — Product Direction Fit
 
-- Does this design/plan align with the product's stated goals and vision (as expressed in README, CLAUDE.md, CUSTOMIZATION.md, or project guidance)?
+- Does this design/plan align with the product's stated goals and vision (as expressed in README, CUSTOMIZATION.md, or project guidance)?
 - Does it move the product forward or introduce tangential complexity?
 - Is the scope proportionate to the stated problem, or does it over-engineer / under-serve?
 

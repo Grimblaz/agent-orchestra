@@ -160,7 +160,7 @@ After design decisions are confirmed with the user, call Code-Critic as a subage
 
 **Pass 3 prompt** (product-alignment):
 
-> "Review this design for product direction fit, customer experience coherence, and planned-work alignment. Use product-alignment perspectives. This is adversarial review pass 3 of 3. Tag each finding with 'pass: 3'. Here is the design: {paste the key design decisions, acceptance criteria, scope, and any constraints confirmed in this session}. Evidence sources: (1) the design content above (always available), (2) issue body if present, (3) Documents/Design/ and Documents/Decisions/, (4) project guidance files (README.md, CLAUDE.md, CUSTOMIZATION.md, copilot-instructions.md), (5) planned-work artifacts (ROADMAP.md, NEXT-STEPS.md) if present. Note absence of planned-work artifacts if not found."
+> "Review this design for product direction fit, customer experience coherence, and planned-work alignment. Use product-alignment perspectives. This is adversarial review pass 3 of 3. Tag each finding with 'pass: 3'. Here is the design: {paste the key design decisions, acceptance criteria, scope, and any constraints confirmed in this session}. Evidence sources: (1) the design content above (always available), (2) issue body if present, (3) Documents/Design/ and Documents/Decisions/, (4) project guidance files (README.md, CUSTOMIZATION.md, copilot-instructions.md), (5) planned-work artifacts (ROADMAP.md, NEXT-STEPS.md) if present. Note absence of planned-work artifacts if not found."
 
 **Merge and deduplicate findings**:
 

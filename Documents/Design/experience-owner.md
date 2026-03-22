@@ -79,7 +79,6 @@ Invoked by Code-Conductor as a subagent during the CE Gate:
 | `.github/prompts/experience.prompt.md` | New slash command: `/experience` → Experience-Owner |
 | `.github/prompts/design.prompt.md` | agent: Solution-Designer |
 | `.github/copilot-instructions.md` | Pipeline diagram + agent count + CE review description updated |
-| `CLAUDE.md` | Pipeline diagram + agent count + CE review + Workflow step 0 added |
 | `README.md` | Plugin count + agent table + pipeline + Workflow updated |
 | `.github/architecture-rules.md` | Agent counts + Issue-Designer retired-name grep added |
 | `CONTRIBUTING.md` | User-facing count 6→7 |
