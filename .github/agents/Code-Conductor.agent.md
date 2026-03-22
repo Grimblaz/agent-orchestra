@@ -107,7 +107,6 @@ Quick checklist before declaring mode for a step:
 ## Core Workflow
 
 <!-- markdownlint-disable-next-line MD029 -->
-
 0. **Issue Transition (Step 0, before implementation)**:
    - Cleanup note: The `.github/copilot-instructions.md` "Session Startup Check" detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `$copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }; pwsh "$copilotRoot/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly (only if `$copilotRoot` is non-empty — requires `COPILOT_ORCHESTRA_ROOT` or `WORKFLOW_TEMPLATE_ROOT` to be set).
    - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
@@ -259,7 +258,7 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 | Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic             | Process-Review       |
 
 > **native Explore vs Research-Agent**: Use the native Explore subagent for lightweight read-only fact-finding (runs on a fast model in a short-lived context — the returned summary is typically smaller than running equivalent tool calls inline). Use Research-Agent when analysis is deep/multi-file and the result needs to be persisted to a research document for future reference. When in doubt: Explore for discovery, Research-Agent for output that must survive compaction.
-
+>
 > **Doc-Keeper parallel documentation batches**: When delegating multiple documentation file updates to Doc-Keeper in a single batch, include a per-file self-check instruction in the delegation prompt: after writing each file, Doc-Keeper should run that file's own Requirement Contract validation grep before proceeding to the next file. The global final validation scan is then a confirmation pass, not the first opportunity to detect gaps.
 
 ## Review Reconciliation Loop (Mandatory)
@@ -742,7 +741,7 @@ VS Code 1.110+ auto-compacts conversation context automatically when the context
 
 **Custom `/compact` instructions**: When recommending compaction, generate the command with actual values from the current context — do not use a generic reminder. Fill in this template with real values:
 
-```
+```text
 /compact focus on: issue #[ID], step [N] of [M] complete ([brief outcome per step]), branch [branch-name], design intent: [key design intent], open items: [unresolved decisions or blockers]
 ```
 
