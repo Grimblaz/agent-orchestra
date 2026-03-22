@@ -326,13 +326,13 @@ Use tools in this priority order:
 
 1. **VS Code native browser tools** (`openBrowserPage`, `screenshotPage`, `clickElement`, `typeInPage`, `readPage`, etc.) — enabled via `workbench.browser.enableChatTools: true` in `.vscode/settings.json`; zero setup
 2. **Playwright MCP** (`playwright/*` tools) — if `.vscode/mcp.json` is configured; requires VS Code restart after adding
-3. **Manual fallback** — use `vscode/openSimpleBrowser` and request user-pasted screenshots
+3. **Manual fallback** — request user-pasted screenshots
 
 ## Error handling
 
 - If port `{PORT}` is in use by a non-dev-server process, report it and stop.
 - If startup times out, report the timeout and do not continue browser actions.
-- If native browser tools fail, try Playwright MCP; if still failing, use `vscode/openSimpleBrowser` manual fallback.
+- If native browser tools fail, try Playwright MCP; if still failing, use manual screenshot paste fallback.
 
 ## Screenshots
 

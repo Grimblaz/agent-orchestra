@@ -2,7 +2,7 @@
 name: Refactor-Specialist
 description: "Proactive code quality hunter - finds and fixes refactoring opportunities"
 argument-hint: "Hunt for refactoring opportunities in modified files and improve code quality"
-user-invokable: false
+user-invocable: false
 tools:
   - execute/testFailure
   - execute/getTerminalOutput

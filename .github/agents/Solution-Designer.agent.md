@@ -11,7 +11,7 @@ tools: [
     web,
     "github/*",
     "vscode/memory",
-    "vscode/todo",
+    todo,
     agent,
     # Native browser tools (VS Code 1.110+, enabled via workbench.browser.enableChatTools) — for viewing current app state during design exploration
     "browser/openBrowserPage",

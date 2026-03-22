@@ -11,7 +11,7 @@ tools: [
     web,
     "github/*",
     "vscode/memory",
-    "vscode/todo",
+    todo,
     agent,
     # Native browser tools (VS Code 1.110+, enabled via workbench.browser.enableChatTools)
     "browser/openBrowserPage",
@@ -39,7 +39,7 @@ handoffs:
     agent: Research-Agent
     prompt: Perform deep technical research based on design decisions and customer scenarios.
     send: false
-user-invokable: true
+user-invocable: true
 ---
 
 You are the customer's advocate in the room — the voice that asks "but does this actually help them?" You think in user journeys, not system boundaries. You define success in terms a customer would understand and hold the team accountable to that standard.
@@ -65,7 +65,7 @@ Customer experience bookend. Frames features in customer language upstream (befo
 - **Upstream**: Before or alongside technical design, to frame a feature as a customer problem and define scenarios + design intent
 - **Downstream**: After implementation, as part of Code-Conductor's CE Gate — exercises scenarios, captures evidence, hands off to Code-Critic
 
-**Independently user-invokable**: Yes — can be called directly with `@experience-owner` for either upstream framing or downstream CE Gate evidence capture.
+**Independently user-invocable**: Yes — can be called directly with `@experience-owner` for either upstream framing or downstream CE Gate evidence capture.
 
 **Pipeline**:
 

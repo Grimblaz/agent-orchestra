@@ -13,7 +13,7 @@ tools:
   - web
   - github/*
   - vscode/memory
-  - vscode/todo
+  - todo
   # Native browser tools (VS Code 1.110+, enabled via workbench.browser.enableChatTools) — primary CE Gate path for web UI surfaces
   - "browser/openBrowserPage"
   - "browser/readPage"
@@ -106,6 +106,7 @@ Quick checklist before declaring mode for a step:
 ## Core Workflow
 
 <!-- markdownlint-disable-next-line MD029 -->
+
 0. **Issue Transition (Step 0, before implementation)**:
    - Cleanup note: The `.github/copilot-instructions.md` "Session Startup Check" detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `$copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }; pwsh "$copilotRoot/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly (only if `$copilotRoot` is non-empty — requires `COPILOT_ORCHESTRA_ROOT` or `WORKFLOW_TEMPLATE_ROOT` to be set).
    - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
@@ -200,18 +201,18 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 
 ## Agent Selection
 
-| File Type / Task                                                                                                     | Keywords                                       | Agent                |
-| -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- | -------------------- |
-| `*.test.*`, test suites, fixtures                                                                                    | test, assertion, flaky, coverage               | Test-Writer          |
-| `src/**/*.ts`, `src/**/*.tsx` (new behavior)                                                                         | implement, feature, bugfix, logic              | Code-Smith           |
-| `src/**/*.ts`, `src/**/*.tsx` (restructure existing)                                                                 | refactor, simplify, extract, dedupe            | Refactor-Specialist  |
-| UI source files (visual polish)                                                                                      | ui polish, spacing, alignment, styling         | UI-Iterator          |
-| `*.md`, `README.*`, `CHANGELOG.*`                                                                                    | docs, guide, changelog                         | Doc-Keeper           |
-| Session memory `/memories/session/plan-issue-{ID}.md` or GitHub issue comment with `<!-- plan-issue-{ID} -->` marker | plan, acceptance criteria, sequencing          | Issue-Planner        |
-| CE Gate evidence capture (downstream); upstream customer framing, scenarios, design intent                           | ce gate, customer, experience, journey, scenarios | Experience-Owner  |
-| Code review (read-only)                                                                                              | review, risks, quality, critique               | Code-Critic          |
-| Categorize review feedback (read-only)                                                                               | judge, score, prosecution, defense, categorize | Code-Review-Response |
-| Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic          | Process-Review       |
+| File Type / Task                                                                                                     | Keywords                                          | Agent                |
+| -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | -------------------- |
+| `*.test.*`, test suites, fixtures                                                                                    | test, assertion, flaky, coverage                  | Test-Writer          |
+| `src/**/*.ts`, `src/**/*.tsx` (new behavior)                                                                         | implement, feature, bugfix, logic                 | Code-Smith           |
+| `src/**/*.ts`, `src/**/*.tsx` (restructure existing)                                                                 | refactor, simplify, extract, dedupe               | Refactor-Specialist  |
+| UI source files (visual polish)                                                                                      | ui polish, spacing, alignment, styling            | UI-Iterator          |
+| `*.md`, `README.*`, `CHANGELOG.*`                                                                                    | docs, guide, changelog                            | Doc-Keeper           |
+| Session memory `/memories/session/plan-issue-{ID}.md` or GitHub issue comment with `<!-- plan-issue-{ID} -->` marker | plan, acceptance criteria, sequencing             | Issue-Planner        |
+| CE Gate evidence capture (downstream); upstream customer framing, scenarios, design intent                           | ce gate, customer, experience, journey, scenarios | Experience-Owner     |
+| Code review (read-only)                                                                                              | review, risks, quality, critique                  | Code-Critic          |
+| Categorize review feedback (read-only)                                                                               | judge, score, prosecution, defense, categorize    | Code-Review-Response |
+| Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic             | Process-Review       |
 
 > **native Explore vs Research-Agent**: Use the native Explore subagent for lightweight read-only fact-finding (runs on a fast model in a short-lived context — the returned summary is typically smaller than running equivalent tool calls inline). Use Research-Agent when analysis is deep/multi-file and the result needs to be persisted to a research document for future reference. When in doubt: Explore for discovery, Research-Agent for output that must survive compaction.
 

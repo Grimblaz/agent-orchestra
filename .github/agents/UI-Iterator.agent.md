@@ -2,7 +2,7 @@
 name: UI-Iterator
 description: "Systematic UI polish through screenshot-based iteration"
 argument-hint: "Polish [PageName] or Polish [ComponentName] [iterations]"
-user-invokable: true
+user-invocable: true
 tools:
   - edit
   - search
@@ -13,10 +13,9 @@ tools:
   - github/*
   - vscode/vscodeAPI
   - search/changes
-  - vscode/openSimpleBrowser
   - web
   - vscode/extensions
-  - vscode/todo
+  - todo
   # Native browser tools (VS Code 1.110+, enabled via workbench.browser.enableChatTools) — primary path
   - "browser/openBrowserPage"
   - "browser/readPage"
@@ -59,7 +58,7 @@ You are a design-eye perfectionist who thinks like the user, not the developer. 
 
 A systematic UI refinement mode using screenshot-based iteration. Evaluates current UI state against aesthetic criteria, proposes improvements, and implements changes through iterative polish passes.
 
-**Core Workflow**: Agent autonomously manages browser-based polish using VS Code native browser tools (`openBrowserPage`, `screenshotPage`) with iterative analyze→implement→verify loops, and falls back to `vscode/openSimpleBrowser` + user-pasted screenshots when browser tools are unavailable.
+**Core Workflow**: Agent autonomously manages browser-based polish using VS Code native browser tools (`openBrowserPage`, `screenshotPage`) with iterative analyze→implement→verify loops, and falls back to manual screenshot paste when browser tools are unavailable.
 
 **Applicability**: This agent is for projects with UI surfaces. For backend-only or CLI-only projects, this agent is not applicable; use Code-Smith/Refactor-Specialist for non-UI improvements, then follow standard validation and review workflow.
 
@@ -83,7 +82,7 @@ A systematic UI refinement mode using screenshot-based iteration. Evaluates curr
 - **State**: Representative populated state (avoid empty or placeholder-only screens)
 - **Resolution**: Standard browser width (~1200px) preferred
 - **Capture Mode**: If browser tools are available, take screenshots programmatically (`screenshotPage`) with no manual user capture needed.
-- **Fallback Mode**: If both native tools and Playwright MCP are unavailable, use `vscode/openSimpleBrowser` and follow manual screenshot paste workflow.
+- **Fallback Mode**: If both native tools and Playwright MCP are unavailable, follow manual screenshot paste workflow.
 
 ## Browser Tools Reference
 

@@ -2,7 +2,7 @@
 name: Research-Agent
 description: "Research specialist for comprehensive technical analysis and pattern discovery"
 argument-hint: "Perform deep technical research for a task or feature"
-user-invokable: false
+user-invocable: false
 tools:
   - read
   - edit

@@ -29,13 +29,13 @@ Pipeline-based agent orchestration:
 ```
 
 - **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
-- **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invokable: false`)
+- **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invocable: false`)
 - **Skills** (14): Loaded on demand by agents from `.github/skills/`
 - **Instructions** (5): Shared rules loaded by agents from `.github/instructions/`
 
 ## Key Conventions
 
-- Agent files use `.agent.md` extension with YAML frontmatter (`name`, `description`, `tools`, `handoffs`, `user-invokable`)
+- Agent files use `.agent.md` extension with YAML frontmatter (`name`, `description`, `tools`, `handoffs`, `user-invocable`)
 - Skills use `SKILL.md` with `name` and `description` frontmatter in `.github/skills/{skill-name}/`
 - Instruction files use `.instructions.md` extension in `.github/instructions/`
 - Design documents go in `Documents/Design/`, decision records in `Documents/Decisions/`

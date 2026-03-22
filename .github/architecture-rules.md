@@ -28,7 +28,7 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 
 ### Forbidden
 
-- Internal agents (`user-invokable: false`) must NOT be directly user-invokable; they MAY appear in agent `handoffs` lists as subagents
+- Internal agents (`user-invocable: false`) must NOT be directly user-invocable; they MAY appear in agent `handoffs` lists as subagents
 - Agents must NOT reference deleted agents (e.g., Plan-Architect, Issue-Designer) — validate with `grep`
 - Skills must NOT contain agent logic — they provide knowledge, not orchestration
 - No agent may auto-commit — all commits are manual by the user
@@ -39,10 +39,10 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 ### Agent Files (`.agent.md`)
 
 Required frontmatter fields: `name`, `description`, `tools`
-Optional frontmatter: `handoffs`, `user-invokable` (defaults to `true` if omitted)
+Optional frontmatter: `handoffs`, `user-invocable` (defaults to `true` if omitted)
 
-- User-facing agents (7): Must have `user-invokable: true` or omit the field
-- Internal agents (7): Must have `user-invokable: false`
+- User-facing agents (7): Must have `user-invocable: true` or omit the field
+- Internal agents (7): Must have `user-invocable: false`
 
 ### Skill Files (`SKILL.md`)
 

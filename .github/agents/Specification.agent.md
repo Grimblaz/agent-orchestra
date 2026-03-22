@@ -2,7 +2,7 @@
 name: Specification
 description: "Generate or update specification documents for new or existing functionality."
 argument-hint: "Create formal specification document"
-user-invokable: false
+user-invocable: false
 tools:
   - execute/getTerminalOutput
   - execute/runInTerminal

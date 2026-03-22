@@ -12,7 +12,7 @@ tools:
     "web",
     "github/*",
     "vscode/memory",
-    "vscode/todo",
+    todo,
   ]
 handoffs:
   - label: Execute Fixes

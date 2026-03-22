@@ -116,7 +116,7 @@ Then, once the design is in the issue:
 
 ### Internal agents (called automatically by Code-Conductor)
 
-These agents are hidden from the picker (`user-invokable: false`) and are used automatically during `@Code-Conductor` workflows:
+These agents are hidden from the picker (`user-invocable: false`) and are used automatically during `@Code-Conductor` workflows:
 
 Code-Smith, Test-Writer, Refactor-Specialist, Doc-Keeper, Research-Agent, Process-Review, Specification
 

@@ -2,7 +2,7 @@
 name: Doc-Keeper
 description: "Documentation finalization, accuracy verification, and obsolete content removal"
 argument-hint: "Update documentation to match implementation"
-user-invokable: false
+user-invocable: false
 tools:
   - execute/getTerminalOutput
   - execute/runInTerminal

@@ -17,7 +17,7 @@ The Experience-Owner agent bookends the pipeline with a customer-experience lens
 | D5 | Solution-Designer scope | Remove customer-experience content; narrow to technical design only | Single responsibility: design space exploration and decision documentation |
 | D6 | Graceful degradation | Experience-Owner emits `⚠️ CE Gate evidence capture blocked` if environment unavailable | Consistent with CE Gate graceful degradation pattern; Code-Conductor proceeds with available evidence |
 | D7 | Prompt file | Add `experience.prompt.md` with `agent: Experience-Owner` | Consistent with `/design` → `design.prompt.md` pattern; enables `/experience` slash command |
-| D8 | Agent count | 7 user-facing (was 6) | Experience-Owner is user-invokable; Solution-Designer replaces Issue-Designer at same user-facing count position |
+| D8 | Agent count | 7 user-facing (was 6) | Experience-Owner is user-invocable; Solution-Designer replaces Issue-Designer at same user-facing count position |
 | D9 | Hub Mode + D9 Checkpoint | Code-Conductor gains Smart Resume markers and a D9 pause checkpoint after upstream phases complete | Prevents full upstream re-execution on session resume; user can pause between customer framing and implementation |
 | D10 | Collaboration Pattern for upstream interactivity | Add dedicated `### Collaboration Pattern` subsection in Upstream Phase; hub-mode budget of 2–3 `#tool:vscode/askQuestions` calls; checkpoints at scope ambiguity, key framing decisions, and CE Gate scenario drafting confirmation | Interactivity guidance was underdocumented; explicit budget prevents EO from becoming a hub-mode bottleneck |
 

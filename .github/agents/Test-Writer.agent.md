@@ -2,7 +2,7 @@
 name: Test-Writer
 description: "Test writing and validation specialist for high-quality behavior-focused tests"
 argument-hint: "Write tests, validate coverage, or fix test failures"
-user-invokable: false
+user-invocable: false
 tools:
   [
     execute/testFailure,

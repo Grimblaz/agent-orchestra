@@ -2,7 +2,7 @@
 name: Code-Smith
 description: "Focused code implementation following TDD or plan-driven approach"
 argument-hint: "Implement code changes based on tests or plan"
-user-invokable: false
+user-invocable: false
 tools:
   - execute/testFailure
   - execute/getTerminalOutput
