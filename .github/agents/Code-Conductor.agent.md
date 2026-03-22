@@ -61,7 +61,7 @@ Questioning and pausing are controlled actions, not casual conversation.
 
 When Code-Conductor orchestrates the full hub flow (Experience-Owner → Solution-Designer → Issue-Planner → implementation), one additional authorized pause exists — the **D9 model-switch checkpoint**. This pause is explicitly authorized and does NOT violate the zero-tolerance rule for plain-text questions because it uses `#tool:vscode/askQuestions`.
 
-- **When it fires**: After plan approval, before implementation begins — ONLY when all upstream phases were called in this session (not skipped via smart resume). Does NOT fire when the user invokes `/implement` directly.
+- **When it fires**: After plan approval, before implementation begins — ONLY when at least one upstream phase ran in this session, regardless of whether other phases were skipped by scope classification or prior-session completion. Does NOT fire when the user invokes `/implement` directly.
 - **Options to present**: "Continue implementation" (recommended) / "Pause here — I'll resume with `/implement`"
 - **Interrupt budget effect**: This counts against the overall hub session interruption budget, not the review cycle budget.
 
@@ -102,6 +102,7 @@ Quick checklist before declaring mode for a step:
 - **Well-defined scope**: use Issue-Planner to produce a direct execution plan.
 - **Exploratory scope**: use Issue-Planner to stabilize AC and constraints first, then generate execution steps.
 - If plan assumptions drift from code reality, adapt steps before delegation and record rationale.
+- **No scope exemption**: Code-Conductor must NEVER create plans directly, regardless of change size, scope classification tier, or multi-issue bundling. All plans are created by Issue-Planner — unconditionally.
 
 ## Core Workflow
 
@@ -124,17 +125,46 @@ When the user invokes Code-Conductor without a specific slash command (e.g., `@c
 
 Skip hub mode entirely when the user invokes a specific slash command (e.g., `/implement #N`, `/plan #N`, `/design #N`) — these execute the named phase directly; smart resume applies at the phase level, not the hub level.
 
-**Hub execution order** (call only phases not already complete):
+### Scope Classification Gate
 
-1. **Experience-Owner** (upstream customer framing) — call with issue number; wait for `<!-- experience-owner-complete-{ID} -->` completion marker in issue comments
-2. **Solution-Designer** (technical design) — call with issue number; wait for `<!-- design-phase-complete-{ID} -->` completion marker in issue comments
-3. **Issue-Planner** (implementation plan) — call with issue number; plan persisted to session memory or issue comment
-4. **D9 Checkpoint** — see below; hub-mode only
+Before calling any upstream agent, classify the issue scope to determine the appropriate pipeline tier. Use `#tool:vscode/askQuestions` with your analysis and recommendation.
+
+**5-criterion rubric for abbreviated tier** (ALL five must hold):
+
+1. Acceptance criteria are clearly defined or the change is self-evident from the issue title
+2. Implementation touches ≤3 files in a single domain (no cross-cutting changes)
+3. No new user-facing behavior is introduced (configuration, internal protocol, documentation-only)
+4. No cross-cutting architectural changes (no shared interfaces, new abstractions, or multi-agent contracts)
+5. No CE Gate scenarios are needed (no customer-facing surface affected)
+
+**Default to full pipeline when**: any criterion is absent, the issue is ambiguous, or the scope is sparse. When in doubt, choose full.
+
+**Two-tier table**:
+
+| Phase              | Full pipeline | Abbreviated pipeline |
+| ------------------ | ------------- | -------------------- |
+| Experience-Owner   | ✅            | ❌ (skip)            |
+| Solution-Designer  | ✅            | ❌ (skip)            |
+| Issue-Planner      | ✅            | ✅ (required)        |
+| Design review      | ✅            | ✅ (required)        |
+| D9 Checkpoint      | ✅            | ✅ (required)        |
+| Implementation     | ✅            | ✅                   |
+
+**User override**: Always present both tiers as options and recommend one — the user may choose either regardless of your analysis. This is how scope override (D5) is implemented.
+
+**Escalation check (after Issue-Planner returns)**: After receiving the plan from Issue-Planner, read the plan YAML frontmatter. If `escalation_recommended: true` is present, present the user via `#tool:vscode/askQuestions` with the `escalation_reason` and offer to re-enter the full pipeline from the appropriate upstream phase before proceeding to D9.
+
+**Hub execution order** (call only phases not already complete, per classification result):
+
+1. **Experience-Owner** (upstream customer framing) — full pipeline only; call with issue number; wait for `<!-- experience-owner-complete-{ID} -->` completion marker in issue comments
+2. **Solution-Designer** (technical design) — full pipeline only; call with issue number; wait for `<!-- design-phase-complete-{ID} -->` completion marker in issue comments
+3. **Issue-Planner** (implementation plan) — both tiers; call with issue number; plan persisted to session memory or issue comment; check for `escalation_recommended` after receiving plan
+4. **D9 Checkpoint** — both tiers; see below; hub-mode only
 5. **Implementation** → validation ladder → PR
 
 ### D9 Model-Switch Checkpoint (Hub Mode Only)
 
-After plan approval and before implementation begins, present this checkpoint — **ONLY** when Code-Conductor is in hub mode AND called at least one upstream phase in this session (did not skip all three via smart resume):
+After plan approval and before implementation begins, present this checkpoint — **ONLY** when Code-Conductor is in hub mode AND at least one upstream phase ran in this session, regardless of whether other phases were skipped by scope classification:
 
 ```text
 Use `#tool:vscode/askQuestions`:
@@ -145,8 +175,19 @@ Use `#tool:vscode/askQuestions`:
 **Skip D9 when**:
 
 - User invoked `/implement #N` directly (smart resume determines entry point; no hub-mode pause)
-- Smart resume skipped ALL three upstream phases (they were done before this session — nothing to pause after)
+- Smart resume found ALL applicable upstream phase markers completed in prior sessions — D9 suppression requires prior-session completion, not in-session scope-based skip
 - User already indicated intent to continue (e.g., responded "Continue" or "Approved — save and proceed" in this session)
+
+### Multi-Issue Bundling
+
+When the user invokes hub mode for multiple issues at once (e.g., `@code-conductor issues #163 #164 #165`):
+
+1. **Per-issue marker check**: Use `mcp_github_issue_read` with `method: get_comments` for each issue to detect completed upstream phases. Smart resume applies per-issue independently.
+2. **Per-issue scope classification**: Classify each issue separately using the Scope Classification Gate rubric. The bundle adopts the **highest-scope tier** (if any issue requires full pipeline, run full pipeline for all).
+3. **Shared upstream execution**: Run upstream phases (Experience-Owner, Solution-Designer, Issue-Planner) once for the bundle, covering all issues together. Issue-Planner creates a single bundled plan.
+4. **Plan naming**: Use `plan-bundle-{primary}-{secondary1}-{secondaryN}` (e.g., `plan-bundle-163-164-165`). Save to session memory at `/memories/session/plan-bundle-{primary}-{secondary1}-{secondaryN}.md`. Post plan as a GitHub issue comment to each issue with the bundle's `<!-- plan-issue-{ID} -->` marker.
+5. **Completion markers**: Track completion markers per-issue. When an issue's acceptance criteria are fully addressed, post its completion marker comment.
+6. **Single-issue flow is unaffected**: These rules apply only when multiple issues are bundled in a single invocation.
 
 1. **Locate Plan & Context**:
    - Find plan using this lookup chain: (1) session memory — `view /memories/session/plan-issue-{ID}.md` via the `vscode/memory` tool; (2) GitHub issue comments — use `mcp_github_issue_read` with `method: get_comments` to find a comment containing `<!-- plan-issue-{ID} -->`; (3) escalate via `#tool:vscode/askQuestions` if neither found
@@ -311,6 +352,8 @@ Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFE
 **Diff scoping prerequisite** — Before running the diff recipe, verify the git state: the original implementation MUST be committed (verify with `git status` — only specialist fix files should appear as modified). If uncommitted implementation changes are present, instruct the user to commit them before proceeding.
 
 **Diff scoping** — After Tier 1 passes and the prerequisite is verified, compute the fix diff: `git diff HEAD -- {files touched by specialists}` isolates the review-fix changes (HEAD points to the pre-fix commit; only uncommitted specialist fix changes are captured). Pass those files and hunks in each prosecution prompt. Code-Critic runs in normal code prosecution mode (no marker) with the constrained input. Include the original PR change-type classification in each post-fix prosecution prompt (same requirement as main review pass prompts).
+
+**Prosecution scope constraint** — Post-fix prosecution evaluates fix-introduced regressions and direct side effects only. Findings unrelated to the fix diff changes (pre-existing style issues, optimization opportunities in untouched code, general code quality concerns in surrounding area) must be classified as DEFERRED-SIGNIFICANT regardless of severity. The out-of-diff AC exception is preserved: if a finding outside the diff maps to an explicit acceptance criterion item, the AC Cross-Check Gate applies.
 
 **Pipeline** — 3 parallel prosecution passes (diff-scoped) → merge deduplicated ledger → 1 defense pass → 1 judge pass (Code-Review-Response). Same protocol as main review, smaller input scope.
 

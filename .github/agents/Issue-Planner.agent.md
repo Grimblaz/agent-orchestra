@@ -177,8 +177,13 @@ priority: {priority}  # GitHub label → p value: "priority: high"→p1, "priori
 issue_id: {issue-id}
 created: {date}
 ce_gate: {true|false}
+# Optional — add when scope discovered during planning exceeds the issue's stated scope:
+# escalation_recommended: true
+# escalation_reason: "{reason — e.g., touches multiple systems, needs design decisions not in the issue body}"
 ---
 ```
+
+**Escalation flag**: If during plan creation the scope is discovered to exceed the issue's stated scope (touches multiple systems, requires design decisions not documented in the issue body, or introduces cross-cutting concerns), add `escalation_recommended: true` and `escalation_reason: "{reason}"` to the YAML frontmatter. Code-Conductor reads this field after receiving the plan and offers the user re-entry to the full pipeline from the appropriate upstream phase. This field is valid in both hub-mode (abbreviated tier) and direct `/plan` invocations.
 
 After creating the plan file, immediately create a design cache file: use `mcp_github_issue_read` with `method: get` to read the full issue body, then use the `vscode/memory` tool (`create` command) to write the full issue body content to `/memories/session/design-issue-{ID}.md`. Wrap with a header line `<!-- design-issue-{ID} -->` and a footer `---\n**Source**: Snapshot of issue #{ID} body at plan creation. Design changes require a new plan.`. If the file already exists (refinement cycle), use `delete` followed by `create` to replace it.
 

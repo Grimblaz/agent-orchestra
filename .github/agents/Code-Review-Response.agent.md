@@ -188,7 +188,7 @@ After all rulings, emit a score summary table:
 
 **Judge confidence levels**:
 
-- `high` — clear evidence on one side; independent verification confirms ruling
+- `high` — concrete code evidence (specific lines, test output, or structural proof) on one side, independently verified; reserve for findings with tangible evidence, not inferential reasoning alone
 - `medium` — evidence leans one way but is not definitive
 - `low` — genuinely uncertain; user scoring is valuable here
 
