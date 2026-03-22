@@ -59,7 +59,7 @@ Questioning and pausing are controlled actions, not casual conversation.
 
 ### Model-Switch Checkpoint (Authorized Hub-Mode Pause)
 
-When Code-Conductor orchestrates the full hub flow (Experience-Owner → Solution-Designer → Issue-Planner → implementation), one additional authorized pause exists — the **D9 model-switch checkpoint**. This pause is explicitly authorized and does NOT violate the zero-tolerance rule for plain-text questions because it uses `#tool:vscode/askQuestions`.
+When Code-Conductor orchestrates **hub mode** (any pipeline tier — full or abbreviated), one additional authorized pause exists — the **D9 model-switch checkpoint**. This pause is explicitly authorized and does NOT violate the zero-tolerance rule for plain-text questions because it uses `#tool:vscode/askQuestions`.
 
 - **When it fires**: After plan approval, before implementation begins — ONLY when at least one upstream phase ran in this session, regardless of whether other phases were skipped by scope classification or prior-session completion. Does NOT fire when the user invokes `/implement` directly.
 - **Options to present**: "Continue implementation" (recommended) / "Pause here — I'll resume with `/implement`"
@@ -152,7 +152,7 @@ Before calling any upstream agent, classify the issue scope to determine the app
 
 **User override**: Always present both tiers as options and recommend one — the user may choose either regardless of your analysis. This is how scope override (D5) is implemented.
 
-**Escalation check (after Issue-Planner returns)**: After receiving the plan from Issue-Planner, read the plan YAML frontmatter. If `escalation_recommended: true` is present, present the user via `#tool:vscode/askQuestions` with the `escalation_reason` and offer to re-enter the full pipeline from the appropriate upstream phase before proceeding to D9.
+**Escalation check (after Issue-Planner returns)**: After receiving the plan from Issue-Planner, read the plan YAML frontmatter. If `escalation_recommended: true` is present, present the user via `#tool:vscode/askQuestions` with the `escalation_reason` and offer to re-enter the full pipeline from the appropriate upstream phase (for abbreviated-tier sessions, re-enter at Experience-Owner — the first full-pipeline phase; for full-tier sessions with prior-session partial completion, re-enter at the first non-completed phase — Solution-Designer if Experience-Owner was completed, or Experience-Owner if neither was completed) before proceeding to D9.
 
 **Hub execution order** (call only phases not already complete, per classification result):
 
@@ -164,7 +164,7 @@ Before calling any upstream agent, classify the issue scope to determine the app
 
 ### D9 Model-Switch Checkpoint (Hub Mode Only)
 
-After plan approval and before implementation begins, present this checkpoint — **ONLY** when Code-Conductor is in hub mode AND at least one upstream phase ran in this session, regardless of whether other phases were skipped by scope classification:
+After plan approval and before implementation begins, present this checkpoint — **ONLY** when Code-Conductor is in hub mode AND at least one upstream phase ran in this session, regardless of whether other phases were skipped by scope classification or prior-session completion:
 
 ```text
 Use `#tool:vscode/askQuestions`:
@@ -175,22 +175,25 @@ Use `#tool:vscode/askQuestions`:
 **Skip D9 when**:
 
 - User invoked `/implement #N` directly (smart resume determines entry point; no hub-mode pause)
-- Smart resume found ALL applicable upstream phase markers completed in prior sessions — D9 suppression requires prior-session completion, not in-session scope-based skip
+- Smart resume found ALL upstream phase markers applicable to the current pipeline tier (abbreviated pipeline: Issue-Planner plan marker only; full pipeline: all three phase completion markers) completed in prior sessions — D9 suppression requires prior-session completion, not in-session scope-based skip
 - User already indicated intent to continue (e.g., responded "Continue" or "Approved — save and proceed" in this session)
+- D9 fires even if some upstream phases were completed in prior sessions — suppression requires ALL applicable tier-required phase markers to have been completed before this session. If Issue-Planner ran in this session, D9 must fire unless the user already confirmed continuation.
 
 ### Multi-Issue Bundling
 
 When the user invokes hub mode for multiple issues at once (e.g., `@code-conductor issues #163 #164 #165`):
 
 1. **Per-issue marker check**: Use `mcp_github_issue_read` with `method: get_comments` for each issue to detect completed upstream phases. Smart resume applies per-issue independently.
-2. **Per-issue scope classification**: Classify each issue separately using the Scope Classification Gate rubric. The bundle adopts the **highest-scope tier** (if any issue requires full pipeline, run full pipeline for all).
-3. **Shared upstream execution**: Run upstream phases (Experience-Owner, Solution-Designer, Issue-Planner) once for the bundle, covering all issues together. Issue-Planner creates a single bundled plan.
+2. **Per-issue scope classification**: Classify each issue separately using the Scope Classification Gate rubric. The bundle adopts the **highest-scope tier** (if any issue requires full pipeline, run full pipeline for all). Present all issue classifications in a single `#tool:vscode/askQuestions` call — do not make separate per-issue prompts. Format your recommendation as a list entry per issue showing recommended tier and the key criterion driving the classification, followed by the 'highest-scope-wins' bundle tier.
+3. **Shared upstream execution**: Run upstream phases based on the adopted bundle tier: **Full pipeline** — call Experience-Owner, then Solution-Designer, then Issue-Planner, once for the bundle covering all issues together. **Abbreviated pipeline** — call Issue-Planner only, once for the bundle. Issue-Planner creates a single bundled plan.
 4. **Plan naming**: Use `plan-bundle-{primary}-{secondary1}-{secondaryN}` (e.g., `plan-bundle-163-164-165`). Save to session memory at `/memories/session/plan-bundle-{primary}-{secondary1}-{secondaryN}.md`. Post plan as a GitHub issue comment to each issue with the bundle's `<!-- plan-issue-{ID} -->` marker.
 5. **Completion markers**: Track completion markers per-issue. When an issue's acceptance criteria are fully addressed, post its completion marker comment.
 6. **Single-issue flow is unaffected**: These rules apply only when multiple issues are bundled in a single invocation.
 
+### Hub Execution Workflow
+
 1. **Locate Plan & Context**:
-   - Find plan using this lookup chain: (1) session memory — `view /memories/session/plan-issue-{ID}.md` via the `vscode/memory` tool; (2) GitHub issue comments — use `mcp_github_issue_read` with `method: get_comments` to find a comment containing `<!-- plan-issue-{ID} -->`; (3) escalate via `#tool:vscode/askQuestions` if neither found
+   - Find plan using this lookup chain: (1) session memory — if hub mode was invoked with multiple issues, check `plan-bundle-{primary}-{secondary1}-{secondaryN}.md` first; otherwise check `plan-issue-{ID}.md`; via the `vscode/memory` tool; (2) GitHub issue comments — use `mcp_github_issue_read` with `method: get_comments` to find a comment containing `<!-- plan-issue-{ID} -->`; (3) escalate via `#tool:vscode/askQuestions` if neither found
    - Find design context using this lookup chain: (1) session memory — `view /memories/session/design-issue-{ID}.md` via the `vscode/memory` tool; (2) GitHub issue comments — use `mcp_github_issue_read` with `method: get_comments` to find a comment containing `<!-- design-issue-{ID} -->`; (3) fall back to reading the issue body directly and create the design cache: use `mcp_github_issue_read` with `method: get` to read the issue body, then use `vscode/memory` `create` to write the full issue body content to `/memories/session/design-issue-{ID}.md`, wrapped with header `<!-- design-issue-{ID} -->` and footer `---\n**Source**: Snapshot of issue #{ID} body at plan creation. Design changes require a new plan.` (fallback creator role — Issue-Planner is the primary creator; Code-Conductor recreates only on session reset recovery)
    - Look for supporting docs in `Documents/Design/`, `Documents/Decisions/`, `.copilot-tracking/research/` — read whatever exists for additional context
    - Check `.github/skills/` for relevant domain expertise
@@ -212,7 +215,7 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
    - **Per-step refactor**: After GREEN, clean up code introduced in that step (extract helpers, reduce duplication, simplify conditionals) — distinct from the dedicated Refactor-Specialist pass
    - **Incremental validation**: Run project validation commands (see `.github/copilot-instructions.md`), then the project test command (for example `npm test` when applicable)
    - If specialist does a task outside their responsibility, retry with clearer instructions (max 2 retries)
-   - **Progress checkpoint**: After all quality checks pass (validation + scope check), update the plan in session memory — use `vscode/memory str_replace` to append exactly `— ✅ DONE` to the step's title line in `/memories/session/plan-issue-{ID}.md`. If the session memory plan file doesn't exist (plan was loaded from a GitHub issue comment), first use `vscode/memory create` to write the full plan content, then apply the annotation.
+   - **Progress checkpoint**: After all quality checks pass (validation + scope check), update the plan in session memory — use `vscode/memory str_replace` to append exactly `— ✅ DONE` to the step's title line in the plan file loaded in Step 1 (either `plan-bundle-{primary}-{secondary1}-{secondaryN}.md` for bundles or `plan-issue-{ID}.md` for single-issue plans). If the session memory plan file doesn't exist (plan was loaded from a GitHub issue comment), first use `vscode/memory create` to write the full plan content, then apply the annotation.
 
 4. **Create PR (MANDATORY, review-ready gate)**: After all steps complete (including documentation):
    - **End-to-end check**: Does this PR actually resolve the issue? Not "all steps executed" but "the feature works." Review the full diff against the issue's acceptance criteria.

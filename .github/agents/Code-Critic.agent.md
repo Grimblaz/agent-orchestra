@@ -419,7 +419,7 @@ Performs a final review for architecture, security, and overall quality.
 - Classify confidence and blast radius
 - Mark whether user authority is needed (`authority_needed: yes|no`)
 - Suggest fixes
-- **Post-fix context**: When Code-Conductor provides a fix diff (post-fix targeted prosecution), restrict findings to fix-introduced regressions and direct side effects of the fix. Do not surface pre-existing issues in surrounding code — those are out-of-diff findings and must be classified DEFERRED-SIGNIFICANT by Code-Conductor.
+- **Post-fix context**: When Code-Conductor provides a fix diff (post-fix targeted prosecution), restrict findings to fix-introduced regressions and direct side effects of the fix. Do not raise pre-existing issues in surrounding code as prosecution findings — classify them DEFERRED-SIGNIFICANT internally and omit from the surfaced ledger. Exception: if a surrounding-code issue maps directly to an explicit acceptance criterion item, surface it and note 'AC Cross-Check Gate exception' so Code-Conductor can apply the AC override routing.
 
 **Goal**: Ensure code is production-ready by enforcing architecture standards, catching defects, and upholding maintainability
 
