@@ -42,6 +42,7 @@
     "./.github/prompts/implement.prompt.md",
     "./.github/prompts/review.prompt.md",
     "./.github/prompts/polish.prompt.md",
-    "./.github/prompts/experience.prompt.md"
+    "./.github/prompts/experience.prompt.md",
+    "./.github/prompts/orchestrate.prompt.md"
   ]
 }

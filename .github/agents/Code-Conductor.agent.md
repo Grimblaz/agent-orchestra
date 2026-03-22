@@ -123,7 +123,7 @@ When the user invokes Code-Conductor without a specific slash command (e.g., `@c
 - `<!-- design-phase-complete-{ID} -->` found → technical design done; skip Solution-Designer
 - Plan found (session memory or `<!-- plan-issue-{ID} -->` comment) → skip upstream phases, proceed to implementation
 
-Skip hub mode entirely when the user invokes a specific slash command (e.g., `/implement #N`, `/plan #N`, `/design #N`) — these execute the named phase directly; smart resume applies at the phase level, not the hub level.
+Skip hub mode entirely when the user invokes a specific slash command (e.g., `/implement #N`, `/plan #N`, `/design #N`) — these execute the named phase directly; smart resume applies at the phase level, not the hub level. Exception: `/orchestrate` is a slash command that explicitly triggers hub mode — treat it as equivalent to `@code-conductor issue #N` (single issue) or `@code-conductor issues #A #B #C` (multi-issue bundle, per the Multi-Issue Bundling section).
 
 ### Scope Classification Gate
 

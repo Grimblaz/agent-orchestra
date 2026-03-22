@@ -23,7 +23,7 @@ A multi-agent workflow system for GitHub Copilot that orchestrates AI-assisted s
 2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins copilot-orchestra` and install.
 3. **Use** — All 14 agents and 14 skills are immediately available in VS Code Chat.
 
-**What's included in the plugin**: 14 agents, 14 skills, and 8 slash commands (`/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish`, `/experience`).
+**What's included in the plugin**: 14 agents, 14 skills, and 9 slash commands (`/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish`, `/experience`, `/orchestrate`).
 
 **What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo.
 
@@ -71,6 +71,7 @@ That's it. You're ready to use agents.
 | Pick up a GitHub issue and design a solution | `@Solution-Designer` |
 | Create an implementation plan for an issue | `@Issue-Planner` |
 | Implement a planned feature end-to-end | `@Code-Conductor` |
+| Run the full pipeline end-to-end for an issue | `/orchestrate` |
 | Review code and identify risks | `@Code-Critic` |
 | Respond to a code review | `@Code-Review-Response` |
 | Polish a UI page or component | `@UI-Iterator` |
