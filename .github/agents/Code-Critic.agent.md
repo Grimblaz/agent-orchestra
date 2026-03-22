@@ -543,11 +543,12 @@ _To identify peers: grep for the field name in function signatures (criterion a)
 
 ### 7. Documentation Script Audit
 
-**When to apply**: PR modifies `.md` files that contain shell or PowerShell code blocks (fenced ` ```bash `, ` ```sh `, ` ```powershell `, or unlabeled fenced blocks containing shell commands such as `grep`, `ls`, `wc`, `pwsh`, `git`).
+**When to apply**: PR modifies `.md` files that contain shell or PowerShell code blocks (fenced ` ```bash `, ` ```sh `, ` ```powershell `, or unlabeled fenced blocks containing shell commands such as `grep`, `ls`, `wc`, `pwsh`, `git`) **or inline terminal command guidance** (e.g., prescriptive backtick-quoted `git status` or `Select-String` usage instructions in workflow docs).
 
 - [ ] Every `grep`, `ls`, `wc`, or similar validation command listed in documentation is runnable against the current file contents **from the repository root** and produces the documented result (do not accept "should be 0" without verifying the expected count is achievable)
 - [ ] Commands expected to return `0` cannot self-match — verify: does the searched pattern appear in the file hosting the command **or in any other `.md` file not already excluded by a `grep -v` filter**? If yes, a `grep -v <filename>` exclusion is required for every matching file (covers both same-file self-match and cross-file matches)
 - [ ] Expected counts (agent counts, file counts, etc.) reflect the post-change state, not the pre-change state
+- [ ] Workflow documentation (`.agent.md`, `.instructions.md`, `.prompt.md`, `SKILL.md`) that prescribes shell or PowerShell commands for read-only operations (text search, file listing, existence check, working-tree diff, file reading) defaults to built-in VS Code tools — flag terminal-first guidance when a built-in equivalent exists (`grep_search` for search, `file_search`/`list_dir` for listing, `file_search` for existence, `get_changed_files` for working-tree diff, `read_file` for reading). Allowed exceptions: project validation commands defined in `.github/copilot-instructions.md`; cross-branch or cross-ref diff (e.g., `git diff main..HEAD`); git state operations (e.g., commit, push, checkout, branch, merge, reset, revert, tag); `gh`/GitHub CLI operations; build, test, or script execution (including output filtering on script pipelines); targets outside the workspace; operations with no built-in equivalent (file timestamps, untracked file detection, git log history, grep_search filter-gap for complex path-exclusion filters). These exception categories correspond to the canonical taxonomy in `Documents/Design/safe-operations.md` — keep both in sync when adding or modifying categories.
 
 ## Browser-Based Review (UI-Touching PRs)
 

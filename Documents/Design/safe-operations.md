@@ -58,7 +58,7 @@ The search-index delay is acknowledged as a known limitation of the secondary de
 
 The Rule paragraph in the Read-Only & Computable Operations subsection ends with an explicit allow-list for `run_in_terminal`. Two of those categories need particular explanation:
 
-**`git workflow operations` (commit, push, checkout, branch)**
+**`git workflow operations` (commit, push, checkout, branch, merge)**
 These are inherently stateful operations that modify repository state; no dedicated VS Code tool exposes them. Excluding them from the guardrail is necessary because the alternative — blocking all terminal git use — would prevent agents from completing any PR workflow step.
 
 **`project validation commands` (e.g., quick-validate checks in `.github/copilot-instructions.md`)**
@@ -66,7 +66,34 @@ The quick-validate commands in `copilot-instructions.md` use `Get-ChildItem` + `
 
 ---
 
+## Exception Taxonomy
+
+The following categories of terminal command usage remain allowed even when a VS Code built-in tool could theoretically accomplish part of the task. Each exception must be documented inline with a rationale comment.
+
+| Category | Rationale | Examples |
+| --- | --- | --- |
+| `project-validation` | Defined in `.github/copilot-instructions.md` quick-validate block; mandatory pre-PR gates that require PowerShell count expressions | `(Get-ChildItem ... \| Select-String ...).Count` checks in quick-validate |
+| `cross-branch-diff` | Git diff with explicit ref specs (`main..HEAD`, `main...HEAD`) — `get_changed_files` only reports working-tree state, not cross-branch deltas | `git diff --name-only main..HEAD`, `git diff main...HEAD --stat` |
+| `git-state-ops` | State-changing git operations — commit, push, checkout, branch, merge — are not readable via built-in tools | e.g. `git commit`, `git push`, `git checkout`, `git branch`, `git merge` |
+| `gh-cli` | GitHub API operations via `gh` CLI (issue create, PR create, label, comment) — no built-in tool equivalent | `gh issue create`, `gh pr create`, `gh issue list` |
+| `build-test-script` | Build and test execution, script invocation, and output filtering on script pipelines | `npm test`, `pwsh script.ps1`, `Invoke-Pester`, `Select-String` filtering build script output |
+| `outside-workspace` | Target is outside the workspace (e.g., VS Code user `settings.json` in `$env:APPDATA`) — workspace-scoped tools cannot reach it | `Select-String -Path "$env:APPDATA\Code\User\settings.json"` |
+| `no-equivalent` | No built-in tool equivalent exists for the operation | File timestamps (`LastWriteTime`), untracked file detection (`git status`), git log history (`git log`) |
+
+---
+
+## Rejected Alternatives
+
+The following approaches were considered and rejected during the design of this enforcement policy (issue #132):
+
+- **Docs-only cleanup**: Lower effort, but likely to regress. The repo already had a safe-operations policy and still drifted — enforcement must be structural (Code-Critic check) not just documentation.
+- **Ban all terminal usage**: Too blunt. Numerous legitimate exceptions exist (cross-branch diff, git state ops, build/test execution, gh CLI, outside-workspace targets). A blanket ban would break the workflow.
+- **Full lint/automation for every shell snippet**: Stronger, but carries higher effort and higher false-positive risk for an initial rollout. Code-Critic's judgment-based review is a better first step.
+
+---
+
 ## Source
 
-- Issue #67: [feat: add read-only tool preference guardrail](https://github.com/Grimblaz/workflow-template/issues/67)
-- Issue #127: [feat: add deduplication guard to issue creation protocol](https://github.com/Grimblaz/workflow-template/issues/127)
+- Issue #67: [feat: add read-only tool preference guardrail](https://github.com/Grimblaz/copilot-orchestra/issues/67)
+- Issue #127: [feat: add deduplication guard to issue creation protocol](https://github.com/Grimblaz/copilot-orchestra/issues/127)
+- Issue #132: [feat: built-in-tool-first enforcement](https://github.com/Grimblaz/copilot-orchestra/issues/132)

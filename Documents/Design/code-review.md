@@ -25,13 +25,9 @@ For migration-type issues — pattern replacement, API migration, rename/move ac
 
 **Root cause**: In issue #39, two instruction files with hardcoded relative paths were missed by the plan and only caught in Code-Critic Pass 3 as a blocker. A single scan before implementation would have caught them.
 
-**Example scan command**:
+**Example scan guidance**:
 
-```powershell
-Get-ChildItem -Path "." -Recurse -Include "*.md","*.json","*.ps1" |
-    Where-Object { $_.FullName -notmatch "\.copilot-tracking-archive|\.git[\\/]" } |
-    Select-String -Pattern "old-pattern"
-```
+Use `grep_search` with the old-pattern as `query` and `includePattern` matching the target files (e.g., `**/*.md`). Confirm result count is 0. Use `file_search` with the same glob to confirm at least 1 file was examined — a 0-match from 0 files indicates a misconfigured glob.
 
 **Two insertion points**:
 
@@ -471,6 +467,12 @@ All recommendations cite the specific file, section, and suggested change. Proce
 | `.github/scripts/aggregate-review-scores.ps1` | New script — reads merged PRs, computes calibration profile |
 | `Documents/Design/code-review.md` | This file — cross-session learning pipeline section |
 | `.github/agents/Code-Review-Response.agent.md` | Added `<!-- judge-rulings -->` structured YAML block requirement; added `Pass` column to score summary table template; added `id` field to finding schema; split example into code-prosecution and non-code-prosecution variants |
+
+---
+
+## Implementation Notes
+
+**Issue #132 — Built-in-tool-first enforcement (2026-03)**: Code-Critic §7 (Documentation Script Audit) now includes a new checklist item that flags workflow markdown prescribing terminal commands for read-only operations when a built-in VS Code tool equivalent exists. The §7 "When to apply" trigger also now covers inline terminal command guidance (backtick-quoted commands in prose), not only fenced shell blocks.
 
 ---
 

@@ -184,13 +184,13 @@ Performs retrospective analysis of development process to improve future executi
 
 ```powershell
 # Review recent commits and their sequence
-git log --oneline --decorate -20
+git log --oneline --decorate -20  # history — no built-in tool equivalent
 
 # Check current branch changes
-git diff main...HEAD --stat
+git diff main...HEAD --stat  # cross-branch diff — no built-in tool equivalent
 
-# Review file creation/modification times
-Get-ChildItem -Recurse -File | Where-Object {$_.LastWriteTime -gt (Get-Date).AddDays(-7)} | Sort-Object LastWriteTime
+# Review file modification times
+Get-ChildItem -Recurse -File | Where-Object {$_.LastWriteTime -gt (Get-Date).AddDays(-7)} | Sort-Object LastWriteTime  # file modification timestamps — no built-in tool equivalent
 ```
 
 **Analyze**:
@@ -220,14 +220,9 @@ Get-ChildItem -Recurse -File | Where-Object {$_.LastWriteTime -gt (Get-Date).Add
 
 **Scan for**:
 
-```powershell
-# Find references to specific concepts
-git grep "plan-tracking"
-git grep "implementation-workflow"
-
-# Check for orphaned files
-Get-ChildItem -Recurse -Include *.md | Where-Object {(Select-String -Path $_ -Pattern "OBSOLETE|DEPRECATED" -Quiet)}
-```
+- Use `grep_search` with query `plan-tracking` and `includePattern: "**/*.md"` to find references to plan-tracking concepts
+- Use `grep_search` with query `implementation-workflow` to find implementation-workflow references
+- Use `grep_search` with query `OBSOLETE|DEPRECATED` (set `isRegexp: true`) and `includePattern: "**/*.md"` to identify files with stale content markers
 
 **Verify**:
 
@@ -546,7 +541,7 @@ No actionable signals found. All metrics within acceptable ranges or below per-c
 
 **Analysis**:
 
-- Search for duplicate topics: `git grep "subject"`
+- Search for duplicate topics in workspace docs: Use `grep_search` with query `subject` and `includePattern: "**/*.md"`. For session memory, use the `memory` tool (`view /memories/session/` then read individual files) to check for overlapping topics.
 - Check file ages: Which is canonical?
 - Review references: Which files link to which?
 

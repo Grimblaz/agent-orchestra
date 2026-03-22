@@ -127,11 +127,7 @@ Before finalizing a skill's `description:` field, verify:
 1. **Length target**: ≤60 words total (positive triggers + negative signals combined)
 2. **Positive triggers**: includes "Use when..." with 2–3 specific, distinct scenarios — not generic summary language
 3. **Negative signals**: includes "DO NOT USE FOR:..." with at least one adjacent skill pointer, e.g. `(use {other-skill})`
-4. **Collision check**: before finalizing, grep existing SKILL.md files for overlapping trigger words and add explicit "DO NOT USE FOR:" signals to **both** sides of any conflict:
-
-   ```powershell
-   Select-String -Path ".github/skills/*/SKILL.md" -Pattern "your-trigger-word" | Select-Object Path, Line
-   ```
+4. **Collision check**: before finalizing, use `grep_search` with query `your-trigger-word` and `includePattern: ".github/skills/*/SKILL.md"` to check for naming collisions with existing skills. Add explicit "DO NOT USE FOR:" signals to **both** sides of any conflict.
 
 ## Writing Guidelines
 
