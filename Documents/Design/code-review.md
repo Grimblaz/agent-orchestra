@@ -70,7 +70,7 @@ VS Code 1.110 renamed the questioning tool from `ask_questions` to `vscode/askQu
 - Issue-Planner `<plan_style_guide>` includes exhaustive-scan rule for migration issues
 - Code-Conductor Step 4 includes migration completeness check
 - PR body template includes `migration-scan result (migration-type issues only)`
-- Quick-validate: Plan-Architect refs = 0, Janitor refs = 0, agent count = 13
+- Quick-validate: Plan-Architect refs = 0, Janitor refs = 0, agent count = 14
 
 ---
 
@@ -515,7 +515,7 @@ Three changes across two agent files:
 - Code-Critic §1 includes a docs-only producer-side check for renamed/added enumerated constants
 - Issue-Planner `<plan_style_guide>` includes bidirectional Cross-file constants rule with format example
 - Issue-Planner `<plan_style_guide>` includes Multi-tier statistical output rule using "involves"
-- Quick-validate: Plan-Architect refs = 0, Janitor refs = 0, agent count = 13
+- Quick-validate: Plan-Architect refs = 0, Janitor refs = 0, agent count = 14
 
 ---
 
@@ -539,7 +539,7 @@ Adds a local calibration cache (`.copilot-tracking/calibration/review-data.json`
 - `backfill-calibration.ps1` backfills from existing merged PR history (VS Code Copilot only)
 - `aggregate-review-scores.ps1` accepts optional `-CalibrationFile` parameter (default: `.copilot-tracking/calibration/review-data.json`)
 - Claude Code workflow uses PR body parsing only — local calibration cache is a VS Code Copilot optimization
-- Quick-validate: Plan-Architect refs = 0, Janitor refs = 0, agent count = 13
+- Quick-validate: Plan-Architect refs = 0, Janitor refs = 0, agent count = 14
 
 ---
 
@@ -552,7 +552,7 @@ Adds a local calibration cache (`.copilot-tracking/calibration/review-data.json`
 Three targeted additions to close the process gaps that allowed these defects through:
 
 1. **Code-Critic §6 — Two new PowerShell checklist items** (`Code-Critic.agent.md`):
-   - **.NET explicit-interface interop**: Flag `.Clone()` on `[ordered]@{}` or ambiguously-typed dictionary variables; recommend `ConvertTo-Json | ConvertFrom-Json -AsHashtable` deep-copy idiom.
+   - **.NET method accessibility**: Flag `.Clone()` on `[ordered]@{}` or ambiguously-typed dictionary variables; recommend `ConvertTo-Json | ConvertFrom-Json -AsHashtable` deep-copy idiom.
    - **Collection-return semantics**: Verify functions returning `@(...)` that may be serialized use `return , @(...)` (unary comma) or `Write-Output -NoEnumerate` to preserve array identity.
 
 2. **Code-Smith item 4 — Single-element array round-trip verification** (`Code-Smith.agent.md`): Extended the serialized output correctness rule to require verifying that single-element writes preserve array type, not just that the JSON document is parseable. Added PowerShell idiom hint (`return , @(...)` / `Write-Output -NoEnumerate`).
