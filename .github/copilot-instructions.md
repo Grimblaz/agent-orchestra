@@ -63,7 +63,7 @@ This repo uses a **scored prosecution → defense → judge pipeline** across al
 
 **GitHub review**: proxy prosecution (Code-Critic validates/scores each GitHub comment) → defense → judge.
 
-**Post-fix review** (after accepted fixes are applied): 1+1 prosecution (diff-scoped, conditional follow-up — see R2 in Code-Conductor), 1× defense, 1× judge — triggered by Critical/High fix or control-flow modification. Loop budget: 1. Token budget optimizations (R6 express lane, R4 batch dispatch, R5 backoff) reduce subagent call overhead — see Code-Conductor for full protocol.
+**Post-fix review** (after accepted fixes are applied): 1+1 prosecution (diff-scoped; follow-up pass 2 is conditional on pass 1 producing ≥1 finding — see R2 in Code-Conductor), 1× defense, 1× judge — triggered by Critical/High fix or control-flow modification. Loop budget: 1. Token budget optimizations (R6 express lane, R4 batch dispatch, R5 backoff) reduce subagent call overhead — see Code-Conductor for full protocol.
 
 **Code-Critic modes** — activated by marker in the prompt:
 
