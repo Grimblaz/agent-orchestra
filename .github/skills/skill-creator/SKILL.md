@@ -187,8 +187,9 @@ description: This skill helps with testing things.  # Unclear scope
   ## brainstorming
 
   <!-- gotcha-status: new -->
-  | Trigger | Gotcha | Fix |
-  |---------|--------|-----|
+
+  | Trigger                                | Gotcha                            | Fix                                        |
+  | -------------------------------------- | --------------------------------- | ------------------------------------------ |
   | Asking for options without constraints | Produces unbounded solution space | Add scope constraints before brainstorming |
   ```
 

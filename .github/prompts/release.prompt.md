@@ -93,11 +93,12 @@ Format the notes to match the established release pattern:
 ```markdown
 ## What's Changed
 
-* {commit or PR summary} by @{author}
+- {commit or PR summary} by @{author}
 
 ## Highlights
 
 **{Feature name (issue #N)}** — {2–3 sentence description of what changed and why}
+
 - {Bullet point detail}
 - {Bullet point detail}
 
