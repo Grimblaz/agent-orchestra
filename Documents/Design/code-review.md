@@ -182,7 +182,7 @@ Code-Conductor invokes →
     → Code-Critic (defense, 1 pass over merged ledger)
       → Code-Review-Response (judge, rules + emits score summary)
         → Score summary → Code-Conductor routes accepted fixes to specialists
-          → [if triggered] Post-fix targeted prosecution (1+1 passes, diff-scoped, conditional → defense → judge)
+          → [if triggered] Post-fix targeted prosecution (1+1 passes, diff-scoped; if pass 1 finds issues → defense → judge; otherwise ends)
               → Code-Conductor routes post-fix accepted findings (loop budget: 1)
 ```
 
@@ -569,7 +569,7 @@ Three targeted additions to close the process gaps that allowed these defects th
 
 **Rationale**: A 1-point string casing fix does not benefit from a defense pass or a judge arbitration. The compound 6-criteria gate mitigates severity under-rating risk — all criteria must hold simultaneously, making false eligibility rare. Estimated savings: 30K–75K+ tokens per express-laned item (2 avoided subagent calls × preamble cost). Session-level call reduction varies by scenario: 20–30% when most or all findings are express-laned; proportionally lower in partial express-lane sessions (observed: ~22% in a 2-of-4 express-lane scenario).
 
-**Scope restriction**: Standard code review prosecution only — not proxy prosecution (GitHub intake), CE prosecution, or design review.
+**Scope restriction**: Standard code review prosecution and diff-scoped post-fix targeted prosecution only — not proxy prosecution (GitHub intake), CE prosecution, or design review.
 
 ### D36 — 1+1 Post-Fix Prosecution (R2)
 

@@ -187,7 +187,7 @@ $accumulateFinding = {
     $defenseVerdict  = if ($finding.ContainsKey('defense_verdict'))  { $finding['defense_verdict'].ToLowerInvariant()  } else { '' }
     if (-not $finding.ContainsKey('review_stage')) { $reviewStageUntagged++ }
     $reviewStage = if ($finding.ContainsKey('review_stage')) { $finding['review_stage'].ToLowerInvariant() } else { 'main' }
-    $isSustained = ($judgeRuling -eq 'sustained')
+    $isSustained = ($judgeRuling -eq 'sustained' -or $judgeRuling -eq 'finding-sustained')
 
     if ($category -ne 'n/a') {
         $weightedTotal += $weight
@@ -257,6 +257,11 @@ foreach ($pr in $mergedPRs) {
             foreach ($lf in $localEntry.findings) {
                 $finding = @{}
                 foreach ($prop in $lf.PSObject.Properties) { $finding[$prop.Name] = [string]$prop.Value }
+                # Express-lane findings (pre-v2.1) may legitimately omit judge_ruling — default it
+                if ($finding.ContainsKey('express_lane') -and $finding['express_lane'] -eq 'True' -and
+                    (-not $finding.ContainsKey('judge_ruling') -or [string]::IsNullOrWhiteSpace($finding['judge_ruling']))) {
+                    $finding['judge_ruling'] = 'finding-sustained'
+                }
                 $missingField = $false
                 foreach ($field in $requiredFindingFields) {
                     if (-not $finding.ContainsKey($field) -or [string]::IsNullOrWhiteSpace($finding[$field])) {
@@ -290,6 +295,11 @@ foreach ($pr in $mergedPRs) {
     $findings = Get-FindingsArray -Block $block
 
     foreach ($finding in $findings) {
+        # Express-lane findings (pre-v2.1) may legitimately omit judge_ruling — default it
+        if ($finding.ContainsKey('express_lane') -and $finding['express_lane'] -eq 'True' -and
+            (-not $finding.ContainsKey('judge_ruling') -or [string]::IsNullOrWhiteSpace($finding['judge_ruling']))) {
+            $finding['judge_ruling'] = 'finding-sustained'
+        }
         # Validate required fields
         $missingField = $false
         foreach ($field in $requiredFindingFields) {

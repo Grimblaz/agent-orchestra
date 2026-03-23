@@ -98,7 +98,10 @@ catch {
 if (Test-HasProperty $entry 'findings') {
     $requiredFindingFields = @('id', 'category', 'judge_ruling')
     foreach ($finding in $entry.findings) {
+        # Express-lane findings may legitimately omit judge_ruling (pre-v2.1) — exempt them
+        $isExpressLane = (Test-HasProperty $finding 'express_lane') -and ($finding.express_lane -eq $true -or $finding.express_lane -eq 'true')
         foreach ($field in $requiredFindingFields) {
+            if ($field -eq 'judge_ruling' -and $isExpressLane) { continue }
             if (-not (Test-HasProperty $finding $field)) {
                 Write-ValidationError "Validation failed: a finding is missing required field '$field'."
             }
