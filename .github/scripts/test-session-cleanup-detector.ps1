@@ -2,11 +2,11 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Verification harness for session-cleanup-detector.ps1 (issue #40: stale-branch detection).
+    Verification harness for session-cleanup-detector.ps1.
 
 .DESCRIPTION
-    Exercises the detector across 11 scenarios using git mocking (temp mock dir on PATH).
-    All 11 scenarios should PASS with the completed branch-detection implementation.
+    Exercises the detector across 14 scenarios using git mocking (temp mock dir on PATH).
+    Covers stale-branch detection plus issue #185 calibration exclusion paths.
 
 .USAGE
     pwsh .github/scripts/test-session-cleanup-detector.ps1 [-Verbose]
@@ -223,6 +223,39 @@ function Assert-HasCleanupContext {
     }
 }
 
+function Assert-CleanupContextOmitsNoise {
+    param([string]$Context, [string[]]$Forbidden)
+
+    foreach ($item in $Forbidden) {
+        if ($Context -like "*$item*") {
+            return @{ Pass = $false; Reason = "additionalContext should not mention '$item'. ctx=[$Context]" }
+        }
+    }
+
+    return @{ Pass = $true }
+}
+
+function Assert-HasCleanupContextWithoutNoise {
+    param(
+        [string]$Output,
+        [string[]]$Contains,
+        [string[]]$Forbidden
+    )
+
+    $result = Assert-HasCleanupContext -Output $Output -Contains $Contains
+    if (-not $result.Pass) {
+        return $result
+    }
+
+    try {
+        $json = $Output | ConvertFrom-Json -ErrorAction Stop
+        return Assert-CleanupContextOmitsNoise -Context $json.hookSpecificOutput.additionalContext -Forbidden $Forbidden
+    }
+    catch {
+        return @{ Pass = $false; Reason = "JSON parse error or missing structure: $_. Output: $Output" }
+    }
+}
+
 function Assert-BranchFirstInContext {
     param([string]$Output, [string]$BranchContains, [string]$TrackingContains)
     try {
@@ -284,6 +317,39 @@ title: "Test tracking file for S11 (same-issue dedup)"
 ---
 # Issue #40 plan (test fixture)
 '@ -Encoding UTF8
+
+# ---------------------------------------------------------------------------
+# S12 work directory — calibration-only persistent data
+# ---------------------------------------------------------------------------
+$s12WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "detector-test-s12-$([System.IO.Path]::GetRandomFileName())"
+$s12CalibrationFile = Join-Path $s12WorkDir '.copilot-tracking' 'calibration' 'review-data.json'
+New-Item -ItemType Directory -Path (Split-Path -Parent $s12CalibrationFile) | Out-Null
+Set-Content -Path $s12CalibrationFile -Value '{"calibration_version":1,"entries":[]}' -Encoding UTF8
+
+# ---------------------------------------------------------------------------
+# S13 work directory — calibration plus stale issue-tracking artifact
+# ---------------------------------------------------------------------------
+$s13WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "detector-test-s13-$([System.IO.Path]::GetRandomFileName())"
+$s13CalibrationFile = Join-Path $s13WorkDir '.copilot-tracking' 'calibration' 'review-data.json'
+$s13TrackingFile = Join-Path $s13WorkDir '.copilot-tracking' 'research' 'issue-185-red.md'
+New-Item -ItemType Directory -Path (Split-Path -Parent $s13CalibrationFile) | Out-Null
+New-Item -ItemType Directory -Path (Split-Path -Parent $s13TrackingFile) | Out-Null
+Set-Content -Path $s13CalibrationFile -Value '{"calibration_version":1,"entries":[]}' -Encoding UTF8
+Set-Content -Path $s13TrackingFile -Value @'
+---
+issue_id: "185"
+title: "Issue 185 RED fixture"
+---
+# Fixture tracking file
+'@ -Encoding UTF8
+
+# ---------------------------------------------------------------------------
+# S14 work directory — calibration plus stale branch
+# ---------------------------------------------------------------------------
+$s14WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "detector-test-s14-$([System.IO.Path]::GetRandomFileName())"
+$s14CalibrationFile = Join-Path $s14WorkDir '.copilot-tracking' 'calibration' 'review-data.json'
+New-Item -ItemType Directory -Path (Split-Path -Parent $s14CalibrationFile) | Out-Null
+Set-Content -Path $s14CalibrationFile -Value '{"calibration_version":1,"entries":[]}' -Encoding UTF8
 
 # ---------------------------------------------------------------------------
 # Run scenarios
@@ -481,12 +547,62 @@ Invoke-Scenario `
     }
 }
 
+# S12 — Calibration-only subtree → no-op
+Invoke-Scenario `
+    -Name 'S12: Calibration-only persistent data → no-op' `
+    -GitConfig @{
+    'branch--show-current'     = 'main'
+    'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+} `
+    -WorkDir $s12WorkDir `
+    -Assert { param($o) Assert-NoOp $o }
+
+# S13 — Calibration + stale issue tracking artifact → report only the issue artifact
+Invoke-Scenario `
+    -Name 'S13: Calibration + stale issue tracking artifact → issue artifact only' `
+    -GitConfig @{
+    'branch--show-current'       = 'main'
+    'symbolic-ref-origin-HEAD'   = 'refs/remotes/origin/main'
+    'ls-remote-feature/issue-185-*' = ''
+    'branch-list-feature/issue-185-*' = '  feature/issue-185-red'
+} `
+    -WorkDir $s13WorkDir `
+    -Assert {
+    param($o)
+    Assert-HasCleanupContextWithoutNoise `
+        -Output $o `
+        -Contains @('Issue #185', 'post-merge-cleanup.ps1') `
+        -Forbidden @('calibration', 'review-data.json', 'tracking file(s) with no issue ID')
+}
+
+# S14 — Calibration + stale branch → stale branch still reported
+Invoke-Scenario `
+    -Name 'S14: Calibration + stale branch → branch cleanup still reported' `
+    -GitConfig @{
+    'branch--show-current'                     = 'feature/issue-185-stale-branch'
+    'symbolic-ref-origin-HEAD'                 = 'refs/remotes/origin/main'
+    'rev-parse-exit'                           = 0
+    'rev-parse-upstream'                       = 'origin/feature/issue-185-stale-branch'
+    'ls-remote-feature/issue-185-stale-branch' = ''
+} `
+    -WorkDir $s14WorkDir `
+    -Assert {
+    param($o)
+    Assert-HasCleanupContextWithoutNoise `
+        -Output $o `
+        -Contains @('feature/issue-185-stale-branch', 'post-merge-cleanup.ps1') `
+        -Forbidden @('calibration', 'review-data.json', 'tracking file(s) with no issue ID')
+}
+
 # ---------------------------------------------------------------------------
 # Cleanup temp directories
 # ---------------------------------------------------------------------------
 Remove-Item -Recurse -Force $emptyWorkDir -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $s7WorkDir    -ErrorAction SilentlyContinue
 Remove-Item -Recurse -Force $s11WorkDir   -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $s12WorkDir   -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $s13WorkDir   -ErrorAction SilentlyContinue
+Remove-Item -Recurse -Force $s14WorkDir   -ErrorAction SilentlyContinue
 
 # ---------------------------------------------------------------------------
 # Summary

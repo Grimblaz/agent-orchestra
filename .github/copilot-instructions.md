@@ -76,33 +76,56 @@ This repo uses a **scored prosecution → defense → judge pipeline** across al
 
 ## Session Startup Check
 
-At the start of every new conversation, **before responding to the user's first message**, run the session-cleanup detector:
+At the start of every new conversation, **before responding to the user's first message**, use session memory to decide whether the automatic startup detector should run:
+
+### Canonical Automatic Startup Guard Contract
+
+```json
+{
+  "sessionStartupMarkerPath": "/memories/session/session-startup-check-complete.md",
+  "checkMarkerBeforeAutomaticDetectorRun": true,
+  "recordMarkerAfterFirstAutomaticStartupCheck": true,
+  "recordMarkerRegardlessOfCleanupChoice": true,
+  "failOpenOnSessionMemoryAccessError": true,
+  "manualDetectorRunsRemainAllowed": true
+}
+```
 
 ### Step 1 — Check prerequisites
 
 Resolve the root path: use `$env:COPILOT_ORCHESTRA_ROOT` if set; otherwise fall back to `$env:WORKFLOW_TEMPLATE_ROOT`. If neither is set, skip the entire check silently and continue with the user's request.
 
-### Step 2 — Run the detector
+### Step 2 — Check the automatic run-once guard
+
+Before any automatic startup detector run, check session memory for the marker at `/memories/session/session-startup-check-complete.md`. If that marker is present, skip the automatic detector run and continue silently with the user's request. If session-memory lookup, read, or other access fails, fail open and still run the detector rather than suppressing the check.
+
+### Step 3 — Run the detector
 
 ```powershell
 $copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }
 pwsh -NoProfile -NonInteractive -File "$copilotRoot/.github/scripts/session-cleanup-detector.ps1"
 ```
 
-### Step 3 — Parse output
+### Step 4 — Record the run-once marker
+
+Record or write the session-memory marker at `/memories/session/session-startup-check-complete.md` after the first automatic startup check runs so later agent hops in the same conversation skip the automatic detector run. Record the marker regardless of whether cleanup is needed and regardless of whether the user later confirms, declines, or skips cleanup. If session-memory write or other access fails, fail open: continue with the detector result you already obtained, and allow later automatic checks rather than risking a missed cleanup warning.
+
+### Step 5 — Parse output
 
 - Output is `{}` → continue silently, no prompt
-- Output contains `hookSpecificOutput` → stale state found; proceed to Step 4
+- Output contains `hookSpecificOutput` → stale state found; proceed to Step 6
 
-### Step 4 — Prompt the user
+### Step 6 — Prompt the user
 
 Present the `additionalContext` field from the output to the user using `#tool:vscode/askQuestions` with two options: "Yes — run cleanup" and "No — skip for now".
 
-### Step 5 — Run cleanup (only if confirmed)
+### Step 7 — Run cleanup (only if confirmed)
 
 Execute the PowerShell code block from `additionalContext` in the terminal. Report what was cleaned up when complete.
 
-Continue with the user's original request regardless of whether cleanup was run, skipped, or declined.
+### Step 8 — Continue with the user's request
+
+Continue with the user's original request regardless of whether cleanup was run, skipped, or declined. This automatic run-once guard applies only to the startup path; explicit or manual detector runs still remain available after the automatic guard fires.
 
 > **Silent skip conditions**: Skip the entire check when neither `$env:COPILOT_ORCHESTRA_ROOT` nor `$env:WORKFLOW_TEMPLATE_ROOT` is set, `pwsh` is not available, or the script produces non-JSON output. See `.github/instructions/session-startup.instructions.md` for full edge case details.
 

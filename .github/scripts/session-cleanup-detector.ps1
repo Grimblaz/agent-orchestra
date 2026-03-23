@@ -33,6 +33,42 @@ function Write-NoOp {
     Write-Output '{}'
 }
 
+$persistentTrackingSubtrees = @(
+    'calibration'
+)
+
+function Test-IsPersistentTrackingFile {
+    param(
+        [Parameter(Mandatory)]
+        [string]$TrackingRootPath,
+
+        [Parameter(Mandatory)]
+        [System.IO.FileInfo]$File,
+
+        [Parameter(Mandatory)]
+        [string[]]$PersistentSubtrees
+    )
+
+    $filePath = [System.IO.Path]::GetFullPath($File.FullName)
+    $relativePath = [System.IO.Path]::GetRelativePath($trackingRootPath, $filePath).Replace('\', '/')
+
+    foreach ($subtree in $PersistentSubtrees) {
+        $normalizedSubtree = $subtree.Trim('/').Replace('\', '/')
+        if (-not $normalizedSubtree) {
+            continue
+        }
+
+        if (
+            $relativePath.Equals($normalizedSubtree, [System.StringComparison]::OrdinalIgnoreCase) -or
+            $relativePath.StartsWith("$normalizedSubtree/", [System.StringComparison]::OrdinalIgnoreCase)
+        ) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Get-DefaultBranch {
     <#
     .SYNOPSIS
@@ -104,6 +140,7 @@ $cleanupNeeded = @()
 $trackingRoot = '.copilot-tracking'
 
 if (Test-Path $trackingRoot) {
+    $trackingRootPath = [System.IO.Path]::GetFullPath((Join-Path (Get-Location) $trackingRoot))
     $trackingFiles = @(Get-ChildItem -Path $trackingRoot -Recurse -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -notmatch '^\.gitkeep$' })
 
@@ -111,6 +148,10 @@ if (Test-Path $trackingRoot) {
         $issueIds = @()
         $unknownFiles = @()
         foreach ($file in $trackingFiles) {
+            if (Test-IsPersistentTrackingFile -TrackingRootPath $trackingRootPath -File $file -PersistentSubtrees $persistentTrackingSubtrees) {
+                continue
+            }
+
             $content = Get-Content -Path $file.FullName -Raw -ErrorAction SilentlyContinue
             if ($content -match '(?m)^issue_id:\s*["\x27]?(\d+)["\x27]?') {
                 $id = $Matches[1]

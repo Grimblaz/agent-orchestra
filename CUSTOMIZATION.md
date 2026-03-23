@@ -115,7 +115,7 @@ To share agents across all repositories in your org:
 >
 > The steps below are the manual equivalent — follow them if you prefer to configure without the wizard, or if you need to adjust an existing configuration.
 
-The Copilot Orchestra includes a session startup check (inline in `.github/copilot-instructions.md`) that tells agents to check for stale feature branches and leftover tracking files at the start of each conversation. When cleanup is needed, the agent prompts you to confirm before running cleanup. The full edge-case details are in `.github/instructions/session-startup.instructions.md` (detailed reference only — the check itself runs from `.github/copilot-instructions.md`).
+The Copilot Orchestra includes a session startup check (inline in `.github/copilot-instructions.md`) that applies a session-memory run-once guard before any automatic detector invocation. The guard uses the marker `/memories/session/session-startup-check-complete.md`. The first automatic check in a conversation looks for stale feature branches and leftover issue-scoped tracking files, records that marker after the automatic startup check runs, and prevents repeated prompts from later agent hops even if cleanup is declined. Persistent calibration data under `.copilot-tracking/calibration/` is not cleanup work. The full edge-case details are in `.github/instructions/session-startup.instructions.md` (detailed reference only — the check itself runs from `.github/copilot-instructions.md`).
 
 **Setup — two steps:**
 
@@ -173,7 +173,7 @@ $env:COPILOT_ORCHESTRA_ROOT = "C:\path\to\copilot-orchestra"
 export COPILOT_ORCHESTRA_ROOT="/path/to/copilot-orchestra"
 ```
 
-**What it does**: At the start of each conversation, the agent checks whether your current branch's remote has been deleted (indicating a merged PR) or whether `.copilot-tracking/` files exist for merged issues. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`.
+**What it does**: At the start of each conversation, the first automatic startup check uses the session-memory marker `/memories/session/session-startup-check-complete.md` to ensure the detector runs only once automatically per conversation. That automatic check looks for a deleted upstream branch (indicating a merged PR) or stale issue-scoped `.copilot-tracking/` files for merged issues. Persistent calibration data is excluded from cleanup detection. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`. If neither root environment variable is set, `pwsh` is unavailable, the detector script is missing, or the detector returns non-JSON output, the automatic check skips silently. If session-memory access fails, the detector still runs; explicit manual detector runs remain available after the automatic guard fires.
 
 **Requires**: PowerShell 7+ (`pwsh`) installed on PATH and `COPILOT_ORCHESTRA_ROOT` (or `WORKFLOW_TEMPLATE_ROOT`) set.
 
