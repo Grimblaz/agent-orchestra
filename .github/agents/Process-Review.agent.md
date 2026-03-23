@@ -383,14 +383,16 @@ No actionable signals found. All metrics within acceptable ranges or below per-c
 - If the file exists but is empty → skip §4.8 silently
 - Read `copilot-orchestra-repo` from `.github/copilot-instructions.md` (look for line `copilot-orchestra-repo: {owner}/{repo}`)
 - If field is absent → skip §4.8 silently
-- Pre-flight access check: `gh repo view {copilot-orchestra-repo} --json name 2>&1` — if non-zero exit or error output → emit `⚠️ Upstream gotcha flow skipped — gh access to {copilot-orchestra-repo} failed` and fall back to creating a local GitHub issue tagged `upstream-gotcha`
+- Pre-flight access check: `gh repo view {copilot-orchestra-repo} --json name 2>&1` — if non-zero exit or error output → emit `⚠️ Upstream gotcha flow skipped — gh access to {copilot-orchestra-repo} failed` and fall back to creating a local GitHub issue labeled `upstream-gotcha` and `priority: medium`
 
 **Step 2 — Scan for unresolved entries**:
 
-Read `local-gotchas.instructions.md`. For each skill heading (`## {skill-name}`) and each entry without a terminal marker — that is, without a `<!-- gotcha-status: ... -->` marker, or with marker `<!-- gotcha-status: new -->`, or with marker `<!-- gotcha-status: dedup-error -->` (the terminal markers are: `upstream:{url}`, `local`, `duplicate`, `resolved`):
+Read `local-gotchas.instructions.md`. For each skill heading (`## {skill-name}`) and each entry without a terminal marker — that is, an entry with no status marker, or with marker `<!-- gotcha-status: new -->`, or with marker `<!-- gotcha-status: dedup-error -->` (the terminal markers are: `upstream:{url}`, `local`, `duplicate`, `resolved`):
 
 - Apply heuristic filter: if the pattern references a library or system unique to this downstream repo → mark `<!-- gotcha-status: local -->` (do not send upstream)
 - If the pattern describes the skill's domain generally (could happen to any user of the skill) → upstream candidate
+
+> **Format note**: Each gotcha entry in `local-gotchas.instructions.md` must be its own single-row table with its own `<!-- gotcha-status: ... -->` marker. Multi-row tables produce ambiguous state — only the marker before the table header is read.
 
 **Step 3 — Dedup and create upstream issues**:
 
@@ -428,7 +430,7 @@ For each entry already marked `<!-- gotcha-status: upstream:{url} -->`: check if
 - Skipped: {reason or "none"}
 ```
 
-**Guardrail**: This section reads `local-gotchas.instructions.md` and creates GitHub issues. It does NOT modify any agent, skill, or instruction file directly. Issue creation requires output-capture verification per safe-operations.instructions.md §2a and §2c.
+**Guardrail**: This section reads and writes `local-gotchas.instructions.md` to update status markers, and creates GitHub issues. It does NOT modify any other agent, skill, or system instruction file. Issue creation requires output-capture verification per safe-operations.instructions.md §2a and §2c.
 
 ### 5. Root Cause Analysis
 

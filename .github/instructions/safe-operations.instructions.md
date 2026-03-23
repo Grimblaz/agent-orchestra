@@ -132,4 +132,4 @@ Key differences from the standard pattern:
 - `--repo {copilot-orchestra-repo}` targets the upstream template repo (not the current repo)
 - `--state all` includes closed issues (a resolved gotcha should not be re-submitted)
 - Search key format is `[Gotcha] {skill-name}` — the `[Gotcha]` prefix groups all gotcha issues for that skill
-- If `gh` cannot access the upstream repo, fall back to creating a local issue with label `upstream-gotcha` for manual transfer
+- If `gh` cannot access the upstream repo, fall back to creating a local issue labeled `upstream-gotcha` and `priority: medium` for manual transfer

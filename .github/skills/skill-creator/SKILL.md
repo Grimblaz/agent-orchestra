@@ -194,6 +194,7 @@ description: This skill helps with testing things.  # Unclear scope
   ```
 
   The `<!-- gotcha-status: new -->` marker goes on the line immediately before the table header it annotates (not inside the table body).
+  Each gotcha entry must be its own single-row table — do not combine multiple entries in one table, as the `<!-- gotcha-status: ... -->` marker tracks state per table, not per row.
 
 ### Customization Markers
 
