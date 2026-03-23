@@ -389,4 +389,43 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             }
         }
     }
+
+    # ==================================================================
+    # Context: express-lane injection
+    # AST/source-code presence tests — no gh CLI needed.
+    # Verifies that both injection paths (local-entries loop and v2 PR-body
+    # findings loop) correctly auto-set judge_ruling = 'finding-sustained'
+    # for express-lane findings that omit that field.
+    # ==================================================================
+    Context 'express-lane injection' -Tag 'no-gh' {
+
+        BeforeAll {
+            # Array of lines — enables per-line Select-String counts
+            $script:ScriptLines = Get-Content -Path $script:ScriptFile
+        }
+
+        It 'local-entries path contains the express-lane injection guard' {
+            # Verify the guard condition is present somewhere in the script
+            ($script:ScriptLines | Select-String "express_lane.*'True'") | Should -Not -BeNullOrEmpty `
+                -Because 'the local-entries loop must check express_lane eq True before injecting judge_ruling'
+            # Verify the injected value is present
+            ($script:ScriptLines | Select-String 'finding-sustained') | Should -Not -BeNullOrEmpty `
+                -Because 'the guard must inject judge_ruling = finding-sustained for express-lane findings'
+        }
+
+        It 'both injection paths (local-entries and v2 PR-body) are present in the script' {
+            ($script:ScriptLines | Select-String 'express_lane.*True').Count |
+                Should -BeGreaterOrEqual 2 `
+                -Because 'both the local-entries loop (Change B) and v2 PR-body loop (Change C) must contain the express-lane guard'
+            ($script:ScriptLines | Select-String 'finding-sustained').Count |
+                Should -BeGreaterOrEqual 2 `
+                -Because 'both injection paths must set judge_ruling to finding-sustained'
+        }
+
+        It '$isSustained treats finding-sustained as a sustained ruling' {
+            ($script:ScriptLines | Select-String 'isSustained.*finding-sustained|finding-sustained.*isSustained') |
+                Should -Not -BeNullOrEmpty `
+                -Because '$isSustained must combine both sustained and finding-sustained so express-lane findings are counted correctly'
+        }
+    }
 }

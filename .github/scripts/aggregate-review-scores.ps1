@@ -258,7 +258,7 @@ foreach ($pr in $mergedPRs) {
                 $finding = @{}
                 foreach ($prop in $lf.PSObject.Properties) { $finding[$prop.Name] = [string]$prop.Value }
                 # Express-lane findings (pre-v2.1) may legitimately omit judge_ruling — default it
-                if ($finding.ContainsKey('express_lane') -and $finding['express_lane'] -eq 'True' -and
+                if ($finding.ContainsKey('express_lane') -and $finding['express_lane'] -eq 'true' -and
                     (-not $finding.ContainsKey('judge_ruling') -or [string]::IsNullOrWhiteSpace($finding['judge_ruling']))) {
                     $finding['judge_ruling'] = 'finding-sustained'
                 }
@@ -296,7 +296,7 @@ foreach ($pr in $mergedPRs) {
 
     foreach ($finding in $findings) {
         # Express-lane findings (pre-v2.1) may legitimately omit judge_ruling — default it
-        if ($finding.ContainsKey('express_lane') -and $finding['express_lane'] -eq 'True' -and
+        if ($finding.ContainsKey('express_lane') -and $finding['express_lane'] -eq 'true' -and
             (-not $finding.ContainsKey('judge_ruling') -or [string]::IsNullOrWhiteSpace($finding['judge_ruling']))) {
             $finding['judge_ruling'] = 'finding-sustained'
         }

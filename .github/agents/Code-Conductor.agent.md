@@ -612,7 +612,15 @@ findings:
     points: 1
     pass: 1
     review_stage: main
-    express_lane: true  # optional — present only for express-laned findings; defense_verdict is absent because express-laned findings bypass defense and judge; judge_ruling is required and should be "finding-sustained"
+    express_lane: true  # optional — present only for express-laned findings; defense_verdict and judge_ruling are absent because express-laned findings bypass defense and judge (scripts default judge_ruling to "finding-sustained" for backward compat)
+    judge_ruling: finding-sustained
+  - id: F3
+    category: documentation
+    severity: low
+    points: 1
+    pass: 1
+    review_stage: postfix
+    express_lane: true  # post-fix targeted prosecution express-lane example
     judge_ruling: finding-sustained
   - id: F2
     category: performance
@@ -757,7 +765,7 @@ When a subagent call fails or returns no output, classify the failure before rou
 
 1. Wait `2^attempt × 30s` before retrying (attempt 1 = 60s, attempt 2 = 120s).
 2. On Sonnet-class model failure: before entering backoff, consider switching to an Opus-class model — Sonnet and Opus have separate per-model TPM limits, so Opus may still be available when Sonnet is throttled.
-3. After **2 consecutive retry failures** for the same call (3 total attempts: initial call + retry 1 after 60s + retry 2 after 120s): prompt via `#tool:vscode/askQuestions` with:
+3. After **2 consecutive retry failures** for the same call (3 total attempts in the timeout-failure path; the rate-limit-heuristic detection path described above may trigger a prompt after 2 attempts when the initial call + 1 retry both return empty output): prompt via `#tool:vscode/askQuestions` with:
    - Option A: "Defer remaining work — {N} findings pending (resume next session from current phase)" _(recommended)_
    - Option B: "Skip remaining low-severity findings and continue" — only available when all pending findings are `low` severity; Critical/High/Medium findings cannot be skipped.
 

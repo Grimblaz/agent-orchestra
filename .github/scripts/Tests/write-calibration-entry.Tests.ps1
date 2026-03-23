@@ -13,7 +13,7 @@
       - Appends entry on no match
       - Atomic write: .tmp → validate JSON → rename to review-data.json
       - Validates required top-level fields: pr_number, created_at
-      - Validates required finding fields: id, category, judge_ruling
+      - Validates required finding fields: id, category, judge_ruling (express-lane findings exempt from judge_ruling check)
       - Validates required summary subfields:
           prosecution_findings, pass_1_findings, pass_2_findings,
           pass_3_findings, defense_disproved, judge_accepted,
@@ -409,6 +409,38 @@ Describe 'write-calibration-entry.ps1' {
             $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
             $dataFile | Should -Not -Exist `
                 -Because 'no file should be created or modified when validation fails'
+        }
+
+        It 'exits 0 when an express-lane finding omits judge_ruling' {
+            $workDir = & $script:NewWorkDir
+            $entry = [ordered]@{
+                pr_number  = 100
+                created_at = '2026-03-20T12:00:00Z'
+                findings   = @(
+                    [ordered]@{
+                        id           = 'E1'
+                        category     = 'documentation'
+                        # judge_ruling omitted — express-lane exception
+                        express_lane = $true
+                        review_stage = 'main'
+                    }
+                )
+                summary    = [ordered]@{
+                    prosecution_findings = 1
+                    pass_1_findings      = 1
+                    pass_2_findings      = 0
+                    pass_3_findings      = 0
+                    defense_disproved    = 0
+                    judge_accepted       = 1
+                    judge_rejected       = 0
+                    judge_deferred       = 0
+                }
+            }
+            $entryJson = $entry | ConvertTo-Json -Depth 10 -Compress
+            $result = & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
+
+            $result.ExitCode | Should -Be 0 `
+                -Because 'express-lane findings are exempt from the judge_ruling required-field check'
         }
     }
 
