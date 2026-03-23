@@ -567,7 +567,7 @@ Three targeted additions to close the process gaps that allowed these defects th
 
 **Decision**: After prosecution merges and deduplicates the ledger, partition findings matching all six mechanical criteria (severity is `low`, strictly mechanical fix type, no logic changes, no test cascade, not stored ID/DB schema, scope ≤1 file) into an express lane that bypasses defense and judge and routes directly to the specialist.
 
-**Rationale**: A 1-point string casing fix does not benefit from a defense pass or a judge arbitration. The compound 6-criteria gate mitigates severity under-rating risk — all criteria must hold simultaneously, making false eligibility rare. Estimated savings: 30K–75K+ tokens per express-laned item (2 avoided subagent calls × preamble cost).
+**Rationale**: A 1-point string casing fix does not benefit from a defense pass or a judge arbitration. The compound 6-criteria gate mitigates severity under-rating risk — all criteria must hold simultaneously, making false eligibility rare. Estimated savings: 30K–75K+ tokens per express-laned item (2 avoided subagent calls × preamble cost). Session-level call reduction varies by scenario: 20–30% when most or all findings are express-laned; proportionally lower in partial express-lane sessions (observed: ~22% in a 2-of-4 express-lane scenario).
 
 **Scope restriction**: Standard code review prosecution only — not proxy prosecution (GitHub intake), CE prosecution, or design review.
 
