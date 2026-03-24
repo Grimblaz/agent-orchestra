@@ -346,7 +346,7 @@ Every finding must also include these automation-routing fields:
 - `category`: architecture | security | performance | pattern | simplicity | script-automation | documentation-audit — the active prosecution perspective for this finding. Code prosecution only; use `n/a` in CE review, design review, product-alignment prosecution, and proxy prosecution modes. For findings that span multiple perspectives, use the primary perspective.
 - `blast_radius`: localized | module | cross-module | system-wide
 - `authority_needed`: yes | no
-- `systemic_fix_type`: instruction | skill | agent-prompt | plan-template | none — root cause classification: what kind of guardrail would prevent this defect class? Filled in by prosecutor during each prosecution pass. Always emit this field; use `none` when no specific guardrail type applies.
+- `systemic_fix_type`: instruction | skill | agent-prompt | plan-template | none — root cause classification: what kind of guardrail would prevent this defect class? Filled in by prosecutor during each prosecution pass (code, design/plan, product-alignment, CE, and proxy prosecution). Always emit this field; use `none` when no specific guardrail type applies.
 
 **Root cause tagging**: After identifying each finding, tag the `systemic_fix_type` — ask: _What kind of guardrail would prevent this defect class?_ This is a lightweight classification, not a full root cause analysis — Process-Review will perform deeper analysis on sustained findings retrospectively (Sub C).
 

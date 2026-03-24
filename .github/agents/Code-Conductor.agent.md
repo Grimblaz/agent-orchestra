@@ -608,11 +608,12 @@ rate_limit_retries: {N}
 rate_limit_deferred: {true|false}
 findings:
   - id: F1
-    category: documentation
+    category: documentation-audit
     severity: low
     points: 1
     pass: 1
     review_stage: main
+    systemic_fix_type: none
     express_lane: true  # optional — present only for express-laned findings; defense_verdict and judge_ruling are absent because express-laned findings bypass defense and judge (scripts default judge_ruling to "finding-sustained" for backward compat)
     judge_ruling: finding-sustained
   - id: F2
@@ -623,14 +624,15 @@ findings:
     defense_verdict: disproved
     judge_ruling: defense-sustained
     judge_confidence: medium
-    systemic_fix_type: instruction  # optional — present when root cause classification is available
+    systemic_fix_type: instruction  # always present for current findings; absent only in pre-adoption pipeline-metrics data (backward compat: defaults to none when absent)
     review_stage: main
   - id: F3
-    category: documentation
+    category: documentation-audit
     severity: low
     points: 1
     pass: 1
     review_stage: postfix
+    systemic_fix_type: none
     express_lane: true  # post-fix targeted prosecution express-lane example
     judge_ruling: finding-sustained
 -->
