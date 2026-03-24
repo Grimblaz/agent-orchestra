@@ -575,4 +575,247 @@ Describe 'write-calibration-entry.ps1' {
                 -Because 'atomic write must not leave .tmp files behind after success'
         }
     }
+
+    # ==================================================================
+    # Context: re-activation event write path
+    # ==================================================================
+    Context 're-activation event write path' {
+
+        BeforeAll {
+            # ------------------------------------------------------------------
+            # Fixture: canonical valid re-activation event
+            # ------------------------------------------------------------------
+            $script:ValidEvent = [ordered]@{
+                category        = 'security'
+                triggered_at_pr = 85
+                expires_at_pr   = 90
+                trigger_source  = 'code_prosecution'
+            }
+
+            # ------------------------------------------------------------------
+            # Helper: invoke with -ReactivationEventJson only
+            # ------------------------------------------------------------------
+            $script:InvokeEvent = {
+                param(
+                    [string]$WorkDir,
+                    [string]$EventJson
+                )
+                Push-Location $WorkDir
+                try {
+                    $stdout = & pwsh -NoProfile -NonInteractive -File $script:ScriptFile `
+                        -ReactivationEventJson $EventJson 2>&1
+                    $exitCode = $LASTEXITCODE
+                    $errLines = ($stdout | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) -join "`n"
+                    $outLines = ($stdout | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
+                    return @{ ExitCode = $exitCode; Output = $outLines; Error = $errLines }
+                }
+                finally {
+                    Pop-Location
+                }
+            }
+
+            # ------------------------------------------------------------------
+            # Helper: invoke with both -EntryJson and -ReactivationEventJson
+            # ------------------------------------------------------------------
+            $script:InvokeBoth = {
+                param(
+                    [string]$WorkDir,
+                    [string]$EntryJson,
+                    [string]$EventJson
+                )
+                Push-Location $WorkDir
+                try {
+                    $stdout = & pwsh -NoProfile -NonInteractive -File $script:ScriptFile `
+                        -EntryJson $EntryJson -ReactivationEventJson $EventJson 2>&1
+                    $exitCode = $LASTEXITCODE
+                    $errLines = ($stdout | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) -join "`n"
+                    $outLines = ($stdout | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
+                    return @{ ExitCode = $exitCode; Output = $outLines; Error = $errLines }
+                }
+                finally {
+                    Pop-Location
+                }
+            }
+
+            # ------------------------------------------------------------------
+            # Helper: invoke with neither -EntryJson nor -ReactivationEventJson
+            # ------------------------------------------------------------------
+            $script:InvokeNeither = {
+                param(
+                    [string]$WorkDir
+                )
+                Push-Location $WorkDir
+                try {
+                    $stdout = & pwsh -NoProfile -NonInteractive -File $script:ScriptFile 2>&1
+                    $exitCode = $LASTEXITCODE
+                    $errLines = ($stdout | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) -join "`n"
+                    $outLines = ($stdout | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
+                    return @{ ExitCode = $exitCode; Output = $outLines; Error = $errLines }
+                }
+                finally {
+                    Pop-Location
+                }
+            }
+        }
+
+        # -- AST-based parameter contract tests --
+
+        It 'declares a -ReactivationEventJson parameter' {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                $script:ScriptFile, [ref]$null, [ref]$null)
+            $paramNames = $ast.ParamBlock.Parameters.Name.VariablePath.UserPath
+            $paramNames | Should -Contain 'ReactivationEventJson' `
+                -Because 'the script must accept a -ReactivationEventJson parameter'
+        }
+
+        It 'no longer marks -EntryJson as mandatory' {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                $script:ScriptFile, [ref]$null, [ref]$null)
+            $entryParam = $ast.ParamBlock.Parameters |
+                Where-Object { $_.Name.VariablePath.UserPath -eq 'EntryJson' }
+            $mandatoryAttr = $entryParam.Attributes |
+                Where-Object { $_.TypeName.Name -eq 'Parameter' } |
+                Where-Object {
+                    $_.NamedArguments | Where-Object {
+                        $_.ArgumentName -eq 'Mandatory' -and
+                        ($_.Argument.Extent.Text -eq '$true' -or $_.ExpressionOmitted)
+                    }
+                }
+            $mandatoryAttr | Should -BeNullOrEmpty `
+                -Because '-EntryJson must no longer be mandatory when -ReactivationEventJson exists'
+        }
+
+        # -- Execution tests --
+
+        It 'exits non-zero when neither -EntryJson nor -ReactivationEventJson is provided' {
+            $workDir = & $script:NewWorkDir
+            $result = & $script:InvokeNeither -WorkDir $workDir
+
+            $result.ExitCode | Should -Not -Be 0 `
+                -Because 'at least one of -EntryJson or -ReactivationEventJson must be supplied'
+        }
+
+        It 'writes event to re_activation_events array when only -ReactivationEventJson is provided' {
+            $workDir = & $script:NewWorkDir
+
+            # Seed with an existing entry so we can verify entries are untouched
+            & $script:SeedFile -WorkDir $workDir -Entry $script:ValidEntry
+
+            $eventJson = $script:ValidEvent | ConvertTo-Json -Depth 10 -Compress
+            $result = & $script:InvokeEvent -WorkDir $workDir -EventJson $eventJson
+
+            $result.ExitCode | Should -Be 0 `
+                -Because 'a valid event-only write must succeed'
+
+            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $data = Get-Content $dataFile -Raw | ConvertFrom-Json
+
+            # Existing entries must be preserved
+            $data.entries.Count | Should -Be 1 `
+                -Because 'existing entries must remain untouched during event-only write'
+
+            # Event must appear in re_activation_events
+            $data.re_activation_events | Should -Not -BeNullOrEmpty `
+                -Because 're_activation_events array must exist after event write'
+            $data.re_activation_events.Count | Should -Be 1 `
+                -Because 'exactly one event was written'
+            $data.re_activation_events[0].category | Should -Be 'security'
+            $data.re_activation_events[0].triggered_at_pr | Should -Be 85
+        }
+
+        It 'writes both entry and event when -EntryJson and -ReactivationEventJson are provided' {
+            $workDir = & $script:NewWorkDir
+            $entryJson = $script:ValidEntry | ConvertTo-Json -Depth 10 -Compress
+            $eventJson = $script:ValidEvent | ConvertTo-Json -Depth 10 -Compress
+
+            $result = & $script:InvokeBoth -WorkDir $workDir -EntryJson $entryJson -EventJson $eventJson
+
+            $result.ExitCode | Should -Be 0 `
+                -Because 'combined entry + event write must succeed'
+
+            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $data = Get-Content $dataFile -Raw | ConvertFrom-Json
+
+            $data.entries.Count | Should -Be 1 `
+                -Because 'one calibration entry was written'
+            $data.entries[0].pr_number | Should -Be 100
+
+            $data.re_activation_events.Count | Should -Be 1 `
+                -Because 'one re-activation event was written'
+            $data.re_activation_events[0].category | Should -Be 'security'
+        }
+
+        It 'deduplicates events by category + triggered_at_pr' {
+            $workDir = & $script:NewWorkDir
+
+            # Write first event
+            $eventJson = $script:ValidEvent | ConvertTo-Json -Depth 10 -Compress
+            & $script:InvokeEvent -WorkDir $workDir -EventJson $eventJson
+
+            # Write second event with same category + triggered_at_pr but different expires_at_pr
+            $updatedEvent = [ordered]@{
+                category        = 'security'
+                triggered_at_pr = 85
+                expires_at_pr   = 100          # changed
+                trigger_source  = 'ce_review'  # changed
+            }
+            $eventJson2 = $updatedEvent | ConvertTo-Json -Depth 10 -Compress
+            & $script:InvokeEvent -WorkDir $workDir -EventJson $eventJson2
+
+            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $data = Get-Content $dataFile -Raw | ConvertFrom-Json
+
+            $data.re_activation_events.Count | Should -Be 1 `
+                -Because 'same category + triggered_at_pr must overwrite, not duplicate'
+            $data.re_activation_events[0].expires_at_pr | Should -Be 100 `
+                -Because 'the newer event data must replace the old'
+        }
+
+        It 'exits non-zero when event is missing category' {
+            $workDir = & $script:NewWorkDir
+            $badEvent = [ordered]@{
+                # category omitted
+                triggered_at_pr = 85
+                expires_at_pr   = 90
+                trigger_source  = 'code_prosecution'
+            }
+            $eventJson = $badEvent | ConvertTo-Json -Depth 10 -Compress
+            $result = & $script:InvokeEvent -WorkDir $workDir -EventJson $eventJson
+
+            $result.ExitCode | Should -Not -Be 0 `
+                -Because 'event missing category must be rejected'
+        }
+
+        It 'exits non-zero when event is missing triggered_at_pr' {
+            $workDir = & $script:NewWorkDir
+            $badEvent = [ordered]@{
+                category       = 'security'
+                # triggered_at_pr omitted
+                expires_at_pr  = 90
+                trigger_source = 'code_prosecution'
+            }
+            $eventJson = $badEvent | ConvertTo-Json -Depth 10 -Compress
+            $result = & $script:InvokeEvent -WorkDir $workDir -EventJson $eventJson
+
+            $result.ExitCode | Should -Not -Be 0 `
+                -Because 'event missing triggered_at_pr must be rejected'
+        }
+
+        It 'uses atomic write for event-only writes with no leftover .tmp file' {
+            $workDir = & $script:NewWorkDir
+            $eventJson = $script:ValidEvent | ConvertTo-Json -Depth 10 -Compress
+            $result = & $script:InvokeEvent -WorkDir $workDir -EventJson $eventJson
+
+            $result.ExitCode | Should -Be 0 `
+                -Because 'valid event write must succeed'
+
+            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile | Should -Exist -Because 'review-data.json must exist after event write'
+
+            $tmpFiles = Get-ChildItem -Path (Join-Path $workDir '.copilot-tracking\calibration') `
+                -Filter '*.tmp' -ErrorAction SilentlyContinue
+            $tmpFiles | Should -BeNullOrEmpty `
+                -Because 'atomic write must not leave .tmp files behind after success'
+        }
+    }
 }

@@ -53,7 +53,7 @@ This repo uses a **scored prosecution → defense → judge pipeline** across al
 
 **Code review** (3× prosecution, 1× defense, 1× judge):
 
-- 3 independent parallel Code-Critic prosecution passes (hard-coded, not configurable)
+- 3 independent parallel Code-Critic prosecution passes (pass count is fixed; per-category perspective depth is calibration-adjusted)
 - 1 Code-Critic defense pass over the merged findings ledger
 - 1 Code-Review-Response judge pass with confidence scoring + score summary
 

@@ -428,4 +428,399 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 -Because '$isSustained must combine both sustained and finding-sustained so express-lane findings are counted correctly'
         }
     }
+
+    # ==================================================================
+    # Context: prosecution_depth output
+    # RED TESTS: aggregate-review-scores.ps1 does NOT yet emit a
+    # prosecution_depth: section — every test below must fail initially.
+    # ==================================================================
+    Context 'prosecution_depth output' {
+
+        BeforeAll {
+            # Authoritative category list (mirrors $knownCategories in the script)
+            $script:DepthCategories = @(
+                'architecture', 'security', 'performance', 'pattern',
+                'simplicity', 'script-automation', 'documentation-audit'
+            )
+
+            # ---------------------------------------------------------------
+            # Helper: generate findings array for a single category with
+            # specified sustained / defense-sustained counts.
+            # ---------------------------------------------------------------
+            $script:MakeCategoryFindings = {
+                param([string]$Category, [int]$Sustained, [int]$DefenseSustained)
+                $list = [System.Collections.Generic.List[object]]::new()
+                for ($i = 1; $i -le $Sustained; $i++) {
+                    $list.Add([ordered]@{
+                        id           = "F-${Category}-s${i}"
+                        category     = $Category
+                        judge_ruling = 'finding-sustained'
+                        severity     = 'medium'
+                        points       = 5
+                        review_stage = 'main'
+                    })
+                }
+                for ($i = 1; $i -le $DefenseSustained; $i++) {
+                    $list.Add([ordered]@{
+                        id           = "F-${Category}-d${i}"
+                        category     = $Category
+                        judge_ruling = 'defense-sustained'
+                        severity     = 'medium'
+                        points       = 5
+                        review_stage = 'main'
+                    })
+                }
+                return , $list.ToArray()
+            }
+
+            # ---------------------------------------------------------------
+            # Helper: build a calibration object with entries and optional
+            # prosecution-depth overlay fields.
+            # ---------------------------------------------------------------
+            $script:BuildDepthCalibration = {
+                param(
+                    [object[]]$Findings,
+                    [string]$Override = $null,
+                    [object[]]$ReactivationEvents = $null,
+                    [object]$DepthState = $null
+                )
+                $calib = [ordered]@{
+                    calibration_version = 1
+                    entries             = @(
+                        [ordered]@{
+                            pr_number  = 9901
+                            created_at = '2026-03-01T10:00:00Z'
+                            findings   = $Findings
+                            summary    = [ordered]@{
+                                prosecution_findings = $Findings.Count
+                                pass_1_findings      = $Findings.Count
+                                pass_2_findings      = 0
+                                pass_3_findings      = 0
+                                defense_disproved    = 0
+                                judge_accepted       = $Findings.Count
+                                judge_rejected       = 0
+                                judge_deferred       = 0
+                            }
+                        }
+                    )
+                }
+                if (-not [string]::IsNullOrEmpty($Override)) {
+                    $calib['prosecution_depth_override'] = $Override
+                }
+                if ($null -ne $ReactivationEvents) {
+                    $calib['re_activation_events'] = $ReactivationEvents
+                }
+                if ($null -ne $DepthState) {
+                    $calib['prosecution_depth_state'] = $DepthState
+                }
+                return $calib
+            }
+        }
+
+        # ------ AST-based test (no-gh) ------
+
+        It 'script help block no longer claims READ-ONLY' -Tag 'no-gh' {
+            # RED: the .DESCRIPTION section currently contains "READ-ONLY".
+            # Implementation will update it to reflect prosecution_depth_state writes.
+            $content = Get-Content -Path $script:ScriptFile -Raw
+            $content | Should -Not -cMatch 'READ-ONLY' `
+                -Because 'script description must be updated to reflect prosecution_depth_state writes'
+        }
+
+        # ------ Execution tests (requires-gh) ------
+
+        It 'emits prosecution_depth section in YAML output' -Tag 'requires-gh' {
+            # RED: script does not yet emit prosecution_depth: in output.
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
+                            severity = 'medium'; points = 5; review_stage = 'main' },
+                [ordered]@{ id = 'F2'; category = 'security'; judge_ruling = 'defense-sustained'
+                            severity = 'medium'; points = 5; review_stage = 'main' }
+            )
+            $calib = & $script:BuildDepthCalibration -Findings $findings
+            $calibPath = Join-Path $workDir 'depth-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'prosecution_depth:' `
+                -Because 'prosecution_depth section must appear in YAML output when v2 findings data exists'
+        }
+
+        It 'emits all 7 known categories with recommendation, sustain_rate, effective_count, sufficient_data, re_activated' -Tag 'requires-gh' {
+            # RED: prosecution_depth section does not exist yet; first assertion fails.
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
+                            severity = 'medium'; points = 5; review_stage = 'main' }
+            )
+            $calib = & $script:BuildDepthCalibration -Findings $findings
+            $calibPath = Join-Path $workDir 'depth-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+
+            # Unique to prosecution_depth — fails in RED
+            $result.Output | Should -Match 'prosecution_depth:' `
+                -Because 'prosecution_depth section must be emitted before checking per-category fields'
+
+            foreach ($cat in $script:DepthCategories) {
+                $result.Output | Should -Match "(?s)prosecution_depth:.*?${cat}:" `
+                    -Because "category '$cat' must appear under prosecution_depth"
+            }
+            $result.Output | Should -Match 'recommendation:' `
+                -Because 'recommendation field must appear in prosecution_depth categories'
+            $result.Output | Should -Match 're_activated:' `
+                -Because 're_activated field must appear in prosecution_depth categories'
+        }
+
+        It 'reports recommendation skip when sustain_rate < 0.05 and effective_count >= 30' -Tag 'requires-gh' {
+            # RED: prosecution_depth section does not exist yet.
+            # Fixture: architecture — 1 sustained + 34 defense-sustained
+            # Expected sustain_rate ~ 0.029 (< 0.05), effective_count ~ 35 (>= 30)
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = & $script:MakeCategoryFindings 'architecture' 1 34
+            $calib = & $script:BuildDepthCalibration -Findings $findings
+            $calibPath = Join-Path $workDir 'skip-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '(?s)prosecution_depth:.*?architecture:\s+recommendation:\s*skip' `
+                -Because 'sustain_rate < 0.05 with effective_count >= 30 must produce recommendation: skip'
+        }
+
+        It 'reports recommendation light when sustain_rate < 0.15 and effective_count >= 20' -Tag 'requires-gh' {
+            # RED: prosecution_depth section does not exist yet.
+            # Fixture: security — 3 sustained + 22 defense-sustained
+            # Expected sustain_rate ~ 0.12 (< 0.15), effective_count ~ 25 (>= 20)
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = & $script:MakeCategoryFindings 'security' 3 22
+            $calib = & $script:BuildDepthCalibration -Findings $findings
+            $calibPath = Join-Path $workDir 'light-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '(?s)prosecution_depth:.*?security:\s+recommendation:\s*light' `
+                -Because 'sustain_rate < 0.15 with effective_count >= 20 must produce recommendation: light'
+        }
+
+        It 'reports recommendation full when sustain_rate >= 0.15' -Tag 'requires-gh' {
+            # RED: prosecution_depth section does not exist yet.
+            # Fixture: performance — 8 sustained + 12 defense-sustained
+            # Expected sustain_rate = 0.40 (>= 0.15), effective_count ~ 20 (>= 20)
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = & $script:MakeCategoryFindings 'performance' 8 12
+            $calib = & $script:BuildDepthCalibration -Findings $findings
+            $calibPath = Join-Path $workDir 'full-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '(?s)prosecution_depth:.*?performance:\s+recommendation:\s*full' `
+                -Because 'sustain_rate >= 0.15 must produce recommendation: full'
+        }
+
+        It 'reports recommendation full with sufficient_data false when effective_count < 20' -Tag 'requires-gh' {
+            # RED: prosecution_depth section does not exist yet.
+            # Fixture: simplicity — 3 sustained + 2 defense-sustained (5 total, < 20)
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = & $script:MakeCategoryFindings 'simplicity' 3 2
+            $calib = & $script:BuildDepthCalibration -Findings $findings
+            $calibPath = Join-Path $workDir 'insuff-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '(?s)prosecution_depth:.*?simplicity:\s+recommendation:\s*full' `
+                -Because 'insufficient data (effective_count < 20) must default to recommendation: full'
+            $result.Output | Should -Match '(?s)prosecution_depth:.*?simplicity:.*?sufficient_data:\s*false' `
+                -Because 'effective_count < 20 must set sufficient_data: false'
+        }
+
+        It 'reports recommendation full with effective_count 0.0 for categories absent from data' -Tag 'requires-gh' {
+            # RED: prosecution_depth section does not exist yet.
+            # Fixture: only architecture findings — documentation-audit has zero data
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
+                            severity = 'medium'; points = 5; review_stage = 'main' }
+            )
+            $calib = & $script:BuildDepthCalibration -Findings $findings
+            $calibPath = Join-Path $workDir 'zero-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '(?s)prosecution_depth:.*?documentation-audit:\s+recommendation:\s*full' `
+                -Because 'categories absent from finding data must default to recommendation: full'
+            $result.Output | Should -Match '(?s)prosecution_depth:.*?documentation-audit:.*?effective_count:\s*0\.0' `
+                -Because 'categories with no findings must report effective_count: 0.0'
+        }
+
+        It 'emits override_active true and forces all categories to full when prosecution_depth_override is set' -Tag 'requires-gh' {
+            # RED: prosecution_depth section does not exist yet.
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
+                            severity = 'medium'; points = 5; review_stage = 'main' }
+            )
+            $calib = & $script:BuildDepthCalibration -Findings $findings -Override 'full'
+            $calibPath = Join-Path $workDir 'override-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '(?s)prosecution_depth:\s+override_active:\s*true' `
+                -Because 'prosecution_depth_override in calibration file must set override_active: true'
+            foreach ($cat in $script:DepthCategories) {
+                $result.Output | Should -Match "(?s)prosecution_depth:.*?${cat}:\s+recommendation:\s*full" `
+                    -Because "override must force category '$cat' to recommendation: full"
+            }
+        }
+
+        It 'reports recommendation full and re_activated true when a re-activation event is active' -Tag 'requires-gh' {
+            # RED: prosecution_depth section does not exist yet.
+            # Fixture: re-activation event for 'pattern' with expires_at_pr=999999
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
+                            severity = 'medium'; points = 5; review_stage = 'main' }
+            )
+            $reactivationEvents = @(
+                [ordered]@{
+                    category        = 'pattern'
+                    triggered_at_pr = 100
+                    expires_at_pr   = 999999
+                    trigger_source  = 'manual'
+                    created_at      = '2026-03-01T10:00:00Z'
+                }
+            )
+            $calib = & $script:BuildDepthCalibration -Findings $findings `
+                -ReactivationEvents $reactivationEvents
+            $calibPath = Join-Path $workDir 'reactivation-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '(?s)prosecution_depth:.*?pattern:\s+recommendation:\s*full' `
+                -Because 'active re-activation event must force recommendation: full'
+            $result.Output | Should -Match '(?s)prosecution_depth:.*?pattern:.*?re_activated:\s*true' `
+                -Because 'active re-activation event must set re_activated: true'
+        }
+
+        It 'applies time-decay when skip_first_observed_at exceeds 90 days' -Tag 'requires-gh' {
+            # RED: prosecution_depth section does not exist yet.
+            # Fixture: architecture skip_first_observed_at is 100 days ago (> 90-day default)
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $staleDate = (Get-Date).AddDays(-100).ToString('o')
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
+                            severity = 'medium'; points = 5; review_stage = 'main' }
+            )
+            $depthState = [ordered]@{
+                architecture = [ordered]@{
+                    skip_first_observed_at = $staleDate
+                }
+            }
+            $calib = & $script:BuildDepthCalibration -Findings $findings -DepthState $depthState
+            $calibPath = Join-Path $workDir 'timedecay-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '(?s)prosecution_depth:.*?architecture:\s+recommendation:\s*light' `
+                -Because 'skip_first_observed_at > 90 days must decay from skip to light'
+            $result.Output | Should -Match '(?s)prosecution_depth:.*?architecture:.*?re_activated:\s*true' `
+                -Because 'time-decay re-activation must set re_activated: true'
+        }
+
+        It 'priority chain: override > re-activation > time-decay > insufficient-data > threshold' -Tag 'requires-gh' {
+            # RED: prosecution_depth section does not exist yet.
+            # Fixture: override=full AND re-activation event AND time-decay state
+            # Override must win: all categories forced to full, override_active: true
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
+                            severity = 'medium'; points = 5; review_stage = 'main' }
+            )
+            $reactivationEvents = @(
+                [ordered]@{
+                    category        = 'security'
+                    triggered_at_pr = 100
+                    expires_at_pr   = 999999
+                    trigger_source  = 'manual'
+                    created_at      = '2026-03-01T10:00:00Z'
+                }
+            )
+            $staleDate = (Get-Date).AddDays(-100).ToString('o')
+            $depthState = [ordered]@{
+                performance = [ordered]@{
+                    skip_first_observed_at = $staleDate
+                }
+            }
+            $calib = & $script:BuildDepthCalibration -Findings $findings `
+                -Override 'full' -ReactivationEvents $reactivationEvents -DepthState $depthState
+            $calibPath = Join-Path $workDir 'priority-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            # Override wins: override_active must be true
+            $result.Output | Should -Match '(?s)prosecution_depth:\s+override_active:\s*true' `
+                -Because 'override takes highest priority — override_active must be true'
+            # All categories forced to full by override
+            foreach ($cat in $script:DepthCategories) {
+                $result.Output | Should -Match "(?s)prosecution_depth:.*?${cat}:\s+recommendation:\s*full" `
+                    -Because "override must force '$cat' to full regardless of re-activation or time-decay signals"
+            }
+        }
+    }
 }
