@@ -160,6 +160,39 @@ Before calling any upstream agent, classify the issue scope to determine the app
 4. **D9 Checkpoint** — both tiers; see below; hub-mode only
 5. **Implementation** → validation ladder → PR
 
+### Downstream Ownership Boundary
+
+Before any editing delegation or file mutation in hub mode, run a pre-edit ownership gate for the proposed work. Downstream orchestration must distinguish exactly these work classes:
+
+1. `downstream-owned work`
+2. `shared read-only guidance`
+3. `upstream shared-workflow mutation`
+
+`downstream-owned work` and `shared read-only guidance` remain in scope for downstream issues. `shared read-only guidance` covers reading, searching, and summarizing shared workflow assets without mutating them. `upstream shared-workflow mutation` is out of scope during downstream orchestration and requires the visible stop outcome text `requires upstream issue` before any editing delegation or file mutation begins.
+
+**Pre-edit ownership gate**:
+
+- Before any editing delegation or file mutation, classify the needed work using the three classes above.
+- If the needed change is `upstream shared-workflow mutation`, fail closed immediately with `requires upstream issue` instead of starting mixed-repo implementation.
+- Reuse the existing upstream-routing conventions instead of inventing a second escalation path: if an upstream issue already exists, link it and stop; otherwise, when the upstream repo can be resolved and upstream access is available, follow the existing safe-operations rules for dedup search, priority-labeled `gh issue create`, and output capture. If the upstream repo cannot be resolved or upstream access is unavailable, create a local fallback artifact labeled `process-gap-upstream` and stop with an explicit manual upstream handoff path.
+- Safe-operations retains ownership of deduplication, priority-label, and output-capture rules for any upstream issue creation.
+- The local `process-gap-upstream` fallback is distinct from Process-Review's gotcha-specific `upstream-gotcha` flow.
+
+**Mid-run fail-closed rule**:
+
+- If new scope is discovered after work has started and the newly required change is `upstream shared-workflow mutation`, stop at discovery time, fail-closed, and emit `requires upstream issue` before any new mutation delegation.
+- Do not widen scope in place, and avoid converting the downstream task into mixed-repo work.
+
+**Repository-aware bypass and external context rules**:
+
+- This guard is repository-aware. When the active issue itself belongs to the shared workflow repo itself, shared-agent edits remain normal in-scope work.
+- Pre-existing upstream dirty state is external context, not permission to continue cross-repo edits.
+- A local upstream clone, copied shared artifacts, or upstream edits already present in the local clone do not grant permission for new upstream mutation during downstream orchestration.
+
+**Durability boundary**:
+
+- This ownership gate does not change D9 durability semantics. D9 remains the only durable execution-handoff writer, and Continue remains session-memory-only.
+
 ### D9 Model-Switch Checkpoint (Hub Mode Only)
 
 After plan approval and before implementation begins, present this checkpoint — **ONLY** when Code-Conductor is in hub mode AND at least one upstream phase ran in this session, regardless of whether other phases were skipped by scope classification or prior-session completion:

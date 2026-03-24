@@ -78,3 +78,40 @@ D7: The original D9 wording implied full-pipeline-only, which meant abbreviated-
 | `.github/agents/Code-Critic.agent.md` | Added post-fix prosecution scope constraint clause and out-of-diff AC exception |
 | `.github/agents/Code-Review-Response.agent.md` | Updated effort estimation language to use "high confidence" framing |
 | `.github/agents/Issue-Planner.agent.md` | Added `escalation_recommended` and `escalation_reason` YAML frontmatter fields to plan output spec |
+
+---
+
+## Issue #196 Additions: Downstream Ownership Boundary
+
+### Summary
+
+Issue #196 adds a repository-ownership guardrail to hub mode so downstream orchestration can keep using shared workflow assets as guidance without silently turning a downstream issue into upstream shared-workflow maintenance. The guardrail reuses the repo's existing upstream-routing conventions and preserves the existing D9 durability contract.
+
+### Design Decisions
+
+| ID | Decision | Details |
+|----|----------|---------|
+| D8 | Exact work-class triad | Before any editing delegation or file mutation, hub mode must distinguish exactly these work classes: `downstream-owned work`, `shared read-only guidance`, and `upstream shared-workflow mutation`. The first two remain in scope for downstream issues; the third is out of scope during downstream orchestration. |
+| D9 | Pre-edit ownership gate | Code-Conductor runs a pre-edit ownership gate before any editing delegation or file mutation. If the required work is already known to be `upstream shared-workflow mutation`, the run stops immediately with the visible outcome text `requires upstream issue` instead of beginning mixed-repo edits. |
+| D10 | Mid-run fail-closed stop | If new scope is discovered after work has started and the newly required change is `upstream shared-workflow mutation`, the run fails closed, stops at discovery time, and emits `requires upstream issue` before any new mutation delegation. This avoids converting the downstream task into mixed-repo work. |
+| D11 | Reuse existing upstream routing | The stop path reuses the existing upstream-routing conventions instead of introducing a second mechanism: link the existing upstream issue when present; otherwise, when the upstream repo can be resolved and upstream access is available, follow the existing safe-operations rules for dedup-first, priority-labeled upstream issue creation, and output capture. If the upstream repo cannot be resolved or upstream access is unavailable, create a local fallback artifact labeled `process-gap-upstream` and stop with an explicit manual upstream handoff path. Safe-operations keeps ownership of the dedup/priority/output-capture rules, and this fallback remains distinct from Process-Review's gotcha-specific `upstream-gotcha` flow. |
+| D12 | Repository-aware bypass | The guardrail is repository-aware rather than file-name-based. When the active issue itself belongs to the shared workflow repo itself, shared-agent edits remain normal in-scope work. |
+| D13 | External context is not permission | Pre-existing upstream dirty state is external context, not permission to continue cross-repo edits. A local upstream clone or upstream edits already present in the local clone do not authorize new upstream mutation during downstream orchestration. |
+| D14 | Preserve D9 durability ownership | The new ownership gate does not change plan/design handoff durability. D9 remains the only durable execution-handoff writer; Continue remains session-memory-only, and Issue-Planner still stops at session-memory handoff. |
+
+### Rationale
+
+D8-D10: The trust failure in issue #196 was not caused by shared guidance reads; it was caused by mutation scope widening without an explicit boundary check. Requiring both the pre-edit ownership gate and the mid-run fail-closed stop fixes that at the point where scope can expand.
+
+D11: Reusing the existing upstream-routing path keeps the workflow legible. The repo already has conventions for `copilot-orchestra-repo` resolution, dedup-first issue creation, priority labeling, output capture, and the local `process-gap-upstream` fallback when the upstream repo cannot be resolved or upstream access is unavailable. This ownership-boundary fallback is intentionally separate from Process-Review's gotcha-specific `upstream-gotcha` flow, so the stop path stays deterministic instead of collapsing two mechanisms into one.
+
+D12-D13: Repository awareness avoids false positives for legitimate shared-workflow maintenance, while the external-context rule closes the loophole where an already-dirty local upstream clone could be misread as permission to continue cross-repo edits.
+
+D14: The issue is about repository ownership boundaries, not handoff persistence. Keeping D9 semantics unchanged preserves the existing latest-comment-wins durability contract and avoids reopening the planner-vs-conductor ownership boundary.
+
+### Files Changed (Issue #196)
+
+| File | Change |
+|------|--------|
+| `.github/agents/Code-Conductor.agent.md` | Added the downstream ownership boundary contract: exact work-class triad, pre-edit ownership gate, mid-run fail-closed stop, repository-aware bypass, external-context rule, and explicit reuse of existing upstream-routing conventions while preserving D9 semantics |
+| `Documents/Design/hub-mode-ux.md` | Added the synced design rationale and decisions for the downstream ownership boundary so the committed design doc matches Code-Conductor's wording |
