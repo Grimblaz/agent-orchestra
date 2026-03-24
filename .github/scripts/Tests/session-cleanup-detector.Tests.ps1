@@ -270,6 +270,13 @@ exit 0
 '@
             Set-Content -Path (Join-Path $mockDir 'git-mock.ps1') -Value $mockPs1 -Encoding UTF8
 
+            $ps1Shim = @'
+#!/usr/bin/env pwsh
+& (Join-Path $PSScriptRoot 'git-mock.ps1') @args
+exit $LASTEXITCODE
+'@
+            Set-Content -Path (Join-Path $mockDir 'git.ps1') -Value $ps1Shim -Encoding UTF8
+
             $cmdContent = "@echo off`r`npwsh -NoProfile -NonInteractive -File `"%~dp0git-mock.ps1`" %*"
             Set-Content -Path (Join-Path $mockDir 'git.cmd') -Value $cmdContent -Encoding ASCII
 

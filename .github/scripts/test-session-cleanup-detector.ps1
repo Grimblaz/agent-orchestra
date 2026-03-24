@@ -29,7 +29,8 @@ function New-MockGitDir {
     <#
     Creates a temp directory containing:
       git-mock.ps1  — the mock dispatch logic, reads its config from git-mock-config.json
-      git.cmd       — thin batch wrapper so the OS resolves "git" to our mock
+    git.ps1       — PowerShell shim so bare "git" resolves cross-platform in pwsh
+    git.cmd       — thin batch wrapper that preserves Windows command resolution
     Returns the directory path.
     #>
     param([hashtable]$Config)
@@ -135,6 +136,13 @@ exit 0
 '@
     Set-Content -Path (Join-Path $mockDir 'git-mock.ps1') -Value $mockPs1 -Encoding UTF8
 
+    $ps1Shim = @'
+#!/usr/bin/env pwsh
+& (Join-Path $PSScriptRoot 'git-mock.ps1') @args
+exit $LASTEXITCODE
+'@
+    Set-Content -Path (Join-Path $mockDir 'git.ps1') -Value $ps1Shim -Encoding UTF8
+
     # Batch wrapper — %* passes all args through to the PS script.
     # Using -File so PowerShell sees $args correctly.
     $cmdContent = "@echo off`r`npwsh -NoProfile -NonInteractive -File `"%~dp0git-mock.ps1`" %*"
@@ -156,7 +164,7 @@ function Invoke-Scenario {
     $oldCwd = (Get-Location).Path
 
     try {
-        # Prepend mock dir so our git.cmd wins over the real git
+        # Prepend the mock dir so PowerShell resolves our git shim before real git
         $env:PATH = "$mockDir$([System.IO.Path]::PathSeparator)$env:PATH"
 
         # Run detector in an isolated process; capture stdout + stderr combined
