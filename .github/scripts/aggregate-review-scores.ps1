@@ -640,7 +640,8 @@ if ($v2IssuesAnalyzed -gt 0) {
             $calibContent | Add-Member -NotePropertyName 'prosecution_depth_state' -NotePropertyValue ([PSCustomObject]$stateObj) -Force
             # Prune expired events before persisting (events still active: expires_at_pr > $maxMergedPrNumber)
             $reActivationEvents = @($reActivationEvents | Where-Object {
-                [int]$_.expires_at_pr -gt $maxMergedPrNumber
+                $exp = Get-FlexProperty $_ 'expires_at_pr'
+                $null -ne $exp -and [int]$exp -gt $maxMergedPrNumber
             })
             $calibContent | Add-Member -NotePropertyName 're_activation_events' -NotePropertyValue @($reActivationEvents) -Force
 

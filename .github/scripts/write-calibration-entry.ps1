@@ -167,8 +167,13 @@ if (-not [string]::IsNullOrWhiteSpace($ReactivationEventJson)) {
     }
     # Range check (only if both are present):
     if ((Test-HasProperty $reactivationEvent 'expires_at_pr') -and (Test-HasProperty $reactivationEvent 'triggered_at_pr')) {
-        if ([int]$reactivationEvent.expires_at_pr -le [int]$reactivationEvent.triggered_at_pr) {
-            Write-ValidationError "re-activation event 'expires_at_pr' ($($reactivationEvent.expires_at_pr)) must be greater than 'triggered_at_pr' ($($reactivationEvent.triggered_at_pr))"
+        try {
+            if ([int]$reactivationEvent.expires_at_pr -le [int]$reactivationEvent.triggered_at_pr) {
+                Write-ValidationError "re-activation event 'expires_at_pr' ($($reactivationEvent.expires_at_pr)) must be greater than 'triggered_at_pr' ($($reactivationEvent.triggered_at_pr))"
+            }
+        } catch {
+            Write-ValidationError "re-activation event 'expires_at_pr' and 'triggered_at_pr' must be integers"
+            return
         }
     }
 
