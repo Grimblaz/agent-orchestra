@@ -601,3 +601,144 @@ Three targeted additions to close the process gaps that allowed these defects th
 | # | Decision | Choice | Rationale |
 |---|----------|--------|------------|
 | D39 | `systemic_fix_type` root cause tagging | Code-Critic tags each prosecution finding with one of: `instruction`, `skill`, `agent-prompt`, `plan-template`, `none` — what kind of guardrail would prevent this defect class | Enables manual and automated (future Sub C) pattern recognition across PRs without requiring full root cause analysis at review time; backward-compatible (field optional, defaults to `none`) |
+
+---
+
+## Review Kaizen Sub B: Prosecution Adaptive Depth
+
+**Issue**: #150 | **Depends on**: #141 (Persistent Review Calibration Data Storage), #97 (Cross-Session Learning Pipeline)
+
+### Summary
+
+Adjusts prosecution perspective depth per category based on calibration data (sustained finding rates), reducing review effort on categories that consistently produce low-value findings while maintaining full scrutiny where it matters. The 3-pass prosecution protocol remains fixed; what changes is the set of active perspectives within each pass.
+
+### Decision Log
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|-----------|
+| D40 | Depth computation location | Inline in `aggregate-review-scores.ps1` | Script already computes per-category `sustain_rate` and `effective_count`; applying thresholds in the same loop gives a single source of truth and keeps the logic Pester-testable |
+| D41 | Re-activation write path | Extend `write-calibration-entry.ps1` with `-ReactivationEventJson` | Reuses existing atomic write infrastructure (temp + rename); single file I/O path for `review-data.json`; consistent with #141 extensible design |
+| D42 | Perspective exclusion mechanism | Explicit exclusion instruction appended to each Code-Critic pass prompt | No Code-Critic agent file changes needed; compatible with existing change-type classification (both filters apply independently) |
+| D43 | Prosecution Depth Summary placement | Conversation brief + full table in PR body | Brief inline note ("Prosecution depth: N full, N light, N skip") for real-time awareness; full table in PR body for durable record |
+| D44 | Override and config location | Top-level keys in `review-data.json` | `prosecution_depth_override` (optional string) and `time_decay_days` (optional int, default 90) as sibling keys to `entries`; consistent with #141 extensible design |
+| D45 | PR counting for re-activation expiry | Max merged PR number from GitHub API | Aggregate script already fetches merged PRs; store `triggered_at_pr` and `expires_at_pr` (= triggered + 5); no new state required |
+| D46 | Post-fix prosecution depth | Always full depth | Post-fix is diff-scoped and safety-critical; applying depth exclusions would undermine its purpose |
+| D47 | CE/proxy prosecution category mapping | Code-Conductor infers category via keyword heuristics | CE/proxy findings use `category: n/a`; keyword mapping (e.g., "injection" → security, "N+1" → performance) is the least-overhead approach; ambiguous findings re-activate all potentially matching categories |
+| D48 | Time-decay state tracking | `prosecution_depth_state` key in `review-data.json` | Aggregate script records `skip_first_observed_at` per category; clears on exit from skip; comparison against `time_decay_days` drives auto-restore |
+
+### Prosecution Adaptive Depth
+
+#### Depth Levels
+
+| Depth | Behavior | Condition |
+|-------|----------|-----------|
+| `full` | Category included in all 3 passes | Default; or insufficient data; or re-activated |
+| `light` | Category included in pass 1 only; excluded from passes 2–3 | `sustain_rate < 0.15` AND `effective_count ≥ 20` |
+| `skip` | Category excluded from all 3 passes | `sustain_rate < 0.05` AND `effective_count ≥ 30` |
+
+#### Threshold Priority Chain (7 Steps)
+
+Applied per category, in order:
+
+1. `prosecution_depth_override: "full"` in calibration file → force `full` for all categories
+2. Active re-activation event (`expires_at_pr > maxMergedPrNumber`) → `full`, `re_activated: true`
+3. Time-decay: category in `skip` for more than `time_decay_days` (default 90) → `light`, `re_activated: true`; write synthetic re-activation event expiring at `maxMergedPrNumber + 50`
+4. `effective_count < 20` → `full` (insufficient data)
+5. `sustain_rate < 0.05` AND `effective_count ≥ 30` → `skip`
+6. `sustain_rate < 0.15` AND `effective_count ≥ 20` → `light`
+7. Default → `full`
+
+#### Re-Activation Triggers
+
+A `light` or `skip` category reverts to `full` for the next 5 merged PRs when:
+
+| Trigger source | Mechanism |
+|---------------|-----------|
+| `code_prosecution` | Sustained finding in that category during main review |
+| `ce_prosecution` | CE Gate finding maps to that category (keyword heuristics) |
+| `github_proxy` | Proxy prosecution finding maps to that category |
+| `time_decay` | Automatic 50-PR window after `time_decay_days` elapsed in skip |
+
+Re-activation events are written to `re_activation_events` in `review-data.json` via `write-calibration-entry.ps1 -ReactivationEventJson`.
+
+### Implementation
+
+#### Scripts
+
+- **`aggregate-review-scores.ps1`**: Emits a `prosecution_depth:` YAML block (after `by_review_stage:`) with `override_active` flag and per-category fields (`recommendation`, `sustain_rate`, `effective_count`, `sufficient_data`, `re_activated`). Writes `prosecution_depth_state` and time-decay synthetic re-activation events to the calibration file when state changes (atomic write; only when calibration file exists).
+- **`write-calibration-entry.ps1`**: Accepts optional `-ReactivationEventJson` parameter. Writes re-activation events to `re_activation_events` array with dedup by `category + triggered_at_pr`. `-EntryJson` and `-ReactivationEventJson` may be used together or independently (at least one required).
+
+#### Code-Conductor Orchestration
+
+**Prosecution Depth Setup** (runs before `### Critic Pass Protocol`):
+
+1. Run `aggregate-review-scores.ps1`; capture `prosecution_depth:` section
+2. Build depth map (category → `full`/`light`/`skip`); record for post-judgment use
+3. Emit conversation brief: `"Prosecution depth: N full, N light, N skip"`
+4. Compose per-pass exclusions: pass 1 excludes `skip`; passes 2–3 exclude `skip` AND `light`
+5. Append exclusion section to each Code-Critic pass prompt
+6. Safe fallback: script failure or YAML parse failure → all categories `full`
+
+**Post-judgment re-activation detection**: After the judge pass, check each sustained finding's `category` against the recorded depth map; write a re-activation event for any finding whose category was `light` or `skip` (`trigger_source: code_prosecution`).
+
+**CE/proxy re-activation**: Map `category: n/a` findings to prosecution categories via keyword heuristics; write re-activation events with `trigger_source: ce_prosecution` or `github_proxy`.
+
+**Post-fix prosecution**: Always runs at full depth; exclusion instructions are never composed or applied.
+
+### Transparency Artifacts
+
+**Conversation brief** (emitted before prosecution starts):
+
+```text
+Prosecution depth: 5 full, 1 light, 1 skip
+```
+
+**PR body — Prosecution Depth Summary table**:
+
+```markdown
+## Prosecution Depth Summary
+
+| Category | Depth | Rationale |
+|----------|-------|-----------|
+| architecture | full | — |
+| security | light | sustain rate 0.12 / 22 effective findings |
+| performance | full | — |
+| pattern | skip | sustain rate 0.03 / 35 effective findings |
+| simplicity | full | — |
+| script-automation | full | insufficient data (8 effective) |
+| documentation-audit | full | — |
+```
+
+Re-activated categories show their `trigger_source` in the Rationale column.
+
+**Pipeline metrics addition**:
+
+```yaml
+prosecution_depth_used:
+  light: [security]
+  skip: [pattern]
+  override: false
+```
+
+### Calibration Data Schema (relevant keys)
+
+```json
+{
+  "prosecution_depth_override": null,
+  "time_decay_days": 90,
+  "prosecution_depth_state": {
+    "pattern": { "skip_first_observed_at": "2026-03-15T00:00:00Z" }
+  },
+  "re_activation_events": [
+    {
+      "category": "security",
+      "triggered_at_pr": 85,
+      "expires_at_pr": 90,
+      "trigger_source": "ce_prosecution",
+      "triggered_at": "2026-03-20T14:30:00Z"
+    }
+  ]
+}
+```
+
+`trigger_source` allowed values: `code_prosecution | ce_prosecution | github_proxy | post_fix | time_decay | manual_override`
