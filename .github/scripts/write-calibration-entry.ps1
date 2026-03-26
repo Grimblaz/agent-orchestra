@@ -1,16 +1,22 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Writes a review calibration entry to .copilot-tracking/calibration/review-data.json.
+    Writes a review calibration entry and/or re-activation event to .copilot-tracking/calibration/review-data.json.
 
 .PARAMETER EntryJson
-    Mandatory JSON string representing the calibration entry to write.
+    JSON string representing the calibration entry to write. At least one of -EntryJson or -ReactivationEventJson is required.
+
+.PARAMETER ReactivationEventJson
+    JSON string representing a re-activation event to write. Required fields: category, triggered_at_pr, expires_at_pr, trigger_source.
 #>
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
-    [string]$EntryJson
+    [Parameter()]
+    [string]$EntryJson,
+
+    [Parameter()]
+    [string]$ReactivationEventJson
 )
 
 Set-StrictMode -Version Latest
@@ -21,7 +27,7 @@ $ErrorActionPreference = 'Stop'
 function Test-HasProperty {
     param($Object, [string]$Name)
     if ($Object -is [System.Collections.IDictionary]) {
-        return $Object.ContainsKey($Name)
+        return $Object.Contains($Name)
     }
     return $null -ne $Object.PSObject.Properties[$Name]
 }
@@ -59,74 +65,120 @@ function ConvertTo-NormalizedObject {
     return $obj
 }
 
-# ── Parse input ────────────────────────────────────────────────────────────────
+# ── At-least-one validation ────────────────────────────────────────────────────
 
-try {
-    $entry = $EntryJson | ConvertFrom-Json -AsHashtable
-}
-catch {
-    Write-Error "Failed to parse -EntryJson: $_" -ErrorAction Continue
-    exit 1
+if ([string]::IsNullOrWhiteSpace($EntryJson) -and [string]::IsNullOrWhiteSpace($ReactivationEventJson)) {
+    Write-ValidationError "At least one of -EntryJson or -ReactivationEventJson must be provided."
 }
 
-# ── Validate top-level required fields ────────────────────────────────────────
+# ── Parse and validate entry (conditional) ─────────────────────────────────────
 
-if (-not (Test-HasProperty $entry 'pr_number')) {
-    Write-ValidationError "Validation failed: required top-level field 'pr_number' is missing."
-}
-try {
-    if ([int]$entry['pr_number'] -le 0) { throw "pr_number must be a positive integer" }
-}
-catch {
-    Write-ValidationError "Validation failed: 'pr_number' must be a positive integer. Got: $($entry['pr_number'])"
-}
-if (-not (Test-HasProperty $entry 'created_at')) {
-    Write-ValidationError "Validation failed: required top-level field 'created_at' is missing."
-}
-try {
-    $rawCreatedAt = $entry['created_at']
-    if ($rawCreatedAt -isnot [datetime]) {
-        [void][datetime]::Parse([string]$rawCreatedAt, [System.Globalization.CultureInfo]::InvariantCulture)
+$entry = $null
+if (-not [string]::IsNullOrWhiteSpace($EntryJson)) {
+    try {
+        $entry = $EntryJson | ConvertFrom-Json -AsHashtable
     }
-}
-catch {
-    Write-ValidationError "Validation failed: 'created_at' must be a parseable ISO 8601 datetime string. Got: $($entry['created_at'])"
-}
+    catch {
+        Write-Error "Failed to parse -EntryJson: $_" -ErrorAction Continue
+        exit 1
+    }
 
-# ── Validate findings ─────────────────────────────────────────────────────────
+    # ── Validate top-level required fields ────────────────────────────────────
 
-if (Test-HasProperty $entry 'findings') {
-    $requiredFindingFields = @('id', 'category', 'judge_ruling')
-    foreach ($finding in $entry.findings) {
-        # Express-lane findings may legitimately omit judge_ruling (pre-v2.1) — exempt them
-        $isExpressLane = (Test-HasProperty $finding 'express_lane') -and ($finding.express_lane -eq $true -or $finding.express_lane -eq 'true')
-        foreach ($field in $requiredFindingFields) {
-            if ($field -eq 'judge_ruling' -and $isExpressLane) { continue }
-            if (-not (Test-HasProperty $finding $field)) {
-                Write-ValidationError "Validation failed: a finding is missing required field '$field'."
+    if (-not (Test-HasProperty $entry 'pr_number')) {
+        Write-ValidationError "Validation failed: required top-level field 'pr_number' is missing."
+    }
+    try {
+        if ([int]$entry['pr_number'] -le 0) { throw "pr_number must be a positive integer" }
+    }
+    catch {
+        Write-ValidationError "Validation failed: 'pr_number' must be a positive integer. Got: $($entry['pr_number'])"
+    }
+    if (-not (Test-HasProperty $entry 'created_at')) {
+        Write-ValidationError "Validation failed: required top-level field 'created_at' is missing."
+    }
+    try {
+        $rawCreatedAt = $entry['created_at']
+        if ($rawCreatedAt -isnot [datetime]) {
+            [void][datetime]::Parse([string]$rawCreatedAt, [System.Globalization.CultureInfo]::InvariantCulture)
+        }
+    }
+    catch {
+        Write-ValidationError "Validation failed: 'created_at' must be a parseable ISO 8601 datetime string. Got: $($entry['created_at'])"
+    }
+
+    # ── Validate findings ─────────────────────────────────────────────────────
+
+    if (Test-HasProperty $entry 'findings') {
+        $requiredFindingFields = @('id', 'category', 'judge_ruling')
+        foreach ($finding in $entry.findings) {
+            $isExpressLane = (Test-HasProperty $finding 'express_lane') -and ($finding.express_lane -eq $true -or $finding.express_lane -eq 'true')
+            foreach ($field in $requiredFindingFields) {
+                if ($field -eq 'judge_ruling' -and $isExpressLane) { continue }
+                if (-not (Test-HasProperty $finding $field)) {
+                    Write-ValidationError "Validation failed: a finding is missing required field '$field'."
+                }
             }
         }
     }
-}
 
-# ── Validate summary sub-fields ───────────────────────────────────────────────
+    # ── Validate summary sub-fields ───────────────────────────────────────────
 
-if (Test-HasProperty $entry 'summary') {
-    $requiredSummaryFields = @(
-        'prosecution_findings', 'pass_1_findings', 'pass_2_findings',
-        'pass_3_findings', 'defense_disproved', 'judge_accepted',
-        'judge_rejected', 'judge_deferred'
-    )
-    foreach ($field in $requiredSummaryFields) {
-        if (-not (Test-HasProperty $entry.summary $field)) {
-            Write-ValidationError "Validation failed: summary is missing required field '$field'."
+    if (Test-HasProperty $entry 'summary') {
+        $requiredSummaryFields = @(
+            'prosecution_findings', 'pass_1_findings', 'pass_2_findings',
+            'pass_3_findings', 'defense_disproved', 'judge_accepted',
+            'judge_rejected', 'judge_deferred'
+        )
+        foreach ($field in $requiredSummaryFields) {
+            if (-not (Test-HasProperty $entry.summary $field)) {
+                Write-ValidationError "Validation failed: summary is missing required field '$field'."
+            }
         }
     }
+
+    # ── Normalize DateTime values to compact ISO strings ──────────────────────
+
+    $entry = ConvertTo-NormalizedObject $entry
 }
 
-# ── Normalize DateTime values to compact ISO strings (must be after validation) ─
+# ── Parse and validate re-activation event (conditional) ──────────────────────
 
-$entry = ConvertTo-NormalizedObject $entry
+$reactivationEvent = $null
+if (-not [string]::IsNullOrWhiteSpace($ReactivationEventJson)) {
+    try {
+        $reactivationEvent = $ReactivationEventJson | ConvertFrom-Json -AsHashtable
+    }
+    catch {
+        Write-ValidationError "ReactivationEventJson is not valid JSON: $_"
+    }
+
+    if (-not (Test-HasProperty $reactivationEvent 'category')) {
+        Write-ValidationError "Re-activation event missing required field: category"
+    }
+    if (-not (Test-HasProperty $reactivationEvent 'triggered_at_pr')) {
+        Write-ValidationError "Re-activation event missing required field: triggered_at_pr"
+    }
+    if (-not (Test-HasProperty $reactivationEvent 'expires_at_pr')) {
+        Write-ValidationError "re-activation event missing required field 'expires_at_pr'"
+    }
+    if (-not (Test-HasProperty $reactivationEvent 'trigger_source')) {
+        Write-ValidationError "re-activation event missing required field 'trigger_source'"
+    }
+    # Range check (only if both are present):
+    if ((Test-HasProperty $reactivationEvent 'expires_at_pr') -and (Test-HasProperty $reactivationEvent 'triggered_at_pr')) {
+        try {
+            if ([int]$reactivationEvent.expires_at_pr -le [int]$reactivationEvent.triggered_at_pr) {
+                Write-ValidationError "re-activation event 'expires_at_pr' ($($reactivationEvent.expires_at_pr)) must be greater than 'triggered_at_pr' ($($reactivationEvent.triggered_at_pr))"
+            }
+        } catch {
+            Write-ValidationError "re-activation event 'expires_at_pr' and 'triggered_at_pr' must be integers"
+            return
+        }
+    }
+
+    $reactivationEvent = ConvertTo-NormalizedObject $reactivationEvent
+}
 
 # ── Resolve paths ──────────────────────────────────────────────────────────────
 
@@ -155,17 +207,31 @@ else {
     }
 }
 
-# ── Deduplicate by pr_number, then append new entry ───────────────────────────
+# ── Deduplicate by pr_number, then append new entry (if provided) ─────────────
 
-$prNumber = $entry.pr_number
-$filtered = @($data.entries | Where-Object { $_.pr_number -ne $prNumber })
-$newEntries = $filtered + @($entry)
+if ($null -ne $entry) {
+    $prNumber = $entry.pr_number
+    $filtered = @($data.entries | Where-Object { $_.pr_number -ne $prNumber })
+    $data['entries'] = $filtered + @($entry)
+}
+
+# ── Re-activation event handling ──────────────────────────────────────────────
+
+if (-not (Test-HasProperty $data 're_activation_events')) {
+    $data['re_activation_events'] = @()
+}
+
+if ($null -ne $reactivationEvent) {
+    $data['re_activation_events'] = @($data['re_activation_events'] | Where-Object {
+        -not ($_.category -eq $reactivationEvent.category -and [int]$_.triggered_at_pr -eq [int]$reactivationEvent.triggered_at_pr)
+    })
+    $data['re_activation_events'] += $reactivationEvent
+}
 
 # ── Build output — preserve all top-level keys from existing data ──────────────
 
 $output = [ordered]@{}
 foreach ($key in $data.Keys) { $output[$key] = $data[$key] }
-$output['entries'] = $newEntries
 
 # ── Crash-safe write: tmp → validate → rename ─────────────────────────────────
 

@@ -9,7 +9,7 @@
     gh CLI, extracts <!-- pipeline-metrics --> blocks from PR bodies, and
     computes exponentially-decayed aggregate statistics.
 
-    This script is READ-ONLY. It makes no mutations to PRs, repos, or files.
+    This script is primarily read-only. It writes prosecution_depth_state and time-decay re-activation events to the calibration file when present.
 
 .PARAMETER DecayLambda
     Exponential decay parameter. Default: 0.023 (half-life ≈ 30 days).
@@ -86,6 +86,12 @@ catch {
 $localEntries = @{}
 $dataSource = 'github'
 
+# Prosecution depth defaults (overridden when calibration file is loaded)
+$prosecutionDepthOverride = $null
+$timeDecayDays = 90
+$prosecutionDepthState = @{}
+$reActivationEvents = @()
+
 if ($null -eq $mergedPRs -or $mergedPRs.Count -eq 0) {
     Write-Output "data_source: $dataSource"
     Write-Output "insufficient_data: true"
@@ -94,6 +100,17 @@ if ($null -eq $mergedPRs -or $mergedPRs.Count -eq 0) {
     Write-Output "skipped_prs: 0"
     Write-Output 'message: "Minimum effective sample size of 5 required (current: 0.00)"'
     exit 0
+}
+
+# ---------------------------------------------------------------------------
+# Shared helper: safe property read for PSCustomObject/hashtable
+# ---------------------------------------------------------------------------
+function Get-FlexProperty {
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return $null }
+    if ($Object -is [hashtable]) { return $Object[$Name] }
+    if ($Object.PSObject.Properties.Name -contains $Name) { return $Object.$Name }
+    return $null
 }
 
 # ---------------------------------------------------------------------------
@@ -124,6 +141,23 @@ if (-not [string]::IsNullOrWhiteSpace($CalibrationFile) -and (Test-Path $Calibra
         if ($localEntries.Count -eq 0 -and $totalLocalEntries -gt 0) {
             Write-Warning "All $totalLocalEntries calibration entries were orphaned (no matching PR in GitHub fetch results). Check -CalibrationFile path and -Repo values."
         }
+        # Read prosecution-depth overlay fields from calibration
+        $prosecutionDepthOverride = Get-FlexProperty $calibJson 'prosecution_depth_override'
+        $v = Get-FlexProperty $calibJson 'time_decay_days'
+        if ($v) { $timeDecayDays = [int]$v }
+        $v = Get-FlexProperty $calibJson 'prosecution_depth_state'
+        if ($v) {
+            $prosecutionDepthState = $v
+            # Ensure hashtable (ConvertFrom-Json without -AsHashtable yields PSCustomObject;
+            # .Keys access under Set-StrictMode throws PropertyNotFoundException on PSCustomObject)
+            if ($prosecutionDepthState -is [PSCustomObject]) {
+                $h = @{}
+                $prosecutionDepthState.PSObject.Properties | ForEach-Object { $h[$_.Name] = $_.Value }
+                $prosecutionDepthState = $h
+            }
+        }
+        $v = Get-FlexProperty $calibJson 're_activation_events'
+        if ($v) { $reActivationEvents = @($v) }
     }
     catch {
         Write-Warning "CalibrationFile '$CalibrationFile' could not be parsed: $_ — proceeding with GitHub data only."
@@ -316,6 +350,13 @@ foreach ($pr in $mergedPRs) {
     }
 }
 
+# Compute max merged PR number (used for re-activation event expiry checks)
+$maxMergedPrNumber = 0
+foreach ($pr in $mergedPRs) {
+    $prNum = [int]$pr.number
+    if ($prNum -gt $maxMergedPrNumber) { $maxMergedPrNumber = $prNum }
+}
+
 # ---------------------------------------------------------------------------
 # 5. Apply tiered thresholds and emit output
 # ---------------------------------------------------------------------------
@@ -446,6 +487,177 @@ if ($v2IssuesAnalyzed -gt 0) {
         Write-Output "      sustained: $($sd.sustained)"
         Write-Output ("      effective_count: {0:F1}" -f $sd.effectiveCount)
         Write-Output ("      sustain_rate: {0:F2}" -f $stageSustainRate)
+    }
+
+    # -------------------------------------------------------------------
+    # prosecution_depth: per-category depth recommendation (7-step chain)
+    # -------------------------------------------------------------------
+
+    $overrideActive = ($prosecutionDepthOverride -ieq 'full')
+    $depthStateChanged = $false
+
+    Write-Output "  prosecution_depth:"
+    Write-Output "    override_active: $($overrideActive.ToString().ToLower())"
+
+    foreach ($cat in $knownCategories) {
+        # Read per-category depth state once (used by time-decay and state tracking)
+        $catState = Get-FlexProperty $prosecutionDepthState $cat
+
+        # Gather per-category stats
+        $catEffective = 0.0
+        $catSustainRate = 0.0
+        if ($categoryData.ContainsKey($cat)) {
+            $cd = $categoryData[$cat]
+            $catEffective = $cd.effectiveCount
+            $catSustainRate = if ($cd.effectiveCount -gt 0) { $cd.sustained / $cd.effectiveCount } else { 0.0 }
+        }
+
+        $recommendation = 'full'
+        $reActivated = $false
+        # ≥20 threshold for depth recommendation (higher bar than by_category ≥15 — depth changes have
+        # direct behavioral consequences; statistical confidence for depth decisions requires more data)
+        $sufficientData = $catEffective -ge 20.0
+
+        # 7-step priority chain (evaluated top-down, first match wins)
+        if ($overrideActive) {
+            # Step 1: Global override forces full
+            $recommendation = 'full'
+        }
+        elseif ($reActivationEvents.Count -gt 0) {
+            $activeEvent = $reActivationEvents | Where-Object {
+                $_.category -eq $cat -and [int]$_.expires_at_pr -gt $maxMergedPrNumber
+            }
+            if ($activeEvent) {
+                # Step 2: Active re-activation event
+                $recommendation = 'full'
+                $reActivated = $true
+            }
+            else {
+                # Fall through to remaining steps
+                $recommendation = $null
+            }
+        }
+        else {
+            $recommendation = $null
+        }
+
+        if ($null -eq $recommendation) {
+            # Step 3: Time-decay check
+            $skipObservedAt = Get-FlexProperty $catState 'skip_first_observed_at'
+
+            if ($null -ne $skipObservedAt -and $skipObservedAt -ne '') {
+                try {
+                    $observedDate = [datetime]::Parse($skipObservedAt)
+                    $daysSinceObserved = ($now - $observedDate).TotalDays
+                    if ($daysSinceObserved -gt $timeDecayDays) {
+                        # Step 3: Time-decay — re-activate from skip to light
+                        $recommendation = 'light'
+                        $reActivated = $true
+                        # Write synthetic re-activation event
+                        $reActivationEvents += @{
+                            category        = $cat
+                            triggered_at_pr = $maxMergedPrNumber
+                            expires_at_pr   = $maxMergedPrNumber + 50
+                            trigger_source  = 'time_decay'
+                            created_at      = $now.ToString('o')
+                        }
+                        $depthStateChanged = $true
+                    }
+                }
+                catch {
+                    # Unparseable date — ignore, fall through
+                }
+            }
+
+            if ($null -eq $recommendation) {
+                if ($catEffective -lt 20.0) {
+                    # Step 4: Insufficient data
+                    $recommendation = 'full'
+                    $sufficientData = $false
+                }
+                elseif ($catSustainRate -lt 0.05 -and $catEffective -ge 30.0) {
+                    # Step 5: Skip threshold
+                    $recommendation = 'skip'
+                }
+                elseif ($catSustainRate -lt 0.15 -and $catEffective -ge 20.0) {
+                    # Step 6: Light threshold
+                    $recommendation = 'light'
+                }
+                else {
+                    # Step 7: Full (default)
+                    $recommendation = 'full'
+                }
+            }
+        }
+
+        # prosecution_depth_state tracking: record/clear skip_first_observed_at
+        if ($recommendation -eq 'skip') {
+            # Entering skip: record skip_first_observed_at if not already set
+            $existingObserved = Get-FlexProperty $catState 'skip_first_observed_at'
+            if ($null -eq $existingObserved -or $existingObserved -eq '') {
+                if ($prosecutionDepthState -isnot [hashtable]) {
+                    $newState = @{}
+                    $prosecutionDepthState.PSObject.Properties | ForEach-Object { $newState[$_.Name] = $_.Value }
+                    $prosecutionDepthState = $newState
+                }
+                $prosecutionDepthState[$cat] = @{ skip_first_observed_at = $now.ToString('o') }
+                $depthStateChanged = $true
+            }
+        }
+        else {
+            # Clear skip_first_observed_at when leaving skip (including when re-activation forces full).
+            # This intentionally resets the 90-day time-decay clock: the re-activation window
+            # (5 PRs) is expected to produce fresh calibration data before the category returns
+            # to skip, at which point the time-decay observation period restarts.
+            if ($null -ne $catState) {
+                if ($prosecutionDepthState -is [hashtable]) {
+                    $prosecutionDepthState.Remove($cat)
+                }
+                $depthStateChanged = $true
+            }
+        }
+
+        Write-Output "    ${cat}:"
+        Write-Output "      recommendation: $recommendation"
+        Write-Output ("      sustain_rate: {0:F2}" -f $catSustainRate)
+        Write-Output ("      effective_count: {0:F1}" -f $catEffective)
+        Write-Output "      sufficient_data: $($sufficientData.ToString().ToLower())"
+        Write-Output "      re_activated: $($reActivated.ToString().ToLower())"
+    }
+
+    # Write updated prosecution_depth_state + re_activation_events to calibration file
+    if ($depthStateChanged -and
+        -not [string]::IsNullOrWhiteSpace($CalibrationFile) -and
+        (Test-Path $CalibrationFile)) {
+        $tempPath = $null
+        try {
+            $calibContent = Get-Content -Path $CalibrationFile -Raw | ConvertFrom-Json
+            # Convert prosecutionDepthState hashtable to PSCustomObject for JSON
+            $stateObj = [ordered]@{}
+            foreach ($k in $prosecutionDepthState.Keys) {
+                $stateObj[$k] = $prosecutionDepthState[$k]
+            }
+            $calibContent | Add-Member -NotePropertyName 'prosecution_depth_state' -NotePropertyValue ([PSCustomObject]$stateObj) -Force
+            # Prune expired events before persisting (events still active: expires_at_pr > $maxMergedPrNumber)
+            $reActivationEvents = @($reActivationEvents | Where-Object {
+                $exp = Get-FlexProperty $_ 'expires_at_pr'
+                $null -ne $exp -and [int]$exp -gt $maxMergedPrNumber
+            })
+            $calibContent | Add-Member -NotePropertyName 're_activation_events' -NotePropertyValue @($reActivationEvents) -Force
+
+            $tempPath = "$CalibrationFile.$([System.Guid]::NewGuid().ToString('N')).tmp"
+            $calibContent | ConvertTo-Json -Depth 10 | Set-Content -Path $tempPath -Encoding UTF8
+            # Validate before promotion (mirrors write-calibration-entry.ps1 safety pattern)
+            $null = Get-Content $tempPath -Raw | ConvertFrom-Json
+            Move-Item -Path $tempPath -Destination $CalibrationFile -Force
+        }
+        catch {
+            if ($null -ne $tempPath -and (Test-Path $tempPath)) {
+                Remove-Item $tempPath -Force -ErrorAction SilentlyContinue
+            }
+            Write-Warning "Failed to write prosecution_depth_state to calibration file: $_"
+            # Non-fatal — state write failure does not affect YAML output
+        }
     }
 }
 else {
