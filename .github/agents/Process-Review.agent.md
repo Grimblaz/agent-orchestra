@@ -142,7 +142,7 @@ Performs retrospective analysis of development process to improve future executi
 
 **Remember**: This is an **advisory role**. You review, recommend, and delegate. You do NOT implement changes to code or project documentation directly.
 
-**Subagent invocation**: Code-Conductor may invoke Process-Review as a subagent (via `runSubagent`) during CE Gate failure handling (Track 2 systemic analysis). In this mode, respond with the structured CE Gate Defect Analysis format defined in `### 4.6 CE Gate Defect Analysis (Track 2)` — do not run a full retrospective unless explicitly requested.
+**Subagent invocation**: Code-Conductor may invoke Process-Review as a subagent (via `runSubagent`) during CE Gate failure handling (Track 2 systemic analysis). In this mode, respond with the structured CE Gate Defect Analysis format defined in `### 4.6 CE Gate Defect Analysis (Track 2)` — do not run a full retrospective unless explicitly requested. In calibration mode, §4.9 runs automatically after §4.7 for root cause analysis and guardrail proposal generation.
 
 ---
 
@@ -369,6 +369,8 @@ When no actionable signals are found (all categories insufficient data, or all r
 No actionable signals found. All metrics within acceptable ranges or below per-category data threshold (15 effective findings required).
 ```
 
+After §4.7 analysis completes, proceed to §4.9 for root cause analysis and guardrail proposals.
+
 **Guardrail**: Calibration recommendations are advisory only. This agent does NOT auto-apply changes to agent instruction files. Recommendations are presented for human review and approval. To apply an approved recommendation, use the "Update Instructions → Doc-Keeper" handoff button.
 
 ### 4.8 Upstream Gotcha Lifecycle
@@ -431,6 +433,110 @@ For each entry already marked `<!-- gotcha-status: upstream:{url} -->`: check if
 ```
 
 **Guardrail**: This section reads and writes `local-gotchas.instructions.md` to update status markers, and creates GitHub issues. It does NOT modify any other agent, skill, or system instruction file. Issue creation requires output-capture verification per safe-operations.instructions.md §2a and §2c.
+
+### 4.9 Root Cause Analysis & Guardrail Proposals
+
+**Purpose**: Identify recurring defect patterns from sustained findings and propose concrete guardrail additions to prevent recurrence.
+
+**When to run**: During any Process-Review invocation that includes calibration analysis (including Calibration-only mode, unlike §4.8). Skip in subagent mode (CE Gate Track 2).
+
+**Step 1 — Parse systemic patterns from script output**:
+
+Read the `systemic_patterns:` section from the aggregation script's YAML output. If the section is absent or empty, emit "Root cause analysis: no systemic patterns found" and skip to kaizen metric.
+
+**Step 2 — Identify guardrails** (for each pattern where `meets_threshold: true` and `previously_proposed: false`):
+
+1. **Read finding content**: Examine the evidence citations (PR numbers + finding IDs) from the script output. Access the finding details from calibration data or PR bodies to understand the specific defect pattern.
+2. **Search target by type**: Based on `systemic_fix_type`, search the relevant files:
+   - `instruction` → `.github/instructions/*.instructions.md`
+   - `skill` → `.github/skills/*/SKILL.md`
+   - `agent-prompt` → `.github/agents/*.agent.md`
+   - `plan-template` → Issue-Planner plan style guide section
+3. **Draft guardrail rule**: Identify the specific missing rule or strengthening needed. Write a concrete proposed change (what to add, which file, which section).
+
+**Step 3 — Emit proposals**:
+
+For each identified guardrail, emit in the report using this format:
+
+```yaml
+guardrail_proposals:
+  - pattern: "Missing input validation rule"
+    systemic_fix_type: instruction
+    category: security
+    target_file: .github/instructions/safe-operations.instructions.md
+    target_section: "Section 1: File Operation Rules"
+    proposed_change: "Add rule: all user-facing endpoints must validate input against schema before processing"
+    evidence:
+      - pr: 78, finding: F3
+      - pr: 82, finding: F1
+    upstream: false  # true if fix targets copilot-orchestra shared files
+```
+
+**Step 4 — Upstream proposals** (when `systemic_fix_type` targets copilot-orchestra shared files):
+
+1. Read `copilot-orchestra-repo` from `.github/copilot-instructions.md`
+2. If absent → mark proposal `upstream: true` in report, log "upstream repo not configured" and skip issue creation
+3. Pre-flight access check: `gh repo view {copilot-orchestra-repo} --json name 2>&1` — if non-zero exit → mark `upstream: true`, log access failure, skip issue creation
+4. Dedup search: `gh issue list --repo {copilot-orchestra-repo} --search '"[Systemic Fix] {category} [{systemic_fix_type}]" in:title' --state all --json number --jq length`
+   - If `$LASTEXITCODE -ne 0` → skip upstream issue creation, log error
+   - If result > 0 → duplicate found, skip
+   - If result = 0 → create upstream issue:
+
+> **Note**: Unlike §4.8, §4.9 requires no persistent error-state marker. When dedup search fails, skipping issue creation leaves `previously_proposed: false` in script output — the next calibration run will retry automatically.
+
+```markdown
+Title: [Systemic Fix] {category} [{systemic_fix_type}]: {brief description}
+Labels: enhancement, priority: medium
+
+## Systemic Fix Proposal
+
+- **Category**: {category}
+- **Systemic fix type**: {systemic_fix_type}
+- **Pattern**: {description of recurring defect pattern}
+- **Target file**: {file in copilot-orchestra}
+- **Proposed change**: {specific rule or strengthening}
+- **Evidence**: {N} sustained findings across {N} PRs in downstream repo
+- **Source**: Discovered via calibration analysis in {downstream-repo}
+
+## Context
+
+{Additional context about why this pattern recurs and what guardrail would prevent it}
+```
+
+**Report format**:
+
+```markdown
+## Root Cause Analysis & Guardrail Proposals ({N} patterns analyzed)
+
+### Systemic Patterns Found
+
+{N} patterns identified ({N} meeting threshold, {N} previously proposed).
+
+### Guardrail Proposals
+
+{For each pattern meeting threshold and not previously proposed:}
+
+**{N}. {Pattern description}: {systemic_fix_type} × {category}**
+
+- Evidence: {N} sustained findings across {N} PRs (PR #{N} F{N}, PR #{N} F{N})
+- Target: `{file path}` → {section name}
+- Proposed change: {specific rule or strengthening}
+- Upstream: {yes/no}
+
+### Previously Proposed (Awaiting Application)
+
+{List patterns where previously_proposed: true}
+
+### Kaizen Metric
+
+- Categories with sufficient data: {N}
+- Categories at reduced depth (skip + light): {N}
+- **Kaizen rate: {rate}** ({skip+light} / {sufficient_data} categories)
+- Patterns meeting proposal threshold: {N}
+- Patterns previously proposed: {N}
+```
+
+**Guardrail**: Advisory only — this agent does NOT apply guardrail changes directly. Proposals require human approval. Code-Conductor handles application through normal change orchestration (Doc-Keeper for instruction/skill updates, Code-Smith for agent prompt changes, per D6).
 
 ### 5. Root Cause Analysis
 

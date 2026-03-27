@@ -744,3 +744,153 @@ prosecution_depth_reactivations: 0
 `trigger_source` allowed values: `code_prosecution | ce_prosecution | github_proxy | time_decay | manual_override`
 
 > **Note**: `trigger_source` values are not runtime-validated by `write-calibration-entry.ps1`. All callers are responsible for emitting a canonical value. Test fixtures must use canonical values to avoid propagating stale names as documentation.
+
+---
+
+## Review Kaizen Sub C: Guardrail Proposal Pipeline & Kaizen Metric
+
+**Issue**: #151 | **Parent**: #148 (Review Kaizen) | **Depends on**: #149 (Sub A), #150 (Sub B), #141 (calibration storage), #136 (upstream lifecycle)
+
+### Summary
+
+Extends `aggregate-review-scores.ps1` to aggregate sustained findings by `systemic_fix_type` × category, compute a kaizen effectiveness metric, and emit structured YAML for Process-Review §4.9 to interpret into concrete guardrail proposals. Adds cross-calibration deduplication to prevent re-emitting the same proposal in consecutive calibration runs.
+
+### Decision Log
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|-----------|
+| D49 | Root cause analysis split | Script aggregates `systemic_fix_type` × category patterns; Process-Review §4.9 interprets into guardrail proposals | Script is good at counting (deterministic, Pester-testable); agent is good at reasoning (identifies specific guardrails by reading target files). Follows existing §4.7 pattern. |
+| D50 | Aggregation threshold | ≥2 sustained findings with same `systemic_fix_type` × category across ≥2 PRs | Simple; matches prosecution_depth's hardcoded thresholds. Configurable later if needed. |
+| D51 | Script output format | Inline `systemic_patterns:` section in existing YAML output (after `prosecution_depth:`), followed by `kaizen_metric:` | Single invocation; consistent with existing output; Process-Review already parses this output. |
+| D52 | Kaizen metric location | Script computes and emits as `kaizen_metric:` in YAML output | Deterministic, Pester-testable; script already has prosecution_depth data (`categories_at_skip` / `categories_at_light`). |
+| D53 | Upstream flow integration | §4.9 has own inline upstream mechanics (same patterns as §4.8, `[Systemic Fix]` format) | §4.8 (gotchas) runs only during full retrospective; root cause analysis runs during calibration (all modes). §4.9 must be self-contained. |
+| D54 | Approval UX | Code-Conductor orchestrates proposal application through normal change flow | Process-Review is advisory only; Code-Conductor handles all change orchestration. User reviews proposals in calibration report, then applies via normal flow. |
+
+### Script Extension: `systemic_patterns:` Output
+
+New section emitted after `prosecution_depth:` in YAML output. Aggregates `systemic_fix_type` × category across local calibration findings with `judge_ruling: sustained` and `category ≠ n/a` (D49: accumulation is restricted to the local-calibration path; v2 PR-body and local-calibration paths union-merge as complementary data sources):
+
+```yaml
+  systemic_patterns:
+    instruction:
+      security:
+        count: 3
+        sustained_count: 2
+        distinct_prs: 2
+        meets_threshold: true
+        evidence:
+          - pr: 78, finding: F3
+          - pr: 82, finding: F1
+        previously_proposed: false
+    skill:
+      pattern:
+        count: 2
+        sustained_count: 2
+        distinct_prs: 2
+        meets_threshold: true
+        evidence:
+          - pr: 85, finding: F2
+          - pr: 90, finding: F4
+        previously_proposed: true
+    agent-prompt: {}
+    plan-template: {}
+```
+
+Threshold: `meets_threshold: true` when `sustained_count ≥ 2` AND `distinct_prs ≥ 2`. `category: n/a` findings are excluded (proxy/CE prosecution).
+
+### Script Extension: `kaizen_metric:` Output
+
+New section emitted after `systemic_patterns:` in YAML output:
+
+```yaml
+  kaizen_metric:
+    categories_with_sufficient_data: 5
+    categories_at_skip_depth: 1
+    categories_at_light_depth: 1
+    kaizen_rate: 0.40
+    patterns_meeting_threshold: 3
+    patterns_previously_proposed: 1
+```
+
+- `kaizen_rate` = (skip + light categories) / categories with sufficient data. 0.00 when no sufficient-data categories exist.
+- Uses prosecution depth as a proxy for guardrail effectiveness — see Known Limitations.
+
+### Cross-Calibration Deduplication: `proposals_emitted`
+
+The aggregation script persists emitted proposals to prevent re-proposing the same pattern in consecutive calibration runs. Stored in the calibration JSON alongside `entries` and `prosecution_depth_state`:
+
+```json
+{
+  "entries": [...],
+  "proposals_emitted": [
+    {
+      "pattern_key": "instruction:security",
+      "evidence_prs": [78, 82],
+      "first_emitted_at": "2026-03-25T12:00:00Z"
+    }
+  ]
+}
+```
+
+Pattern marked `previously_proposed: true` when `pattern_key` AND `evidence_prs` match an existing entry. New evidence PRs produce a non-match — generating a fresh proposal. Write-back uses the same atomic `tmp + validate + rename` pattern as `prosecution_depth_state`.
+
+### Process-Review §4.9 Integration
+
+§4.9 runs after §4.7 in all Process-Review calibration modes. For each pattern where `meets_threshold: true` and `previously_proposed: false`, §4.9:
+
+1. Reads finding evidence from calibration data / PR bodies
+2. Searches the target file by `systemic_fix_type` (instruction → `.github/instructions/`, skill → `.github/skills/`, agent-prompt → `.github/agents/`, plan-template → Issue-Planner plan style guide)
+3. Drafts a specific proposed guardrail change
+
+All proposals are advisory only — Code-Conductor applies approved proposals through normal change orchestration (Doc-Keeper for instructions/skills, Code-Smith for agent prompts).
+
+### Upstream `[Systemic Fix]` Issue Format
+
+When `systemic_fix_type` targets copilot-orchestra shared files, §4.9 creates an upstream issue after auth check and dedup search (`"[Systemic Fix] {category} [{systemic_fix_type}]" in:title`):
+
+```markdown
+Title: [Systemic Fix] {category} [{systemic_fix_type}]: {brief description}
+Labels: enhancement, priority: medium
+
+## Systemic Fix Proposal
+
+- **Category**: {category}
+- **Systemic fix type**: {systemic_fix_type}
+- **Pattern**: {description of recurring defect pattern}
+- **Target file**: {file in copilot-orchestra}
+- **Proposed change**: {specific rule or strengthening}
+- **Evidence**: {N} sustained findings across {N} PRs in downstream repo
+- **Source**: Discovered via calibration analysis in {downstream-repo}
+```
+
+### Approval UX
+
+1. Process-Review emits guardrail proposals in calibration report (advisory only)
+2. User reviews proposals and directs Code-Conductor to apply accepted ones:
+   - **< 1 day effort**: Address in current PR via Doc-Keeper / Code-Smith
+   - **> 1 day effort**: Create follow-up GitHub issue via safe-operations
+3. Upstream proposals (`upstream: true`): §4.9 creates issue directly; user can defer for manual transfer
+
+### Known Limitations
+
+- **Kaizen rate is a proxy**: Reduced prosecution depth correlates with (but is not identical to) "guardrails were applied." Explicit guardrail-application tracking and pre/post rate comparison are future enhancements.
+- **No `guardrails_applied_total` tracking**: v1 uses depth-based proxy only.
+- **Proposal actionability depends on LLM reasoning**: Advisory system; all threshold-met proposals require human review regardless of quality.
+
+### Acceptance Criteria (from issue #151)
+
+- `systemic_patterns:` section emitted after `prosecution_depth:` in script output
+- `kaizen_metric:` section emitted after `systemic_patterns:`
+- `category: n/a` findings excluded from systemic pattern aggregation
+- `proposals_emitted` array written to calibration JSON for threshold-met proposals; preserved across runs
+- Process-Review §4.9 added as documented — advisory only, 3-step guardrail identification, upstream `[Systemic Fix]` format
+- Pester tests cover systemic pattern accumulation, kaizen metric computation, and `proposals_emitted` write-back
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `.github/scripts/aggregate-review-scores.ps1` | Added `systemic_patterns:` and `kaizen_metric:` YAML output; `proposals_emitted` write-back; `Test-PatternProposed` helper |
+| `.github/scripts/Tests/aggregate-review-scores.Tests.ps1` | 16 new Pester tests across 3 contexts (systemic patterns, kaizen metric, proposals write-back) |
+| `.github/agents/Process-Review.agent.md` | Added §4.9 section; updated §4.7 integration note and subagent invocation note |
+| `Documents/Design/code-review.md` | This section |

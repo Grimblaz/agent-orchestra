@@ -91,6 +91,7 @@ $prosecutionDepthOverride = $null
 $timeDecayDays = 90
 $prosecutionDepthState = @{}
 $reActivationEvents = @()
+$proposalsEmitted = @()
 
 if ($null -eq $mergedPRs -or $mergedPRs.Count -eq 0) {
     Write-Output "data_source: $dataSource"
@@ -111,6 +112,26 @@ function Get-FlexProperty {
     if ($Object -is [hashtable]) { return $Object[$Name] }
     if ($Object.PSObject.Properties.Name -contains $Name) { return $Object.$Name }
     return $null
+}
+
+# ---------------------------------------------------------------------------
+# Shared helper: check whether a pattern (key + evidence PRs) is already in
+# a proposals list. Works with both hashtable and PSCustomObject elements.
+# ---------------------------------------------------------------------------
+function Test-PatternProposed {
+    param([object[]]$Proposals, [string]$PatternKey, [int[]]$EvidencePrs)
+    foreach ($prop in $Proposals) {
+        $propKey = if ($prop -is [hashtable]) { $prop['pattern_key'] } else { $prop.pattern_key }
+        $propPrs = if ($prop -is [hashtable]) { @($prop['evidence_prs']) } else { @($prop.evidence_prs) }
+        if ($propKey -eq $PatternKey) {
+            $sortedPropPrs = @($propPrs | ForEach-Object { [int]$_ } | Sort-Object)
+            if ($null -eq (Compare-Object $EvidencePrs $sortedPropPrs)) {
+                # $null means no differences → arrays are identical
+                return $true
+            }
+        }
+    }
+    return $false
 }
 
 # ---------------------------------------------------------------------------
@@ -158,6 +179,8 @@ if (-not [string]::IsNullOrWhiteSpace($CalibrationFile) -and (Test-Path $Calibra
         }
         $v = Get-FlexProperty $calibJson 're_activation_events'
         if ($v) { $reActivationEvents = @($v) }
+        $v = Get-FlexProperty $calibJson 'proposals_emitted'
+        if ($v) { $proposalsEmitted = @($v) }
     }
     catch {
         Write-Warning "CalibrationFile '$CalibrationFile' could not be parsed: $_ — proceeding with GitHub data only."
@@ -201,6 +224,18 @@ $defenseOverreach = 0.0   # defense claimed disproved but judge sustained prosec
 $defenseChallengedTotal = 0.0   # weighted count of findings where defense claimed disproved (overreach denominator)
 # v2 tracking
 $v2IssuesAnalyzed = 0
+# Known category taxonomy (mirrors the emit section — defined here so $accumulateFinding
+# can reference it before the output section runs)
+$knownCategories = @(
+    'architecture', 'security', 'performance', 'pattern',
+    'simplicity', 'script-automation', 'documentation-audit'
+)
+$systemicActive = $false   # true only inside the local-calibration findings loop
+
+# Systemic fix pattern accumulators: fix_type -> category -> @{ count; sustained_count; prs; evidence }
+$knownSystemicFixTypes = @('instruction', 'skill', 'agent-prompt', 'plan-template')
+$systemicPatterns = @{}
+foreach ($ft in $knownSystemicFixTypes) { $systemicPatterns[$ft] = @{} }
 
 # Judge confidence calibration: level -> @{ count=0; effectiveCount=0.0; sustained=0.0 }
 $confidenceData = @{
@@ -215,10 +250,10 @@ $confidenceData = @{
 # ---------------------------------------------------------------------------
 $accumulateFinding = {
     $totalFindings++
-    $category        = $finding['category'].ToLowerInvariant()
-    $judgeRuling     = $finding['judge_ruling'].ToLowerInvariant()
+    $category = $finding['category'].ToLowerInvariant()
+    $judgeRuling = $finding['judge_ruling'].ToLowerInvariant()
     $judgeConfidence = if ($finding.ContainsKey('judge_confidence')) { $finding['judge_confidence'].ToLowerInvariant() } else { '' }
-    $defenseVerdict  = if ($finding.ContainsKey('defense_verdict'))  { $finding['defense_verdict'].ToLowerInvariant()  } else { '' }
+    $defenseVerdict = if ($finding.ContainsKey('defense_verdict')) { $finding['defense_verdict'].ToLowerInvariant() } else { '' }
     if (-not $finding.ContainsKey('review_stage')) { $reviewStageUntagged++ }
     $reviewStage = if ($finding.ContainsKey('review_stage')) { $finding['review_stage'].ToLowerInvariant() } else { 'main' }
     $isSustained = ($judgeRuling -eq 'sustained' -or $judgeRuling -eq 'finding-sustained')
@@ -256,6 +291,25 @@ $accumulateFinding = {
         $confidenceData[$judgeConfidence].effectiveCount += $weight
         if ($isSustained) { $confidenceData[$judgeConfidence].sustained += $weight }
     }
+    # Systemic fix pattern accumulation (calibration path only — $systemicActive guards this)
+    $systemicFixType = if ($finding.ContainsKey('systemic_fix_type')) { $finding['systemic_fix_type'].ToLowerInvariant() } else { 'none' }
+    if ($systemicActive -and $systemicFixType -ne 'none' -and $knownSystemicFixTypes -contains $systemicFixType -and $category -ne 'n/a' -and $knownCategories -contains $category) {
+        if (-not $systemicPatterns.ContainsKey($systemicFixType)) { $systemicPatterns[$systemicFixType] = @{} }
+        if (-not $systemicPatterns[$systemicFixType].ContainsKey($category)) {
+            $systemicPatterns[$systemicFixType][$category] = @{
+                count           = 0
+                sustained_count = 0
+                prs             = [System.Collections.Generic.HashSet[int]]::new()
+                evidence        = [System.Collections.Generic.List[object]]::new()
+            }
+        }
+        $systemicPatterns[$systemicFixType][$category].count++
+        if ($isSustained) {
+            $systemicPatterns[$systemicFixType][$category].sustained_count++
+            [void]$systemicPatterns[$systemicFixType][$category].prs.Add($prNumber)
+            [void]$systemicPatterns[$systemicFixType][$category].evidence.Add(@{ pr = $prNumber; finding = $finding['id'] })
+        }
+    }
 }
 
 foreach ($pr in $mergedPRs) {
@@ -288,6 +342,7 @@ foreach ($pr in $mergedPRs) {
             $effectiveSampleSize += $weight
             $v2IssuesAnalyzed++
             # Process local entry's findings array using GitHub's mergedAt-derived weight
+            $systemicActive = $true
             foreach ($lf in $localEntry.findings) {
                 $finding = @{}
                 foreach ($prop in $lf.PSObject.Properties) { $finding[$prop.Name] = [string]$prop.Value }
@@ -305,6 +360,7 @@ foreach ($pr in $mergedPRs) {
                 if ($missingField) { Write-Warning "Warning: local finding entry missing required fields, skipped."; continue }
                 . $accumulateFinding
             }
+            $systemicActive = $false
         }
         continue
     }
@@ -328,6 +384,10 @@ foreach ($pr in $mergedPRs) {
     # v2: parse per-finding array
     $findings = Get-FindingsArray -Block $block
 
+    # $systemicActive remains $false for v2 PR-body findings (D49 design decision):
+    # systemic pattern accumulation is calibration-only. Local entries run with
+    # $systemicActive = $true; v2 PR-body and local-calibration paths union-merge,
+    # so restricting accumulation to local entries does not create a data gap.
     foreach ($finding in $findings) {
         # Express-lane findings (pre-v2.1) may legitimately omit judge_ruling — default it
         if ($finding.ContainsKey('express_lane') -and $finding['express_lane'] -eq 'true' -and
@@ -495,6 +555,10 @@ if ($v2IssuesAnalyzed -gt 0) {
 
     $overrideActive = ($prosecutionDepthOverride -ieq 'full')
     $depthStateChanged = $false
+    $proposalsChanged = $false
+    $categoriesWithSufficientData = 0
+    $categoriesAtSkip = 0
+    $categoriesAtLight = 0
 
     Write-Output "  prosecution_depth:"
     Write-Output "    override_active: $($overrideActive.ToString().ToLower())"
@@ -617,6 +681,10 @@ if ($v2IssuesAnalyzed -gt 0) {
             }
         }
 
+        if ($sufficientData) { $categoriesWithSufficientData++ }
+        if ($recommendation -eq 'skip') { $categoriesAtSkip++ }
+        elseif ($recommendation -eq 'light') { $categoriesAtLight++ }
+
         Write-Output "    ${cat}:"
         Write-Output "      recommendation: $recommendation"
         Write-Output ("      sustain_rate: {0:F2}" -f $catSustainRate)
@@ -625,8 +693,35 @@ if ($v2IssuesAnalyzed -gt 0) {
         Write-Output "      re_activated: $($reActivated.ToString().ToLower())"
     }
 
-    # Write updated prosecution_depth_state + re_activation_events to calibration file
-    if ($depthStateChanged -and
+    # Accumulate newly threshold-met unproposed patterns into proposals_emitted.
+    # Must run after systemic pattern accumulation and before the write-back block
+    # so $proposalsChanged correctly gates the atomic calibration file update.
+    # Snapshot prior proposals first: $priorProposalsEmitted drives the previously_proposed
+    # output field (only patterns proposed in a PRIOR run count as previously_proposed: true).
+    $priorProposalsEmitted = @($proposalsEmitted)
+    foreach ($ft in $knownSystemicFixTypes) {
+        foreach ($cat in $systemicPatterns[$ft].Keys) {
+            $spEntry = $systemicPatterns[$ft][$cat]
+            $sustainedCnt = $spEntry.sustained_count
+            $distinctPrs = $spEntry.prs.Count
+            if ($sustainedCnt -ge 2 -and $distinctPrs -ge 2) {
+                $patternKey = "${ft}:${cat}"
+                $evidencePrs = @($spEntry.prs | Sort-Object)
+                $alreadyProposed = Test-PatternProposed $proposalsEmitted $patternKey $evidencePrs
+                if (-not $alreadyProposed) {
+                    $proposalsEmitted += @{
+                        pattern_key      = $patternKey
+                        evidence_prs     = $evidencePrs
+                        first_emitted_at = $now.ToString('o')
+                    }
+                    $proposalsChanged = $true
+                }
+            }
+        }
+    }
+
+    # Write updated prosecution_depth_state + re_activation_events + proposals_emitted
+    if (($depthStateChanged -or $proposalsChanged) -and
         -not [string]::IsNullOrWhiteSpace($CalibrationFile) -and
         (Test-Path $CalibrationFile)) {
         $tempPath = $null
@@ -640,10 +735,13 @@ if ($v2IssuesAnalyzed -gt 0) {
             $calibContent | Add-Member -NotePropertyName 'prosecution_depth_state' -NotePropertyValue ([PSCustomObject]$stateObj) -Force
             # Prune expired events before persisting (events still active: expires_at_pr > $maxMergedPrNumber)
             $reActivationEvents = @($reActivationEvents | Where-Object {
-                $exp = Get-FlexProperty $_ 'expires_at_pr'
-                $null -ne $exp -and [int]$exp -gt $maxMergedPrNumber
-            })
+                    $exp = Get-FlexProperty $_ 'expires_at_pr'
+                    $null -ne $exp -and [int]$exp -gt $maxMergedPrNumber
+                })
             $calibContent | Add-Member -NotePropertyName 're_activation_events' -NotePropertyValue @($reActivationEvents) -Force
+            if ($proposalsChanged) {
+                $calibContent | Add-Member -NotePropertyName 'proposals_emitted' -NotePropertyValue @($proposalsEmitted) -Force
+            }
 
             $tempPath = "$CalibrationFile.$([System.Guid]::NewGuid().ToString('N')).tmp"
             $calibContent | ConvertTo-Json -Depth 10 | Set-Content -Path $tempPath -Encoding UTF8
@@ -655,10 +753,61 @@ if ($v2IssuesAnalyzed -gt 0) {
             if ($null -ne $tempPath -and (Test-Path $tempPath)) {
                 Remove-Item $tempPath -Force -ErrorAction SilentlyContinue
             }
-            Write-Warning "Failed to write prosecution_depth_state to calibration file: $_"
+            Write-Warning "Failed to write calibration state to calibration file: $_"
             # Non-fatal — state write failure does not affect YAML output
         }
     }
+
+    # systemic_patterns: aggregated fix-type x category patterns from sustained findings
+    $patternsMeetingThreshold = 0
+    $patternsPreviouslyProposed = 0
+    $fixTypesWithData = $knownSystemicFixTypes | Where-Object { $systemicPatterns[$_].Count -gt 0 }
+    if ($fixTypesWithData) {
+        Write-Output "  systemic_patterns:"
+        foreach ($ft in $knownSystemicFixTypes) {
+            if ($systemicPatterns[$ft].Count -eq 0) {
+                Write-Output "    ${ft}: {}"
+            }
+            else {
+                Write-Output "    ${ft}:"
+                foreach ($cat in ($systemicPatterns[$ft].Keys | Sort-Object)) {
+                    $entry = $systemicPatterns[$ft][$cat]
+                    $sustainedCnt = $entry.sustained_count
+                    $distinctPrs = $entry.prs.Count
+                    $meetsThreshold = ($sustainedCnt -ge 2 -and $distinctPrs -ge 2)
+                    $patternKey = "${ft}:${cat}"
+                    $evidencePrs = @($entry.prs | Sort-Object)
+                    $prevProposed = Test-PatternProposed $priorProposalsEmitted $patternKey $evidencePrs
+                    Write-Output "      ${cat}:"
+                    Write-Output "        count: $($entry.count)"
+                    Write-Output "        sustained_count: ${sustainedCnt}"
+                    Write-Output "        distinct_prs: ${distinctPrs}"
+                    Write-Output "        meets_threshold: $($meetsThreshold.ToString().ToLower())"
+                    if ($entry.evidence.Count -gt 0) {
+                        Write-Output "        evidence:"
+                        foreach ($ev in $entry.evidence) {
+                            Write-Output "          - pr: $($ev.pr), finding: $($ev.finding)"
+                        }
+                    }
+                    if ($meetsThreshold) { $patternsMeetingThreshold++ }
+                    if ($prevProposed -and $meetsThreshold) { $patternsPreviouslyProposed++ }
+                    Write-Output "        previously_proposed: $($prevProposed.ToString().ToLower())"
+                }
+            }
+        }
+    }
+    # kaizen_metric: aggregated calibration effectiveness metric
+    $kaizenRate = if ($categoriesWithSufficientData -gt 0) {
+        ($categoriesAtSkip + $categoriesAtLight) / [double]$categoriesWithSufficientData
+    }
+    else { 0.0 }
+    Write-Output "  kaizen_metric:"
+    Write-Output "    categories_with_sufficient_data: $categoriesWithSufficientData"
+    Write-Output "    categories_at_skip_depth: $categoriesAtSkip"
+    Write-Output "    categories_at_light_depth: $categoriesAtLight"
+    Write-Output ("    kaizen_rate: {0:F2}" -f $kaizenRate)
+    Write-Output "    patterns_meeting_threshold: $patternsMeetingThreshold"
+    Write-Output "    patterns_previously_proposed: $patternsPreviouslyProposed"
 }
 else {
     Write-Output "  has_finding_data: false"

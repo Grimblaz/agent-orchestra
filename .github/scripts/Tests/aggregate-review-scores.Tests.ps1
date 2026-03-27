@@ -262,8 +262,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
             # At least one canonical output field must be present
             $hasKnownField = ($result.Output -match 'insufficient_data:') -or
-                             ($result.Output -match 'calibration:') -or
-                             ($result.Output -match 'skipped_prs:')
+            ($result.Output -match 'calibration:') -or
+            ($result.Output -match 'skipped_prs:')
             $hasKnownField | Should -BeTrue `
                 -Because 'existing YAML output fields must be preserved when CalibrationFile is absent'
         }
@@ -334,7 +334,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
             # Extract issues_analyzed from both runs
             $baselineMatch = [regex]::Match($baselineResult.Output, 'issues_analyzed:\s*(\d+)')
-            $orphanMatch   = [regex]::Match($withOrphanResult.Output, 'issues_analyzed:\s*(\d+)')
+            $orphanMatch = [regex]::Match($withOrphanResult.Output, 'issues_analyzed:\s*(\d+)')
 
             if ($baselineMatch.Success -and $orphanMatch.Success) {
                 $orphanMatch.Groups[1].Value | Should -Be $baselineMatch.Groups[1].Value `
@@ -415,16 +415,16 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
         It 'both injection paths (local-entries and v2 PR-body) are present in the script' {
             ($script:ScriptLines | Select-String 'express_lane.*True').Count |
-                Should -BeGreaterOrEqual 2 `
+            Should -BeGreaterOrEqual 2 `
                 -Because 'both the local-entries loop (Change B) and v2 PR-body loop (Change C) must contain the express-lane guard'
             ($script:ScriptLines | Select-String 'finding-sustained').Count |
-                Should -BeGreaterOrEqual 2 `
+            Should -BeGreaterOrEqual 2 `
                 -Because 'both injection paths must set judge_ruling to finding-sustained'
         }
 
         It '$isSustained treats finding-sustained as a sustained ruling' {
             ($script:ScriptLines | Select-String 'isSustained.*finding-sustained|finding-sustained.*isSustained') |
-                Should -Not -BeNullOrEmpty `
+            Should -Not -BeNullOrEmpty `
                 -Because '$isSustained must combine both sustained and finding-sustained so express-lane findings are counted correctly'
         }
     }
@@ -451,7 +451,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 @(($allPrJson | ConvertFrom-Json) |
                     Where-Object { $_.body -notmatch 'pipeline-metrics' } |
                     ForEach-Object { [int]$_.number })
-            } else {
+            }
+            else {
                 @(9901)  # fallback if gh fails
             }
 
@@ -460,7 +461,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $cleanPrJson = & gh pr list --repo 'github/docs' --state merged --limit 10 --json number 2>$null
             $script:CleanRepoPrNumbers = if ($cleanPrJson) {
                 @(($cleanPrJson | ConvertFrom-Json) | ForEach-Object { [int]$_.number })
-            } else {
+            }
+            else {
                 @(9901)  # fallback if gh fails
             }
 
@@ -473,23 +475,23 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 $list = [System.Collections.Generic.List[object]]::new()
                 for ($i = 1; $i -le $Sustained; $i++) {
                     $list.Add([ordered]@{
-                        id           = "F-${Category}-s${i}"
-                        category     = $Category
-                        judge_ruling = 'finding-sustained'
-                        severity     = 'medium'
-                        points       = 5
-                        review_stage = 'main'
-                    })
+                            id           = "F-${Category}-s${i}"
+                            category     = $Category
+                            judge_ruling = 'finding-sustained'
+                            severity     = 'medium'
+                            points       = 5
+                            review_stage = 'main'
+                        })
                 }
                 for ($i = 1; $i -le $DefenseSustained; $i++) {
                     $list.Add([ordered]@{
-                        id           = "F-${Category}-d${i}"
-                        category     = $Category
-                        judge_ruling = 'defense-sustained'
-                        severity     = 'medium'
-                        points       = 5
-                        review_stage = 'main'
-                    })
+                            id           = "F-${Category}-d${i}"
+                            category     = $Category
+                            judge_ruling = 'defense-sustained'
+                            severity     = 'medium'
+                            points       = 5
+                            review_stage = 'main'
+                        })
                 }
                 return , $list.ToArray()
             }
@@ -560,9 +562,11 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                            severity = 'medium'; points = 5; review_stage = 'main' },
+                    severity = 'medium'; points = 5; review_stage = 'main' 
+                },
                 [ordered]@{ id = 'F2'; category = 'security'; judge_ruling = 'defense-sustained'
-                            severity = 'medium'; points = 5; review_stage = 'main' }
+                    severity = 'medium'; points = 5; review_stage = 'main' 
+                }
             )
             $calib = & $script:BuildDepthCalibration -Findings $findings
             $calibPath = Join-Path $workDir 'depth-calib.json'
@@ -583,7 +587,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                            severity = 'medium'; points = 5; review_stage = 'main' }
+                    severity = 'medium'; points = 5; review_stage = 'main' 
+                }
             )
             $calib = & $script:BuildDepthCalibration -Findings $findings
             $calibPath = Join-Path $workDir 'depth-calib.json'
@@ -694,7 +699,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                            severity = 'medium'; points = 5; review_stage = 'main' }
+                    severity = 'medium'; points = 5; review_stage = 'main' 
+                }
             )
             $calib = & $script:BuildDepthCalibration -Findings $findings -PrNumbers $script:CleanRepoPrNumbers
             $calibPath = Join-Path $workDir 'zero-calib.json'
@@ -717,7 +723,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                            severity = 'medium'; points = 5; review_stage = 'main' }
+                    severity = 'medium'; points = 5; review_stage = 'main' 
+                }
             )
             $calib = & $script:BuildDepthCalibration -Findings $findings -Override 'full'
             $calibPath = Join-Path $workDir 'override-calib.json'
@@ -743,7 +750,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                            severity = 'medium'; points = 5; review_stage = 'main' }
+                    severity = 'medium'; points = 5; review_stage = 'main' 
+                }
             )
             $reactivationEvents = @(
                 [ordered]@{
@@ -778,7 +786,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $staleDate = (Get-Date).AddDays(-100).ToString('o')
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                            severity = 'medium'; points = 5; review_stage = 'main' }
+                    severity = 'medium'; points = 5; review_stage = 'main' 
+                }
             )
             $depthState = [ordered]@{
                 architecture = [ordered]@{
@@ -808,7 +817,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                            severity = 'medium'; points = 5; review_stage = 'main' }
+                    severity = 'medium'; points = 5; review_stage = 'main' 
+                }
             )
             $reactivationEvents = @(
                 [ordered]@{
@@ -1019,6 +1029,689 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 [int]$eventsAfter[0]['expires_at_pr'] | Should -Be ([int]$eventsAfter[0]['triggered_at_pr'] + 50) `
                     -Because 'expires_at_pr must be triggered_at_pr + 50 as computed by the time-decay logic'
             }
+        }
+    }
+
+    # ==================================================================
+    # systemic_patterns: section — every test below must fail initially.
+    # ==================================================================
+    Context 'systemic_patterns output' {
+
+        BeforeAll {
+            # $script:NonMetricsPrNumbers is populated by the prosecution_depth BeforeAll,
+            # which runs before this context (contexts execute in document order).
+            # Take up to 2 real non-metrics PR numbers for multi-PR fixtures.
+            # Guard: ensure NonMetricsPrNumbers is available when this context runs in isolation
+            if (-not $script:NonMetricsPrNumbers) {
+                $script:NonMetricsPrNumbers = @(9901, 9902)
+            }
+            $firstTwo = @($script:NonMetricsPrNumbers | Select-Object -First 2)
+            $script:SystemicPr1 = if ($firstTwo.Count -ge 1) { [int]$firstTwo[0] } else { 9901 }
+            $script:SystemicPr2 = if ($firstTwo.Count -ge 2) { [int]$firstTwo[1] } else { 9902 }
+
+            # ---------------------------------------------------------------
+            # Helper: build a calibration object for systemic-pattern tests.
+            # Each PR in $PrNumbers receives the same $Findings array.
+            # Optional $ProposalsEmitted adds a proposals_emitted root key.
+            # ---------------------------------------------------------------
+            $script:BuildSystemicCalibration = {
+                param(
+                    [object[]]$Findings,
+                    [int[]]$PrNumbers = @(9901),
+                    [object[]]$ProposalsEmitted = @()
+                )
+                $entries = @()
+                foreach ($prNum in $PrNumbers) {
+                    $entries += [ordered]@{
+                        pr_number  = $prNum
+                        created_at = '2026-03-01T10:00:00Z'
+                        findings   = $Findings
+                        summary    = [ordered]@{
+                            prosecution_findings = $Findings.Count
+                            pass_1_findings      = $Findings.Count
+                            pass_2_findings      = 0
+                            pass_3_findings      = 0
+                            defense_disproved    = 0
+                            judge_accepted       = $Findings.Count
+                            judge_rejected       = 0
+                            judge_deferred       = 0
+                        }
+                    }
+                }
+                $calib = [ordered]@{
+                    calibration_version = 1
+                    entries             = $entries
+                }
+                if ($ProposalsEmitted.Count -gt 0) {
+                    $calib['proposals_emitted'] = $ProposalsEmitted
+                }
+                return $calib
+            }
+        }
+
+        It 'emits systemic_patterns section when v2 findings with systemic_fix_type exist' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            # One instruction:security finding per PR, 2 distinct PRs → threshold met
+            $finding = [ordered]@{
+                id                = 'F1'
+                category          = 'security'
+                judge_ruling      = 'finding-sustained'
+                severity          = 'medium'
+                points            = 5
+                review_stage      = 'main'
+                systemic_fix_type = 'instruction'
+            }
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings @($finding) `
+                -PrNumbers @($script:SystemicPr1, $script:SystemicPr2)
+            $calibPath = Join-Path $workDir 'systemic-basic.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'systemic_patterns:' `
+                -Because 'systemic_patterns section must appear when v2 findings with systemic_fix_type exist'
+            $result.Output | Should -Match 'instruction:' `
+                -Because 'instruction fix type must appear under systemic_patterns'
+            $result.Output | Should -Match 'security:' `
+                -Because 'security category must appear under the instruction fix type'
+            $result.Output | Should -Match 'meets_threshold:\s*true' `
+                -Because '2 sustained findings across 2 distinct PRs must meet the threshold'
+            $result.Output | Should -Match 'sustained_count:\s*2' `
+                -Because 'sustained_count must reflect total sustained findings across all PR entries'
+            $result.Output | Should -Match 'distinct_prs:\s*2' `
+                -Because 'distinct_prs must count unique PR numbers contributing to the pattern'
+        }
+
+        It 'threshold logic: single PR does not meet threshold' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            # Two instruction:security findings in the SAME PR → distinct_prs = 1
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction' 
+                },
+                [ordered]@{ id = 'F2'; category = 'security'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction' 
+                }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings $findings `
+                -PrNumbers @($script:SystemicPr1)
+            $calibPath = Join-Path $workDir 'systemic-threshold.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'systemic_patterns:' `
+                -Because 'systemic_patterns section must appear even when threshold not met (section always emitted when data exists)'
+            $result.Output | Should -Match 'meets_threshold:\s*false' `
+                -Because 'only 1 distinct PR must produce meets_threshold: false'
+        }
+
+        It 'excludes category n/a findings from systemic patterns' -Tag 'requires-gh' {
+            # Both valid (security) and n/a findings are present; section must appear
+            # for the valid finding but must not contain an n/a key.
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction' 
+                },
+                [ordered]@{ id = 'F2'; category = 'n/a'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction' 
+                }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings $findings `
+                -PrNumbers @($script:SystemicPr1, $script:SystemicPr2)
+            $calibPath = Join-Path $workDir 'systemic-noa.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'systemic_patterns:' `
+                -Because 'systemic_patterns section must appear when valid (non-n/a) findings exist'
+            $result.Output | Should -Not -Match '(?s)systemic_patterns:.*?n/a:' `
+                -Because 'n/a category must be excluded from systemic_patterns'
+        }
+
+        It 'omits systemic_patterns section when all systemic_fix_type values are none' -Tag 'requires-gh' {
+            # Boundary/backward-compat test: no systemic_patterns section when no findings
+            # have a non-none systemic_fix_type. Passes in red state (section not yet
+            # emitted) and continues passing after correct implementation.
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'none' 
+                },
+                [ordered]@{ id = 'F2'; category = 'architecture'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main' 
+                }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings $findings `
+                -PrNumbers @($script:SystemicPr1, $script:SystemicPr2)
+            $calibPath = Join-Path $workDir 'systemic-none.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Not -Match 'systemic_patterns:' `
+                -Because 'systemic_patterns section must be omitted when all systemic_fix_type values are none or absent'
+            $result.Output | Should -Match 'kaizen_metric:' `
+                -Because 'kaizen_metric section must appear even when systemic_patterns is omitted (emitted unconditionally when v2IssuesAnalyzed > 0)'
+        }
+
+        It 'includes evidence pr and finding id pairs in output' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            # Two skill:pattern findings, same finding ids per PR → evidence carries pr + id
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'pattern'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'skill' 
+                },
+                [ordered]@{ id = 'F2'; category = 'pattern'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'skill' 
+                }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings $findings `
+                -PrNumbers @($script:SystemicPr1, $script:SystemicPr2)
+            $calibPath = Join-Path $workDir 'systemic-evidence.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'systemic_patterns:' `
+                -Because 'systemic_patterns section must appear before evidence fields can be checked'
+            $result.Output | Should -Match 'pr:\s*\d+' `
+                -Because 'evidence entries must include the contributing pr number'
+            $result.Output | Should -Match 'finding:\s*F[12]' `
+                -Because 'evidence entries must include the contributing finding id'
+        }
+
+        It 'emits all 4 known fix types even when empty' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            # Only instruction:security findings; skill/agent-prompt/plan-template must
+            # appear as empty sections regardless.
+            $finding = [ordered]@{
+                id                = 'F1'
+                category          = 'security'
+                judge_ruling      = 'finding-sustained'
+                severity          = 'medium'
+                points            = 5
+                review_stage      = 'main'
+                systemic_fix_type = 'instruction'
+            }
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings @($finding) `
+                -PrNumbers @($script:SystemicPr1, $script:SystemicPr2)
+            $calibPath = Join-Path $workDir 'systemic-alltypes.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'systemic_patterns:' `
+                -Because 'systemic_patterns section must appear before checking all 4 fix types'
+            $result.Output | Should -Match 'skill:' `
+                -Because 'skill fix type must appear in systemic_patterns even when no findings exist for it'
+            $result.Output | Should -Match 'agent-prompt:' `
+                -Because 'agent-prompt fix type must appear in systemic_patterns even when no findings exist for it'
+            $result.Output | Should -Match 'plan-template:' `
+                -Because 'plan-template fix type must appear in systemic_patterns even when no findings exist for it'
+        }
+
+        It 'previously_proposed is false when pattern not in proposals_emitted' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $finding = [ordered]@{
+                id                = 'F1'
+                category          = 'security'
+                judge_ruling      = 'finding-sustained'
+                severity          = 'medium'
+                points            = 5
+                review_stage      = 'main'
+                systemic_fix_type = 'instruction'
+            }
+            # No proposals_emitted in calibration — pattern must be unmarked
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings @($finding) `
+                -PrNumbers @($script:SystemicPr1, $script:SystemicPr2)
+            $calibPath = Join-Path $workDir 'systemic-notproposed.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'systemic_patterns:' `
+                -Because 'systemic_patterns section must appear before checking previously_proposed'
+            $result.Output | Should -Match 'previously_proposed:\s*false' `
+                -Because 'pattern absent from proposals_emitted must have previously_proposed: false'
+        }
+
+        It 'previously_proposed is true when pattern_key and evidence_prs match proposals_emitted' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $finding = [ordered]@{
+                id                = 'F1'
+                category          = 'security'
+                judge_ruling      = 'finding-sustained'
+                severity          = 'medium'
+                points            = 5
+                review_stage      = 'main'
+                systemic_fix_type = 'instruction'
+            }
+            $proposals = @(
+                [ordered]@{
+                    pattern_key  = 'instruction:security'
+                    evidence_prs = @($script:SystemicPr1, $script:SystemicPr2)
+                }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings @($finding) `
+                -PrNumbers @($script:SystemicPr1, $script:SystemicPr2) `
+                -ProposalsEmitted $proposals
+            $calibPath = Join-Path $workDir 'systemic-proposed.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'systemic_patterns:' `
+                -Because 'systemic_patterns section must appear before checking previously_proposed'
+            $result.Output | Should -Match 'previously_proposed:\s*true' `
+                -Because 'pattern matching proposals_emitted pattern_key and evidence_prs must have previously_proposed: true'
+        }
+
+        It 'v2 PR-body findings loop never activates systemic accumulation (D49 structural check)' -Tag 'no-gh' {
+            # D49: systemic accumulation is restricted to the local-calibration path only.
+            # $systemicActive must be set to $true in exactly one place -- inside the
+            # local-calibration fallback branch (if (-not $metricsMatch.Success)).
+            # This test verifies the invariant structurally so regressions (accidentally
+            # activating $systemicActive in the v2 loop) fail immediately.
+            $scriptContent = Get-Content -Path (Join-Path $PSScriptRoot '..\aggregate-review-scores.ps1') -Raw
+
+            # Exactly 1 occurrence of $systemicActive = $true (local-cal path only).
+            # Use [^#\n]* so the match anchor forbids # from appearing anywhere before
+            # the pattern on the same line — comment lines (# $systemicActive = ...) are
+            # excluded because [^#\n]* consumes only non-# chars from the line start.
+            $activations = [regex]::Matches($scriptContent, '(?m)^[^#\n]*\$systemicActive\s*=\s*\$true')
+            $activations.Count | Should -Be 1 `
+                -Because 'D49: $systemicActive must be set to $true in exactly one place (local-calibration fallback path only)'
+
+            # That activation must appear AFTER the local-cal branch marker and BEFORE the v2 path
+            $localCalBranchPos = $scriptContent.IndexOf('-not $metricsMatch.Success')
+            $localCalBranchPos | Should -BeGreaterThan 0 `
+                -Because 'local-calibration branch marker must be present in the script'
+            $activationPos = $activations[0].Index
+            $activationPos | Should -BeGreaterThan $localCalBranchPos `
+                -Because 'D49: $systemicActive activation must be inside the local-calibration fallback branch (after -not $metricsMatch.Success)'
+        }
+    }
+
+    # ==================================================================
+    # kaizen_metric: section — every test below must fail initially.
+    # ==================================================================
+    Context 'kaizen_metric output' {
+
+        BeforeAll {
+            # $script:NonMetricsPrNumbers, $script:BuildDepthCalibration,
+            # $script:BuildSystemicCalibration, $script:MakeCategoryFindings,
+            # $script:SystemicPr1, and $script:SystemicPr2 are populated by their
+            # respective context BeforeAll blocks, which run before this context
+            # (contexts execute in document order).
+            $script:KaizenSystemicPr1 = $script:SystemicPr1
+            $script:KaizenSystemicPr2 = $script:SystemicPr2
+        }
+
+        It 'emits kaizen_metric section after systemic_patterns' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            # Findings with systemic_fix_type so both systemic_patterns and kaizen_metric
+            # can be computed. NonMetricsPrNumbers provides enough PRs for sufficient_data.
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction' }
+            )
+            $calib = & $script:BuildDepthCalibration `
+                -Findings $findings `
+                -PrNumbers $script:NonMetricsPrNumbers
+            $calibPath = Join-Path $workDir 'kaizen-basic.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'kaizen_metric:' `
+                -Because 'kaizen_metric section must appear in output'
+            $result.Output | Should -Match 'categories_with_sufficient_data:' `
+                -Because 'categories_with_sufficient_data field must appear under kaizen_metric'
+            $result.Output | Should -Match 'categories_at_skip_depth:' `
+                -Because 'categories_at_skip_depth field must appear under kaizen_metric'
+            $result.Output | Should -Match 'categories_at_light_depth:' `
+                -Because 'categories_at_light_depth field must appear under kaizen_metric'
+            $result.Output | Should -Match 'kaizen_rate:' `
+                -Because 'kaizen_rate field must appear under kaizen_metric'
+            $result.Output | Should -Match 'patterns_meeting_threshold:' `
+                -Because 'patterns_meeting_threshold field must appear under kaizen_metric'
+            $result.Output | Should -Match 'patterns_previously_proposed:' `
+                -Because 'patterns_previously_proposed field must appear under kaizen_metric'
+        }
+
+        It 'kaizen_rate is 0.00 when no categories have sufficient data' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            # Only 1 PR → effective_count << 20 → sufficient_data: false for all categories
+            # → denominator is 0 → kaizen_rate must be 0.00
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main' }
+            )
+            $calib = & $script:BuildDepthCalibration -Findings $findings -PrNumbers @(9901)
+            $calibPath = Join-Path $workDir 'kaizen-nosuffix.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'kaizen_rate:\s*0\.00' `
+                -Because 'kaizen_rate must be 0.00 when no categories have sufficient data (denominator is 0)'
+        }
+
+        It 'kaizen_rate computed correctly when categories at reduced depth' -Tag 'requires-gh' {
+            # Fixture: architecture has stale skip_first_observed_at (100 days ago) which drives
+            # time-decay skip→light. NonMetricsPrNumbers gives sufficient effective_count.
+            # Acceptable assertion: kaizen_rate must be present in F2 decimal format.
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $staleDate = (Get-Date).AddDays(-100).ToString('o')
+            $depthState = [ordered]@{
+                architecture = [ordered]@{
+                    skip_first_observed_at = $staleDate
+                }
+            }
+            $findings = & $script:MakeCategoryFindings 'architecture' 1 34
+            $calib = & $script:BuildDepthCalibration -Findings $findings `
+                -PrNumbers $script:NonMetricsPrNumbers -DepthState $depthState
+            $calibPath = Join-Path $workDir 'kaizen-rate.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'kaizen_rate:\s*\d+\.\d{2}' `
+                -Because 'kaizen_rate must appear in F2 decimal format when categories have sufficient data'
+        }
+
+        It 'patterns_meeting_threshold counts threshold-met patterns' -Tag 'requires-gh' {
+            # Two distinct systemic patterns (instruction:security, skill:pattern) each
+            # across 2 distinct PRs → both meet threshold → patterns_meeting_threshold: 2
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction' },
+                [ordered]@{ id = 'F2'; category = 'pattern'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'skill' }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings $findings `
+                -PrNumbers @($script:KaizenSystemicPr1, $script:KaizenSystemicPr2)
+            $calibPath = Join-Path $workDir 'kaizen-threshold.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'patterns_meeting_threshold:\s*2' `
+                -Because '2 distinct patterns each appearing in 2 distinct PRs must yield patterns_meeting_threshold: 2'
+        }
+
+        It 'patterns_previously_proposed counts previously_proposed patterns' -Tag 'requires-gh' {
+            # Two threshold-met patterns: instruction:security is in proposals_emitted,
+            # skill:pattern is not → patterns_previously_proposed: 1
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction' },
+                [ordered]@{ id = 'F2'; category = 'pattern'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'skill' }
+            )
+            $proposals = @(
+                [ordered]@{
+                    pattern_key  = 'instruction:security'
+                    evidence_prs = @($script:KaizenSystemicPr1, $script:KaizenSystemicPr2)
+                }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings $findings `
+                -PrNumbers @($script:KaizenSystemicPr1, $script:KaizenSystemicPr2) `
+                -ProposalsEmitted $proposals
+            $calibPath = Join-Path $workDir 'kaizen-proposed.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'patterns_previously_proposed:\s*1' `
+                -Because '1 of 2 threshold-met patterns matches proposals_emitted so patterns_previously_proposed must be 1'
+        }
+    }
+
+    # ===================================================================
+    # proposals_emitted write-back — every test below must fail initially.
+    # ===================================================================
+    Context 'proposals_emitted write-back' {
+
+        It 'write-back: threshold-met unproposed patterns added to proposals_emitted in calibration file' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            # ARRANGE: two PRs each with instruction:security finding → distinct_prs=2, meets_threshold.
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction' }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings $findings `
+                -PrNumbers @($script:SystemicPr1, $script:SystemicPr2) `
+                -ProposalsEmitted @()
+            $calibPath = Join-Path $workDir 'proposals-writeback.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            # ACT
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            # ASSERT: fixture produced a threshold-met pattern
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'meets_threshold:\s*true' `
+                -Because 'fixture must produce a threshold-met pattern (2 sustained across 2 PRs)'
+
+            # ASSERT: proposals_emitted written to calibration file with correct fields
+            $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
+            $readBack['proposals_emitted'] | Should -Not -BeNullOrEmpty `
+                -Because 'proposals_emitted must be written when a threshold-met unproposed pattern exists'
+            $readBack['proposals_emitted'].Count | Should -BeGreaterOrEqual 1 `
+                -Because 'at least one proposal entry (instruction:security) must be written'
+            $entry = @($readBack['proposals_emitted']) | Where-Object { $_['pattern_key'] -eq 'instruction:security' }
+            $entry | Should -Not -BeNullOrEmpty `
+                -Because 'pattern_key instruction:security must be present in proposals_emitted'
+            @($entry)[0]['evidence_prs'] | Should -Not -BeNullOrEmpty `
+                -Because 'evidence_prs must be persisted alongside the pattern_key'
+            @($entry)[0]['first_emitted_at'] | Should -Not -BeNullOrEmpty `
+                -Because 'first_emitted_at timestamp must be persisted'
+        }
+
+        It 'write-back: pre-existing proposals_emitted entries preserved when new pattern added' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            # ARRANGE: pre-existing proposal for different key; new threshold-met pattern (instruction:security).
+            $workDir = & $script:NewWorkDir
+            $preExisting = @(
+                [ordered]@{
+                    pattern_key      = 'instruction:architecture'
+                    evidence_prs     = @(8801, 8802)
+                    first_emitted_at = '2025-01-01T00:00:00Z'
+                }
+            )
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction' }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings $findings `
+                -PrNumbers @($script:SystemicPr1, $script:SystemicPr2) `
+                -ProposalsEmitted $preExisting
+            $calibPath = Join-Path $workDir 'proposals-preserve.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            # ACT
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+
+            # ASSERT: both old and new entries present
+            $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
+            $readBack['proposals_emitted'] | Should -Not -BeNullOrEmpty `
+                -Because 'proposals_emitted must exist after write-back'
+            $keys = @($readBack['proposals_emitted']) | ForEach-Object { $_['pattern_key'] }
+            $keys | Should -Contain 'instruction:architecture' `
+                -Because 'pre-existing proposal entry must be preserved after write-back'
+            $keys | Should -Contain 'instruction:security' `
+                -Because 'new threshold-met pattern must be added alongside pre-existing entries'
+        }
+
+        It 'write-back: proposals_emitted not written when no new patterns meet threshold' -Tag 'requires-gh' {
+            # RED: cannot trivially pass — absence of write-back when threshold unmet.
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            # ARRANGE: only 1 PR → distinct_prs=1 < 2 → threshold not met → no write-back.
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction' }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings $findings `
+                -PrNumbers @($script:SystemicPr1) `
+                -ProposalsEmitted @()
+            $calibPath = Join-Path $workDir 'proposals-nothreshold.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            # ACT
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'meets_threshold:\s*false' `
+                -Because 'fixture with 1 PR must produce meets_threshold: false'
+
+            # ASSERT: proposals_emitted not added to calibration file
+            $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
+            $readBack['proposals_emitted'] | Should -BeNullOrEmpty `
+                -Because 'proposals_emitted must not be written when no new pattern meets threshold'
+        }
+
+        It 'write-back: superset evidence PRs produce previously_proposed: false (new proposal generated)' -Tag 'requires-gh' {
+            # F3 boundary: prior proposals_emitted has evidence_prs [PR1, PR2].
+            # Current run accumulates 3 distinct PRs [PR1, PR2, PR3].
+            # Compare-Object finds differences → previously_proposed: false → new proposal written.
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $firstThree = @($script:NonMetricsPrNumbers | Select-Object -First 3)
+            if ($firstThree.Count -lt 3) { Set-ItResult -Skipped -Because 'need 3 non-metrics PRs for superset test' }
+            $pr1 = [int]$firstThree[0]
+            $pr2 = [int]$firstThree[1]
+            $pr3 = [int]$firstThree[2]
+
+            $workDir = & $script:NewWorkDir
+            $finding = [ordered]@{
+                id                = 'F1'
+                category          = 'security'
+                judge_ruling      = 'finding-sustained'
+                severity          = 'medium'
+                points            = 5
+                review_stage      = 'main'
+                systemic_fix_type = 'instruction'
+            }
+            # Prior proposals: instruction:security seen across PR1+PR2 only
+            $priorProposals = @(
+                [ordered]@{
+                    pattern_key      = 'instruction:security'
+                    evidence_prs     = @($pr1, $pr2)
+                    first_emitted_at = '2025-01-01T00:00:00Z'
+                }
+            )
+            # Current calibration has the pattern across PR1+PR2+PR3 (superset)
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings @($finding) `
+                -PrNumbers @($pr1, $pr2, $pr3) `
+                -ProposalsEmitted $priorProposals
+            $calibPath = Join-Path $workDir 'proposals-superset.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'systemic_patterns:' `
+                -Because 'systemic_patterns section must appear before checking previously_proposed'
+            $result.Output | Should -Match 'previously_proposed:\s*false' `
+                -Because 'expanded evidence set (superset) must not match prior proposal -- new proposal expected'
         }
     }
 }
