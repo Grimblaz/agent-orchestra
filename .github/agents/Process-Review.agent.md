@@ -477,7 +477,7 @@ guardrail_proposals:
 1. Read `copilot-orchestra-repo` from `.github/copilot-instructions.md`
 2. If absent → mark proposal `upstream: true` in report, log "upstream repo not configured" and skip issue creation
 3. Pre-flight access check: `gh repo view {copilot-orchestra-repo} --json name 2>&1` — if non-zero exit → mark `upstream: true`, log access failure, skip issue creation
-4. Dedup search: `gh issue list --repo {copilot-orchestra-repo} --search "[Systemic Fix] {category} {systemic_fix_type}" --state all --json number --jq length`
+4. Dedup search: `gh issue list --repo {copilot-orchestra-repo} --search '"[Systemic Fix] {category} [{systemic_fix_type}]" in:title' --state all --json number --jq length`
    - If `$LASTEXITCODE -ne 0` → skip upstream issue creation, log error
    - If result > 0 → duplicate found, skip
    - If result = 0 → create upstream issue:
@@ -485,7 +485,7 @@ guardrail_proposals:
 > **Note**: Unlike §4.8, §4.9 requires no persistent error-state marker. When dedup search fails, skipping issue creation leaves `previously_proposed: false` in script output — the next calibration run will retry automatically.
 
 ```markdown
-Title: [Systemic Fix] {category}: {brief description}
+Title: [Systemic Fix] {category} [{systemic_fix_type}]: {brief description}
 Labels: enhancement, priority: medium
 
 ## Systemic Fix Proposal

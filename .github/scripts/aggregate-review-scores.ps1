@@ -125,7 +125,8 @@ function Test-PatternProposed {
         $propPrs = if ($prop -is [hashtable]) { @($prop['evidence_prs']) } else { @($prop.evidence_prs) }
         if ($propKey -eq $PatternKey) {
             $sortedPropPrs = @($propPrs | ForEach-Object { [int]$_ } | Sort-Object)
-            if ($null -eq (Compare-Object $EvidencePrs $sortedPropPrs)) {  # $null means no differences → arrays are identical
+            if ($null -eq (Compare-Object $EvidencePrs $sortedPropPrs)) {
+                # $null means no differences → arrays are identical
                 return $true
             }
         }
@@ -249,10 +250,10 @@ $confidenceData = @{
 # ---------------------------------------------------------------------------
 $accumulateFinding = {
     $totalFindings++
-    $category        = $finding['category'].ToLowerInvariant()
-    $judgeRuling     = $finding['judge_ruling'].ToLowerInvariant()
+    $category = $finding['category'].ToLowerInvariant()
+    $judgeRuling = $finding['judge_ruling'].ToLowerInvariant()
     $judgeConfidence = if ($finding.ContainsKey('judge_confidence')) { $finding['judge_confidence'].ToLowerInvariant() } else { '' }
-    $defenseVerdict  = if ($finding.ContainsKey('defense_verdict'))  { $finding['defense_verdict'].ToLowerInvariant()  } else { '' }
+    $defenseVerdict = if ($finding.ContainsKey('defense_verdict')) { $finding['defense_verdict'].ToLowerInvariant() } else { '' }
     if (-not $finding.ContainsKey('review_stage')) { $reviewStageUntagged++ }
     $reviewStage = if ($finding.ContainsKey('review_stage')) { $finding['review_stage'].ToLowerInvariant() } else { 'main' }
     $isSustained = ($judgeRuling -eq 'sustained' -or $judgeRuling -eq 'finding-sustained')
@@ -292,7 +293,7 @@ $accumulateFinding = {
     }
     # Systemic fix pattern accumulation (calibration path only — $systemicActive guards this)
     $systemicFixType = if ($finding.ContainsKey('systemic_fix_type')) { $finding['systemic_fix_type'].ToLowerInvariant() } else { 'none' }
-    if ($systemicActive -and $systemicFixType -ne 'none' -and $category -ne 'n/a' -and $knownCategories -contains $category) {
+    if ($systemicActive -and $systemicFixType -ne 'none' -and $knownSystemicFixTypes -contains $systemicFixType -and $category -ne 'n/a' -and $knownCategories -contains $category) {
         if (-not $systemicPatterns.ContainsKey($systemicFixType)) { $systemicPatterns[$systemicFixType] = @{} }
         if (-not $systemicPatterns[$systemicFixType].ContainsKey($category)) {
             $systemicPatterns[$systemicFixType][$category] = @{
@@ -700,11 +701,11 @@ if ($v2IssuesAnalyzed -gt 0) {
     $priorProposalsEmitted = @($proposalsEmitted)
     foreach ($ft in $knownSystemicFixTypes) {
         foreach ($cat in $systemicPatterns[$ft].Keys) {
-            $spEntry      = $systemicPatterns[$ft][$cat]
+            $spEntry = $systemicPatterns[$ft][$cat]
             $sustainedCnt = $spEntry.sustained_count
-            $distinctPrs  = $spEntry.prs.Count
+            $distinctPrs = $spEntry.prs.Count
             if ($sustainedCnt -ge 2 -and $distinctPrs -ge 2) {
-                $patternKey  = "${ft}:${cat}"
+                $patternKey = "${ft}:${cat}"
                 $evidencePrs = @($spEntry.prs | Sort-Object)
                 $alreadyProposed = Test-PatternProposed $proposalsEmitted $patternKey $evidencePrs
                 if (-not $alreadyProposed) {
@@ -734,9 +735,9 @@ if ($v2IssuesAnalyzed -gt 0) {
             $calibContent | Add-Member -NotePropertyName 'prosecution_depth_state' -NotePropertyValue ([PSCustomObject]$stateObj) -Force
             # Prune expired events before persisting (events still active: expires_at_pr > $maxMergedPrNumber)
             $reActivationEvents = @($reActivationEvents | Where-Object {
-                $exp = Get-FlexProperty $_ 'expires_at_pr'
-                $null -ne $exp -and [int]$exp -gt $maxMergedPrNumber
-            })
+                    $exp = Get-FlexProperty $_ 'expires_at_pr'
+                    $null -ne $exp -and [int]$exp -gt $maxMergedPrNumber
+                })
             $calibContent | Add-Member -NotePropertyName 're_activation_events' -NotePropertyValue @($reActivationEvents) -Force
             if ($proposalsChanged) {
                 $calibContent | Add-Member -NotePropertyName 'proposals_emitted' -NotePropertyValue @($proposalsEmitted) -Force
@@ -770,11 +771,11 @@ if ($v2IssuesAnalyzed -gt 0) {
             else {
                 Write-Output "    ${ft}:"
                 foreach ($cat in ($systemicPatterns[$ft].Keys | Sort-Object)) {
-                    $entry        = $systemicPatterns[$ft][$cat]
+                    $entry = $systemicPatterns[$ft][$cat]
                     $sustainedCnt = $entry.sustained_count
-                    $distinctPrs  = $entry.prs.Count
+                    $distinctPrs = $entry.prs.Count
                     $meetsThreshold = ($sustainedCnt -ge 2 -and $distinctPrs -ge 2)
-                    $patternKey  = "${ft}:${cat}"
+                    $patternKey = "${ft}:${cat}"
                     $evidencePrs = @($entry.prs | Sort-Object)
                     $prevProposed = Test-PatternProposed $priorProposalsEmitted $patternKey $evidencePrs
                     Write-Output "      ${cat}:"
@@ -789,7 +790,7 @@ if ($v2IssuesAnalyzed -gt 0) {
                         }
                     }
                     if ($meetsThreshold) { $patternsMeetingThreshold++ }
-                    if ($prevProposed)   { $patternsPreviouslyProposed++ }
+                    if ($prevProposed -and $meetsThreshold) { $patternsPreviouslyProposed++ }
                     Write-Output "        previously_proposed: $($prevProposed.ToString().ToLower())"
                 }
             }
@@ -798,7 +799,8 @@ if ($v2IssuesAnalyzed -gt 0) {
     # kaizen_metric: aggregated calibration effectiveness metric
     $kaizenRate = if ($categoriesWithSufficientData -gt 0) {
         ($categoriesAtSkip + $categoriesAtLight) / [double]$categoriesWithSufficientData
-    } else { 0.0 }
+    }
+    else { 0.0 }
     Write-Output "  kaizen_metric:"
     Write-Output "    categories_with_sufficient_data: $categoriesWithSufficientData"
     Write-Output "    categories_at_skip_depth: $categoriesAtSkip"

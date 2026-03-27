@@ -1090,7 +1090,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'emits systemic_patterns section when v2 findings with systemic_fix_type exist' -Tag 'requires-gh' {
-            # RED: script does not yet emit systemic_patterns: in output.
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
 
             $workDir = & $script:NewWorkDir
@@ -1129,7 +1128,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'threshold logic: single PR does not meet threshold' -Tag 'requires-gh' {
-            # RED: systemic_patterns section does not exist yet; first assertion fails.
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
 
             $workDir = & $script:NewWorkDir
@@ -1161,7 +1159,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'excludes category n/a findings from systemic patterns' -Tag 'requires-gh' {
-            # RED: systemic_patterns section does not exist yet; first assertion fails.
             # Both valid (security) and n/a findings are present; section must appear
             # for the valid finding but must not contain an n/a key.
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
@@ -1226,7 +1223,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'includes evidence pr and finding id pairs in output' -Tag 'requires-gh' {
-            # RED: script does not yet emit systemic_patterns: in output.
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
 
             $workDir = & $script:NewWorkDir
@@ -1260,7 +1256,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'emits all 4 known fix types even when empty' -Tag 'requires-gh' {
-            # RED: script does not yet emit systemic_patterns: in output.
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
 
             $workDir = & $script:NewWorkDir
@@ -1296,7 +1291,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'previously_proposed is false when pattern not in proposals_emitted' -Tag 'requires-gh' {
-            # RED: script does not yet emit systemic_patterns: in output.
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
 
             $workDir = & $script:NewWorkDir
@@ -1327,7 +1321,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'previously_proposed is true when pattern_key and evidence_prs match proposals_emitted' -Tag 'requires-gh' {
-            # RED: script does not yet emit systemic_patterns: in output.
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
 
             $workDir = & $script:NewWorkDir
@@ -1405,7 +1398,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'emits kaizen_metric section after systemic_patterns' -Tag 'requires-gh' {
-            # RED: script does not yet emit kaizen_metric: in output.
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
 
             $workDir = & $script:NewWorkDir
@@ -1443,7 +1435,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'kaizen_rate is 0.00 when no categories have sufficient data' -Tag 'requires-gh' {
-            # RED: script does not yet emit kaizen_metric: in output.
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
 
             $workDir = & $script:NewWorkDir
@@ -1466,7 +1457,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'kaizen_rate computed correctly when categories at reduced depth' -Tag 'requires-gh' {
-            # RED: script does not yet emit kaizen_metric: in output.
             # Fixture: architecture has stale skip_first_observed_at (100 days ago) which drives
             # time-decay skip→light. NonMetricsPrNumbers gives sufficient effective_count.
             # Acceptable assertion: kaizen_rate must be present in F2 decimal format.
@@ -1494,7 +1484,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'patterns_meeting_threshold counts threshold-met patterns' -Tag 'requires-gh' {
-            # RED: script does not yet emit kaizen_metric: in output.
             # Two distinct systemic patterns (instruction:security, skill:pattern) each
             # across 2 distinct PRs → both meet threshold → patterns_meeting_threshold: 2
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
@@ -1523,7 +1512,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'patterns_previously_proposed counts previously_proposed patterns' -Tag 'requires-gh' {
-            # RED: script does not yet emit kaizen_metric: in output.
             # Two threshold-met patterns: instruction:security is in proposals_emitted,
             # skill:pattern is not → patterns_previously_proposed: 1
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
@@ -1565,7 +1553,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
     Context 'proposals_emitted write-back' {
 
         It 'write-back: threshold-met unproposed patterns added to proposals_emitted in calibration file' -Tag 'requires-gh' {
-            # RED: script does not yet write proposals_emitted to calibration file.
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
 
             # ARRANGE: two PRs each with instruction:security finding → distinct_prs=2, meets_threshold.
@@ -1607,7 +1594,6 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'write-back: pre-existing proposals_emitted entries preserved when new pattern added' -Tag 'requires-gh' {
-            # RED: script does not yet write proposals_emitted to calibration file.
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
 
             # ARRANGE: pre-existing proposal for different key; new threshold-met pattern (instruction:security).

@@ -846,10 +846,10 @@ All proposals are advisory only — Code-Conductor applies approved proposals th
 
 ### Upstream `[Systemic Fix]` Issue Format
 
-When `systemic_fix_type` targets copilot-orchestra shared files, §4.9 creates an upstream issue after auth check and dedup search (`[Systemic Fix] {category} {key-phrase}`):
+When `systemic_fix_type` targets copilot-orchestra shared files, §4.9 creates an upstream issue after auth check and dedup search (`"[Systemic Fix] {category} [{systemic_fix_type}]" in:title`):
 
 ```markdown
-Title: [Systemic Fix] {category}: {brief description}
+Title: [Systemic Fix] {category} [{systemic_fix_type}]: {brief description}
 Labels: enhancement, priority: medium
 
 ## Systemic Fix Proposal
