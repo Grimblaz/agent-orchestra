@@ -5,17 +5,17 @@
     Deterministic git-mock tests for the planned Branch Authority Gate helper.
 
 .DESCRIPTION
-    RED coverage for issue #205 against the planned helper surface:
+    Deterministic git-mock tests for the Branch Authority Gate helper (issue #205):
       - .github/scripts/lib/branch-authority-gate.ps1
 
-        The helper must expose a testable decision surface that:
+        The helper exposes a testable decision surface that:
             - returns a no-mutation continue result when the live current branch already satisfies the intended working state
             - treats multiple feature/issue-205* branches as ambiguity that must be reconciled before mutation
             - consults git rev-parse only when ambiguity exists
             - keeps same-tip duplicate branches blocked for rename and cleanup
             - keeps divergent branches blocked
 
-        These tests intentionally fail until the helper exists and the branch-authority behavior is implemented.
+        These tests lock the landed branch-authority behavior for issue #205; update them only when the contract semantics intentionally change.
 #>
 
 Describe 'branch-authority-gate.ps1' {
@@ -165,7 +165,7 @@ exit $LASTEXITCODE
 
                 Push-Location $workDir
                 try {
-                    & $script:LoadSubject
+                    . $script:LoadSubject
 
                     $result = Get-BranchAuthorityGateDecision `
                         -IssueNumber 205 `

@@ -1,6 +1,6 @@
 #Requires -Version 7.0
 
-function Global:Invoke-BranchAuthorityGit {
+function Invoke-BranchAuthorityGit {
     param([string[]]$Arguments)
 
     $output = @()
@@ -25,7 +25,7 @@ function Global:Invoke-BranchAuthorityGit {
     }
 }
 
-function Global:Get-BranchAuthorityFirstOutputLine {
+function Get-BranchAuthorityFirstOutputLine {
     param([object[]]$Output)
 
     foreach ($entry in @($Output)) {
@@ -40,7 +40,7 @@ function Global:Get-BranchAuthorityFirstOutputLine {
     return $null
 }
 
-function Global:ConvertTo-BranchAuthorityBranchList {
+function ConvertTo-BranchAuthorityBranchList {
     param([object[]]$Output)
 
     $branches = [System.Collections.Generic.List[string]]::new()
@@ -61,7 +61,7 @@ function Global:ConvertTo-BranchAuthorityBranchList {
     Write-Output -NoEnumerate ([string[]]$branches.ToArray())
 }
 
-function Global:Get-BranchAuthorityCommitComparison {
+function Get-BranchAuthorityCommitComparison {
     param([string[]]$MatchingIssueBranches)
 
     if ($MatchingIssueBranches.Count -eq 0) {
@@ -116,7 +116,7 @@ function Global:Get-BranchAuthorityCommitComparison {
     }
 }
 
-function Global:New-BranchAuthorityGateDecision {
+function New-BranchAuthorityGateDecision {
     param(
         [string]$RequestedAction,
         [string]$IntendedBranch,
@@ -157,7 +157,7 @@ function Global:New-BranchAuthorityGateDecision {
     }
 }
 
-function Global:Get-BranchAuthoritySafeNextState {
+function Get-BranchAuthoritySafeNextState {
     param(
         [bool]$CurrentMatchesIntended,
 
@@ -180,7 +180,7 @@ function Global:Get-BranchAuthoritySafeNextState {
     return 'Reconcile branch authority before any branch mutation resumes.'
 }
 
-function Global:Get-BranchAuthorityGateDecision {
+function Get-BranchAuthorityGateDecision {
     param(
         [Parameter(Mandatory)]
         [int]$IssueNumber,
