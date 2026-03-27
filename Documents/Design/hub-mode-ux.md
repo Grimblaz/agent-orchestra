@@ -185,3 +185,39 @@ D19: The issue is about repository ownership boundaries, not handoff persistence
 |------|--------|
 | `.github/agents/Code-Conductor.agent.md` | Added the downstream ownership boundary contract: exact work-class triad, pre-edit ownership gate, mid-run fail-closed stop, repository-aware bypass, external-context rule, and explicit reuse of existing upstream-routing conventions while preserving D9 semantics |
 | `Documents/Design/hub-mode-ux.md` | Added the synced design rationale and decisions for the downstream ownership boundary so the committed design doc matches Code-Conductor's wording |
+
+---
+
+## Issue #205 Additions: Branch Authority Gate
+
+### Summary
+
+Issue #205 fixes a stale-context branch-authority failure in hub-mode orchestration. During prior branch transitions, attached chat or repository context could lag live git by one step, which let Code-Conductor act on stale branch identity and create a duplicate issue branch even though the intended working branch already existed. The durable contract for this issue makes live git the only authority before branch mutation and keeps recovery non-destructive when duplicate branches are discovered.
+
+### Design Decisions
+
+| ID | Decision | Details |
+|----|----------|---------|
+| D20 | Attached context is advisory only | Attached branch context, session memory, and prior branch hints remain useful cues, but they are explicitly advisory only. They cannot override the repository's live branch state. |
+| D21 | Live git is canonical before mutation | The canonical source for branch authority is live git, not startup context. Before any branch mutation, Code-Conductor must anchor on the live current branch and current issue-scoped branch set. |
+| D22 | Per-mutation Branch Authority Gate | A Branch Authority Gate runs immediately before each branch create, checkout, rename, and cleanup action. This gate is placed adjacent to the risky action instead of being treated as a one-time startup check. |
+| D23 | Fixed proof-set order | The gate uses a narrow proof set in a fixed order: `git branch --show-current`, then `git branch --list "feature/issue-{ID}*"`, then `git rev-parse` only when the issue-branch list still leaves ambiguity. |
+| D24 | Stop and reconcile on mismatch or ambiguity | If attached context and live git differ, or the proof set still leaves more than one plausible issue branch, the workflow stops and reconciles before any branch-changing action continues. The reconciliation note must capture the requested mutation, advisory branch context if present, verified live branch, matching issue branches, commit-comparison result when used, and the safe next state. |
+| D25 | Same-tip duplicates stay non-destructive | Same-tip duplicate branches remain blocked for rename and cleanup. Commit equality does not authorize automatic cleanup, forced delete, or auto-rename; the workflow preserves recoverability. |
+| D26 | Narrow no-mutation continue exception | The only automatic continuation is the narrow case where the verified current branch already satisfies the intended working state and no branch mutation is needed. This is a continue-without-mutation exception, not permission to guess between branches. |
+
+### Rationale
+
+The issue's failure mode was not that startup context was missing; it was that startup context could become stale between branch transitions, resume flows, and cleanup decisions. A startup-only verification step would therefore prove the wrong thing at the wrong time. Per-mutation verification keeps the proof adjacent to the branch-changing action that could cause damage, which is the only point where the workflow can safely decide whether to create, checkout, rename, or clean up a branch.
+
+This design also keeps the fix narrow. It does not widen into a general git-state validator, and it does not redefine cleanup semantics. The contract is specifically about branch authority before mutation, with a fail-safe stop path and a single no-mutation continue exception when live git already proves the intended working state.
+
+### Files Changed (Issue #205)
+
+| File | Change |
+|------|--------|
+| `.github/agents/Code-Conductor.agent.md` | Added the Branch Authority Gate contract: attached branch context is advisory only, live git is canonical before branch mutation, the gate runs immediately before create, checkout, rename, and cleanup actions, mismatch handling is stop/reconcile/document, same-tip duplicates remain non-destructive, and the only automatic continuation is the no-mutation verified-current-branch case. |
+| `.github/scripts/lib/branch-authority-gate.ps1` | Added the dedicated branch-authority helper with a public decision surface that evaluates the ordered proof set and distinguishes verified, blocked, same-tip-duplicate, and divergent cases. |
+| `.github/scripts/Tests/branch-authority-gate-contract.Tests.ps1` | Added contract coverage that locks the Code-Conductor wording for canonical source, per-mutation placement, mismatch stop/reconcile behavior, and non-destructive duplicate handling. |
+| `.github/scripts/Tests/branch-authority-gate.Tests.ps1` | Added deterministic git-mock coverage for the ordered proof set, ambiguity handling, same-tip duplicate blocking, divergent-branch blocking, and the narrow no-mutation continue path. |
+| `Documents/Design/hub-mode-ux.md` | Added the synced durable design section for the branch-authority hub-mode contract so the committed design doc matches the implemented orchestration behavior. |

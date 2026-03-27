@@ -212,6 +212,20 @@ Use `#tool:vscode/askQuestions`:
 - Smart resume found ALL prior-session artifacts required by the current pipeline tier (abbreviated pipeline: the `<!-- plan-issue-{ID} -->` comment, which is itself the required durable handoff artifact; full pipeline: the `<!-- experience-owner-complete-{ID} -->` and `<!-- design-phase-complete-{ID} -->` phase markers plus the `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` durable handoff comments). D9 suppression requires those prior-session durable handoff artifacts when the selected tier needs them, not just phase markers, and in-session scope-based skips do not satisfy this rule. For multi-issue bundles, ALL required prior-session markers and durable handoff comments for ALL bundled issues (not just the primary issue) must already exist before D9 may be suppressed (see Multi-Issue Bundling: smart resume applies per-issue independently).
 - User has already answered the D9 checkpoint in this session (e.g., selected the "Continue implementation" option in the D9 `#tool:vscode/askQuestions` prompt)
 
+### Branch Authority Gate
+
+Attached branch context is advisory only; live git is the canonical source before branch mutation.
+
+Immediately before each branch create, checkout, rename, and cleanup action, run a Branch Authority Gate with this proof set in order:
+
+1. `git branch --show-current`
+2. `git branch --list "feature/issue-{ID}*"`
+3. `git rev-parse` only when ambiguity exists after the issue-branch list is checked
+
+Mismatch handling is fail-safe. If attached branch context and live git differ, or the proof set still leaves more than one plausible issue branch, stop and reconcile. Document the requested mutation action, the advisory branch context if present, the verified live branch, matching issue branches, the commit-comparison result when used, and the safe next state before any branch-changing action continues.
+
+Same-tip duplicates remain non-destructive. They preserve recoverability, remain blocked for rename/cleanup, and do not justify forced delete, automatic cleanup, or auto-rename. The only automatic continuation is the narrow no-mutation case where the verified current branch already satisfies the intended working state.
+
 ### Multi-Issue Bundling
 
 When the user invokes hub mode for multiple issues at once (e.g., `@code-conductor issues #163 #164 #165`):
