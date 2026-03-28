@@ -1714,4 +1714,356 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 -Because 'expanded evidence set (superset) must not match prior proposal -- new proposal expected'
         }
     }
+
+    # ==================================================================
+    # Context: complexity_over_ceiling_history
+    # Tests for -ComplexityJsonPath parameter and complexity history
+    # write-back behavior (Phase 2 D7 implementation).
+    # AST tests (no-gh): verify parameter declaration and script structure.
+    # Execution tests (requires-gh): verify history increment, reset,
+    # idempotency, consolidation events, and YAML extraction_agents output.
+    # ==================================================================
+    Context 'complexity_over_ceiling_history' {
+
+        BeforeAll {
+            # Guard: ensure NonMetricsPrNumbers is available when this context runs in isolation
+            if (-not $script:NonMetricsPrNumbers) {
+                $allPrJsonGuard = & gh pr list --repo 'Grimblaz/copilot-orchestra' --state merged --limit 100 --json number,body 2>$null
+                $script:NonMetricsPrNumbers = if ($allPrJsonGuard) {
+                    @(($allPrJsonGuard | ConvertFrom-Json) |
+                        Where-Object { $_.body -notmatch 'pipeline-metrics' } |
+                        ForEach-Object { [int]$_.number })
+                }
+                else { @(9901) }
+            }
+
+            # Helper: write a complexity JSON file simulating measure-guidance-complexity.ps1 output
+            $script:WriteComplexityFile = {
+                param([string]$Path, [string[]]$AgentsOverCeiling)
+                $complexity = [ordered]@{
+                    config_source       = 'test'
+                    agents_over_ceiling = @($AgentsOverCeiling)
+                    agents              = @($AgentsOverCeiling | ForEach-Object {
+                        [ordered]@{ file = $_; total_directives = 150; section_count = 20; sections = @() }
+                    })
+                }
+                $complexity | ConvertTo-Json -Depth 5 | Set-Content -Path $Path -Encoding UTF8
+            }
+        }
+
+        # ---- AST tests (no-gh) -----------------------------------------------
+
+        It 'script declares -ComplexityJsonPath parameter as [string]' -Tag 'no-gh' {
+            $script:ParamNames | Should -Contain 'ComplexityJsonPath' `
+                -Because 'aggregate-review-scores.ps1 must declare -ComplexityJsonPath to receive the complexity JSON file path from Process-Review §4.7'
+            $paramAst = $script:AllParams | Where-Object { $_.Name.VariablePath.UserPath -eq 'ComplexityJsonPath' }
+            $paramAst | Should -Not -BeNullOrEmpty `
+                -Because '-ComplexityJsonPath parameter AST node must be found'
+            $paramAst.StaticType.Name | Should -Be 'String' `
+                -Because '-ComplexityJsonPath must be declared as [string]'
+        }
+
+        It 'script references guidance-complexity.json for persistent_threshold' -Tag 'no-gh' {
+            $content = Get-Content -Path $script:ScriptFile -Raw
+            $content | Should -Match 'guidance-complexity\.json' `
+                -Because 'aggregate-review-scores.ps1 must read persistent_threshold from the guidance-complexity config file'
+            $content | Should -Match 'persistent_threshold' `
+                -Because 'script must reference the persistent_threshold config key used to gate extraction advisory'
+        }
+
+        It 'script declares complexityHistoryChanged dirty flag to gate write-back' -Tag 'no-gh' {
+            $content = Get-Content -Path $script:ScriptFile -Raw
+            $content | Should -Match 'complexityHistoryChanged' `
+                -Because 'script must track whether complexity history changed so write-back is conditional (atomic + dirty-flag pattern)'
+        }
+
+        # ---- Execution tests (requires-gh) ------------------------------------
+
+        It 'exits cleanly without -ComplexityJsonPath — backward compatible' -Tag 'requires-gh' {
+            # When -ComplexityJsonPath is omitted, complexity history must not be written
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $calibPath = Join-Path $workDir 'backward-compat.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data ([ordered]@{
+                calibration_version = 1; entries = @()
+            })
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0 `
+                -Because 'script must exit 0 without -ComplexityJsonPath'
+            $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
+            $readBack['complexity_over_ceiling_history'] | Should -BeNullOrEmpty `
+                -Because 'complexity_over_ceiling_history must not be written when -ComplexityJsonPath is omitted'
+        }
+
+        It 'increments consecutive_count to 1 on first observation of an over-ceiling agent' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $complexityPath = Join-Path $workDir 'complexity.json'
+            & $script:WriteComplexityFile -Path $complexityPath -AgentsOverCeiling @('TestAgent.agent.md')
+
+            $calibPath = Join-Path $workDir 'increment-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data ([ordered]@{
+                calibration_version = 1; entries = @()
+            })
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
+
+            $result.ExitCode | Should -Be 0
+            $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
+            $readBack['complexity_over_ceiling_history'] | Should -Not -BeNullOrEmpty `
+                -Because 'complexity_over_ceiling_history must be written to the calibration file when an agent is over ceiling'
+            [int]$readBack['complexity_over_ceiling_history']['TestAgent.agent.md']['consecutive_count'] | Should -Be 1 `
+                -Because 'first observation of an over-ceiling agent must set consecutive_count to 1'
+        }
+
+        It 'sets first_observed_at and last_observed_at as valid datetime strings on first observation' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $complexityPath = Join-Path $workDir 'complexity.json'
+            & $script:WriteComplexityFile -Path $complexityPath -AgentsOverCeiling @('TestAgent.agent.md')
+
+            $calibPath = Join-Path $workDir 'firstobs-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data ([ordered]@{
+                calibration_version = 1; entries = @()
+            })
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
+
+            $result.ExitCode | Should -Be 0
+            $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
+            $entry = $readBack['complexity_over_ceiling_history']['TestAgent.agent.md']
+            $entry | Should -Not -BeNullOrEmpty `
+                -Because 'history entry must exist for the observed agent'
+            $entry['first_observed_at'] | Should -Not -BeNullOrEmpty `
+                -Because 'first_observed_at must be set on first observation'
+            $entry['last_observed_at'] | Should -Not -BeNullOrEmpty `
+                -Because 'last_observed_at must be set on first observation'
+            { [datetime]$entry['first_observed_at'] } | Should -Not -Throw `
+                -Because 'first_observed_at must be a valid datetime string'
+        }
+
+        It 'does not re-increment consecutive_count on second run with same max PR number (idempotency)' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $complexityPath = Join-Path $workDir 'complexity.json'
+            & $script:WriteComplexityFile -Path $complexityPath -AgentsOverCeiling @('TestAgent.agent.md')
+
+            $calibPath = Join-Path $workDir 'idempotency-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data ([ordered]@{
+                calibration_version = 1; entries = @()
+            })
+
+            # First run — establishes last_pr_number (the current max merged PR number)
+            $result1 = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
+            $result1.ExitCode | Should -Be 0 `
+                -Because 'first run must exit 0'
+
+            # Second run — same max PR number context; must NOT re-increment
+            $result2 = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
+            $result2.ExitCode | Should -Be 0 `
+                -Because 'second run must exit 0'
+
+            $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
+            [int]$readBack['complexity_over_ceiling_history']['TestAgent.agent.md']['consecutive_count'] | Should -Be 1 `
+                -Because 're-running the aggregate for the same max PR number must not re-increment consecutive_count (idempotency guard by last_pr_number)'
+        }
+
+        It 'removes history entry and logs consolidation_event when agent drops below ceiling' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+
+            # Pre-seed: TestAgent.agent.md was over ceiling for 2 consecutive runs
+            $preSeededHistory = [ordered]@{
+                'TestAgent.agent.md' = [ordered]@{
+                    consecutive_count = 2
+                    first_observed_at = '2026-03-01T00:00:00Z'
+                    last_observed_at  = '2026-03-15T00:00:00Z'
+                    last_pr_number    = 1
+                }
+            }
+            $calib = [ordered]@{
+                calibration_version             = 1
+                entries                         = @()
+                complexity_over_ceiling_history = $preSeededHistory
+            }
+            $calibPath = Join-Path $workDir 'consolidation-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            # Complexity JSON: TestAgent.agent.md is now BELOW ceiling (absent from agents_over_ceiling)
+            $complexityPath = Join-Path $workDir 'complexity-clean.json'
+            & $script:WriteComplexityFile -Path $complexityPath -AgentsOverCeiling @()
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
+
+            $result.ExitCode | Should -Be 0
+            $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
+            $readBack['complexity_over_ceiling_history'] | Should -BeNullOrEmpty `
+                -Because 'TestAgent.agent.md dropped below ceiling — history entry must be removed'
+            $readBack['consolidation_events'] | Should -Not -BeNullOrEmpty `
+                -Because 'a consolidation_event must be recorded when an agent that was tracked drops below ceiling'
+            [int]($readBack['consolidation_events']).Count | Should -BeGreaterOrEqual 1 `
+                -Because 'at least one consolidation event must be logged for the agent that dropped below ceiling'
+            ($readBack['consolidation_events'])[0]['agent'] | Should -Be 'TestAgent.agent.md' `
+                -Because 'consolidation event must record the agent basename that dropped below ceiling'
+        }
+
+        It 'tracks multiple agents independently in the same run' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $complexityPath = Join-Path $workDir 'complexity-multi.json'
+            & $script:WriteComplexityFile -Path $complexityPath -AgentsOverCeiling @('AgentA.agent.md', 'AgentB.agent.md')
+
+            $calibPath = Join-Path $workDir 'multi-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data ([ordered]@{
+                calibration_version = 1; entries = @()
+            })
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
+
+            $result.ExitCode | Should -Be 0
+            $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
+            $history = $readBack['complexity_over_ceiling_history']
+            $history | Should -Not -BeNullOrEmpty `
+                -Because 'complexity_over_ceiling_history must be written for multiple agents'
+            [int]$history['AgentA.agent.md']['consecutive_count'] | Should -Be 1 `
+                -Because 'AgentA must be independently tracked with consecutive_count 1'
+            [int]$history['AgentB.agent.md']['consecutive_count'] | Should -Be 1 `
+                -Because 'AgentB must be independently tracked with consecutive_count 1'
+        }
+
+        It 'emits extraction_agents in YAML output when consecutive_count meets persistent_threshold' -Tag 'requires-gh' {
+            # Fix M4: use a custom config fixture with persistent_threshold=2 so the test is not
+            # coupled to the production config value. Pre-seed consecutive_count=1 (threshold-1);
+            # this run increments to 2 -> meets custom threshold of 2 -> extraction_agents emitted.
+            # If someone changes the production threshold to 5, this test still passes.
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $configPath = Join-Path $script:RepoRoot '.github/config/guidance-complexity.json'
+            $configBackup = Get-Content -Path $configPath -Raw
+            try {
+                # Write custom config with persistent_threshold=2
+                $customConfig = [ordered]@{
+                    version           = 1
+                    ceilings          = [ordered]@{}
+                    default_ceiling   = [ordered]@{ max_directives = 128 }
+                    persistent_threshold = 2
+                }
+                $customConfig | ConvertTo-Json -Depth 5 | Set-Content -Path $configPath -Encoding UTF8
+
+                $preSeededHistory = [ordered]@{
+                    'TestAgent.agent.md' = [ordered]@{
+                        consecutive_count = 1
+                        first_observed_at = '2026-03-01T00:00:00Z'
+                        last_observed_at  = '2026-03-15T00:00:00Z'
+                        last_pr_number    = 1
+                    }
+                }
+                $calib = [ordered]@{
+                    calibration_version             = 1
+                    entries                         = @()
+                    complexity_over_ceiling_history = $preSeededHistory
+                }
+                $calibPath = Join-Path $workDir 'threshold-calib.json'
+                & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+                # This run increments TestAgent to consecutive_count=2 -> meets custom threshold of 2
+                $complexityPath = Join-Path $workDir 'complexity-threshold.json'
+                & $script:WriteComplexityFile -Path $complexityPath -AgentsOverCeiling @('TestAgent.agent.md')
+
+                $result = & $script:InvokeAggregate -WorkDir $workDir `
+                    -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
+
+                $result.ExitCode | Should -Be 0
+                $result.Output | Should -Match 'extraction_agents:' `
+                    -Because 'extraction_agents section must appear in YAML output when an agent meets or exceeds the custom persistent_threshold of 2'
+                $result.Output | Should -Match 'TestAgent\.agent\.md' `
+                    -Because 'the agent meeting the threshold must be listed under extraction_agents'
+            }
+            finally {
+                # Restore the real config regardless of test outcome
+                $configBackup | Set-Content -Path $configPath -Encoding UTF8
+            }
+        }
+
+        It 'skips complexity tracking when -ComplexityJsonPath points to a non-existent file' -Tag 'requires-gh' {
+            # Fix M7: verify that a non-existent -ComplexityJsonPath produces exit 0 and leaves
+            # complexity_over_ceiling_history untouched (backward-compatible skip behavior).
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $calibPath = Join-Path $workDir 'nonexistent-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data ([ordered]@{
+                calibration_version = 1; entries = @()
+            })
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath, `
+                    '-ComplexityJsonPath', 'C:\nonexistentpath\complexity-ghost.json')
+
+            $result.ExitCode | Should -Be 0 `
+                -Because 'a non-existent -ComplexityJsonPath must not abort the script'
+            $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
+            $readBack['complexity_over_ceiling_history'] | Should -BeNullOrEmpty `
+                -Because 'complexity_over_ceiling_history must not be written when -ComplexityJsonPath points to a non-existent file'
+        }
+
+        It 'preserves first_observed_at on genuine increment (different PR number)' -Tag 'requires-gh' {
+            # Fix M10: verify that first_observed_at is immutable once set — only last_observed_at
+            # and consecutive_count change when the idempotency guard does NOT fire (different PR number).
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+
+            $workDir = & $script:NewWorkDir
+            $complexityPath = Join-Path $workDir 'complexity-m10.json'
+            & $script:WriteComplexityFile -Path $complexityPath -AgentsOverCeiling @('TestAgent.agent.md')
+
+            # Pre-seed with last_pr_number=1 (far below current max merged PR) so the
+            # idempotency guard does not fire and a genuine increment occurs.
+            $preSeededHistory = [ordered]@{
+                'TestAgent.agent.md' = [ordered]@{
+                    consecutive_count = 1
+                    first_observed_at = '2026-01-01T00:00:00Z'
+                    last_observed_at  = '2026-01-01T00:00:00Z'
+                    last_pr_number    = 1
+                }
+            }
+            $calib = [ordered]@{
+                calibration_version             = 1
+                entries                         = @()
+                complexity_over_ceiling_history = $preSeededHistory
+            }
+            $calibPath = Join-Path $workDir 'first-observed-immutable-calib.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
+
+            $result.ExitCode | Should -Be 0
+            $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
+            $entry = $readBack['complexity_over_ceiling_history']['TestAgent.agent.md']
+            $entry | Should -Not -BeNullOrEmpty `
+                -Because 'history entry must still exist after a genuine increment'
+            [int]$entry['consecutive_count'] | Should -Be 2 `
+                -Because 'genuine increment (different PR number) must raise consecutive_count from 1 to 2'
+            $entry['first_observed_at'] | Should -Be '2026-01-01T00:00:00Z' `
+                -Because 'first_observed_at must be preserved on genuine increment — only set on first observation, never overwritten'
+            $entry['last_observed_at'] | Should -Not -Be '2026-01-01T00:00:00Z' `
+                -Because 'last_observed_at must be updated to reflect the new observation time'
+        }
+    }
 }
