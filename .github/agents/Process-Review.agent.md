@@ -318,6 +318,14 @@ Emit exactly this structure when returning results to Code-Conductor:
 pwsh -NonInteractive .github/scripts/aggregate-review-scores.ps1
 ```
 
+**Step 1b — Run the guidance complexity measurement**:
+
+```powershell
+$complexityOutput = pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json
+```
+
+If the script errors (non-zero exit or `ConvertFrom-Json` throws), set `$complexityOutput = $null` and emit: `Complexity measurement unavailable — §4.9 ceiling check skipped.` The `$complexityOutput` variable is consumed by §4.9 Step 1b.
+
 **Step 2 — Parse output**:
 
 - If output contains `insufficient_data: true`: emit `Calibration analysis: insufficient data ({effective_sample_size} effective issues, minimum 5.0 required). Skipping.` and proceed to §5.
@@ -377,7 +385,9 @@ After §4.7 analysis completes, proceed to §4.9 for root cause analysis and gua
 
 **Purpose**: Surface domain failure patterns discovered in downstream repos back to Copilot Orchestra as potential skill improvements.
 
-**When to run**: Automatically during each full Process-Review retrospective invocation. Skip in subagent mode (CE Gate Track 2, Calibration-only).
+**When to run**: Automatically during each full Process-Review retrospective invocation, including calibration-only mode. Skip in subagent mode (CE Gate Track 2).
+
+> **Monitoring note (D6)**: When §4.8 runs during calibration-only mode, log whether each prerequisite was met and what action was taken (skip-prereq/scan/create) to inform future extraction decisions per the D6 extraction-criteria framework in `Documents/Design/guidance-complexity.md`.
 
 **Step 1 — Check prerequisites**:
 
@@ -438,11 +448,25 @@ For each entry already marked `<!-- gotcha-status: upstream:{url} -->`: check if
 
 **Purpose**: Identify recurring defect patterns from sustained findings and propose concrete guardrail additions to prevent recurrence.
 
-**When to run**: During any Process-Review invocation that includes calibration analysis (including Calibration-only mode, unlike §4.8). Skip in subagent mode (CE Gate Track 2).
+**When to run**: During any Process-Review invocation that includes calibration analysis (including calibration-only mode). Skip in subagent mode (CE Gate Track 2).
 
 **Step 1 — Parse systemic patterns from script output**:
 
 Read the `systemic_patterns:` section from the aggregation script's YAML output. If the section is absent or empty, emit "Root cause analysis: no systemic patterns found" and skip to kaizen metric.
+
+**Step 1b — Check agent complexity ceiling** (for `agent-prompt` proposals only):
+
+Read `$complexityOutput` from §4.7. If `$complexityOutput` is `$null`, skip this step.
+
+For each pattern being considered for a guardrail proposal with `systemic_fix_type: agent-prompt`:
+
+1. Extract the target agent basename from `target_file` (the filename portion of `.github/agents/{Name}.agent.md`)
+2. Check whether that basename appears in `$complexityOutput.agents_over_ceiling`
+3. If **over ceiling** → tag the eventual proposal `compression_required: true` and emit this advisory in the report:
+   > **Compression advisory (D2)**: Target agent `{agent-basename}` exceeds its complexity ceiling (`{total_directives}` directives). Before adding a new guardrail, consider consolidating existing rules in the target section first. See `Documents/Design/guidance-complexity.md` — Rule Compression Approach section for the consolidation steps. The proposal is still emitted — this flag is advisory only.
+4. If **not over ceiling** → tag `compression_required: false`
+
+**Scope**: `instruction`, `skill`, and `plan-template` proposals skip this step — per-agent ceilings apply to `agent-prompt` type only.
 
 **Step 2 — Identify guardrails** (for each pattern where `meets_threshold: true` and `previously_proposed: false`):
 
@@ -470,6 +494,7 @@ guardrail_proposals:
       - pr: 78, finding: F3
       - pr: 82, finding: F1
     upstream: false  # true if fix targets copilot-orchestra shared files
+    compression_required: false  # true when target agent exceeds complexity ceiling (agent-prompt proposals only)
 ```
 
 **Step 4 — Upstream proposals** (when `systemic_fix_type` targets copilot-orchestra shared files):
