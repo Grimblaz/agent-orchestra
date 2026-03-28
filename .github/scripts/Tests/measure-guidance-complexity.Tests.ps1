@@ -29,15 +29,12 @@
 
     Isolation: all tests write temp .agent.md files to a session-scoped temp
     root. No real .github/agents/*.agent.md files are used.
-
-    These tests are expected to FAIL (RED phase) until the implementation
-    script is created.
 #>
 
 Describe 'measure-guidance-complexity.ps1' {
 
     BeforeAll {
-        $script:RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptFile = Join-Path $script:RepoRoot '.github\scripts\measure-guidance-complexity.ps1'
 
         # Session-scoped temp root — all per-test dirs live under here
@@ -85,7 +82,7 @@ Describe 'measure-guidance-complexity.ps1' {
             )
             $scriptArgs = @('-AgentsPath', $AgentsPath)
             if ($ConfigPath) { $scriptArgs += @('-ConfigPath', $ConfigPath) }
-            $stdout   = & pwsh -NoProfile -NonInteractive -File $script:ScriptFile @scriptArgs 2>&1
+            $stdout = & pwsh -NoProfile -NonInteractive -File $script:ScriptFile @scriptArgs 2>&1
             $exitCode = $LASTEXITCODE
             $outLines = ($stdout | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
             return @{ ExitCode = $exitCode; Raw = $outLines.Trim() }
@@ -95,7 +92,7 @@ Describe 'measure-guidance-complexity.ps1' {
         # Shared high-ceiling config (ceiling 1000 — never triggers)
         # Used by tests that only care about counting, not ceiling enforcement
         # ---------------------------------------------------------------
-        $script:SharedConfigDir  = & $script:NewTempDir
+        $script:SharedConfigDir = & $script:NewTempDir
         $script:SharedConfigPath = & $script:WriteConfig -Dir $script:SharedConfigDir -Config @{
             version         = 1
             default_ceiling = @{ max_directives = 1000 }
@@ -133,8 +130,8 @@ This step is MANDATORY.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.total_directives | Should -Be 5 -Because 'MUST + NEVER + ALWAYS + REQUIRED + MANDATORY = 5 distinct directive keywords'
         }
@@ -151,8 +148,8 @@ Wholegrain mustard is never acceptable here.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             # NEVER is a directive (whole word); MUST is NOT (only appears inside "mustard")
             $agent.total_directives | Should -Be 1 -Because '"mustard" must not match MUST; only standalone NEVER counts'
@@ -169,8 +166,8 @@ You probably should try that too.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.total_directives | Should -Be 0 -Because '"should" is not in the counted keyword set'
         }
@@ -187,8 +184,8 @@ MUST also do this (uppercase).
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.total_directives | Should -Be 3 -Because 'must/Must/MUST are the same keyword; all three must be counted'
         }
@@ -210,8 +207,8 @@ MUST also do this (uppercase).
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.checklist_items | Should -Be 2 -Because '- [ ] items must be counted as checklist items'
         }
@@ -227,8 +224,8 @@ MUST also do this (uppercase).
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.checklist_items | Should -Be 2 -Because '- [x] and - [X] must both count as checklist items'
         }
@@ -245,8 +242,8 @@ You MUST do this.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.checklist_items  | Should -Be 2 -Because '2 checklist items'
             $agent.total_directives | Should -Be 3 -Because '1 MUST + 2 checklist items = 3 total_directives'
@@ -268,8 +265,8 @@ You MUST do this.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             # Design intent: checklist signal (1) + keyword signal (1) = 2 total_directives.
             # This documents that the counting is cumulative, not deduplicated.
@@ -296,8 +293,8 @@ You MUST not count this directive inside the fence.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.total_directives | Should -Be 0 -Because 'MUST between ``` fences must not be counted'
         }
@@ -315,8 +312,8 @@ ALWAYS skip this too.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.total_directives | Should -Be 0 -Because 'MUST and ALWAYS inside a ```powershell fence must not be counted'
         }
@@ -331,8 +328,8 @@ You MUST call `SomeFunction()` to proceed.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.total_directives | Should -Be 1 -Because 'MUST on a line with inline backtick code is still a normal line and must be counted'
         }
@@ -349,10 +346,91 @@ Normal line after.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.total_directives | Should -Be 1 -Because '4-space indented lines are NOT excluded; MUST must be counted'
+        }
+
+        It 'does not count directives inside a 4-backtick fenced code block' {
+            $dir = & $script:NewTempDir
+            $content = @'
+# Test Agent
+
+````markdown
+You MUST not count this inside a 4-backtick fence.
+ALWAYS skip this too.
+````
+'@
+            & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
+
+            $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+
+            $agent.total_directives | Should -Be 0 -Because 'MUST and ALWAYS inside a ```` fence must not be counted'
+        }
+
+        It 'does not count directives after a nested ``` inside a 4-backtick fence' {
+            $dir = & $script:NewTempDir
+            $content = @'
+# Test Agent
+
+````markdown
+Here is an example fence:
+```
+You MUST not count this — inside nested ``` within ````.
+```
+Still inside the 4-backtick fence — ALWAYS skip this too.
+````
+
+You MUST count this — outside the 4-backtick fence.
+'@
+            & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
+
+            $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+
+            $agent.total_directives | Should -Be 1 -Because 'only the MUST outside the 4-backtick fence should be counted; nested ``` must not prematurely close the outer fence'
+        }
+
+        It 'does not count directives inside a tilde fenced code block' {
+            $dir = & $script:NewTempDir
+            $content = @'
+# Test Agent
+
+~~~
+You MUST do this.
+ALWAYS verify.
+~~~
+'@
+            & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
+
+            $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+
+            $agent.total_directives | Should -Be 0 -Because 'MUST and ALWAYS inside a ~~~ tilde fence must not be counted'
+        }
+
+        It 'does not count directives inside an indented fence opener block' {
+            $dir = & $script:NewTempDir
+            $content = @'
+# Test Agent
+
+   ```powershell
+You MUST not.
+ALWAYS check.
+   ```
+'@
+            & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
+
+            $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+
+            $agent.total_directives | Should -Be 0 -Because 'MUST and ALWAYS inside an indented fence opener block must not be counted'
         }
     }
 
@@ -367,7 +445,7 @@ Normal line after.
             & $script:NewAgentFile -Dir $dir -Name 'AgentB.agent.md' -Content "# B`nYou NEVER do that." | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
+            $json = $result.Raw | ConvertFrom-Json
 
             @($json.agents).Count | Should -Be 2 -Because 'two input files must produce two agent entries in the agents array'
         }
@@ -383,8 +461,8 @@ You MUST do this.
             & $script:NewAgentFile -Dir $dir -Name 'MyAgent.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'MyAgent\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'MyAgent\.agent\.md' }
 
             $agent                           | Should -Not -BeNullOrEmpty -Because 'agents array must have an entry matching the input filename'
             $agent.PSObject.Properties.Name  | Should -Contain 'file'            -Because 'each agent entry must include a file property'
@@ -417,8 +495,8 @@ You ALWAYS consider this.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.sections | Should -Not -BeNullOrEmpty -Because 'sections array must be populated when ## headings are present'
 
@@ -445,8 +523,8 @@ Nothing directive-worthy here.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.total_directives | Should -Be 1 -Because 'preamble MUST must contribute to total_directives'
 
@@ -478,7 +556,7 @@ You ALWAYS consider this.
             }
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $configPath
-            $json   = $result.Raw | ConvertFrom-Json
+            $json = $result.Raw | ConvertFrom-Json
 
             @($json.agents_over_ceiling) | Should -Contain 'HeavyAgent.agent.md' `
                 -Because '3 directives exceeds the ceiling of 2; filename must appear in agents_over_ceiling'
@@ -499,7 +577,7 @@ You MUST do this.
             }
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $configPath
-            $json   = $result.Raw | ConvertFrom-Json
+            $json = $result.Raw | ConvertFrom-Json
 
             @($json.agents_over_ceiling) | Should -Not -Contain 'LightAgent.agent.md' `
                 -Because '1 directive is well under the ceiling of 100'
@@ -533,7 +611,7 @@ You MUST do this.
             }
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $configPath
-            $json   = $result.Raw | ConvertFrom-Json
+            $json = $result.Raw | ConvertFrom-Json
 
             @($json.agents_over_ceiling) | Should -Contain 'MyAgent.agent.md' `
                 -Because '6 directives exceeds the per-agent ceiling of 5; the per-agent override must take precedence over the default of 1000'
@@ -551,7 +629,7 @@ You MUST do this.
             }
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $configPath
-            $json   = $result.Raw | ConvertFrom-Json
+            $json = $result.Raw | ConvertFrom-Json
 
             @($json.agents_over_ceiling) | Should -Contain 'MyAgent.agent.md' `
                 -Because '6 directives exceeds the default ceiling of 5; a per-agent entry with no max_directives must fall through to the default ceiling'
@@ -583,8 +661,8 @@ Content.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.section_count | Should -Be 3 -Because 'three ## headings must yield section_count of 3'
         }
@@ -605,8 +683,8 @@ Subsection content.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.section_count | Should -Be 2 -Because '## Intro and ### Details are both ##+ headings; section_count must be 2'
         }
@@ -627,8 +705,8 @@ Content.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.max_nesting_depth | Should -Be 1 -Because '## headings represent depth 1; no deeper headings present'
         }
@@ -651,8 +729,8 @@ Content.
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.max_nesting_depth | Should -Be 2 -Because '### inside ## represents a second level of nesting; depth must be 2'
         }
@@ -674,8 +752,8 @@ You MUST NOT count this line <!-- complexity-override: intentional pattern langu
             & $script:NewAgentFile -Dir $dir -Name 'Test.agent.md' -Content $content | Out-Null
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $script:SharedConfigPath
-            $json   = $result.Raw | ConvertFrom-Json
-            $agent  = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
+            $json = $result.Raw | ConvertFrom-Json
+            $agent = @($json.agents) | Where-Object { $_.file -match 'Test\.agent\.md' }
 
             $agent.total_directives | Should -Be 1 `
                 -Because 'the override-comment line must be skipped entirely; only the first line MUST counts'
@@ -703,7 +781,7 @@ You MUST NOT count this line <!-- complexity-override: intentional pattern langu
             $missingConfig = Join-Path $dir 'nonexistent-config.json'
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $missingConfig
-            $json   = $result.Raw | ConvertFrom-Json
+            $json = $result.Raw | ConvertFrom-Json
 
             $json.PSObject.Properties.Name | Should -Contain 'agents_over_ceiling' `
                 -Because 'agents_over_ceiling must appear in output even when config is missing'
@@ -715,14 +793,14 @@ You MUST NOT count this line <!-- complexity-override: intentional pattern langu
             $missingConfig = Join-Path $dir 'nonexistent-config.json'
 
             $result = & $script:Invoke -AgentsPath "$dir\*.agent.md" -ConfigPath $missingConfig
-            $json   = $result.Raw | ConvertFrom-Json
+            $json = $result.Raw | ConvertFrom-Json
 
             # Accept any reasonable implementation of "indicates default was used":
             # a JSON field whose value references 'default', or a 'using_default_ceiling' boolean, or
             # a match in the raw output. Exact field name is implementation-defined.
             $indicatesDefault = (
-                ($json.PSObject.Properties.Name -contains 'config_source'        -and ($json.config_source     -match 'default')) -or
-                ($json.PSObject.Properties.Name -contains 'using_default_ceiling' -and  $json.using_default_ceiling -eq $true)   -or
+                ($json.PSObject.Properties.Name -contains 'config_source' -and ($json.config_source -match 'default')) -or
+                ($json.PSObject.Properties.Name -contains 'using_default_ceiling' -and $json.using_default_ceiling -eq $true) -or
                 ($result.Raw -match '(?i)default.{0,40}ceiling|using default')
             )
             $indicatesDefault | Should -Be $true `

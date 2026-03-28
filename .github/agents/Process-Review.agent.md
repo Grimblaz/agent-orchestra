@@ -321,12 +321,16 @@ pwsh -NonInteractive .github/scripts/aggregate-review-scores.ps1
 **Step 1b — Run the guidance complexity measurement**:
 
 ```powershell
-$complexityOutput = pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json
+try {
+    $complexityOutput = pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json
+} catch {
+    $complexityOutput = $null
+}
 ```
 
-If the script cannot be executed (script file not found, pwsh unavailable, or output is non-JSON), set `$complexityOutput = $null` and emit: `Complexity measurement unavailable — §4.9 ceiling check skipped.` The `$complexityOutput` variable is consumed by §4.9 Step 1b.
+If the script cannot be executed (script file not found, pwsh unavailable) or output is non-JSON, the `try/catch` sets `$complexityOutput = $null`; emit: `Complexity measurement unavailable — §4.9 ceiling check skipped.` The `$complexityOutput` variable is consumed by §4.9 Step 1b.
 
-> **Note**: If the script runs but fails internally, it emits valid JSON with `agents_over_ceiling: ['__script-error__']` and an `error` field — `$complexityOutput` will be non-null. Check `$complexityOutput.agents_over_ceiling[0] -eq '__script-error__'` to detect this case and treat as null.
+> **Note**: If the script runs but fails internally, it emits valid JSON with `agents_over_ceiling: ['__script-error__']` and an `error` field — `$complexityOutput` will be non-null. Check `$complexityOutput.error` to detect this case and treat as null.
 
 **Step 2 — Parse output**:
 
@@ -494,7 +498,7 @@ guardrail_proposals:
     category: security
     target_file: .github/instructions/safe-operations.instructions.md
     target_section: "Section 1: File Operation Rules"
-    compression_advisory: "none — ceiling not exceeded"  # advisory text when compression_required: true; "none — ceiling not exceeded" otherwise
+    compression_advisory: "none — ceiling not exceeded"  # advisory text if compression_required is true, otherwise "none — ceiling not exceeded"
     proposed_change: "Add rule: all user-facing endpoints must validate input against schema before processing"
     evidence:
       - pr: 78, finding: F3
