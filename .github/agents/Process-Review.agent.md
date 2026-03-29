@@ -312,31 +312,50 @@ Emit exactly this structure when returning results to Code-Conductor:
 
 **When invoked**: Automatically whenever Process-Review runs (in both full retrospective and subagent modes). Execute the aggregation script via terminal before beginning analysis.
 
-**Step 1 — Run the aggregation script**:
-
-```powershell
-pwsh -NonInteractive .github/scripts/aggregate-review-scores.ps1
-```
-
 **Step 1b — Run the guidance complexity measurement**:
 
 ```powershell
+$complexityTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "complexity-output-${PID}.json"
 try {
     $complexityOutput = pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json
+    if ($null -ne $complexityOutput -and $null -eq $complexityOutput.error) {
+        $complexityOutput | ConvertTo-Json -Depth 5 | Set-Content -Path $complexityTempFile -Encoding UTF8
+    } else {
+        $complexityTempFile = $null
+    }
 } catch {
     $complexityOutput = $null
+    $complexityTempFile = $null
 }
 ```
 
-If the script cannot be executed (script file not found, pwsh unavailable) or output is non-JSON, the `try/catch` sets `$complexityOutput = $null`; emit: `Complexity measurement unavailable — §4.9 ceiling check skipped.` The `$complexityOutput` variable is consumed by §4.9 Step 1b.
+If the script cannot be executed (script file not found, pwsh unavailable) or output is non-JSON, the `try/catch` sets `$complexityOutput = $null` and `$complexityTempFile = $null`; emit: `Complexity measurement unavailable — §4.9 ceiling check skipped.` The `$complexityOutput` variable is consumed by §4.9 Step 1b.
 
 > **Note**: If the script runs but fails internally, it emits valid JSON with `agents_over_ceiling: ['__script-error__']` and an `error` field — `$complexityOutput` will be non-null. Check `$complexityOutput.error` to detect this case and treat as null.
 
+**Step 1 — Run the aggregation script**:
+
+```powershell
+if ($null -ne $complexityTempFile -and (Test-Path $complexityTempFile)) {
+    pwsh -NoProfile -NonInteractive -File .github/scripts/aggregate-review-scores.ps1 -ComplexityJsonPath $complexityTempFile
+} else {
+    pwsh -NoProfile -NonInteractive -File .github/scripts/aggregate-review-scores.ps1
+}
+```
+
 **Step 2 — Parse output**:
 
-- If output contains `insufficient_data: true`: emit `Calibration analysis: insufficient data ({effective_sample_size} effective issues, minimum 5.0 required). Skipping.` and proceed to §5.
+- If output contains `insufficient_data: true`: emit `Calibration analysis: insufficient data ({effective_sample_size} effective issues, minimum 5.0 required). Skipping.` Before proceeding to §5, if `extraction_agents:` is also present in the output, additionally emit: `Note: One or more agents have reached the persistent ceiling exceedance threshold (see extraction_agents: in output above). Consider reviewing §4.9 for the extraction advisory — insufficient calibration data does not reduce the significance of persistent complexity violations.` Then proceed to §5.
 - If the script errors (non-zero exit or `error:` prefix in output): emit `Calibration analysis: aggregation script unavailable ({error message}). Skipping.` and proceed to §5.
 - Otherwise: analyze the full calibration profile.
+
+After parsing, clean up the temp file:
+
+```powershell
+if ($null -ne $complexityTempFile) {
+    Remove-Item $complexityTempFile -ErrorAction SilentlyContinue
+}
+```
 
 **Step 3 — Identify actionable signals** (only for categories/metrics with `sufficient_data: true`):
 
@@ -470,10 +489,23 @@ For each pattern being considered for a guardrail proposal with `systemic_fix_ty
 
 1. Extract the target agent basename from `target_file` (the filename portion of `.github/agents/{Name}.agent.md`)
 2. Check whether that basename appears in `$complexityOutput.agents_over_ceiling`
-3. If **over ceiling** → tag the eventual proposal `compression_required: true` and emit this advisory in the report:
+3. If **over ceiling**, check whether the agent also appears in the `extraction_agents:` block from the §4.7 aggregate output:
+
+   **Sub-case A — extraction threshold met** (agent appears in `extraction_agents:`):
+   Retrieve `{consecutive_over_ceiling}` and `{persistent_threshold}` from the matching entry in the `extraction_agents:` block (fields: `consecutive_over_ceiling`, `persistent_threshold`).
+   → Tag proposal `extraction_recommended: true`, `compression_required: true`
+   → Emit D8 extraction advisory (REPLACES D2 compression advisory — do NOT emit both for the same agent):
+
+   > **Extraction advisory (D8)**: Target agent `{agent-basename}` has exceeded its guidance-complexity ceiling for `{consecutive_over_ceiling}` consecutive tracked periods (persistent_threshold: `{persistent_threshold}`). Compression alone is unlikely to resolve persistent over-ceiling exceedance. Recommended action: extract a skill using the `skill-creator` skill (`.github/skills/skill-creator/SKILL.md`) based on the D6 extraction criteria in `Documents/Design/guidance-complexity.md`. See the D8 section for extraction advisory format and the archive convention for retiring replaced rules. The proposal is still emitted — this advisory is non-blocking.
+
+   **Sub-case B — over ceiling but extraction threshold NOT yet met** (agent in `agents_over_ceiling` but NOT in `extraction_agents:`):
    Retrieve `{total_directives}` via: `($complexityOutput.agents | Where-Object { $_.file -eq $agentBasename }).total_directives`.
+   → Tag proposal `compression_required: true`, `extraction_recommended: false`
+   → Emit D2 compression advisory (unchanged):
+
    > **Compression advisory (D2)**: Target agent `{agent-basename}` exceeds its complexity ceiling (`{total_directives}` directives). Before adding a new guardrail, consider consolidating existing rules in the target section first. See `Documents/Design/guidance-complexity.md` — Rule Compression Approach section for the consolidation steps. The proposal is still emitted — this flag is advisory only.
-4. If **not over ceiling** → tag `compression_required: false`
+
+4. If **not over ceiling** → tag `compression_required: false`, `extraction_recommended: false`
 
 **Scope**: `instruction`, `skill`, and `plan-template` proposals skip this step — per-agent ceilings apply to `agent-prompt` type only.
 
@@ -505,6 +537,7 @@ guardrail_proposals:
       - pr: 82, finding: F1
     upstream: false  # true if fix targets copilot-orchestra shared files
     compression_required: false  # true when target agent exceeds complexity ceiling (agent-prompt proposals only)
+    extraction_recommended: false  # true when agent has met persistent_threshold consecutive over-ceiling periods (agent-prompt proposals only)
 ```
 
 **Step 4 — Upstream proposals** (when `systemic_fix_type` targets copilot-orchestra shared files):

@@ -3,5 +3,8 @@
   "ceilings": {},
   "default_ceiling": {
     "max_directives": 128
-  }
+  },
+  "persistent_threshold": 3
 }
+
+

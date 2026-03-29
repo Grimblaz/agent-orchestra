@@ -27,25 +27,31 @@ Guardrail additions accumulate asymmetrically — new rules are proposed with no
 - **D2**: Compression trigger wiring in Process-Review §4.9 (ceiling flag, advisory guidance)
 - **D6**: Extraction criteria documented; Process-Review §4.8 trigger widened to calibration-inclusive mode; invocation monitoring added
 
-### Phase 2 — Data-Dependent (Ships After Calibration Matures)
+### Phase 2 — Consolidation Monitoring & Tiered Advisory (Ships With This PR)
+
+- **D7**: Persistent over-ceiling detection — `-ComplexityJsonPath` parameter, `complexity_over_ceiling_history` write-back, `consolidation_events[]` (`aggregate-review-scores.ps1`)
+- **D8**: Tiered advisory in Process-Review §4.9 — extraction advisory replaces compression advisory when `consecutive_count >= persistent_threshold`
+- **D9**: Agent Creation Complexity Budget — convention documented, enforced by existing quick-validate gate
+
+### Phase 3 — Data-Dependent (Requires Calibration Maturity)
 
 - **D3**: Compound-signal retirement (requires `prosecution_depth_state` to exist in calibration data)
 - **D4**: Structural Prevention Gate in §4.9 (requires stabilized Sub C pipeline)
 - **D5**: Consolidation event tracking + regression monitoring (requires consolidation events to exist)
 
-**Rationale for phasing**: Phase 1 mechanisms work purely from file analysis and structural rules — no calibration data needed. Phase 2 mechanisms depend on sufficient calibration history (~20+ effective findings per category for depth transitions to activate). Shipping Phase 1 first allows the system to start capping complexity immediately while calibration data accumulates.
+**Rationale for phasing**: Phase 1 mechanisms work purely from file analysis and structural rules — no calibration data needed. Phase 2 activates consolidation monitoring and tiered advisory once Phase 1 infrastructure is deployed. Phase 3 mechanisms depend on sufficient calibration history (~20+ effective findings per category for depth transitions to activate). Shipping Phase 1 first allows the system to start capping complexity immediately while calibration data accumulates.
 
 ---
 
 ## Phase 2 Readiness Criteria
 
-Phase 2 implementation is not yet warranted. The trigger for beginning Phase 2 implementation is:
+Phase 2 implementation is **complete** (issue #213, see Phase 2 section below). The original readiness criteria that triggered Phase 2 work were:
 
-1. `prosecution_depth_state` exists in `.copilot-tracking/calibration/review-data.json` (currently absent — only 4 calibration entries exist, ~20 effective count per category needed for depth transitions)
+1. `prosecution_depth_state` exists in `.copilot-tracking/calibration/review-data.json` (was absent at Phase 2 inception — only 4 calibration entries existed; ~20 effective per category needed for depth transitions)
 2. At least one category has `recommendation: skip` or `recommendation: light` (compound-signal confirmation of a sustained low-defect-rate pattern)
 3. At least one `consolidation event` candidate can be identified from calibration data
 
-These conditions are tracked via the follow-up issue created alongside this PR. Implementation should not begin until all three criteria are met.
+These conditions were met and tracked via issue #213, which implements Phase 2. See the Phase 2 section below for implementation details.
 
 ---
 
@@ -121,10 +127,144 @@ When those conditions are met, reduce the ceiling by 10 directives and reassess 
 | `Process-Review.agent.md` §4.7 | Modified — invoke `measure-guidance-complexity.ps1` in run-scripts phase | 1 |
 | `Process-Review.agent.md` §4.8 | Modified — widen trigger to calibration-inclusive mode + monitoring note | 1 |
 | `Process-Review.agent.md` §4.9 | Modified — `compression_required` flag when ceiling exceeded | 1 |
-| `.github/scripts/aggregate-review-scores.ps1` | Modified — `prevention_level:`, `retirement_candidates:`, `consolidation_events[]` | 2 |
+| `.github/scripts/aggregate-review-scores.ps1` | Modified — `-ComplexityJsonPath` parameter, `complexity_over_ceiling_history` write-back, `extraction_agents:` output, `consolidation_events[]` | 2 |
 | `Documents/Archive/retired-rules/` | New convention — archive for retired rules with restoration metadata | 2 |
 
 **Net-new artifacts capped**: 1 script + 1 config (Phase 1). Phase 2 modifies existing files only (plus archive convention).
+
+---
+
+---
+
+## Phase 2 — Consolidation Monitoring & Tiered Advisory
+
+Implements the data-dependent mechanisms from D7–D9 that require calibration history. Phase 2 activation is issue #213.
+
+### D7 — Persistent Over-Ceiling Detection
+
+`aggregate-review-scores.ps1` gains a `-ComplexityJsonPath` parameter (type `[string]`, optional) that receives the path to the JSON output from `measure-guidance-complexity.ps1`. When provided, the script tracks per-agent over-ceiling history in the calibration JSON under `complexity_over_ceiling_history`.
+
+**History entry schema** (per agent filename):
+
+```json
+{
+  "AgentName.agent.md": {
+    "consecutive_count": 3,
+    "first_observed_at": "2026-03-01T00:00:00Z",
+    "last_observed_at": "2026-04-01T00:00:00Z",
+    "last_pr_number": 210
+  }
+}
+```
+
+**Idempotency**: The `last_pr_number` field prevents re-incrementing `consecutive_count` when the aggregate script is run multiple times with the same calibration state (e.g., on model switch resume). Increment is skipped when `last_pr_number == $maxMergedPrNumber`.
+
+**`persistent_threshold`** (authoritative source: `.github/config/guidance-complexity.json`): The consecutive-run count at which the extraction advisory fires. Default value: `3`. Read by `aggregate-review-scores.ps1` directly from the config file (not from the complexity JSON temp file) to keep the config as the single source of truth.
+
+**`extraction_agents:` YAML output**: After processing, the aggregate script emits an `extraction_agents:` block listing every agent whose `consecutive_count >= persistent_threshold`:
+
+```yaml
+extraction_agents:
+  - file: AgentName.agent.md
+    consecutive_over_ceiling: 3
+    persistent_threshold: 3
+```
+
+This block is consumed by §4.9 Step 1b during the same Process-Review calibration session.
+
+### D8 — Tiered Advisory
+
+§4.9 Step 1b now implements a two-tier advisory for `agent-prompt` proposals:
+
+| Tier | Condition | Advisory | Proposal fields |
+|------|-----------|----------|-----------------|
+| **D8 — Extraction** | Agent appears in `extraction_agents:` block (consecutive_count ≥ persistent_threshold) | Extraction advisory — skill extraction recommended via `skill-creator` skill, referencing D6 criteria | `extraction_recommended: true`, `compression_required: true` |
+| **D2 — Compression** | Agent in `agents_over_ceiling` but NOT in `extraction_agents:` | Compression advisory — consolidate existing rules before adding new ones | `compression_required: true`, `extraction_recommended: false` |
+| None | Agent not over ceiling | No advisory | `compression_required: false`, `extraction_recommended: false` |
+
+**Replacement rule**: The D8 extraction advisory replaces (not stacks with) D2. A single advisory fires per agent per review cycle. When D8 fires, D2 is suppressed for that agent.
+
+**Data source for D8**: §4.9 reads the `extraction_agents:` YAML block from the §4.7 aggregate script output (printed to terminal). It does NOT read the calibration JSON or the complexity config independently during §4.9 execution.
+
+### D9 — Agent Creation Complexity Budget
+
+New agents should be designed to fit within the soft ceiling from the outset. This is a convention, not an automated check; the quick-validate gate (`agents_over_ceiling.Count  # should be 0`) enforces it at PR time.
+
+**Convention**: When creating a new agent, its initial directive density should not exceed 80% of the `default_ceiling.max_directives` value in `guidance-complexity.json` (currently **102 directives** with the default ceiling of 128). This leaves headroom for guardrail additions over the agent's lifecycle before compression becomes necessary.
+
+**Verification workflow**: After any agent addition or modification, run:
+
+```powershell
+(pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json).agents_over_ceiling.Count  # should be 0
+```
+
+This is already part of the Quick-validate suite in `.github/copilot-instructions.md`.
+
+### Consolidation Event Tracking
+
+When an agent drops from the `complexity_over_ceiling_history` (appears below ceiling after being tracked), `aggregate-review-scores.ps1` logs a consolidation event in the calibration JSON:
+
+```json
+{
+  "consolidation_events": [
+    {
+      "agent": "AgentName.agent.md",
+      "consolidated_at": "2026-04-01T00:00:00Z",
+      "at_pr_number": 215,
+      "previous_consecutive": 4
+    }
+  ]
+}
+```
+
+Consolidation events provide evidence for D5 monitoring (quality regression threshold after consolidation). They accumulate indefinitely and are not pruned by the aggregate script.
+
+### Integration Contract
+
+The data flow for D7/D8 in a Process-Review calibration run (§4.7):
+
+```text
+measure-guidance-complexity.ps1
+   → $complexityOutput (in-memory PSCustomObject)
+   → $complexityTempFile (temp JSON in $env:TEMP)
+aggregate-review-scores.ps1 -ComplexityJsonPath $complexityTempFile
+   → reads agents_over_ceiling from temp file
+   → updates complexity_over_ceiling_history in calibration JSON (atomic write-back)
+   → emits extraction_agents: block in YAML output
+§4.9 Step 1b reads extraction_agents: from aggregate YAML output
+   → emits D8 extraction advisory (or falls back to D2 compression advisory)
+Temp file cleanup: Remove-Item $complexityTempFile
+```
+
+**Error handling**: If `measure-guidance-complexity.ps1` fails or produces non-JSON output, `$complexityTempFile = $null` and the aggregate script runs without `-ComplexityJsonPath` (backward compatible — no complexity history tracking for that run).
+
+**`persistent_threshold` authority**: The value lives in `.github/config/guidance-complexity.json` (key: `persistent_threshold`). The aggregate script reads it via `$PSScriptRoot/../config/guidance-complexity.json`. §4.9 reads the value from the `extraction_agents:` YAML block produced by the aggregate script — §4.9 never reads the config file directly.
+
+### Archive Convention
+
+When a rule section is retired as part of D3 (compound-signal retirement), move its content to `Documents/Archive/retired-rules/` with restoration metadata. The directory is created on first use (no pre-creation required).
+
+**Archived file format** (one file per retired section, filename: `{agent-slug}-{section-slug}.md`):
+
+````markdown
+# {Rule Section Name} — Archived
+
+**Source**: `.github/agents/{AgentName}.agent.md`, section "{Section heading}"
+**Archived at**: PR #{N} (merged {date})
+**Version range**: Committed at PR #{first-pr} — retired at PR #{N}
+**Replacement**: Compressed into `{principle name}` in `.github/agents/{AgentName}.agent.md`
+**Restoration**: Revert to git tag `{tag}` or cherry-pick from commit `{sha}` to restore the original section
+
+## Original Content
+
+{verbatim copy of the retired section}
+
+## Retirement Rationale
+
+{why this section was retired: calibration data, consolidation event, compound-signal evidence}
+````
+
+**Responsibility**: Archive creation is manual (part of the consolidation workflow) and is not automated by any script.
 
 ---
 
@@ -154,9 +294,16 @@ When those conditions are met, reduce the ceiling by 10 directives and reassess 
 - Process-Review §4.8 trigger widened to run in calibration-only mode, with invocation monitoring note
 - Process-Review §4.7 invokes `measure-guidance-complexity.ps1` in run-scripts phase
 - Extraction criteria for agent→skill moves documented (D6 framework)
-- Phase 2 readiness criteria documented and tracked via follow-up issue
+- Phase 2 readiness criteria met (issue #213); Phase 2 implemented
 
-**Phase 2 (future PR, requires calibration maturity):**
+**Phase 2 (this PR):**
+
+- `-ComplexityJsonPath` parameter in `aggregate-review-scores.ps1`; per-agent `complexity_over_ceiling_history` write-back to calibration JSON (D7)
+- Tiered advisory in Process-Review §4.9 — extraction advisory replaces compression advisory at `persistent_threshold` (D8)
+- Agent Creation Complexity Budget convention documented; quick-validate gate enforces it (D9)
+- `consolidation_events[]` logged when an agent drops from over-ceiling tracking
+
+**Phase 3 (future PR, requires calibration maturity):**
 
 - Compound-signal retirement (D3) — requires `prosecution_depth_state` in calibration data
 - Structural Prevention Gate in §4.9 (D4) — requires stabilized Sub C pipeline

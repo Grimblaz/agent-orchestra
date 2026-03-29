@@ -31,7 +31,8 @@ param(
     [double]$DecayLambda = 0.023,
     [int]$Limit = 100,
     [string]$Repo = '',
-    [string]$CalibrationFile = '.copilot-tracking/calibration/review-data.json'
+    [string]$CalibrationFile = '.copilot-tracking/calibration/review-data.json',
+    [string]$ComplexityJsonPath = ''
 )
 
 Set-StrictMode -Version Latest
@@ -92,6 +93,9 @@ $timeDecayDays = 90
 $prosecutionDepthState = @{}
 $reActivationEvents = @()
 $proposalsEmitted = @()
+$complexityOverCeilingHistory = @{}
+$consolidationEvents = @()
+$complexityHistoryChanged = $false
 
 if ($null -eq $mergedPRs -or $mergedPRs.Count -eq 0) {
     Write-Output "data_source: $dataSource"
@@ -112,6 +116,43 @@ function Get-FlexProperty {
     if ($Object -is [hashtable]) { return $Object[$Name] }
     if ($Object.PSObject.Properties.Name -contains $Name) { return $Object.$Name }
     return $null
+}
+
+# ---------------------------------------------------------------------------
+# Shared helper: coerce PSCustomObject to hashtable
+# ---------------------------------------------------------------------------
+function ConvertTo-Hashtable {
+    param([PSCustomObject]$InputObject)
+    $h = @{}
+    $InputObject.PSObject.Properties | ForEach-Object {
+        $val = $_.Value
+        if ($val -is [datetime]) {
+            $val = $val.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        }
+        $h[$_.Name] = $val
+    }
+    return $h
+}
+
+# ---------------------------------------------------------------------------
+# Shared helper: emit extraction_agents YAML block
+# ---------------------------------------------------------------------------
+function Write-ExtractionAgentsYaml {
+    param(
+        [hashtable]$ComplexityOverCeilingHistory,
+        [int]$PersistentThreshold
+    )
+    $candidates = @($ComplexityOverCeilingHistory.Keys | Where-Object {
+        [int](Get-FlexProperty $ComplexityOverCeilingHistory[$_] 'consecutive_count') -ge $PersistentThreshold
+    } | Sort-Object)
+    if ($candidates.Count -eq 0) { return }
+    Write-Output 'extraction_agents:'
+    foreach ($agent in $candidates) {
+        $cnt = [int](Get-FlexProperty $ComplexityOverCeilingHistory[$agent] 'consecutive_count')
+        Write-Output "  - file: $agent"
+        Write-Output "    consecutive_over_ceiling: $cnt"
+        Write-Output "    persistent_threshold: $PersistentThreshold"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -181,11 +222,38 @@ if (-not [string]::IsNullOrWhiteSpace($CalibrationFile) -and (Test-Path $Calibra
         if ($v) { $reActivationEvents = @($v) }
         $v = Get-FlexProperty $calibJson 'proposals_emitted'
         if ($v) { $proposalsEmitted = @($v) }
+        $v = Get-FlexProperty $calibJson 'complexity_over_ceiling_history'
+        if ($v) {
+            $complexityOverCeilingHistory = $v
+            if ($complexityOverCeilingHistory -is [PSCustomObject]) {
+                $complexityOverCeilingHistory = ConvertTo-Hashtable $complexityOverCeilingHistory
+            }
+        }
+        $v = Get-FlexProperty $calibJson 'consolidation_events'
+        if ($v) { $consolidationEvents = @($v) }
     }
     catch {
         Write-Warning "CalibrationFile '$CalibrationFile' could not be parsed: $_ — proceeding with GitHub data only."
         $localEntries = @{}
         $dataSource = 'github'
+    }
+}
+
+# Read persistent_threshold from guidance-complexity config (Phase 2 D7)
+$persistentThreshold = 3  # default when config is absent or unreadable
+$complexityConfigPath = Join-Path $PSScriptRoot '../config/guidance-complexity.json'
+if (Test-Path $complexityConfigPath) {
+    try {
+        $complexityCfg = Get-Content $complexityConfigPath -Raw | ConvertFrom-Json
+        if ($null -ne $complexityCfg.persistent_threshold -and [int]$complexityCfg.persistent_threshold -gt 0) {
+            $persistentThreshold = [int]$complexityCfg.persistent_threshold
+        }
+        elseif ($null -ne $complexityCfg.persistent_threshold) {
+            Write-Warning "persistent_threshold in guidance-complexity.json must be > 0 (got $($complexityCfg.persistent_threshold)); using default 3"
+        }
+    }
+    catch {
+        Write-Warning "Could not read persistent_threshold from guidance-complexity config: $_ — defaulting to $persistentThreshold"
     }
 }
 
@@ -418,6 +486,69 @@ foreach ($pr in $mergedPRs) {
 }
 
 # ---------------------------------------------------------------------------
+# Process complexity over-ceiling history (Phase 2 D7)
+# Runs only when -ComplexityJsonPath is provided and the file exists.
+# ---------------------------------------------------------------------------
+if (-not [string]::IsNullOrWhiteSpace($ComplexityJsonPath) -and (Test-Path $ComplexityJsonPath)) {
+    try {
+        $complexityJson = Get-Content $ComplexityJsonPath -Raw | ConvertFrom-Json
+        $agentsOverCeiling = @()
+        if ($null -ne $complexityJson.agents_over_ceiling) {
+            $agentsOverCeiling = @($complexityJson.agents_over_ceiling)
+        }
+        $agentsOverCeilingSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+        foreach ($a in $agentsOverCeiling) { [void]$agentsOverCeilingSet.Add($a) }
+
+        # Increment consecutive_count for agents currently over ceiling
+        foreach ($agentFile in $agentsOverCeiling) {
+            if ($complexityOverCeilingHistory.ContainsKey($agentFile)) {
+                $entry = $complexityOverCeilingHistory[$agentFile]
+                # Coerce PSCustomObject to hashtable for mutation
+                if ($entry -is [PSCustomObject]) {
+                    $entry = ConvertTo-Hashtable $entry
+                    $complexityOverCeilingHistory[$agentFile] = $entry
+                }
+                # Idempotency: skip increment if already processed for this max PR number
+                $entryLastPr = if ($entry.ContainsKey('last_pr_number')) { [int]$entry['last_pr_number'] } else { 0 }
+                if ($entryLastPr -eq $maxMergedPrNumber) { continue }
+                $entry['consecutive_count'] = [int]$entry['consecutive_count'] + 1
+                $entry['last_observed_at'] = $now.ToString('o')
+                $entry['last_pr_number'] = $maxMergedPrNumber
+                $complexityHistoryChanged = $true
+            }
+            else {
+                # First observation
+                $complexityOverCeilingHistory[$agentFile] = @{
+                    consecutive_count = 1
+                    first_observed_at = $now.ToString('o')
+                    last_observed_at  = $now.ToString('o')
+                    last_pr_number    = $maxMergedPrNumber
+                }
+                $complexityHistoryChanged = $true
+            }
+        }
+
+        # Log consolidation events for agents that dropped below ceiling
+        $agentsToRemove = @($complexityOverCeilingHistory.Keys | Where-Object { -not $agentsOverCeilingSet.Contains($_) })
+        foreach ($agentFile in $agentsToRemove) {
+            $entry = $complexityOverCeilingHistory[$agentFile]
+            $prevCount = [int](Get-FlexProperty $entry 'consecutive_count')
+            $consolidationEvents += @{
+                agent                = $agentFile
+                consolidated_at      = $now.ToString('o')
+                at_pr_number         = $maxMergedPrNumber
+                previous_consecutive = $prevCount
+            }
+            $complexityOverCeilingHistory.Remove($agentFile)
+            $complexityHistoryChanged = $true
+        }
+    }
+    catch {
+        Write-Warning "Could not process complexity JSON '$ComplexityJsonPath': $_ — skipping complexity history update"
+    }
+}
+
+# ---------------------------------------------------------------------------
 # 5. Apply tiered thresholds and emit output
 # ---------------------------------------------------------------------------
 $overallSufficient = $effectiveSampleSize -ge 5.0
@@ -430,6 +561,28 @@ if (-not $overallSufficient) {
     Write-Output "issues_analyzed: $issuesAnalyzed"
     Write-Output "skipped_prs: $skippedPRs"
     Write-Output "message: `"Minimum effective sample size of 5 required (current: ${essFmt})`""
+    # Flush complexity history write-back before insufficient-data exit
+    if ($complexityHistoryChanged -and (Test-Path $CalibrationFile -PathType Leaf)) {
+        $earlyTmp = $null
+        try {
+            $earlyCalib = Get-Content -Raw $CalibrationFile | ConvertFrom-Json
+            $earlyCalib | Add-Member -Force -NotePropertyName 'complexity_over_ceiling_history' -NotePropertyValue $(if ($complexityOverCeilingHistory.Count -gt 0) { [PSCustomObject]($complexityOverCeilingHistory) } else { $null })
+            $earlyCalib | Add-Member -Force -NotePropertyName 'consolidation_events' -NotePropertyValue $consolidationEvents
+            $earlyTmp = "$CalibrationFile.$([System.Guid]::NewGuid().ToString('N')).tmp"
+            $earlyCalib | ConvertTo-Json -Depth 10 | Set-Content -Path $earlyTmp -Encoding UTF8
+            # Validate before promotion (mirrors write-calibration-entry.ps1 safety pattern)
+            $null = Get-Content $earlyTmp -Raw | ConvertFrom-Json
+            Move-Item -Path $earlyTmp -Destination $CalibrationFile -Force
+        } catch {
+            if ($null -ne $earlyTmp -and (Test-Path $earlyTmp)) { Remove-Item $earlyTmp -Force -ErrorAction SilentlyContinue }
+            Write-Warning "Could not flush complexity history before early exit: $_"
+        }
+    }
+    elseif ($complexityHistoryChanged -and -not (Test-Path $CalibrationFile -PathType Leaf)) {
+        Write-Warning "complexity-tracking: calibration file not found at '$CalibrationFile' — consecutive_count cannot persist across runs. Complexity history will not advance toward extraction threshold until the calibration file exists."
+    }
+    # Emit extraction_agents in insufficient-data path if threshold met
+    Write-ExtractionAgentsYaml -ComplexityOverCeilingHistory $complexityOverCeilingHistory -PersistentThreshold $persistentThreshold
     exit 0
 }
 
@@ -721,7 +874,7 @@ if ($v2IssuesAnalyzed -gt 0) {
     }
 
     # Write updated prosecution_depth_state + re_activation_events + proposals_emitted
-    if (($depthStateChanged -or $proposalsChanged) -and
+    if (($depthStateChanged -or $proposalsChanged -or $complexityHistoryChanged) -and
         -not [string]::IsNullOrWhiteSpace($CalibrationFile) -and
         (Test-Path $CalibrationFile)) {
         $tempPath = $null
@@ -742,6 +895,24 @@ if ($v2IssuesAnalyzed -gt 0) {
             if ($proposalsChanged) {
                 $calibContent | Add-Member -NotePropertyName 'proposals_emitted' -NotePropertyValue @($proposalsEmitted) -Force
             }
+            if ($complexityHistoryChanged) {
+                if ($complexityOverCeilingHistory.Count -eq 0) {
+                    # All agents dropped below ceiling — write null so the key reads back as $null
+                    $calibContent | Add-Member -NotePropertyName 'complexity_over_ceiling_history' -NotePropertyValue $null -Force
+                }
+                else {
+                    $histObj = [ordered]@{}
+                    foreach ($k in ($complexityOverCeilingHistory.Keys | Sort-Object)) {
+                        $entryVal = $complexityOverCeilingHistory[$k]
+                        if ($entryVal -is [PSCustomObject]) {
+                            $entryVal = ConvertTo-Hashtable $entryVal
+                        }
+                        $histObj[$k] = [PSCustomObject]$entryVal
+                    }
+                    $calibContent | Add-Member -NotePropertyName 'complexity_over_ceiling_history' -NotePropertyValue ([PSCustomObject]$histObj) -Force
+                }
+                $calibContent | Add-Member -NotePropertyName 'consolidation_events' -NotePropertyValue @($consolidationEvents) -Force
+            }
 
             $tempPath = "$CalibrationFile.$([System.Guid]::NewGuid().ToString('N')).tmp"
             $calibContent | ConvertTo-Json -Depth 10 | Set-Content -Path $tempPath -Encoding UTF8
@@ -756,6 +927,9 @@ if ($v2IssuesAnalyzed -gt 0) {
             Write-Warning "Failed to write calibration state to calibration file: $_"
             # Non-fatal — state write failure does not affect YAML output
         }
+    }
+    if ($complexityHistoryChanged -and -not (Test-Path $CalibrationFile -PathType Leaf)) {
+        Write-Warning "complexity-tracking: calibration file not found at '$CalibrationFile' — consecutive_count cannot persist across runs. Complexity history will not advance toward extraction threshold until the calibration file exists."
     }
 
     # systemic_patterns: aggregated fix-type x category patterns from sustained findings
@@ -813,3 +987,9 @@ else {
     Write-Output "  has_finding_data: false"
     Write-Output "  note: `"All analyzed PRs use v1 metrics format (no per-finding data). Upgrade to metrics_version: 2 to enable calibration.`""
 }
+
+# ---------------------------------------------------------------------------
+# extraction_agents: per-agent extraction advisory (Phase 2 D7)
+# Emits agents where consecutive_over_ceiling >= persistent_threshold.
+# ---------------------------------------------------------------------------
+Write-ExtractionAgentsYaml -ComplexityOverCeilingHistory $complexityOverCeilingHistory -PersistentThreshold $persistentThreshold
