@@ -352,9 +352,9 @@ Classify the PR change type using `git diff --name-only main..HEAD` (cross-branc
 
 | Change type          | Condition                                                                     | Active perspectives                                                                                                                                                                  |
 | -------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `documentation-only` | All changed files are `.md`, `.instructions.md`, `.prompt.md`, or `.agent.md` | Architecture (§1, docs-misrepresentation check only), Simplicity (§5), Documentation Script Audit (§7, if `.md` files contain shell blocks), Patterns doc-clarity angle (§4 partial) |
-| `mixed`              | Changed files include both source/scripts AND docs                            | All 7 perspectives                                                                                                                                                                   |
-| `code` (default)     | Changed files include source code, scripts, or runtime config                 | All 7 perspectives                                                                                                                                                                   |
+| `documentation-only` | All changed files are `.md`, `.instructions.md`, `.prompt.md`, or `.agent.md` | Architecture (§1, docs-misrepresentation check only), Simplicity (§5), Script & Automation (doc-audit sub-gate, if `.md` files contain shell blocks), Patterns doc-clarity angle (§4 partial) |
+| `mixed`              | Changed files include both source/scripts AND docs                            | All 6 perspectives                                                                                                                                                                   |
+| `code` (default)     | Changed files include source code, scripts, or runtime config                 | All 6 perspectives                                                                                                                                                                   |
 
 > **Precedence**: Evaluate rows in order; the first matching condition applies. `mixed` takes priority over `code` for source+docs PRs.
 

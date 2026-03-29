@@ -562,10 +562,10 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                    severity = 'medium'; points = 5; review_stage = 'main' 
+                    severity = 'medium'; points = 5; review_stage = 'main'
                 },
                 [ordered]@{ id = 'F2'; category = 'security'; judge_ruling = 'defense-sustained'
-                    severity = 'medium'; points = 5; review_stage = 'main' 
+                    severity = 'medium'; points = 5; review_stage = 'main'
                 }
             )
             $calib = & $script:BuildDepthCalibration -Findings $findings
@@ -587,7 +587,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                    severity = 'medium'; points = 5; review_stage = 'main' 
+                    severity = 'medium'; points = 5; review_stage = 'main'
                 }
             )
             $calib = & $script:BuildDepthCalibration -Findings $findings
@@ -699,7 +699,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                    severity = 'medium'; points = 5; review_stage = 'main' 
+                    severity = 'medium'; points = 5; review_stage = 'main'
                 }
             )
             $calib = & $script:BuildDepthCalibration -Findings $findings -PrNumbers $script:CleanRepoPrNumbers
@@ -723,7 +723,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                    severity = 'medium'; points = 5; review_stage = 'main' 
+                    severity = 'medium'; points = 5; review_stage = 'main'
                 }
             )
             $calib = & $script:BuildDepthCalibration -Findings $findings -Override 'full'
@@ -750,7 +750,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                    severity = 'medium'; points = 5; review_stage = 'main' 
+                    severity = 'medium'; points = 5; review_stage = 'main'
                 }
             )
             $reactivationEvents = @(
@@ -786,7 +786,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $staleDate = (Get-Date).AddDays(-100).ToString('o')
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                    severity = 'medium'; points = 5; review_stage = 'main' 
+                    severity = 'medium'; points = 5; review_stage = 'main'
                 }
             )
             $depthState = [ordered]@{
@@ -817,7 +817,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                    severity = 'medium'; points = 5; review_stage = 'main' 
+                    severity = 'medium'; points = 5; review_stage = 'main'
                 }
             )
             $reactivationEvents = @(
@@ -1135,11 +1135,11 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'instruction' 
+                    systemic_fix_type = 'instruction'
                 },
                 [ordered]@{ id = 'F2'; category = 'security'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'instruction' 
+                    systemic_fix_type = 'instruction'
                 }
             )
             $calib = & $script:BuildSystemicCalibration `
@@ -1167,11 +1167,11 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'instruction' 
+                    systemic_fix_type = 'instruction'
                 },
                 [ordered]@{ id = 'F2'; category = 'n/a'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'instruction' 
+                    systemic_fix_type = 'instruction'
                 }
             )
             $calib = & $script:BuildSystemicCalibration `
@@ -1200,10 +1200,10 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'none' 
+                    systemic_fix_type = 'none'
                 },
                 [ordered]@{ id = 'F2'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                    severity = 'medium'; points = 5; review_stage = 'main' 
+                    severity = 'medium'; points = 5; review_stage = 'main'
                 }
             )
             $calib = & $script:BuildSystemicCalibration `
@@ -1230,11 +1230,11 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'pattern'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'skill' 
+                    systemic_fix_type = 'skill'
                 },
                 [ordered]@{ id = 'F2'; category = 'pattern'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'skill' 
+                    systemic_fix_type = 'skill'
                 }
             )
             $calib = & $script:BuildSystemicCalibration `
@@ -1406,7 +1406,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'instruction' 
+                    systemic_fix_type = 'instruction'
                 }
             )
             $calib = & $script:BuildDepthCalibration `
@@ -1443,7 +1443,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # → denominator is 0 → kaizen_rate must be 0.00
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'architecture'; judge_ruling = 'finding-sustained'
-                    severity = 'medium'; points = 5; review_stage = 'main' 
+                    severity = 'medium'; points = 5; review_stage = 'main'
                 }
             )
             $calib = & $script:BuildDepthCalibration -Findings $findings -PrNumbers @(9901)
@@ -1494,11 +1494,11 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'instruction' 
+                    systemic_fix_type = 'instruction'
                 },
                 [ordered]@{ id = 'F2'; category = 'pattern'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'skill' 
+                    systemic_fix_type = 'skill'
                 }
             )
             $calib = & $script:BuildSystemicCalibration `
@@ -1524,11 +1524,11 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'instruction' 
+                    systemic_fix_type = 'instruction'
                 },
                 [ordered]@{ id = 'F2'; category = 'pattern'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'skill' 
+                    systemic_fix_type = 'skill'
                 }
             )
             $proposals = @(
@@ -1566,7 +1566,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'instruction' 
+                    systemic_fix_type = 'instruction'
                 }
             )
             $calib = & $script:BuildSystemicCalibration `
@@ -1615,7 +1615,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'instruction' 
+                    systemic_fix_type = 'instruction'
                 }
             )
             $calib = & $script:BuildSystemicCalibration `
@@ -1651,7 +1651,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $findings = @(
                 [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
                     severity = 'medium'; points = 5; review_stage = 'main'
-                    systemic_fix_type = 'instruction' 
+                    systemic_fix_type = 'instruction'
                 }
             )
             $calib = & $script:BuildSystemicCalibration `

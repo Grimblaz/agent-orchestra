@@ -11,7 +11,7 @@ Two complementary guardrails that catch cross-function input domain mismatches: 
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
 | D1 | Placement in TDD workflow | Step 2 (new), before "Write the Test" | Proactive — resolve range mismatches before RED tests are written; inserting earlier ensures tests don't encode the wrong domain assumptions |
-| D2 | Placement in Code-Critic | §1d sub-perspective under §1 Architecture | Reactive complement to D1; sub-perspective keeps the "7 code perspectives" count accurate across all reference locations; §1b/§1c precedent for lettered sub-perspectives |
+| D2 | Placement in Code-Critic | §1d sub-perspective under §1 Architecture | Reactive complement to D1; sub-perspective keeps the "6 code perspectives" count accurate across all reference locations (now 6 as of #212); §1b/§1c precedent for lettered sub-perspectives |
 | D3 | "Same field" heuristic | Three criteria: (a) same parameter/field name, (b) same documented concept (different names allowed), (c) one function's output feeds the other's input | Criteria must be concrete enough for authors to apply without judgment ambiguity; "when uncertain, err toward checking" catchall covers edge cases |
 | D4 | Scope | PR diff + existing codebase (not PR-only) | A new validator can conflict with an existing parser not in the diff; PR-only scope would reproduce the original defect |
 | D5 | Gate condition | Function "validates, parses, deserializes, or constrains" a field also handled by another function | Covers the class broadly: range-clampers / normalizers included via "constrains"; vocabulary symmetry between TDD gate and §1d gate maintained |
@@ -35,5 +35,5 @@ The defect pattern: two functions in the same codebase accept inputs "about" the
 |---|---|
 | Single guardrail (TDD-only or review-only) | Two stages reduce risk of each stage being skipped or glossed over; defense-in-depth |
 | PR-only scope | Wouldn't catch conflicts with existing functions not in the diff |
-| §1 top-level (new §8) | Would change "7 code perspectives" count across 5 reference locations; not warranted for an architectural sub-check |
+| §1 top-level (new §8) | Would change "6 code perspectives" count across reference locations; not warranted for an architectural sub-check |
 | Require formal documentation artifact for intentional differences | Overhead disproportionate to benefit; plan step or inline comment achieves the same traceability goal |

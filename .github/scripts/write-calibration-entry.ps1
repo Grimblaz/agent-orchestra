@@ -182,8 +182,8 @@ if (-not [string]::IsNullOrWhiteSpace($ReactivationEventJson)) {
 
 # ── Resolve paths ──────────────────────────────────────────────────────────────
 
-$calibDir = Join-Path (Get-Location).Path '.copilot-tracking' 'calibration'
-$dataFile = Join-Path $calibDir 'review-data.json'
+$calibDir = Join-Path -Path (Get-Location).Path -ChildPath '.copilot-tracking' -AdditionalChildPath 'calibration'
+$dataFile = Join-Path -Path $calibDir -ChildPath 'review-data.json'
 $tmpFile = "$dataFile.tmp"
 
 # Clean up any stale .tmp from a previous incomplete run

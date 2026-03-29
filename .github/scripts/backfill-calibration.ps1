@@ -94,7 +94,7 @@ foreach ($pr in $prs) {
 # ── Batch write: load once, merge all entries, write once ─────────────────────
 
 if ($pendingEntries.Count -gt 0) {
-    $calibDir = Join-Path (Get-Location).Path '.copilot-tracking' 'calibration'
+    $calibDir = Join-Path -Path (Get-Location).Path -ChildPath '.copilot-tracking' -AdditionalChildPath 'calibration'
     $dataFile = Join-Path $calibDir 'review-data.json'
     $tmpFile = "$dataFile.tmp"
 

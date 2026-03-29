@@ -61,6 +61,17 @@ Default to responding in chat.
 - If the review context is provided only in chat (even if it _sounds_ like it came from GitHub, e.g., “an external reviewer said…”), respond **only in chat**.
 - When responding on GitHub, keep the response consistent with the chat response (same categorization and planned actions).
 
+## Enforcement Gates
+
+The following rules are enforced at all judgment phases. Each `## 🚨 CRITICAL:` marker below references these gates.
+
+| Gate | Rule |
+| --- | --- |
+| G1 — No plain-text questions | Every question MUST use `#tool:vscode/askQuestions` |
+| G2 — Always call Code-Review-Response | Code-Critic output is never presented directly to users |
+| G3 — Deferred-Significant threshold | 1+ day effort estimate → auto-track, never abandon |
+| G4 — Score summary mandatory | Every judgment MUST include the score summary table |
+
 ## 🚨 CRITICAL: Review Intake Modes
 
 ### GitHub Review (pull from GitHub)
@@ -257,7 +268,7 @@ Before marking any finding as ✅ ACCEPT, you MUST:
 - **Design decisions with trade-offs**: Note in categorization output; flag for user/Conductor decision
 - **Harmful changes**: ❌ REJECT with evidence
 
-## 🚨 CRITICAL: Effort Estimation Guidelines
+## 🚨 CRITICAL: Effort Estimation Guidelines (→ G3)
 
 **Default to SMALLER (<1 day) unless you can justify why it's larger.**
 
@@ -316,7 +327,7 @@ Delegation guidance:
 - ❌ WRONG: "📋 DEFERRED-SIGNIFICANT — no skill uses this yet, wire it later"
 - ✅ CORRECT: "✅ ACCEPT — this is an explicit acceptance criterion, must be wired now"
 
-## 🚨 CRITICAL: Significant Improvements Auto-Track
+## 🚨 CRITICAL: Significant Improvements Auto-Track (→ G3)
 
 **Deferral policy is replaced by automatic significant-improvement tracking.**
 
@@ -360,116 +371,12 @@ Categorize and respond to each review item with clear acknowledgment, honest ass
 
 **Response Categories**:
 
-1. **✅ ACCEPT - Change improves the code (<1 day)**
-   - Verified: The issue exists and the fix would make the code better
-   - Response: Quote feedback, acknowledge validity, categorize as ✅ ACCEPT
-   - Action: Output categorization — Code-Conductor routes the fix
-
-2. **⚠️ INVESTIGATE - Need to verify claim**
-   - Finding is unclear or evidence seems weak
-   - Response: "Investigating..." then read code, check tests, verify yourself
-   - Action: After investigation, reclassify as ACCEPT, DEFERRED, or REJECT
-   - _Do NOT ask reviewer for clarification — verify it yourself_
-
-3. **📋 DEFERRED-SIGNIFICANT - Large improvement (>1 day), non-blocking/out-of-scope**
-   - Change would improve code but genuinely requires >1 day effort (see effort estimation guidelines)
-   - **Pre-check**: Verify this does NOT relate to an acceptance criterion (if it does → ✅ ACCEPT instead)
-   - **Pre-check**: Verify ALL four deferral criteria are met (5+ files, new subsystem, unknown patterns, non-incremental)
-
-- Response: Quote feedback, acknowledge it's a valid improvement, explain why it exceeds 1 day
-- Action: Output as 📋 DEFERRED-SIGNIFICANT — Code-Conductor creates tracking issue automatically
-
-4. **❌ REJECT - Change would harm the code**
-   - The proposed change would make the code WORSE, not better
-   - Or: The finding is factually incorrect (you verified it doesn't exist)
-   - Response: Quote feedback, cite evidence (why this would be harmful OR why it's factually wrong)
-   - Action: Document reasoning — do not fix
-
-**The only valid reason to push back is if the change would result in worse code.**
-
-**Workflow**:
-
-1. **Verify**: Read the code, check tests, confirm the issue exists and the fix would improve things
-2. **Categorize**: ✅ ACCEPT (<1 day) / ⚠️ INVESTIGATE (verify yourself) / 📋 DEFERRED-SIGNIFICANT (>1 day) / ❌ REJECT (not improvement or harmful)
-3. **Emit**: Output categorization with evidence per finding
-4. **Summary**: Score summary table — items accepted, deferred (for Conductor auto-tracking), rejected with evidence
-
-**Special Cases**:
-
-- **Unclear finding**: Investigate yourself (read code, run tests), then accept or reject based on evidence
-- **Large improvement (>1 day)**: Categorize as 📋 DEFERRED-SIGNIFICANT — Code-Conductor auto-tracks unless it's blocking an acceptance criterion
-- **Relates to acceptance criteria**: ALWAYS ✅ ACCEPT regardless of effort — acceptance criteria are non-negotiable
-- **Out-of-Scope but <1 day**: If it improves code, still do it — scope alone isn't a reason to reject
-- **Out-of-Scope and >1 day**: Categorize as 📋 DEFERRED-SIGNIFICANT — Code-Conductor auto-tracks and continue ruling on in-scope findings
-- **Contradicts documented decision**: Reject with citation to the decision document
-
-**Output Style**:
-
-- ✅ Be judgment-oriented: verify, then categorize
-- ✅ Investigate unclear items yourself — don't ask for clarification
-- ✅ Accept anything that improves code
-- ✅ For >1 day significant improvements, categorize as 📋 DEFERRED-SIGNIFICANT — Code-Conductor creates tracking issues
-- ✅ Always check acceptance criteria before deferring or rejecting — AC items are non-negotiable
-- ❌ Don't push back unless the change would harm the code
-- ❌ Don't ask reviewers for more details — that's your job to verify
-- ❌ Don't use scope as a reason to reject improvements
-- ❌ Don't block accepted in-scope fixes while waiting on significant follow-up work
-- ❌ Don't defer findings that relate to the issue's acceptance criteria
-
-**Goal**: Every review item addressed. Small improvements implemented now. Large improvements tracked for later. Only harmful changes rejected.
+1. **✅ ACCEPT (<1 day)** — Finding verified; fix improves code. Output categorization — Code-Conductor routes.
+2. **⚠️ INVESTIGATE** — Evidence weak or unclear. Read the code, verify yourself, then reclassify.
+3. **📋 DEFERRED-SIGNIFICANT (>1 day, non-blocking)** — Valid improvement but large. Check AC first (see AC Cross-Check above). Code-Conductor auto-tracks.
+4. **❌ REJECT** — Change would harm code, or finding factually wrong. Cite evidence.
 
 **After Judgment**: When invoked as a subagent (by Code-Conductor), the judgment output returns to Code-Conductor for routing. When invoked directly by the user, the **Execute Fixes** handoff button routes the judgment to Code-Conductor. Code-Conductor is responsible for running validation after executing accepted fixes.
-
----
-
-## Skills Reference
-
-**When review identifies bugs:**
-
-- Reference `.github/skills/systematic-debugging/SKILL.md` approach
-- Ensure fixes follow root cause investigation, not symptom patching
-
----
-
-## Self-Check Before Proceeding
-
-Before taking ANY action:
-
-1. **Did I verify the finding?** → Read the code, don't assume Code-Critic is right
-2. **Would this change improve the code?** → If yes, categorize ✅ ACCEPT. If yes and >1 day, categorize 📋 DEFERRED-SIGNIFICANT.
-3. **Am I asking for clarification?** → ❌ STOP! Investigate yourself instead.
-4. **Am I deferring or rejecting something?** → Check acceptance criteria FIRST. If it's in the AC, it CANNOT be deferred or rejected — reclassify as ✅ ACCEPT.
-5. **Did user ask to review GitHub comments?** → If yes, fetch all GitHub comments first, present judgment details (step 7), then emit categorization.
-
-**Example of CORRECT workflow**:
-
-```markdown
-Review: "The score calculation doesn't account for configured thresholds"
-
-Agent: [Reads the code to verify]
-Agent: "Verified: ScoreCalculator.ts line 45 shows no threshold-cap handling. This improves scoring correctness."
-Agent: "✅ ACCEPT — threshold-cap handling in ScoreCalculator.ts, <1 day effort, high confidence."
-```
-
-**Example of CORRECT categorization for large improvement**:
-
-```markdown
-Review: "The entire rule evaluation system should be refactored to use a pipeline pattern"
-
-Agent: [Reads the code to verify]
-Agent: "Verified: RuleEngine.ts has 800 lines of nested conditionals. Pipeline pattern would significantly improve maintainability."
-Agent: "📋 DEFERRED-SIGNIFICANT — pipeline refactor of RuleEngine.ts, >1 day effort, Code-Conductor will auto-track."
-```
-
-**Example of CORRECT rejection**:
-
-```markdown
-Review: "You should use a class instead of a function here"
-
-Agent: [Reads the code to verify]
-Agent: "Verified: The function is pure, stateless, and follows our documented preference for functions."
-Agent: "❌ REJECT — violates documented architecture patterns. Current implementation follows 'prefer functions for pure logic' guideline."
-```
 
 ---
 

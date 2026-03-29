@@ -308,3 +308,33 @@ When a rule section is retired as part of D3 (compound-signal retirement), move 
 - Compound-signal retirement (D3) — requires `prosecution_depth_state` in calibration data
 - Structural Prevention Gate in §4.9 (D4) — requires stabilized Sub C pipeline
 - Consolidation event tracking + regression monitoring (D5) — requires consolidation events to exist
+
+---
+
+## Issue #212 — Remediation Results
+
+Issue #212 applies this framework to reduce existing instruction bloat. All workstreams complete as of March 2026.
+
+### W1a — Code-Critic §6+§7 Merge
+
+**Directives**: 55 → 41 (25.5% reduction). **Perspectives**: 7 → 6 — §6 Documentation Script Audit and §7 merged into a unified "Script & Automation" perspective with a branching gate (`.ps1`/`.sh`/`.py`/`.yml` → script principles; `.md` with code blocks → doc-audit sub-routing). Category taxonomy preserved at 7 values.
+
+### W1b — Code-Review-Response Restructuring
+
+**Lines**: 476 → 383 (19.5% reduction; target ≥15%). Added `## Enforcement Gates` reference section consolidating AC enforcement, categorization, and effort estimation from 3+ scattered definitions each to single authoritative definitions with inline triggers.
+
+### W2 — Process-Review Skill Extraction
+
+Extracted "Common Scenarios" section (5 workflows) from `Process-Review.agent.md` to `.github/skills/process-troubleshooting/SKILL.md`. Process-Review retains an ~11-line stub with symptom-keyword triggers. Skill count: 14 → 15.
+
+### W3 — Structural Prevention
+
+| Workstream | Artifact | Outcome |
+|---|---|---|
+| W3a | `.github/config/PSScriptAnalyzerSettings.psd1` | 6 rules suppressed with documented rationale; 9 scripts remediated; 0 violations remain |
+| W3b | `.github/scripts/Tests/script-safety-contract.Tests.ps1` | 3 contract tests: `.Clone()` prohibition, StrictMode enforcement, `$knownCategories` dual-definition |
+| W3c | `copilot-instructions.md` quick-validate | PSScriptAnalyzer conditional check added |
+
+### W4 — Backlog Triage
+
+All 18 backlog issues received triage comments with classification (ship-as-is, wait-for-compression, structural candidate, or cross-linked batch) and rationale.

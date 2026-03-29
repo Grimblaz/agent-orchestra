@@ -302,7 +302,7 @@ New-Item -ItemType Directory -Path $emptyWorkDir | Out-Null
 # S7 work directory — has stale tracking files
 # ---------------------------------------------------------------------------
 $s7WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "detector-test-s7-$([System.IO.Path]::GetRandomFileName())"
-$s7TrackingFile = Join-Path $s7WorkDir '.copilot-tracking' 'research' 'issue-40-stale.md'
+$s7TrackingFile = Join-Path -Path $s7WorkDir -ChildPath '.copilot-tracking' -AdditionalChildPath 'research', 'issue-40-stale.md'
 New-Item -ItemType Directory -Path (Split-Path -Parent $s7TrackingFile) | Out-Null
 Set-Content -Path $s7TrackingFile -Value @'
 ---
@@ -316,7 +316,7 @@ title: "Test tracking file for S7"
 # S11 work directory — has issue-40 tracking file (same issue as stale branch)
 # ---------------------------------------------------------------------------
 $s11WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "detector-test-s11-$([System.IO.Path]::GetRandomFileName())"
-$s11TrackingFile = Join-Path $s11WorkDir '.copilot-tracking' 'research' 'issue-40-stale.md'
+$s11TrackingFile = Join-Path -Path $s11WorkDir -ChildPath '.copilot-tracking' -AdditionalChildPath 'research', 'issue-40-stale.md'
 New-Item -ItemType Directory -Path (Split-Path -Parent $s11TrackingFile) | Out-Null
 Set-Content -Path $s11TrackingFile -Value @'
 ---
@@ -330,7 +330,7 @@ title: "Test tracking file for S11 (same-issue dedup)"
 # S12 work directory — calibration-only persistent data
 # ---------------------------------------------------------------------------
 $s12WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "detector-test-s12-$([System.IO.Path]::GetRandomFileName())"
-$s12CalibrationFile = Join-Path $s12WorkDir '.copilot-tracking' 'calibration' 'review-data.json'
+$s12CalibrationFile = Join-Path -Path $s12WorkDir -ChildPath '.copilot-tracking' -AdditionalChildPath 'calibration', 'review-data.json'
 New-Item -ItemType Directory -Path (Split-Path -Parent $s12CalibrationFile) | Out-Null
 Set-Content -Path $s12CalibrationFile -Value '{"calibration_version":1,"entries":[]}' -Encoding UTF8
 
@@ -338,8 +338,8 @@ Set-Content -Path $s12CalibrationFile -Value '{"calibration_version":1,"entries"
 # S13 work directory — calibration plus stale issue-tracking artifact
 # ---------------------------------------------------------------------------
 $s13WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "detector-test-s13-$([System.IO.Path]::GetRandomFileName())"
-$s13CalibrationFile = Join-Path $s13WorkDir '.copilot-tracking' 'calibration' 'review-data.json'
-$s13TrackingFile = Join-Path $s13WorkDir '.copilot-tracking' 'research' 'issue-185-red.md'
+$s13CalibrationFile = Join-Path -Path $s13WorkDir -ChildPath '.copilot-tracking' -AdditionalChildPath 'calibration', 'review-data.json'
+$s13TrackingFile = Join-Path -Path $s13WorkDir -ChildPath '.copilot-tracking' -AdditionalChildPath 'research', 'issue-185-red.md'
 New-Item -ItemType Directory -Path (Split-Path -Parent $s13CalibrationFile) | Out-Null
 New-Item -ItemType Directory -Path (Split-Path -Parent $s13TrackingFile) | Out-Null
 Set-Content -Path $s13CalibrationFile -Value '{"calibration_version":1,"entries":[]}' -Encoding UTF8
@@ -355,7 +355,7 @@ title: "Issue 185 RED fixture"
 # S14 work directory — calibration plus stale branch
 # ---------------------------------------------------------------------------
 $s14WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "detector-test-s14-$([System.IO.Path]::GetRandomFileName())"
-$s14CalibrationFile = Join-Path $s14WorkDir '.copilot-tracking' 'calibration' 'review-data.json'
+$s14CalibrationFile = Join-Path -Path $s14WorkDir -ChildPath '.copilot-tracking' -AdditionalChildPath 'calibration', 'review-data.json'
 New-Item -ItemType Directory -Path (Split-Path -Parent $s14CalibrationFile) | Out-Null
 Set-Content -Path $s14CalibrationFile -Value '{"calibration_version":1,"entries":[]}' -Encoding UTF8
 

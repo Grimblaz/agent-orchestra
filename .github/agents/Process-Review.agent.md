@@ -722,85 +722,15 @@ Labels: enhancement, priority: medium
 
 ## Common Scenarios
 
-### Scenario 1: Premature Implementation
+For detailed scenario analysis, load `.github/skills/process-troubleshooting/SKILL.md`.
 
-**Symptoms**: Code created before tests, implementations in test-writer mode
+Symptom-keyword routing:
 
-**Analysis**:
-
-- Check git log: Were `.ts` files created before `.test.ts` files?
-- Review plan: Did phase headers show test-writer → code-smith order?
-- Check conversation: Was TDD flow mentioned?
-
-**Recommendations**:
-
-- Add explicit RED state validation
-- Strengthen test-writer → code-smith handoff
-- Create TDD checklist for issue-planner
-
-### Scenario 2: Agent Confusion
-
-**Symptoms**: Multiple agents handling same phase, role overlap
-
-**Analysis**:
-
-- Review agent descriptions: Are boundaries clear?
-- Check plan: Were agent assignments explicit?
-- Examine handoffs: Were handoff buttons used?
-
-**Recommendations**:
-
-- Clarify agent responsibilities
-- Add phase-to-agent mapping table
-- Create decision tree for agent selection
-
-### Scenario 3: Validation Gaps
-
-**Symptoms**: Quality gate failures discovered late, rework needed
-
-**Analysis**:
-
-- Check when tests were run: After each task or only at end?
-- Review phase completion: Were validation commands listed?
-- Examine changes file: Were validation results recorded?
-
-**Recommendations**:
-
-- Add validation checklist to plan-tracking
-- Require validation output in changes file
-- Create pre-handoff validation step
-
-### Scenario 4: Documentation Conflicts
-
-**Symptoms**: Contradictory instructions, confusion about standards
-
-**Analysis**:
-
-- Search for duplicate topics in workspace docs: Use `grep_search` with query `subject` and `includePattern: "**/*.md"`. For session memory, use the `memory` tool (`view /memories/session/` then read individual files) to check for overlapping topics.
-- Check file ages: Which is canonical?
-- Review references: Which files link to which?
-
-**Recommendations**:
-
-- Consolidate redundant files
-- Establish clear hierarchy (primary vs reference)
-- Add cross-reference validation
-
-### Scenario 5: Terminal Stall During Workflow
-
-**Symptoms**: Agent appears blocked by long-running or hung terminal commands
-
-**Analysis**:
-
-- Check terminal history for repeated commands with no output progress
-- Review whether timeout boundaries were set or adjusted
-- Verify whether escalation happened after repeated stalls
-
-**Recommendations**:
-
-- Add timeout defaults and retry limits in workflow instructions
-- Introduce a "stall triage" checklist before rerunning commands
-- Require fallback path documentation when terminal automation is unavailable
+- **Code before tests, implementations in test-writer mode** → Premature Implementation
+- **Multiple agents handling same phase, role overlap** → Agent Confusion
+- **Quality gate failures discovered late, rework needed** → Validation Gaps
+- **Contradictory instructions, confusion about standards** → Documentation Conflicts
+- **Agent blocked by long-running or hung terminal commands** → Terminal Stall
 
 ---
 
@@ -918,6 +848,7 @@ When reviewing a completed workflow, audit skill usage:
 | `frontend-design`                | Designing UI components, screens, or evaluating distinctiveness   |
 | `parallel-execution`             | Coordinating parallel implementation lanes, convergence gates     |
 | `post-pr-review`                 | Post-merge cleanup, tracking archival, docs, strategic assessment |
+| `process-troubleshooting`        | Diagnosing premature implementation, agent confusion, validation gaps, doc conflicts, terminal stalls |
 | `property-based-testing`         | Randomized testing, input ranges, invariant verification          |
 | `skill-creator`                  | Adding new skills, updating templates, reviewing skill structure  |
 | `software-architecture`          | Layer boundaries, dependency flow, ADR-level decisions            |

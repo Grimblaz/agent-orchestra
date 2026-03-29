@@ -94,8 +94,7 @@ Describe 'guidance complexity ceiling contract' {
     It 'requires the guidance-complexity config file to exist with a valid schema' {
         Test-Path -Path $script:ConfigPath | Should -BeTrue `
             -Because '.github/config/guidance-complexity.json must be committed to the repo'
-        $configJson = $null
-        { $configJson = Get-Content -Path $script:ConfigPath -Raw | ConvertFrom-Json } | Should -Not -Throw `
+        { $null = Get-Content -Path $script:ConfigPath -Raw | ConvertFrom-Json } | Should -Not -Throw `
             -Because 'guidance-complexity.json must be parseable as valid JSON'
         $configJson = Get-Content -Path $script:ConfigPath -Raw | ConvertFrom-Json
         [bool]($configJson.version -is [ValueType] -and $configJson.version -ge 1) | Should -BeTrue `
