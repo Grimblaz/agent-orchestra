@@ -143,8 +143,8 @@ function Write-ExtractionAgentsYaml {
         [int]$PersistentThreshold
     )
     $candidates = @($ComplexityOverCeilingHistory.Keys | Where-Object {
-        [int](Get-FlexProperty $ComplexityOverCeilingHistory[$_] 'consecutive_count') -ge $PersistentThreshold
-    } | Sort-Object)
+            [int](Get-FlexProperty $ComplexityOverCeilingHistory[$_] 'consecutive_count') -ge $PersistentThreshold
+        } | Sort-Object)
     if ($candidates.Count -eq 0) { return }
     Write-Output 'extraction_agents:'
     foreach ($agent in $candidates) {
@@ -573,7 +573,8 @@ if (-not $overallSufficient) {
             # Validate before promotion (mirrors write-calibration-entry.ps1 safety pattern)
             $null = Get-Content $earlyTmp -Raw | ConvertFrom-Json
             Move-Item -Path $earlyTmp -Destination $CalibrationFile -Force
-        } catch {
+        }
+        catch {
             if ($null -ne $earlyTmp -and (Test-Path $earlyTmp)) { Remove-Item $earlyTmp -Force -ErrorAction SilentlyContinue }
             Write-Warning "Could not flush complexity history before early exit: $_"
         }
@@ -782,7 +783,7 @@ if ($v2IssuesAnalyzed -gt 0) {
                     }
                 }
                 catch {
-                    # Unparseable date — ignore, fall through
+                    Write-Verbose "Skipping unparseable expiry date — non-fatal, continuing"
                 }
             }
 
@@ -860,7 +861,7 @@ if ($v2IssuesAnalyzed -gt 0) {
             if ($sustainedCnt -ge 2 -and $distinctPrs -ge 2) {
                 $patternKey = "${ft}:${cat}"
                 $evidencePrs = @($spEntry.prs | Sort-Object)
-                $alreadyProposed = Test-PatternProposed $proposalsEmitted $patternKey $evidencePrs
+                $alreadyProposed = Test-PatternProposed -Proposals $proposalsEmitted -PatternKey $patternKey -EvidencePrs $evidencePrs
                 if (-not $alreadyProposed) {
                     $proposalsEmitted += @{
                         pattern_key      = $patternKey
@@ -951,7 +952,7 @@ if ($v2IssuesAnalyzed -gt 0) {
                     $meetsThreshold = ($sustainedCnt -ge 2 -and $distinctPrs -ge 2)
                     $patternKey = "${ft}:${cat}"
                     $evidencePrs = @($entry.prs | Sort-Object)
-                    $prevProposed = Test-PatternProposed $priorProposalsEmitted $patternKey $evidencePrs
+                    $prevProposed = Test-PatternProposed -Proposals $priorProposalsEmitted -PatternKey $patternKey -EvidencePrs $evidencePrs
                     Write-Output "      ${cat}:"
                     Write-Output "        count: $($entry.count)"
                     Write-Output "        sustained_count: ${sustainedCnt}"

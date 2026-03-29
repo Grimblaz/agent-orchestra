@@ -89,13 +89,13 @@ If after genuine adversarial effort you find no issues, state what you checked a
 
 ## Design Review Mode
 
-When the prompt contains the marker **"Use design review perspectives"**, activate Design Review Mode instead of the standard 7-perspective code review. Solution-Designer and Issue-Planner include this marker for passes 1–2; pass 3 uses `"Use product-alignment perspectives"` instead.
+When the prompt contains the marker **"Use design review perspectives"**, activate Design Review Mode instead of the standard 6-perspective code review. Solution-Designer and Issue-Planner include this marker for passes 1–2; pass 3 uses `"Use product-alignment perspectives"` instead.
 
 ### Mode Detection
 
 | Marker in prompt                       | Mode                          | Passes       | Perspectives                              |
 | -------------------------------------- | ----------------------------- | ------------ | ----------------------------------------- |
-| _(none / default)_                     | Code prosecution              | 3 (parallel) | 7 code perspectives                       |
+| _(none / default)_                     | Code prosecution              | 3 (parallel) | 6 code perspectives                       |
 | `"Use design review perspectives"`     | Design/plan prosecution       | 2 (parallel) | 3 design perspectives (passes 1–2)        |
 | `"Use product-alignment perspectives"` | Product-alignment prosecution | 1            | 3 product-alignment perspectives (pass 3) |
 | `"Use defense review perspectives"`    | **Defense**                   | 1            | Presume innocent; disprove each finding   |
@@ -437,7 +437,7 @@ Performs a final review for architecture, security, and overall quality.
 
 ## Review Perspectives
 
-Every review MUST address all 7 perspectives in sequence, using the **"When to apply" gate** for each:
+Every review MUST address all 6 perspectives in sequence, using the **"When to apply" gate** for each:
 
 - **In scope** (gate triggered): apply the full checklist for that perspective.
 - **Out of scope** (gate not triggered): replace the entire section with the Compact N/A heading (see **Compact N/A rule** below). Do not expand the section with checklist items.
@@ -541,26 +541,43 @@ _To identify peers: grep for the field name in function signatures (criterion a)
 - [ ] Unnecessary complexity removed
 - [ ] Comments explain "why", not "what"
 
-### 6. Script & Automation Files
+### 6. Script & Automation
 
-**When to apply**: PR includes `.ps1`, `.sh`, `.py`, `.yml`, or `.yaml` (for `run:` shell blocks) files.
+**When to apply**: PR includes `.ps1`, `.sh`, `.py`, `.yml`, or `.yaml` (for `run:` shell blocks) files **OR** `.md` files that contain shell or PowerShell code blocks (fenced ` ```bash `, ` ```sh `, ` ```powershell `, or unlabeled fenced blocks containing shell commands) **or inline terminal command guidance** (prescriptive backtick-quoted commands in workflow docs).
 
-- [ ] Native executable calls (`git`, `gh`, `curl`, `pwsh`, etc.) have explicit exit-code checks immediately after the call — do NOT rely on `$ErrorActionPreference = 'Stop'`, `try/catch`, or `trap` in PowerShell (these do not catch non-zero native exit codes); in POSIX shells, `set -e` / `trap ERR` can intercept exit codes but carry well-known caveats (subshells, pipelines, `&&` chains) — always prefer explicit `$LASTEXITCODE` (PowerShell) or `$?` / `|| exit` (POSIX) checks for each call
-- [ ] Dynamic values are NOT passed to `Invoke-Expression`, `& $dynamicVar`, `Start-Process` with runtime-constructed argument strings, or equivalent constructs (`eval`, `subprocess.Popen(shell=True)`); if unavoidable, input is allowlist-validated — not merely escaped
-- [ ] Any string constructed from dynamic values and emitted to an output sink (Markdown, JSON, terminal display) is sanitized for that medium's metacharacters (e.g., backtick and triple-backtick sequences break Markdown code-block rendering; unescaped `"` breaks JSON structure)
-- [ ] Regex patterns involving domain-specific character sets (repo names, branch names, file paths) are validated against known edge cases (dotted names, slashes, special chars)
-- [ ] String constants that enumerate values produced or consumed by another file/template (e.g., stage names from an agent template, category strings from a specification) exactly match those canonical values — verify by cross-referencing the authoritative source file (when no plan names the source, grep for the consumed constant in defining contexts — array literals, hash table key assignments, enum definitions — rather than prose mentions, to locate the authoritative producer); do not assume correctness from the plan description alone
-- [ ] **PowerShell / .NET method accessibility**: Calls to methods on .NET collection types must verify the method is a **public instance member**. In particular, `[ordered]@{}` (`OrderedDictionary`) does **not** have a `Clone()` method — unlike `Hashtable` and `ArrayList`, which expose `Clone()` as a public instance member, `OrderedDictionary` simply lacks it. Flag `.Clone()` access on `[ordered]@{}` or ambiguously-typed dictionary variables and recommend the deep-copy idiom: `$copy = $obj | ConvertTo-Json -Depth 10 | ConvertFrom-Json -AsHashtable`
-- [ ] **PowerShell collection-return semantics**: Functions whose output will be serialized to JSON or consumed by a type-sensitive API that return or pipeline-yield arrays must use `return , @(...)` (unary comma) or `Write-Output -NoEnumerate` to preserve array identity. A bare `return @(...)` or `ForEach-Object { ... }` in pipeline position collapses single-element results to a scalar. Verify each function returning `@(...)` that may be serialized, by checking the caller's capture pattern
+**Branching gate**: For script files, apply Principles 1–3. For `.md` files with code blocks or inline command guidance (and no scripting changes), skip to the doc-audit checks section.
 
-### 7. Documentation Script Audit
+#### Principle 1 — Validate all boundary interactions
 
-**When to apply**: PR modifies `.md` files that contain shell or PowerShell code blocks (fenced ` ```bash `, ` ```sh `, ` ```powershell `, or unlabeled fenced blocks containing shell commands such as `grep`, `ls`, `wc`, `pwsh`, `git`) **or inline terminal command guidance** (e.g., prescriptive backtick-quoted `git status` or `Select-String` usage instructions in workflow docs).
+All native executable calls (`git`, `gh`, `curl`, `pwsh`, etc.) require explicit exit-code verification immediately after the call.
 
-- [ ] Every `grep`, `ls`, `wc`, or similar validation command listed in documentation is runnable against the current file contents **from the repository root** and produces the documented result (do not accept "should be 0" without verifying the expected count is achievable)
-- [ ] Commands expected to return `0` cannot self-match — verify: does the searched pattern appear in the file hosting the command **or in any other `.md` file not already excluded by a `grep -v` filter**? If yes, a `grep -v <filename>` exclusion is required for every matching file (covers both same-file self-match and cross-file matches)
-- [ ] Expected counts (agent counts, file counts, etc.) reflect the post-change state, not the pre-change state
-- [ ] Workflow documentation (`.agent.md`, `.instructions.md`, `.prompt.md`, `SKILL.md`) that prescribes shell or PowerShell commands for read-only operations (text search, file listing, existence check, working-tree diff, file reading) defaults to built-in VS Code tools — flag terminal-first guidance when a built-in equivalent exists (`grep_search` for search, `file_search`/`list_dir` for listing, `file_search` for existence, `get_changed_files` for working-tree diff, `read_file` for reading). Allowed exceptions: project validation commands defined in `.github/copilot-instructions.md`; cross-branch or cross-ref diff (e.g., `git diff main..HEAD`); git state operations (e.g., commit, push, checkout, branch, merge, reset, revert, tag); `gh`/GitHub CLI operations; build, test, or script execution (including output filtering on script pipelines); targets outside the workspace; operations with no built-in equivalent (file timestamps, untracked file detection, git log history, grep_search filter-gap for complex path-exclusion filters). These exception categories correspond to the canonical taxonomy in `Documents/Design/safe-operations.md` — keep both in sync when adding or modifying categories.
+- DO: check `$LASTEXITCODE` (PowerShell) or `$?` / `|| exit` (POSIX) after every native call
+- DON'T: rely on `$ErrorActionPreference = 'Stop'`, `try/catch`, or `trap` as exit-code interceptors — they do not catch non-zero native exit codes in PowerShell; in POSIX shells, `set -e` / `trap ERR` carry well-known caveats (subshells, pipelines, `&&` chains)
+- DO: allowlist-validate before passing dynamic values to `Invoke-Expression`, `& $dynamicVar`, `Start-Process`, `eval`, or `subprocess.Popen(shell=True)`
+- DON'T: pass runtime-constructed argument strings to command invocation constructs without validation — escaped input is not sufficient
+- Sanitize strings from dynamic values emitted to output sinks (Markdown, JSON, terminal): backtick and triple-backtick sequences break Markdown rendering; unescaped `"` breaks JSON
+- Validate regex patterns against domain-specific edge cases: dotted repo names, branch names with slashes, file paths with special characters
+
+#### Principle 2 — Cross-reference enumerated values with authoritative sources
+
+String constants enumerating values produced or consumed by another file must exactly match those canonical values.
+
+- DO: cross-reference by locating array literals, hash table key assignments, or `$known*` definitions in the authoritative source file
+- DON'T: assume correctness from plan descriptions or prose mentions alone — grep for the consumed constant in defining contexts, not text mentions
+
+#### Principle 3 — Verify .NET method availability and pipeline semantics
+
+- DO: use the deep-copy idiom for ordered dictionaries: `$copy = $obj | ConvertTo-Json -Depth 10 | ConvertFrom-Json -AsHashtable`
+- DON'T: call `.Clone()` on `[ordered]@{}` (`OrderedDictionary`) — it does not expose `Clone()` as a public instance member, unlike `Hashtable` and `ArrayList`
+- DO: use `return , @(...)` (unary comma) or `Write-Output -NoEnumerate` when a function returns arrays that will be serialized to JSON or consumed by a type-sensitive API
+- DON'T: use bare `return @(...)` or `ForEach-Object { ... }` in pipeline position for arrays that may have one element — these collapse to a scalar
+
+**Doc-audit checks** (`.md` files with code blocks or inline command guidance):
+
+- Every `grep`, `ls`, `wc`, or similar validation command is runnable from the repository root and produces the documented result — do not accept "should be 0" without verifying achievability
+- Commands expected to return `0` cannot self-match: verify the searched pattern is absent from the hosting file and all other `.md` files not excluded by a `grep -v` filter; add `grep -v <filename>` exclusions for each matching file
+- Expected counts (agent counts, file counts) reflect the post-change state, not pre-change state
+- Workflow docs (`.agent.md`, `.instructions.md`, `.prompt.md`, `SKILL.md`) that prescribe shell or PowerShell commands for read-only operations default to built-in VS Code tools — flag terminal-first guidance when an equivalent exists (`grep_search` for search, `file_search`/`list_dir` for listing, `file_search` for existence, `get_changed_files` for working-tree diff, `read_file` for reading). Allowed exceptions (canonical taxonomy per `Documents/Design/safe-operations.md` — keep in sync when adding or modifying categories): project validation commands in `.github/copilot-instructions.md`; cross-branch or cross-ref diff (e.g., `git diff main..HEAD`); git state operations (commit, push, checkout, branch, merge, reset, revert, tag); `gh`/GitHub CLI operations; build, test, or script execution; targets outside the workspace; operations with no built-in equivalent (file timestamps, untracked file detection, git log, complex path-exclusion filters)
 
 ## Browser-Based Review (UI-Touching PRs)
 
@@ -631,11 +648,7 @@ Do not include checklist items. This eliminates output bloat without reducing co
 
 ### ✅ Script & Automation: PASS/FAIL
 
-[Specific findings — use `### ⏭️ Script & Automation: N/A — no script files in this PR` when gate not triggered]
-
-### ✅ Documentation Script Audit: PASS/FAIL
-
-[Specific findings — use `### ⏭️ Documentation Script Audit: N/A — no .md files with shell code blocks` when gate not triggered]
+[Specific findings — script principles and/or doc-audit checks per branching gate. Use `### ⏭️ Script & Automation: N/A — no script files or .md files with shell blocks` when gate not triggered]
 
 ## Summary
 

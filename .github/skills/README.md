@@ -20,7 +20,7 @@ Each skill should use this flow:
 
 This keeps prompts concise while preserving depth when needed.
 
-## Available Skills (14)
+## Available Skills (15)
 
 | Skill | Purpose | Status |
 | ----- | ------- | ------ |
@@ -38,6 +38,7 @@ This keeps prompts concise while preserving depth when needed.
 | `browser-canvas-testing` | VS Code native browser tool behavior for canvas-based games | ✅ Included |
 | `code-review-intake` | Deterministic GitHub review intake workflow with ledger-based judgment | ✅ Included |
 | `post-pr-review` | Post-merge checklist for archiving, documentation, versioning, and release tagging | ✅ Included |
+| `process-troubleshooting` | Five-scenario guide for diagnosing common orchestration failure patterns | ✅ Included |
 
 ## How to Use a Skill
 

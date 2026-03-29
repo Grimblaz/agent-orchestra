@@ -6,7 +6,7 @@
 
 The `SessionStart` hook replaces the retired Janitor agent by converting its mechanical post-merge cleanup work into an automated VS Code Copilot hook. The hook fires at the natural "ready for next work" moment — when the user starts a new agent session after merging a PR — and prompts for cleanup with no overhead when nothing needs cleaning. A second enhancement (`WORKFLOW_TEMPLATE_ROOT`) makes the hook portable across downstream repos that consume it via `chat.hookFilesLocations`.
 
-Code-Critic Perspective 7 (Documentation Script Audit) was added in the same phase to close a gap where shell commands embedded in Markdown documentation went unreviewed for self-consistency.
+Code-Critic Perspective 7 (Documentation Script Audit) was added in the same phase to close a gap where shell commands embedded in Markdown documentation went unreviewed for self-consistency. _(Merged into §6 Script & Automation as doc-audit sub-gate in issue #212.)_
 
 ---
 
@@ -70,7 +70,7 @@ The hook is consumed by downstream repos via `chat.hookFilesLocations`. The hook
 
 ---
 
-## Code-Critic Perspective 7: Documentation Script Audit
+## Code-Critic Perspective 7: Documentation Script Audit _(merged into §6 in #212)_
 
 Added alongside the portability fix to close a gap found in the post-PR review of issue #36: `copilot-instructions.md` quick-validate commands always self-matched because the file hosting the command was inside the searched path.
 
@@ -82,7 +82,7 @@ Added alongside the portability fix to close a gap found in the post-PR review o
 2. Grep/Select-String patterns that search `.github/` exclude the file that hosts the command itself (self-match prevention).
 3. Numeric counts in documentation (e.g., "must be 0", "must be 13") match the actual state of the repo.
 
-**Numbering**: Perspective 6 (Script & Automation Files) was added in PR #38 between when issue #39 was filed and when it was implemented; Documentation Script Audit is therefore Perspective 7.
+**Numbering**: Perspective 6 (Script & Automation Files) was added in PR #38 between when issue #39 was filed and when it was implemented; Documentation Script Audit is therefore Perspective 7. _(Both merged into a single §6 Script & Automation perspective with branching gate in issue #212; total perspective count reduced from 7 to 6.)_
 
 ---
 

@@ -173,7 +173,7 @@ exit 1
                 [string]$GhCliPath,
                 [int]$Limit = 10
             )
-            $dataFile = Join-Path $WorkDir '.copilot-tracking' 'calibration' 'review-data.json'
+            $dataFile = Join-Path -Path $WorkDir -ChildPath '.copilot-tracking' -AdditionalChildPath 'calibration', 'review-data.json'
 
             $stdout = & pwsh -NoProfile -NonInteractive -WorkingDirectory $WorkDir -File $script:ScriptFile `
                 -GhCliPath $GhCliPath `

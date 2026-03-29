@@ -93,7 +93,7 @@ function Measure-AgentFile {
         # Track the opening delimiter character (` or ~) and length so that only
         # a matching close (same char, same or greater length) ends the fence.
         # This prevents a nested ``` inside a ```` fence from toggling state.
-        if ($fenceChar -ne $null) {
+        if ($null -ne $fenceChar) {
             # Inside a fence — look for a matching close delimiter
             if ($line -match $Script:FencePattern) {
                 $delimiter = $Matches[1]

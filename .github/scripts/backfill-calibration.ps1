@@ -33,7 +33,7 @@ function ConvertTo-IntSafe {
 # ---------------------------------------------------------------------------
 $repoArgs = if ($Repo) { @('--repo', $Repo) } else { @() }
 
-$ghOut = & $GhCliPath pr list --state merged --limit $Limit --json number,mergedAt,body @repoArgs
+$ghOut = & $GhCliPath pr list --state merged --limit $Limit --json number, mergedAt, body @repoArgs
 $exitCode = $LASTEXITCODE
 if ($exitCode -ne 0) {
     Write-Error "gh pr list failed with exit code $exitCode"
@@ -63,7 +63,8 @@ foreach ($pr in $prs) {
     $rawMergedAt = $pr.mergedAt
     if ($rawMergedAt -is [datetime]) {
         $mergedAtStr = $rawMergedAt.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    } else {
+    }
+    else {
         $mergedAtStr = [string]$rawMergedAt
     }
 
@@ -94,13 +95,14 @@ foreach ($pr in $prs) {
 # ── Batch write: load once, merge all entries, write once ─────────────────────
 
 if ($pendingEntries.Count -gt 0) {
-    $calibDir = Join-Path (Get-Location).Path '.copilot-tracking' 'calibration'
+    $calibDir = Join-Path -Path (Get-Location).Path -ChildPath '.copilot-tracking' -AdditionalChildPath 'calibration'
     $dataFile = Join-Path $calibDir 'review-data.json'
     $tmpFile = "$dataFile.tmp"
 
     if (Test-Path $dataFile) {
         $data = Get-Content $dataFile -Raw | ConvertFrom-Json -AsHashtable
-    } else {
+    }
+    else {
         $data = [ordered]@{
             calibration_version = 1
             entries             = @()
@@ -111,9 +113,9 @@ if ($pendingEntries.Count -gt 0) {
 
     # Merge: replace any existing entries with the same pr_number
     $existingEntries = @($data.entries | Where-Object {
-        $pn = [int]$_.pr_number
-        -not ($pendingEntries | Where-Object { [int]$_.pr_number -eq $pn })
-    })
+            $pn = [int]$_.pr_number
+            -not ($pendingEntries | Where-Object { [int]$_.pr_number -eq $pn })
+        })
     $mergedEntries = $existingEntries + @($pendingEntries)
 
     # Preserve all top-level keys from existing data, override only entries
@@ -126,7 +128,8 @@ if ($pendingEntries.Count -gt 0) {
         Set-Content -Path $tmpFile -Value $json -Encoding UTF8
         $null = Get-Content $tmpFile -Raw | ConvertFrom-Json
         Move-Item -Path $tmpFile -Destination $dataFile -Force
-    } catch {
+    }
+    catch {
         if (Test-Path $tmpFile) { Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue }
         Write-Error "Batch write failed: $_" -ErrorAction Continue
         exit 1

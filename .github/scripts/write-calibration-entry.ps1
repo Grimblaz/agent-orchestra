@@ -171,7 +171,8 @@ if (-not [string]::IsNullOrWhiteSpace($ReactivationEventJson)) {
             if ([int]$reactivationEvent.expires_at_pr -le [int]$reactivationEvent.triggered_at_pr) {
                 Write-ValidationError "re-activation event 'expires_at_pr' ($($reactivationEvent.expires_at_pr)) must be greater than 'triggered_at_pr' ($($reactivationEvent.triggered_at_pr))"
             }
-        } catch {
+        }
+        catch {
             Write-ValidationError "re-activation event 'expires_at_pr' and 'triggered_at_pr' must be integers"
             return
         }
@@ -182,8 +183,8 @@ if (-not [string]::IsNullOrWhiteSpace($ReactivationEventJson)) {
 
 # ── Resolve paths ──────────────────────────────────────────────────────────────
 
-$calibDir = Join-Path (Get-Location).Path '.copilot-tracking' 'calibration'
-$dataFile = Join-Path $calibDir 'review-data.json'
+$calibDir = Join-Path -Path (Get-Location).Path -ChildPath '.copilot-tracking' -AdditionalChildPath 'calibration'
+$dataFile = Join-Path -Path $calibDir -ChildPath 'review-data.json'
 $tmpFile = "$dataFile.tmp"
 
 # Clean up any stale .tmp from a previous incomplete run
@@ -223,8 +224,8 @@ if (-not (Test-HasProperty $data 're_activation_events')) {
 
 if ($null -ne $reactivationEvent) {
     $data['re_activation_events'] = @($data['re_activation_events'] | Where-Object {
-        -not ($_.category -eq $reactivationEvent.category -and [int]$_.triggered_at_pr -eq [int]$reactivationEvent.triggered_at_pr)
-    })
+            -not ($_.category -eq $reactivationEvent.category -and [int]$_.triggered_at_pr -eq [int]$reactivationEvent.triggered_at_pr)
+        })
     $data['re_activation_events'] += $reactivationEvent
 }
 

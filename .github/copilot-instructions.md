@@ -30,7 +30,7 @@ Pipeline-based agent orchestration:
 
 - **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
 - **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invocable: false`)
-- **Skills** (14): Loaded on demand by agents from `.github/skills/`
+- **Skills** (15): Loaded on demand by agents from `.github/skills/`
 - **Instructions** (5): Shared rules loaded by agents from `.github/instructions/`
 
 ## Key Conventions
@@ -165,4 +165,5 @@ Then run the structural checks:
 (Get-ChildItem .github/skills/*/SKILL.md | Where-Object { (Select-String -Path $_ -Pattern '^description:.*DO NOT USE FOR:') -eq $null }).Count  # should be 0
 (Get-ChildItem .github/skills/*/SKILL.md | Where-Object { (Select-String -Path $_ -Pattern '^## Gotchas') -eq $null }).Count  # should be 0
 (pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json).agents_over_ceiling.Count  # should be 0
+if (Get-Module -ListAvailable PSScriptAnalyzer) { (Invoke-ScriptAnalyzer -Path .github/scripts/ -Recurse -Settings .github/config/PSScriptAnalyzerSettings.psd1).Count } else { Write-Warning 'PSScriptAnalyzer not installed — skipping' }  # should be 0
 ```

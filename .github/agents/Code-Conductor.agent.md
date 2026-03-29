@@ -106,7 +106,9 @@ Quick checklist before declaring mode for a step:
 - **No scope exemption**: Code-Conductor must NEVER create plans directly, regardless of change size, scope classification tier, or multi-issue bundling. All plans are created by Issue-Planner — unconditionally.
 
 ## Core Workflow
+
 <!-- markdownlint-disable-next-line MD029 -->
+
 0. **Issue Transition (Step 0, before implementation)**:
    - Cleanup note: The `.github/copilot-instructions.md` "Session Startup Check" detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `$copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }; pwsh "$copilotRoot/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly (only if `$copilotRoot` is non-empty — requires `COPILOT_ORCHESTRA_ROOT` or `WORKFLOW_TEMPLATE_ROOT` to be set).
    - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
@@ -350,11 +352,11 @@ Each pass is an **independent invocation** of Code-Critic — not a duplicate. L
 
 Classify the PR change type using `git diff --name-only main..HEAD` (cross-branch diff — no built-in tool equivalent) and include the classification in each pass prompt:
 
-| Change type          | Condition                                                                     | Active perspectives                                                                                                                                                                  |
-| -------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `documentation-only` | All changed files are `.md`, `.instructions.md`, `.prompt.md`, or `.agent.md` | Architecture (§1, docs-misrepresentation check only), Simplicity (§5), Documentation Script Audit (§7, if `.md` files contain shell blocks), Patterns doc-clarity angle (§4 partial) |
-| `mixed`              | Changed files include both source/scripts AND docs                            | All 7 perspectives                                                                                                                                                                   |
-| `code` (default)     | Changed files include source code, scripts, or runtime config                 | All 7 perspectives                                                                                                                                                                   |
+| Change type          | Condition                                                                     | Active perspectives                                                                                                                                                                           |
+| -------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `documentation-only` | All changed files are `.md`, `.instructions.md`, `.prompt.md`, or `.agent.md` | Architecture (§1, docs-misrepresentation check only), Simplicity (§5), Script & Automation (doc-audit sub-gate, if `.md` files contain shell blocks), Patterns doc-clarity angle (§4 partial) |
+| `mixed`              | Changed files include both source/scripts AND docs                            | All 6 perspectives                                                                                                                                                                            |
+| `code` (default)     | Changed files include source code, scripts, or runtime config                 | All 6 perspectives                                                                                                                                                                            |
 
 > **Precedence**: Evaluate rows in order; the first matching condition applies. `mixed` takes priority over `code` for source+docs PRs.
 
@@ -692,15 +694,15 @@ Prosecution depth: 5 full, 1 light, 1 skip
 ```markdown
 ## Prosecution Depth Summary
 
-| Category | Depth | Rationale |
-| --- | --- | --- |
-| architecture | full | — |
-| security | light | sustain rate 0.12 / 22 effective findings |
-| performance | full | — |
-| pattern | skip | sustain rate 0.03 / 35 effective findings |
-| simplicity | full | — |
-| script-automation | full | insufficient data (8 effective) |
-| documentation-audit | full | insufficient data (3 effective) |
+| Category            | Depth | Rationale                                 |
+| ------------------- | ----- | ----------------------------------------- |
+| architecture        | full  | —                                         |
+| security            | light | sustain rate 0.12 / 22 effective findings |
+| performance         | full  | —                                         |
+| pattern             | skip  | sustain rate 0.03 / 35 effective findings |
+| simplicity          | full  | —                                         |
+| script-automation   | full  | insufficient data (8 effective)           |
+| documentation-audit | full  | insufficient data (3 effective)           |
 
 Re-activated categories (if any): {list with trigger source, or "none"}
 ```

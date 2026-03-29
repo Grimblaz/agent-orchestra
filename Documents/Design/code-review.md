@@ -161,7 +161,7 @@ Prosecutor assigns severity; judge may override.
 
 | Marker in prompt | Mode | Passes | Perspectives |
 |-----------------|------|--------|-------------|
-| *(none / default)* | Code prosecution | 3 (parallel) | 7 code perspectives |
+| *(none / default)* | Code prosecution | 3 (parallel) | 6 code perspectives |
 | `"Use design review perspectives"` | Design/plan prosecution | 2 (parallel) | 3 design perspectives (passes 1–2) |
 | `"Use product-alignment perspectives"` | Product-alignment prosecution | 1 | 3 product-alignment perspectives (pass 3) |
 | `"Use defense review perspectives"` | Defense | 1 | Presume innocent; disprove each finding |
@@ -405,7 +405,7 @@ User reviews → approves/rejects → applies changes to agent files
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
 | D22 | Data source | Enriched `<!-- pipeline-metrics -->` in PR bodies | No repo pollution; data lives with the PR; durable across session resets |
-| D23 | Category taxonomy | Code-Critic's 7 prosecution perspectives | 1:1 mapping; no ambiguity; `n/a` for CE/design/proxy modes |
+| D23 | Category taxonomy | Code-Critic's 6 prosecution perspectives (7 category taxonomy values) | 7-to-6 mapping after #212 (`documentation-audit` and `script-automation` share §6 Script & Automation); `n/a` for CE/design/proxy modes |
 | D24 | Sample size thresholds | 5 effective issues overall; 15 effective findings per category | Balances early value against statistical noise |
 | D25 | Storage format | On-demand stdout from aggregation script | Always fresh; no stale files; no repo clutter |
 | D26 | Drift handling | Exponential decay λ=0.023 (~30-day half-life), configurable via `-DecayLambda` | Automatic adaptation as prompts evolve; avoids cliff effect of sliding window |
@@ -423,7 +423,7 @@ The `<!-- pipeline-metrics -->` format is extended from 18-field flat YAML (v1) 
 - `review_stage` values: `main | postfix | ce | design | proxy`
 - `systemic_fix_type` values (per finding): `instruction | skill | agent-prompt | plan-template | none` — what kind of guardrail would prevent this defect class; filled by Code-Critic at prosecution time; defaults to `none` when absent
 
-**Category values** (Code-Critic's 7 prosecution perspectives): `architecture | security | performance | pattern | simplicity | script-automation | documentation-audit`; `n/a` for CE, design, and proxy prosecution findings.
+**Category values** (Code-Critic's 7 category taxonomy values — 6 prosecution perspectives post-#212; `documentation-audit` and `script-automation` share a single §6 Script & Automation perspective): `architecture | security | performance | pattern | simplicity | script-automation | documentation-audit`; `n/a` for CE, design, and proxy prosecution findings.
 
 ### Code-Review-Response Structured Output
 
@@ -473,7 +473,7 @@ All recommendations cite the specific file, section, and suggested change. Proce
 
 ## Implementation Notes
 
-**Issue #132 — Built-in-tool-first enforcement (2026-03)**: Code-Critic §7 (Documentation Script Audit) now includes a new checklist item that flags workflow markdown prescribing terminal commands for read-only operations when a built-in VS Code tool equivalent exists. The §7 "When to apply" trigger also now covers inline terminal command guidance (backtick-quoted commands in prose), not only fenced shell blocks.
+**Issue #132 — Built-in-tool-first enforcement (2026-03)**: Code-Critic §6 (Script & Automation) doc-audit sub-gate includes a check that flags workflow markdown prescribing terminal commands for read-only operations when a built-in VS Code tool equivalent exists. The doc-audit "When to apply" trigger covers inline terminal command guidance (backtick-quoted commands in prose) in addition to fenced shell blocks. *(Note: originally §7 Documentation Script Audit — merged into §6 as doc-audit sub-gate in #212.)*
 
 ---
 
