@@ -135,6 +135,22 @@ Write 2–4 customer-perspective scenarios:
 
 Scenarios become the CE Gate checklist for downstream validation.
 
+#### Structured Scenario Authoring (BDD opt-in)
+
+When the consumer repo's `copilot-instructions.md` contains a `## BDD Framework` section, write scenarios in G/W/T (Given/When/Then) format using the `bdd-scenarios` skill (`.github/skills/bdd-scenarios/SKILL.md`). When the `## BDD Framework` section is absent, use the current natural-language scenario format above (default fallback).
+
+**Heading convention**: `### SN — {title} (Type)` where N is a sequential integer and Type is `Functional` or `Intent`.
+
+```markdown
+### S1 — User completes onboarding (Functional)
+
+Given a new user has opened the application for the first time
+When they follow the onboarding prompts
+Then they reach the home screen with personalized content
+```
+
+**Customer-language principle**: G/W/T keywords are structural framing only. Write clause content in customer terms — no method names, no file paths, no implementation details.
+
 ### Named Design Decisions (D1–DN)
 
 As design decisions are made (during Solution-Designer and Issue-Planner phases), record them in the issue body using the D1–DN convention. Experience-Owner sets up the D1–DN section structure during upstream framing — decisions are populated progressively as Solution-Designer and Issue-Planner formalize them. Experience-Owner is responsible for giving each decision a customer-perspective name and framing it in user-outcome terms. These become the systematic verification checklist at the CE Gate.
@@ -171,7 +187,7 @@ After framing is complete, update the GitHub issue body with:
 
 - Customer problem statement
 - User segments and journeys
-- Scenarios (functional + intent)
+- Scenarios (functional + intent) — use `## Scenarios` (H2) as the section heading in the issue body so Code-Conductor's pre-flight extraction can correctly anchor to it. Individual scenario headings (`### SN — {title} (Type)`) go inside this section.
 - Named design decisions framing (D1–DN owner field)
 - Customer surface identification
 - Design intent reference
@@ -245,7 +261,7 @@ This is the "now that we can see the completed product, does it accomplish the g
 
 Return to Code-Conductor with a structured evidence summary:
 
-- Scenario results (PASS / FAIL / INCONCLUSIVE for each)
+- Scenario results (PASS / FAIL / INCONCLUSIVE for each) — when BDD is enabled, label each result with its scenario ID: e.g., `S1: PASS`, `S2: FAIL`, `S3: INCONCLUSIVE`. Code-Conductor's pre-flight check and Code-Critic's CE prosecution mode both rely on S-IDs appearing in the evidence summary.
 - D1–DN verification results
 - Exploratory validation observations
 - Screenshots or output captured (as references)

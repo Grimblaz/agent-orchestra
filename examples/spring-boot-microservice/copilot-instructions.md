@@ -12,6 +12,14 @@ Microservice handling order processing for an e-commerce platform. This is an **
 - **Build Tool**: Gradle 8.x
 - **Testing**: JUnit 5, Mockito, TestContainers
 
+## BDD Framework
+
+bdd: true
+
+<!-- Phase 1: BDD is activated solely by the presence of the `## BDD Framework` heading above.
+     The `bdd: true` key is reserved for Phase 2 framework mapping (e.g., cucumber.js, behave).
+     To DISABLE BDD, remove the `## BDD Framework` section heading entirely. -->
+
 ## Architecture
 
 Layered architecture following Domain-Driven Design principles:

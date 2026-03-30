@@ -326,6 +326,8 @@ CE prosecution is **one pass only**. Experience-Owner exercises the CE scenarios
 
 **Read-only clarification**: CE Mode is observational only — no source or configuration file modifications. Browser interaction (filling forms, clicking buttons, navigating) is permitted — it is testing, not mutation. If testing mutates app state, note this for subsequent scenarios.
 
+**BDD per-scenario evaluation** (conditional — activate when BDD scenario IDs are present in Experience-Owner's evidence): When the evidence summary contains BDD scenario IDs (e.g., S1, S2, S3), evaluate each scenario individually across all three lenses (Functional, Intent, Error States). Include the scenario ID in finding references — for example: `S2: Intent — partial match` or `S3: Error States — not covered`. When BDD IDs are absent from the evidence, apply the three lenses holistically as usual.
+
 **Output**: Standard prosecution findings ledger with severity/points + CE intent match level (`pass: N` omitted — CE prosecution is not part of the 3-pass structure). This ledger is the input to the defense pass.
 
 ## Finding Categories

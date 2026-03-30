@@ -67,7 +67,7 @@ MANDATORY: Instruct the subagent to work autonomously following <research_instru
 - Check `Documents/Design/` and `Documents/Decisions/` for existing design docs relevant to the task.
 - Pay special attention to instructions and skills made available by the developers to understand best practices and intended usage.
 - Identify the customer-facing surface of the change (Web UI, REST/GraphQL API, CLI, SDK, Batch pipeline, or none) and note the appropriate CE Gate verification tool (native browser tools/Playwright MCP fallback for Web UI, curl/httpie for REST/GraphQL, terminal invocation for CLI/SDK, or skip with reason).
-- Check the issue body for Experience-Owner's CE Gate readiness assessment (customer surface identification, tool availability notes, and pre-drafted CE Gate scenarios — both functional and intent scenarios) — use these directly in the `[CE GATE]` step rather than re-deriving them from scratch. **Graceful degradation**: If Experience-Owner data is absent from the issue body (user invoked `/design` or `/plan` directly, bypassing the Experience-Owner upstream phase), derive CE Gate readiness inline: identify the customer surface from the feature description, assess available tools, draft 2–3 functional scenarios, and note that intent scenarios were not pre-defined.
+- Check the issue body for Experience-Owner's CE Gate readiness assessment (customer surface identification, tool availability notes, and pre-drafted CE Gate scenarios — both functional and intent scenarios) — use these directly in the `[CE GATE]` step rather than re-deriving them from scratch. **Graceful degradation**: If Experience-Owner data is absent from the issue body (user invoked `/design` or `/plan` directly, bypassing the Experience-Owner upstream phase), derive CE Gate readiness inline: identify the customer surface from the feature description, assess available tools, draft 2–3 functional scenarios, and note that intent scenarios were not pre-defined. When BDD is enabled (consumer repo has `## BDD Framework` section), assign scenario IDs (`S1`, `S2`, `S3`) to the derived scenarios using the `### SN — {title} (Type)` heading convention and add `[auto]`/`[manual]` classification tags. Include them in the CE GATE step in the format `SN: {description} [auto/manual]`.
 - For backend/non-UI/CLI projects, identify the API/CLI surface and note how scenarios should be exercised from a customer perspective.
 - Identify missing information, conflicting requirements, or technical unknowns.
 - DO NOT draft a full plan yet — focus on discovery and feasibility.
@@ -107,6 +107,29 @@ The plan should reflect:
 - All plans must include `ce_gate: {true|false}` in frontmatter (set `true` if the change has a customer-facing surface). Insert a **dedicated `[CE GATE]` step** as the final numbered step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Each `[CE GATE]` step must: identify the surface type, include a design intent reference (link to the issue body section or a brief summary of the intended user experience), list the specific scenarios to exercise — both functional (e.g., "Submit the login form with valid credentials and verify the dashboard loads") and intent (e.g., "Verify the confirmation message is specific to what was submitted, not generic") — and specify the exercise method (how Conductor should exercise each scenario, e.g., "use native browser tools to navigate to /login and submit the form", "use curl to POST /api/orders with valid payload"). These must be **first-class numbered plan steps — not sub-bullets** — so Code-Conductor encounters them as blocking checkpoints in its step iteration loop. Set `ce_gate: false` and omit the `[CE GATE]` step only when the change has no customer-facing surface; document the reason.
 - For backend/non-UI/CLI projects, the CE Gate surface is typically the API or CLI — identify the surface and scenarios accordingly.
 - Note: CE Gate execution uses the CE prosecution pipeline (Code-Critic CE prosecution → defense → judge) — do not describe Conductor's judgment in the CE Gate step; describe only the scenarios and surface.
+
+### BDD Scenario Classification (opt-in)
+
+When the consumer repo's `copilot-instructions.md` contains a `## BDD Framework` section, use the `bdd-scenarios` skill (`.github/skills/bdd-scenarios/SKILL.md`) to classify each scenario with `[auto]` or `[manual]` using this classification rubric:
+
+| Condition                                           | Classification        |
+| --------------------------------------------------- | --------------------- |
+| Functional + fully observable (grep/code assertion) | `[auto]`              |
+| Intent + subjective judgment required               | `[manual]`            |
+| Functional but requires UI interaction              | `[manual]` (override) |
+| Any scenario requiring human judgment in CE Gate    | `[manual]` (override) |
+
+_(Classification rubric is duplicated from `bdd-scenarios/SKILL.md` for quick reference. If you update one, update the other.)_
+
+When BDD is enabled, list each scenario in the `[CE GATE]` step by ID with its classification: `SN: {description} [auto/manual]`. For example:
+
+```text
+[CE GATE] — Surface: CLI — ... — Scenarios: S1: Submit login form with valid credentials [auto], S2: Verify confirmation message clarity [manual]
+```
+
+**Reclassification**: Test-Writer may reclassify `[auto]`↔`[manual]` during implementation — note the change in the plan and CE Gate evidence.
+
+When `## BDD Framework` is absent, use the current natural-language scenario format (no IDs, no classification tags).
 
 Before presenting the plan for approval, call Code-Critic as a subagent **three times** to stress-test it. Run all 3 passes independently — do not share findings between passes before merging.
 
@@ -248,7 +271,7 @@ Rules:
 - NO code blocks — describe changes, link to files/symbols
 - NO questions at the end — ask during workflow via #tool:vscode/askQuestions
 - Include execution metadata in plan steps (mode + requirement contract expectations) so implementers can execute without re-deriving process rules.
-- Insert a dedicated **`[CE GATE]`** numbered step as the final implementation step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Format: `N. [CE GATE] — Surface: {type} — Design Intent: {link to issue section or one-line summary of intended UX} — Scenarios: {functional + intent scenarios to exercise and verify} — Method: {how Conductor exercises each scenario}`. This is a blocking step; Code-Conductor must not advance past it without completing the CE Gate or emitting the documented skip marker. Omit only when `ce_gate: false` in frontmatter.
+- Insert a dedicated **`[CE GATE]`** numbered step as the final implementation step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Format: `N. [CE GATE] — Surface: {type} — Design Intent: {link to issue section or one-line summary of intended UX} — Scenarios: {functional + intent scenarios to exercise and verify} — Method: {how Conductor exercises each scenario}`. When BDD is enabled, list each scenario by ID with classification: `SN: {description} [auto/manual]`. This is a blocking step; Code-Conductor must not advance past it without completing the CE Gate or emitting the documented skip marker. Omit only when `ce_gate: false` in frontmatter.
 - For backend/non-UI/CLI projects, the CE Gate surface is the API or CLI — identify appropriate scenarios for customer-perspective verification.
 - Keep scannable
 - **Agent file insertion strategies** — when a plan step modifies `.agent.md` files, categorize each file as exactly one of: (a) **clean insert** — no existing identity/personality text at the canonical insertion point (top of body, immediately before the main heading); (b) **fragment replacement** — existing identity/personality text is present at the canonical insertion point; (c) **stance-preserving insert** — a named stance section (e.g., `## Adversarial Analysis Stance`) sits at the insertion point and must be preserved. Behavioral guidance found elsewhere in the body (not at the canonical insertion point) does not qualify as a fragment — classify those files as clean inserts.

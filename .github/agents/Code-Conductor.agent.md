@@ -576,15 +576,17 @@ Read the plan's `[CE GATE]` step to identify the customer surface. Pass this sur
 1. Read the `[CE GATE]` scenarios from the plan step (natural language descriptions)
 2. Establish the **design intent reference**: read the `Design Intent` field from the plan's `[CE GATE]` step (if present); otherwise read `/memories/session/design-issue-{ID}.md` via `vscode/memory` (falling back to the issue body if the cache is absent). Understand what the change was supposed to accomplish for the user — not just what it does technically
 3. **Delegate CE Gate evidence capture to Experience-Owner** (subagent): Call Experience-Owner as a subagent via the `agent` tool, passing: (a) the issue number, (b) the scenarios from the `[CE GATE]` plan step, (c) the named design decisions (D1–DN) from the issue body, and (d) the design intent reference. Experience-Owner exercises scenarios using appropriate tools, performs D1–DN systematic verification, performs exploratory validation, and returns a structured evidence summary (scenario results, D1–DN verification outcomes, exploratory observations, captured screenshots/output). **Code-Conductor does NOT exercise scenarios itself — delegation is mandatory.** If Experience-Owner returns graceful-degradation output (environment unavailable), emit the appropriate `⚠️ CE Gate skipped` marker and proceed.
-4. **Invoke CE prosecution pipeline**: Pass Experience-Owner's evidence summary to Code-Critic with the marker `"Use CE review perspectives"`. Code-Critic reviews adversarially across 3 lenses (Functional + Intent + Error States) and emits a prosecution findings ledger.
-5. **Defense pass**: Invoke Code-Critic with the CE prosecution ledger and marker `"Use defense review perspectives"`.
-6. **Judge pass**: Invoke Code-Review-Response with both the CE prosecution ledger and defense report. Judge rules final and emits score summary with CE intent match level.
-7. CE Gate result markers (emitted by the judge in conjunction with Code-Conductor's read of the verdict):
+4. **BDD pre-flight coverage check** (conditional — skip when the consumer repo's `copilot-instructions.md` does not contain a `## BDD Framework` section heading; when BDD is active, read scenario IDs from the `## Scenarios` section of the issue body (not from the plan); max 2 recovery cycles, independent of Track 1's 2-cycle budget): Read all scenario IDs from the issue body by matching `### S\d+` headings within the `## Scenarios` section. Scope the extraction to content between the `## Scenarios` heading and the next H2 heading — do not match `### S\d+` patterns outside this boundary. For each ID, verify it appears in Experience-Owner's evidence summary. If all IDs are present, proceed to step 5. If any IDs are missing, invoke `#tool:vscode/askQuestions` with three options: "Re-exercise missing scenario" (re-delegate to Experience-Owner with only the missing IDs; merge evidence with the first run), "Waive with documented reason" (proceed with a documented gap), or "Abort CE Gate" (emit `❌ CE Gate aborted — pre-flight: {N} of {M} scenarios uncovered after {N} recovery cycles` in the PR body; PR creation may continue with the abort marker and documented reason). After 2 recovery cycles, if scenarios remain uncovered, present final options via `#tool:vscode/askQuestions`: `Waive with documented reason` (recommended) or `Abort CE Gate`. When BDD is enabled, include a per-scenario coverage table in the PR body (see PR Body CE Gate Entry). For waived scenarios, use `⚠️ Waived — {reason}` in the Result column.
+5. **Invoke CE prosecution pipeline**: Pass Experience-Owner's evidence summary to Code-Critic with the marker `"Use CE review perspectives"`. Code-Critic reviews adversarially across 3 lenses (Functional + Intent + Error States) and emits a prosecution findings ledger.
+6. **Defense pass**: Invoke Code-Critic with the CE prosecution ledger and marker `"Use defense review perspectives"`.
+7. **Judge pass**: Invoke Code-Review-Response with both the CE prosecution ledger and defense report. Judge rules final and emits score summary with CE intent match level.
+8. CE Gate result markers (emitted by the judge in conjunction with Code-Conductor's read of the verdict):
    - `✅ CE Gate passed — intent match: strong` — all scenarios passed, no defects found, design intent fully achieved
    - `✅ CE Gate passed — intent match: partial` — scenarios pass; intent partially achieved (in-PR fix routed to Code-Smith by default; follow-up issue at Code-Conductor's discretion)
    - `✅ CE Gate passed — intent match: weak` — scenarios pass; intent not met (in-PR fix routed to Code-Smith by default; follow-up issue at Code-Conductor's discretion)
    - `✅ CE Gate passed after fix — intent match: {strong|partial|weak}` — defects found and resolved within loop budget
    - `⚠️ CE Gate skipped — {reason}` — tool unavailable or environment issue
+   - `❌ CE Gate aborted — {reason}` — pre-flight uncovered scenarios not resolved within recovery budget
    - `⏭️ CE Gate not applicable — {reason}` — no customer surface for this change
 
 ### Intent Match Rubric
@@ -644,8 +646,17 @@ When a functional defect or intent deficiency is found:
 Always include in the PR body:
 
 - CE Gate result marker (one of the markers above, with intent match level for passing gates)
-- Scenarios exercised (brief list)
+- Scenarios exercised: when BDD is enabled, use the per-scenario coverage table format below; otherwise, use the current brief list format
 - Track 2 outcome: "Process-Review: no systemic gap found" or link to created follow-up issue
+
+When BDD is enabled, replace the "Scenarios exercised (brief list)" with:
+
+Read the `Class` value (`[auto]` or `[manual]`) from the plan's `[CE GATE]` step scenario entries (e.g., `S1: {description} [auto]`).
+
+| ID  | Type       | Class    | Result    | Evidence            |
+| --- | ---------- | -------- | --------- | ------------------- |
+| S1  | Functional | [manual] | ✅ Passed | {brief description} |
+| S2  | Intent     | [manual] | ✅ Passed | {brief description} |
 
 #### CE and Proxy Prosecution Re-Activation
 

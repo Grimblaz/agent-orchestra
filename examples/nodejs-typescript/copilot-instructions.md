@@ -13,6 +13,14 @@ REST API for task management, supporting task creation, assignment, and status t
 - **Build Tool**: npm / tsc
 - **Testing**: Jest + Supertest
 
+## BDD Framework
+
+bdd: true
+
+<!-- Phase 1: BDD is activated solely by the presence of the `## BDD Framework` heading above.
+     The `bdd: true` key is reserved for Phase 2 framework mapping (e.g., cucumber.js, behave).
+     To DISABLE BDD, remove the `## BDD Framework` section heading entirely. -->
+
 ## Architecture
 
 Layered architecture with strict top-down dependency flow:
