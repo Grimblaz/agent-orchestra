@@ -213,6 +213,10 @@ Describe 'Code-Conductor BDD Phase 2 runner dispatch contract' {
         $script:CCContent | Should -Match '(?is)(all.{0,5}\[auto\].{0,100}pass.{0,200}only.{0,5}\[manual\]|only.{0,5}\[manual\].{0,200}(pass|runner).{0,100}\[auto\])' -Because 'issue #227 requires Code-Conductor to delegate only [manual] scenarios to EO when all [auto] runners passed'
     }
 
+    It 'Code-Conductor runner dispatch adds failed [auto] scenarios to EO delegation list on partial failure' {
+        $script:CCContent | Should -Match '(?is)any.{0,30}\[auto\].{0,30}runner.{0,20}fail.{0,200}add.{0,50}failed.{0,30}\[auto\].{0,100}(EO delegation list|delegation list)' -Because 'issue #227 requires Code-Conductor to add failed [auto] scenarios to the EO delegation list when some (but not all) [auto] runners fail, so EO exercises both the failed [auto] and all [manual] scenarios'
+    }
+
     It 'Code-Conductor PR body per-scenario coverage table includes a Source column' {
         $script:CCContent | Should -Match '(?is)\|\s*Source\s*\|' -Because 'issue #227 requires Code-Conductor to add a Source column to the per-scenario PR coverage table to distinguish runner evidence from EO evidence'
     }

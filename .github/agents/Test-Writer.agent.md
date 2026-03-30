@@ -270,7 +270,9 @@ Place generated `.feature` files in the framework-default output directory from 
 
 ### Idempotency
 
-`.feature` files are regenerated on each pipeline run. Step definition stubs link each `Then` clause to the scenario's Intent — the consumer maintains assertion logic in stub implementations.
+`.feature` files are regenerated on each pipeline run. **Important**: Step definition stub files are generated **once** at initial run and are **not** regenerated on subsequent pipeline runs — only the `.feature` file is regenerated. Existing stub files are preserved to protect the consumer's assertion logic. Generate stub files only if they do not already exist.
+
+Generated stubs are pending by default (e.g., `return 'pending'` in cucumber.js). The consumer must implement the step definitions before runner dispatch at CE Gate time produces per-scenario passing evidence.
 
 ### Warning Behavior
 

@@ -17,7 +17,8 @@ Microservice handling order processing for an e-commerce platform. This is an **
 bdd: cucumber
 
 <!-- Phase 2: `bdd: {framework}` enables Gherkin file generation and runner dispatch at CE Gate time.
-     Recognized values: cucumber.js, behave, jest-cucumber, cucumber (JVM).
+     Recognized values: cucumber.js, behave, jest-cucumber, cucumber.
+     To revert to **Phase 1** (G/W/T scenario authoring only, no Gherkin generation), remove the `bdd:` line but keep the `## BDD Framework` heading.
      To DISABLE BDD, remove the `## BDD Framework` section heading entirely. -->
 
 ## Architecture
