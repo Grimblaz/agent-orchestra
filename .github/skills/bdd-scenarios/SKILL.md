@@ -108,7 +108,6 @@ Phase 2 is active when **both** conditions are met in the consumer repo's `copil
 | cucumber (JVM Cucumber) | `@S{N}`    | `src/test/resources/features/` | `./gradlew test -Dcucumber.filter.tags=@S{N}` | `./gradlew --version`       |
 
 > **jest-cucumber limitation**: jest-cucumber does not support per-scenario Gherkin tag filtering via CLI. Runner dispatch for jest-cucumber runs the entire `features/` directory as one suite. All `[auto]` scenarios receive the same evidence record (suite-level pass/fail rather than per-scenario). Conflict detection (`source: runner+eo, result: conflict`) is still reachable: if the suite fails and EO passes during the delegated re-exercise, the conflict is recorded at suite granularity (all `[auto]` scenarios may resolve to conflict). Per-scenario runner granularity is what is not available — the suite-level result applies uniformly to all `[auto]` scenarios.
-
 > **cucumber (JVM Cucumber) note**: Runner commands assume Gradle (`./gradlew`). Maven-based projects will fail the pre-check and fall back to Phase 1 (EO exercises all scenarios). No runner dispatch occurs for Maven+Cucumber consumers.
 
 ### Gherkin Conversion Rules
