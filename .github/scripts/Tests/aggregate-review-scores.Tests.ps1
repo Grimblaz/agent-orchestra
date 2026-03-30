@@ -50,7 +50,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         $script:CleanCalibrationBootstrapSkipReason =
         'clean calibration bootstrap did not produce a usable real PR candidate'
         $script:CleanCalibrationWindowStabilitySkipReason =
-        'clean calibration bootstrap latest-10 github/docs window changed after bootstrap'
+        "clean calibration bootstrap latest-$($script:CleanCalibrationLimit) github/docs window changed after bootstrap"
         $script:TestHasPipelineMetricsBlock = {
             param([AllowNull()][string]$Body)
 
@@ -410,7 +410,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 '-Repo',
                 $script:CleanCalibrationRepo,
                 '-Limit',
-                '10',
+                $script:CleanCalibrationLimit,
                 '-CalibrationFile',
                 $calibPath
             )
@@ -459,7 +459,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 '-Repo',
                 $script:CleanCalibrationRepo,
                 '-Limit',
-                '10',
+                $script:CleanCalibrationLimit,
                 '-CalibrationFile',
                 $calibPath
             )
@@ -503,7 +503,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 '-Repo',
                 $script:CleanCalibrationRepo,
                 '-Limit',
-                '10',
+                $script:CleanCalibrationLimit,
                 '-CalibrationFile',
                 $calibPath
             )
