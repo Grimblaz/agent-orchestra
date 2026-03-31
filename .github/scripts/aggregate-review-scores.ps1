@@ -296,7 +296,7 @@ $v2IssuesAnalyzed = 0
 # can reference it before the output section runs)
 $knownCategories = @(
     'architecture', 'security', 'performance', 'pattern',
-    'simplicity', 'script-automation', 'documentation-audit'
+    'implementation-clarity', 'script-automation', 'documentation-audit'
 )
 $systemicActive = $false   # true only inside the local-calibration findings loop
 
@@ -319,6 +319,9 @@ $confidenceData = @{
 $accumulateFinding = {
     $totalFindings++
     $category = $finding['category'].ToLowerInvariant()
+    if ($category -eq 'simplicity') {
+        $category = 'implementation-clarity'
+    }
     $judgeRuling = $finding['judge_ruling'].ToLowerInvariant()
     $judgeConfidence = if ($finding.ContainsKey('judge_confidence')) { $finding['judge_confidence'].ToLowerInvariant() } else { '' }
     $defenseVerdict = if ($finding.ContainsKey('defense_verdict')) { $finding['defense_verdict'].ToLowerInvariant() } else { '' }
@@ -607,7 +610,7 @@ else {
 # Known category taxonomy (always emit, even if no data)
 $knownCategories = @(
     'architecture', 'security', 'performance', 'pattern',
-    'simplicity', 'script-automation', 'documentation-audit'
+    'implementation-clarity', 'script-automation', 'documentation-audit'
 )
 
 # ---------------------------------------------------------------------------

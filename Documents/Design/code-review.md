@@ -423,7 +423,7 @@ The `<!-- pipeline-metrics -->` format is extended from 18-field flat YAML (v1) 
 - `review_stage` values: `main | postfix | ce | design | proxy`
 - `systemic_fix_type` values (per finding): `instruction | skill | agent-prompt | plan-template | none` — what kind of guardrail would prevent this defect class; filled by Code-Critic at prosecution time; defaults to `none` when absent
 
-**Category values** (Code-Critic's 7 category taxonomy values — 6 prosecution perspectives post-#212; `documentation-audit` and `script-automation` share a single §6 Script & Automation perspective): `architecture | security | performance | pattern | simplicity | script-automation | documentation-audit`; `n/a` for CE, design, and proxy prosecution findings.
+**Category values** (Code-Critic's 7 category taxonomy values — 6 prosecution perspectives post-#212; `documentation-audit` and `script-automation` share a single §6 Script & Automation perspective): `architecture | security | performance | pattern | implementation-clarity | script-automation | documentation-audit`; `n/a` for CE, design, and proxy prosecution findings.
 
 ### Code-Review-Response Structured Output
 
@@ -706,7 +706,7 @@ Prosecution depth: 5 full, 1 light, 1 skip
 | security | light | sustain rate 0.12 / 22 effective findings |
 | performance | full | — |
 | pattern | skip | sustain rate 0.03 / 35 effective findings |
-| simplicity | full | — |
+| implementation-clarity | full | — |
 | script-automation | full | insufficient data (8 effective) |
 | documentation-audit | full | — |
 ```

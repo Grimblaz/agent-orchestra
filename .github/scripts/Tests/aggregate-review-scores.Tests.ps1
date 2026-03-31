@@ -586,7 +586,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # Authoritative category list (mirrors $knownCategories in the script)
             $script:DepthCategories = @(
                 'architecture', 'security', 'performance', 'pattern',
-                'simplicity', 'script-automation', 'documentation-audit'
+                'implementation-clarity', 'script-automation', 'documentation-audit'
             )
 
             # Query merged PRs without pipeline-metrics blocks for calibration entries.
@@ -817,23 +817,54 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'reports recommendation full with sufficient_data false when effective_count < 20' -Tag 'requires-gh' {
-            # Fixture: architecture findings only → simplicity gets data only from real
-            # pipeline-metrics PRs (small effective_count, < 20 → insufficient data)
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            # Fixture: one implementation-clarity finding on a clean github/docs PR.
+            # github/docs latest-10 PRs do not use pipeline-metrics, so this category's
+            # effective_count is driven only by the local calibration entry and remains
+            # well below the 20-point prosecution-depth threshold.
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
+            if (-not (& $script:AssertCleanCalibrationWindowStable)) {
+                return
+            }
 
             $workDir = & $script:NewWorkDir
-            $findings = & $script:MakeCategoryFindings 'architecture' 1 0
-            $calib = & $script:BuildDepthCalibration -Findings $findings -PrNumbers $script:NonMetricsPrNumbers
+            $findings = & $script:MakeCategoryFindings 'implementation-clarity' 1 0
+            $calib = & $script:BuildDepthCalibration `
+                -Findings $findings `
+                -PrNumbers $script:CleanRepoPrNumbers
             $calibPath = Join-Path $workDir 'insuff-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
             $result = & $script:InvokeAggregate -WorkDir $workDir `
-                -ExtraArgs @('-CalibrationFile', $calibPath)
+                -ExtraArgs @(
+                '-Repo',
+                $script:CleanCalibrationRepo,
+                '-Limit',
+                $script:CleanCalibrationLimit,
+                '-CalibrationFile',
+                $calibPath
+            )
 
             $result.ExitCode | Should -Be 0
-            $result.Output | Should -Match '(?s)prosecution_depth:.*?simplicity:\s+recommendation:\s*full' `
+
+            $categoryMatch = [regex]::Match(
+                $result.Output,
+                '(?ms)^    implementation-clarity:\r?\n(?:      .*\r?\n){0,5}'
+            )
+            $categoryMatch.Success | Should -BeTrue `
+                -Because 'implementation-clarity must appear in prosecution_depth output'
+
+            $categoryBlock = $categoryMatch.Value
+            $effectiveCountMatch = [regex]::Match($categoryBlock, 'effective_count:\s*([0-9]+(?:\.[0-9]+)?)')
+            $effectiveCountMatch.Success | Should -BeTrue `
+                -Because 'implementation-clarity prosecution_depth output must include effective_count'
+            $effectiveCount = [double]$effectiveCountMatch.Groups[1].Value
+            $effectiveCount | Should -BeGreaterThan 0 `
+                -Because 'the controlled implementation-clarity fixture must contribute non-zero effective_count so the insufficient-data assertion cannot pass vacuously'
+            $effectiveCount | Should -BeLessThan 20 `
+                -Because 'the insufficient-data guardrail is defined by effective_count < 20'
+            $categoryBlock | Should -Match 'recommendation:\s*full' `
                 -Because 'insufficient data (effective_count < 20) must default to recommendation: full'
-            $result.Output | Should -Match '(?s)prosecution_depth:.*?simplicity:.*?sufficient_data:\s*false' `
+            $categoryBlock | Should -Match 'sufficient_data:\s*false' `
                 -Because 'effective_count < 20 must set sufficient_data: false'
         }
 
@@ -1370,6 +1401,33 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 -Because 'unknown categories must be excluded from systemic_patterns'
         }
 
+        It 'maps legacy simplicity findings to implementation-clarity without emitting a simplicity key' -Tag 'requires-gh' {
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'simplicity'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction'
+                }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings $findings `
+                -PrNumbers @($script:SystemicPr1, $script:SystemicPr2)
+            $calibPath = Join-Path $workDir 'systemic-simplicity-alias.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '(?ms)^  systemic_patterns:\r?\n(?:(?!^  \S).*\r?\n)*?      implementation-clarity:' `
+                -Because 'legacy simplicity findings must contribute under implementation-clarity in systemic_patterns output'
+            $result.Output | Should -Not -Match '(?ms)^  systemic_patterns:\r?\n(?:(?!^  \S).*\r?\n)*?      simplicity:' `
+                -Because 'systemic_patterns must not emit a legacy simplicity key after alias normalization'
+            $result.Output | Should -Not -Match '(?ms)^  prosecution_depth:\r?\n(?:(?!^  \S).*\r?\n)*?    simplicity:' `
+                -Because 'prosecution_depth must not emit a legacy simplicity key after alias normalization'
+        }
         It 'omits systemic_patterns section when all systemic_fix_type values are none' -Tag 'requires-gh' {
             # Boundary/backward-compat test: no systemic_patterns section when no findings
             # have a non-none systemic_fix_type. Passes in red state (section not yet

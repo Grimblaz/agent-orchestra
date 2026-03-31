@@ -351,11 +351,11 @@ Each pass is an **independent invocation** of Code-Critic — not a duplicate. L
 
 Classify the PR change type using `git diff --name-only main..HEAD` (cross-branch diff — no built-in tool equivalent) and include the classification in each pass prompt:
 
-| Change type          | Condition                                                                     | Active perspectives                                                                                                                                                                           |
-| -------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `documentation-only` | All changed files are `.md`, `.instructions.md`, `.prompt.md`, or `.agent.md` | Architecture (§1, docs-misrepresentation check only), Simplicity (§5), Script & Automation (doc-audit sub-gate, if `.md` files contain shell blocks), Patterns doc-clarity angle (§4 partial) |
-| `mixed`              | Changed files include both source/scripts AND docs                            | All 6 perspectives                                                                                                                                                                            |
-| `code` (default)     | Changed files include source code, scripts, or runtime config                 | All 6 perspectives                                                                                                                                                                            |
+| Change type          | Condition                                                                     | Active perspectives                                                                                                                                                                                       |
+| -------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `documentation-only` | All changed files are `.md`, `.instructions.md`, `.prompt.md`, or `.agent.md` | Architecture (§1, docs-misrepresentation check only), Implementation Clarity (§5), Script & Automation (doc-audit sub-gate, if `.md` files contain shell blocks), Patterns doc-clarity angle (§4 partial) |
+| `mixed`              | Changed files include both source/scripts AND docs                            | All 6 perspectives                                                                                                                                                                                        |
+| `code` (default)     | Changed files include source code, scripts, or runtime config                 | All 6 perspectives                                                                                                                                                                                        |
 
 > **Precedence**: Evaluate rows in order; the first matching condition applies. `mixed` takes priority over `code` for source+docs PRs.
 
@@ -709,15 +709,15 @@ Prosecution depth: 5 full, 1 light, 1 skip
 ```markdown
 ## Prosecution Depth Summary
 
-| Category            | Depth | Rationale                                 |
-| ------------------- | ----- | ----------------------------------------- |
-| architecture        | full  | —                                         |
-| security            | light | sustain rate 0.12 / 22 effective findings |
-| performance         | full  | —                                         |
-| pattern             | skip  | sustain rate 0.03 / 35 effective findings |
-| simplicity          | full  | —                                         |
-| script-automation   | full  | insufficient data (8 effective)           |
-| documentation-audit | full  | insufficient data (3 effective)           |
+| Category               | Depth | Rationale                                 |
+| ---------------------- | ----- | ----------------------------------------- |
+| architecture           | full  | —                                         |
+| security               | light | sustain rate 0.12 / 22 effective findings |
+| performance            | full  | —                                         |
+| pattern                | skip  | sustain rate 0.03 / 35 effective findings |
+| implementation-clarity | full  | —                                         |
+| script-automation      | full  | insufficient data (8 effective)           |
+| documentation-audit    | full  | insufficient data (3 effective)           |
 
 Re-activated categories (if any): {list with trigger source, or "none"}
 ```

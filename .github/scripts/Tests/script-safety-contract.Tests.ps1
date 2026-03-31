@@ -23,12 +23,12 @@ Describe 'script safety contract' {
         $script:AggregateReviewScores = Join-Path $script:ScriptsRoot 'aggregate-review-scores.ps1'
 
         $script:ProductionScripts = Get-ChildItem -Path $script:ScriptsRoot -Recurse -Filter '*.ps1' |
-        Where-Object { $_.DirectoryName -notmatch '[/\\]Tests([/\\]|$)' }
+            Where-Object { $_.DirectoryName -notmatch '[/\\]Tests([/\\]|$)' }
 
         # Canonical taxonomy — sorted alphabetically for deterministic comparison
         $script:MandatedCategories = @(
-            'architecture', 'documentation-audit', 'pattern', 'performance',
-            'script-automation', 'security', 'simplicity'
+            'architecture', 'documentation-audit', 'implementation-clarity',
+            'pattern', 'performance', 'script-automation', 'security'
         )
     }
 
@@ -58,10 +58,10 @@ Describe 'script safety contract' {
 
         $allMatches | ForEach-Object {
             $extractedSorted = [regex]::Matches($_.Groups[1].Value, "'([a-z-]+)'") |
-            ForEach-Object { $_.Groups[1].Value } |
-            Sort-Object
+                ForEach-Object { $_.Groups[1].Value } |
+                Sort-Object
 
-            ($extractedSorted -join ',') | Should -Be ($script:MandatedCategories -join ',') -Because 'every $knownCategories definition must contain exactly the 7 mandated taxonomy values (architecture, documentation-audit, pattern, performance, script-automation, security, simplicity); drift breaks cross-script consistency and calibration data integrity'
+                ($extractedSorted -join ',') | Should -Be ($script:MandatedCategories -join ',') -Because 'every $knownCategories definition must contain exactly the 7 mandated taxonomy values (architecture, documentation-audit, implementation-clarity, pattern, performance, script-automation, security); drift breaks cross-script consistency and calibration data integrity'
+            }
         }
     }
-}

@@ -352,7 +352,7 @@ Every finding must also include these automation-routing fields:
 - `confidence`: high | medium | low
 - `id`: F1 | F2 | F3 | … — sequential label within this review cycle; used by defense and judge to cross-reference findings by ID. Assign in order of appearance.
 - `pass`: 1 | 2 | 3 — prosecution pass number that originated this finding. Code prosecution and design/plan prosecution; omit in CE review, proxy prosecution, and defense mode.
-- `category`: architecture | security | performance | pattern | simplicity | script-automation | documentation-audit — the active prosecution perspective for this finding. Code prosecution only; use `n/a` in CE review, design review, product-alignment prosecution, and proxy prosecution modes. For findings that span multiple perspectives, use the primary perspective.
+- `category`: architecture | security | performance | pattern | implementation-clarity | script-automation | documentation-audit — the active prosecution perspective for this finding. Code prosecution only; use `n/a` in CE review, design review, product-alignment prosecution, and proxy prosecution modes. For findings that span multiple perspectives, use the primary perspective.
 - `blast_radius`: localized | module | cross-module | system-wide
 - `authority_needed`: yes | no
 - `systemic_fix_type`: instruction | skill | agent-prompt | plan-template | none — root cause classification: what kind of guardrail would prevent this defect class? Filled in by prosecutor during each prosecution pass (code, design/plan, product-alignment, CE, and proxy prosecution). Always emit this field; use `none` when no specific guardrail type applies.
@@ -541,7 +541,7 @@ _To identify peers: grep for the field name in function signatures (criterion a)
 - [ ] SOLID principles applied _(code-only — skip for docs)_
 - [ ] UI tests query by `aria-label`/behavior, NOT DOM structure (see `.github/skills/ui-testing/SKILL.md`) _(code-only — skip for docs)_
 
-### 5. Simplicity Perspective
+### 5. Implementation Clarity Perspective
 
 **When to apply**: All change types, including documentation-only PRs. For documentation: evaluate clarity, precision, and the absence of unnecessary complexity in explanations and examples.
 
@@ -651,7 +651,7 @@ Do not include checklist items. This eliminates output bloat without reducing co
 
 [Specific findings]
 
-### ✅ Simplicity: PASS/FAIL
+### ✅ Implementation Clarity: PASS/FAIL
 
 [Specific findings]
 
