@@ -1,5 +1,5 @@
 #!/bin/sh
-# Pre-commit hook: auto-format staged Markdown and PowerShell files.
+# Pre-commit hook: format staged Markdown and PowerShell files and normalize curated config/text whitespace.
 #
 # Install once per clone:
 #   git config core.hooksPath .githooks
@@ -8,6 +8,16 @@
 
 # Collect staged files once (added, copied, or modified - not deleted).
 staged_files=$(git diff --cached --name-only --diff-filter=ACM)
+
+restage_if_changed() {
+  file_path="$1"
+  hash_before="$2"
+  hash_after=$(git hash-object -- "$file_path")
+
+  if [ "$hash_before" != "$hash_after" ]; then
+    git add -- "$file_path"
+  fi
+}
 
 # Markdown lane
 if ! command -v markdownlint-cli2 > /dev/null 2>&1; then
@@ -24,9 +34,8 @@ else
       # Errors that cannot be auto-fixed are reported but do not block the commit.
       _hash_before=$(git hash-object -- "$f")
       markdownlint-cli2 --fix "$f" || true
-      _hash_after=$(git hash-object -- "$f")
       # Only re-stage if markdownlint changed the file — avoids unnecessary restaging.
-      [ "$_hash_before" != "$_hash_after" ] && git add -- "$f"
+      restage_if_changed "$f" "$_hash_before"
     done
   fi
 fi
@@ -93,9 +102,39 @@ try {
         continue
       fi
 
-      _hash_after=$(git hash-object -- "$f")
       # This keeps the existing working-tree/restage model explicit for partially staged files.
-      [ "$_hash_before" != "$_hash_after" ] && git add -- "$f"
+      restage_if_changed "$f" "$_hash_before"
+    done
+  fi
+fi
+
+# Generic whitespace-only lane
+staged_whitespace=$(printf '%s\n' "$staged_files" | grep -E '(\.(json|jsonc|yml|yaml|psd1|txt)$|(^|/)\.gitignore$|(^|/)\.gitattributes$|(^|/)\.editorconfig$)')
+
+if [ -n "$staged_whitespace" ]; then
+  whitespace_helper=".github/scripts/normalize-whitespace.ps1"
+
+  if ! command -v pwsh > /dev/null 2>&1; then
+    echo "⚠ pwsh not found — skipping whitespace normalization for config/text files."
+    echo "  Install PowerShell 7+: https://aka.ms/powershell-install"
+  elif [ ! -f "$whitespace_helper" ]; then
+    echo "⚠ normalize-whitespace helper not found — skipping whitespace normalization for config/text files."
+    echo "  Expected helper: $whitespace_helper"
+  else
+    echo "→ normalize-whitespace on staged config/text files..."
+    printf '%s\n' "$staged_whitespace" | while IFS= read -r f; do
+      _hash_before=$(git hash-object -- "$f")
+      ws_output=$(pwsh -NoProfile -NonInteractive -File "$whitespace_helper" -Path "$f" 2>&1)
+      if [ $? -ne 0 ]; then
+        ws_error_first_line=$(printf '%s\n' "$ws_output" | sed -n '1p')
+        echo "⚠ normalize-whitespace failed for $f — leaving file unchanged."
+        [ -n "$ws_error_first_line" ] && echo "  Error: $ws_error_first_line"
+        continue
+      fi
+
+      [ -n "$ws_output" ] && printf '%s\n' "$ws_output"
+
+      restage_if_changed "$f" "$_hash_before"
     done
   fi
 fi

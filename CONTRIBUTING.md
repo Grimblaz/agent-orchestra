@@ -14,17 +14,24 @@ For the best experience with Copilot Orchestra:
 
 ### Recommended Tooling
 
-- PowerShell 7+ (`pwsh`) with `PSScriptAnalyzer` — recommended for automatic `.ps1` formatting in VS Code and the pre-commit hook: `pwsh -NoProfile -Command "Install-Module PSScriptAnalyzer -Scope CurrentUser"`
+- PowerShell 7+ (`pwsh`) — recommended so the pre-commit hook can run the allowlisted whitespace-normalization lane for config/text files
+- `PSScriptAnalyzer` — recommended if you want automatic semantic formatting for staged `.ps1` files in VS Code and the pre-commit hook: `pwsh -NoProfile -Command "Install-Module PSScriptAnalyzer -Scope CurrentUser"`
 
 ### Recommended Settings
 
-Enable the pre-commit hook to auto-format staged Markdown and PowerShell files before every commit (covers agents and manual edits):
+Enable the pre-commit hook to run three independent lanes before every commit (covers agents and manual edits): semantic Markdown formatting for staged `.md`, semantic PowerShell formatting for staged `.ps1`, and whitespace-only normalization for staged allowlisted config/text files:
 
 ```sh
 git config core.hooksPath .githooks
 ```
 
-The hook runs `markdownlint-cli2 --fix` on staged `.md` files (including `.agent.md` agent definitions) and re-stages any Markdown changes. When `pwsh` and `PSScriptAnalyzer` are available, it also runs `Invoke-Formatter` on staged `.ps1` files and re-stages any PowerShell changes. If PowerShell tooling is missing, the hook warns and skips the PowerShell lane rather than blocking the commit.
+The hook runs `markdownlint-cli2 --fix` on staged `.md` files (including `.agent.md` agent definitions) and re-stages any Markdown changes. When `pwsh` and `PSScriptAnalyzer` are available, it also runs `Invoke-Formatter` on staged `.ps1` files and re-stages any PowerShell changes.
+
+Separately, when `pwsh` and `.github/scripts/normalize-whitespace.ps1` are available, the hook runs a whitespace-only lane for staged `.json`, `.jsonc`, `.yml`, `.yaml`, `.psd1`, `.txt`, `.gitignore`, `.gitattributes`, and `.editorconfig` files. That lane trims trailing horizontal whitespace, removes trailing blank lines at EOF, and ensures a single final newline. It does not do semantic reformatting, and it does not take ownership away from the existing Markdown or `.ps1` lanes.
+
+All three lanes are intentionally non-blocking. If `markdownlint-cli2`, `pwsh`, `PSScriptAnalyzer`, or the whitespace helper is unavailable, or if a file-level formatting pass fails, the hook prints an explicit warning and continues so the commit still succeeds.
+
+The hook keeps the existing whole-file re-stage model: if any lane rewrites a staged file, it re-stages the full file with `git add`. If you use partial staging, review the staged diff after the hook runs because non-staged hunks from that file can be pulled into the commit.
 
 Enable the built-in GitHub MCP server for seamless issue and PR workflows:
 
