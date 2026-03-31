@@ -1336,6 +1336,40 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 -Because 'n/a category must be excluded from systemic_patterns'
         }
 
+        It 'excludes unknown categories from systemic patterns' -Tag 'requires-gh' {
+            # Both valid (security) and unknown findings are present; section must
+            # appear for the valid finding but must not contain an unknown category key.
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
+
+            $workDir = & $script:NewWorkDir
+            $findings = @(
+                [ordered]@{ id = 'F1'; category = 'security'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction'
+                },
+                [ordered]@{ id = 'F2'; category = 'unknown-cat'; judge_ruling = 'finding-sustained'
+                    severity = 'medium'; points = 5; review_stage = 'main'
+                    systemic_fix_type = 'instruction'
+                }
+            )
+            $calib = & $script:BuildSystemicCalibration `
+                -Findings $findings `
+                -PrNumbers @($script:SystemicPr1, $script:SystemicPr2)
+            $calibPath = Join-Path $workDir 'systemic-unknown-category.json'
+            & $script:WriteCalibrationFile -Path $calibPath -Data $calib
+
+            $result = & $script:InvokeAggregate -WorkDir $workDir `
+                -ExtraArgs @('-CalibrationFile', $calibPath)
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'systemic_patterns:' `
+                -Because 'systemic_patterns section must appear when valid known-category findings exist'
+            $result.Output | Should -Match '(?ms)^  systemic_patterns:\r?\n(?:(?!^  \S).*\r?\n)*?      security:' `
+                -Because 'known categories must still appear inside the systemic_patterns block for the same fixture'
+            $result.Output | Should -Not -Match '(?ms)^  systemic_patterns:\r?\n(?:(?!^  \S).*\r?\n)*?      unknown-cat:' `
+                -Because 'unknown categories must be excluded from systemic_patterns'
+        }
+
         It 'omits systemic_patterns section when all systemic_fix_type values are none' -Tag 'requires-gh' {
             # Boundary/backward-compat test: no systemic_patterns section when no findings
             # have a non-none systemic_fix_type. Passes in red state (section not yet
