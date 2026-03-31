@@ -538,7 +538,7 @@ guardrail_proposals:
     upstream: false  # true if fix targets copilot-orchestra shared files
     compression_required: false  # true when target agent exceeds complexity ceiling (agent-prompt proposals only)
     extraction_recommended: false  # true when agent has met persistent_threshold consecutive over-ceiling periods (agent-prompt proposals only)
-    prevention_gate_outcome: created-new  # redirected=Step1-match; consolidated=Step2-merge; created-new=Step3; exempt=outside-§2d-scope — outcome of the §2d prevention-analysis advisory applied before creating this upstream proposal
+    prevention_gate_outcome: created-new  # redirected=Step1-match; reframed=Step2-structural; created-new=Step3; exempt=outside-§2d-scope — outcome of the §2d prevention-analysis advisory applied before creating this upstream proposal
 ```
 
 **Step 4 — Upstream proposals** (when `systemic_fix_type` targets copilot-orchestra shared files):
