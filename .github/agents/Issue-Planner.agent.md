@@ -121,6 +121,8 @@ When the consumer repo's `copilot-instructions.md` contains a `## BDD Framework`
 
 Override rule: when in doubt, classify as `[manual]`.
 
+**Phase 2 note**: When Phase 2 runner dispatch is active (the `## BDD Framework` heading is present AND `bdd: {framework}` is set to a recognized framework), `[auto]`-classified scenarios are runner-executable — Test-Writer generates a `.feature` file and Code-Conductor dispatches the runner at CE Gate time. The classification rubric criteria above are unchanged.
+
 _(Classification rubric is duplicated from `bdd-scenarios/SKILL.md` for quick reference. If you update one, update the other.)_
 
 When BDD is enabled, list each scenario in the `[CE GATE]` step by ID with its classification: `SN: {description} [auto/manual]`. For example:

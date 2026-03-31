@@ -220,6 +220,8 @@ Called by Code-Conductor as a subagent during the CE Gate step. Exercises scenar
 
 **NOTE: Do NOT prosecute. Evidence capture only. Adversarial prosecution stays in Code-Critic (adversarial independence preserved).**
 
+**Phase 2 conditional delegation**: When Phase 2 BDD runner dispatch is active, Code-Conductor determines the delegation scope before calling Experience-Owner. Experience-Owner receives only the scenarios CC delegates: `[manual]` only (if all `[auto]` runners passed), all scenarios (if runner pre-check failed or CC is in Phase 1 mode), or a mixed list (if some `[auto]` runners failed). Exercise whatever scenarios are in the delegation list — do not attempt to exercise scenarios that were not delegated (the runner has already covered them).
+
 ### Before Exercising Scenarios
 
 1. Read the issue body to retrieve:

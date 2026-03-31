@@ -19,6 +19,10 @@ Consumer repos opt in via a `## BDD Framework` heading in `copilot-instructions.
 | D3 | Scenario extraction mechanism | Code-Conductor uses `### S\d+` grep scoped within `## Scenarios` to next H2 boundary to enumerate IDs before CE pre-flight | Grep-based extraction is stateless, requires no tooling beyond what agents already have, and is trivially auditable |
 | D4 | Coverage gap detection | Hard pre-flight gate in Code-Conductor (`vscode/askQuestions`): Re-exercise / Waive / Abort; max 2 recovery cycles; abort marker written to PR body | Hard gate prevents silent misses; `vscode/askQuestions` is the established recovery mechanism used by CE Track 1; 2-cycle budget matches the existing CE fix-revalidate loop budget (D2 in customer-experience-gate.md) |
 | D5 | Opt-in detection | Presence of `## BDD Framework` heading in consumer repo's `copilot-instructions.md`; template ships BDD-disabled | Heading-based detection requires no tooling config and is readable and grep-stable; template stays BDD-disabled so downstream repos that are not code repos are not forced into G/W/T workflow |
+| D6 | Phase 2 activation mechanism | Both `## BDD Framework` heading AND `bdd: {framework}` line required; `bdd: true` / unrecognized → warning + Phase 1 fallback | Requiring both conditions prevents accidental activation; sentinel `bdd: true` had a documented Phase 2 placeholder role in Phase 1 that must be preserved as a graceful upgrade path rather than silent failure |
+| D7 | Supported framework mapping | Four entries: `cucumber.js`, `behave`, `jest-cucumber`, `cucumber` (JVM); each maps to a runner command, version check, and default feature directory | Explicit mapping table allows exact, testable dispatch commands and predictable output locations; unrecognized values fall back to Phase 1 to limit blast radius of misconfiguration |
+| D8 | Unified evidence record schema | 5-field record: `scenario_id`, `source` (`runner \| eo \| runner+eo`), `result` (`pass \| fail \| conflict`), `detail`, `raw_exit_code` (runner only) | Unified schema flows from runner → merge → EO evidence → Code-Critic without format negotiation; `source` field enables per-source evaluation rules in prosecution |
+| D9 | Runner dispatch and EO conditional delegation | Runner dispatches per scenario using `@S{N}` tag filter; EO receives only scenarios CC delegates (Phase 1: all; Phase 2: conditional on runner pass/fail); conflict = Concern, not Issue | Conditional delegation avoids redundant EO exercise of runner-verified [auto] scenarios; classifying conflict as Concern prevents false automation failures when runner and EO disagree |
 
 ---
 
@@ -140,6 +144,79 @@ See [customer-experience-gate.md](customer-experience-gate.md) for the full CE G
 
 ---
 
+## Phase 2: Gherkin Conversion & Runner Dispatch
+
+### Activation
+
+Phase 2 requires **both** conditions:
+
+1. `## BDD Framework` heading present in consumer's `copilot-instructions.md`
+2. `bdd: {framework}` line under that heading with a recognized framework value
+
+| Condition | Behavior |
+|-----------|----------|
+| Heading present + `bdd: {framework}` recognized | Phase 2 active |
+| Heading present, no `bdd:` line | Phase 1 (existing behavior, unchanged) |
+| Heading present + `bdd: true` | Warning emitted; Phase 1 fallback |
+| Heading present + `bdd: {unknown}` | Warning emitted; Phase 1 fallback |
+
+### Framework Mapping
+
+| Framework | `bdd:` value | Feature directory | Runner command | Version check |
+|-----------|-------------|-------------------|----------------| --------------|
+| cucumber.js | `cucumber.js` | `features/` | `npx cucumber-js --tags @S{N}` | `npx cucumber-js --version` |
+| behave | `behave` | `features/` | `behave --tags @S{N}` | `behave --version` |
+| jest-cucumber | `jest-cucumber` | `features/` | `npx jest --testPathPattern features` | `npx jest --version` |
+| cucumber (JVM) | `cucumber` | `src/test/resources/features/` | `./gradlew test -Dcucumber.filter.tags=@S{N}` | `./gradlew --version` |
+
+### Gherkin Generation (Test-Writer)
+
+- Generates one `.feature` file per issue (idempotent — regenerated each pipeline run)
+- Includes `[auto]` scenarios only; `[manual]` scenarios are excluded
+- Each scenario tagged with `@S{N}` for per-scenario runner dispatch filtering
+- Output location: framework-default directory from mapping table
+- Consumer maintains assertion step definitions; Test-Writer generates scenario outlines only
+
+### Runner Dispatch (Code-Conductor CE Gate, Step 3)
+
+1. **Pre-check**: run version check command from mapping table; fail → warning + Phase 1 fallback (all scenarios delegated to EO)
+2. **Per-scenario dispatch**: run runner with `@S{N}` tag filter for each `[auto]` scenario
+3. **Evidence capture**: record 5-field unified evidence record per scenario (`scenario_id`, `source`, `result`, `detail`, `raw_exit_code`)
+4. **Conditional EO delegation**: all `[auto]` passed → EO receives `[manual]` only; any `[auto]` failed → add failed scenarios; pre-check failed → all scenarios
+5. **Evidence merge**: after EO delegation returns, merge EO evidence for all delegated scenarios; runner primary for `[auto]`; EO primary for `[manual]`; divergence → `source: runner+eo`, `result: conflict`
+
+### Unified Evidence Record Schema
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `scenario_id` | string | e.g., `S1` |
+| `source` | `runner \| eo \| runner+eo` | Origin of evidence |
+| `result` | `pass \| fail \| conflict` | Outcome |
+| `detail` | string | Summary or first stderr line |
+| `raw_exit_code` | int | Runner source only |
+
+### Code-Critic Runner Evidence Evaluation
+
+When the unified evidence record contains a `source` field, Code-Critic applies source-specific evaluation semantics:
+
+| Source | Result | Code-Critic treatment |
+|--------|--------|-----------------------|
+| `runner` | `pass` | Strong Functional evidence — focus scrutiny on Intent and Error States |
+| `runner` | `fail` | Concern under Functional lens; cite `detail` and `raw_exit_code` |
+| `runner+eo` | `conflict` | Concern (not Issue); include both records; request clarification |
+| `eo` | any | Phase 1 per-scenario evaluation unchanged |
+
+### PR Body Coverage Table (Phase 2 extension)
+
+```text
+| ID  | Type       | Class    | Result    | Evidence            | Source |
+| --- | ---------- | -------- | --------- | ------------------- | ------ |
+| S1  | Functional | [auto]   | ✅ Passed | exit 0, 1 assertion | Runner |
+| S2  | Intent     | [manual] | ✅ Passed | {observation note}  | EO     |
+```
+
+---
+
 ## Opt-In Detection
 
 | State | Detection | Behavior |
@@ -166,16 +243,17 @@ Structured authoring and traceability infrastructure:
 - `bdd-scenarios` skill with authoring patterns and ID lifecycle guidance
 - Consumer opt-in via `## BDD Framework` heading; template ships BDD-disabled
 
-### Phase 2 — Deferred (Separate Issue)
+### Phase 2 — Delivered (Issue #227)
 
 Gherkin conversion and framework runner integration:
 
-- Conversion of S-ID scenarios to `.feature` files using consumer-stack-native BDD framework (Cucumber, Behave, SpecFlow, etc.)
-- Consumer `copilot-instructions.md` config section for framework mapping
-- Automated test case generation from G/W/T scenarios
-- CI integration for feature file execution
-
-**Deferral rationale**: Phase 2 requires consumer-facing tooling choices (framework selection, runner configuration, CI wiring) that vary significantly by tech stack and are too risky to bundle with Phase 1's foundational traceability work. Phase 1 establishes the ID and authoring contract that Phase 2 will build on.
+- `bdd: {framework}` key in consumer `copilot-instructions.md` under `## BDD Framework` heading activates Phase 2
+- Test-Writer generates a single `.feature` file per issue with `@S{N}` tags for each `[auto]` scenario
+- Code-Conductor CE Gate runner dispatch: pre-check → per-scenario dispatch → evidence capture → conditional EO delegation → evidence merge
+- Code-Critic runner evidence evaluation keyed on `source` field in unified evidence record
+- Unified 5-field evidence record schema flows runner output through the full CE Gate pipeline
+- Conditional EO delegation: EO receives `[manual]` only when all `[auto]` runners passed; all scenarios when pre-check failed; mixed list when some `[auto]` runners failed
+- PR body coverage table extended with `Source` column (`Runner` / `EO`)
 
 ---
 
@@ -191,3 +269,19 @@ Gherkin conversion and framework runner integration:
 | `examples/*/copilot-instructions.md` (3 files) | Ship BDD-enabled with a commented disable note |
 | `.github/copilot-instructions.md` | Updated skill count; BDD opt-in documentation |
 | `CUSTOMIZATION.md` | BDD configuration guidance |
+
+## Files Changed (Phase 2)
+
+| File | Change |
+|------|--------|
+| `.github/skills/bdd-scenarios/SKILL.md` | Phase 2 section added: framework mapping table, Gherkin conversion rules, runner dispatch protocol, unified evidence schema, CE prosecution guidance |
+| `.github/agents/Test-Writer.agent.md` | `## BDD Gherkin Generation (Phase 2)` section: activation, [auto]-only generation, @S{N} tags, skill reference, warning behavior |
+| `.github/agents/Code-Conductor.agent.md` | CE Gate runner dispatch step (step 3); EO conditional delegation note; Source column in PR coverage table |
+| `.github/agents/Experience-Owner.agent.md` | Phase 2 conditional delegation note in Downstream Phase section |
+| `.github/agents/Code-Critic.agent.md` | Runner evidence evaluation block keyed on `source` field |
+| `.github/agents/Issue-Planner.agent.md` | Phase 2 note below rubric table connecting [auto] → runner-executable |
+| `examples/nodejs-typescript/copilot-instructions.md` | `bdd: cucumber.js` line added; Phase 2 comment replacing Phase 1 placeholder |
+| `examples/python/copilot-instructions.md` | `bdd: behave` line added; Phase 2 comment |
+| `examples/spring-boot-microservice/copilot-instructions.md` | `bdd: cucumber` line added; Phase 2 comment |
+| `.github/copilot-instructions.md` | BDD description expanded to include Phase 2 capabilities |
+| `.github/scripts/Tests/bdd-scenario-contract.Tests.ps1` | 4 new Phase 2 Describe blocks (16 It blocks) |

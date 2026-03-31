@@ -1,6 +1,6 @@
 ---
 name: bdd-scenarios
-description: Structured Given/When/Then scenario authoring with ID traceability and CE Gate coverage gap detection. Use when writing or reviewing BDD scenarios in Copilot Orchestra, classifying scenarios as [auto]/[manual], managing scenario ID lifecycle, or extracting scenario IDs for CE Gate pre-flight. DO NOT USE FOR: Gherkin test file conversion (Phase 2, deferred), framework-specific runner configuration, general test strategy (use test-driven-development), or writing example-based unit tests.
+description: Structured Given/When/Then scenario authoring with ID traceability and CE Gate coverage gap detection. Use when writing or reviewing BDD scenarios in Copilot Orchestra, classifying scenarios as [auto]/[manual], managing scenario ID lifecycle, extracting scenario IDs for CE Gate pre-flight, generating Gherkin .feature files and step definitions for [auto] scenarios (Phase 2), or configuring framework runner dispatch for CE Gate (Phase 2). DO NOT USE FOR: general test strategy (use test-driven-development), or writing example-based unit tests.
 ---
 
 # BDD Scenarios
@@ -79,4 +79,175 @@ BDD structured scenarios are only active when the consumer repo's `copilot-instr
 - **Customer language principle**: G/W/T keywords are structural framing only. The clause content must be in customer terms — no method names, no file paths, no agent names, no implementation details. "When the system calls ExperienceOwner.FrameScenarios()" is wrong; "When the team begins feature planning" is correct.
 - **BDD detection gating**: All BDD-specific behavior (G/W/T authoring, classification, pre-flight, per-scenario prosecution) is conditional on `## BDD Framework` presence. Repos without this section keep the existing natural-language workflow unchanged — do not apply rubric, IDs, or pre-flight to natural-language scenarios.
 - **Issue-body source of truth**: The `## Scenarios` section in the GitHub issue body is the authoritative store for scenario IDs. Any abbreviated or derived authoring path (e.g., generating scenarios only in the plan's `[CE GATE]` step) **must** also write the full scenarios back into the issue body using the GitHub issue update tool — Code-Conductor's CE Gate pre-flight reads from the issue body and will treat missing issue-body scenarios as coverage gaps.
-- **Phase 2 scope boundary**: This skill covers Phase 1 only (structured authoring + traceability + coverage detection). Gherkin file conversion and consumer-side BDD framework runner configuration are Phase 2 scope — do not include or suggest those patterns here.
+- **Phase 2 scope boundary**: Phase 2 (Gherkin conversion + framework runner integration) is documented in the `## Phase 2: Gherkin Conversion & Framework Runner` section below. Phase 1 content (authoring, traceability, coverage detection) is unchanged.
+
+## Phase 2: Gherkin Conversion & Framework Runner
+
+Phase 2 extends Phase 1 by converting `[auto]` scenarios into runnable `.feature` files and dispatching the consumer's BDD framework runner at CE Gate validation.
+
+### Phase 2 Detection
+
+Phase 2 is active when **both** conditions are met in the consumer repo's `copilot-instructions.md`:
+
+1. `## BDD Framework` section heading is present (Phase 1 condition)
+2. A `bdd: {framework}` config line is present with a recognized framework name
+
+**Known migration case — `bdd: true`**: If a consumer repo was set up under Phase 1 only and still has `bdd: true` in a comment, emit a warning: _"bdd: true detected — Phase 2 requires a recognized framework name. Set `bdd: {framework}` with one of: cucumber.js, behave, jest-cucumber, cucumber. Falling back to Phase 1 behavior."_ Then fall back to Phase 1.
+
+**Unrecognized framework name**: If a `bdd: {framework}` line is present but the value is not in the mapping table, emit a warning: _"Unrecognized framework '{value}'. Recognized values: cucumber.js, behave, jest-cucumber, cucumber. Falling back to Phase 1 behavior."_ Then fall back to Phase 1.
+
+**Phase-1-only repos** (heading present, no `bdd:` line): Phase 2 detection requires BOTH conditions. A repo with only the `## BDD Framework` heading is Phase 1 only — behavior is unchanged.
+
+### Framework Mapping Table
+
+| Framework               | Tag Format | Default Output Dir             | Runner Command Template                       | Version Check Command       |
+| ----------------------- | ---------- | ------------------------------ | --------------------------------------------- | --------------------------- |
+| cucumber.js             | `@S{N}`    | `features/`                    | `npx cucumber-js --tags @S{N}`                | `npx cucumber-js --version` |
+| behave                  | `@S{N}`    | `features/`                    | `behave --tags @S{N}`                         | `behave --version`          |
+| jest-cucumber           | `@S{N}`    | `features/`                    | `npx jest --testPathPattern features`         | `npx jest --version`        |
+| cucumber (JVM Cucumber) | `@S{N}`    | `src/test/resources/features/` | `./gradlew test -Dcucumber.filter.tags=@S{N}` | `./gradlew --version`       |
+
+> **jest-cucumber limitation**: jest-cucumber does not support per-scenario Gherkin tag filtering via CLI. Runner dispatch for jest-cucumber runs the entire `features/` directory as one suite. All `[auto]` scenarios receive the same evidence record (suite-level pass/fail rather than per-scenario). Conflict detection (`source: runner+eo, result: conflict`) is still reachable: if the suite fails and EO passes during the delegated re-exercise, the conflict is recorded at suite granularity (all `[auto]` scenarios may resolve to conflict). Per-scenario runner granularity is what is not available — the suite-level result applies uniformly to all `[auto]` scenarios.
+> **cucumber (JVM Cucumber) note**: Runner commands assume Gradle (`./gradlew`). Maven-based projects will fail the pre-check and fall back to Phase 1 (EO exercises all scenarios). No runner dispatch occurs for Maven+Cucumber consumers.
+
+### Gherkin Conversion Rules
+
+For each `[auto]` scenario in the issue's `## Scenarios` section:
+
+- Include a `Feature: Issue #{N} — {issue-title}` declaration at the top of every `.feature` file (required by all four supported parsers).
+- Add `@S{N}` tag directly above the `Scenario:` line
+- Map the scenario heading to `Scenario: {title}` (strip the `### SN —` prefix and type tag)
+- Map G/W/T clauses to Gherkin `Given`/`When`/`Then` keywords (1:1 mapping)
+- `And`/`But` connectors preserved as-is
+
+**File layout**: One `.feature` file per issue (all `[auto]` scenarios in one file). File naming: `S{first}-S{last}-{issue-slug}.feature` (e.g., `S1-S3-task-manager-api-onboarding.feature`). Derive `{issue-slug}` from the issue title by: lowercasing, replacing spaces and non-alphanumeric characters with hyphens, collapsing consecutive hyphens, and truncating to 40 characters. Place in the framework-default output directory from the mapping table.
+
+**Example output**:
+
+```gherkin
+Feature: Issue #42 — Task Manager API Onboarding
+
+@S1
+Scenario: User completes onboarding
+  Given a new user has opened the application for the first time
+  When they follow the onboarding prompts
+  Then they reach the home screen with personalized content
+```
+
+**`[manual]` exclusion**: Do NOT generate `.feature` files for `[manual]` scenarios — they are exercised by Experience-Owner only.
+
+### Step Definition Stubs
+
+Generate step definition stubs alongside the `.feature` file **only if the stub file does not already exist**. On subsequent pipeline runs (e.g., when a new scenario is added), stubs are NOT regenerated — only the `.feature` file is regenerated. The consumer's assertion logic in existing stubs is preserved. Stubs link each `Then` clause to the scenario's Intent.
+
+**cucumber.js** (JavaScript/TypeScript):
+
+```javascript
+const { Given, When, Then } = require("@cucumber/cucumber");
+
+// S1 — User completes onboarding
+Given(
+  "a new user has opened the application for the first time",
+  async function () {
+    // TODO: implement setup
+    return "pending";
+  },
+);
+When("they follow the onboarding prompts", async function () {
+  // TODO: implement action
+  return "pending";
+});
+Then("they reach the home screen with personalized content", async function () {
+  // TODO: implement assertion — Intent: verify onboarding completion
+  return "pending";
+});
+```
+
+**behave** (Python):
+
+```python
+from behave import given, when, then
+
+# S1 — User completes onboarding
+@given('a new user has opened the application for the first time')
+def step_impl(context):
+    pass  # TODO: implement setup
+
+@when('they follow the onboarding prompts')
+def step_impl(context):
+    pass  # TODO: implement action
+
+@then('they reach the home screen with personalized content')
+def step_impl(context):
+    pass  # TODO: implement assertion — Intent: verify onboarding completion
+```
+
+**jest-cucumber**: Use `loadFeature` + `defineFeature` pattern with steps mapped to `@S{N}` scenario.
+
+**cucumber (JVM Cucumber)** (Java):
+
+```java
+import io.cucumber.java.en.Given;
+import io.cucumber.java.en.When;
+import io.cucumber.java.en.Then;
+
+public class StepDefinitions {
+
+    // S1 — User completes onboarding
+    @Given("a new user has opened the application for the first time")
+    public void givenNewUserOpened() {
+        throw new io.cucumber.java.PendingException(); // TODO: implement setup
+    }
+
+    @When("they follow the onboarding prompts")
+    public void whenTheyFollowPrompts() {
+        throw new io.cucumber.java.PendingException(); // TODO: implement action
+    }
+
+    @Then("they reach the home screen with personalized content")
+    public void thenTheyReachHomeScreen() {
+        throw new io.cucumber.java.PendingException(); // TODO: implement assertion — Intent: verify onboarding completion
+    }
+}
+```
+
+### Runner Dispatch Protocol
+
+Code-Conductor dispatches the framework runner at CE Gate. Process:
+
+1. **Pre-check**: Run version check command from mapping table. Non-zero exit → log warning, fall back to Phase 1 (EO exercises all scenarios).
+2. **Per-scenario dispatch**: For each `[auto]` scenario, run the runner command with `@S{N}` tag filtering. Capture exit code + stdout + stderr.
+3. **Evidence capture**: Record as a unified evidence record per scenario.
+4. **Conditional EO delegation**: Runner passed all `[auto]` → send only `[manual]` to EO. Some `[auto]` failed → add failed `[auto]` to EO list. Pre-check failed → send all to EO.
+5. **Evidence merge**: Combine runner evidence (for `[auto]`) with EO evidence (for `[manual]`) into the unified evidence record.
+
+> **Note on pending stubs**: Step definition stubs are generated as pending (e.g., `return 'pending'` in cucumber.js). **The consumer must implement the step definitions before runner dispatch produces per-scenario evidence at CE Gate time.** On the first CE Gate run after stub generation (before stubs are implemented), all `[auto]` scenarios will fail the runner dispatch — this is expected behavior. Code-Conductor will treat all `[auto]` failures as delegation triggers and fall back to EO exercising all scenarios (same as Phase 1).
+
+**Unified evidence record schema** (5 fields):
+
+| Field           | Type   | Description                           |
+| --------------- | ------ | ------------------------------------- |
+| `scenario_id`   | string | Scenario ID (e.g., `S1`)              |
+| `source`        | enum   | `runner` \| `eo` \| `runner+eo`       |
+| `result`        | enum   | `pass` \| `fail` \| `conflict`        |
+| `detail`        | string | Summary or first stderr line          |
+| `raw_exit_code` | int    | Runner exit code (runner source only) |
+
+**Evidence merge rules**:
+
+- Runner evidence is primary for `[auto]` scenarios; EO evidence is primary for `[manual]`.
+- Same-scenario conflict (runner-fail + EO-pass — EO exercises a failed `[auto]` scenario and yields a different result) → set `source: runner+eo`, `result: conflict` — passed to Code-Critic with both records. (Note: runner-pass + EO-fail is unreachable — runner-passed `[auto]` scenarios are excluded from EO delegation.)
+
+**Result format examples**:
+
+- `S1: runner-pass (exit 0, 1 scenario passed)`
+- `S2: runner-fail (exit 1, error: AssertionError: expected 200 but got 404)`
+
+### Runner Evidence in CE Prosecution
+
+Code-Critic evaluates runner evidence using the `source` field from the unified evidence record:
+
+- `source: runner`, `result: pass` → strong evidence for **Functional** lens (exit 0 + passing assertions)
+- `source: runner`, `result: fail` → classify as **Concern** with error context from `detail` field
+- `source: runner+eo`, `result: conflict` → **Concern** (not Issue) — include both records in findings, request clarification from Experience-Owner
+- `source: eo` (Phase 1 behavior or runner fallback) → existing per-scenario evaluation unchanged

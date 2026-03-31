@@ -14,7 +14,7 @@ Multi-agent workflow system for GitHub Copilot. Provides specialized agents, ski
 - **Framework**: VS Code Custom Agents (`.agent.md` format with YAML frontmatter)
 - **Build Tool**: None (no compiled code)
 - **Testing**: Pester (`.github/scripts/Tests/`), plus manual verification and grep-based structural checks
-- **BDD Framework (opt-in)**: Structured G/W/T scenarios with scenario ID traceability and CE Gate coverage gap detection. Consumer repos enable by adding a `## BDD Framework` section to their `copilot-instructions.md`. Template ships BDD-disabled; see `.github/skills/bdd-scenarios/SKILL.md` for authoring patterns.
+- **BDD Framework (opt-in)**: Structured G/W/T scenarios with scenario ID traceability and CE Gate coverage gap detection. Consumer repos enable by adding a `## BDD Framework` section to their `copilot-instructions.md`. Template ships BDD-disabled; see `.github/skills/bdd-scenarios/SKILL.md` for authoring patterns. **Phase 2 (runner dispatch)**: add `bdd: {framework}` under the heading (recognized values: `cucumber.js`, `behave`, `jest-cucumber`, `cucumber`) to enable Gherkin file generation by Test-Writer and automated runner dispatch at CE Gate time by Code-Conductor.
 
 ## Architecture
 

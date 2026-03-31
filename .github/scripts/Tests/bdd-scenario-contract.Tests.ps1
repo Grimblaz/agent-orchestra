@@ -5,13 +5,15 @@
     Contract tests for BDD structured scenario wording across agents.
 
 .DESCRIPTION
-    Locks the issue #223 BDD framework contract in:
+    Locks the Phase 1 (issue #223) and Phase 2 (issue #227) BDD framework contracts in:
       - .github/agents/Experience-Owner.agent.md
       - .github/agents/Issue-Planner.agent.md
       - .github/agents/Code-Conductor.agent.md
       - .github/agents/Code-Critic.agent.md
+      - .github/agents/Test-Writer.agent.md
+      - .github/skills/bdd-scenarios/SKILL.md
 
-        Each agent file must describe the same BDD integration semantics:
+        Phase 1 contracts (issue #223):
             - Conditional G/W/T authoring when ## BDD Framework section is present
             - Scenario ID convention (S1, S2...) with ### SN heading pattern
             - Natural-language fallback when BDD not enabled
@@ -19,8 +21,13 @@
             - Pre-flight coverage check and recovery path (Code-Conductor)
             - Per-scenario evidence mapping (Code-Critic)
 
-        These tests lock the BDD contract for issue #223 going forward; update them
-        only when the contract semantics intentionally change.
+        Phase 2 contracts (issue #227):
+            - Framework mapping table and Gherkin conversion rules (bdd-scenarios skill)
+            - Gherkin .feature file generation for [auto] scenarios (Test-Writer)
+            - Runner dispatch, evidence capture, and conditional EO delegation (Code-Conductor)
+            - Runner evidence evaluation keyed on source field (Code-Critic)
+
+        Update these tests only when the contract semantics intentionally change.
 #>
 
 Describe 'Experience-Owner BDD scenario contract' {
@@ -133,5 +140,113 @@ Describe 'Code-Critic BDD CE prosecution contract' {
 
     It 'Code-Critic per-scenario evaluation is conditional on BDD scenario IDs present in evidence' {
         $script:CriticContent | Should -Match '(?is)(when.{0,60}(BDD.{0,30}scenario ID|scenario ID.{0,30}BDD|S\d+.{0,30}ID).{0,100}(present|found|available|contain)|BDD.{0,100}conditional)' -Because 'issue #223 requires Code-Critic to specify that per-scenario evaluation is conditional on BDD scenario IDs being present in evidence'
+    }
+}
+
+Describe 'bdd-scenarios SKILL.md Phase 2 contract' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:SkillFile = Join-Path $script:RepoRoot '.github\skills\bdd-scenarios\SKILL.md'
+        $script:SkillContent = Get-Content -Path $script:SkillFile -Raw
+    }
+
+    It 'SKILL.md Phase 2 section documents all four supported frameworks including JVM cucumber' {
+        $script:SkillContent | Should -Match '(?is)cucumber\.js.{0,500}behave.{0,500}jest-cucumber.{0,500}cucumber' -Because 'issue #227 requires the bdd-scenarios skill Phase 2 section to document all four supported frameworks: cucumber.js, behave, jest-cucumber, and cucumber (JVM)'
+    }
+
+    It 'SKILL.md documents unified evidence record with scenario_id, source, result, detail, and raw_exit_code fields' {
+        $script:SkillContent | Should -Match '(?is)(scenario_id.{0,100}source.{0,100}result.{0,100}detail.{0,100}raw_exit_code)' -Because 'issue #227 requires the bdd-scenarios skill to document the unified evidence record schema with scenario_id, source, result, detail, and raw_exit_code fields'
+    }
+
+    It 'SKILL.md documents runner dispatch protocol with pre-check step' {
+        $script:SkillContent | Should -Match '(?is)(runner.{0,20}dispatch|dispatch.{0,20}runner).{0,300}(pre.{0,5}check|version check)' -Because 'issue #227 requires the bdd-scenarios skill to document the runner dispatch protocol including a pre-check (version verification) step'
+    }
+
+    It 'SKILL.md Phase 2 detection requires both BDD Framework heading and bdd: {framework} line' {
+        $script:SkillContent | Should -Match '(?is)(Phase 2.{0,200}(both|heading.{0,50}bdd:|bdd:.{0,50}heading)|activation.{0,100}both)' -Because 'issue #227 requires Phase 2 to activate only when both the ## BDD Framework heading AND a bdd: {framework} line are present'
+    }
+
+    It 'SKILL.md documents bdd: true warning and fallback to Phase 1' {
+        $script:SkillContent | Should -Match '(?is)(bdd:\s*true.{0,300}(warning|warn|fallback|Phase 1))' -Because 'issue #227 requires SKILL.md to document that bdd: true emits a warning and falls back to Phase 1 behavior'
+    }
+}
+
+Describe 'Test-Writer BDD Phase 2 Gherkin generation contract' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:TestWriter = Join-Path $script:RepoRoot '.github\agents\Test-Writer.agent.md'
+        $script:TWContent = Get-Content -Path $script:TestWriter -Raw
+    }
+
+    It 'Test-Writer documents BDD Gherkin generation activated by bdd: {framework}' {
+        $script:TWContent | Should -Match '(?is)(bdd:\s*.{0,20}(framework|\{framework\}|cucumber\.js|behave|jest-cucumber|cucumber)).{0,300}(Gherkin|\.feature)' -Because 'issue #227 requires Test-Writer to document BDD Phase 2 Gherkin generation activated by bdd: {framework}'
+    }
+
+    It 'Test-Writer generates .feature files for [auto] scenarios only, excluding [manual]' {
+        $script:TWContent | Should -Match '(?is)(\[auto\].{0,200}(\.feature|Gherkin|only)|(\.feature|Gherkin).{0,200}\[auto\])' -Because 'issue #227 requires Test-Writer to generate Gherkin .feature files for [auto] scenarios only'
+    }
+
+    It 'Test-Writer uses @S{N} tags in generated Gherkin scenarios' {
+        $script:TWContent | Should -Match '(?is)(@S\d+|@S\{N\}|@SN).{0,100}(tag|Gherkin|\.feature|scenario)' -Because 'issue #227 requires Test-Writer to tag each generated Gherkin scenario with @S{N} for per-scenario runner dispatch filtering'
+    }
+
+    It 'Test-Writer references bdd-scenarios skill for framework mapping table' {
+        $script:TWContent | Should -Match '(?is)bdd-scenarios.{0,200}(framework|mapping|table)' -Because 'issue #227 requires Test-Writer to reference the bdd-scenarios skill to determine the framework mapping (output directory) for generated files'
+    }
+}
+
+Describe 'Code-Conductor BDD Phase 2 runner dispatch contract' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:CodeConductor = Join-Path $script:RepoRoot '.github\agents\Code-Conductor.agent.md'
+        $script:CCContent = Get-Content -Path $script:CodeConductor -Raw
+    }
+
+    It 'Code-Conductor runner dispatch activates only when bdd: {framework} is a recognized value' {
+        $script:CCContent | Should -Match '(?is)(runner.{0,30}dispatch|Phase 2.{0,30}runner).{0,300}(bdd:.{0,100}(recognized|framework)|recognized.{0,100}framework)' -Because 'issue #227 requires Code-Conductor runner dispatch to check that bdd: {framework} is set to a recognized framework value before dispatching'
+    }
+
+    It 'Code-Conductor runner dispatch conditionally delegates [manual]-only or all scenarios to Experience-Owner' {
+        $script:CCContent | Should -Match '(?is)(all.{0,5}\[auto\].{0,100}pass.{0,200}only.{0,5}\[manual\]|only.{0,5}\[manual\].{0,200}(pass|runner).{0,100}\[auto\])' -Because 'issue #227 requires Code-Conductor to delegate only [manual] scenarios to EO when all [auto] runners passed'
+    }
+
+    It 'Code-Conductor runner dispatch adds failed [auto] scenarios to EO delegation list on partial failure' {
+        $script:CCContent | Should -Match '(?is)any.{0,30}\[auto\].{0,30}runner.{0,20}fail.{0,200}add.{0,50}failed.{0,30}\[auto\].{0,100}(EO delegation list|delegation list)' -Because 'issue #227 requires Code-Conductor to add failed [auto] scenarios to the EO delegation list when some (but not all) [auto] runners fail, so EO exercises both the failed [auto] and all [manual] scenarios'
+    }
+
+    It 'Code-Conductor PR body per-scenario coverage table includes a Source column' {
+        $script:CCContent | Should -Match '(?is)\|\s*Source\s*\|' -Because 'issue #227 requires Code-Conductor to add a Source column to the per-scenario PR coverage table to distinguish runner evidence from EO evidence'
+    }
+
+    It 'Code-Conductor runner dispatch falls back to Phase 1 (all scenarios to EO) when pre-check fails' {
+        $script:CCContent | Should -Match '(?is)(pre.{0,5}check.{0,200}(fail|fail.{0,20}warning).{0,200}(Phase 1|fall.{0,5}back|all scenarios))' -Because 'issue #227 requires Code-Conductor to fall back to Phase 1 behavior (delegate all scenarios to EO) when the runner version pre-check fails'
+    }
+}
+
+Describe 'Code-Critic BDD Phase 2 runner evidence evaluation contract' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:CodeCritic = Join-Path $script:RepoRoot '.github\agents\Code-Critic.agent.md'
+        $script:CriticContent = Get-Content -Path $script:CodeCritic -Raw
+    }
+
+    It 'Code-Critic treats source:runner result:pass as strong Functional lens evidence' {
+        $script:CriticContent | Should -Match '(?is)(source:\s*runner.{0,100}result:\s*pass|runner.{0,30}pass).{0,300}(strong.{0,50}Functional|Functional.{0,100}strong)' -Because 'issue #227 requires Code-Critic to treat source:runner, result:pass as strong Functional lens evidence'
+    }
+
+    It 'Code-Critic classifies source:runner result:fail as Concern under Functional lens' {
+        $script:CriticContent | Should -Match '(?is)(source:\s*runner.{0,100}result:\s*fail|runner.{0,30}fail).{0,300}Concern' -Because 'issue #227 requires Code-Critic to classify source:runner, result:fail as a Concern'
+    }
+
+    It 'Code-Critic classifies runner+eo conflicts as Concern (not Issue or automatic failure)' {
+        $script:CriticContent | Should -Match '(?is)(source:\s*runner\+eo|runner\+eo.{0,50}conflict|conflict.{0,50}runner\+eo).{0,300}(Concern.{0,50}(not|no).{0,20}Issue)' -Because 'issue #227 requires Code-Critic to classify runner+eo conflicts as Concern — not Issue — to avoid automatic failure escalation'
+    }
+
+    It 'Code-Critic runner evidence evaluation is keyed on presence of source field in unified evidence record' {
+        $script:CriticContent | Should -Match '(?is)(`source`.{0,100}field.{0,100}(present|contains|unified evidence|source field)|(unified evidence.{0,50}source|source field.{0,50}unified))' -Because 'issue #227 requires Code-Critic to key runner evidence evaluation on the presence of a source field in the unified evidence record'
     }
 }

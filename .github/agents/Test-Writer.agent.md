@@ -249,6 +249,38 @@ it("calculates internal delay value", () => {
 
 ---
 
+## BDD Gherkin Generation (Phase 2)
+
+When the consumer repo has **both** `## BDD Framework` heading AND a `bdd: {framework}` config line with a recognized framework, Test-Writer activates Phase 2 Gherkin generation for `[auto]` scenarios.
+
+### Activation
+
+- Load `.github/skills/bdd-scenarios/SKILL.md` for framework mapping table, Gherkin conversion rules, and step definition stub patterns.
+- Phase 2 is active only when BOTH conditions are met: `## BDD Framework` heading present AND `bdd: {framework}` line present with a recognized framework name.
+
+### Generation Scope
+
+- For each `[auto]` scenario in the issue's `## Scenarios` section, generate a `.feature` file with `@S{N}` tag and step definition stubs using the framework mapping from the bdd-scenarios skill.
+- **`[manual]` exclusion**: Do NOT generate `.feature` files for `[manual]` scenarios — they are exercised by Experience-Owner.
+- All `[auto]` scenarios for an issue go into one `.feature` file. File naming: `S{first}-S{last}-{issue-slug}.feature`.
+
+### Output Location
+
+Place generated `.feature` files in the framework-default output directory from the bdd-scenarios skill mapping table (e.g., `features/` for cucumber.js and behave; `src/test/resources/features/` for cucumber JVM).
+
+### Idempotency
+
+`.feature` files are regenerated on each pipeline run. **Important**: Step definition stub files are generated **once** at initial run and are **not** regenerated on subsequent pipeline runs — only the `.feature` file is regenerated. Existing stub files are preserved to protect the consumer's assertion logic. Generate stub files only if they do not already exist.
+
+Generated stubs are pending by default (e.g., `return 'pending'` in cucumber.js). The consumer must implement the step definitions before runner dispatch at CE Gate time produces per-scenario passing evidence.
+
+### Warning Behavior
+
+- **`bdd: true`**: Emit warning: _"Phase 2 requires a recognized framework name — see bdd-scenarios skill for recognized values. Falling back to Phase 1 (G/W/T authoring only)."_ Do not generate `.feature` files.
+- **Unrecognized framework**: Emit warning: _"Unrecognized framework '{value}' — see bdd-scenarios skill for recognized values. Falling back to Phase 1."_ Do not generate `.feature` files.
+
+---
+
 ## Skills Reference
 
 **When writing tests (TDD workflow):**
