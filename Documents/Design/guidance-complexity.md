@@ -16,6 +16,10 @@ Guardrail additions accumulate asymmetrically — new rules are proposed with no
 | D4 | How to distinguish structural vs. rule-level | **Hybrid** — script defaults `prevention_level: unknown`; Process-Review §4.9 evaluates against upstream catch hierarchy and reclassifies to `structural` or `rule-level`. | Deterministic default where possible; flexible reasoning for novel patterns |
 | D5 | How to measure quality after consolidation | **Consolidation event tracking + regression threshold** — record events in calibration data; sustain rate monitoring with +10pp regression threshold; human review (not auto-rollback). | Uses existing infrastructure; regression detection is meaningful and non-destructive |
 | D6 | How to extract agent sections to skills | **Skill reference stubs** — 2-3 line stub in agent ("what and when"), full procedure in skill ("how"); 4 extraction criteria defined (see [Agent-to-Skill Extraction Criteria](#agent-to-skill-extraction-criteria)); **framework only — no immediate extractions**; §4.8 gets widened trigger + monitoring to collect evidence for future extraction/retirement decision. | Framework-first; candidates emerge from monitoring data; §4.8 needs fair chance before extraction |
+| D7 | Persistent over-ceiling detection | **`complexity_over_ceiling_history` write-back** — `aggregate-review-scores.ps1` gains `-ComplexityJsonPath` parameter and tracks per-agent over-ceiling history in calibration JSON; `persistent_threshold` in `guidance-complexity.json` controls extraction advisory trigger. | Enables compound-signal retirement and regression detection; requires calibration data maturity (Phase 2) |
+| D8 | Tiered advisory | **Extraction replaces compression** — when an agent's `consecutive_count ≥ persistent_threshold`, §4.9 emits `extraction_recommended: true` instead of compression advisory; D8 fires exclusively (D2 suppressed when D8 fires). | Avoids repeated compression of already-compressed sections; extraction is higher-leverage when compression has been sustained |
+| D9 | Agent creation complexity budget | **Convention + quick-validate gate** — new agents must not exceed 80% of `default_ceiling.max_directives` at creation time; enforced at PR time via the existing `agents_over_ceiling.Count  # should be 0` quick-validate check. | Prevents ceiling violations at agent-creation time without additional infrastructure |
+| D10 | Implementation capacity gate | **CC autonomous decision rule** — when Code-Conductor begins implementing a rule-addition issue (`systemic_fix_type: agent-prompt`), it checks whether the target agent exceeds its soft ceiling (`measure-guidance-complexity.ps1`). If over ceiling, CC autonomously creates a compression prerequisite issue and blocks the rule-addition until the compression issue is closed AND the agent ≤ ceiling. Exempt: issues reducing directive count (compression, extraction, consolidation). Complements the D2/D8 advisory system with implementation-time enforcement. | Preserves D2/D8 advisory semantics; same autonomy pattern as improvement-first (§2a); no infrastructure gate required — CC is self-enforcing |
 
 ---
 
@@ -199,6 +203,31 @@ New agents should be designed to fit within the soft ceiling from the outset. Th
 ```
 
 This is already part of the Quick-validate suite in `.github/copilot-instructions.md`.
+
+### D10 — Implementation Capacity Gate
+
+**Trigger**: When Code-Conductor begins implementing a rule-addition issue targeting an agent file (`systemic_fix_type: agent-prompt`), it checks whether the target agent currently exceeds its soft ceiling.
+
+**Mechanism**: CC runs `measure-guidance-complexity.ps1` and inspects `agents_over_ceiling`. If the target agent appears:
+
+1. CC uses `#tool:vscode/askQuestions` to present options — (a) "Wait — compression prerequisite for {agent} is needed" (recommended) or (b) "Override and proceed now". Do not proceed silently.
+2. If waiting: CC autonomously creates a compression prerequisite issue (label: `priority: medium`)
+3. Implementation of the rule-addition is blocked until the compression issue is closed **and** the script confirms the agent is ≤ ceiling
+
+**Exemption**: Issues that reduce directive count (compression, extraction, consolidation) are exempt — no circular dependency.
+
+**Completion signal**: Compression issue closed + script output shows target agent absent from `agents_over_ceiling`. If still over ceiling after one compression round, the pattern repeats (new compression prerequisite created).
+
+**Override**: User override is respected — gate is CC-enforced, not infrastructure. CC notes the override in the PR body.
+
+**Relationship to D2/D8**:
+
+- D2 (compression advisory in §4.9) fires at retrospective time — advisory only, does not block proposals
+- D8 (extraction advisory replacing D2) fires at retrospective time — advisory only
+- D10 fires at implementation time — enforces capacity headroom before rule-additions land
+- D10 is an enforcement mechanism complementing the D2/D8 advisory system, not a replacement. All three may fire for the same agent across different workflow stages.
+
+**Scope**: `agent-prompt` proposals only. Instruction file targets have no per-file ceiling; §2d advisory still applies to them, but D10 does not fire.
 
 ### Consolidation Event Tracking
 

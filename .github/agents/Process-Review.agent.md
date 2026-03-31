@@ -467,7 +467,7 @@ For each entry already marked `<!-- gotcha-status: upstream:{url} -->`: check if
 - Skipped: {reason or "none"}
 ```
 
-**Guardrail**: This section reads and writes `local-gotchas.instructions.md` to update status markers, and creates GitHub issues. It does NOT modify any other agent, skill, or system instruction file. Issue creation requires output-capture verification per safe-operations.instructions.md §2a and §2c.
+**Guardrail**: This section reads and writes `local-gotchas.instructions.md` to update status markers, and creates GitHub issues. It does NOT modify any other agent, skill, or system instruction file. Issue creation must follow output-capture verification (§2a) and deduplication search (§2c) from `safe-operations.instructions.md`. For rule-addition proposals, apply the prevention-analysis advisory (§2d) from `safe-operations.instructions.md` before the §2c dedup search.
 
 ### 4.9 Root Cause Analysis & Guardrail Proposals
 
@@ -538,9 +538,12 @@ guardrail_proposals:
     upstream: false  # true if fix targets copilot-orchestra shared files
     compression_required: false  # true when target agent exceeds complexity ceiling (agent-prompt proposals only)
     extraction_recommended: false  # true when agent has met persistent_threshold consecutive over-ceiling periods (agent-prompt proposals only)
+    prevention_gate_outcome: created-new  # redirected=Step1-match; reframed=Step2-structural; created-new=Step3; exempt=outside-§2d-scope — outcome of the §2d prevention-analysis advisory applied before creating this upstream proposal
 ```
 
 **Step 4 — Upstream proposals** (when `systemic_fix_type` targets copilot-orchestra shared files):
+
+Before creating any upstream issue, apply the prevention-analysis advisory from `safe-operations.instructions.md` §2d.
 
 1. Read `copilot-orchestra-repo` from `.github/copilot-instructions.md`
 2. If absent → mark proposal `upstream: true` in report, log "upstream repo not configured" and skip issue creation

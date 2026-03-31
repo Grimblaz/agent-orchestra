@@ -251,6 +251,7 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
    - Scan the session memory plan file for title lines not ending in `— ✅ DONE` — this is the primary resume mechanism. Resume from the first such incomplete step. If annotations are absent (e.g., first session reset after recovery from GitHub comment), fall back to branch-state inference to determine completed steps.
    - **Reality check**: Before resuming, verify the plan still matches the codebase. If interfaces moved, files were renamed, or assumptions no longer hold, adapt the plan rather than executing steps that won't land correctly.
    - **Migration-type plan check**: If the issue is migration-type (pattern replacement, rename/move, API migration), verify that Step 1 of the plan is an exhaustive repo scan. If the scan step is absent, insert it before any implementation step and re-validate scope.
+   - **Capacity check (D10)**: When the plan adds rules or directives to an agent file (`systemic_fix_type: agent-prompt`), check whether the target agent currently exceeds its soft ceiling: run `pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json` and inspect `agents_over_ceiling`. If the target agent appears in `agents_over_ceiling`, use `#tool:vscode/askQuestions` to notify the user: options are (a) "Wait — compression prerequisite for {agent} is needed" (recommended) and (b) "Override and proceed now". Do not proceed silently. If waiting: autonomously create a compression prerequisite issue (label: `priority: medium`) and block implementation until that issue is closed **and** the script confirms the agent is ≤ ceiling; if the compression issue closes but the script still shows the agent over ceiling, create another compression prerequisite issue and continue blocking (the cycle repeats). **Exemption**: issues that reduce directive count (compression, extraction, consolidation) are exempt — do not apply this check to them. If the plan targets multiple agent files, check each agent independently — block if any target agent is over ceiling. **Completion signal**: compression issue closed + script output shows target agent absent from `agents_over_ceiling`. **Override**: if the user directs the implementation to proceed despite the capacity block, respect the override and note it in the PR body. This is an autonomous decision rule — same pattern as improvement-first (§2a).
 
 3. **Execute Each Step**:
    - Identify appropriate specialist agent (see Agent Selection below)
@@ -443,6 +444,8 @@ Default to <1 day. Only defer if ALL of these apply: 5+ files, new subsystem des
 
 For DEFERRED-SIGNIFICANT items, create a GitHub tracking issue automatically — no user approval required. Include PR link, review comment reference, and acceptance target in the issue body.
 
+Before creating the tracking issue, apply the prevention-analysis advisory from `safe-operations.instructions.md` §2d.
+
 #### Batch Specialist Dispatch (R4)
 
 Before dispatching any findings to specialists, complete **all** routing decisions first (express-lane partition from the prosecutor pass + judge rulings). Then dispatch in a single batch per specialist agent:
@@ -634,7 +637,7 @@ When a functional defect or intent deficiency is found:
 
 - Call Process-Review subagent with: the defect description, what scenario revealed it, and which agent/file/instruction likely caused the gap
 - Process-Review will emit a structured CE Gate Defect Analysis (gap description, affected agent/file, recommended fix, ready-to-use issue title + body) — if a systemic gap is confirmed, **Code-Conductor creates the issue** using Process-Review's ready-to-use title and body; Process-Review does not create GitHub issues itself
-- If a systemic gap is confirmed: create a follow-up GitHub issue in the copilot-orchestra repository (or fallback to current repo with label `process-gap-upstream`)
+- If a systemic gap is confirmed: before creating the follow-up GitHub issue, apply the prevention-analysis advisory from `safe-operations.instructions.md` §2d. Then create the follow-up issue in the copilot-orchestra repository (or fallback to current repo with label `process-gap-upstream`)
 - "No systemic gap found" is a valid Process-Review outcome — log it in the PR body
 - Track 2 is non-blocking: do not hold up Track 1 fix or PR creation
 

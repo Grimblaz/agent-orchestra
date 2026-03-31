@@ -105,6 +105,8 @@ gh issue create --title "..." --body "..."
 
 ### 2c. Deduplication Check (Mandatory)
 
+> **Rule-addition proposals**: Apply §2d (Prevention-Analysis Advisory, below) before this search — if §2d redirects to an existing issue, this dedup search is unnecessary.
+
 Before every `gh issue create`, search for existing open issues with matching titles or key terms from the title:
 
 ```powershell
@@ -133,3 +135,27 @@ Key differences from the standard pattern:
 - `--state all` includes closed issues (a resolved gotcha should not be re-submitted)
 - Search key format is `[Gotcha] {skill-name}` — the `[Gotcha]` prefix groups all gotcha issues for that skill
 - If `gh` cannot access the upstream repo, fall back to creating a local issue labeled `upstream-gotcha` and `priority: medium` for manual transfer
+
+### 2d. Prevention-Analysis Advisory (Rule-Addition Proposals Only)
+
+Before creating any issue that proposes **adding a new rule, directive, or guidance clause** to an agent file, instruction file, or skill, evaluate the following in order. Apply this check before the §2c dedup search — if §2d redirects to an existing issue, the §2c search is unnecessary:
+
+**Step 1 — Principle-level consolidation check**: Does an open issue already cover the same underlying principle, even if it targets a different agent or file? If yes, comment on the existing issue instead of creating a new one. If multiple matching issues exist, comment on the most recently updated one.
+
+**Principle-level consolidation examples**:
+
+- "Add input validation to CLI handler" and "Add input schema enforcement to REST handler" → same principle (input validation), consolidate into one issue
+- "Add error handling for null responses" and "Add timeout handling for slow responses" → different principles (null safety vs. resilience), separate issues are appropriate
+- "Require docstrings on public functions" and "Require inline comments on complex logic" → same principle (documentation completeness), consolidate into one issue
+
+**Step 2 — Prevention alternative check**: Could the problem be solved structurally instead of adding a rule? Structural alternatives include: contract test that enforces the behavior, upstream catch that prevents the failure, skill extraction that reduces rule density, or consolidation with an existing guideline. If yes, reframe the issue as a structural improvement rather than a rule addition.
+
+**Step 3 — Create with justification**: If neither Step 1 nor Step 2 applies, create the issue and note briefly in the issue body why a new rule is warranted (e.g., 'no existing principle covers this; structural prevention is not feasible here').
+
+**Scope**: This advisory applies **only to rule-addition proposals** (`systemic_fix_type: agent-prompt` or `instruction`). It does **not** apply to:
+
+- Issues that reduce directive count (compression, extraction, consolidation) — these are exempt
+- Structural prevention issues (new contract tests, upstream catches)
+- Bug reports, configuration fixes, or documentation corrections
+
+**Override**: This is advisory guidance — agent judgment determines the outcome. Users may always direct issue creation regardless of this advisory.
