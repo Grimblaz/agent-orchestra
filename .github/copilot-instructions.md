@@ -168,3 +168,27 @@ Then run the structural checks:
 (pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json).agents_over_ceiling.Count  # should be 0
 if (Get-Module -ListAvailable PSScriptAnalyzer) { (Invoke-ScriptAnalyzer -Path .github/scripts/ -Recurse -Settings .github/config/PSScriptAnalyzerSettings.psd1).Count } else { Write-Warning 'PSScriptAnalyzer not installed — skipping' }  # should be 0
 ```
+
+## Terminal & Test Hygiene
+
+> These rules supplement (do not replace) any agent-specific terminal guidance (e.g., Code-Conductor's Terminal Non-Interactive Guardrails).
+
+### Pester Scope
+
+When iterating on a specific test during red-green-refactor **within** an implementation step, use targeted Pester:
+
+```powershell
+Invoke-Pester 'path/to/specific.Tests.ps1' -Output Minimal
+```
+
+The full-suite command in **Build & Run > Commands** (above) remains the standard validation gate at **step boundaries** (Tier 1). Do not run the full suite during inner-loop iteration.
+
+### `isBackground` Default
+
+Use `isBackground: false` for Pester, PSScriptAnalyzer, `markdownlint-cli2`, structural checks, and any command expected to complete in under 60 seconds. Reserve `isBackground: true` for dev servers and watch-mode builds.
+
+> **Exception**: when diagnosing a terminal stall, the process-troubleshooting skill's guidance to switch to `isBackground: true` for diagnostics takes precedence.
+
+### No Terminal/Subagent Batching
+
+Do not batch `run_in_terminal` and subagent dispatch calls (`runSubagent` or agent-tool dispatch) in the same parallel tool-call set. Sequential use (terminal validation → then subagent dispatch, or vice versa) is fine. Parallel subagent dispatch (e.g., 3 Code-Critic prosecution passes) remains allowed.

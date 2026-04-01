@@ -33,6 +33,16 @@ All three lanes are intentionally non-blocking. If `markdownlint-cli2`, `pwsh`, 
 
 The hook keeps the existing whole-file re-stage model: if any lane rewrites a staged file, it re-stages the full file with `git add`. If you use partial staging, review the staged diff after the hook runs because non-staged hunks from that file can be pulled into the commit.
 
+For long agent sessions, disable persistent terminal sessions:
+
+```json
+{
+  "terminal.integrated.enablePersistentSessions": false
+}
+```
+
+This prevents VS Code from restoring terminal sessions after a window restart or reload, avoiding a fresh accumulation of sessions from prior agent runs.
+
 Enable the built-in GitHub MCP server for seamless issue and PR workflows:
 
 ```json
