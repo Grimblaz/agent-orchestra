@@ -165,7 +165,9 @@ A **supplement skill** is a project-specific skill that layers additional constr
 
 ### Supplement SKILL.md Template
 
-````markdown
+> **Note**: This template is pre-filled for `frontend-design` supplements. When creating a supplement for a different hub skill, replace every occurrence of `frontend-design` with your hub-skill name.
+
+```markdown
 ---
 name: {project}-frontend-design
 description: Supplements `frontend-design` with {project} brand identity, design tokens, and visual conventions. Use when designing {project} UI components or screens alongside the `frontend-design` hub skill. DO NOT USE FOR: standalone sessions without `frontend-design` loaded (this is a supplement skill; always load `frontend-design` alongside).
@@ -193,10 +195,10 @@ Project-specific design constraints that layer on top of the `frontend-design` h
 
 ## Gotchas
 
-| Trigger | Gotcha | Fix |
-| ------- | ------ | --- |
+| Trigger                          | Gotcha                      | Fix                       |
+| -------------------------------- | --------------------------- | ------------------------- |
 | [CUSTOMIZE] Observable condition | [CUSTOMIZE] What goes wrong | [CUSTOMIZE] How to fix it |
-````
+```
 
 ## Gotchas
 

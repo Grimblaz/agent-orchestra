@@ -2,7 +2,7 @@
 
 ## Summary
 
-The skills framework provides domain-specific knowledge modules loaded on demand by agents from `.github/skills/`. Skills use a `SKILL.md` format with YAML frontmatter and supply procedural guidance, quality standards, and example patterns — but no orchestration logic. The current inventory contains 14 skills. Hub skills may be extended by project-specific supplement skills (named `{project}-{hub-skill-name}`) that layer additional constraints on top of their defaults.
+The skills framework provides domain-specific knowledge modules loaded on demand by agents from `.github/skills/`. Skills use a `SKILL.md` format with YAML frontmatter and supply procedural guidance, quality standards, and example patterns — but no orchestration logic. The current inventory contains 16 skills. Hub skills may be extended by project-specific supplement skills (named `{project}-{hub-skill-name}`) that layer additional constraints on top of their defaults.
 
 ---
 
@@ -19,10 +19,11 @@ The skills framework provides domain-specific knowledge modules loaded on demand
 
 ---
 
-## Skill Inventory (14 Skills)
+## Skill Inventory (16 Skills)
 
 | Skill | Directory | Purpose |
 |-------|-----------|---------|
+| `bdd-scenarios` | `.github/skills/bdd-scenarios/` | Structured Given/When/Then scenario authoring with ID traceability and CE Gate coverage gap detection |
 | `brainstorming` | `.github/skills/brainstorming/` | Structured Socratic questioning for exploring ideas and solutions |
 | `frontend-design` | `.github/skills/frontend-design/` | Guide for creating distinctive UI designs that avoid generic templates |
 | `parallel-execution` | `.github/skills/parallel-execution/` | Build-test orchestration protocol for choosing and running parallel or serial implementation lanes |
@@ -37,6 +38,7 @@ The skills framework provides domain-specific knowledge modules loaded on demand
 | `browser-canvas-testing` | `.github/skills/browser-canvas-testing/` | VS Code native browser tool behavior for canvas-based games (Phaser 3, etc.) |
 | `code-review-intake` | `.github/skills/code-review-intake/` | Deterministic GitHub review intake workflow with ledger-based judgment |
 | `post-pr-review` | `.github/skills/post-pr-review/` | Post-merge checklist for archiving, documentation, versioning, and release tagging |
+| `process-troubleshooting` | `.github/skills/process-troubleshooting/` | Five-scenario workflow troubleshooting guide for diagnosing and fixing common orchestration failure patterns |
 
 ---
 
