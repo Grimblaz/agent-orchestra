@@ -358,5 +358,16 @@ exit 1
             $result.ExitCode | Should -Not -Be 0 `
                 -Because 'when gh fails the backfill script must surface the error via non-zero exit'
         }
+
+        It 'returns ExitCode 1 and error message when GhCliPath is not a valid command' {
+            # Arrange: a command name that cannot possibly exist on any machine
+            # Act
+            $result = Invoke-BackfillCalibration -Repo 'owner/repo' -GhCliPath 'gh-definitely-not-installed-xyz'
+
+            # Assert: Get-Command pre-flight guard fires early-return path
+            $result.ExitCode | Should -Be 1
+            $result.Error    | Should -Match 'not found'
+            $result.Output   | Should -BeNullOrEmpty
+        }
     }
 }

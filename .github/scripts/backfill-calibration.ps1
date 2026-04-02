@@ -15,5 +15,5 @@ param(
 
 $result = Invoke-BackfillCalibration @PSBoundParameters
 if ($result.Output) { Write-Output $result.Output }
-if ($result.Error) { Write-Error $result.Error }
+if ($result.Error) { Write-Error $result.Error -ErrorAction Continue }
 exit $result.ExitCode

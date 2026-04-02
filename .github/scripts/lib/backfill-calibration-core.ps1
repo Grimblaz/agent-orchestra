@@ -5,8 +5,8 @@
 #>
 
 # Dot-source sibling helpers (Get-YamlField, Get-FindingsArray)
-$libDir = Split-Path -Parent $PSCommandPath
-. "$libDir/pipeline-metrics-helpers.ps1"
+$script:_BCCoreLibDir = Split-Path -Parent $PSCommandPath
+. "$script:_BCCoreLibDir/pipeline-metrics-helpers.ps1"
 
 function Invoke-BackfillCalibration {
     [CmdletBinding()]
@@ -19,6 +19,14 @@ function Invoke-BackfillCalibration {
 
     Set-StrictMode -Version Latest
     $ErrorActionPreference = 'Stop'
+
+    if (-not (Get-Command $GhCliPath -ErrorAction SilentlyContinue)) {
+        return @{
+            ExitCode = 1
+            Output   = ''
+            Error    = "gh CLI not found at '$GhCliPath'. Install the GitHub CLI or set -GhCliPath."
+        }
+    }
 
     # ---------------------------------------------------------------------------
     # Helper: safe integer conversion — returns 0 for null / n/a / empty
@@ -34,7 +42,7 @@ function Invoke-BackfillCalibration {
     # ---------------------------------------------------------------------------
     $repoArgs = if ($Repo) { @('--repo', $Repo) } else { @() }
 
-    $ghOut = & $GhCliPath pr list --state merged --limit $Limit --json number, mergedAt, body @repoArgs
+    $ghOut = & $GhCliPath pr list --state merged --limit $Limit --json 'number,mergedAt,body' @repoArgs
     $ghExitCode = $LASTEXITCODE
     if ($ghExitCode -ne 0) {
         return @{ ExitCode = $ghExitCode; Output = ''; Error = "gh pr list failed with exit code $ghExitCode" }

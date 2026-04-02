@@ -22,5 +22,5 @@ $repoRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } els
 $result = Invoke-SessionCleanupDetector -RepoRoot $repoRoot
 
 if ($result.Output) { Write-Output $result.Output }
-if ($result.Error) { Write-Error $result.Error }
+if ($result.Error) { Write-Error $result.Error -ErrorAction Continue }
 exit $result.ExitCode

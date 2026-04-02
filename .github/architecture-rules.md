@@ -11,6 +11,7 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 | `.github/instructions/`  | Shared rules loaded by agents                        | `*.instructions.md` files                                     |
 | `.github/prompts/`       | Prompt files and workflow templates                  | `*.prompt.md` with frontmatter; supporting `*.md` templates   |
 | `.github/scripts/`       | Automation scripts invoked by agents or instructions | `*.ps1` PowerShell scripts                                    |
+| `.github/scripts/lib/`   | Library modules dot-sourced by CLI wrappers and tests | `{name}-core.ps1` files exposing `Invoke-*` functions; the corresponding CLI script in `.github/scripts/` is a thin wrapper that dot-sources the library and relays results |
 | `.github/config/`        | Committed configuration files consumed by automation scripts | JSON config files                                      |
 | `.github/plugin/`        | VS Code agent plugin manifests                       | `plugin.json`, `marketplace.json`                             |
 | `Documents/Design/`      | Design documents (committed with implementation PRs) | `{domain-slug}.md`                                            |

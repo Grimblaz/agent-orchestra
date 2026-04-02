@@ -155,6 +155,8 @@ Production scripts under `.github/scripts/` are split into a `lib/{name}-core.ps
 # Example: call aggregate-review-scores logic in-process
 . .github/scripts/lib/aggregate-review-scores-core.ps1
 Invoke-AggregateReviewScores -Repo owner/name
+# Example: with mock gh CLI for tests (no live API calls)
+# Invoke-AggregateReviewScores -Repo owner/name -GhCliPath $mockGhScript
 ```
 
 ## Quick-validate (used by agents before every PR)
