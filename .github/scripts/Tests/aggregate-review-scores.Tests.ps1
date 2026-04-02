@@ -29,6 +29,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptFile = Join-Path $script:RepoRoot '.github\scripts\aggregate-review-scores.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        . $script:LibFile
 
         # Master temp root — all per-test dirs live under here
         $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
@@ -276,22 +278,34 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         # ------------------------------------------------------------------
-        # Helper: invoke aggregate-review-scores.ps1 as an external process.
-        # $ExtraArgs are appended to the pwsh invocation verbatim.
+        # Helper: invoke Invoke-AggregateReviewScores in-process.
+        # $ExtraArgs are parsed from '-Key Value' pairs into a params hashtable.
         # Returns @{ ExitCode; Output (stdout string); Error (stderr string) }
         # ------------------------------------------------------------------
         $script:InvokeAggregate = {
-            param([string]$WorkDir, [string[]]$ExtraArgs = @())
+            param([string[]]$ExtraArgs = @())
             Push-Location $script:RepoRoot
             try {
-                $allArgs = @('-NoProfile', '-NonInteractive', '-File', $script:ScriptFile) + $ExtraArgs
-                $rawOutput = & pwsh @allArgs 2>&1
-                $exitCode = $LASTEXITCODE
-                $errLines = ($rawOutput |
-                        Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) -join "`n"
-                $outLines = ($rawOutput |
-                        Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
-                return @{ ExitCode = $exitCode; Output = $outLines; Error = $errLines }
+                $params = @{ GhCliPath = 'gh' }
+                $i = 0
+                while ($i -lt $ExtraArgs.Count) {
+                    $arg = $ExtraArgs[$i]
+                    if ($arg -match '^-[-]?(.+)') {
+                        $key = $Matches[1]
+                        if ($i + 1 -lt $ExtraArgs.Count -and -not ($ExtraArgs[$i + 1] -match '^-')) {
+                            $params[$key] = $ExtraArgs[$i + 1]
+                            $i += 2
+                        }
+                        else {
+                            $params[$key] = $true
+                            $i++
+                        }
+                    }
+                    else {
+                        $i++
+                    }
+                }
+                return Invoke-AggregateReviewScores @params
             }
             finally {
                 Pop-Location
@@ -353,7 +367,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $nonExistentPath = Join-Path $workDir 'does-not-exist.json'
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $nonExistentPath)
 
             $result.ExitCode | Should -Be 0 `
@@ -371,7 +385,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $workDir = & $script:NewWorkDir
             $nonExistentPath = Join-Path $workDir 'does-not-exist.json'
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $nonExistentPath)
 
             $result.ExitCode | Should -Be 0
@@ -405,7 +419,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $script:ValidCalibration
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @(
                 '-Repo',
                 $script:CleanCalibrationRepo,
@@ -432,7 +446,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'orphan-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $script:OrphanCalibration
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -454,7 +468,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
             $calibPath = Join-Path $workDir 'orphan-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $script:OrphanCalibration
-            $withOrphanResult = & $script:InvokeAggregate -WorkDir $workDir `
+            $withOrphanResult = & $script:InvokeAggregate `
                 -ExtraArgs @(
                 '-Repo',
                 $script:CleanCalibrationRepo,
@@ -498,7 +512,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # Run with stale-timestamp calibration file
             $calibPath = Join-Path $workDir 'stale-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $script:StaleTimestampCalibration
-            $withStaleResult = & $script:InvokeAggregate -WorkDir $workDir `
+            $withStaleResult = & $script:InvokeAggregate `
                 -ExtraArgs @(
                 '-Repo',
                 $script:CleanCalibrationRepo,
@@ -547,7 +561,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
         BeforeAll {
             # Array of lines — enables per-line Select-String counts
-            $script:ScriptLines = Get-Content -Path $script:ScriptFile
+            $script:ScriptLines = Get-Content -Path $script:LibFile
         }
 
         It 'local-entries path contains the express-lane injection guard' {
@@ -718,7 +732,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'depth-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -740,7 +754,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'depth-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -770,7 +784,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'skip-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -789,7 +803,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'light-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -808,7 +822,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'full-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -834,7 +848,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'insuff-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @(
                 '-Repo',
                 $script:CleanCalibrationRepo,
@@ -883,7 +897,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'zero-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath, '-Repo', 'github/docs', '-Limit', '10')
 
             $result.ExitCode | Should -Be 0
@@ -907,7 +921,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'override-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -944,7 +958,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'reactivation-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -975,7 +989,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'timedecay-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1017,7 +1031,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'priority-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1051,7 +1065,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
                 # ACT
-                $result = & $script:InvokeAggregate -WorkDir $workDir `
+                $result = & $script:InvokeAggregate `
                     -ExtraArgs @('-CalibrationFile', $calibPath)
 
                 # ASSERT: fixture produced skip recommendation (confirms write-back path was entered)
@@ -1092,7 +1106,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
                 # ACT
-                $result = & $script:InvokeAggregate -WorkDir $workDir `
+                $result = & $script:InvokeAggregate `
                     -ExtraArgs @('-CalibrationFile', $calibPath)
 
                 # ASSERT: pattern recommendation is now full (exited skip)
@@ -1142,7 +1156,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
                 # ACT
-                $result = & $script:InvokeAggregate -WorkDir $workDir `
+                $result = & $script:InvokeAggregate `
                     -ExtraArgs @('-CalibrationFile', $calibPath)
 
                 # ASSERT: script succeeded
@@ -1180,7 +1194,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
                 # ACT
-                $result = & $script:InvokeAggregate -WorkDir $workDir `
+                $result = & $script:InvokeAggregate `
                     -ExtraArgs @('-CalibrationFile', $calibPath)
 
                 # ASSERT: time-decay promoted architecture to light (confirming the write-back path was entered)
@@ -1286,7 +1300,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'systemic-basic.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1325,7 +1339,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'systemic-threshold.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1357,7 +1371,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'systemic-noa.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1389,7 +1403,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'systemic-unknown-category.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1417,7 +1431,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'systemic-simplicity-alias.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1450,7 +1464,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'systemic-none.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1481,7 +1495,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'systemic-evidence.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1514,7 +1528,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'systemic-alltypes.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1548,7 +1562,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'systemic-notproposed.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1584,7 +1598,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'systemic-proposed.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1600,7 +1614,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # local-calibration fallback branch (if (-not $metricsMatch.Success)).
             # This test verifies the invariant structurally so regressions (accidentally
             # activating $systemicActive in the v2 loop) fail immediately.
-            $scriptContent = Get-Content -Path (Join-Path $PSScriptRoot '..\aggregate-review-scores.ps1') -Raw
+            $scriptContent = Get-Content -Path $script:LibFile -Raw
 
             # Exactly 1 occurrence of $systemicActive = $true (local-cal path only).
             # Use [^#\n]* so the match anchor forbids # from appearing anywhere before
@@ -1653,7 +1667,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'kaizen-basic.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1688,7 +1702,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'kaizen-nosuffix.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1715,7 +1729,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'kaizen-rate.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1745,7 +1759,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'kaizen-threshold.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1782,7 +1796,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'kaizen-proposed.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1815,7 +1829,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
             # ACT
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             # ASSERT: fixture produced a threshold-met pattern
@@ -1864,7 +1878,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
             # ACT
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1900,7 +1914,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
             # ACT
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -1951,7 +1965,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'proposals-superset.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0
@@ -2011,7 +2025,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'script references guidance-complexity.json for persistent_threshold' -Tag 'no-gh' {
-            $content = Get-Content -Path $script:ScriptFile -Raw
+            $content = Get-Content -Path $script:LibFile -Raw
             $content | Should -Match 'guidance-complexity\.json' `
                 -Because 'aggregate-review-scores.ps1 must read persistent_threshold from the guidance-complexity config file'
             $content | Should -Match 'persistent_threshold' `
@@ -2019,7 +2033,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'script declares complexityHistoryChanged dirty flag to gate write-back' -Tag 'no-gh' {
-            $content = Get-Content -Path $script:ScriptFile -Raw
+            $content = Get-Content -Path $script:LibFile -Raw
             $content | Should -Match 'complexityHistoryChanged' `
                 -Because 'script must track whether complexity history changed so write-back is conditional (atomic + dirty-flag pattern)'
         }
@@ -2036,7 +2050,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                     calibration_version = 1; entries = @()
                 })
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath)
 
             $result.ExitCode | Should -Be 0 `
@@ -2058,7 +2072,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                     calibration_version = 1; entries = @()
                 })
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
 
             $result.ExitCode | Should -Be 0
@@ -2081,7 +2095,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                     calibration_version = 1; entries = @()
                 })
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
 
             $result.ExitCode | Should -Be 0
@@ -2110,13 +2124,13 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 })
 
             # First run — establishes last_pr_number (the current max merged PR number)
-            $result1 = & $script:InvokeAggregate -WorkDir $workDir `
+            $result1 = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
             $result1.ExitCode | Should -Be 0 `
                 -Because 'first run must exit 0'
 
             # Second run — same max PR number context; must NOT re-increment
-            $result2 = & $script:InvokeAggregate -WorkDir $workDir `
+            $result2 = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
             $result2.ExitCode | Should -Be 0 `
                 -Because 'second run must exit 0'
@@ -2152,7 +2166,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $complexityPath = Join-Path $workDir 'complexity-clean.json'
             & $script:WriteComplexityFile -Path $complexityPath -AgentsOverCeiling @()
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
 
             $result.ExitCode | Should -Be 0
@@ -2179,7 +2193,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                     calibration_version = 1; entries = @()
                 })
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
 
             $result.ExitCode | Should -Be 0
@@ -2233,7 +2247,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 $complexityPath = Join-Path $workDir 'complexity-threshold.json'
                 & $script:WriteComplexityFile -Path $complexityPath -AgentsOverCeiling @('TestAgent.agent.md')
 
-                $result = & $script:InvokeAggregate -WorkDir $workDir `
+                $result = & $script:InvokeAggregate `
                     -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
 
                 $result.ExitCode | Should -Be 0
@@ -2259,7 +2273,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                     calibration_version = 1; entries = @()
                 })
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath, `
                     '-ComplexityJsonPath', 'C:\nonexistentpath\complexity-ghost.json')
 
@@ -2297,7 +2311,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $calibPath = Join-Path $workDir 'first-observed-immutable-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
-            $result = & $script:InvokeAggregate -WorkDir $workDir `
+            $result = & $script:InvokeAggregate `
                 -ExtraArgs @('-CalibrationFile', $calibPath, '-ComplexityJsonPath', $complexityPath)
 
             $result.ExitCode | Should -Be 0

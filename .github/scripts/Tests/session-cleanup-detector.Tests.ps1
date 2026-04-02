@@ -25,22 +25,22 @@ Describe 'session-cleanup-detector.ps1 — env var fallback' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptFile = Join-Path $script:RepoRoot '.github\scripts\session-cleanup-detector.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\session-cleanup-detector-core.ps1'
+        . $script:LibFile
 
         # Snapshot env vars so every test starts from a known baseline
         $script:SavedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
         $script:SavedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
 
+        # In-process helper: mirrors the wrapper's env-var-to-parameter resolution.
         # Pester v5 isolation: helper stored as a script-scoped scriptblock so
         # It blocks can call it via & $script:InvokeDetector.
         $script:InvokeDetector = {
+            # Mirror the wrapper's env-var resolution logic (in-process)
+            $repoRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } elseif ($env:WORKFLOW_TEMPLATE_ROOT) { $env:WORKFLOW_TEMPLATE_ROOT } else { '' }
             Push-Location $script:RepoRoot
             try {
-                $lines = & pwsh -NoProfile -NonInteractive -File $script:ScriptFile 2>$null
-                $exitCode = $LASTEXITCODE
-                # Script uses ConvertTo-Json -Compress → single line; join in case
-                # pwsh splits it across multiple output objects.
-                $output = ($lines -join '')
-                return @{ Output = $output; ExitCode = $exitCode }
+                return Invoke-SessionCleanupDetector -RepoRoot $repoRoot
             }
             finally {
                 Pop-Location
@@ -182,6 +182,31 @@ Describe 'session-cleanup-detector.ps1 — env var fallback' {
             }
         }
     }
+
+    # ------------------------------------------------------------------
+    # Wrapper smoke test — validates env-var-to-parameter translation
+    # Intentional pwsh spawn: tests the wrapper's env-var resolution path
+    # (covers requirement: at least 1 test verifies the wrapper contract)
+    # ------------------------------------------------------------------
+    Context 'wrapper env-var smoke test' {
+        It 'exits 0 when COPILOT_ORCHESTRA_ROOT is set via wrapper (pwsh -File)' {
+            $savedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
+            $savedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
+            try {
+                $env:COPILOT_ORCHESTRA_ROOT = $script:RepoRoot
+                Remove-Item Env:WORKFLOW_TEMPLATE_ROOT -ErrorAction SilentlyContinue
+
+                $null = & pwsh -NoProfile -NonInteractive -File $script:ScriptFile 2>$null
+                $exitCode = $LASTEXITCODE
+
+                $exitCode | Should -Be 0 -Because 'wrapper must translate COPILOT_ORCHESTRA_ROOT env var to -RepoRoot parameter'
+            }
+            finally {
+                $env:COPILOT_ORCHESTRA_ROOT = $savedOrchestra
+                $env:WORKFLOW_TEMPLATE_ROOT = $savedWorkflow
+            }
+        }
+    }
 }
 
 Describe 'session-cleanup-detector.ps1 — calibration tracking exclusion' {
@@ -189,6 +214,7 @@ Describe 'session-cleanup-detector.ps1 — calibration tracking exclusion' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptFile = Join-Path $script:RepoRoot '.github\scripts\session-cleanup-detector.ps1'
+        . (Join-Path $script:RepoRoot '.github\scripts\lib\session-cleanup-detector-core.ps1')
 
         $script:SavedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
         $script:SavedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
@@ -283,6 +309,9 @@ exit $LASTEXITCODE
             return $mockDir
         }
 
+        # In-process helper: injects git mock via PATH, changes CWD, calls library directly.
+        # Note: git mock .cmd wrappers internally spawn child pwsh processes — this is a known
+        # residual limitation of the git mock infrastructure and cannot be eliminated here.
         $script:InvokeDetectorInWorkDir = {
             param(
                 [string]$WorkDir,
@@ -291,14 +320,13 @@ exit $LASTEXITCODE
 
             $mockDir = & $script:NewMockGitDir -ParentDir $WorkDir -Config $GitConfig
             try {
-                $env:COPILOT_ORCHESTRA_ROOT = $script:RepoRoot
-                Remove-Item Env:WORKFLOW_TEMPLATE_ROOT -ErrorAction SilentlyContinue
                 $env:PATH = "$mockDir$([System.IO.Path]::PathSeparator)$script:SavedPath"
-
-                $lines = & pwsh -NoProfile -NonInteractive -WorkingDirectory $WorkDir -File $script:ScriptFile 2>$null
-                return @{
-                    Output   = ($lines -join '')
-                    ExitCode = $LASTEXITCODE
+                Push-Location $WorkDir
+                try {
+                    return Invoke-SessionCleanupDetector -RepoRoot $script:RepoRoot
+                }
+                finally {
+                    Pop-Location
                 }
             }
             finally {

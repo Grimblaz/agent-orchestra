@@ -25,6 +25,8 @@ Describe 'normalize-whitespace.ps1' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:HelperPath = Join-Path $script:RepoRoot '.github\scripts\normalize-whitespace.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\normalize-whitespace-core.ps1'
+        . $script:LibFile
 
         $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-normalize-whitespace-$([System.Guid]::NewGuid().ToString('N'))"
@@ -68,20 +70,10 @@ Describe 'normalize-whitespace.ps1' {
         $script:InvokeHelper = {
             param([string]$Path)
 
-            $output = & pwsh -NoProfile -NonInteractive -File $script:HelperPath -Path $Path 2>&1
-            $exitCode = $LASTEXITCODE
-            $renderedOutput = ($output | ForEach-Object {
-                    if ($_ -is [System.Management.Automation.ErrorRecord]) {
-                        $_.ToString()
-                    }
-                    else {
-                        "$_"
-                    }
-                }) -join "`n"
-
+            $result = Invoke-NormalizeWhitespace -Path $Path
             return @{
-                ExitCode = $exitCode
-                Output   = $renderedOutput.Trim()
+                ExitCode = $result.ExitCode
+                Output   = $result.Output
             }
         }
     }

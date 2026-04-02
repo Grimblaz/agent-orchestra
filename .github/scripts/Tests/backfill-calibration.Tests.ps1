@@ -37,6 +37,8 @@ Describe 'backfill-calibration.ps1' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptFile = Join-Path $script:RepoRoot '.github\scripts\backfill-calibration.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\backfill-calibration-core.ps1'
+        . $script:LibFile
 
         # ---------------------------------------------------------------------------
         # Shared pipeline-metrics content used across tests
@@ -163,7 +165,7 @@ exit 1
         }
 
         # ------------------------------------------------------------------
-        # Helper: invoke the backfill script with injected mocks.
+        # Helper: invoke Invoke-BackfillCalibration in-process.
         # Returns @{ ExitCode; Output; EntryCount; Entries[] }
         # where Entries[] is the list of entry objects written to review-data.json.
         # ------------------------------------------------------------------
@@ -175,14 +177,17 @@ exit 1
             )
             $dataFile = Join-Path -Path $WorkDir -ChildPath '.copilot-tracking' -AdditionalChildPath 'calibration', 'review-data.json'
 
-            $stdout = & pwsh -NoProfile -NonInteractive -WorkingDirectory $WorkDir -File $script:ScriptFile `
-                -GhCliPath $GhCliPath `
-                -Limit $Limit 2>&1
-
-            $exitCode = $LASTEXITCODE
-
-            $errLines = ($stdout | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) -join "`n"
-            $outLines = ($stdout | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
+            Push-Location $WorkDir
+            $invokeResult = $null
+            try {
+                $invokeResult = Invoke-BackfillCalibration -GhCliPath $GhCliPath -Limit $Limit
+            }
+            catch {
+                $invokeResult = @{ ExitCode = 1; Output = ''; Error = $_.ToString() }
+            }
+            finally {
+                Pop-Location
+            }
 
             $entries = @()
             if (Test-Path $dataFile) {
@@ -191,9 +196,9 @@ exit 1
             }
 
             return @{
-                ExitCode   = $exitCode
-                Output     = $outLines
-                Error      = $errLines
+                ExitCode   = $invokeResult.ExitCode
+                Output     = $invokeResult.Output
+                Error      = $invokeResult.Error
                 EntryCount = $entries.Count
                 Entries    = $entries
             }

@@ -147,6 +147,16 @@ pwsh -NoProfile -NonInteractive -Command "Invoke-Pester .github/scripts/Tests/ -
 (Get-ChildItem .github/agents/*.agent.md).Count  # should be 14
 ```
 
+### Script Library Convention
+
+Production scripts under `.github/scripts/` are split into a `lib/{name}-core.ps1` library (containing the logic as an `Invoke-*` function) and a thin CLI wrapper that dot-sources the library and calls the function. Tests dot-source `lib/` files directly and call the function in-process, avoiding per-test `pwsh` child process spawning. Private helpers inside a library use a short prefix (`NW-`, `WCE-`, `SCD-`) to avoid name collisions across dot-sourced files.
+
+```powershell
+# Example: call aggregate-review-scores logic in-process
+. .github/scripts/lib/aggregate-review-scores-core.ps1
+Invoke-AggregateReviewScores -Repo owner/name
+```
+
 ## Quick-validate (used by agents before every PR)
 
 After editing any `.md` files, run the Markdown auto-formatter before committing:

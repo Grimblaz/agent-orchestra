@@ -35,7 +35,8 @@ Describe 'measure-guidance-complexity.ps1' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot '.github\scripts\measure-guidance-complexity.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\measure-guidance-complexity-core.ps1'
+        . $script:LibFile
 
         # Session-scoped temp root — all per-test dirs live under here
         $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
@@ -72,20 +73,24 @@ Describe 'measure-guidance-complexity.ps1' {
         }
 
         # ---------------------------------------------------------------
-        # Helper: invoke the script; returns @{ ExitCode; Raw (stdout) }
-        # ErrorRecord objects (stderr) are filtered out of Raw.
+        # Helper: invoke Invoke-MeasureGuidanceComplexity in-process.
+        # Returns @{ ExitCode; Raw (stdout JSON) }
         # ---------------------------------------------------------------
         $script:Invoke = {
             param(
                 [string]$AgentsPath,
                 [string]$ConfigPath = ''
             )
-            $scriptArgs = @('-AgentsPath', $AgentsPath)
-            if ($ConfigPath) { $scriptArgs += @('-ConfigPath', $ConfigPath) }
-            $stdout = & pwsh -NoProfile -NonInteractive -File $script:ScriptFile @scriptArgs 2>&1
-            $exitCode = $LASTEXITCODE
-            $outLines = ($stdout | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
-            return @{ ExitCode = $exitCode; Raw = $outLines.Trim() }
+            $params = @{ AgentsPath = $AgentsPath }
+            if ($ConfigPath) { $params['ConfigPath'] = $ConfigPath }
+            $invokeResult = $null
+            try {
+                $invokeResult = Invoke-MeasureGuidanceComplexity @params
+            }
+            catch {
+                $invokeResult = @{ ExitCode = 0; Output = '{"config_source":"error","agents_over_ceiling":[],"agents":[]}'; Error = $_.ToString() }
+            }
+            return @{ ExitCode = $invokeResult.ExitCode; Raw = $invokeResult.Output.Trim() }
         }
 
         # ---------------------------------------------------------------

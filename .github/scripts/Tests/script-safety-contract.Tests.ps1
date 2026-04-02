@@ -21,6 +21,7 @@ Describe 'script safety contract' {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptsRoot = Join-Path -Path $script:RepoRoot -ChildPath '.github' -AdditionalChildPath 'scripts'
         $script:AggregateReviewScores = Join-Path $script:ScriptsRoot 'aggregate-review-scores.ps1'
+        $script:AggregateReviewScoresCore = Join-Path $script:ScriptsRoot 'lib\aggregate-review-scores-core.ps1'
 
         $script:ProductionScripts = Get-ChildItem -Path $script:ScriptsRoot -Recurse -Filter '*.ps1' |
             Where-Object { $_.DirectoryName -notmatch '[/\\]Tests([/\\]|$)' }
@@ -51,7 +52,7 @@ Describe 'script safety contract' {
     }
 
     It 'script safety: $knownCategories in aggregate-review-scores.ps1 must contain exactly the 7 mandated values' {
-        $content = Get-Content -Path $script:AggregateReviewScores -Raw
+        $content = Get-Content -Path $script:AggregateReviewScoresCore -Raw
 
         $allMatches = [regex]::Matches($content, '(?s)\$knownCategories\s*=\s*@\((.*?)\)')
         $allMatches | Should -HaveCount 2 -Because '$knownCategories must be defined twice in aggregate-review-scores.ps1 (once for $accumulateFinding, once for emit loops) and both definitions must be present'
@@ -64,4 +65,22 @@ Describe 'script safety contract' {
                 ($extractedSorted -join ',') | Should -Be ($script:MandatedCategories -join ',') -Because 'every $knownCategories definition must contain exactly the 7 mandated taxonomy values (architecture, documentation-audit, implementation-clarity, pattern, performance, script-automation, security); drift breaks cross-script consistency and calibration data integrity'
             }
         }
+
+        It 'script safety: test files must not spawn child pwsh processes (use dot-source + in-process call pattern)' {
+            $allowlist = @(
+                'branch-authority-gate.Tests.ps1',
+                'script-safety-contract.Tests.ps1',   # self-excluded: this file contains the literal '& pwsh' in its own scan pattern, which would cause a false-positive match
+                'session-cleanup-detector.Tests.ps1'
+            )
+
+            $violations = Get-ChildItem -Path (Join-Path $script:ScriptsRoot 'Tests') -Filter '*.Tests.ps1' |
+                Where-Object { $_.Name -notin $allowlist } |
+                Where-Object {
+                    $content = Get-Content -Path $_.FullName -Raw
+                    $content -match '& pwsh'
+                } |
+                Select-Object -ExpandProperty Name
+
+        $violations | Should -HaveCount 0 -Because 'test files must use the dot-source + in-process call pattern (dot-source lib/...core.ps1, call Invoke-... directly) instead of spawning a child pwsh process per test; spawning adds significant Pester suite overhead (see issue #257)'
     }
+}

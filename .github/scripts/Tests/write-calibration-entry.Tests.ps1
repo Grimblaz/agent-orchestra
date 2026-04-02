@@ -36,6 +36,8 @@ Describe 'write-calibration-entry.ps1' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptFile = Join-Path $script:RepoRoot '.github\scripts\write-calibration-entry.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\write-calibration-entry-core.ps1'
+        . $script:LibFile
 
         # Master temp root — all per-test dirs live under here
         $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "pester-calibration-$([System.Guid]::NewGuid().ToString('N'))"
@@ -73,7 +75,7 @@ Describe 'write-calibration-entry.ps1' {
         }
 
         # ------------------------------------------------------------------
-        # Helper: invoke the script from a given working directory.
+        # Helper: invoke Invoke-WriteCalibrationEntry in-process.
         # Returns @{ ExitCode; Output (stdout); Error (stderr) }
         # ------------------------------------------------------------------
         $script:Invoke = {
@@ -84,15 +86,14 @@ Describe 'write-calibration-entry.ps1' {
             )
             Push-Location $WorkDir
             try {
-                $scriptArgs = @()
-                if ($EntryJson) { $scriptArgs += @('-EntryJson', $EntryJson) }
-                if ($EventJson) { $scriptArgs += @('-ReactivationEventJson', $EventJson) }
-                $stdout = & pwsh -NoProfile -NonInteractive -File $script:ScriptFile @scriptArgs 2>&1
-                $exitCode = $LASTEXITCODE
-                # Separate ErrorRecord objects (stderr) from plain strings (stdout)
-                $errLines = ($stdout | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }) -join "`n"
-                $outLines = ($stdout | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
-                return @{ ExitCode = $exitCode; Output = $outLines; Error = $errLines }
+                $invokeArgs = @{}
+                if ($EntryJson) { $invokeArgs['EntryJson'] = $EntryJson }
+                if ($EventJson) { $invokeArgs['ReactivationEventJson'] = $EventJson }
+                $result = Invoke-WriteCalibrationEntry @invokeArgs
+                return @{ ExitCode = $result.ExitCode; Output = $result.Output; Error = $result.Error }
+            }
+            catch {
+                return @{ ExitCode = 1; Output = ''; Error = $_.ToString() }
             }
             finally {
                 Pop-Location
@@ -243,7 +244,7 @@ Describe 'write-calibration-entry.ps1' {
             $data.entries.Count | Should -Be 1 -Because 'same pr_number must be overwritten, not duplicated'
             # ConvertFrom-Json returns created_at as DateTime; normalise to UTC string for comparison
             ([datetime]$data.entries[0].created_at).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss') |
-            Should -Be '2026-03-22T10:00:00' -Because 'the new entry data must replace the old one'
+                Should -Be '2026-03-22T10:00:00' -Because 'the new entry data must replace the old one'
         }
     }
 
@@ -614,15 +615,15 @@ Describe 'write-calibration-entry.ps1' {
             $ast = [System.Management.Automation.Language.Parser]::ParseFile(
                 $script:ScriptFile, [ref]$null, [ref]$null)
             $entryParam = $ast.ParamBlock.Parameters |
-            Where-Object { $_.Name.VariablePath.UserPath -eq 'EntryJson' }
+                Where-Object { $_.Name.VariablePath.UserPath -eq 'EntryJson' }
             $mandatoryAttr = $entryParam.Attributes |
-            Where-Object { $_.TypeName.Name -eq 'Parameter' } |
-            Where-Object {
-                $_.NamedArguments | Where-Object {
-                    $_.ArgumentName -eq 'Mandatory' -and
-                    ($_.Argument.Extent.Text -eq '$true' -or $_.ExpressionOmitted)
+                Where-Object { $_.TypeName.Name -eq 'Parameter' } |
+                Where-Object {
+                    $_.NamedArguments | Where-Object {
+                        $_.ArgumentName -eq 'Mandatory' -and
+                        ($_.Argument.Extent.Text -eq '$true' -or $_.ExpressionOmitted)
+                    }
                 }
-            }
             $mandatoryAttr | Should -BeNullOrEmpty `
                 -Because '-EntryJson must no longer be mandatory when -ReactivationEventJson exists'
         }
