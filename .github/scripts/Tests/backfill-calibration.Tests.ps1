@@ -26,10 +26,9 @@
       - A minimal mock `gh.ps1` is written into the temp dir; its path is
         passed to the script via -GhCliPath so the real `gh` CLI is never
         invoked.
-      - The child pwsh process runs with -WorkingDirectory set to the temp dir
-        so .copilot-tracking/calibration/review-data.json is written there.
       - Tests read the output JSON directly to inspect entries written.
-      - Invocations run in a child pwsh process to keep test process state clean.
+      - Invocations run in-process by calling Invoke-BackfillCalibration from
+        lib/backfill-calibration-core.ps1 directly (no child pwsh spawning).
 #>
 
 Describe 'backfill-calibration.ps1' {
