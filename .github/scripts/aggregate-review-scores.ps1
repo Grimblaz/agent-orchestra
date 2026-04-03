@@ -13,6 +13,11 @@
     complexity_over_ceiling_history, and proposals_emitted to the calibration file
     when present.
 
+    When -HealthReport is specified, all calibration file write-back is suppressed
+    (read-only mode) and the health report Markdown is emitted to stdout instead of
+    the YAML output. When -OutputPath is specified, the health report is written to
+    the given file path (write-back still occurs unless -HealthReport is also set).
+
 .PARAMETER DecayLambda
     Exponential decay parameter. Default: 0.023 (half-life approximately 30 days).
 
@@ -34,6 +39,16 @@
 
 .PARAMETER GhCliPath
     Path to the gh CLI executable. Defaults to 'gh'. Override for testing.
+
+.PARAMETER HealthReport
+    When present, suppresses all calibration file write-back (read-only mode) and
+    emits the health report Markdown to stdout instead of the YAML output. If
+    -OutputPath is also provided, the health report is written to that file.
+
+.PARAMETER OutputPath
+    Optional file path to write the health report Markdown. When specified, the
+    health report is written to this file regardless of whether -HealthReport is
+    set. Does not affect stdout routing or write-back suppression on its own.
 #>
 [CmdletBinding()]
 param(
@@ -42,12 +57,36 @@ param(
     [string]$Repo = '',
     [string]$CalibrationFile = '.copilot-tracking/calibration/review-data.json',
     [string]$ComplexityJsonPath = '',
-    [string]$GhCliPath = 'gh'
+    [string]$GhCliPath = 'gh',
+    [switch]$HealthReport,
+    [string]$OutputPath = ''
 )
 
 . "$PSScriptRoot/lib/aggregate-review-scores-core.ps1"
 
+# OutputPath is wrapper-only; remove before splatting to core function
+$null = $PSBoundParameters.Remove('OutputPath')
 $result = Invoke-AggregateReviewScores @PSBoundParameters
-if ($result.Output) { Write-Output $result.Output }
+
+# Write health report to file if OutputPath specified
+if (-not [string]::IsNullOrWhiteSpace($OutputPath) -and $result.ContainsKey('HealthReport')) {
+    try {
+        Set-Content -Path $OutputPath -Value $result.HealthReport -Encoding UTF8
+    }
+    catch {
+        Write-Error "Failed to write health report to '$OutputPath': $_" -ErrorAction Continue
+        exit 1
+    }
+}
+
+# Route stdout: health report if -HealthReport switch, else YAML
+if ($HealthReport.IsPresent) {
+    if ($result.ContainsKey('HealthReport')) { Write-Output $result.HealthReport }
+    elseif ($result.Output) { Write-Error $result.Output -ErrorAction Continue }
+}
+else {
+    if ($result.Output) { Write-Output $result.Output }
+}
+
 if ($result.Error) { Write-Error $result.Error -ErrorAction Continue }
 exit $result.ExitCode

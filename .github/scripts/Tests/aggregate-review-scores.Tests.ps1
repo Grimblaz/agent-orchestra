@@ -587,6 +587,15 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 Should -Not -BeNullOrEmpty `
                     -Because '$isSustained must combine both sustained and finding-sustained so express-lane findings are counted correctly'
         }
+
+        It "maps legacy 'documentation' category to 'documentation-audit' in accumulateFinding" -Tag 'no-gh' {
+            ($script:ScriptLines | Select-String "category -eq 'documentation'") |
+                Should -Not -BeNullOrEmpty `
+                    -Because '$accumulateFinding must normalize documentation to documentation-audit like it normalizes simplicity to implementation-clarity'
+            ($script:ScriptLines | Select-String "category = 'documentation-audit'") |
+                Should -Not -BeNullOrEmpty `
+                    -Because '$accumulateFinding must assign documentation-audit as the canonical category name'
+        }
     }
 
     # ==================================================================
@@ -2327,5 +2336,869 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             $entry['last_observed_at'] | Should -Not -Be $seedTime `
                 -Because 'last_observed_at must be updated to reflect the new observation time'
         }
+    }
+}
+
+# ==================================================================
+# Describe: -HealthReport parameter and return shape contract (Step 1 #259)
+# RED tests — all fail until -HealthReport is added to core lib and wrapper,
+# -OutputPath is added to wrapper only, and HealthReport key is returned
+# from the success path.
+# ==================================================================
+Describe 'aggregate-review-scores -HealthReport parameter and return shape contract' {
+
+    BeforeAll {
+        $script:HRRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:HRScriptFile = Join-Path $script:HRRepoRoot '.github\scripts\aggregate-review-scores.ps1'
+        $script:HRLibFile = Join-Path $script:HRRepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        . $script:HRLibFile
+
+        # Isolated temp root for mock-gh artifacts
+        $script:HRTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
+            "pester-healthreport-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:HRTempRoot -Force | Out-Null
+
+        # ---------------------------------------------------------------
+        # Parse CLI wrapper AST for parameter introspection (no-gh)
+        # ---------------------------------------------------------------
+        $wrapperContent = Get-Content -Path $script:HRScriptFile -Raw
+        $wrapperErrors = $null
+        $script:HRWrapperAst = [System.Management.Automation.Language.Parser]::ParseInput(
+            $wrapperContent, [ref]$null, [ref]$wrapperErrors
+        )
+        $script:HRWrapperParams = $script:HRWrapperAst.FindAll(
+            { $args[0] -is [System.Management.Automation.Language.ParameterAst] }, $true
+        )
+        $script:HRWrapperParamNames = $script:HRWrapperParams |
+            ForEach-Object { $_.Name.VariablePath.UserPath }
+
+        # ---------------------------------------------------------------
+        # Parse core lib AST for parameter introspection (no-gh)
+        # ---------------------------------------------------------------
+        $libContent = Get-Content -Path $script:HRLibFile -Raw
+        $libErrors = $null
+        $script:HRLibAst = [System.Management.Automation.Language.Parser]::ParseInput(
+            $libContent, [ref]$null, [ref]$libErrors
+        )
+        $script:HRLibParams = $script:HRLibAst.FindAll(
+            { $args[0] -is [System.Management.Automation.Language.ParameterAst] }, $true
+        )
+        $script:HRLibParamNames = $script:HRLibParams |
+            ForEach-Object { $_.Name.VariablePath.UserPath }
+
+        # ---------------------------------------------------------------
+        # Helper: write a mock gh.ps1 that outputs preset PR JSON.
+        # Same companion-data-file pattern as backfill-calibration.Tests.ps1
+        # to avoid quoting hazards in the generated script body.
+        # Returns the path to the mock script.
+        # ---------------------------------------------------------------
+        $script:HRWriteMockGh = {
+            param([string]$WorkDir, [string]$JsonOutput)
+            $dataFile = Join-Path $WorkDir 'gh-response.json'
+            $mockPath = Join-Path $WorkDir 'gh.ps1'
+            $JsonOutput | Set-Content -Path $dataFile -Encoding UTF8
+            @"
+# Mock gh CLI — outputs pre-defined JSON regardless of arguments
+Get-Content -Raw -Path '$($dataFile -replace "'", "''")'
+exit 0
+"@ | Set-Content -Path $mockPath -Encoding UTF8
+            return $mockPath
+        }
+    }
+
+    AfterAll {
+        if (Test-Path $script:HRTempRoot) {
+            Remove-Item -Recurse -Force -Path $script:HRTempRoot -ErrorAction SilentlyContinue
+        }
+    }
+
+    # ==================================================================
+    # Context: parameter declarations (AST introspection, no-gh)
+    # ==================================================================
+    Context '-HealthReport and -OutputPath parameter declarations' {
+
+        It 'core lib Invoke-AggregateReviewScores declares -HealthReport as [switch]' -Tag 'no-gh' {
+            $script:HRLibParamNames | Should -Contain 'HealthReport' `
+                -Because 'Invoke-AggregateReviewScores must declare -HealthReport [switch] to support read-only write-back suppression (D-259-15)'
+            $paramAst = $script:HRLibParams | Where-Object {
+                $_.Name.VariablePath.UserPath -eq 'HealthReport'
+            }
+            $paramAst | Should -Not -BeNullOrEmpty `
+                -Because '-HealthReport AST node must be present in the core lib param block'
+            $paramAst.StaticType.Name | Should -Be 'SwitchParameter' `
+                -Because '-HealthReport must be declared as [switch] (StaticType = SwitchParameter)'
+        }
+
+        It 'CLI wrapper aggregate-review-scores.ps1 declares -HealthReport as [switch]' -Tag 'no-gh' {
+            $script:HRWrapperParamNames | Should -Contain 'HealthReport' `
+                -Because 'aggregate-review-scores.ps1 wrapper must declare -HealthReport to activate read-only mode and stdout health-report routing'
+            $paramAst = $script:HRWrapperParams | Where-Object {
+                $_.Name.VariablePath.UserPath -eq 'HealthReport'
+            }
+            $paramAst | Should -Not -BeNullOrEmpty `
+                -Because '-HealthReport AST node must be present in the wrapper param block'
+            $paramAst.StaticType.Name | Should -Be 'SwitchParameter' `
+                -Because '-HealthReport must be declared as [switch] in the wrapper'
+        }
+
+        It 'CLI wrapper aggregate-review-scores.ps1 declares -OutputPath as [string]' -Tag 'no-gh' {
+            $script:HRWrapperParamNames | Should -Contain 'OutputPath' `
+                -Because 'aggregate-review-scores.ps1 wrapper must declare -OutputPath so Process-Review §4.7 can write the health report to a file (D-259-16)'
+            $paramAst = $script:HRWrapperParams | Where-Object {
+                $_.Name.VariablePath.UserPath -eq 'OutputPath'
+            }
+            $paramAst | Should -Not -BeNullOrEmpty `
+                -Because '-OutputPath AST node must be present in the wrapper param block'
+            $paramAst.StaticType.Name | Should -Be 'String' `
+                -Because '-OutputPath must be declared as [string] in the wrapper'
+        }
+
+        It 'core lib Invoke-AggregateReviewScores does NOT declare -OutputPath (F1 fix)' -Tag 'no-gh' {
+            $script:HRLibParamNames | Should -Not -Contain 'OutputPath' `
+                -Because 'OutputPath controls wrapper-only file routing; passing it to Invoke-AggregateReviewScores causes a parameter-binding error when the wrapper splats PSBoundParameters (F1 critical finding — wrapper must remove OutputPath before splatting)'
+        }
+    }
+
+    # ==================================================================
+    # Context: return hashtable HealthReport key (mock-gh, in-process)
+    # Tagged no-gh because mock gh eliminates live API dependency.
+    # ==================================================================
+    Context 'return hashtable HealthReport key presence and absence' {
+
+        It 'return hashtable includes HealthReport key on sufficient-data success path' -Tag 'no-gh' {
+            # ARRANGE: mock gh returns 6 recent PRs with v2 pipeline-metrics blocks
+            # effectiveSampleSize ≈ 6.0 (weight ≈ 1.0 each, mergedAt = today) ≥ 5.0 threshold
+            $workDir = Join-Path $script:HRTempRoot ([System.Guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+            $today = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+            $mockBody = "<!-- pipeline-metrics`nmetrics_version: v2.0`n-->"
+            $prs = @(1..6 | ForEach-Object {
+                    [ordered]@{ number = $_; mergedAt = $today; body = $mockBody }
+                })
+            $mockGhPath = & $script:HRWriteMockGh `
+                -WorkDir     $workDir `
+                -JsonOutput  ($prs | ConvertTo-Json -Depth 3)
+
+            # ACT
+            $result = Invoke-AggregateReviewScores `
+                -GhCliPath       $mockGhPath `
+                -Repo            'test/mockowner' `
+                -CalibrationFile (Join-Path $workDir 'no-calib.json')
+
+            # ASSERT
+            $result.ContainsKey('HealthReport') | Should -BeTrue `
+                -Because 'successful run with sufficient data must return a HealthReport key in the hashtable (Step 1 plumbing)'
+        }
+
+        It 'return hashtable does NOT include HealthReport key when gh CLI is not found (ExitCode=1)' -Tag 'no-gh' {
+            # ARRANGE: GhCliPath points to a path that does not exist → early ExitCode=1 exit
+            $nonExistentGh = Join-Path $script:HRTempRoot 'no-such-subdir\gh.exe'
+
+            # ACT
+            $result = Invoke-AggregateReviewScores `
+                -GhCliPath $nonExistentGh `
+                -Repo      'test/mockowner'
+
+            # ASSERT
+            $result.ExitCode | Should -Be 1 `
+                -Because 'missing gh CLI must produce ExitCode=1'
+            $result.ContainsKey('HealthReport') | Should -BeFalse `
+                -Because 'ExitCode=1 error paths must never include a HealthReport key'
+        }
+    }
+}
+
+# ==================================================================
+# Describe: Format-HealthReport private function core content (Step 2 #259)
+# RED tests — all fail until Format-HealthReport is implemented in core lib.
+# All tests are in-process with constructed $Context hashtables; no gh CLI needed.
+# ==================================================================
+Describe 'Format-HealthReport core content' {
+
+    BeforeAll {
+        $script:FHRRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:FHRLibFile = Join-Path $script:FHRRepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        . $script:FHRLibFile
+
+        # ---------------------------------------------------------------
+        # Shared valid context used by the majority of tests.
+        # Covers all 5 sections: heading, sustain rate, hotspots,
+        # prosecution depth, D10 ceiling, systemic patterns.
+        # ---------------------------------------------------------------
+        $script:FHRValidContext = @{
+            OverallSustainRate           = 0.52
+            CategoryData                 = @{
+                'architecture'           = @{ findings = 10; effectiveCount = 30.0; sustained = 15.5 }
+                'security'               = @{ findings = 5; effectiveCount = 12.0; sustained = 6.0 }
+                'performance'            = @{ findings = 3; effectiveCount = 8.0; sustained = 4.0 }
+                'pattern'                = @{ findings = 2; effectiveCount = 5.0; sustained = 2.5 }
+                'implementation-clarity' = @{ findings = 1; effectiveCount = 2.0; sustained = 1.0 }
+            }
+            ProsecutionDepthState        = @{}
+            KnownCategories              = @(
+                'architecture', 'security', 'performance', 'pattern',
+                'implementation-clarity', 'script-automation', 'documentation-audit'
+            )
+            ComplexityOverCeilingHistory = @{
+                'some-agent.agent.md' = @{
+                    consecutive_count = 4
+                    first_observed_at = '2026-01-01T00:00:00Z'
+                    last_observed_at  = '2026-03-01T00:00:00Z'
+                    last_pr_number    = 42
+                }
+            }
+            PersistentThreshold          = 3
+            SystemicPatterns             = @{
+                'instruction' = @{
+                    'architecture' = @{
+                        count           = 3
+                        sustained_count = 2
+                        prs             = [System.Collections.Generic.HashSet[int]]@(10, 11)
+                        evidence        = @()
+                    }
+                }
+            }
+            KnownSystemicFixTypes        = @('instruction', 'skill', 'agent-prompt', 'plan-template')
+            ProposalsEmitted             = @()
+            Generated                    = '2026-04-03T12:00:00Z'
+            IssuesAnalyzed               = 15
+            EffectiveSampleSize          = 42.3
+            OlderWindowRate              = $null
+            OlderCategoryRates           = $null
+        }
+    }
+
+    # ------------------------------------------------------------------
+    # Test 1: empty context → empty string (defensive early-exit)
+    # ------------------------------------------------------------------
+    It 'returns empty string for empty context' -Tag 'no-gh' {
+        # ARRANGE
+        $emptyCtx = @{}
+
+        # ACT
+        $result = Format-HealthReport $emptyCtx
+
+        # ASSERT
+        $result | Should -BeExactly '' `
+            -Because 'empty context must trigger defensive early-exit and return an empty string'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 2: heading present
+    # ------------------------------------------------------------------
+    It 'output starts with # Pipeline Health Report heading' -Tag 'no-gh' {
+        # ARRANGE
+        $ctx = $script:FHRValidContext
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match '^# Pipeline Health Report' `
+            -Because 'the report must open with the top-level heading # Pipeline Health Report'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 3: ## Overall Sustain Rate section uses → indicator stub
+    # ------------------------------------------------------------------
+    It '## Overall Sustain Rate section uses → indicator stub' -Tag 'no-gh' {
+        # ARRANGE
+        $ctx = $script:FHRValidContext
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match '## Overall Sustain Rate' `
+            -Because '## Overall Sustain Rate section heading must be present'
+        # Capture the section between ## Overall Sustain Rate and the next ## heading
+        $sectionMatch = [regex]::Match($result, '(?s)## Overall Sustain Rate(.*?)(?=\n## |\z)')
+        $sectionMatch.Success | Should -BeTrue `
+            -Because 'regex must match the ## Overall Sustain Rate section'
+        $sectionMatch.Value | Should -Match '→' `
+            -Because 'ensures flat indicators are returned when OlderWindowRate is null (insufficient temporal data)'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 4: ## Category Hotspots shows top 3 by effectiveCount
+    # ------------------------------------------------------------------
+    It '## Category Hotspots shows top 3 categories by effectiveCount' -Tag 'no-gh' {
+        # ARRANGE: 5 categories with distinct effectiveCount values
+        # Top 3: architecture(30.0) > security(12.0) > performance(8.0)
+        # Bottom 2: pattern(5.0), implementation-clarity(2.0)
+        $ctx = $script:FHRValidContext
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match '## Category Hotspots' `
+            -Because '## Category Hotspots section must be present when CategoryData has entries'
+
+        # Capture the hotspot section only (between its heading and the next ##)
+        $hotspotSection = [regex]::Match($result, '(?s)## Category Hotspots(.*?)(?=\n## |\z)').Value
+
+        $hotspotSection | Should -Match 'architecture' `
+            -Because 'architecture (effectiveCount=30.0, rank 1) must appear in the top-3 hotspot table'
+        $hotspotSection | Should -Match 'security' `
+            -Because 'security (effectiveCount=12.0, rank 2) must appear in the top-3 hotspot table'
+        $hotspotSection | Should -Match 'performance' `
+            -Because 'performance (effectiveCount=8.0, rank 3) must appear in the top-3 hotspot table'
+        $hotspotSection | Should -Not -Match 'pattern\b' `
+            -Because 'pattern (effectiveCount=5.0, rank 4) must NOT appear — only top 3 are shown'
+        $hotspotSection | Should -Not -Match 'implementation-clarity' `
+            -Because 'implementation-clarity (effectiveCount=2.0, rank 5) must NOT appear — only top 3 are shown'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 5: ## Prosecution Depth section present
+    # ------------------------------------------------------------------
+    It '## Prosecution Depth section is present with known categories' -Tag 'no-gh' {
+        # ARRANGE
+        $ctx = $script:FHRValidContext
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match '## Prosecution Depth' `
+            -Because '## Prosecution Depth section must always be present when context is valid'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 6: ## D10 Ceiling Status omitted when history is empty
+    # ------------------------------------------------------------------
+    It '## D10 Ceiling Status omitted when ComplexityOverCeilingHistory is empty' -Tag 'no-gh' {
+        # ARRANGE: clone valid context but clear the ceiling history
+        $ctx = $script:FHRValidContext.Clone()
+        $ctx['ComplexityOverCeilingHistory'] = @{}
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Not -Match '## D10 Ceiling Status' `
+            -Because '## D10 Ceiling Status must be omitted entirely when no agents are over ceiling'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 7: ## D10 Ceiling Status present when over-ceiling agent exists
+    # ------------------------------------------------------------------
+    It '## D10 Ceiling Status present when over-ceiling agent exists' -Tag 'no-gh' {
+        # ARRANGE: valid context already has one over-ceiling agent
+        $ctx = $script:FHRValidContext
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match '## D10 Ceiling Status' `
+            -Because '## D10 Ceiling Status must appear when ComplexityOverCeilingHistory contains at least one agent'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 8: ## Systemic Pattern Alerts omitted when no patterns meet threshold
+    # ------------------------------------------------------------------
+    It '## Systemic Pattern Alerts omitted when no patterns meet threshold' -Tag 'no-gh' {
+        # ARRANGE: clone valid context; give pattern a count below threshold
+        # threshold: sustained_count >= 2 AND distinct_prs (prs.Count) >= 2
+        $ctx = $script:FHRValidContext.Clone()
+        $ctx['SystemicPatterns'] = @{
+            'instruction' = @{
+                'architecture' = @{
+                    count           = 1
+                    sustained_count = 1           # below threshold (< 2)
+                    prs             = [System.Collections.Generic.HashSet[int]]@(10)  # only 1 PR
+                    evidence        = @()
+                }
+            }
+        }
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Not -Match '## Systemic Pattern Alerts' `
+            -Because '## Systemic Pattern Alerts must be omitted when no pattern has sustained_count >= 2 AND distinct_prs >= 2'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 9: ## Systemic Pattern Alerts present when pattern meets threshold
+    # ------------------------------------------------------------------
+    It '## Systemic Pattern Alerts present when pattern meets threshold' -Tag 'no-gh' {
+        # ARRANGE: valid context has one pattern with sustained_count=2 AND prs.Count=2
+        $ctx = $script:FHRValidContext
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match '## Systemic Pattern Alerts' `
+            -Because '## Systemic Pattern Alerts must appear when at least one pattern has sustained_count >= 2 AND distinct_prs >= 2'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 10: ## Category Hotspots omitted when CategoryData is empty
+    # ------------------------------------------------------------------
+    It '## Category Hotspots section omitted when CategoryData is empty' -Tag 'no-gh' {
+        # ARRANGE: clone valid context but provide empty CategoryData
+        $ctx = $script:FHRValidContext.Clone()
+        $ctx['CategoryData'] = @{}
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Not -Match '## Category Hotspots' `
+            -Because '## Category Hotspots section must be omitted entirely when CategoryData is empty'
+    }
+}
+
+# ==================================================================
+# Describe: Directional indicators via temporal split (Step 3 #259)
+# RED tests — Tests 1 and 2 fail until temporal split logic is
+# implemented. Tests 3 and 4 currently pass (stub always outputs →);
+# they become meaningful guards once the implementation is in place.
+# All tests use mock gh CLI (companion-data-file pattern). Tag: no-gh.
+# ==================================================================
+Describe 'Directional indicators via temporal split' {
+
+    BeforeAll {
+        $script:TSSRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:TSSLibFile = Join-Path $script:TSSRepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        . $script:TSSLibFile
+        $script:TSSTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
+            "pester-tss-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:TSSTempRoot -Force | Out-Null
+
+        # ---------------------------------------------------------------
+        # Helper: write a mock gh.ps1 that outputs preset PR JSON.
+        # Companion-data-file pattern avoids quoting hazards in the
+        # generated script body.
+        # ---------------------------------------------------------------
+        $script:TSSWriteMockGh = {
+            param([string]$WorkDir, [string]$JsonOutput)
+            $dataFile = Join-Path $WorkDir 'gh-response.json'
+            $mockPath = Join-Path $WorkDir 'gh.ps1'
+            $JsonOutput | Set-Content -Path $dataFile -Encoding UTF8
+            @"
+# Mock gh CLI
+Get-Content -Raw -Path '$($dataFile -replace "'", "''")'
+exit 0
+"@ | Set-Content -Path $mockPath -Encoding UTF8
+            return $mockPath
+        }
+
+        # ---------------------------------------------------------------
+        # Helper: build a PR object for the mock JSON array.
+        # ---------------------------------------------------------------
+        function New-MockPr {
+            param([int]$Number, [string]$MergedAt, [string]$Body)
+            return [ordered]@{ number = $Number; mergedAt = $MergedAt; body = $Body }
+        }
+
+        # Body with 1 sustained / 2 total per PR → 50% sustain rate.
+        # F1: sustained, F2: defense-sustained (counts toward weightedTotal but not weightedAccepted).
+        $script:TSSHalfBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: sustained
+  - id: F2
+    category: security
+    judge_ruling: defense-sustained
+-->
+"@
+
+        # Body with 2 sustained / 2 total per PR → 100% sustain rate.
+        $script:TSSFullBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: sustained
+  - id: F2
+    category: security
+    judge_ruling: sustained
+-->
+"@
+
+        # v1 body: pipeline-metrics block with no metrics_version field.
+        # Contributes to effectiveSampleSize but not to prContributions for temporal split.
+        $script:TSSV1Body = "<!-- pipeline-metrics`n-->"
+    }
+
+    AfterAll {
+        Remove-Item -Recurse -Force -Path $script:TSSTempRoot -ErrorAction SilentlyContinue
+    }
+
+    # ------------------------------------------------------------------
+    # Test 1: 10 PRs with improving trend → ↑ indicator in HealthReport
+    # RED: fails until temporal split replaces → stub with ↑
+    # ------------------------------------------------------------------
+    It '10 PRs with improving trend → ↑ indicator in HealthReport' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:TSSTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        # Old half (PRs 1-5, 12-8 days ago): 50% sustain rate each
+        # New half (PRs 6-10, 5-1 days ago): 100% sustain rate each
+        # Temporal split gap: 1.0 - 0.5 = 0.5 > 0.05 → ↑
+        $prs = @(
+            (New-MockPr -Number 1  -MergedAt ([DateTime]::UtcNow.AddDays(-12).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:TSSHalfBody),
+            (New-MockPr -Number 2  -MergedAt ([DateTime]::UtcNow.AddDays(-11).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:TSSHalfBody),
+            (New-MockPr -Number 3  -MergedAt ([DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:TSSHalfBody),
+            (New-MockPr -Number 4  -MergedAt ([DateTime]::UtcNow.AddDays(-9).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 5  -MergedAt ([DateTime]::UtcNow.AddDays(-8).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 6  -MergedAt ([DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSFullBody),
+            (New-MockPr -Number 7  -MergedAt ([DateTime]::UtcNow.AddDays(-4).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSFullBody),
+            (New-MockPr -Number 8  -MergedAt ([DateTime]::UtcNow.AddDays(-3).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSFullBody),
+            (New-MockPr -Number 9  -MergedAt ([DateTime]::UtcNow.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSFullBody),
+            (New-MockPr -Number 10 -MergedAt ([DateTime]::UtcNow.AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSFullBody)
+        )
+        $mockGhPath = & $script:TSSWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile (Join-Path $workDir 'no-calib.json')
+
+        # ASSERT
+        $result.HealthReport | Should -Match '↑' `
+            -Because 'newer half sustain rate (1.0) minus older half (0.5) = 0.5 exceeds 0.05 deadzone; indicator must be ↑'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 2: 10 PRs with declining trend → ↓ indicator in HealthReport
+    # RED: fails until temporal split replaces → stub with ↓
+    # ------------------------------------------------------------------
+    It '10 PRs with declining trend → ↓ indicator in HealthReport' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:TSSTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        # Old half (PRs 1-5, 12-8 days ago): 100% sustain rate each
+        # New half (PRs 6-10, 5-1 days ago): 50% sustain rate each
+        # Temporal split gap: 0.5 - 1.0 = -0.5 < -0.05 → ↓
+        $prs = @(
+            (New-MockPr -Number 1  -MergedAt ([DateTime]::UtcNow.AddDays(-12).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:TSSFullBody),
+            (New-MockPr -Number 2  -MergedAt ([DateTime]::UtcNow.AddDays(-11).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:TSSFullBody),
+            (New-MockPr -Number 3  -MergedAt ([DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:TSSFullBody),
+            (New-MockPr -Number 4  -MergedAt ([DateTime]::UtcNow.AddDays(-9).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSFullBody),
+            (New-MockPr -Number 5  -MergedAt ([DateTime]::UtcNow.AddDays(-8).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSFullBody),
+            (New-MockPr -Number 6  -MergedAt ([DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 7  -MergedAt ([DateTime]::UtcNow.AddDays(-4).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 8  -MergedAt ([DateTime]::UtcNow.AddDays(-3).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 9  -MergedAt ([DateTime]::UtcNow.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 10 -MergedAt ([DateTime]::UtcNow.AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody)
+        )
+        $mockGhPath = & $script:TSSWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile (Join-Path $workDir 'no-calib.json')
+
+        # ASSERT
+        $result.HealthReport | Should -Match '↓' `
+            -Because 'newer half sustain rate (0.5) minus older half (1.0) = -0.5 is below -0.05 deadzone; indicator must be ↓'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 3: 10 PRs with similar trend → → indicator only in HealthReport
+    # Deadzone guard: gap = 0.0 is within ±0.05 so neither ↑ nor ↓ appears.
+    # Currently passes (stub outputs →); remains a meaningful guard post-impl.
+    # ------------------------------------------------------------------
+    It '10 PRs with similar trend → → indicator only in HealthReport' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:TSSTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        # Both halves: 50% sustain rate each
+        # Temporal split gap: 0.5 - 0.5 = 0.0, within ±0.05 deadzone → →
+        $prs = @(
+            (New-MockPr -Number 1  -MergedAt ([DateTime]::UtcNow.AddDays(-12).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:TSSHalfBody),
+            (New-MockPr -Number 2  -MergedAt ([DateTime]::UtcNow.AddDays(-11).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:TSSHalfBody),
+            (New-MockPr -Number 3  -MergedAt ([DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:TSSHalfBody),
+            (New-MockPr -Number 4  -MergedAt ([DateTime]::UtcNow.AddDays(-9).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 5  -MergedAt ([DateTime]::UtcNow.AddDays(-8).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 6  -MergedAt ([DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 7  -MergedAt ([DateTime]::UtcNow.AddDays(-4).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 8  -MergedAt ([DateTime]::UtcNow.AddDays(-3).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 9  -MergedAt ([DateTime]::UtcNow.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody),
+            (New-MockPr -Number 10 -MergedAt ([DateTime]::UtcNow.AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:TSSHalfBody)
+        )
+        $mockGhPath = & $script:TSSWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile (Join-Path $workDir 'no-calib.json')
+
+        # ASSERT: gap = 0.0, within ±0.05 deadzone → must output → and NOT ↑ or ↓
+        $result.HealthReport | Should -Match '→' `
+            -Because 'older and newer half sustain rates are equal (0.5 vs 0.5); gap = 0.0 is within ±0.05 deadzone, indicator must be →'
+        $result.HealthReport | Should -Not -Match '↑' `
+            -Because 'gap = 0.0 is within deadzone; ↑ must not appear in the health report'
+        $result.HealthReport | Should -Not -Match '↓' `
+            -Because 'gap = 0.0 is within deadzone; ↓ must not appear in the health report'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 4: Only 3 PRs have findings (< 4 minimum) → all → indicators
+    # Count guard: 7 v1 PRs keep effectiveSampleSize ≥ 5.0 so the
+    # insufficient-data path is not triggered; only the temporal-split
+    # count guard fires (prContributions.Count = 3 < 4 → all →).
+    # Currently passes (stub outputs →); remains a meaningful guard post-impl.
+    # ------------------------------------------------------------------
+    It 'only 3 PRs have findings (fewer than 4) → → indicator only in HealthReport' -Tag 'no-gh' {
+        # ARRANGE
+        # 7 v1 PRs — contributes to effectiveSampleSize (≈ 7.0) but not to prContributions
+        # 3 v2 PRs — prContributions.Count = 3 < 4 minimum for temporal split
+        # Total effectiveSampleSize ≈ 10.0 ≥ 5.0 → passes the insufficient-data gate
+        $workDir = Join-Path $script:TSSTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $today = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $prs = @(
+            # 7 v1 PRs — effectiveSampleSize contributors only
+            (New-MockPr -Number 1  -MergedAt $today -Body $script:TSSV1Body),
+            (New-MockPr -Number 2  -MergedAt $today -Body $script:TSSV1Body),
+            (New-MockPr -Number 3  -MergedAt $today -Body $script:TSSV1Body),
+            (New-MockPr -Number 4  -MergedAt $today -Body $script:TSSV1Body),
+            (New-MockPr -Number 5  -MergedAt $today -Body $script:TSSV1Body),
+            (New-MockPr -Number 6  -MergedAt $today -Body $script:TSSV1Body),
+            (New-MockPr -Number 7  -MergedAt $today -Body $script:TSSV1Body),
+            # 3 v2 PRs with findings — prContributions.Count = 3 < 4 minimum
+            (New-MockPr -Number 8  -MergedAt $today -Body $script:TSSFullBody),
+            (New-MockPr -Number 9  -MergedAt $today -Body $script:TSSFullBody),
+            (New-MockPr -Number 10 -MergedAt $today -Body $script:TSSFullBody)
+        )
+        $mockGhPath = & $script:TSSWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile (Join-Path $workDir 'no-calib.json')
+
+        # ASSERT: count guard — 3 PRs with findings is below the minimum of 4
+        # required for a meaningful temporal split, so all indicators must stay →
+        $result.HealthReport | Should -Not -Match '↑' `
+            -Because 'only 3 PRs have findings (below minimum of 4 for temporal split); ↑ must not appear in health report'
+        $result.HealthReport | Should -Not -Match '↓' `
+            -Because 'only 3 PRs have findings (below minimum of 4 for temporal split); ↓ must not appear in health report'
+    }
+}
+
+# ==================================================================
+# Describe: Read-only mode and insufficient data handling (Step 4 #259)
+# All tests use mock gh CLI (companion-data-file pattern). Tag: no-gh.
+# ==================================================================
+Describe 'Read-only mode and insufficient data handling' {
+
+    BeforeAll {
+        $script:RORepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:ROLibFile = Join-Path $script:RORepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        . $script:ROLibFile
+        $script:ROTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
+            "pester-ro-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:ROTempRoot -Force | Out-Null
+
+        # ---------------------------------------------------------------
+        # Helper: write a mock gh.ps1 that outputs preset PR JSON.
+        # Companion-data-file pattern avoids quoting hazards.
+        # ---------------------------------------------------------------
+        $script:ROWriteMockGh = {
+            param([string]$WorkDir, [string]$JsonOutput)
+            $dataFile = Join-Path $WorkDir 'gh-response.json'
+            $mockPath = Join-Path $WorkDir 'gh.ps1'
+            $JsonOutput | Set-Content -Path $dataFile -Encoding UTF8
+            @"
+# Mock gh CLI
+Get-Content -Raw -Path '$($dataFile -replace "'", "''")'
+exit 0
+"@ | Set-Content -Path $mockPath -Encoding UTF8
+            return $mockPath
+        }
+
+        # ---------------------------------------------------------------
+        # Shared v2 PR body with one architecture sustained finding.
+        # Used by Tests 1 and 2 (sufficient-data write-back path).
+        # ---------------------------------------------------------------
+        $script:ROV2Body = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: sustained
+-->
+"@
+
+        # ---------------------------------------------------------------
+        # Helper: write a minimal valid calibration JSON with architecture
+        # in skip state.  When the run processes architecture findings at
+        # effectiveCount < 20, the depth loop clears the catState entry and
+        # sets $depthStateChanged = $true — reliably triggering write-back.
+        # ---------------------------------------------------------------
+        $script:ROWriteCalibFile = {
+            param([string]$FilePath)
+            @{
+                calibration_version     = 1
+                entries                 = @()
+                prosecution_depth_state = @{
+                    architecture = @{ skip_first_observed_at = '2026-01-01T00:00:00Z' }
+                }
+            } | ConvertTo-Json -Depth 5 | Set-Content -Path $FilePath -Encoding UTF8
+        }
+    }
+
+    AfterAll {
+        Remove-Item -Recurse -Force -Path $script:ROTempRoot -ErrorAction SilentlyContinue
+    }
+
+    # ------------------------------------------------------------------
+    # Test 1: -HealthReport suppresses all calibration file writes
+    # ------------------------------------------------------------------
+    It '-HealthReport switch suppresses all calibration file writes' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:ROTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        $calibFilePath = Join-Path $workDir 'calib.json'
+        & $script:ROWriteCalibFile -FilePath $calibFilePath
+
+        $today = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $prs = @(1..6 | ForEach-Object {
+                [ordered]@{ number = $_; mergedAt = $today; body = $script:ROV2Body }
+            })
+        $mockGhPath = & $script:ROWriteMockGh -WorkDir $workDir -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        $bytesBefore = [System.IO.File]::ReadAllBytes($calibFilePath)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath `
+            -HealthReport
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'read-only mode must still complete successfully (ExitCode=0)'
+        $bytesAfter = [System.IO.File]::ReadAllBytes($calibFilePath)
+        ($bytesBefore -join ',') | Should -Be ($bytesAfter -join ',') `
+            -Because '-HealthReport must suppress all calibration writes (read-only mode D-259-15)'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 2: normal mode (no -HealthReport) returns ExitCode 0, emits YAML output,
+    # and writes back the calibration file.
+    # Makes Test 1 meaningful — demonstrates write-back fires in normal mode.
+    # ------------------------------------------------------------------
+    It 'normal mode (no -HealthReport) returns ExitCode 0 and emits YAML output' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:ROTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        $calibFilePath = Join-Path $workDir 'calib.json'
+        & $script:ROWriteCalibFile -FilePath $calibFilePath
+
+        $today = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $prs = @(1..6 | ForEach-Object {
+                [ordered]@{ number = $_; mergedAt = $today; body = $script:ROV2Body }
+            })
+        $mockGhPath = & $script:ROWriteMockGh -WorkDir $workDir -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        $bytesBefore = [System.IO.File]::ReadAllBytes($calibFilePath)
+
+        # ACT: no -HealthReport (normal write mode)
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'normal mode must complete successfully (ExitCode=0)'
+        $result.Output | Should -Match 'prosecution_depth:' `
+            -Because 'normal mode with sufficient data must emit prosecution_depth section in YAML output'
+        $bytesAfter = [System.IO.File]::ReadAllBytes($calibFilePath)
+        ($bytesAfter | Compare-Object $bytesBefore).Count | Should -BeGreaterThan 0 `
+            -Because 'write-back must fire in normal (non-HealthReport) mode'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 3: insufficient data returns HealthReport with the required message
+    # ------------------------------------------------------------------
+    It 'insufficient data returns HealthReport with Insufficient data message' -Tag 'no-gh' {
+        # ARRANGE: 1 PR from year 2000 — weight ≈ exp(-0.023 * 9490) ≈ 0
+        # effectiveSampleSize ≈ 0 < 5.0 → triggers the insufficient-data early return
+        $workDir = Join-Path $script:ROTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $ancientBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: sustained
+-->
+"@
+        $prs = @([ordered]@{ number = 1; mergedAt = '2000-01-01T00:00:00Z'; body = $ancientBody })
+        $mockGhPath = & $script:ROWriteMockGh -WorkDir $workDir -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile (Join-Path $workDir 'no-calib.json')
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'insufficient-data path must return ExitCode=0'
+        $result.HealthReport | Should -Match '# Pipeline Health Report' `
+            -Because 'insufficient-data HealthReport must open with the # Pipeline Health Report heading'
+        $result.HealthReport | Should -Match 'Insufficient data' `
+            -Because 'insufficient-data HealthReport must contain the "Insufficient data: {N:.2f} effective issues" message (D-259-15)'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 4: zero merged PRs returns HealthReport with the required message
+    # ------------------------------------------------------------------
+    It 'zero merged PRs returns HealthReport with No data message' -Tag 'no-gh' {
+        # ARRANGE: mock gh returns [] → $mergedPRs.Count -eq 0 → early return before per-PR loop
+        $workDir = Join-Path $script:ROTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        $mockGhPath = & $script:ROWriteMockGh -WorkDir $workDir -JsonOutput '[]'
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile (Join-Path $workDir 'no-calib.json')
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'zero-PRs path must return ExitCode=0'
+        $result.HealthReport | Should -Match '# Pipeline Health Report' `
+            -Because 'zero-PRs HealthReport must open with the # Pipeline Health Report heading'
+        $result.HealthReport | Should -Match 'No data' `
+            -Because 'zero-PRs HealthReport must contain the "No data: no merged PRs found." message (D-259-15)'
     }
 }

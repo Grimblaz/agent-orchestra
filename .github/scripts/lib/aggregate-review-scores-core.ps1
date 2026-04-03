@@ -78,6 +78,106 @@ function Test-PatternProposed {
 }
 
 # ---------------------------------------------------------------------------
+# Private helper: Format-HealthReport
+# ---------------------------------------------------------------------------
+function Format-HealthReport {
+    param(
+        [hashtable]$Context
+    )
+    if ($null -eq $Context -or $Context.Count -eq 0) { return '' }
+
+    $sb = [System.Text.StringBuilder]::new()
+
+    [void]$sb.AppendLine('# Pipeline Health Report')
+    [void]$sb.AppendLine('')
+    $metaLine = "Generated: {0}  |  Issues analyzed: {1}  |  Effective sample: {2:F1}" -f `
+        $Context.Generated, $Context.IssuesAnalyzed, $Context.EffectiveSampleSize
+    [void]$sb.AppendLine($metaLine)
+    [void]$sb.AppendLine('')
+
+    [void]$sb.AppendLine('## Overall Sustain Rate')
+    [void]$sb.AppendLine('')
+    $overallIndicator = '→'
+    $indicatorDeadzone = 0.05  # D-259-17: threshold for ↑/↓ vs → directional indicator
+    if ($Context.ContainsKey('NewerWindowRate') -and $Context.ContainsKey('OlderWindowRate') -and
+        $null -ne $Context.NewerWindowRate -and $null -ne $Context.OlderWindowRate) {
+        if ($Context.NewerWindowRate -gt ($Context.OlderWindowRate + $indicatorDeadzone)) { $overallIndicator = '↑' }
+        elseif ($Context.NewerWindowRate -lt ($Context.OlderWindowRate - $indicatorDeadzone)) { $overallIndicator = '↓' }
+    }
+    [void]$sb.AppendLine(("Overall: {0}  {1}" -f ('{0:P0}' -f $Context.OverallSustainRate), $overallIndicator))
+    [void]$sb.AppendLine('')
+
+    if ($Context.CategoryData.Count -gt 0) {
+        [void]$sb.AppendLine('## Category Hotspots')
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('| Category | Effective Count | Sustain Rate | Trend |')
+        [void]$sb.AppendLine('|----------|-----------------|--------------|-------|')
+        $top3 = $Context.CategoryData.GetEnumerator() |
+            Sort-Object { $_.Value['effectiveCount'] } -Descending |
+            Select-Object -First 3
+        foreach ($entry in $top3) {
+            $eCount = $entry.Value['effectiveCount']
+            $sRate = if ($eCount -gt 0) { $entry.Value['sustained'] / $eCount } else { 0.0 }
+            # TODO (Phase 2): compute per-category trend from OlderCategoryRates
+            [void]$sb.AppendLine(("| {0} | {1:F1} | {2} | → |" -f $entry.Key, $eCount, ('{0:P0}' -f $sRate)))
+        }
+        [void]$sb.AppendLine('')
+    }
+
+    [void]$sb.AppendLine('## Prosecution Depth')
+    [void]$sb.AppendLine('')
+    [void]$sb.AppendLine('| Category | Effective Count | Sustain Rate |')
+    [void]$sb.AppendLine('|----------|-----------------|--------------|')
+    foreach ($cat in $Context.KnownCategories) {
+        if ($Context.CategoryData.ContainsKey($cat)) {
+            $data = $Context.CategoryData[$cat]
+            $eCount = $data['effectiveCount']
+            $sRate = if ($eCount -gt 0) { $data['sustained'] / $eCount } else { 0.0 }
+            [void]$sb.AppendLine(("| {0} | {1:F1} | {2} |" -f $cat, $eCount, ('{0:P0}' -f $sRate)))
+        }
+        else {
+            [void]$sb.AppendLine(("| {0} | — | — |" -f $cat))
+        }
+    }
+    [void]$sb.AppendLine('')
+
+    if ($Context.ComplexityOverCeilingHistory.Count -gt 0) {
+        [void]$sb.AppendLine('## D10 Ceiling Status')
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('| Agent | Consecutive Over-Ceiling |')
+        [void]$sb.AppendLine('|-------|--------------------------|')
+        foreach ($agent in ($Context.ComplexityOverCeilingHistory.Keys | Sort-Object)) {
+            $consecutiveCount = [int]$Context.ComplexityOverCeilingHistory[$agent]['consecutive_count']
+            [void]$sb.AppendLine(("| {0} | {1} |" -f $agent, $consecutiveCount))
+        }
+        [void]$sb.AppendLine('')
+    }
+
+    $alertRows = @()
+    foreach ($ft in $Context.KnownSystemicFixTypes) {
+        if (-not $Context.SystemicPatterns.ContainsKey($ft)) { continue }
+        foreach ($cat in ($Context.SystemicPatterns[$ft].Keys | Sort-Object)) {
+            $p = $Context.SystemicPatterns[$ft][$cat]
+            if ($p['sustained_count'] -ge 2 -and $p['prs'].Count -ge 2) {
+                $alertRows += @{ FixType = $ft; Category = $cat; SustainedCount = $p['sustained_count']; PRs = $p['prs'].Count }
+            }
+        }
+    }
+    if ($alertRows.Count -gt 0) {
+        [void]$sb.AppendLine('## Systemic Pattern Alerts')
+        [void]$sb.AppendLine('')
+        [void]$sb.AppendLine('| Fix Type | Category | Sustained | PRs |')
+        [void]$sb.AppendLine('|----------|----------|-----------|-----|')
+        foreach ($row in $alertRows) {
+            [void]$sb.AppendLine(("| {0} | {1} | {2} | {3} |" -f $row.FixType, $row.Category, $row.SustainedCount, $row.PRs))
+        }
+        [void]$sb.AppendLine('')
+    }
+
+    return $sb.ToString()
+}
+
+# ---------------------------------------------------------------------------
 # Expose: Invoke-AggregateReviewScores
 # ---------------------------------------------------------------------------
 function Invoke-AggregateReviewScores {
@@ -89,7 +189,8 @@ function Invoke-AggregateReviewScores {
         [string]$Repo = '',
         [string]$CalibrationFile = '.copilot-tracking/calibration/review-data.json',
         [string]$ComplexityJsonPath = '',
-        [string]$GhCliPath = 'gh'
+        [string]$GhCliPath = 'gh',
+        [switch]$HealthReport
     )
 
     Set-StrictMode -Version Latest
@@ -163,7 +264,7 @@ function Invoke-AggregateReviewScores {
         [void]$out.AppendLine("issues_analyzed: 0")
         [void]$out.AppendLine("skipped_prs: 0")
         [void]$out.AppendLine('message: "Minimum effective sample size of 5 required (current: 0.00)"')
-        return @{ ExitCode = 0; Output = $out.ToString(); Error = '' }
+        return @{ ExitCode = 0; Output = $out.ToString(); Error = ''; HealthReport = "# Pipeline Health Report`n`nNo data: no merged PRs found." }
     }
 
     # ---------------------------------------------------------------------------
@@ -303,6 +404,9 @@ function Invoke-AggregateReviewScores {
         if ($category -eq 'simplicity') {
             $category = 'implementation-clarity'
         }
+        if ($category -eq 'documentation') {
+            $category = 'documentation-audit'
+        }
         $judgeRuling = $finding['judge_ruling'].ToLowerInvariant()
         $judgeConfidence = if ($finding.ContainsKey('judge_confidence')) { $finding['judge_confidence'].ToLowerInvariant() } else { '' }
         $defenseVerdict = if ($finding.ContainsKey('defense_verdict')) { $finding['defense_verdict'].ToLowerInvariant() } else { '' }
@@ -364,6 +468,22 @@ function Invoke-AggregateReviewScores {
         }
     }
 
+    # Accumulate per-PR contribution for temporal split (Step 3 directional indicators)
+    $prContributions = [System.Collections.Generic.List[object]]::new()
+    # Dot-sourced scriptblock: captures this PR's weighted contribution into $prContributions.
+    # Shares loop-local variables without parameter overhead; mirrors $accumulateFinding pattern.
+    $captureContribution = {
+        $prDeltaTotal = $ctx.weightedTotal - $prWtotalBefore
+        $prDeltaAccepted = $ctx.weightedAccepted - $prWacceptedBefore
+        if ($prDeltaTotal -gt 0) {
+            [void]$prContributions.Add([pscustomobject]@{
+                    mergedAt  = $mergedAt
+                    wTotal    = $prDeltaTotal
+                    wAccepted = $prDeltaAccepted
+                })
+        }
+    }
+
     foreach ($pr in $mergedPRs) {
         $prNumber = [int]$pr.number
         $mergedAt = $pr.mergedAt
@@ -380,6 +500,10 @@ function Invoke-AggregateReviewScores {
             $skippedPRs++
             continue
         }
+
+        # Snapshot for temporal split (computed after $weight is known)
+        $prWtotalBefore = $ctx.weightedTotal
+        $prWacceptedBefore = $ctx.weightedAccepted
 
         $body = if ($pr.body) { $pr.body } else { '' }
 
@@ -414,6 +538,8 @@ function Invoke-AggregateReviewScores {
                 }
                 $systemicActive = $false
             }
+            # Capture per-PR contribution for temporal split
+            . $captureContribution
             continue
         }
 
@@ -460,6 +586,27 @@ function Invoke-AggregateReviewScores {
             }
             . $accumulateFinding
         }
+        # Capture per-PR contribution for temporal split
+        . $captureContribution
+    }
+
+    # ---------------------------------------------------------------------------
+    # Temporal split for directional indicators (D-259-17)
+    # Sort processed PRs by mergedAt ascending, split at median.
+    # < 4 PRs with contribution data → all indicators stay → (insufficient split).
+    # ---------------------------------------------------------------------------
+    $olderWindowRate = $null
+    $newerWindowRate = $null
+    if ($prContributions.Count -ge 4) {
+        $sortedContribs = @($prContributions | Sort-Object { [datetime]::Parse($_.mergedAt) })
+        $splitIdx = [Math]::Floor($sortedContribs.Count / 2)
+        $olderHalf = @($sortedContribs[0..($splitIdx - 1)])
+        $newerHalf = @($sortedContribs[$splitIdx..($sortedContribs.Count - 1)])
+        $olderWt = 0.0; $olderWa = 0.0; $newerWt = 0.0; $newerWa = 0.0
+        foreach ($c in $olderHalf) { $olderWt += $c.wTotal; $olderWa += $c.wAccepted }
+        foreach ($c in $newerHalf) { $newerWt += $c.wTotal; $newerWa += $c.wAccepted }
+        $olderWindowRate = if ($olderWt -gt 0) { $olderWa / $olderWt } else { 0.0 }
+        $newerWindowRate = if ($newerWt -gt 0) { $newerWa / $newerWt } else { 0.0 }
     }
 
     # Compute max merged PR number (used for re-activation event expiry checks)
@@ -546,7 +693,7 @@ function Invoke-AggregateReviewScores {
         [void]$out.AppendLine("skipped_prs: $skippedPRs")
         [void]$out.AppendLine("message: `"Minimum effective sample size of 5 required (current: ${essFmt})`"")
         # Flush complexity history write-back before insufficient-data exit
-        if ($complexityHistoryChanged -and (Test-Path $CalibrationFile -PathType Leaf)) {
+        if (-not $HealthReport.IsPresent -and $complexityHistoryChanged -and (Test-Path $CalibrationFile -PathType Leaf)) {
             $earlyTmp = $null
             try {
                 $earlyCalib = Get-Content -Raw $CalibrationFile | ConvertFrom-Json
@@ -563,12 +710,12 @@ function Invoke-AggregateReviewScores {
                 Write-Warning "Could not flush complexity history before early exit: $_"
             }
         }
-        elseif ($complexityHistoryChanged -and -not (Test-Path $CalibrationFile -PathType Leaf)) {
+        elseif (-not $HealthReport.IsPresent -and $complexityHistoryChanged -and -not (Test-Path $CalibrationFile -PathType Leaf)) {
             Write-Warning "complexity-tracking: calibration file not found at '$CalibrationFile' — consecutive_count cannot persist across runs. Complexity history will not advance toward extraction threshold until the calibration file exists."
         }
         # Emit extraction_agents in insufficient-data path if threshold met
         Write-ExtractionAgentsYaml -ComplexityOverCeilingHistory $complexityOverCeilingHistory -PersistentThreshold $persistentThreshold -Builder $out
-        return @{ ExitCode = 0; Output = $out.ToString(); Error = '' }
+        return @{ ExitCode = 0; Output = $out.ToString(); Error = ''; HealthReport = "# Pipeline Health Report`n`nInsufficient data: ${essFmt} effective issues (minimum 5.0 required)." }
     }
 
     # Compute rates
@@ -859,7 +1006,7 @@ function Invoke-AggregateReviewScores {
         }
 
         # Write updated prosecution_depth_state + re_activation_events + proposals_emitted
-        if (($depthStateChanged -or $proposalsChanged -or $complexityHistoryChanged) -and
+        if (-not $HealthReport.IsPresent -and ($depthStateChanged -or $proposalsChanged -or $complexityHistoryChanged) -and
             -not [string]::IsNullOrWhiteSpace($CalibrationFile) -and
             (Test-Path $CalibrationFile)) {
             $tempPath = $null
@@ -913,7 +1060,7 @@ function Invoke-AggregateReviewScores {
                 # Non-fatal — state write failure does not affect YAML output
             }
         }
-        if ($complexityHistoryChanged -and -not (Test-Path $CalibrationFile -PathType Leaf)) {
+        if (-not $HealthReport.IsPresent -and $complexityHistoryChanged -and -not (Test-Path $CalibrationFile -PathType Leaf)) {
             Write-Warning "complexity-tracking: calibration file not found at '$CalibrationFile' — consecutive_count cannot persist across runs. Complexity history will not advance toward extraction threshold until the calibration file exists."
         }
 
@@ -979,5 +1126,20 @@ function Invoke-AggregateReviewScores {
     # ---------------------------------------------------------------------------
     Write-ExtractionAgentsYaml -ComplexityOverCeilingHistory $complexityOverCeilingHistory -PersistentThreshold $persistentThreshold -Builder $out
 
-    return @{ ExitCode = 0; Output = $out.ToString(); Error = '' }
+    $healthReportContext = @{
+        OverallSustainRate           = $overallSustainRate
+        CategoryData                 = $ctx.categoryData
+        KnownCategories              = $knownCategories
+        ComplexityOverCeilingHistory = $complexityOverCeilingHistory
+        PersistentThreshold          = $persistentThreshold
+        SystemicPatterns             = $ctx.systemicPatterns
+        KnownSystemicFixTypes        = $knownSystemicFixTypes
+        ProposalsEmitted             = $proposalsEmitted
+        Generated                    = $now.ToString('o')
+        IssuesAnalyzed               = $ctx.issuesAnalyzed
+        EffectiveSampleSize          = $ctx.effectiveSampleSize
+        OlderWindowRate              = $olderWindowRate
+        NewerWindowRate              = $newerWindowRate
+    }
+    return @{ ExitCode = 0; Output = $out.ToString(); Error = ''; HealthReport = (Format-HealthReport $healthReportContext) }
 }

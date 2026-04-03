@@ -312,9 +312,10 @@ Emit exactly this structure when returning results to Code-Conductor:
 
 **When invoked**: Automatically whenever Process-Review runs (in both full retrospective and subagent modes). Execute the aggregation script via terminal before beginning analysis.
 
-**Step 1b — Run the guidance complexity measurement**:
+**Step 0 — Set up temp file paths and run the guidance complexity measurement**:
 
 ```powershell
+$healthReportTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "health-report-${PID}.md"
 $complexityTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "complexity-output-${PID}.json"
 try {
     $complexityOutput = pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json
@@ -337,9 +338,9 @@ If the script cannot be executed (script file not found, pwsh unavailable) or ou
 
 ```powershell
 if ($null -ne $complexityTempFile -and (Test-Path $complexityTempFile)) {
-    pwsh -NoProfile -NonInteractive -File .github/scripts/aggregate-review-scores.ps1 -ComplexityJsonPath $complexityTempFile
+    pwsh -NoProfile -NonInteractive -File .github/scripts/aggregate-review-scores.ps1 -ComplexityJsonPath $complexityTempFile -OutputPath $healthReportTempFile
 } else {
-    pwsh -NoProfile -NonInteractive -File .github/scripts/aggregate-review-scores.ps1
+    pwsh -NoProfile -NonInteractive -File .github/scripts/aggregate-review-scores.ps1 -OutputPath $healthReportTempFile
 }
 ```
 
@@ -354,6 +355,9 @@ After parsing, clean up the temp file:
 ```powershell
 if ($null -ne $complexityTempFile) {
     Remove-Item $complexityTempFile -ErrorAction SilentlyContinue
+}
+if ($null -ne $healthReportTempFile -and -not (Test-Path $healthReportTempFile)) {
+    $healthReportTempFile = $null
 }
 ```
 
@@ -400,6 +404,15 @@ When no actionable signals are found (all categories insufficient data, or all r
 ## Calibration Analysis ({N} issues, effective n={X:.1f})
 
 No actionable signals found. All metrics within acceptable ranges or below per-category data threshold (15 effective findings required).
+```
+
+**Step 5 — Display pipeline health report**:
+
+```powershell
+if ($null -ne $healthReportTempFile -and (Test-Path $healthReportTempFile)) {
+    Write-Output (Get-Content -Path $healthReportTempFile -Raw -Encoding UTF8)
+    Remove-Item $healthReportTempFile -ErrorAction SilentlyContinue
+}
 ```
 
 After §4.7 analysis completes, proceed to §4.9 for root cause analysis and guardrail proposals.
