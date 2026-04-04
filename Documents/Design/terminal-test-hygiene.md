@@ -53,7 +53,7 @@ and any command expected to complete in under 60 seconds. `isBackground: false` 
 terminal; `isBackground: true` spawns a new persistent `pwsh` process that stays alive after the
 command finishes.
 
-Reserve `isBackground: true` for dev servers and watch-mode builds only.
+Reserve `isBackground: true` for dev servers and watch-mode builds.
 
 **Override**: the process-troubleshooting skill's stall-diagnosis guidance takes precedence when
 diagnosing a terminal stall.
@@ -71,6 +71,25 @@ reducing background accumulation between sessions. This is advisory — not enfo
 the same parallel tool-call set. Sequential use — terminal validation then subagent dispatch, or
 vice versa — is fine. Parallel subagent dispatch (e.g., 3-pass Code-Critic prosecution) remains
 allowed; the restriction applies to terminal commands alongside subagents only.
+
+### D7 — Final-gate full-suite Pester must use `isBackground: true`
+
+The full Pester suite (`Invoke-Pester .github/scripts/Tests/`) includes tests tagged `requires-gh`
+that make live GitHub API calls and may take 10–20 minutes to complete, violating D3's "under 60
+seconds" assumption.
+
+**Gap**: D3's `isBackground: false` default does not carve out the final-gate full suite, causing
+terminal stalls when the full suite is run synchronously at Tier 1 step boundaries.
+
+**Root cause evidence**: issues #252 (terminal process accumulation) and #259 (session stall
+caused by running the full suite synchronously at the Tier 1 gate).
+
+**Fix**: Run the final-gate full suite with `isBackground: true`, redirecting all output to a file
+(e.g., `*> pester-results.txt`), and poll with `get_terminal_output`. After `get_terminal_output` returns a
+PS prompt on its final line (indicating the process has exited), read actual test results with
+`read_file('pester-results.txt')`. Do
+not use `await_terminal` for this call. Targeted single-file Pester invocations (D2) are unaffected
+and remain `isBackground: false`.
 
 ## Rejected Alternatives
 
@@ -100,7 +119,7 @@ operating correctly.
 
 ### In Scope
 
-- `copilot-instructions.md` — new `## Terminal & Test Hygiene` section (D1, D2, D3, D6)
+- `copilot-instructions.md` — new `## Terminal & Test Hygiene` section (D1, D2, D3, D6, D7)
 - `CONTRIBUTING.md` — VS Code setting recommendation (D5)
 
 ### Explicit Non-Goals
@@ -114,4 +133,4 @@ operating correctly.
 
 This document records the design shipped for issue #252. The implementation source of truth is the
 `## Terminal & Test Hygiene` section in `.github/copilot-instructions.md` and the Developer Setup
-note in `CONTRIBUTING.md`.
+note in `CONTRIBUTING.md`. Updated by issue #268 to add D7.

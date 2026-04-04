@@ -139,6 +139,7 @@ No build step. This is a configuration/documentation template.
 ```powershell
 # Run PowerShell script test suite (Pester)
 pwsh -NoProfile -NonInteractive -Command "Invoke-Pester .github/scripts/Tests/ -Output Minimal"
+# Final-gate full suite: see Terminal & Test Hygiene > isBackground Default exception (final-gate full suite) for required isBackground:true + file redirect
 
 # Validate no broken references
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Plan-Architect").Count  # should be 0
@@ -200,6 +201,7 @@ The full-suite command in **Build & Run > Commands** (above) remains the standar
 Use `isBackground: false` for Pester, PSScriptAnalyzer, `markdownlint-cli2`, structural checks, and any command expected to complete in under 60 seconds. Reserve `isBackground: true` for dev servers and watch-mode builds.
 
 > **Exception**: when diagnosing a terminal stall, the process-troubleshooting skill's guidance to switch to `isBackground: true` for diagnostics takes precedence.
+> **Exception — final-gate full suite**: The full Pester suite (`Invoke-Pester .github/scripts/Tests/`) includes tests tagged `requires-gh` that make live GitHub API calls and may take 10–20 minutes. Run the full suite with `isBackground: true`, capture output to a file (e.g., `Invoke-Pester .github/scripts/Tests/ -Output Minimal *> pester-results.txt`), and poll with `get_terminal_output`. Do not use `await_terminal` for this call. Read results from the output file with `read_file` after the run completes (the PS prompt appearing in `get_terminal_output` output signals completion).
 
 ### No Terminal/Subagent Batching
 
