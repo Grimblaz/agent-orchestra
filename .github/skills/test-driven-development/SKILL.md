@@ -46,6 +46,16 @@ Quality gates are enforced in priority order:
 - **Test rules, not formulas**: "higher values produce larger results" not exact arithmetic
 - **Keep test files focused**: Split by behavior if tests become unwieldy
 
+## Collection / Iteration Coverage
+
+For any function that iterates a persisted collection (`getAll()` or
+`for...of` across repository results), the test plan **must** include at
+least one 2-record scenario that verifies the loop applies semantics to
+all members, not only the first or primary record.
+
+- **Single-record fixtures** confirm field-level semantics.
+- **Multi-record fixtures** confirm loop-level correctness.
+
 </essential_principles>
 
 <intake>
