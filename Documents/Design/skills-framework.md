@@ -48,7 +48,7 @@ The skills framework provides domain-specific knowledge modules loaded on demand
 |-------|--------------------------------------|
 | `skill-creator` | `.github/skills/` paths; VS Code 1.108 `chat.useAgentSkills` discovery info; "Minimal vs Full Skill" pattern; frontmatter validation table |
 | `verification-before-completion` | "Iron Law" framing; "Rationalization Prevention" table; "Red Flags — STOP" patterns (genericized, not project-specific) |
-| `test-driven-development` | Renamed from `tdd-workflow`; "Iron Law of TDD"; quality hierarchy table; verification checklist; anti-pattern references; `[CUSTOMIZE]` commands preserved |
+| `test-driven-development` | Renamed from `tdd-workflow`; "Iron Law of TDD"; quality hierarchy table; verification checklist; anti-pattern references; `[CUSTOMIZE]` commands preserved; "Collection / Iteration Coverage" principle requiring 2-record scenarios for persistence-layer iteration functions |
 | `brainstorming` | No content changes — template version already appropriate for a general template |
 | `software-architecture` | No content changes — generic Clean Architecture/SOLID guidance preserved |
 | `ui-testing`, `systematic-debugging`, `frontend-design` | Path references updated only |

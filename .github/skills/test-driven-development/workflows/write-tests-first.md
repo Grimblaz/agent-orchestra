@@ -111,6 +111,7 @@ git commit -m "test: add failing test for user lookup by ID"
 - [ ] Test fails for the right reason (missing implementation, not wrong setup)
 - [ ] No `@Disabled` or skipped tests
 - [ ] Domain Peer Check: if function shares a field with another validator, parser, converter, deserializer, or constraining function (new or existing), input ranges confirmed identical or difference documented
+- [ ] Collection / Iteration Coverage: if function iterates a persisted collection (getAll() or for...of), at least one 2-record scenario is included
 
 ## Anti-Patterns to Avoid
 
