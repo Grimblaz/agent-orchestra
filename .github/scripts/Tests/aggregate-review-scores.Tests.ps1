@@ -14,6 +14,33 @@
       - Orphan local entries (pr_number not in GitHub merged list) are excluded
       - GitHub mergedAt timestamp is authoritative over local created_at
 
+    Fixture-backed test mode (default):
+      Static JSON fixtures under .github/scripts/Tests/fixtures/ replace all live
+      GitHub API calls. This makes the full test suite run in <2 minutes with no
+      network access required.
+
+      Fixtures:
+        fixtures/github-docs-window.json            — 10-PR merged window from github/docs
+        fixtures/copilot-orchestra-nonmetrics.json  — non-metrics PRs from Grimblaz/copilot-orchestra
+
+      Toggle:
+        Default (no env var)  → fixture mode (fixtures must be present)
+        PESTER_LIVE_GH=1      → live mode  (real gh CLI calls; auto-refreshes fixtures on write-back)
+
+      3-way fallback:
+        (1) Fixture files present + PESTER_LIVE_GH != '1' → fixture mode  (fast, offline)
+        (2) No fixtures + gh available → live mode (PESTER_LIVE_GH=1 also enables auto-refresh)
+        (3) No fixtures + no gh          → skip mode     (requires-gh tests skipped)
+
+      Auto-refresh:
+        Running with PESTER_LIVE_GH=1 writes fresher fixture files after the bootstrap
+        completes; SHA-256 hash check prevents no-op git diffs.
+
+      Adding new tests that need GitHub data:
+        Read from $script:FixtureDocsNormalized or $script:FixtureOrchNormalized (both
+        are populated in fixture mode only — $null in live mode). Always guard
+        direct reads with if ($script:FixtureMode) { ... }.
+
     Isolation strategy:
       - Each test uses a fresh temp directory.
       - gh-dependent tests (union merge, fallback behavior) are tagged 'requires-gh'
@@ -37,8 +64,116 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             "pester-aggregate-$([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $script:TempRoot -Force | Out-Null
 
+        # ------------------------------------------------------------------
+        # Fixture mode detection — must run before GhAvailable check.
+        # 3-way fallback:
+        #   (1) Fixture files present + PESTER_LIVE_GH != '1' → fixture mode
+        #   (2) No fixtures + gh available                     → live mode
+        #   (3) No fixtures + no gh                            → skip mode
+        # ------------------------------------------------------------------
+        $script:FixtureDir = Join-Path $PSScriptRoot 'fixtures'
+        $script:FixtureDocsPath = Join-Path $script:FixtureDir 'github-docs-window.json'
+        $script:FixtureOrchPath = Join-Path $script:FixtureDir 'copilot-orchestra-nonmetrics.json'
+        $script:FixtureMode = $false
+        $script:FixtureGhPath = $null
+
+        $fixturesPresent = (Test-Path $script:FixtureDocsPath) -and (Test-Path $script:FixtureOrchPath)
+        $liveForced = $env:PESTER_LIVE_GH -eq '1'
+
+        if ($fixturesPresent -and -not $liveForced) {
+            $script:FixtureMode = $true
+            $script:GhAvailable = $true  # override — fixture mock satisfies all requires-gh tests
+
+            # Load raw fixture data
+            $fixtureDocsRaw = @(Get-Content -Raw $script:FixtureDocsPath | ConvertFrom-Json)
+            $fixtureOrchRaw = @(Get-Content -Raw $script:FixtureOrchPath | ConvertFrom-Json)
+
+            # Normalize mergedAt: shift all timestamps so most-recent = 7 days ago,
+            # preserving relative spacing. This prevents time-decay weight collapse.
+            $allDates = @($fixtureDocsRaw + $fixtureOrchRaw) | ForEach-Object {
+                [datetime]::Parse($_.mergedAt, [System.Globalization.CultureInfo]::InvariantCulture,
+                    [System.Globalization.DateTimeStyles]::RoundtripKind)
+            }
+            $maxDate = ($allDates | Sort-Object -Descending)[0]
+            $targetDate = [datetime]::UtcNow.AddDays(-7)
+            $shiftSecs = ($targetDate - $maxDate).TotalSeconds
+
+            $normalizeEntries = {
+                param([object[]]$Entries, [double]$ShiftSecs)
+                return @($Entries | ForEach-Object {
+                        $orig = [datetime]::Parse($_.mergedAt,
+                            [System.Globalization.CultureInfo]::InvariantCulture,
+                            [System.Globalization.DateTimeStyles]::RoundtripKind)
+                        $shifted = $orig.AddSeconds($ShiftSecs)
+                        [ordered]@{
+                            number   = [int]$_.number
+                            mergedAt = $shifted.ToString('yyyy-MM-ddTHH:mm:ssZ')
+                            body     = [string]$_.body
+                        }
+                    })
+            }
+
+            $script:FixtureDocsNormalized = & $normalizeEntries -Entries $fixtureDocsRaw -ShiftSecs $shiftSecs
+            $script:FixtureOrchNormalized = & $normalizeEntries -Entries $fixtureOrchRaw -ShiftSecs $shiftSecs
+
+            # Staleness warning (raw dates, not normalized)
+            $rawAgeDays = ([datetime]::UtcNow - $maxDate).TotalDays
+            if ($rawAgeDays -gt 30) {
+                Write-Warning ("Fixture data is {0:F0} days old. Consider refreshing with PESTER_LIVE_GH=1." -f $rawAgeDays)
+            }
+
+            # Write normalized fixture JSON to temp files for the mock script to read
+            $normDocsFile = Join-Path $script:TempRoot 'fixture-docs-normalized.json'
+            $normOrchFile = Join-Path $script:TempRoot 'fixture-orch-normalized.json'
+            $script:FixtureDocsNormalized | ConvertTo-Json -Depth 5 |
+                Set-Content -Path $normDocsFile -Encoding UTF8
+            $script:FixtureOrchNormalized | ConvertTo-Json -Depth 5 |
+                Set-Content -Path $normOrchFile -Encoding UTF8
+
+            # Create argument-dispatching fixture mock script.
+            # Dispatches: repo view → Grimblaz/copilot-orchestra JSON
+            #             pr list --repo github/docs → docs fixture
+            #             pr list (other) → copilot-orchestra fixture
+            $script:FixtureGhPath = Join-Path $script:TempRoot 'fixture-gh.ps1'
+            @"
+#Requires -Version 7.0
+param()
+`$sub  = if (`$args.Count -gt 0) { `$args[0] } else { '' }
+`$sub2 = if (`$args.Count -gt 1) { `$args[1] } else { '' }
+if (`$sub -eq 'repo' -and `$sub2 -eq 'view') {
+    Write-Output '{"nameWithOwner":"Grimblaz/copilot-orchestra"}'
+    exit 0
+}
+if (`$sub -eq 'pr' -and `$sub2 -eq 'list') {
+    `$repoIdx = [array]::IndexOf([string[]]`$args, '--repo')
+    `$repoVal = if (`$repoIdx -ge 0 -and (`$repoIdx + 1) -lt `$args.Count) { `$args[`$repoIdx + 1] } else { '' }
+    if (`$repoVal -eq 'github/docs') {
+        Get-Content -Raw "$normDocsFile"
+    } else {
+        Get-Content -Raw "$normOrchFile"
+    }
+    exit 0
+}
+Write-Output '[]'
+exit 0
+"@ | Set-Content -Path $script:FixtureGhPath -Encoding UTF8
+        }
+        elseif (-not $fixturesPresent -and -not $liveForced) {
+            # No fixtures and not PESTER_LIVE_GH=1: fall through to Get-Command gh check below.
+            # If gh is also absent, requires-gh tests will skip with the standard message.
+            if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+                Write-Warning 'No fixtures found and gh CLI not available — requires-gh tests will be skipped. Run with PESTER_LIVE_GH=1 and gh CLI to generate fixtures.'
+            }
+            else {
+                Write-Warning 'No fixtures found — falling back to live gh CLI mode. Run with PESTER_LIVE_GH=1 once to generate fixture files for faster offline runs.'
+            }
+        }
+
         # Check gh CLI availability (gh-dependent tests are tagged requires-gh)
-        $script:GhAvailable = $null -ne (Get-Command gh -ErrorAction SilentlyContinue)
+        # In fixture mode, GhAvailable was already set to $true above.
+        if (-not $script:FixtureMode) {
+            $script:GhAvailable = $null -ne (Get-Command gh -ErrorAction SilentlyContinue)
+        }
         $script:CleanCalibrationRepo = 'github/docs'
         $script:CleanCalibrationLimit = 10
         $script:PipelineMetricsBlockPattern = '(?s)<!--\s*pipeline-metrics\s*(.*?)-->'
@@ -92,6 +227,9 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         $script:AssertCleanCalibrationWindowStable = {
             param([switch]$RequireBootstrapCandidate)
 
+            # In fixture mode, data is static — no live drift possible
+            if ($script:FixtureMode) { return $true }
+
             if (-not $script:CleanCalibrationWindowReady) {
                 Set-ItResult -Skipped -Because $script:CleanCalibrationWindowSkipReason
                 return $false
@@ -122,7 +260,31 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
             return $true
         }
-        if ($script:GhAvailable) {
+        if ($script:FixtureMode) {
+            # Derive bootstrap variables from fixture data (same logic as live bootstrap)
+            $cleanCalibrationWindow = @($script:FixtureDocsNormalized | ForEach-Object {
+                    [pscustomobject]@{
+                        number      = [int]$_.number
+                        has_metrics = [bool](& $script:TestHasPipelineMetricsBlock -Body $_.body)
+                    }
+                })
+            if ($cleanCalibrationWindow.Count -gt 0) {
+                $script:CleanCalibrationWindowReady = $true
+                $script:CleanCalibrationWindowSignature = & $script:GetCleanCalibrationWindowSignature `
+                    -WindowSnapshot $cleanCalibrationWindow
+                $script:CleanCalibrationBaselineIssuesAnalyzed = @(
+                    $cleanCalibrationWindow | Where-Object { $_.has_metrics }
+                ).Count
+                $cleanCalibrationCandidate = @(
+                    $cleanCalibrationWindow | Where-Object { -not $_.has_metrics } | Select-Object -First 1
+                )
+                if ($cleanCalibrationCandidate.Count -gt 0) {
+                    $script:CleanCalibrationPrNumber = [int]$cleanCalibrationCandidate[0].number
+                    $script:CleanCalibrationBootstrapReady = $true
+                }
+            }
+        }
+        elseif ($script:GhAvailable) {
             try {
                 $cleanCalibrationWindow = @(& $script:GetCleanCalibrationWindowSnapshot)
                 if ($cleanCalibrationWindow.Count -gt 0) {
@@ -150,6 +312,81 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 "clean calibration bootstrap query failed: $($_.Exception.Message)"
                 $script:CleanCalibrationBootstrapSkipReason =
                 "clean calibration bootstrap query failed: $($_.Exception.Message)"
+            }
+        }
+
+        # ------------------------------------------------------------------
+        # Live-mode auto-refresh: update fixture files from live data.
+        # Runs only when PESTER_LIVE_GH=1 and live bootstrap succeeded.
+        # Content-hash check prevents spurious git diffs on no-op runs.
+        # ------------------------------------------------------------------
+        if (-not $script:FixtureMode -and $script:CleanCalibrationWindowReady -and $liveForced) {
+            $refreshDocsJson = $null
+            $refreshOrchJson = $null
+
+            try {
+                # Refresh github-docs-window.json (same fields as the fixture schema)
+                $liveDocsRaw = & gh pr list --repo $script:CleanCalibrationRepo `
+                    --state merged --limit $script:CleanCalibrationLimit --json 'number,mergedAt,body' 2>$null
+                if ($LASTEXITCODE -eq 0 -and $liveDocsRaw) {
+                    $refreshDocsJson = $liveDocsRaw  # already valid JSON string from gh
+                }
+
+                # Refresh copilot-orchestra-nonmetrics.json
+                $liveOrchRaw = & gh pr list --repo 'Grimblaz/copilot-orchestra' `
+                    --state merged --limit 100 --json 'number,mergedAt,body' 2>$null
+                if ($LASTEXITCODE -eq 0 -and $liveOrchRaw) {
+                    $liveOrchParsed = @($liveOrchRaw | ConvertFrom-Json) |
+                        Where-Object { $_.body -notmatch 'pipeline-metrics' } |
+                        ForEach-Object {
+                            [ordered]@{
+                                number   = [int]$_.number
+                                mergedAt = $_.mergedAt
+                                body     = '(non-metrics)'
+                            }
+                        }
+                    $refreshOrchJson = @($liveOrchParsed) | ConvertTo-Json -Depth 3
+                }
+            }
+            catch {
+                Write-Warning "Live-mode fixture refresh failed: $($_.Exception.Message)"
+            }
+
+            # Write each fixture only if content changed (SHA256 hash comparison)
+            $hashAlgo = [System.Security.Cryptography.SHA256]::Create()
+            try {
+                $hashContent = {
+                    param([string]$Content)
+                    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Content)
+                    [System.Convert]::ToBase64String($hashAlgo.ComputeHash($bytes))
+                }
+
+                New-Item -ItemType Directory -Path $script:FixtureDir -Force | Out-Null
+
+                if ($refreshDocsJson) {
+                    $newHash = & $hashContent -Content $refreshDocsJson
+                    $existingHash = if (Test-Path $script:FixtureDocsPath) {
+                        & $hashContent -Content (Get-Content -Raw $script:FixtureDocsPath)
+                    }
+                    else { '' }
+                    if ($newHash -ne $existingHash) {
+                        $refreshDocsJson | Set-Content -Path $script:FixtureDocsPath -Encoding UTF8
+                    }
+                }
+
+                if ($refreshOrchJson) {
+                    $newHash = & $hashContent -Content $refreshOrchJson
+                    $existingHash = if (Test-Path $script:FixtureOrchPath) {
+                        & $hashContent -Content (Get-Content -Raw $script:FixtureOrchPath)
+                    }
+                    else { '' }
+                    if ($newHash -ne $existingHash) {
+                        $refreshOrchJson | Set-Content -Path $script:FixtureOrchPath -Encoding UTF8
+                    }
+                }
+            }
+            finally {
+                $hashAlgo.Dispose()
             }
         }
 
@@ -278,6 +515,24 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         # ------------------------------------------------------------------
+        # Helper: load NonMetricsPrNumbers from fixture (fixture mode) or via
+        # live gh CLI (live mode), with @(9901) fallback on gh failure.
+        # ------------------------------------------------------------------
+        $script:GetNonMetricsPrNumbers = {
+            if ($script:FixtureMode) {
+                return @($script:FixtureOrchNormalized | ForEach-Object { [int]$_.number })
+            }
+            if (-not $script:GhAvailable) { return @(9901) }   # guard for no-gh fallback
+            $allPrJson = & gh pr list --repo 'Grimblaz/copilot-orchestra' --state merged --limit 100 --json 'number,body' 2>$null
+            if ($allPrJson) {
+                return @(($allPrJson | ConvertFrom-Json) |
+                        Where-Object { $_.body -notmatch 'pipeline-metrics' } |
+                        ForEach-Object { [int]$_.number })
+            }
+            return @(9901)
+        }
+
+        # ------------------------------------------------------------------
         # Helper: invoke Invoke-AggregateReviewScores in-process.
         # $ExtraArgs are parsed from '-Key Value' pairs into a params hashtable.
         # Returns @{ ExitCode; Output (stdout string); Error (stderr string) }
@@ -286,7 +541,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             param([string[]]$ExtraArgs = @())
             Push-Location $script:RepoRoot
             try {
-                $params = @{ GhCliPath = 'gh' }
+                $params = @{ GhCliPath = if ($script:FixtureMode) { $script:FixtureGhPath } else { 'gh' } }
                 $i = 0
                 while ($i -lt $ExtraArgs.Count) {
                     $arg = $ExtraArgs[$i]
@@ -362,7 +617,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # RED: -CalibrationFile is not a recognized parameter; invoking with it
             # produces a parameter-binding error (exit code 1).
             # Once implemented: unknown path -> behave as PR-body-only -> exit 0.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $nonExistentPath = Join-Path $workDir 'does-not-exist.json'
@@ -380,7 +635,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # Once implemented: output must still contain canonical fields
             # (insufficient_data: or calibration: plus skipped_prs:), proving
             # that the existing PR-body-parsing path is unchanged.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $nonExistentPath = Join-Path $workDir 'does-not-exist.json'
@@ -440,7 +695,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # Once implemented: all local entries are orphans (pr_number=99999999 not in
             # GitHub's merged PR list) so they are removed; data comes from GitHub only;
             # data_source must be "github".
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $calibPath = Join-Path $workDir 'orphan-calib.json'
@@ -606,6 +861,13 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
     Context 'prosecution_depth output' {
 
         BeforeAll {
+            # Guard: no-gh fallback — set sensible defaults and return early
+            if (-not $script:FixtureMode -and -not $script:GhAvailable) {
+                $script:NonMetricsPrNumbers = @(9901)
+                $script:CleanRepoPrNumbers = @(9901)
+                return
+            }
+
             # Authoritative category list (mirrors $knownCategories in the script)
             $script:DepthCategories = @(
                 'architecture', 'security', 'performance', 'pattern',
@@ -615,24 +877,22 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # Query merged PRs without pipeline-metrics blocks for calibration entries.
             # These PRs exist in the merged list (not orphaned) but lack body metrics,
             # so the script falls back to calibration entries for their data.
-            $allPrJson = & gh pr list --repo 'Grimblaz/copilot-orchestra' --state merged --limit 100 --json 'number,body' 2>$null
-            $script:NonMetricsPrNumbers = if ($allPrJson) {
-                @(($allPrJson | ConvertFrom-Json) |
-                        Where-Object { $_.body -notmatch 'pipeline-metrics' } |
-                        ForEach-Object { [int]$_.number })
-            }
-            else {
-                @(9901)  # fallback if gh fails
-            }
+            $script:NonMetricsPrNumbers = & $script:GetNonMetricsPrNumbers
 
             # Query a public repo that has no pipeline-metrics in any PR body,
             # giving pure calibration-only data for isolation tests.
-            $cleanPrJson = & gh pr list --repo 'github/docs' --state merged --limit 10 --json number 2>$null
-            $script:CleanRepoPrNumbers = if ($cleanPrJson) {
-                @(($cleanPrJson | ConvertFrom-Json) | ForEach-Object { [int]$_.number })
+            if ($script:FixtureMode) {
+                # Derive CleanRepoPrNumbers from fixture (all 10 docs PRs)
+                $script:CleanRepoPrNumbers = @($script:FixtureDocsNormalized | ForEach-Object { [int]$_.number })
             }
             else {
-                @(9901)  # fallback if gh fails
+                $cleanPrJson = & gh pr list --repo 'github/docs' --state merged --limit 10 --json number 2>$null
+                $script:CleanRepoPrNumbers = if ($cleanPrJson) {
+                    @(($cleanPrJson | ConvertFrom-Json) | ForEach-Object { [int]$_.number })
+                }
+                else {
+                    @(9901)  # fallback if gh fails
+                }
             }
 
             # ---------------------------------------------------------------
@@ -726,7 +986,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
         It 'emits prosecution_depth section in YAML output' -Tag 'requires-gh' {
             # RED: script does not yet emit prosecution_depth: in output.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = @(
@@ -737,7 +997,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                     severity = 'medium'; points = 5; review_stage = 'main'
                 }
             )
-            $calib = & $script:BuildDepthCalibration -Findings $findings
+            $calib = & $script:BuildDepthCalibration -Findings $findings -PrNumbers @($script:NonMetricsPrNumbers | Select-Object -First 1)
             $calibPath = Join-Path $workDir 'depth-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
@@ -751,7 +1011,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
         It 'emits all 7 known categories with recommendation, sustain_rate, effective_count, sufficient_data, re_activated' -Tag 'requires-gh' {
             # RED: prosecution_depth section does not exist yet; first assertion fails.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = @(
@@ -759,7 +1019,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                     severity = 'medium'; points = 5; review_stage = 'main'
                 }
             )
-            $calib = & $script:BuildDepthCalibration -Findings $findings
+            $calib = & $script:BuildDepthCalibration -Findings $findings -PrNumbers @($script:NonMetricsPrNumbers | Select-Object -First 1)
             $calibPath = Join-Path $workDir 'depth-calib.json'
             & $script:WriteCalibrationFile -Path $calibPath -Data $calib
 
@@ -785,7 +1045,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         It 'reports recommendation skip when sustain_rate below 0.05 and effective_count at least 30' -Tag 'requires-gh' {
             # Fixture: architecture — 1 sustained + 34 defense-sustained per non-metrics PR
             # Calibration dominates real data → sustain_rate ≈ 0.029 (< 0.05)
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = & $script:MakeCategoryFindings 'architecture' 1 34
@@ -804,7 +1064,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         It 'reports recommendation light when sustain_rate below 0.15 and effective_count at least 20' -Tag 'requires-gh' {
             # Fixture: security — 3 sustained + 22 defense-sustained per non-metrics PR
             # Calibration dominates real data → sustain_rate ≈ 0.12 (< 0.15, >= 0.05)
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = & $script:MakeCategoryFindings 'security' 3 22
@@ -823,7 +1083,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         It 'reports recommendation full when sustain_rate >= 0.15' -Tag 'requires-gh' {
             # Fixture: performance — 8 sustained + 12 defense-sustained per non-metrics PR
             # Calibration dominates real data → sustain_rate ≈ 0.40 (>= 0.15)
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = & $script:MakeCategoryFindings 'performance' 8 12
@@ -894,7 +1154,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         It 'reports recommendation full with effective_count 0.0 for categories absent from data' -Tag 'requires-gh' {
             # Uses github/docs (no pipeline-metrics) for pure calibration isolation.
             # Architecture findings only → all other categories have effective_count 0.0.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = @(
@@ -918,7 +1178,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
         It 'emits override_active true and forces all categories to full when prosecution_depth_override is set' -Tag 'requires-gh' {
             # RED: prosecution_depth section does not exist yet.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = @(
@@ -945,7 +1205,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         It 'reports recommendation full and re_activated true when a re-activation event is active' -Tag 'requires-gh' {
             # RED: prosecution_depth section does not exist yet.
             # Fixture: re-activation event for 'pattern' with expires_at_pr=999999
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = @(
@@ -980,7 +1240,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         It 'applies time-decay when skip_first_observed_at exceeds 90 days' -Tag 'requires-gh' {
             # RED: prosecution_depth section does not exist yet.
             # Fixture: architecture skip_first_observed_at is 100 days ago (> 90-day default)
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $staleDate = (Get-Date).AddDays(-100).ToString('o')
@@ -1012,7 +1272,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # RED: prosecution_depth section does not exist yet.
             # Fixture: override=full AND re-activation event AND time-decay state
             # Override must win: all categories forced to full, override_active: true
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = @(
@@ -1063,7 +1323,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         Context 'write-back persistence' {
 
             It 'write-back: entering skip writes skip_first_observed_at to calibration file' -Tag 'requires-gh' {
-                if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+                if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
                 # ARRANGE: calibration where pattern enters skip
                 # (1 sustained + 34 defense-sustained -> sustain_rate ~= 0.029 < 0.05, effective_count >= 30)
@@ -1098,7 +1358,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             }
 
             It 'write-back: transitioning from skip to full clears skip_first_observed_at from calibration file' -Tag 'requires-gh' {
-                if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+                if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
                 # ARRANGE: pre-seeded skip state for pattern, but findings now show high sustain_rate
                 # (8 sustained + 12 defense-sustained -> sustain_rate = 0.4 >= 0.15 -> full)
@@ -1136,7 +1396,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             }
 
             It 'write-back: expired re-activation events are pruned on write-back' -Tag 'requires-gh' {
-                if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+                if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
                 # ARRANGE: two re-activation events (one active, one expired) plus a skip-entering
                 # category fixture so that $depthStateChanged is set and write-back runs.
@@ -1183,7 +1443,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             }
 
             It 'writes time-decay synthetic re-activation event to calibration file' -Tag 'requires-gh' {
-                if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+                if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
                 # ARRANGE: architecture has a stale skip_first_observed_at (100 days ago) and
                 # skip-threshold findings (sustain_rate ~0.029 < 0.05, dominated by NonMetricsPRs).
@@ -1290,7 +1550,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'emits systemic_patterns section when v2 findings with systemic_fix_type exist' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             # One instruction:security finding per PR, 2 distinct PRs → threshold met
@@ -1328,7 +1588,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'threshold logic: single PR does not meet threshold' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             # Two instruction:security findings in the SAME PR → distinct_prs = 1
@@ -1361,7 +1621,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         It 'excludes category n/a findings from systemic patterns' -Tag 'requires-gh' {
             # Both valid (security) and n/a findings are present; section must appear
             # for the valid finding but must not contain an n/a key.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = @(
@@ -1455,7 +1715,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # Boundary/backward-compat test: no systemic_patterns section when no findings
             # have a non-none systemic_fix_type. Passes in red state (section not yet
             # emitted) and continues passing after correct implementation.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = @(
@@ -1484,7 +1744,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'includes evidence pr and finding id pairs in output' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             # Two skill:pattern findings, same finding ids per PR → evidence carries pr + id
@@ -1517,7 +1777,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'emits all 4 known fix types even when empty' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             # Only instruction:security findings; skill/agent-prompt/plan-template must
@@ -1552,7 +1812,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'previously_proposed is false when pattern not in proposals_emitted' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $finding = [ordered]@{
@@ -1582,7 +1842,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'previously_proposed is true when pattern_key and evidence_prs match proposals_emitted' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $finding = [ordered]@{
@@ -1659,7 +1919,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'emits kaizen_metric section after systemic_patterns' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             # Findings with systemic_fix_type so both systemic_patterns and kaizen_metric
@@ -1697,7 +1957,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'kaizen_rate is 0.00 when no categories have sufficient data' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             # Only 1 PR → effective_count << 20 → sufficient_data: false for all categories
@@ -1723,7 +1983,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # Fixture: architecture has stale skip_first_observed_at (100 days ago) which drives
             # time-decay skip→light. NonMetricsPrNumbers gives sufficient effective_count.
             # Acceptable assertion: kaizen_rate must be present in F2 decimal format.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $staleDate = (Get-Date).AddDays(-100).ToString('o')
@@ -1749,7 +2009,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         It 'patterns_meeting_threshold counts threshold-met patterns' -Tag 'requires-gh' {
             # Two distinct systemic patterns (instruction:security, skill:pattern) each
             # across 2 distinct PRs → both meet threshold → patterns_meeting_threshold: 2
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = @(
@@ -1779,7 +2039,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         It 'patterns_previously_proposed counts previously_proposed patterns' -Tag 'requires-gh' {
             # Two threshold-met patterns: instruction:security is in proposals_emitted,
             # skill:pattern is not → patterns_previously_proposed: 1
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $findings = @(
@@ -1820,7 +2080,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
     Context 'proposals_emitted write-back' {
 
         It 'write-back: threshold-met unproposed patterns added to proposals_emitted in calibration file' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             # ARRANGE: two PRs each with instruction:security finding → distinct_prs=2, meets_threshold.
             $workDir = & $script:NewWorkDir
@@ -1862,7 +2122,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'write-back: pre-existing proposals_emitted entries preserved when new pattern added' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             # ARRANGE: pre-existing proposal for different key; new threshold-met pattern (instruction:security).
             $workDir = & $script:NewWorkDir
@@ -1905,7 +2165,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
         It 'write-back: proposals_emitted not written when no new patterns meet threshold' -Tag 'requires-gh' {
             # RED: cannot trivially pass — absence of write-back when threshold unmet.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             # ARRANGE: only 1 PR → distinct_prs=1 < 2 → threshold not met → no write-back.
             $workDir = & $script:NewWorkDir
@@ -1940,10 +2200,10 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # F3 boundary: prior proposals_emitted has evidence_prs [PR1, PR2].
             # Current run accumulates 3 distinct PRs [PR1, PR2, PR3].
             # Compare-Object finds differences → previously_proposed: false → new proposal written.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $firstThree = @($script:NonMetricsPrNumbers | Select-Object -First 3)
-            if ($firstThree.Count -lt 3) { Set-ItResult -Skipped -Because 'need 3 non-metrics PRs for superset test' }
+            if ($firstThree.Count -lt 3) { Set-ItResult -Skipped -Because 'need 3 non-metrics PRs for superset test'; return }
             $pr1 = [int]$firstThree[0]
             $pr2 = [int]$firstThree[1]
             $pr3 = [int]$firstThree[2]
@@ -1998,13 +2258,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         BeforeAll {
             # Guard: ensure NonMetricsPrNumbers is available when this context runs in isolation
             if (-not $script:NonMetricsPrNumbers) {
-                $allPrJsonGuard = & gh pr list --repo 'Grimblaz/copilot-orchestra' --state merged --limit 100 --json 'number,body' 2>$null
-                $script:NonMetricsPrNumbers = if ($allPrJsonGuard) {
-                    @(($allPrJsonGuard | ConvertFrom-Json) |
-                            Where-Object { $_.body -notmatch 'pipeline-metrics' } |
-                            ForEach-Object { [int]$_.number })
-                }
-                else { @(9901) }
+                $script:NonMetricsPrNumbers = & $script:GetNonMetricsPrNumbers
             }
 
             # Helper: write a complexity JSON file simulating measure-guidance-complexity.ps1 output
@@ -2051,7 +2305,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
         It 'exits cleanly without -ComplexityJsonPath — backward compatible' -Tag 'requires-gh' {
             # When -ComplexityJsonPath is omitted, complexity history must not be written
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $calibPath = Join-Path $workDir 'backward-compat.json'
@@ -2070,7 +2324,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'increments consecutive_count to 1 on first observation of an over-ceiling agent' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $complexityPath = Join-Path $workDir 'complexity.json'
@@ -2093,7 +2347,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'sets first_observed_at and last_observed_at as valid datetime strings on first observation' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $complexityPath = Join-Path $workDir 'complexity.json'
@@ -2121,7 +2375,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'does not re-increment consecutive_count on second run with same max PR number (idempotency)' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $complexityPath = Join-Path $workDir 'complexity.json'
@@ -2150,7 +2404,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'removes history entry and logs consolidation_event when agent drops below ceiling' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
 
@@ -2191,7 +2445,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         }
 
         It 'tracks multiple agents independently in the same run' -Tag 'requires-gh' {
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $complexityPath = Join-Path $workDir 'complexity-multi.json'
@@ -2221,7 +2475,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
             # coupled to the production config value. Pre-seed consecutive_count=1 (threshold-1);
             # this run increments to 2 -> meets custom threshold of 2 -> extraction_agents emitted.
             # If someone changes the production threshold to 5, this test still passes.
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $configPath = Join-Path $script:RepoRoot '.github/config/guidance-complexity.json'
@@ -2274,7 +2528,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         It 'skips complexity tracking when -ComplexityJsonPath points to a non-existent file' -Tag 'requires-gh' {
             # Fix M7: verify that a non-existent -ComplexityJsonPath produces exit 0 and leaves
             # complexity_over_ceiling_history untouched (backward-compatible skip behavior).
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $calibPath = Join-Path $workDir 'nonexistent-calib.json'
@@ -2296,7 +2550,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         It 'preserves first_observed_at on genuine increment (different PR number)' -Tag 'requires-gh' {
             # Fix M10: verify that first_observed_at is immutable once set — only last_observed_at
             # and consecutive_count change when the idempotency guard does NOT fire (different PR number).
-            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found' }
+            if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
             $complexityPath = Join-Path $workDir 'complexity-m10.json'
