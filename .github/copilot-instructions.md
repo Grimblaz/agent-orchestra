@@ -139,7 +139,7 @@ No build step. This is a configuration/documentation template.
 ```powershell
 # Run PowerShell script test suite (Pester)
 pwsh -NoProfile -NonInteractive -Command "Invoke-Pester .github/scripts/Tests/ -Output Minimal"
-# Final-gate full suite: see Terminal & Test Hygiene > `isBackground` Default exception (final-gate full suite) for required `isBackground: true` + file redirection
+# Final-gate full suite: see Terminal & Test Hygiene > `isBackground` Default exception (final-gate full suite). In fixture mode (default), isBackground: false is fine. For live-refresh runs (PESTER_LIVE_GH=1), use isBackground: true + poll with `get_terminal_output` to read results (Pester 5 sends pass/fail output to the terminal buffer, not to file streams — `*>` redirection only captures advisory output such as `Write-Warning`).
 
 # Validate no broken references
 (Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Plan-Architect").Count  # should be 0
@@ -201,7 +201,7 @@ The full-suite command in **Build & Run > Commands** (above) remains the standar
 Use `isBackground: false` for Pester, PSScriptAnalyzer, `markdownlint-cli2`, structural checks, and any command expected to complete in under 60 seconds. Reserve `isBackground: true` for dev servers and watch-mode builds.
 
 > **Exception**: when diagnosing a terminal stall, the process-troubleshooting skill's guidance to switch to `isBackground: true` for diagnostics takes precedence.
-> **Exception — final-gate full suite**: The full Pester suite (`Invoke-Pester .github/scripts/Tests/`) includes tests tagged `requires-gh` that make live GitHub API calls and may take 10–20 minutes. Run the full suite with `isBackground: true`, capture output to a file (e.g., `Invoke-Pester .github/scripts/Tests/ -Output Minimal *> pester-results.txt`), and poll with `get_terminal_output`. Do not use `await_terminal` for this call. Read results from the output file with `read_file` after the run completes (the PS prompt appearing on the final line of the `get_terminal_output` response signals completion).
+> **Exception — final-gate full suite**: In fixture mode (default — `PESTER_LIVE_GH` not set), `aggregate-review-scores.Tests.ps1` replaces all live API calls with static fixtures and the full suite completes in under 60 seconds; use `isBackground: false` as normal. The exception applies only to **live-refresh runs** (`PESTER_LIVE_GH=1`): treat that as a long-running command and run with `isBackground: true` and poll with `get_terminal_output` to read results (Pester 5 sends pass/fail output to the terminal buffer, not to file streams — `*>` redirection only captures advisory output such as `Write-Warning`). Do not use `await_terminal` for this call. The PS prompt appearing on the final line of the `get_terminal_output` response signals completion.
 
 ### No Terminal/Subagent Batching
 
