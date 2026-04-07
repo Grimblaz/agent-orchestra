@@ -28,7 +28,7 @@ function Test-QVLegacyReference {
     $mdFiles = Get-ChildItem -Path $githubPath -Recurse -Filter '*.md' |
         Where-Object { $_.Name -notmatch $excludePattern }
 
-    $hits = $mdFiles | Select-String -Pattern $Pattern -SimpleMatch
+    $hits = @($mdFiles | Select-String -Pattern $Pattern -SimpleMatch)
     if ($hits.Count -eq 0) {
         return [PSCustomObject]@{ Name = $Name; Passed = $true; Detail = '' }
     }
@@ -52,9 +52,9 @@ function Test-QVSkillFrontmatter {
         return [PSCustomObject]@{ Name = $CheckName; Passed = $true; Detail = '' }
     }
 
-    $skillFiles = Get-ChildItem -Path $skillsPath -Directory |
-        ForEach-Object { Join-Path -Path $_.FullName -ChildPath 'SKILL.md' } |
-        Where-Object { Test-Path $_ }
+    $skillFiles = @(Get-ChildItem -Path $skillsPath -Directory |
+            ForEach-Object { Join-Path -Path $_.FullName -ChildPath 'SKILL.md' } |
+            Where-Object { Test-Path $_ })
 
     if ($skillFiles.Count -eq 0) {
         return [PSCustomObject]@{ Name = $CheckName; Passed = $true; Detail = '' }
@@ -143,65 +143,95 @@ function Invoke-QuickValidate {
         [string]$ScriptsPath
     )
 
-    if (-not $RootPath) {
-        $RootPath = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-    }
-    if (-not $GuidanceComplexityScriptPath) {
-        $GuidanceComplexityScriptPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'scripts', 'measure-guidance-complexity.ps1'
-    }
-    if (-not $PSScriptAnalyzerSettingsPath) {
-        $PSScriptAnalyzerSettingsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'config', 'PSScriptAnalyzerSettings.psd1'
-    }
-    if (-not $ScriptsPath) {
-        $ScriptsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'scripts'
-    }
+    $ErrorActionPreference = 'Stop'
+    Set-StrictMode -Version Latest
 
-    $results = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-    # 1. Plan-Architect
-    $results.Add((Test-QVLegacyReference -RootPath $RootPath -Name 'Plan-Architect' -Pattern 'Plan-Architect'))
-    # 2. Janitor
-    $results.Add((Test-QVLegacyReference -RootPath $RootPath -Name 'Janitor' -Pattern 'Janitor'))
-    # 3. Issue-Designer
-    $results.Add((Test-QVLegacyReference -RootPath $RootPath -Name 'Issue-Designer' -Pattern 'Issue-Designer'))
-    # 4. workflow-template (also exclude setup.prompt)
-    $results.Add((Test-QVLegacyReference -RootPath $RootPath -Name 'workflow-template' -Pattern 'workflow-template' -ExtraExcludeNames @('setup.prompt')))
-    # 5. SKILL-UseWhen
-    $results.Add((Test-QVSkillFrontmatter -RootPath $RootPath -CheckName 'SKILL-UseWhen' -Pattern '^description:.*Use (when|before)'))
-    # 6. SKILL-DoNotUseFor
-    $results.Add((Test-QVSkillFrontmatter -RootPath $RootPath -CheckName 'SKILL-DoNotUseFor' -Pattern '^description:.*DO NOT USE FOR:'))
-    # 7. SKILL-Gotchas
-    $results.Add((Test-QVSkillFrontmatter -RootPath $RootPath -CheckName 'SKILL-Gotchas' -Pattern '^## Gotchas'))
-    # 8. GuidanceComplexity
-    $results.Add((Test-QVGuidanceComplexity -ScriptPath $GuidanceComplexityScriptPath))
-    # 9. PSScriptAnalyzer
-    $results.Add((Test-QVPSScriptAnalyzer -ScriptsPath $ScriptsPath -SettingsPath $PSScriptAnalyzerSettingsPath))
-
-    $passCount = @($results | Where-Object { $_.Passed -eq $true }).Count
-    $failCount = @($results | Where-Object { $_.Passed -eq $false }).Count
-    $totalCount = $results.Count
-
-    foreach ($r in $results) {
-        if ($r.Passed -eq $true) {
-            Write-Host "[PASS] $($r.Name)"
+    try {
+        if (-not $RootPath) {
+            $RootPath = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         }
-        elseif ($r.Passed -eq 'SKIP') {
-            Write-Host "[SKIP] $($r.Name) — $($r.Detail)"
+        if (-not $GuidanceComplexityScriptPath) {
+            $GuidanceComplexityScriptPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'scripts', 'measure-guidance-complexity.ps1'
         }
-        else {
-            Write-Host "[FAIL] $($r.Name) — $($r.Detail)"
+        if (-not $PSScriptAnalyzerSettingsPath) {
+            $PSScriptAnalyzerSettingsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'config', 'PSScriptAnalyzerSettings.psd1'
+        }
+        if (-not $ScriptsPath) {
+            $ScriptsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'scripts'
+        }
+
+        $results = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+        # 1. Plan-Architect
+        try { $results.Add((Test-QVLegacyReference -RootPath $RootPath -Name 'Plan-Architect' -Pattern 'Plan-Architect')) }
+        catch { $results.Add([PSCustomObject]@{ Name = 'Plan-Architect'; Passed = $false; Detail = "Error: $_" }) }
+        # 2. Janitor
+        try { $results.Add((Test-QVLegacyReference -RootPath $RootPath -Name 'Janitor' -Pattern 'Janitor')) }
+        catch { $results.Add([PSCustomObject]@{ Name = 'Janitor'; Passed = $false; Detail = "Error: $_" }) }
+        # 3. Issue-Designer
+        try { $results.Add((Test-QVLegacyReference -RootPath $RootPath -Name 'Issue-Designer' -Pattern 'Issue-Designer')) }
+        catch { $results.Add([PSCustomObject]@{ Name = 'Issue-Designer'; Passed = $false; Detail = "Error: $_" }) }
+        # 4. workflow-template (also exclude setup.prompt)
+        try { $results.Add((Test-QVLegacyReference -RootPath $RootPath -Name 'workflow-template' -Pattern 'workflow-template' -ExtraExcludeNames @('setup.prompt'))) }
+        catch { $results.Add([PSCustomObject]@{ Name = 'workflow-template'; Passed = $false; Detail = "Error: $_" }) }
+        # 5. SKILL-UseWhen
+        try { $results.Add((Test-QVSkillFrontmatter -RootPath $RootPath -CheckName 'SKILL-UseWhen' -Pattern '^description:.*Use (when|before)')) }
+        catch { $results.Add([PSCustomObject]@{ Name = 'SKILL-UseWhen'; Passed = $false; Detail = "Error: $_" }) }
+        # 6. SKILL-DoNotUseFor
+        try { $results.Add((Test-QVSkillFrontmatter -RootPath $RootPath -CheckName 'SKILL-DoNotUseFor' -Pattern '^description:.*DO NOT USE FOR:')) }
+        catch { $results.Add([PSCustomObject]@{ Name = 'SKILL-DoNotUseFor'; Passed = $false; Detail = "Error: $_" }) }
+        # 7. SKILL-Gotchas
+        try { $results.Add((Test-QVSkillFrontmatter -RootPath $RootPath -CheckName 'SKILL-Gotchas' -Pattern '^## Gotchas')) }
+        catch { $results.Add([PSCustomObject]@{ Name = 'SKILL-Gotchas'; Passed = $false; Detail = "Error: $_" }) }
+        # 8. GuidanceComplexity
+        try { $results.Add((Test-QVGuidanceComplexity -ScriptPath $GuidanceComplexityScriptPath)) }
+        catch { $results.Add([PSCustomObject]@{ Name = 'GuidanceComplexity'; Passed = $false; Detail = "Error: $_" }) }
+        # 9. PSScriptAnalyzer
+        try { $results.Add((Test-QVPSScriptAnalyzer -ScriptsPath $ScriptsPath -SettingsPath $PSScriptAnalyzerSettingsPath)) }
+        catch { $results.Add([PSCustomObject]@{ Name = 'PSScriptAnalyzer'; Passed = $false; Detail = "Error: $_" }) }
+
+        $passCount = @($results | Where-Object { $_.Passed -eq $true }).Count
+        $failCount = @($results | Where-Object { $_.Passed -eq $false }).Count
+        $skipCount = @($results | Where-Object { $_.Passed -is [string] -and $_.Passed -eq 'SKIP' }).Count
+        $totalCount = $results.Count
+        $effectiveTotal = $totalCount - $skipCount
+
+        foreach ($r in $results) {
+            if ($r.Passed -eq $true) {
+                Write-Host "[PASS] $($r.Name)"
+            }
+            elseif ($r.Passed -eq 'SKIP') {
+                Write-Host "[SKIP] $($r.Name) — $($r.Detail)"
+            }
+            else {
+                Write-Host "[FAIL] $($r.Name) — $($r.Detail)"
+            }
+        }
+
+        $summary = "Quick-validate: $passCount/$effectiveTotal checks passed"
+        if ($skipCount -gt 0) { $summary += " ($skipCount skipped)" }
+        Write-Host $summary
+
+        $exitCode = if ($failCount -gt 0) { 1 } else { 0 }
+
+        return [PSCustomObject]@{
+            Results    = $results.ToArray()
+            PassCount  = [int]$passCount
+            FailCount  = [int]$failCount
+            SkipCount  = [int]$skipCount
+            TotalCount = [int]$totalCount
+            ExitCode   = $exitCode
         }
     }
-
-    Write-Host "Quick-validate: $passCount/$totalCount checks passed"
-
-    $exitCode = if ($failCount -gt 0) { 1 } else { 0 }
-
-    return [PSCustomObject]@{
-        Results    = $results.ToArray()
-        PassCount  = [int]$passCount
-        FailCount  = [int]$failCount
-        TotalCount = [int]$totalCount
-        ExitCode   = $exitCode
+    catch {
+        Write-Host "[FATAL] Quick-validate encountered a catastrophic error: $_"
+        return [PSCustomObject]@{
+            Results    = @()
+            PassCount  = 0
+            FailCount  = 1
+            SkipCount  = 0
+            TotalCount = 1
+            ExitCode   = 1
+        }
     }
 }

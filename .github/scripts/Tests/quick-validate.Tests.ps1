@@ -406,6 +406,26 @@ No gotchas section here.
             $check.Passed | Should -BeFalse -Because 'mock returns a non-empty agents_over_ceiling array'
             $check.Detail | Should -Match 'Over-Agent' -Because 'detail should name the offending agent'
         }
+
+        It 'reports FAIL with Error detail when script outputs invalid JSON and subsequent checks still run' {
+            $root = & $script:NewFixture
+            $badScript = Join-Path $root 'mock-bad-complexity.ps1'
+            Set-Content -Path $badScript -Value "Write-Output 'not json'" -Encoding UTF8
+
+            $result = Invoke-QuickValidate `
+                -RootPath $root `
+                -GuidanceComplexityScriptPath $badScript `
+                -ScriptsPath (Join-Path $root '.github\scripts')
+
+            # 1. GuidanceComplexity should FAIL
+            $check = $result.Results | Where-Object { $_.Name -eq 'GuidanceComplexity' }
+            $check.Passed | Should -BeFalse -Because 'invalid JSON output should cause the check to fail'
+            # 2. Detail should contain Error: from the catch block
+            $check.Detail | Should -Match 'Error:' -Because 'catch block prefixes error message with Error:'
+            # 3. Subsequent checks still ran (PSScriptAnalyzer result exists)
+            $psaCheck = $result.Results | Where-Object { $_.Name -eq 'PSScriptAnalyzer' }
+            $psaCheck | Should -Not -BeNullOrEmpty -Because 'checks after GuidanceComplexity should still execute'
+        }
     }
 
     # ==================================================================
@@ -427,6 +447,8 @@ No gotchas section here.
 
             $check = $result.Results | Where-Object { $_.Name -eq 'PSScriptAnalyzer' }
             $check.Passed | Should -Be 'SKIP' -Because 'PSScriptAnalyzer is not installed; check should be skipped, not passed or failed'
+            $result.ExitCode | Should -Be 0 -Because 'SKIP should not poison the exit code when all other checks pass'
+            $result.SkipCount | Should -Be 1 -Because 'exactly one check (PSScriptAnalyzer) is skipped'
         }
 
         It 'reports PASS when PSScriptAnalyzer finds no issues' {

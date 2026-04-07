@@ -985,7 +985,7 @@ Background terminals spawned via `run_in_terminal(isBackground: true)` persist i
 **Completion check before kill**:
 
 1. Call `get_terminal_output` for the tracked terminal ID.
-2. Output ends with a PowerShell prompt (`PS ...>`) → **confirmed completed** → safe to `kill_terminal`.
+2. Output ends with a PowerShell prompt (`PS ...>`) → **confirmed completed** → safe to `kill_terminal`. (`kill_terminal` is a deferred tool — load it via `tool_search_tool_regex` with pattern `kill_terminal` before first use in a session.)
 3. Output shows ongoing activity (no PS prompt at end) → **active** → preserve.
 4. Output is empty, unclear, or `get_terminal_output` fails → **unknown** → preserve.
 

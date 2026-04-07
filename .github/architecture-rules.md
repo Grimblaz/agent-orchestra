@@ -70,11 +70,7 @@ Must live in `.github/instructions/`
 Run before every PR:
 
 ```powershell
-# No references to deleted agents
-(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "architecture-rules|copilot-instructions" } | Select-String "Plan-Architect").Count  # must be 0
-(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "architecture-rules|copilot-instructions" } | Select-String "Janitor").Count  # must be 0
-(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "architecture-rules|copilot-instructions" } | Select-String "Issue-Designer").Count  # must be 0
-
-# Correct agent count
-(Get-ChildItem .github/agents/*.agent.md).Count  # must be 14
+pwsh -NoProfile -NonInteractive -File .github/scripts/quick-validate.ps1
 ```
+
+This consolidates all structural checks (deleted-agent references, skill frontmatter, guidance complexity, PSScriptAnalyzer, and more).
