@@ -3365,9 +3365,8 @@ findings:
 
 # ==================================================================
 # Describe: Fix Effectiveness — per-category contribution enrichment (Step 1 #264)
-# RED tests — Tests 3, 4, 5 fail until Measure-FixEffectiveness and
-# the Fix Effectiveness health report section are implemented (Steps 2+4).
-# Tests 1 and 2 are invariant guards that should pass immediately.
+# Validates Measure-FixEffectiveness and the Fix Effectiveness health
+# report section.
 # All tests use mock gh CLI (companion-data-file pattern). Tag: no-gh.
 # ==================================================================
 Describe 'Fix Effectiveness: per-category contribution enrichment' {
@@ -4180,10 +4179,9 @@ Describe 'Fix Effectiveness: Measure-FixEffectiveness' {
 
 # ==================================================================
 # Describe: Fix Effectiveness — merge-date discovery loop (Step 3 #264)
-# RED tests — all fail until the merge-date discovery loop is
-# implemented inside Invoke-AggregateReviewScores. The loop iterates
-# proposals_emitted entries with fix_issue_number but no fix_merged_at,
-# queries gh CLI for the merge date, and caches the result.
+# Validates the merge-date discovery loop inside
+# Invoke-AggregateReviewScores (proposals_emitted entries with
+# fix_issue_number → gh CLI query → cached fix_merged_at).
 # All tests use mock gh CLI (argument-dispatching pattern). Tag: no-gh.
 # ==================================================================
 Describe 'Fix Effectiveness: merge-date discovery' {

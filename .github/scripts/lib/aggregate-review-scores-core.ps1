@@ -9,7 +9,7 @@ $script:_ARSCoreLibDir = Split-Path -Parent $PSCommandPath
 . "$script:_ARSCoreLibDir/pipeline-metrics-helpers.ps1"
 
 # ---------------------------------------------------------------------------
-# Shared helper: safe property read for PSCustomObject/hashtable
+# Shared helper: safe property read for PSCustomObject/IDictionary
 # ---------------------------------------------------------------------------
 function Get-FlexProperty {
     param($Object, [string]$Name)
