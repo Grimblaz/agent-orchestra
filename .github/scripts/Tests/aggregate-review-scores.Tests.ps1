@@ -3364,6 +3364,1266 @@ findings:
 }
 
 # ==================================================================
+# Describe: Fix Effectiveness — per-category contribution enrichment (Step 1 #264)
+# RED tests — Tests 3, 4, 5 fail until Measure-FixEffectiveness and
+# the Fix Effectiveness health report section are implemented (Steps 2+4).
+# Tests 1 and 2 are invariant guards that should pass immediately.
+# All tests use mock gh CLI (companion-data-file pattern). Tag: no-gh.
+# ==================================================================
+Describe 'Fix Effectiveness: per-category contribution enrichment' {
+
+    BeforeAll {
+        $script:FERepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:FELibFile = Join-Path $script:FERepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        . $script:FELibFile
+        $script:FETempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
+            "pester-fe-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:FETempRoot -Force | Out-Null
+
+        # ---------------------------------------------------------------
+        # Helper: write a mock gh.ps1 that outputs preset PR JSON.
+        # Companion-data-file pattern avoids quoting hazards.
+        # ---------------------------------------------------------------
+        $script:FEWriteMockGh = {
+            param([string]$WorkDir, [string]$JsonOutput)
+            $dataFile = Join-Path $WorkDir 'gh-response.json'
+            $mockPath = Join-Path $WorkDir 'gh.ps1'
+            $JsonOutput | Set-Content -Path $dataFile -Encoding UTF8
+            @"
+# Mock gh CLI
+Get-Content -Raw -Path '$($dataFile -replace "'", "''")'
+exit 0
+"@ | Set-Content -Path $mockPath -Encoding UTF8
+            return $mockPath
+        }
+
+        # ---------------------------------------------------------------
+        # Helper: build a PR object for the mock JSON array.
+        # ---------------------------------------------------------------
+        function New-FEMockPr {
+            param([int]$Number, [string]$MergedAt, [string]$Body)
+            return [ordered]@{ number = $Number; mergedAt = $MergedAt; body = $Body }
+        }
+
+        # ---------------------------------------------------------------
+        # Body templates — mixed-category (for invariant guard tests)
+        # ---------------------------------------------------------------
+
+        # 50% rate: 1 architecture sustained + 1 security defense-sustained
+        $script:FEHalfBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: sustained
+  - id: F2
+    category: security
+    judge_ruling: defense-sustained
+-->
+"@
+
+        # 100% rate: 1 architecture sustained + 1 security sustained
+        $script:FEFullBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: sustained
+  - id: F2
+    category: security
+    judge_ruling: sustained
+-->
+"@
+
+        # ---------------------------------------------------------------
+        # Body templates — single-category (for per-category RED tests)
+        # ---------------------------------------------------------------
+
+        # Architecture only, 100% sustained (1 finding, 1 sustained)
+        $script:FEArchFullBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: sustained
+-->
+"@
+
+        # Architecture only, 50% sustained (1 sustained + 1 defense-sustained)
+        $script:FEArchHalfBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: sustained
+  - id: F2
+    category: architecture
+    judge_ruling: defense-sustained
+-->
+"@
+
+        # Security only, 50% sustained (1 sustained + 1 defense-sustained)
+        $script:FESecHalfBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: security
+    judge_ruling: sustained
+  - id: F2
+    category: security
+    judge_ruling: defense-sustained
+-->
+"@
+
+        # Performance only, 100% sustained (1 finding, 1 sustained)
+        $script:FEPerfFullBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: performance
+    judge_ruling: sustained
+-->
+"@
+    }
+
+    AfterAll {
+        Remove-Item -Recurse -Force -Path $script:FETempRoot -ErrorAction SilentlyContinue
+    }
+
+    # ------------------------------------------------------------------
+    # Test 1: Invariant — enrichment does not break temporal split ↑
+    # Uses same 10-PR improving pattern as temporal split Test 1.
+    # Should pass immediately (invariant guard).
+    # ------------------------------------------------------------------
+    It 'enrichment does not break temporal split ↑ indicator' -Tag 'no-gh' {
+        # ARRANGE: older half 50% sustain, newer half 100% sustain → ↑
+        $workDir = Join-Path $script:FETempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $prs = @(
+            (New-FEMockPr -Number 1  -MergedAt ([DateTime]::UtcNow.AddDays(-12).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEHalfBody),
+            (New-FEMockPr -Number 2  -MergedAt ([DateTime]::UtcNow.AddDays(-11).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEHalfBody),
+            (New-FEMockPr -Number 3  -MergedAt ([DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEHalfBody),
+            (New-FEMockPr -Number 4  -MergedAt ([DateTime]::UtcNow.AddDays(-9).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEHalfBody),
+            (New-FEMockPr -Number 5  -MergedAt ([DateTime]::UtcNow.AddDays(-8).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEHalfBody),
+            (New-FEMockPr -Number 6  -MergedAt ([DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEFullBody),
+            (New-FEMockPr -Number 7  -MergedAt ([DateTime]::UtcNow.AddDays(-4).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEFullBody),
+            (New-FEMockPr -Number 8  -MergedAt ([DateTime]::UtcNow.AddDays(-3).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEFullBody),
+            (New-FEMockPr -Number 9  -MergedAt ([DateTime]::UtcNow.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEFullBody),
+            (New-FEMockPr -Number 10 -MergedAt ([DateTime]::UtcNow.AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEFullBody)
+        )
+        $mockGhPath = & $script:FEWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile (Join-Path $workDir 'no-calib.json')
+
+        # ASSERT
+        $result.HealthReport | Should -Match '↑' `
+            -Because 'per-category enrichment must not break temporal split ↑ detection (newer=100% vs older=50%)'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 2: Invariant — enrichment does not break temporal split ↓
+    # Uses same 10-PR declining pattern as temporal split Test 2.
+    # Should pass immediately (invariant guard).
+    # ------------------------------------------------------------------
+    It 'enrichment does not break temporal split ↓ indicator' -Tag 'no-gh' {
+        # ARRANGE: older half 100% sustain, newer half 50% sustain → ↓
+        $workDir = Join-Path $script:FETempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $prs = @(
+            (New-FEMockPr -Number 1  -MergedAt ([DateTime]::UtcNow.AddDays(-12).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEFullBody),
+            (New-FEMockPr -Number 2  -MergedAt ([DateTime]::UtcNow.AddDays(-11).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEFullBody),
+            (New-FEMockPr -Number 3  -MergedAt ([DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEFullBody),
+            (New-FEMockPr -Number 4  -MergedAt ([DateTime]::UtcNow.AddDays(-9).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEFullBody),
+            (New-FEMockPr -Number 5  -MergedAt ([DateTime]::UtcNow.AddDays(-8).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEFullBody),
+            (New-FEMockPr -Number 6  -MergedAt ([DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEHalfBody),
+            (New-FEMockPr -Number 7  -MergedAt ([DateTime]::UtcNow.AddDays(-4).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEHalfBody),
+            (New-FEMockPr -Number 8  -MergedAt ([DateTime]::UtcNow.AddDays(-3).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEHalfBody),
+            (New-FEMockPr -Number 9  -MergedAt ([DateTime]::UtcNow.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEHalfBody),
+            (New-FEMockPr -Number 10 -MergedAt ([DateTime]::UtcNow.AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEHalfBody)
+        )
+        $mockGhPath = & $script:FEWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile (Join-Path $workDir 'no-calib.json')
+
+        # ASSERT
+        $result.HealthReport | Should -Match '↓' `
+            -Because 'per-category enrichment must not break temporal split ↓ detection (newer=50% vs older=100%)'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 3: RED — health report includes Fix Effectiveness section
+    # Fails until Measure-FixEffectiveness (Step 2) and the health
+    # report Fix Effectiveness section (Step 4) are implemented.
+    # ------------------------------------------------------------------
+    It 'health report includes Fix Effectiveness section with per-category data when proposals have fix_merged_at' -Tag 'no-gh' {
+        # ARRANGE: 10 PRs — first 5 architecture-only at 50%, last 5 at 100%.
+        # Calibration: proposals_emitted with fix_merged_at between PR5 and PR6.
+        $workDir = Join-Path $script:FETempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $prs = @(
+            (New-FEMockPr -Number 1  -MergedAt ([DateTime]::UtcNow.AddDays(-12).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEArchHalfBody),
+            (New-FEMockPr -Number 2  -MergedAt ([DateTime]::UtcNow.AddDays(-11).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEArchHalfBody),
+            (New-FEMockPr -Number 3  -MergedAt ([DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEArchHalfBody),
+            (New-FEMockPr -Number 4  -MergedAt ([DateTime]::UtcNow.AddDays(-9).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEArchHalfBody),
+            (New-FEMockPr -Number 5  -MergedAt ([DateTime]::UtcNow.AddDays(-8).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEArchHalfBody),
+            (New-FEMockPr -Number 6  -MergedAt ([DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 7  -MergedAt ([DateTime]::UtcNow.AddDays(-4).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 8  -MergedAt ([DateTime]::UtcNow.AddDays(-3).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 9  -MergedAt ([DateTime]::UtcNow.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 10 -MergedAt ([DateTime]::UtcNow.AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEArchFullBody)
+        )
+        $mockGhPath = & $script:FEWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        $calibPath = Join-Path $workDir 'fe-calib.json'
+        [ordered]@{
+            calibration_version = 1
+            entries             = @()
+            proposals_emitted   = @(
+                [ordered]@{
+                    pattern_key      = 'instruction:architecture'
+                    evidence_prs     = @(1, 2)
+                    first_emitted_at = '2026-01-01T00:00:00Z'
+                    fix_issue_number = 100
+                    fix_merged_at    = [DateTime]::UtcNow.AddDays(-6.5).ToString('yyyy-MM-ddTHH:mm:ssZ')
+                }
+            )
+        } | ConvertTo-Json -Depth 5 | Set-Content -Path $calibPath -Encoding UTF8
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibPath
+
+        # ASSERT: Fix Effectiveness section present (RED — not yet implemented)
+        $result.HealthReport | Should -Match 'Fix Effectiveness' `
+            -Because 'proposals_emitted with fix_merged_at and >=5 post-fix PRs must produce a Fix Effectiveness section in the health report'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 4: RED — per-category isolation in Fix Effectiveness
+    # PR1-5 architecture-only 100%, PR6-10 security-only 50%.
+    # Fix merged between batches for instruction:architecture.
+    # Fix Effectiveness must show architecture-specific rates, not
+    # aggregate rates polluted by security findings in the after-window.
+    # ------------------------------------------------------------------
+    It 'per-category enrichment handles PRs with different categories correctly' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:FETempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $prs = @(
+            (New-FEMockPr -Number 1  -MergedAt ([DateTime]::UtcNow.AddDays(-12).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 2  -MergedAt ([DateTime]::UtcNow.AddDays(-11).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 3  -MergedAt ([DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 4  -MergedAt ([DateTime]::UtcNow.AddDays(-9).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 5  -MergedAt ([DateTime]::UtcNow.AddDays(-8).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 6  -MergedAt ([DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FESecHalfBody),
+            (New-FEMockPr -Number 7  -MergedAt ([DateTime]::UtcNow.AddDays(-4).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FESecHalfBody),
+            (New-FEMockPr -Number 8  -MergedAt ([DateTime]::UtcNow.AddDays(-3).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FESecHalfBody),
+            (New-FEMockPr -Number 9  -MergedAt ([DateTime]::UtcNow.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FESecHalfBody),
+            (New-FEMockPr -Number 10 -MergedAt ([DateTime]::UtcNow.AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FESecHalfBody)
+        )
+        $mockGhPath = & $script:FEWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        $calibPath = Join-Path $workDir 'fe-calib.json'
+        [ordered]@{
+            calibration_version = 1
+            entries             = @()
+            proposals_emitted   = @(
+                [ordered]@{
+                    pattern_key      = 'instruction:architecture'
+                    evidence_prs     = @(1, 2)
+                    first_emitted_at = '2026-01-01T00:00:00Z'
+                    fix_issue_number = 100
+                    fix_merged_at    = [DateTime]::UtcNow.AddDays(-6.5).ToString('yyyy-MM-ddTHH:mm:ssZ')
+                }
+            )
+        } | ConvertTo-Json -Depth 5 | Set-Content -Path $calibPath -Encoding UTF8
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibPath
+
+        # ASSERT: Fix Effectiveness shows architecture-specific data (RED — not yet implemented)
+        $result.HealthReport | Should -Match 'Fix Effectiveness' `
+            -Because 'Fix Effectiveness section must appear when proposals_emitted has fix_merged_at with sufficient post-fix PRs'
+        $result.HealthReport | Should -Match 'architecture' `
+            -Because 'Fix Effectiveness must show the architecture category derived from instruction:architecture pattern_key'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 5: RED — new category appearing mid-window
+    # PR1-5: architecture only (no performance). PR6-10: performance only.
+    # Calibration: instruction:performance fix_merged_at between batches.
+    # Before-window has zero performance data → reported as "no before data".
+    # ------------------------------------------------------------------
+    It 'new category appearing mid-window treated as before=zero without crash' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:FETempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $prs = @(
+            (New-FEMockPr -Number 1  -MergedAt ([DateTime]::UtcNow.AddDays(-12).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 2  -MergedAt ([DateTime]::UtcNow.AddDays(-11).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 3  -MergedAt ([DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 4  -MergedAt ([DateTime]::UtcNow.AddDays(-9).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 5  -MergedAt ([DateTime]::UtcNow.AddDays(-8).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEArchFullBody),
+            (New-FEMockPr -Number 6  -MergedAt ([DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEPerfFullBody),
+            (New-FEMockPr -Number 7  -MergedAt ([DateTime]::UtcNow.AddDays(-4).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEPerfFullBody),
+            (New-FEMockPr -Number 8  -MergedAt ([DateTime]::UtcNow.AddDays(-3).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEPerfFullBody),
+            (New-FEMockPr -Number 9  -MergedAt ([DateTime]::UtcNow.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEPerfFullBody),
+            (New-FEMockPr -Number 10 -MergedAt ([DateTime]::UtcNow.AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEPerfFullBody)
+        )
+        $mockGhPath = & $script:FEWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        $calibPath = Join-Path $workDir 'fe-calib.json'
+        [ordered]@{
+            calibration_version = 1
+            entries             = @()
+            proposals_emitted   = @(
+                [ordered]@{
+                    pattern_key      = 'instruction:performance'
+                    evidence_prs     = @(1, 2)
+                    first_emitted_at = '2026-01-01T00:00:00Z'
+                    fix_issue_number = 200
+                    fix_merged_at    = [DateTime]::UtcNow.AddDays(-6.5).ToString('yyyy-MM-ddTHH:mm:ssZ')
+                }
+            )
+        } | ConvertTo-Json -Depth 5 | Set-Content -Path $calibPath -Encoding UTF8
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibPath
+
+        # ASSERT: Fix Effectiveness section present even for new category (RED — not yet implemented)
+        $result.HealthReport | Should -Match 'Fix Effectiveness' `
+            -Because 'proposals_emitted with fix_merged_at must produce Fix Effectiveness section even when target category was absent in the before-window'
+    }
+}
+
+# ==================================================================
+# Describe: Measure-FixEffectiveness pure function (Step 2 #264)
+# Tests the split-window comparison algorithm. No gh CLI calls.
+# Tag: no-gh.
+# ==================================================================
+Describe 'Fix Effectiveness: Measure-FixEffectiveness' {
+
+    BeforeAll {
+        $script:CFERepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:CFELibFile = Join-Path $script:CFERepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        . $script:CFELibFile
+
+        # Helper: build a PrContribution entry
+        function New-CFEContrib {
+            param(
+                [string]$MergedAt,
+                [double]$WTotal,
+                [double]$WAccepted,
+                [hashtable]$Categories = @{}
+            )
+            return [pscustomobject]@{
+                mergedAt   = $MergedAt
+                wTotal     = $WTotal
+                wAccepted  = $WAccepted
+                categories = $Categories
+            }
+        }
+
+        # Helper: build a ProposalsEmitted entry
+        function New-CFEProposal {
+            param(
+                [string]$PatternKey,
+                [int[]]$EvidencePrs = @(1, 2),
+                [string]$FirstEmittedAt = '2026-01-01T00:00:00Z',
+                [Nullable[int]]$FixIssueNumber,
+                [string]$FixMergedAt
+            )
+            $entry = [ordered]@{
+                pattern_key      = $PatternKey
+                evidence_prs     = $EvidencePrs
+                first_emitted_at = $FirstEmittedAt
+            }
+            if ($null -ne $FixIssueNumber) {
+                $entry['fix_issue_number'] = $FixIssueNumber
+            }
+            if ($FixMergedAt) {
+                $entry['fix_merged_at'] = $FixMergedAt
+            }
+            return $entry
+        }
+    }
+
+    It 'basic improved split — after rate lower than before' -Tag 'no-gh' {
+        # ARRANGE
+        $fixDate = [DateTime]::UtcNow.AddDays(-6).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $proposals = @(
+            New-CFEProposal -PatternKey 'instruction:architecture' `
+                -FixIssueNumber 100 -FixMergedAt $fixDate
+        )
+        $contribs = @(
+            # Before-window: 5 PRs with architecture 80% sustain rate
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-12 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.8 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.8 } }
+            }
+            # After-window: 5 PRs with architecture 30% sustain rate
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-5 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.3 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.3 } }
+            }
+        )
+
+        # ACT
+        $result = Measure-FixEffectiveness -ProposalsEmitted $proposals -PrContributions $contribs
+
+        # ASSERT
+        $result.Results.Count | Should -Be 1 `
+            -Because 'one proposal with fix_merged_at should produce one result'
+        $result.Results[0].indicator | Should -Be 'improved' `
+            -Because 'after_rate (0.3) < before_rate (0.8) - deadzone (0.05) = 0.75'
+        $result.Results[0].category | Should -Be 'architecture' `
+            -Because 'category is extracted from pattern_key after colon'
+        $result.Results[0].fix_type | Should -Be 'instruction' `
+            -Because 'fix_type is extracted from pattern_key before colon'
+        $result.Results[0].before_rate | Should -BeGreaterThan 0.7 `
+            -Because 'before-window sustain rate should be ~0.8'
+        $result.Results[0].after_rate | Should -BeLessThan 0.4 `
+            -Because 'after-window sustain rate should be ~0.3'
+        $result.Results[0].delta | Should -BeLessThan -0.3 `
+            -Because 'delta = after_rate - before_rate ≈ -0.5'
+        $result.Results[0].post_fix_prs | Should -Be 5 `
+            -Because '5 PRs fall in the after-window'
+        $result.Results[0].before_prs | Should -Be 5 `
+            -Because '5 PRs fall in the before-window'
+        $result.Results[0].fix_issue_number | Should -Be 100 `
+            -Because 'fix_issue_number is passed through from proposal'
+        $result.AwaitingMergeCount | Should -Be 0 `
+            -Because 'all proposals have fix_merged_at'
+    }
+
+    It 'basic worsened split — after rate higher than before' -Tag 'no-gh' {
+        # ARRANGE
+        $fixDate = [DateTime]::UtcNow.AddDays(-6).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $proposals = @(
+            New-CFEProposal -PatternKey 'skill:security' `
+                -FixIssueNumber 101 -FixMergedAt $fixDate
+        )
+        $contribs = @(
+            # Before-window: 5 PRs with security 30% sustain rate
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-12 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.3 `
+                    -Categories @{ 'security' = @{ wTotal = 1.0; wAccepted = 0.3 } }
+            }
+            # After-window: 5 PRs with security 80% sustain rate
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-5 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.8 `
+                    -Categories @{ 'security' = @{ wTotal = 1.0; wAccepted = 0.8 } }
+            }
+        )
+
+        # ACT
+        $result = Measure-FixEffectiveness -ProposalsEmitted $proposals -PrContributions $contribs
+
+        # ASSERT
+        $result.Results.Count | Should -Be 1 `
+            -Because 'one proposal with fix_merged_at should produce one result'
+        $result.Results[0].indicator | Should -Be 'worsened' `
+            -Because 'after_rate (0.8) > before_rate (0.3) + deadzone (0.05) = 0.35'
+        $result.Results[0].delta | Should -BeGreaterThan 0.3 `
+            -Because 'delta = after_rate - before_rate ≈ +0.5'
+        $result.Results[0].category | Should -Be 'security' `
+            -Because 'category extracted from pattern_key'
+        $result.Results[0].fix_type | Should -Be 'skill' `
+            -Because 'fix_type extracted from pattern_key'
+    }
+
+    It 'unchanged — delta within deadzone' -Tag 'no-gh' {
+        # ARRANGE: before 50%, after 53% → delta = 0.03 within ±5% deadzone
+        $fixDate = [DateTime]::UtcNow.AddDays(-6).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $proposals = @(
+            New-CFEProposal -PatternKey 'agent-prompt:pattern' `
+                -FixIssueNumber 102 -FixMergedAt $fixDate
+        )
+        $contribs = @(
+            # Before-window: 5 PRs with pattern 50% sustain rate
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-12 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.5 `
+                    -Categories @{ 'pattern' = @{ wTotal = 1.0; wAccepted = 0.5 } }
+            }
+            # After-window: 5 PRs with pattern 53% sustain rate
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-5 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.53 `
+                    -Categories @{ 'pattern' = @{ wTotal = 1.0; wAccepted = 0.53 } }
+            }
+        )
+
+        # ACT
+        $result = Measure-FixEffectiveness -ProposalsEmitted $proposals -PrContributions $contribs
+
+        # ASSERT
+        $result.Results[0].indicator | Should -Be 'unchanged' `
+            -Because 'delta (0.03) is within deadzone (±0.05)'
+        $result.Results[0].before_rate | Should -BeGreaterThan 0.49 `
+            -Because 'before-window sustain rate should be ~0.5'
+        $result.Results[0].after_rate | Should -BeGreaterThan 0.52 `
+            -Because 'after-window sustain rate should be ~0.53'
+    }
+
+    It 'insufficient data — fewer than 5 post-fix PRs' -Tag 'no-gh' {
+        # ARRANGE: only 3 PRs after fix_merged_at
+        $fixDate = [DateTime]::UtcNow.AddDays(-6).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $proposals = @(
+            New-CFEProposal -PatternKey 'instruction:architecture' `
+                -FixIssueNumber 103 -FixMergedAt $fixDate
+        )
+        $contribs = @(
+            # Before-window: 5 PRs
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-12 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.8 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.8 } }
+            }
+            # After-window: only 3 PRs
+            1..3 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-5 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.3 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.3 } }
+            }
+        )
+
+        # ACT
+        $result = Measure-FixEffectiveness -ProposalsEmitted $proposals -PrContributions $contribs
+
+        # ASSERT
+        $result.Results[0].indicator | Should -Be 'insufficient data' `
+            -Because 'only 3 post-fix PRs, below MinPostFixPrs threshold of 5'
+        $result.Results[0].post_fix_prs | Should -Be 3 `
+            -Because 'the count of post-fix PRs must be reported for transparency'
+    }
+
+    It 'zero post-fix findings — category absent in after-window means improved' -Tag 'no-gh' {
+        # ARRANGE: before has architecture findings, after has PRs but no architecture category
+        $fixDate = [DateTime]::UtcNow.AddDays(-6).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $proposals = @(
+            New-CFEProposal -PatternKey 'instruction:architecture' `
+                -FixIssueNumber 104 -FixMergedAt $fixDate
+        )
+        $contribs = @(
+            # Before-window: 5 PRs with architecture findings
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-12 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.7 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.7 } }
+            }
+            # After-window: 5 PRs with NO architecture category at all
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-5 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 0.5 -WAccepted 0.3 `
+                    -Categories @{ 'security' = @{ wTotal = 0.5; wAccepted = 0.3 } }
+            }
+        )
+
+        # ACT
+        $result = Measure-FixEffectiveness -ProposalsEmitted $proposals -PrContributions $contribs
+
+        # ASSERT
+        $result.Results[0].indicator | Should -Be 'improved' `
+            -Because 'zero findings in after-window (category absent) means pattern eliminated — best outcome'
+        $result.Results[0].after_rate | Should -Be 0 `
+            -Because 'no architecture findings in after-window yields sustain rate of 0'
+        $result.Results[0].before_rate | Should -BeGreaterThan 0.6 `
+            -Because 'before-window has architecture findings with ~70% sustain rate'
+    }
+
+    It 'no before data — category absent in before-window' -Tag 'no-gh' {
+        # ARRANGE: before has no architecture findings, after has architecture findings
+        $fixDate = [DateTime]::UtcNow.AddDays(-6).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $proposals = @(
+            New-CFEProposal -PatternKey 'instruction:architecture' `
+                -FixIssueNumber 105 -FixMergedAt $fixDate
+        )
+        $contribs = @(
+            # Before-window: 5 PRs with NO architecture category
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-12 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 0.5 -WAccepted 0.3 `
+                    -Categories @{ 'security' = @{ wTotal = 0.5; wAccepted = 0.3 } }
+            }
+            # After-window: 5 PRs WITH architecture findings
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-5 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.6 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.6 } }
+            }
+        )
+
+        # ACT
+        $result = Measure-FixEffectiveness -ProposalsEmitted $proposals -PrContributions $contribs
+
+        # ASSERT
+        $result.Results[0].indicator | Should -Be 'no before data' `
+            -Because 'category wTotal = 0 in before-window means no baseline to compare against'
+    }
+
+    It 'stacked fixes — two fixes for same pattern_key get bounded after-windows' -Tag 'no-gh' {
+        # ARRANGE: 2 fixes for same pattern_key at day -10 and day -5
+        $fix1Date = [DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $fix2Date = [DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $proposals = @(
+            (New-CFEProposal -PatternKey 'instruction:architecture' `
+                -FixIssueNumber 106 -FixMergedAt $fix1Date)
+            (New-CFEProposal -PatternKey 'instruction:architecture' `
+                -FixIssueNumber 107 -FixMergedAt $fix2Date)
+        )
+        $contribs = @(
+            # Before both fixes: days -15 to -11 (5 PRs) — high sustain
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-16 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.9 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.9 } }
+            }
+            # Between fix1 and fix2: days -10 to -6 (5 PRs) — medium sustain
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-11 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.5 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.5 } }
+            }
+            # After fix2: days -5 to -1 (5 PRs) — low sustain
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-6 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.2 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.2 } }
+            }
+        )
+
+        # ACT
+        $result = Measure-FixEffectiveness -ProposalsEmitted $proposals -PrContributions $contribs
+
+        # ASSERT
+        $result.Results.Count | Should -Be 2 `
+            -Because 'two proposals with fix_merged_at produce two results'
+
+        # Fix 1: before = days -15..-11 (global before fix1), after = days -10..-6 (bounded by fix2)
+        $fix1Result = $result.Results | Where-Object { $_.fix_issue_number -eq 106 }
+        $fix1Result | Should -Not -BeNullOrEmpty `
+            -Because 'fix 106 should produce a result'
+        $fix1Result.before_prs | Should -Be 5 `
+            -Because 'global before-window for fix1 has 5 PRs (days -15 to -11)'
+        $fix1Result.post_fix_prs | Should -Be 5 `
+            -Because 'fix1 after-window bounded at fix2 date contains 5 PRs (days -10 to -6)'
+
+        # Fix 2: before = days -15..-6 (global before fix2), after = days -5..-1 (unbounded)
+        $fix2Result = $result.Results | Where-Object { $_.fix_issue_number -eq 107 }
+        $fix2Result | Should -Not -BeNullOrEmpty `
+            -Because 'fix 107 should produce a result'
+        $fix2Result.before_prs | Should -Be 10 `
+            -Because 'global before-window for fix2 has 10 PRs (days -15 to -6)'
+        $fix2Result.post_fix_prs | Should -Be 5 `
+            -Because 'fix2 after-window is unbounded and contains 5 PRs (days -5 to -1)'
+    }
+
+    It 'no entries with fix_merged_at — empty results' -Tag 'no-gh' {
+        # ARRANGE: only entries with fix_issue_number but no fix_merged_at
+        $proposals = @(
+            (New-CFEProposal -PatternKey 'instruction:architecture' -FixIssueNumber 108)
+            (New-CFEProposal -PatternKey 'skill:security' -FixIssueNumber 109)
+        )
+        $contribs = @(
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-$_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.5 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.5 } }
+            }
+        )
+
+        # ACT
+        $result = Measure-FixEffectiveness -ProposalsEmitted $proposals -PrContributions $contribs
+
+        # ASSERT
+        $result.Results.Count | Should -Be 0 `
+            -Because 'no proposals have fix_merged_at so no split-window comparison is possible'
+        $result.AwaitingMergeCount | Should -Be 2 `
+            -Because 'both entries have fix_issue_number but no fix_merged_at'
+    }
+
+    It 'awaiting merge count — mix of resolved and pending' -Tag 'no-gh' {
+        # ARRANGE: 1 resolved (has fix_merged_at), 2 pending (fix_issue_number only)
+        $fixDate = [DateTime]::UtcNow.AddDays(-6).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $proposals = @(
+            (New-CFEProposal -PatternKey 'instruction:architecture' `
+                -FixIssueNumber 110 -FixMergedAt $fixDate)
+            (New-CFEProposal -PatternKey 'skill:security' -FixIssueNumber 111)
+            (New-CFEProposal -PatternKey 'agent-prompt:pattern' -FixIssueNumber 112)
+        )
+        $contribs = @(
+            # Before-window: 5 PRs
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-12 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.7 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.7 } }
+            }
+            # After-window: 5 PRs
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-5 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.4 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.4 } }
+            }
+        )
+
+        # ACT
+        $result = Measure-FixEffectiveness -ProposalsEmitted $proposals -PrContributions $contribs
+
+        # ASSERT
+        $result.Results.Count | Should -Be 1 `
+            -Because 'only the resolved proposal (with fix_merged_at) produces a result'
+        $result.Results[0].fix_issue_number | Should -Be 110 `
+            -Because 'only the resolved proposal appears in results'
+        $result.AwaitingMergeCount | Should -Be 2 `
+            -Because '2 entries have fix_issue_number but no fix_merged_at'
+    }
+
+    It 'entries without fix_issue_number are ignored' -Tag 'no-gh' {
+        # ARRANGE: 1 entry with only pattern_key + evidence (no fix_issue_number), 1 with fix resolved
+        $fixDate = [DateTime]::UtcNow.AddDays(-6).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $proposals = @(
+            # Entry without fix_issue_number — just a detected pattern, no fix linked
+            (New-CFEProposal -PatternKey 'instruction:performance')
+            # Entry with fix linked and merged
+            (New-CFEProposal -PatternKey 'skill:architecture' `
+                -FixIssueNumber 113 -FixMergedAt $fixDate)
+        )
+        $contribs = @(
+            # Before-window: 5 PRs
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-12 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.8 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.8 } }
+            }
+            # After-window: 5 PRs
+            1..5 | ForEach-Object {
+                New-CFEContrib `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-5 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -WTotal 1.0 -WAccepted 0.3 `
+                    -Categories @{ 'architecture' = @{ wTotal = 1.0; wAccepted = 0.3 } }
+            }
+        )
+
+        # ACT
+        $result = Measure-FixEffectiveness -ProposalsEmitted $proposals -PrContributions $contribs
+
+        # ASSERT
+        $result.Results.Count | Should -Be 1 `
+            -Because 'only the entry with fix_issue_number AND fix_merged_at produces a result'
+        $result.Results[0].pattern_key | Should -Be 'skill:architecture' `
+            -Because 'the entry without fix_issue_number is fully ignored'
+        $result.AwaitingMergeCount | Should -Be 0 `
+            -Because 'entry without fix_issue_number does not count as awaiting merge'
+    }
+}
+
+# ==================================================================
+# Describe: Fix Effectiveness — merge-date discovery loop (Step 3 #264)
+# RED tests — all fail until the merge-date discovery loop is
+# implemented inside Invoke-AggregateReviewScores. The loop iterates
+# proposals_emitted entries with fix_issue_number but no fix_merged_at,
+# queries gh CLI for the merge date, and caches the result.
+# All tests use mock gh CLI (argument-dispatching pattern). Tag: no-gh.
+# ==================================================================
+Describe 'Fix Effectiveness: merge-date discovery' {
+
+    BeforeAll {
+        $script:MDRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:MDLibFile = Join-Path $script:MDRepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        . $script:MDLibFile
+        $script:MDTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
+            "pester-md-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:MDTempRoot -Force | Out-Null
+
+        # ---------------------------------------------------------------
+        # Helper: argument-dispatching mock gh.ps1.
+        # Dispatches on --search presence: main PR-list call vs discovery.
+        # ---------------------------------------------------------------
+        $script:MDWriteDispatchMockGh = {
+            param([string]$WorkDir, [string]$PrListJson, [string]$DiscoveryJson)
+            $prDataFile = Join-Path $WorkDir 'pr-list-response.json'
+            $discoveryDataFile = Join-Path $WorkDir 'discovery-response.json'
+            $mockPath = Join-Path $WorkDir 'gh.ps1'
+            $PrListJson | Set-Content -Path $prDataFile -Encoding UTF8
+            $DiscoveryJson | Set-Content -Path $discoveryDataFile -Encoding UTF8
+            @"
+# Argument-dispatching mock gh CLI
+if (`$args -join ' ' -match '--search') {
+    Get-Content -Raw -Path '$($discoveryDataFile -replace "'", "''")'
+} else {
+    Get-Content -Raw -Path '$($prDataFile -replace "'", "''")'
+}
+exit 0
+"@ | Set-Content -Path $mockPath -Encoding UTF8
+            return $mockPath
+        }
+
+        # ---------------------------------------------------------------
+        # Helper: argument-capturing mock gh.ps1.
+        # Captures all invocations with --search to a log file.
+        # ---------------------------------------------------------------
+        $script:MDWriteCaptureMockGh = {
+            param([string]$WorkDir, [string]$PrListJson, [string]$DiscoveryJson)
+            $prDataFile = Join-Path $WorkDir 'pr-list-response.json'
+            $discoveryDataFile = Join-Path $WorkDir 'discovery-response.json'
+            $captureFile = Join-Path $WorkDir 'gh-capture.log'
+            $mockPath = Join-Path $WorkDir 'gh.ps1'
+            $PrListJson | Set-Content -Path $prDataFile -Encoding UTF8
+            $DiscoveryJson | Set-Content -Path $discoveryDataFile -Encoding UTF8
+            @"
+# Argument-capturing mock gh CLI
+`$joinedArgs = `$args -join ' '
+if (`$joinedArgs -match '--search') {
+    Add-Content -Path '$($captureFile -replace "'", "''")' -Value `$joinedArgs
+    Get-Content -Raw -Path '$($discoveryDataFile -replace "'", "''")'
+} else {
+    Get-Content -Raw -Path '$($prDataFile -replace "'", "''")'
+}
+exit 0
+"@ | Set-Content -Path $mockPath -Encoding UTF8
+            return $mockPath
+        }
+
+        # ---------------------------------------------------------------
+        # Helper: simple mock gh (no dispatch — only serves PR list).
+        # Used by cache-hit test where no discovery call should occur.
+        # ---------------------------------------------------------------
+        $script:MDWriteSimpleMockGh = {
+            param([string]$WorkDir, [string]$JsonOutput)
+            $dataFile = Join-Path $WorkDir 'gh-response.json'
+            $mockPath = Join-Path $WorkDir 'gh.ps1'
+            $JsonOutput | Set-Content -Path $dataFile -Encoding UTF8
+            @"
+# Simple mock gh CLI
+Get-Content -Raw -Path '$($dataFile -replace "'", "''")'
+exit 0
+"@ | Set-Content -Path $mockPath -Encoding UTF8
+            return $mockPath
+        }
+
+        # ---------------------------------------------------------------
+        # Helper: build a PR object for the mock JSON array.
+        # ---------------------------------------------------------------
+        function New-MDMockPr {
+            param([int]$Number, [string]$MergedAt, [string]$Body)
+            return [ordered]@{ number = $Number; mergedAt = $MergedAt; body = $Body }
+        }
+
+        # Body with architecture sustained finding — triggers depth state
+        # processing and reliable write-back when calibration has
+        # prosecution_depth_state with architecture in skip.
+        $script:MDArchBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: sustained
+-->
+"@
+
+        # ---------------------------------------------------------------
+        # Helper: write a calibration JSON with proposals_emitted and
+        # architecture depth state (for reliable write-back triggering).
+        # ---------------------------------------------------------------
+        $script:MDWriteCalibFile = {
+            param([string]$FilePath, [array]$ProposalsEmitted)
+            @{
+                calibration_version     = 1
+                entries                 = @()
+                prosecution_depth_state = @{
+                    architecture = @{ skip_first_observed_at = '2026-01-01T00:00:00Z' }
+                }
+                proposals_emitted       = $ProposalsEmitted
+            } | ConvertTo-Json -Depth 5 | Set-Content -Path $FilePath -Encoding UTF8
+        }
+
+        # ---------------------------------------------------------------
+        # Shared PR array: 6 v2 PRs with architecture findings.
+        # Provides sufficient data (>= 5) to avoid early exit.
+        # ---------------------------------------------------------------
+        $script:MDBasePrs = @(
+            (New-MDMockPr -Number 1 -MergedAt ([DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:MDArchBody),
+            (New-MDMockPr -Number 2 -MergedAt ([DateTime]::UtcNow.AddDays(-9).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:MDArchBody),
+            (New-MDMockPr -Number 3 -MergedAt ([DateTime]::UtcNow.AddDays(-8).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:MDArchBody),
+            (New-MDMockPr -Number 4 -MergedAt ([DateTime]::UtcNow.AddDays(-7).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:MDArchBody),
+            (New-MDMockPr -Number 5 -MergedAt ([DateTime]::UtcNow.AddDays(-6).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:MDArchBody),
+            (New-MDMockPr -Number 6 -MergedAt ([DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:MDArchBody)
+        )
+    }
+
+    AfterAll {
+        Remove-Item -Recurse -Force -Path $script:MDTempRoot -ErrorAction SilentlyContinue
+    }
+
+    # ------------------------------------------------------------------
+    # Test 1: discovery succeeds — mock gh returns merged PR result →
+    # fix_merged_at set and written back to calibration file.
+    # RED: fails until merge-date discovery loop is implemented.
+    # ------------------------------------------------------------------
+    It 'discovery succeeds — fix_merged_at set and written back' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:MDTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $proposals = @(
+            @{
+                pattern_key      = 'instruction:architecture'
+                evidence_prs     = @(1, 2)
+                first_emitted_at = '2026-01-01T00:00:00Z'
+                fix_issue_number = 100
+            }
+        )
+        $calibFilePath = Join-Path $workDir 'calib.json'
+        & $script:MDWriteCalibFile -FilePath $calibFilePath -ProposalsEmitted $proposals
+
+        $discoveryResult = @(
+            [ordered]@{ number = 50; mergedAt = '2026-03-20T12:00:00Z' }
+        )
+        $mockGhPath = & $script:MDWriteDispatchMockGh `
+            -WorkDir       $workDir `
+            -PrListJson    ($script:MDBasePrs | ConvertTo-Json -Depth 3) `
+            -DiscoveryJson ($discoveryResult | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'merge-date discovery must not cause pipeline failure'
+        $readBack = Get-Content -Path $calibFilePath -Raw | ConvertFrom-Json
+        $entry = $readBack.proposals_emitted | Where-Object {
+            (Get-FlexProperty $_ 'fix_issue_number') -eq 100
+        }
+        $entry | Should -Not -BeNullOrEmpty `
+            -Because 'proposals_emitted entry with fix_issue_number=100 must survive write-back'
+        $discoveredVal = Get-FlexProperty $entry 'fix_merged_at'
+        $discoveredDt = if ($discoveredVal -is [datetime]) { $discoveredVal.ToUniversalTime() } else { [datetime]::Parse($discoveredVal).ToUniversalTime() }
+        $discoveredDt | Should -Be ([datetime]::Parse('2026-03-20T12:00:00Z').ToUniversalTime()) `
+            -Because 'discovery loop must set fix_merged_at from the gh pr list result'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 2: cache hit — entry already has fix_merged_at →
+    # discovery not invoked, fix_merged_at unchanged.
+    # RED: passes trivially if discovery is not implemented (entry already
+    # has fix_merged_at), but validates the cache-hit path once implemented.
+    # ------------------------------------------------------------------
+    It 'cache hit — entry already has fix_merged_at → gh not invoked for discovery' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:MDTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $proposals = @(
+            @{
+                pattern_key      = 'instruction:architecture'
+                evidence_prs     = @(1, 2)
+                first_emitted_at = '2026-01-01T00:00:00Z'
+                fix_issue_number = 100
+                fix_merged_at    = '2026-02-15T08:00:00Z'
+            }
+        )
+        $calibFilePath = Join-Path $workDir 'calib.json'
+        & $script:MDWriteCalibFile -FilePath $calibFilePath -ProposalsEmitted $proposals
+
+        # Simple mock — no --search dispatch. If discovery were attempted
+        # on an already-cached entry, it would get PR list data instead of
+        # discovery data, potentially corrupting the entry.
+        $mockGhPath = & $script:MDWriteSimpleMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($script:MDBasePrs | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'cache-hit path must not cause pipeline failure'
+        $readBack = Get-Content -Path $calibFilePath -Raw | ConvertFrom-Json
+        $entry = $readBack.proposals_emitted | Where-Object {
+            (Get-FlexProperty $_ 'fix_issue_number') -eq 100
+        }
+        $cachedVal = Get-FlexProperty $entry 'fix_merged_at'
+        $cachedDt = if ($cachedVal -is [datetime]) { $cachedVal.ToUniversalTime() } else { [datetime]::Parse($cachedVal).ToUniversalTime() }
+        $cachedDt | Should -Be ([datetime]::Parse('2026-02-15T08:00:00Z').ToUniversalTime()) `
+            -Because 'pre-existing fix_merged_at must not be overwritten by a new discovery call'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 3: gh returns empty array → fix_merged_at not set,
+    # entry unchanged. Will re-query on next run.
+    # RED: entry won't have fix_merged_at either way until discovery is
+    # implemented. Test becomes meaningful once implementation writes
+    # fix_merged_at only when results are non-empty.
+    # ------------------------------------------------------------------
+    It 'gh returns empty — fix_merged_at not set, entry unchanged' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:MDTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $proposals = @(
+            @{
+                pattern_key      = 'instruction:architecture'
+                evidence_prs     = @(1, 2)
+                first_emitted_at = '2026-01-01T00:00:00Z'
+                fix_issue_number = 200
+            }
+        )
+        $calibFilePath = Join-Path $workDir 'calib.json'
+        & $script:MDWriteCalibFile -FilePath $calibFilePath -ProposalsEmitted $proposals
+
+        # Discovery returns empty array — no merged PRs found
+        $mockGhPath = & $script:MDWriteDispatchMockGh `
+            -WorkDir       $workDir `
+            -PrListJson    ($script:MDBasePrs | ConvertTo-Json -Depth 3) `
+            -DiscoveryJson '[]'
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'empty discovery result must not cause pipeline failure'
+        $readBack = Get-Content -Path $calibFilePath -Raw | ConvertFrom-Json
+        $entry = $readBack.proposals_emitted | Where-Object {
+            (Get-FlexProperty $_ 'fix_issue_number') -eq 200
+        }
+        $entry | Should -Not -BeNullOrEmpty `
+            -Because 'proposal entry must survive write-back even without discovery data'
+        (Get-FlexProperty $entry 'fix_merged_at') | Should -BeNullOrEmpty `
+            -Because 'fix_merged_at must not be set when gh returns no matching merged PRs'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 4: HealthReport mode — no discovery executed (read-only).
+    # Calibration entry with fix_issue_number but no fix_merged_at must
+    # remain unchanged.
+    # RED: passes trivially before implementation (no discovery in either
+    # case), but guards the HealthReport skip once discovery is wired.
+    # ------------------------------------------------------------------
+    It 'HealthReport mode — no discovery executed' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:MDTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $proposals = @(
+            @{
+                pattern_key      = 'instruction:architecture'
+                evidence_prs     = @(1, 2)
+                first_emitted_at = '2026-01-01T00:00:00Z'
+                fix_issue_number = 300
+            }
+        )
+        $calibFilePath = Join-Path $workDir 'calib.json'
+        & $script:MDWriteCalibFile -FilePath $calibFilePath -ProposalsEmitted $proposals
+
+        # Provide dispatch mock — but discovery should never fire in HealthReport mode
+        $discoveryResult = @(
+            [ordered]@{ number = 60; mergedAt = '2026-03-25T10:00:00Z' }
+        )
+        $mockGhPath = & $script:MDWriteDispatchMockGh `
+            -WorkDir       $workDir `
+            -PrListJson    ($script:MDBasePrs | ConvertTo-Json -Depth 3) `
+            -DiscoveryJson ($discoveryResult | ConvertTo-Json -Depth 3)
+
+        $bytesBefore = [System.IO.File]::ReadAllBytes($calibFilePath)
+
+        # ACT — HealthReport (read-only mode)
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath `
+            -HealthReport
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'HealthReport mode must complete successfully'
+        $bytesAfter = [System.IO.File]::ReadAllBytes($calibFilePath)
+        ($bytesBefore -join ',') | Should -Be ($bytesAfter -join ',') `
+            -Because 'HealthReport mode must not write back any discovery results (read-only D-264-11)'
+        $readBack = Get-Content -Path $calibFilePath -Raw | ConvertFrom-Json
+        $entry = $readBack.proposals_emitted | Where-Object {
+            (Get-FlexProperty $_ 'fix_issue_number') -eq 300
+        }
+        (Get-FlexProperty $entry 'fix_merged_at') | Should -BeNullOrEmpty `
+            -Because 'discovery must be skipped entirely in HealthReport mode'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 5: picks latest mergedAt from multiple gh results.
+    # Discovery returns 3 PRs with different mergedAt values; the loop
+    # must select the one with the latest timestamp.
+    # RED: fails until merge-date discovery loop is implemented.
+    # ------------------------------------------------------------------
+    It 'picks latest mergedAt from multiple results' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:MDTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $proposals = @(
+            @{
+                pattern_key      = 'instruction:architecture'
+                evidence_prs     = @(1, 2)
+                first_emitted_at = '2026-01-01T00:00:00Z'
+                fix_issue_number = 400
+            }
+        )
+        $calibFilePath = Join-Path $workDir 'calib.json'
+        & $script:MDWriteCalibFile -FilePath $calibFilePath -ProposalsEmitted $proposals
+
+        # Three PRs with different merge dates — latest is 2026-04-01
+        $discoveryResult = @(
+            [ordered]@{ number = 70; mergedAt = '2026-03-10T09:00:00Z' },
+            [ordered]@{ number = 71; mergedAt = '2026-04-01T15:30:00Z' },
+            [ordered]@{ number = 72; mergedAt = '2026-03-25T12:00:00Z' }
+        )
+        $mockGhPath = & $script:MDWriteDispatchMockGh `
+            -WorkDir       $workDir `
+            -PrListJson    ($script:MDBasePrs | ConvertTo-Json -Depth 3) `
+            -DiscoveryJson ($discoveryResult | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'multi-result discovery must not cause pipeline failure'
+        $readBack = Get-Content -Path $calibFilePath -Raw | ConvertFrom-Json
+        $entry = $readBack.proposals_emitted | Where-Object {
+            (Get-FlexProperty $_ 'fix_issue_number') -eq 400
+        }
+        $latestVal = Get-FlexProperty $entry 'fix_merged_at'
+        $latestDt = if ($latestVal -is [datetime]) { $latestVal.ToUniversalTime() } else { [datetime]::Parse($latestVal).ToUniversalTime() }
+        $latestDt | Should -Be ([datetime]::Parse('2026-04-01T15:30:00Z').ToUniversalTime()) `
+            -Because 'discovery loop must pick the entry with the latest mergedAt from multiple results'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 6: search string includes closes, fixes, resolves keywords.
+    # Uses a capturing mock that logs the --search argument for inspection.
+    # RED: fails until merge-date discovery loop is implemented.
+    # ------------------------------------------------------------------
+    It 'search string includes closes, fixes, resolves keywords' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:MDTempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $proposals = @(
+            @{
+                pattern_key      = 'instruction:architecture'
+                evidence_prs     = @(1, 2)
+                first_emitted_at = '2026-01-01T00:00:00Z'
+                fix_issue_number = 500
+            }
+        )
+        $calibFilePath = Join-Path $workDir 'calib.json'
+        & $script:MDWriteCalibFile -FilePath $calibFilePath -ProposalsEmitted $proposals
+
+        $discoveryResult = @(
+            [ordered]@{ number = 80; mergedAt = '2026-03-20T12:00:00Z' }
+        )
+        $mockGhPath = & $script:MDWriteCaptureMockGh `
+            -WorkDir       $workDir `
+            -PrListJson    ($script:MDBasePrs | ConvertTo-Json -Depth 3) `
+            -DiscoveryJson ($discoveryResult | ConvertTo-Json -Depth 3)
+
+        $captureFile = Join-Path $workDir 'gh-capture.log'
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'capturing mock must not cause pipeline failure'
+        $captureFile | Should -Exist `
+            -Because 'discovery loop must invoke gh with --search for entries needing fix_merged_at'
+        $captured = Get-Content -Path $captureFile -Raw
+        $captured | Should -Match 'closes #500' `
+            -Because 'search query must include closes keyword per D-264-6'
+        $captured | Should -Match 'fixes #500' `
+            -Because 'search query must include fixes keyword per D-264-6'
+        $captured | Should -Match 'resolves #500' `
+            -Because 'search query must include resolves keyword per D-264-6'
+    }
+}
+
+# ==================================================================
 # Describe: Read-only mode and insufficient data handling (Step 4 #259)
 # All tests use mock gh CLI (companion-data-file pattern). Tag: no-gh.
 # ==================================================================
@@ -3557,5 +4817,666 @@ findings:
             -Because 'zero-PRs HealthReport must open with the # Pipeline Health Report heading'
         $result.HealthReport | Should -Match 'No data' `
             -Because 'zero-PRs HealthReport must contain the "No data: no merged PRs found." message (D-259-15)'
+    }
+}
+
+# ==================================================================
+# Describe: Fix Effectiveness — Format-HealthReport section rendering (Step 4 #264)
+# RED tests — all fail until Format-HealthReport renders the
+# ## Fix Effectiveness section.  Tag: no-gh (pure in-process).
+# ==================================================================
+Describe 'Fix Effectiveness: Format-HealthReport section rendering' {
+
+    BeforeAll {
+        $script:FHRFERepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:FHRFELibFile = Join-Path $script:FHRFERepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        . $script:FHRFELibFile
+
+        # ---------------------------------------------------------------
+        # Shared base context — covers the 6 existing sections so
+        # Format-HealthReport produces a valid report around the new section.
+        # ---------------------------------------------------------------
+        $script:FHRFEBaseCtx = @{
+            OverallSustainRate           = 0.50
+            CategoryData                 = @{
+                'architecture' = @{ findings = 10; effectiveCount = 10; sustained = 5 }
+            }
+            KnownCategories              = @(
+                'architecture', 'security', 'performance', 'pattern',
+                'implementation-clarity', 'script-automation', 'documentation-audit'
+            )
+            ComplexityOverCeilingHistory = @{}
+            PersistentThreshold          = 3
+            SystemicPatterns             = @{}
+            KnownSystemicFixTypes        = @('instruction', 'skill', 'agent-prompt', 'plan-template')
+            ProposalsEmitted             = @()
+            Generated                    = '2026-04-01T12:00:00Z'
+            IssuesAnalyzed               = 10
+            EffectiveSampleSize          = 8.5
+            OlderWindowRate              = 0.5
+            OlderCategoryRates           = $null
+            DepthRecommendations         = @{}
+        }
+
+        # Helper: clone base context and set FixEffectiveness + ProposalsEmitted
+        function script:New-FHRFECtx {
+            param(
+                [hashtable]$FixEffectiveness,
+                [array]$ProposalsEmitted = @()
+            )
+            $ctx = $script:FHRFEBaseCtx.Clone()
+            if ($PSBoundParameters.ContainsKey('FixEffectiveness')) {
+                $ctx['FixEffectiveness'] = $FixEffectiveness
+            }
+            if ($ProposalsEmitted.Count -gt 0) {
+                $ctx['ProposalsEmitted'] = $ProposalsEmitted
+            }
+            return $ctx
+        }
+    }
+
+    # ------------------------------------------------------------------
+    # Test 1: Table renders with improved indicator
+    # ------------------------------------------------------------------
+    It 'renders ## Fix Effectiveness table with improved indicator' -Tag 'no-gh' {
+        # ARRANGE
+        $ctx = New-FHRFECtx -FixEffectiveness @{
+            Results            = @(
+                @{
+                    pattern_key      = 'instruction:architecture'
+                    category         = 'architecture'
+                    fix_type         = 'instruction'
+                    fix_issue_number = 100
+                    before_rate      = 0.80
+                    after_rate       = 0.50
+                    delta            = -0.30
+                    indicator        = 'improved'
+                    post_fix_prs     = 8
+                    before_prs       = 10
+                }
+            )
+            AwaitingMergeCount = 0
+        }
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match '## Fix Effectiveness' `
+            -Because 'section heading must be present when results exist'
+        $result | Should -Match '\|\s*Pattern\s*\|\s*Fix\s*\|\s*Before\s*\|\s*After\s*\|.*\bPRs\b' `
+            -Because 'table header row must contain Pattern, Fix, Before, After, and PRs columns'
+        $result | Should -Match 'instruction:architecture' `
+            -Because 'the pattern key must appear in the table row'
+        $result | Should -Match 'improved' `
+            -Because 'the indicator must show improved for a -30pp delta'
+        $result | Should -Match '80%' `
+            -Because 'before_rate 0.80 must render as 80%'
+        $result | Should -Match '50%' `
+            -Because 'after_rate 0.50 must render as 50%'
+        $result | Should -Match '\b8\b' `
+            -Because 'post_fix_prs count of 8 must appear in the row'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 2: Table renders worsened and unchanged rows
+    # ------------------------------------------------------------------
+    It 'renders worsened and unchanged indicator rows' -Tag 'no-gh' {
+        # ARRANGE
+        $ctx = New-FHRFECtx -FixEffectiveness @{
+            Results            = @(
+                @{
+                    pattern_key      = 'instruction:security'
+                    category         = 'security'
+                    fix_type         = 'instruction'
+                    fix_issue_number = 101
+                    before_rate      = 0.30
+                    after_rate       = 0.60
+                    delta            = 0.30
+                    indicator        = 'worsened'
+                    post_fix_prs     = 7
+                    before_prs       = 10
+                },
+                @{
+                    pattern_key      = 'skill:performance'
+                    category         = 'performance'
+                    fix_type         = 'skill'
+                    fix_issue_number = 102
+                    before_rate      = 0.50
+                    after_rate       = 0.48
+                    delta            = -0.02
+                    indicator        = 'unchanged'
+                    post_fix_prs     = 6
+                    before_prs       = 10
+                }
+            )
+            AwaitingMergeCount = 0
+        }
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match 'worsened' `
+            -Because 'the worsened indicator must appear for the security row'
+        $result | Should -Match 'unchanged' `
+            -Because 'the unchanged indicator must appear for the performance row'
+        $result | Should -Match 'instruction:security' `
+            -Because 'first pattern key must appear in output'
+        $result | Should -Match 'skill:performance' `
+            -Because 'second pattern key must appear in output'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 3: Awaiting fix merge placeholder (no results, only awaiting)
+    # ------------------------------------------------------------------
+    It 'shows awaiting fix merge placeholder when no results but proposals pending' -Tag 'no-gh' {
+        # ARRANGE
+        $ctx = New-FHRFECtx `
+            -FixEffectiveness @{ Results = @(); AwaitingMergeCount = 3 } `
+            -ProposalsEmitted @(@{ pattern_key = 'x'; fix_issue_number = 1 })
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match 'Awaiting fix merge' `
+            -Because 'awaiting-merge placeholder must appear when AwaitingMergeCount > 0 and no results'
+        $result | Should -Match '3' `
+            -Because 'the pending count of 3 must be visible in the awaiting message'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 4: Insufficient data row
+    # ------------------------------------------------------------------
+    It 'renders insufficient data label with post-fix PR count' -Tag 'no-gh' {
+        # ARRANGE
+        $ctx = New-FHRFECtx -FixEffectiveness @{
+            Results            = @(
+                @{
+                    pattern_key      = 'instruction:architecture'
+                    category         = 'architecture'
+                    fix_type         = 'instruction'
+                    fix_issue_number = 100
+                    before_rate      = $null
+                    after_rate       = $null
+                    delta            = $null
+                    indicator        = 'insufficient data'
+                    post_fix_prs     = 2
+                    before_prs       = 10
+                }
+            )
+            AwaitingMergeCount = 0
+        }
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match 'insufficient data' `
+            -Because 'insufficient data indicator must appear for patterns below MinPostFixPrs'
+        $result | Should -Match '2/5' `
+            -Because 'post_fix_prs/threshold ratio (2/5) must be visible so the user knows how far from sufficient'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 5: No before data row
+    # ------------------------------------------------------------------
+    It 'renders no before data label with after rate' -Tag 'no-gh' {
+        # ARRANGE
+        $ctx = New-FHRFECtx -FixEffectiveness @{
+            Results            = @(
+                @{
+                    pattern_key      = 'instruction:performance'
+                    category         = 'performance'
+                    fix_type         = 'instruction'
+                    fix_issue_number = 103
+                    before_rate      = $null
+                    after_rate       = 0.40
+                    delta            = $null
+                    indicator        = 'no before data'
+                    post_fix_prs     = 8
+                    before_prs       = 0
+                }
+            )
+            AwaitingMergeCount = 0
+        }
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match 'no before data' `
+            -Because 'no before data indicator must appear when category absent from before-window'
+        $result | Should -Match '40%' `
+            -Because 'after_rate 0.40 must still render as 40% even without before data'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 6: Section omitted when no fix_issue_number entries
+    # ------------------------------------------------------------------
+    It 'omits ## Fix Effectiveness when no proposals have fix_issue_number' -Tag 'no-gh' {
+        # ARRANGE
+        $ctx = New-FHRFECtx `
+            -FixEffectiveness $null `
+            -ProposalsEmitted @(@{ pattern_key = 'x' })  # no fix_issue_number
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Not -Match 'Fix Effectiveness' `
+            -Because 'section must be omitted entirely when FixEffectiveness is null (no fix data)'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 7: Section omitted when FixEffectiveness key missing entirely
+    # ------------------------------------------------------------------
+    It 'omits ## Fix Effectiveness when FixEffectiveness key is absent from context' -Tag 'no-gh' {
+        # ARRANGE: base context without FixEffectiveness key
+        $ctx = $script:FHRFEBaseCtx.Clone()
+        # Explicitly ensure no FixEffectiveness key
+        $ctx.Remove('FixEffectiveness')
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Not -Match 'Fix Effectiveness' `
+            -Because 'section must be omitted when FixEffectiveness key is not present in the context'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 8: Awaiting count shown alongside results table
+    # ------------------------------------------------------------------
+    It 'shows both results table and awaiting count when both exist' -Tag 'no-gh' {
+        # ARRANGE
+        $ctx = New-FHRFECtx `
+            -FixEffectiveness @{
+            Results            = @(
+                @{
+                    pattern_key      = 'instruction:architecture'
+                    category         = 'architecture'
+                    fix_type         = 'instruction'
+                    fix_issue_number = 100
+                    before_rate      = 0.80
+                    after_rate       = 0.50
+                    delta            = -0.30
+                    indicator        = 'improved'
+                    post_fix_prs     = 8
+                    before_prs       = 10
+                }
+            )
+            AwaitingMergeCount = 2
+        } `
+            -ProposalsEmitted @(
+            @{ fix_issue_number = 1 },
+            @{ fix_issue_number = 2 },
+            @{ fix_issue_number = 3; fix_merged_at = '2026-01-01T00:00:00Z' }
+        )
+
+        # ACT
+        $result = Format-HealthReport $ctx
+
+        # ASSERT
+        $result | Should -Match '## Fix Effectiveness' `
+            -Because 'section heading must be present when results exist'
+        $result | Should -Match 'instruction:architecture' `
+            -Because 'the results table must contain the pattern key'
+        $result | Should -Match 'Awaiting fix merge' `
+            -Because 'awaiting-merge line must also appear alongside the results table'
+        $result | Should -Match '2' `
+            -Because 'the awaiting count of 2 must be visible'
+    }
+}
+
+# ==================================================================
+# Describe: Fix Effectiveness — integration tests (Step 5 #264)
+# End-to-end tests that exercise the full pipeline: mock gh CLI →
+# Invoke-AggregateReviewScores → health report + calibration round-trip.
+# Tag: no-gh.
+# ==================================================================
+Describe 'Fix Effectiveness: integration tests' {
+
+    BeforeAll {
+        $script:FEIRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:FEILibFile = Join-Path $script:FEIRepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        . $script:FEILibFile
+        $script:FEITempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
+            "pester-fei-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:FEITempRoot -Force | Out-Null
+
+        # ---------------------------------------------------------------
+        # Helper: simple mock gh.ps1 (companion-data-file pattern).
+        # Serves only the main PR list — no --search dispatch.
+        # ---------------------------------------------------------------
+        $script:FEIWriteMockGh = {
+            param([string]$WorkDir, [string]$JsonOutput)
+            $dataFile = Join-Path $WorkDir 'gh-response.json'
+            $mockPath = Join-Path $WorkDir 'gh.ps1'
+            $JsonOutput | Set-Content -Path $dataFile -Encoding UTF8
+            @"
+# Mock gh CLI
+Get-Content -Raw -Path '$($dataFile -replace "'", "''")'
+exit 0
+"@ | Set-Content -Path $mockPath -Encoding UTF8
+            return $mockPath
+        }
+
+        # ---------------------------------------------------------------
+        # Helper: argument-dispatching mock gh.ps1.
+        # Dispatches on --search presence: main PR-list vs discovery.
+        # ---------------------------------------------------------------
+        $script:FEIWriteDispatchMockGh = {
+            param([string]$WorkDir, [string]$PrListJson, [string]$DiscoveryJson)
+            $prDataFile = Join-Path $WorkDir 'pr-list-response.json'
+            $discoveryDataFile = Join-Path $WorkDir 'discovery-response.json'
+            $mockPath = Join-Path $WorkDir 'gh.ps1'
+            $PrListJson | Set-Content -Path $prDataFile -Encoding UTF8
+            $DiscoveryJson | Set-Content -Path $discoveryDataFile -Encoding UTF8
+            @"
+# Argument-dispatching mock gh CLI
+if (`$args -join ' ' -match '--search') {
+    Get-Content -Raw -Path '$($discoveryDataFile -replace "'", "''")'
+} else {
+    Get-Content -Raw -Path '$($prDataFile -replace "'", "''")'
+}
+exit 0
+"@ | Set-Content -Path $mockPath -Encoding UTF8
+            return $mockPath
+        }
+
+        # ---------------------------------------------------------------
+        # Helper: build a PR object for the mock JSON array.
+        # ---------------------------------------------------------------
+        function New-FEIMockPr {
+            param([int]$Number, [string]$MergedAt, [string]$Body)
+            return [ordered]@{ number = $Number; mergedAt = $MergedAt; body = $Body }
+        }
+
+        # ---------------------------------------------------------------
+        # Helper: write calibration JSON with proposals_emitted and
+        # architecture depth state (for reliable write-back triggering).
+        # ---------------------------------------------------------------
+        $script:FEIWriteCalibFile = {
+            param([string]$FilePath, [array]$ProposalsEmitted)
+            @{
+                calibration_version     = 1
+                entries                 = @()
+                prosecution_depth_state = @{
+                    architecture = @{ skip_first_observed_at = '2026-01-01T00:00:00Z' }
+                }
+                proposals_emitted       = $ProposalsEmitted
+            } | ConvertTo-Json -Depth 5 | Set-Content -Path $FilePath -Encoding UTF8
+        }
+
+        # ---------------------------------------------------------------
+        # Body templates — architecture findings with different rulings
+        # ---------------------------------------------------------------
+
+        # Architecture sustained (100% sustain rate per PR)
+        $script:FEIArchSustainedBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: sustained
+-->
+"@
+
+        # Architecture half — 1 sustained + 1 defense-sustained (50% sustain rate)
+        $script:FEIArchHalfBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: sustained
+  - id: F2
+    category: architecture
+    judge_ruling: defense-sustained
+-->
+"@
+
+        # Architecture defense-sustained only (0% sustain rate per PR)
+        $script:FEIArchDefenseBody = @"
+<!-- pipeline-metrics
+metrics_version: 2
+findings:
+  - id: F1
+    category: architecture
+    judge_ruling: defense-sustained
+-->
+"@
+    }
+
+    AfterAll {
+        Remove-Item -Recurse -Force -Path $script:FEITempRoot -ErrorAction SilentlyContinue
+    }
+
+    # ------------------------------------------------------------------
+    # Test 1: End-to-end pipeline produces Fix Effectiveness in health report
+    # Before-window: 5 PRs at 50% architecture sustain rate.
+    # After-window:  5 PRs at 0% architecture sustain rate → improved.
+    # ------------------------------------------------------------------
+    It 'end-to-end pipeline produces Fix Effectiveness in health report' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:FEITempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $fixMergedAt = [DateTime]::UtcNow.AddDays(-6.5).ToString('yyyy-MM-ddTHH:mm:ssZ')
+
+        # 5 before-fix PRs: each has 2 architecture findings (1 sustained, 1 defense) → 50%
+        # 5 after-fix PRs:  each has 1 architecture defense-sustained → 0% sustain
+        $prs = @(
+            (New-FEIMockPr -Number 1  -MergedAt ([DateTime]::UtcNow.AddDays(-12).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEIArchHalfBody),
+            (New-FEIMockPr -Number 2  -MergedAt ([DateTime]::UtcNow.AddDays(-11).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEIArchHalfBody),
+            (New-FEIMockPr -Number 3  -MergedAt ([DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEIArchHalfBody),
+            (New-FEIMockPr -Number 4  -MergedAt ([DateTime]::UtcNow.AddDays(-9).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchHalfBody),
+            (New-FEIMockPr -Number 5  -MergedAt ([DateTime]::UtcNow.AddDays(-8).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchHalfBody),
+            (New-FEIMockPr -Number 6  -MergedAt ([DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchDefenseBody),
+            (New-FEIMockPr -Number 7  -MergedAt ([DateTime]::UtcNow.AddDays(-4).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchDefenseBody),
+            (New-FEIMockPr -Number 8  -MergedAt ([DateTime]::UtcNow.AddDays(-3).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchDefenseBody),
+            (New-FEIMockPr -Number 9  -MergedAt ([DateTime]::UtcNow.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchDefenseBody),
+            (New-FEIMockPr -Number 10 -MergedAt ([DateTime]::UtcNow.AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchDefenseBody)
+        )
+
+        $calibFilePath = Join-Path $workDir 'calib.json'
+        & $script:FEIWriteCalibFile -FilePath $calibFilePath -ProposalsEmitted @(
+            [ordered]@{
+                pattern_key      = 'instruction:architecture'
+                evidence_prs     = @(1, 2)
+                first_emitted_at = '2026-01-01T00:00:00Z'
+                fix_issue_number = 100
+                fix_merged_at    = $fixMergedAt
+            }
+        )
+
+        $mockGhPath = & $script:FEIWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'full pipeline with Fix Effectiveness data must complete successfully'
+        $result.HealthReport | Should -Match '## Fix Effectiveness' `
+            -Because 'health report must contain the Fix Effectiveness section heading'
+        $result.HealthReport | Should -Match 'instruction:architecture' `
+            -Because 'health report must contain the pattern key in the Fix Effectiveness table'
+        $result.HealthReport | Should -Match 'improved' `
+            -Because 'after-window sustain rate (0%) < before-window (50%) must produce improved indicator'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 2: Stacked-fix windowing — two fixes for same pattern_key
+    # produce two rows in the health report.
+    # Fix A merged at day -10, Fix B merged at day -5.
+    # PRs span both windows.
+    # ------------------------------------------------------------------
+    It 'stacked-fix windowing — two fixes for same pattern_key produce two rows' -Tag 'no-gh' {
+        # ARRANGE
+        $workDir = Join-Path $script:FEITempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $fixAMergedAt = [DateTime]::UtcNow.AddDays(-10).ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $fixBMergedAt = [DateTime]::UtcNow.AddDays(-5).ToString('yyyy-MM-ddTHH:mm:ssZ')
+
+        # Before fix A (day -15..-11): architecture half (50%)
+        # After fix A / before fix B (day -9..-6): architecture sustained (100%)
+        # After fix B (day -4..-0): architecture defense (0%)
+        $prs = @(
+            (New-FEIMockPr -Number 1  -MergedAt ([DateTime]::UtcNow.AddDays(-15).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEIArchHalfBody),
+            (New-FEIMockPr -Number 2  -MergedAt ([DateTime]::UtcNow.AddDays(-14).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEIArchHalfBody),
+            (New-FEIMockPr -Number 3  -MergedAt ([DateTime]::UtcNow.AddDays(-13).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEIArchHalfBody),
+            (New-FEIMockPr -Number 4  -MergedAt ([DateTime]::UtcNow.AddDays(-12).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEIArchHalfBody),
+            (New-FEIMockPr -Number 5  -MergedAt ([DateTime]::UtcNow.AddDays(-11).ToString('yyyy-MM-ddTHH:mm:ssZ')) -Body $script:FEIArchHalfBody),
+            (New-FEIMockPr -Number 6  -MergedAt ([DateTime]::UtcNow.AddDays(-9).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchSustainedBody),
+            (New-FEIMockPr -Number 7  -MergedAt ([DateTime]::UtcNow.AddDays(-8).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchSustainedBody),
+            (New-FEIMockPr -Number 8  -MergedAt ([DateTime]::UtcNow.AddDays(-7).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchSustainedBody),
+            (New-FEIMockPr -Number 9  -MergedAt ([DateTime]::UtcNow.AddDays(-6).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchSustainedBody),
+            (New-FEIMockPr -Number 10 -MergedAt ([DateTime]::UtcNow.AddDays(-5.5).ToString('yyyy-MM-ddTHH:mm:ssZ'))-Body $script:FEIArchSustainedBody),
+            (New-FEIMockPr -Number 11 -MergedAt ([DateTime]::UtcNow.AddDays(-4).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchDefenseBody),
+            (New-FEIMockPr -Number 12 -MergedAt ([DateTime]::UtcNow.AddDays(-3).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchDefenseBody),
+            (New-FEIMockPr -Number 13 -MergedAt ([DateTime]::UtcNow.AddDays(-2).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchDefenseBody),
+            (New-FEIMockPr -Number 14 -MergedAt ([DateTime]::UtcNow.AddDays(-1).ToString('yyyy-MM-ddTHH:mm:ssZ'))  -Body $script:FEIArchDefenseBody),
+            (New-FEIMockPr -Number 15 -MergedAt ([DateTime]::UtcNow.AddDays(-0.5).ToString('yyyy-MM-ddTHH:mm:ssZ'))-Body $script:FEIArchDefenseBody)
+        )
+
+        $calibFilePath = Join-Path $workDir 'calib.json'
+        & $script:FEIWriteCalibFile -FilePath $calibFilePath -ProposalsEmitted @(
+            [ordered]@{
+                pattern_key      = 'instruction:architecture'
+                evidence_prs     = @(1, 2)
+                first_emitted_at = '2026-01-01T00:00:00Z'
+                fix_issue_number = 100
+                fix_merged_at    = $fixAMergedAt
+            },
+            [ordered]@{
+                pattern_key      = 'instruction:architecture'
+                evidence_prs     = @(3, 4)
+                first_emitted_at = '2026-02-01T00:00:00Z'
+                fix_issue_number = 101
+                fix_merged_at    = $fixBMergedAt
+            }
+        )
+
+        $mockGhPath = & $script:FEIWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($prs | ConvertTo-Json -Depth 3)
+
+        # ACT
+        $result = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath
+
+        # ASSERT
+        $result.ExitCode | Should -Be 0 `
+            -Because 'stacked-fix integration must complete successfully'
+        $result.HealthReport | Should -Match '## Fix Effectiveness' `
+            -Because 'health report must contain the Fix Effectiveness section heading'
+
+        # Both fix issue numbers must appear in the health report (two rows)
+        $result.HealthReport | Should -Match '#100' `
+            -Because 'first fix (issue #100) must appear as a row in the Fix Effectiveness table'
+        $result.HealthReport | Should -Match '#101' `
+            -Because 'second fix (issue #101) must appear as a row in the Fix Effectiveness table'
+
+        # Count occurrences of instruction:architecture — expect 2 data rows
+        $matchCount = ([regex]::Matches($result.HealthReport, 'instruction:architecture')).Count
+        $matchCount | Should -Be 2 `
+            -Because 'two fixes for the same pattern_key must produce two rows in the Fix Effectiveness table'
+    }
+
+    # ------------------------------------------------------------------
+    # Test 3: Write-back preserves fix_merged_at across runs (round-trip)
+    # Run 1: discovery populates fix_merged_at.
+    # Run 2: cached fix_merged_at survives without corruption.
+    # ------------------------------------------------------------------
+    It 'write-back preserves fix_merged_at across runs (round-trip)' -Tag 'no-gh' {
+        # ARRANGE — Run 1: entry without fix_merged_at, mock gh returns merge date
+        $workDir = Join-Path $script:FEITempRoot ([System.Guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $expectedMergeDate = '2026-03-15T14:30:00Z'
+
+        $calibFilePath = Join-Path $workDir 'calib.json'
+        & $script:FEIWriteCalibFile -FilePath $calibFilePath -ProposalsEmitted @(
+            [ordered]@{
+                pattern_key      = 'instruction:architecture'
+                evidence_prs     = @(1, 2)
+                first_emitted_at = '2026-01-01T00:00:00Z'
+                fix_issue_number = 100
+            }
+        )
+
+        # 6 architecture PRs to provide sufficient data
+        $basePrs = @(1..6 | ForEach-Object {
+                New-FEIMockPr -Number $_ `
+                    -MergedAt ([DateTime]::UtcNow.AddDays(-10 + $_).ToString('yyyy-MM-ddTHH:mm:ssZ')) `
+                    -Body $script:FEIArchSustainedBody
+            })
+
+        $discoveryResult = @(
+            [ordered]@{ number = 50; mergedAt = $expectedMergeDate }
+        )
+
+        # Run 1: dispatch mock — serves PR list AND discovery
+        $mockGhPath = & $script:FEIWriteDispatchMockGh `
+            -WorkDir       $workDir `
+            -PrListJson    ($basePrs | ConvertTo-Json -Depth 3) `
+            -DiscoveryJson ($discoveryResult | ConvertTo-Json -Depth 3)
+
+        # ACT — Run 1 (normal mode — triggers discovery + write-back)
+        $result1 = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath
+
+        # ASSERT — Run 1: fix_merged_at written back
+        $result1.ExitCode | Should -Be 0 `
+            -Because 'Run 1 must complete successfully'
+        $readBack1 = Get-Content -Path $calibFilePath -Raw | ConvertFrom-Json
+        $entry1 = $readBack1.proposals_emitted | Where-Object {
+            (Get-FlexProperty $_ 'fix_issue_number') -eq 100
+        }
+        $mergedVal1 = Get-FlexProperty $entry1 'fix_merged_at'
+        $mergedVal1 | Should -Not -BeNullOrEmpty `
+            -Because 'Run 1 discovery must populate fix_merged_at'
+        $mergedDt1 = if ($mergedVal1 -is [datetime]) { $mergedVal1.ToUniversalTime() } else { [datetime]::Parse($mergedVal1).ToUniversalTime() }
+        $mergedDt1 | Should -Be ([datetime]::Parse($expectedMergeDate).ToUniversalTime()) `
+            -Because 'discovered fix_merged_at must match the mock discovery result'
+
+        # ARRANGE — Run 2: simple mock (no discovery dispatch needed)
+        $mockGhPath2 = & $script:FEIWriteMockGh `
+            -WorkDir    $workDir `
+            -JsonOutput ($basePrs | ConvertTo-Json -Depth 3)
+
+        # ACT — Run 2 (uses the calibration file written by Run 1)
+        $result2 = Invoke-AggregateReviewScores `
+            -GhCliPath       $mockGhPath2 `
+            -Repo            'test/r' `
+            -CalibrationFile $calibFilePath
+
+        # ASSERT — Run 2: fix_merged_at preserved exactly
+        $result2.ExitCode | Should -Be 0 `
+            -Because 'Run 2 must complete successfully'
+        $readBack2 = Get-Content -Path $calibFilePath -Raw | ConvertFrom-Json
+        $entry2 = $readBack2.proposals_emitted | Where-Object {
+            (Get-FlexProperty $_ 'fix_issue_number') -eq 100
+        }
+        $mergedVal2 = Get-FlexProperty $entry2 'fix_merged_at'
+        $mergedVal2 | Should -Not -BeNullOrEmpty `
+            -Because 'fix_merged_at must survive Run 2 write-back'
+        $mergedDt2 = if ($mergedVal2 -is [datetime]) { $mergedVal2.ToUniversalTime() } else { [datetime]::Parse($mergedVal2).ToUniversalTime() }
+        $mergedDt2 | Should -Be ([datetime]::Parse($expectedMergeDate).ToUniversalTime()) `
+            -Because 'fix_merged_at value must be preserved exactly across round-trip (no corruption on write-back)'
     }
 }

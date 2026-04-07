@@ -14,7 +14,7 @@ $script:_ARSCoreLibDir = Split-Path -Parent $PSCommandPath
 function Get-FlexProperty {
     param($Object, [string]$Name)
     if ($null -eq $Object) { return $null }
-    if ($Object -is [hashtable]) { return $Object[$Name] }
+    if ($Object -is [System.Collections.IDictionary]) { return $Object[$Name] }
     if ($Object.PSObject.Properties.Name -contains $Name) { return $Object.$Name }
     return $null
 }
@@ -78,6 +78,194 @@ function Test-PatternProposed {
 }
 
 # ---------------------------------------------------------------------------
+# Private helper: Measure-WindowCategoryTotals
+# Sums per-category wTotal/wAccepted across a PrContributions window.
+# Used by Measure-FixEffectiveness for before/after window accumulation.
+# ---------------------------------------------------------------------------
+function Measure-WindowCategoryTotals {
+    param([object[]]$Window, [string]$Category)
+    $wt = 0.0; $wa = 0.0
+    foreach ($c in $Window) {
+        if ($null -ne $c.categories -and $c.categories.ContainsKey($Category)) {
+            $wt += $c.categories[$Category].wTotal
+            $wa += $c.categories[$Category].wAccepted
+        }
+    }
+    return @{ wTotal = $wt; wAccepted = $wa; prCount = $Window.Count }
+}
+
+# ---------------------------------------------------------------------------
+# Private helper: Measure-FixEffectiveness
+# Computes before/after sustain rate splits per fix proposal (Phase 3).
+# Pure function — no side effects, no gh calls, no file writes.
+# ---------------------------------------------------------------------------
+function Measure-FixEffectiveness {
+    param(
+        [object[]]$ProposalsEmitted,
+        [object[]]$PrContributions,
+        [double]$Deadzone = 0.05,
+        [int]$MinPostFixPrs = 5
+    )
+
+    $results = [System.Collections.Generic.List[object]]::new()
+    $awaitingMerge = 0
+
+    # Step A: Count awaiting-merge entries
+    foreach ($entry in $ProposalsEmitted) {
+        $fixIssueNum = Get-FlexProperty $entry 'fix_issue_number'
+        $fixMerged = Get-FlexProperty $entry 'fix_merged_at'
+        if ($null -ne $fixIssueNum -and ($null -eq $fixMerged -or $fixMerged -eq '')) {
+            $awaitingMerge++
+        }
+    }
+
+    # Step B: Group entries with fix_merged_at by pattern_key
+    $mergedEntries = @($ProposalsEmitted | Where-Object {
+            $fm = Get-FlexProperty $_ 'fix_merged_at'
+            $null -ne $fm -and $fm -ne ''
+        })
+
+    if ($mergedEntries.Count -eq 0) {
+        return @{
+            Results            = @($results)
+            AwaitingMergeCount = $awaitingMerge
+        }
+    }
+
+    # Group by pattern_key, sort each group by fix_merged_at ascending
+    $grouped = @{}
+    foreach ($entry in $mergedEntries) {
+        $pk = Get-FlexProperty $entry 'pattern_key'
+        if (-not $grouped.ContainsKey($pk)) {
+            $grouped[$pk] = [System.Collections.Generic.List[object]]::new()
+        }
+        [void]$grouped[$pk].Add($entry)
+    }
+    foreach ($key in @($grouped.Keys)) {
+        $grouped[$key] = @($grouped[$key] | Sort-Object { [datetime]::Parse((Get-FlexProperty $_ 'fix_merged_at')) })
+    }
+
+    # Step C: Process each fix entry
+    foreach ($entry in $mergedEntries) {
+        $patternKey = Get-FlexProperty $entry 'pattern_key'
+        $parts = $patternKey -split ':', 2
+        $fixType = $parts[0]
+        $category = $parts[1]
+        $fixMergedAt = Get-FlexProperty $entry 'fix_merged_at'
+        $fixIssueNumber = Get-FlexProperty $entry 'fix_issue_number'
+        $fixMergedAtDate = [datetime]::Parse($fixMergedAt)
+
+        # Partition PrContributions
+        $beforeWindow = @($PrContributions | Where-Object {
+                [datetime]::Parse($_.mergedAt) -lt $fixMergedAtDate
+            })
+        $afterWindow = @($PrContributions | Where-Object {
+                [datetime]::Parse($_.mergedAt) -ge $fixMergedAtDate
+            })
+
+        # Stacked-fix windowing (D-264-6): cap after-window at next fix's fix_merged_at
+        $group = $grouped[$patternKey]
+        if ($group.Count -gt 1) {
+            $thisIndex = -1
+            for ($i = 0; $i -lt $group.Count; $i++) {
+                if ((Get-FlexProperty $group[$i] 'fix_issue_number') -eq $fixIssueNumber -and
+                    (Get-FlexProperty $group[$i] 'fix_merged_at') -eq $fixMergedAt) {
+                    $thisIndex = $i
+                    break
+                }
+            }
+            if ($thisIndex -ge 0 -and $thisIndex -lt ($group.Count - 1)) {
+                $nextFixDate = [datetime]::Parse((Get-FlexProperty $group[$thisIndex + 1] 'fix_merged_at'))
+                $afterWindow = @($PrContributions | Where-Object {
+                        $d = [datetime]::Parse($_.mergedAt)
+                        $d -ge $fixMergedAtDate -and $d -lt $nextFixDate
+                    })
+            }
+        }
+
+        # Count post-fix PRs
+        $postFixCount = $afterWindow.Count
+
+        if ($postFixCount -lt $MinPostFixPrs) {
+            $resultEntry = @{
+                pattern_key      = $patternKey
+                category         = $category
+                fix_type         = $fixType
+                fix_issue_number = $fixIssueNumber
+                before_rate      = $null
+                after_rate       = $null
+                delta            = $null
+                indicator        = 'insufficient data'
+                post_fix_prs     = $postFixCount
+                before_prs       = $beforeWindow.Count
+            }
+            [void]$results.Add($resultEntry)
+            continue
+        }
+
+        # Accumulate per-category data for before/after windows
+        $before = Measure-WindowCategoryTotals -Window $beforeWindow -Category $category
+        $after = Measure-WindowCategoryTotals -Window $afterWindow  -Category $category
+
+        # Edge case: no before data
+        if ($before.wTotal -eq 0) {
+            $resultEntry = @{
+                pattern_key      = $patternKey
+                category         = $category
+                fix_type         = $fixType
+                fix_issue_number = $fixIssueNumber
+                before_rate      = $null
+                after_rate       = if ($after.wTotal -gt 0) { [Math]::Round($after.wAccepted / $after.wTotal, 4) } else { 0.0 }
+                delta            = $null
+                indicator        = 'no before data'
+                post_fix_prs     = $postFixCount
+                before_prs       = $before.prCount
+            }
+            [void]$results.Add($resultEntry)
+            continue
+        }
+
+        # Compute rates and indicator
+        $beforeRate = if ($before.wTotal -gt 0) { $before.wAccepted / $before.wTotal } else { 0.0 }
+        $afterRate = if ($after.wTotal -gt 0) { $after.wAccepted / $after.wTotal } else { 0.0 }
+        $delta = $afterRate - $beforeRate
+
+        if ($after.wTotal -eq 0) {
+            # Pattern eliminated — best outcome
+            $indicator = 'improved'
+        }
+        elseif ($delta -lt (-$Deadzone)) {
+            $indicator = 'improved'
+        }
+        elseif ($delta -gt $Deadzone) {
+            $indicator = 'worsened'
+        }
+        else {
+            $indicator = 'unchanged'
+        }
+
+        $resultEntry = @{
+            pattern_key      = $patternKey
+            category         = $category
+            fix_type         = $fixType
+            fix_issue_number = $fixIssueNumber
+            before_rate      = [Math]::Round($beforeRate, 4)
+            after_rate       = [Math]::Round($afterRate, 4)
+            delta            = [Math]::Round($delta, 4)
+            indicator        = $indicator
+            post_fix_prs     = $postFixCount
+            before_prs       = $before.prCount
+        }
+        [void]$results.Add($resultEntry)
+    }
+
+    return @{
+        Results            = @($results)
+        AwaitingMergeCount = $awaitingMerge
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Private helper: Format-HealthReport
 # ---------------------------------------------------------------------------
 function Format-HealthReport {
@@ -118,7 +306,7 @@ function Format-HealthReport {
         foreach ($entry in $top3) {
             $eCount = $entry.Value['effectiveCount']
             $sRate = if ($eCount -gt 0) { $entry.Value['sustained'] / $eCount } else { 0.0 }
-            # Per-category trend deferred to Phase 2 — shows — until OlderCategoryRates is threaded per category
+            # Per-category trend deferred (D-264-10 scope boundary) — shows — until OlderCategoryRates is threaded per category. Per-category wTotal/wAccepted data now available in $prContributions.categories (Phase 3 enrichment) — wiring into Hotspots trend is a separate scope decision.
             [void]$sb.AppendLine(("| {0} | {1:F1} | {2} | — |" -f $entry.Key, $eCount, ('{0:P0}' -f $sRate)))
         }
         [void]$sb.AppendLine('')
@@ -185,6 +373,47 @@ function Format-HealthReport {
             [void]$sb.AppendLine(("| {0} | {1} | {2} | {3} |" -f $row.FixType, $row.Category, $row.SustainedCount, $row.PRs))
         }
         [void]$sb.AppendLine('')
+    }
+
+    # -------------------------------------------------------------------
+    # Fix Effectiveness section (Phase 3 — D-264-1, D-264-5)
+    # -------------------------------------------------------------------
+    if ($Context.ContainsKey('FixEffectiveness') -and $null -ne $Context.FixEffectiveness) {
+        $fe = $Context.FixEffectiveness
+        $feResults = @($fe.Results)
+        $feAwaiting = $fe.AwaitingMergeCount
+
+        if ($feResults.Count -gt 0) {
+            [void]$sb.AppendLine('## Fix Effectiveness')
+            [void]$sb.AppendLine('')
+            [void]$sb.AppendLine('| Pattern | Fix | Before | After | Δ | PRs |')
+            [void]$sb.AppendLine('|---------|-----|--------|-------|---|-----|')
+            foreach ($row in $feResults) {
+                if ($row.indicator -eq 'insufficient data') {
+                    [void]$sb.AppendLine(("| {0} | #{1} | — | — | insufficient data ({2}/5) | {2} |" -f $row.pattern_key, $row.fix_issue_number, $row.post_fix_prs))
+                }
+                elseif ($row.indicator -eq 'no before data') {
+                    $afterPct = '{0:P0}' -f $row.after_rate
+                    [void]$sb.AppendLine(("| {0} | #{1} | — | {2} | no before data | {3} |" -f $row.pattern_key, $row.fix_issue_number, $afterPct, $row.post_fix_prs))
+                }
+                else {
+                    $beforePct = '{0:P0}' -f $row.before_rate
+                    $afterPct = '{0:P0}' -f $row.after_rate
+                    [void]$sb.AppendLine(("| {0} | #{1} | {2} | {3} | {4} | {5} |" -f $row.pattern_key, $row.fix_issue_number, $beforePct, $afterPct, $row.indicator, $row.post_fix_prs))
+                }
+            }
+            [void]$sb.AppendLine('')
+            if ($feAwaiting -gt 0) {
+                [void]$sb.AppendLine(("Awaiting fix merge ({0} proposals pending)." -f $feAwaiting))
+                [void]$sb.AppendLine('')
+            }
+        }
+        elseif ($feAwaiting -gt 0) {
+            [void]$sb.AppendLine('## Fix Effectiveness')
+            [void]$sb.AppendLine('')
+            [void]$sb.AppendLine(("Awaiting fix merge ({0} proposals pending)." -f $feAwaiting))
+            [void]$sb.AppendLine('')
+        }
     }
 
     return $sb.ToString()
@@ -489,10 +718,22 @@ function Invoke-AggregateReviewScores {
         $prDeltaTotal = $ctx.weightedTotal - $prWtotalBefore
         $prDeltaAccepted = $ctx.weightedAccepted - $prWacceptedBefore
         if ($prDeltaTotal -gt 0) {
+            # Per-category deltas (Phase 3 D-264-1)
+            $catDeltas = @{}
+            foreach ($catKey in @($ctx.categoryData.Keys)) {
+                $catNow = $ctx.categoryData[$catKey]
+                $catBefore = if ($prCatBefore.ContainsKey($catKey)) { $prCatBefore[$catKey] } else { @{ effectiveCount = 0.0; sustained = 0.0 } }
+                $dTotal = $catNow.effectiveCount - $catBefore.effectiveCount
+                $dAccepted = $catNow.sustained - $catBefore.sustained
+                if ($dTotal -gt 0 -or $dAccepted -gt 0) {
+                    $catDeltas[$catKey] = @{ wTotal = $dTotal; wAccepted = $dAccepted }
+                }
+            }
             [void]$prContributions.Add([pscustomobject]@{
-                    mergedAt  = $mergedAt
-                    wTotal    = $prDeltaTotal
-                    wAccepted = $prDeltaAccepted
+                    mergedAt   = $mergedAt
+                    wTotal     = $prDeltaTotal
+                    wAccepted  = $prDeltaAccepted
+                    categories = $catDeltas
                 })
         }
     }
@@ -517,6 +758,14 @@ function Invoke-AggregateReviewScores {
         # Snapshot for temporal split (computed after $weight is known)
         $prWtotalBefore = $ctx.weightedTotal
         $prWacceptedBefore = $ctx.weightedAccepted
+
+        # Snapshot per-category data for per-category enrichment (Phase 3 D-264-1)
+        # Deep-copy scalar values — inner hashtables are mutable references (MF-1).
+        $prCatBefore = @{}
+        foreach ($catKey in @($ctx.categoryData.Keys)) {
+            $catData = $ctx.categoryData[$catKey]
+            $prCatBefore[$catKey] = @{ effectiveCount = $catData.effectiveCount; sustained = $catData.sustained }
+        }
 
         $body = if ($pr.body) { $pr.body } else { '' }
 
@@ -627,6 +876,48 @@ function Invoke-AggregateReviewScores {
     foreach ($pr in $mergedPRs) {
         $prNum = [int]$pr.number
         if ($prNum -gt $maxMergedPrNumber) { $maxMergedPrNumber = $prNum }
+    }
+
+    # ---------------------------------------------------------------------------
+    # Merge-date discovery loop (Phase 3 — Fix Effectiveness, D-264-6)
+    # For proposals_emitted entries with fix_issue_number but no fix_merged_at,
+    # query gh CLI to discover when the fix PR was merged.
+    # Skipped in HealthReport mode (read-only, D-264-11).
+    # ---------------------------------------------------------------------------
+    $fixMergedAtChanged = $false
+    if (-not $HealthReport.IsPresent -and $proposalsEmitted.Count -gt 0) {
+        foreach ($entry in $proposalsEmitted) {
+            $fixIssueNum = Get-FlexProperty $entry 'fix_issue_number'
+            $fixMergedAt = Get-FlexProperty $entry 'fix_merged_at'
+            if ($null -eq $fixIssueNum -or $null -ne $fixMergedAt) { continue }
+
+            # Build search query with closes/fixes/resolves variants
+            $searchQuery = "closes #$fixIssueNum OR fixes #$fixIssueNum OR resolves #$fixIssueNum"
+            try {
+                $ghOutput = & $GhCliPath pr list --repo $Repo --state merged --search $searchQuery --json number, mergedAt --sort updated --limit 5 2>&1
+                $prResults = $ghOutput | ConvertFrom-Json -ErrorAction Stop
+                if ($prResults -and $prResults.Count -gt 0) {
+                    # Pick entry with latest mergedAt
+                    $latest = $prResults | Sort-Object { [datetime]::Parse($_.mergedAt) } | Select-Object -Last 1
+                    $latestMergedAt = $latest.mergedAt
+                    # Normalize DateTime to UTC ISO 8601 string for stable JSON round-trip
+                    if ($latestMergedAt -is [datetime]) {
+                        $latestMergedAt = $latestMergedAt.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+                    }
+                    # Type-aware mutation (PSCustomObject vs hashtable)
+                    if ($entry -is [System.Collections.IDictionary]) {
+                        $entry['fix_merged_at'] = $latestMergedAt
+                    }
+                    else {
+                        $entry | Add-Member -NotePropertyName 'fix_merged_at' -NotePropertyValue $latestMergedAt -Force
+                    }
+                    $fixMergedAtChanged = $true
+                }
+            }
+            catch {
+                Write-Warning "Fix merge-date discovery failed for fix_issue_number=$fixIssueNum — $_"
+            }
+        }
     }
 
     # ---------------------------------------------------------------------------
@@ -1021,7 +1312,7 @@ function Invoke-AggregateReviewScores {
         }
 
         # Write updated prosecution_depth_state + re_activation_events + proposals_emitted
-        if (-not $HealthReport.IsPresent -and ($depthStateChanged -or $proposalsChanged -or $complexityHistoryChanged) -and
+        if (-not $HealthReport.IsPresent -and ($depthStateChanged -or $proposalsChanged -or $fixMergedAtChanged -or $complexityHistoryChanged) -and
             -not [string]::IsNullOrWhiteSpace($CalibrationFile) -and
             (Test-Path $CalibrationFile)) {
             $tempPath = $null
@@ -1039,7 +1330,7 @@ function Invoke-AggregateReviewScores {
                         $null -ne $exp -and [int]$exp -gt $maxMergedPrNumber
                     })
                 $calibContent | Add-Member -NotePropertyName 're_activation_events' -NotePropertyValue @($reActivationEvents) -Force
-                if ($proposalsChanged) {
+                if ($proposalsChanged -or $fixMergedAtChanged) {
                     $calibContent | Add-Member -NotePropertyName 'proposals_emitted' -NotePropertyValue @($proposalsEmitted) -Force
                 }
                 if ($complexityHistoryChanged) {
@@ -1156,6 +1447,7 @@ function Invoke-AggregateReviewScores {
         OlderWindowRate              = $olderWindowRate
         NewerWindowRate              = $newerWindowRate
         DepthRecommendations         = if ($ctx.v2IssuesAnalyzed -gt 0) { $depthRecommendations } else { @{} }
+        FixEffectiveness             = (Measure-FixEffectiveness -ProposalsEmitted $proposalsEmitted -PrContributions $prContributions)
     }
     return @{ ExitCode = 0; Output = $out.ToString(); Error = ''; HealthReport = (Format-HealthReport $healthReportContext) }
 }

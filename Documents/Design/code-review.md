@@ -449,7 +449,7 @@ Passing `-HealthReport` to `aggregate-review-scores.ps1` (or `Invoke-AggregateRe
 | Section | Content |
 |---------|---------|
 | **Pipeline Health** | Overall statistics: total findings, sustain rate, effective sample size |
-| **Category Hotspots** | Top categories by effective count; per-category Trend column shows `—` until Phase 2 (per-category temporal split via `OlderCategoryRates` is deferred) |
+| **Category Hotspots** | Top categories by effective count; per-category Trend column shows `—` (per-category temporal split via `OlderCategoryRates` deferred per D-264-10 scope boundary; per-category `wTotal`/`wAccepted` data is now available in `$prContributions.categories` from Phase 3 enrichment) |
 | **Prosecution Depth** | Per-category table with `Depth` column (`full` / `light` / `skip`) for each of `$knownCategories` |
 | **D10 Alerts** | Categories with `light` or `skip` depth, sorted by effective count |
 | **Systemic Pattern Alerts** | Systemic patterns meeting threshold, sorted by sustained count |
