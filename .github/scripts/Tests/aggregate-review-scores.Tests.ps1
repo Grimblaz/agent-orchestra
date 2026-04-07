@@ -4621,6 +4621,22 @@ findings:
         $captured | Should -Match 'resolves #500' `
             -Because 'search query must include resolves keyword per D-264-6'
     }
+
+    # ------------------------------------------------------------------
+    # Test 7: real gh CLI returns mergedAt field with correct --json
+    # argument format. Validates that the argument quoting used in the
+    # discovery loop works against the actual gh binary.
+    # ------------------------------------------------------------------
+    It 'real gh CLI returns mergedAt field with correct --json argument format' -Tag 'requires-gh' {
+        if ($env:PESTER_LIVE_GH -ne '1') {
+            Set-ItResult -Skipped -Because 'PESTER_LIVE_GH not enabled'
+        }
+        # Call real gh CLI with the same argument format used in discovery loop
+        $output = gh pr list --repo Grimblaz/copilot-orchestra --state merged --json 'number,mergedAt' --sort updated --limit 1 2>&1
+        $parsed = $output | ConvertFrom-Json
+        $parsed | Should -Not -BeNullOrEmpty -Because 'gh must return at least one merged PR'
+        $parsed[0].mergedAt | Should -Not -BeNullOrEmpty -Because 'mergedAt field must be present in gh JSON output'
+    }
 }
 
 # ==================================================================
@@ -5004,6 +5020,7 @@ Describe 'Fix Effectiveness: Format-HealthReport section rendering' {
                     indicator        = 'insufficient data'
                     post_fix_prs     = 2
                     before_prs       = 10
+                    min_post_fix_prs = 5
                 }
             )
             AwaitingMergeCount = 0

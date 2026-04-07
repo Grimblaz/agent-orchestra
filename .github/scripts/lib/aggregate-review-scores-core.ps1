@@ -198,6 +198,7 @@ function Measure-FixEffectiveness {
                 indicator        = 'insufficient data'
                 post_fix_prs     = $postFixCount
                 before_prs       = $beforeWindow.Count
+                min_post_fix_prs = $MinPostFixPrs
             }
             [void]$results.Add($resultEntry)
             continue
@@ -390,7 +391,7 @@ function Format-HealthReport {
             [void]$sb.AppendLine('|---------|-----|--------|-------|---|-----|')
             foreach ($row in $feResults) {
                 if ($row.indicator -eq 'insufficient data') {
-                    [void]$sb.AppendLine(("| {0} | #{1} | — | — | insufficient data ({2}/5) | {2} |" -f $row.pattern_key, $row.fix_issue_number, $row.post_fix_prs))
+                    [void]$sb.AppendLine(("| {0} | #{1} | — | — | insufficient data ({2}/{3}) | {2} |" -f $row.pattern_key, $row.fix_issue_number, $row.post_fix_prs, $row.min_post_fix_prs))
                 }
                 elseif ($row.indicator -eq 'no before data') {
                     $afterPct = '{0:P0}' -f $row.after_rate
@@ -725,7 +726,7 @@ function Invoke-AggregateReviewScores {
                 $catBefore = if ($prCatBefore.ContainsKey($catKey)) { $prCatBefore[$catKey] } else { @{ effectiveCount = 0.0; sustained = 0.0 } }
                 $dTotal = $catNow.effectiveCount - $catBefore.effectiveCount
                 $dAccepted = $catNow.sustained - $catBefore.sustained
-                if ($dTotal -gt 0 -or $dAccepted -gt 0) {
+                if ($dTotal -gt 0) {
                     $catDeltas[$catKey] = @{ wTotal = $dTotal; wAccepted = $dAccepted }
                 }
             }
@@ -894,7 +895,11 @@ function Invoke-AggregateReviewScores {
             # Build search query with closes/fixes/resolves variants
             $searchQuery = "closes #$fixIssueNum OR fixes #$fixIssueNum OR resolves #$fixIssueNum"
             try {
-                $ghOutput = & $GhCliPath pr list --repo $Repo --state merged --search $searchQuery --json number, mergedAt --sort updated --limit 5 2>&1
+                $ghOutput = & $GhCliPath pr list --repo $Repo --state merged --search $searchQuery --json 'number,mergedAt' --sort updated --limit 5 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "gh pr list failed for fix issue #$fixIssueNum (exit code $LASTEXITCODE): $ghOutput"
+                    continue
+                }
                 $prResults = $ghOutput | ConvertFrom-Json -ErrorAction Stop
                 if ($prResults -and $prResults.Count -gt 0) {
                     # Pick entry with latest mergedAt
