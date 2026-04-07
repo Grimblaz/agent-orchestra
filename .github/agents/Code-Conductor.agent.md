@@ -108,6 +108,7 @@ Quick checklist before declaring mode for a step:
 ## Core Workflow
 
 <!-- markdownlint-disable-next-line MD029 -->
+
 0. **Issue Transition (Step 0, before implementation)**:
    - Cleanup note: The `.github/copilot-instructions.md` "Session Startup Check" detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `$copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }; pwsh "$copilotRoot/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly (only if `$copilotRoot` is non-empty — requires `COPILOT_ORCHESTRA_ROOT` or `WORKFLOW_TEMPLATE_ROOT` to be set).
    - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
@@ -969,6 +970,39 @@ All terminal execution must be non-interactive and automation-safe:
 - For long-running/background tasks, state startup criteria and verification checks, and avoid blocking orchestration flow.
 - On command failure, capture stderr/stdout evidence and route via failure triage instead of re-running blindly.
 - If a command is known to be interactive-only, escalate with `#tool:vscode/askQuestions` and provide non-interactive alternatives when possible.
+
+### Terminal Lifecycle Protocol
+
+Background terminals spawned via `run_in_terminal(isBackground: true)` persist indefinitely. In long sessions, dozens of idle shells accumulate and — at scale (~30+) — enter CPU-spin states that degrade the developer's workstation. This protocol prevents accumulation.
+
+**Tracking**: Track terminal IDs returned by your own `run_in_terminal(isBackground: true)` calls in conversation context. No persistent file needed. On context compaction, tracked IDs are lost; per-step cleanup prevents dangerous buildup, and new terminals after compaction are re-tracked.
+
+**Cleanup triggers** (3-tier):
+
+1. **Post-step**: After each plan step's validation passes and before marking `✅ DONE`, sweep tracked terminal IDs.
+2. **Phase-boundary**: After all implementation steps complete, before entering the review cycle.
+3. **Post-PR**: After PR creation, before user handoff.
+
+**Completion check before kill**:
+
+1. Call `get_terminal_output` for the tracked terminal ID.
+2. Output ends with a PowerShell prompt (`PS ...>`) → **confirmed completed** → safe to `kill_terminal`. (`kill_terminal` is a deferred tool — load it via `tool_search_tool_regex` with pattern `kill_terminal` before first use in a session.)
+3. Output shows ongoing activity (no PS prompt at end) → **active** → preserve.
+4. Output is empty, unclear, or `get_terminal_output` fails → **unknown** → preserve.
+
+> **Note**: `kill_terminal` is not currently in the VS Code deferred tools inventory. When the tool is unavailable, the protocol degrades gracefully to **preserve-all** — all terminals are preserved regardless of completion status. The completion-check logic above is retained so the protocol can be re-activated when `kill_terminal` becomes available.
+
+Only kill terminals with **confirmed completion**. All other states → preserve. When `kill_terminal` is unavailable, log the preserve-all degradation and continue.
+
+**Error tolerance**: All `kill_terminal` calls are non-fatal. If a kill fails (terminal already gone, invalid ID, API error), log the failure and continue. Cleanup must never block orchestration flow.
+
+**Logging**: After each sweep, log: `"Terminal cleanup: killed N completed, preserved M active, K unknown/already-gone"`.
+
+**Scope boundaries**:
+
+- Only terminals CC created via `isBackground: true` are tracked and eligible for cleanup.
+- Cross-window safety is inherent — VS Code terminal IDs are window-scoped.
+- Subagent terminals are not tracked (subagents follow `isBackground: false` preference).
 
 ## Context Management for Long Sessions
 

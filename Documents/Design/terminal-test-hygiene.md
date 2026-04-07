@@ -16,8 +16,12 @@ model follows the same lean terminal pattern.
 
 | File | Role |
 | --- | --- |
-| `.github/copilot-instructions.md` | New `## Terminal & Test Hygiene` section — primary guardrail location |
+| `.github/copilot-instructions.md` | `## Terminal & Test Hygiene` section — primary guardrail location |
 | `CONTRIBUTING.md` | Advisory VS Code setting recommendation (D5) |
+| `.github/agents/Code-Conductor.agent.md` | `### Terminal Lifecycle Protocol` section (TD1–TD5) |
+| `.github/scripts/lib/quick-validate-core.ps1` | Quick-validate library — `Invoke-QuickValidate` (TD6) |
+| `.github/scripts/quick-validate.ps1` | Quick-validate CLI wrapper (TD6) |
+| `.github/scripts/Tests/quick-validate.Tests.ps1` | Pester tests for quick-validate (TD6) |
 
 ## Design Decisions
 
@@ -178,10 +182,14 @@ operating correctly.
 
 ### In Scope
 
-- `copilot-instructions.md` — new `## Terminal & Test Hygiene` section (D1, D2, D3, D6, D7, D8)
+- `copilot-instructions.md` — `## Terminal & Test Hygiene` section (D1, D2, D3, D6, D7, D8) + `### Terminal Cleanup` (TD1–TD5 summary)
 - `CONTRIBUTING.md` — VS Code setting recommendation (D5)
 - `.github/scripts/Tests/aggregate-review-scores.Tests.ps1` — fixture-backed test mode (D8)
 - `.github/scripts/Tests/fixtures/` — static fixture files (D8)
+- `.github/agents/Code-Conductor.agent.md` — Terminal Lifecycle Protocol (TD1–TD5)
+- `.github/scripts/lib/quick-validate-core.ps1` — consolidated quick-validate library (TD6)
+- `.github/scripts/quick-validate.ps1` — CLI wrapper (TD6)
+- `.github/scripts/Tests/quick-validate.Tests.ps1` — Pester tests (TD6)
 
 ### Explicit Non-Goals
 
@@ -190,9 +198,110 @@ operating correctly.
 - Session-cleanup-detector process counting
 - Windows Defender exclusion guidance
 
+### TD1 — Terminal ID Tracking (CC in-context)
+
+Code-Conductor tracks terminal IDs returned by its own `run_in_terminal(isBackground: true)` calls
+in conversation context. No persistent file is needed — terminal IDs are window-scoped by VS Code's
+tool design, so cross-window collision is impossible. On context compaction, tracked IDs are lost;
+per-step cleanup (TD2) prevents dangerous buildup, and new terminals after compaction are re-tracked.
+
+**Rejected alternatives**:
+
+- Session memory tracking file — extra I/O on every terminal call, and subagent write-back to the
+  tracking file is unreliable.
+- OS-level process cleanup — cannot distinguish Copilot-spawned `pwsh` from user-owned processes;
+  killing across windows is unsafe.
+
+### TD2 — 3-Tier Cleanup Triggers
+
+Cleanup runs at three points in the orchestration lifecycle:
+
+1. **Post-step**: After each plan step's validation passes and before marking `✅ DONE`.
+2. **Phase-boundary**: After all implementation steps complete, before entering the review cycle.
+3. **Post-PR**: After PR creation, before user handoff.
+
+**Rejected**: End-of-orchestration-only cleanup — allows 100+ terminals to accumulate across many
+steps before any cleanup runs.
+
+### TD3 — Completion Check & Safety
+
+Before killing a terminal, CC calls `get_terminal_output` and applies a 3-state classification:
+
+| Output state | Classification | Action |
+| --- | --- | --- |
+| Ends with PS prompt (`PS ...>`) | Confirmed completed | Kill |
+| Ongoing activity (no PS prompt) | Active | Preserve |
+| Empty, unclear, or API error | Unknown | Preserve |
+
+Only **confirmed-completed** terminals are killed. All other states are preserved.
+
+### TD4 — Error Tolerance
+
+All `kill_terminal` calls are non-fatal. If a kill fails (terminal already gone, invalid ID, API
+error), CC logs the failure and continues. Cleanup must never block orchestration flow.
+
+### TD5 — Transparent Logging
+
+After each cleanup sweep, CC logs:
+
+```text
+Terminal cleanup: killed N completed, preserved M active, K unknown/already-gone
+```
+
+### TD6 — Quick-Validate Consolidation
+
+8+ individual structural check commands (legacy references × 4, skill frontmatter × 3, guidance
+complexity, PSScriptAnalyzer) were consolidated into a single `Invoke-QuickValidate` function.
+This reduces per-pass commands from ~10 to ~2, lowering shared terminal buffer overflow
+probability.
+
+**Implementation** follows the Script Library Convention:
+
+| File | Role |
+| --- | --- |
+| `.github/scripts/lib/quick-validate-core.ps1` | Library — `Invoke-QuickValidate` function + internal helpers (`Test-QV*`) |
+| `.github/scripts/quick-validate.ps1` | CLI wrapper — dot-sources library, calls function, exits with result code |
+| `.github/scripts/Tests/quick-validate.Tests.ps1` | Pester tests |
+
+**9 checks** consolidated into `Invoke-QuickValidate`: Plan-Architect, Janitor, Issue-Designer,
+workflow-template (legacy references), SKILL-UseWhen, SKILL-DoNotUseFor, SKILL-Gotchas (skill
+frontmatter), GuidanceComplexity, PSScriptAnalyzer.
+
+### TD7 — Subagent Terminal Gap (Accepted)
+
+Subagent-spawned background terminal IDs are not surfaced back to Code-Conductor. This gap is
+accepted because subagents follow the `isBackground: false` preference (D3), minimizing background
+terminal creation. The D3 enforcement is sufficient to keep subagent terminal counts low.
+
+### TD8 — Implementation Surface
+
+| File | Change |
+| --- | --- |
+| `.github/agents/Code-Conductor.agent.md` | New `### Terminal Lifecycle Protocol` section (TD1–TD5) |
+| `.github/copilot-instructions.md` | New `### Terminal Cleanup` subsection + consolidated quick-validate command |
+| `.github/scripts/lib/quick-validate-core.ps1` | Library — `Invoke-QuickValidate` function (TD6) |
+| `.github/scripts/quick-validate.ps1` | CLI wrapper (TD6) |
+| `.github/scripts/Tests/quick-validate.Tests.ps1` | Pester tests for consolidated script (TD6) |
+| `Documents/Design/terminal-test-hygiene.md` | This document — TD1–TD8 design record |
+
+## Root Cause Cascade
+
+Copilot-orchestra sessions generate high terminal command volume (quick-validate structural checks
+at every step boundary). When the shared terminal buffer overflows (~16 KB), commands appear to
+stall, prompting a switch to `isBackground: true`. Each subsequent command then spawns a new
+persistent terminal. At ~30+ idle terminals, shells enter CPU-spin states.
+
+**Two-pronged mitigation**:
+
+- **Prevention** (TD6): `Invoke-QuickValidate` consolidates 8+ commands into 1, reducing per-pass
+  terminal commands from ~10 to ~2 and lowering overflow probability.
+- **Cleanup** (TD1–TD5): Terminal Lifecycle Protocol kills confirmed-completed terminals at 3 phase
+  boundaries, preventing accumulation even when `isBackground: true` is triggered.
+
 ## Source Of Truth
 
 This document records the design shipped for issue #252. The implementation source of truth is the
 `## Terminal & Test Hygiene` section in `.github/copilot-instructions.md` and the Developer Setup
 note in `CONTRIBUTING.md`. Updated by issue #268 to add D7. Updated by issue #271 to amend D7 and
-add D8 (fixture-backed test mode).
+add D8 (fixture-backed test mode). Updated by issue #294 to add TD1–TD8 (Terminal Lifecycle
+Protocol and quick-validate consolidation).

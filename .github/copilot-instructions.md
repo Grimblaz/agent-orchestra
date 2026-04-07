@@ -141,8 +141,8 @@ No build step. This is a configuration/documentation template.
 pwsh -NoProfile -NonInteractive -Command "Invoke-Pester .github/scripts/Tests/ -Output Minimal"
 # Final-gate full suite: see Terminal & Test Hygiene > `isBackground` Default exception (final-gate full suite). In fixture mode (default), isBackground: false is fine. For live-refresh runs (PESTER_LIVE_GH=1), use isBackground: true + poll with `get_terminal_output` to read results (Pester 5 sends pass/fail output to the terminal buffer, not to file streams — `*>` redirection only captures advisory output such as `Write-Warning`).
 
-# Validate no broken references
-(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Plan-Architect").Count  # should be 0
+# Validate structural checks (broken references, skill frontmatter, complexity, lint)
+pwsh -NoProfile -NonInteractive -File .github/scripts/quick-validate.ps1
 
 # Check agent count
 (Get-ChildItem .github/agents/*.agent.md).Count  # should be 14
@@ -171,15 +171,7 @@ markdownlint-cli2 --fix "**/*.md"
 Then run the structural checks:
 
 ```powershell
-(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Plan-Architect").Count  # should be 0
-(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Janitor").Count  # should be 0
-(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules" } | Select-String "Issue-Designer").Count  # should be 0
-(Get-ChildItem -Path .github -Recurse -Filter "*.md" | Where-Object { $_.Name -notmatch "copilot-instructions|architecture-rules|setup\.prompt" } | Select-String "workflow-template").Count  # should be 0
-(Get-ChildItem .github/skills/*/SKILL.md | Where-Object { (Select-String -Path $_ -Pattern '^description:.*Use (when|before)') -eq $null }).Count  # should be 0
-(Get-ChildItem .github/skills/*/SKILL.md | Where-Object { (Select-String -Path $_ -Pattern '^description:.*DO NOT USE FOR:') -eq $null }).Count  # should be 0
-(Get-ChildItem .github/skills/*/SKILL.md | Where-Object { (Select-String -Path $_ -Pattern '^## Gotchas') -eq $null }).Count  # should be 0
-(pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json).agents_over_ceiling.Count  # should be 0
-if (Get-Module -ListAvailable PSScriptAnalyzer) { (Invoke-ScriptAnalyzer -Path .github/scripts/ -Recurse -Settings .github/config/PSScriptAnalyzerSettings.psd1).Count } else { Write-Warning 'PSScriptAnalyzer not installed — skipping' }  # should be 0
+pwsh -NoProfile -NonInteractive -File .github/scripts/quick-validate.ps1
 ```
 
 ## Terminal & Test Hygiene
@@ -206,3 +198,13 @@ Use `isBackground: false` for Pester, PSScriptAnalyzer, `markdownlint-cli2`, str
 ### No Terminal/Subagent Batching
 
 Do not batch `run_in_terminal` and subagent dispatch calls (`runSubagent` or agent-tool dispatch) in the same parallel tool-call set. Sequential use (terminal validation → then subagent dispatch, or vice versa) is fine. Parallel subagent dispatch (e.g., 3 Code-Critic prosecution passes) remains allowed.
+
+### Terminal Cleanup
+
+Code-Conductor manages background terminal lifecycle via its Terminal Lifecycle Protocol (defined in the Code-Conductor agent). At phase boundaries (post-step, post-implementation, post-PR), CC sweeps tracked `isBackground: true` terminal IDs — killing confirmed-completed terminals and preserving active or unknown-state ones. Cleanup is always non-fatal.
+
+**Root cause context**: Copilot-orchestra sessions generate high terminal command volume (quick-validate structural checks at every step boundary). When the shared terminal buffer overflows (~16 KB), commands appear to stall, prompting a switch to `isBackground: true` — each subsequent command then spawns a new persistent terminal. At ~30+ idle terminals, shells enter CPU-spin states. The consolidated `quick-validate.ps1` script reduces per-pass commands from ~10 to ~2, lowering overflow probability. The Terminal Lifecycle Protocol catches any terminals that do accumulate.
+
+**Logging**: After each cleanup sweep, CC logs: `"Terminal cleanup: killed N completed, preserved M active, K unknown/already-gone"`.
+
+**Subagent gap**: Subagent-spawned background terminals are not tracked by CC. Subagents follow the `isBackground: false` preference (see `### isBackground Default` above), minimizing background terminal creation.
