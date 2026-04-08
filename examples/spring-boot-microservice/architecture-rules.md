@@ -254,3 +254,69 @@ public Order createOrder(CreateOrderRequest request) {
 - Use Spring Cloud Sleuth / Micrometer Tracing
 - Propagate trace IDs across service calls
 - Log trace IDs in all log messages
+
+<!--
+## Migration Safety
+
+When your project includes data migration (merging records from multiple sources, syncing across
+devices, or migrating between storage backends), security-sensitive fields require special handling.
+Full-record overwrite operations (`repository.save()`, `entityManager.merge()`) can silently replace
+a non-null security value with null when the source record lacks that field.
+
+### Security-Sensitive Fields
+
+Enumerate security-sensitive fields per data store. These fields must never be silently overwritten
+by null or absent source values during migration.
+
+| Field | Data Store | Merge Strategy |
+|-------|-----------|----------------|
+| `parentPinHash` | JPA `UserProfile` entity | Preserve non-null target; first-device PIN becomes family PIN |
+| `sessionToken` | (example) | Preserve non-null target |
+| `permissionFlags` | (example) | Preserve non-null target; per-profile independent |
+
+Customize this table for your project's actual security-sensitive fields.
+
+### Overwrite Protection Pattern
+
+Instead of full-record overwrite:
+
+```java
+// UNSAFE — saves entire entity including security fields
+userProfileRepository.save(localProfile);
+```
+
+Use field-level updates that preserve security values:
+
+```java
+// SAFE — update only data fields, preserve security columns
+@Modifying
+@Query("UPDATE UserProfile u SET u.displayName = :name, u.avatarUrl = :avatar "
+     + "WHERE u.id = :id")
+void updateDataFields(@Param("id") Long id, @Param("name") String name,
+                      @Param("avatar") String avatar);
+
+// Or use @DynamicUpdate on the entity and null-check security fields before save
+```
+
+Alternative: `@DynamicUpdate` with null-check fill (mirrors Node.js/Python "preserve non-null, fill null from source" strategy):
+
+```java
+// SAFE — @DynamicUpdate with null-check fill
+@Transactional
+public void migrateSafe(UserProfile source, UserProfile target) {
+    target.setDisplayName(source.getDisplayName());
+    target.setAvatarUrl(source.getAvatarUrl());
+    // Preserve non-null security fields; fill only if target is null
+    if (target.getParentPinHash() == null) {
+        target.setParentPinHash(source.getParentPinHash());
+    }
+    if (target.getSessionToken() == null) {
+        target.setSessionToken(source.getSessionToken());
+    }
+    if (target.getPermissionFlags() == null) {
+        target.setPermissionFlags(source.getPermissionFlags());
+    }
+    repository.save(target); // @DynamicUpdate generates minimal SQL
+}
+```
+-->

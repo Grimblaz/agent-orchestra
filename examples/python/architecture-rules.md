@@ -327,3 +327,48 @@ logger.info("Product created", extra={"product_id": product.id, "sku": product.s
 - Expose `/metrics` via `prometheus-fastapi-instrumentator`
 - Track: request count, request latency (p50/p95/p99), error rate
 - Emit custom counters for significant business events (stock adjustments, etc.)
+
+<!--
+## Migration Safety
+
+When your project includes data migration (merging records from multiple sources, syncing across
+devices, or migrating between storage backends), security-sensitive fields require special handling.
+Full-record overwrite operations (`session.merge()`, bulk `__dict__` update, dict unpacking) can silently replace
+a non-null security value with null when the source record lacks that field.
+
+### Security-Sensitive Fields
+
+Enumerate security-sensitive fields per data store. These fields must never be silently overwritten
+by null or absent source values during migration.
+
+| Field | Data Store | Merge Strategy |
+|-------|-----------|----------------|
+| `parent_pin_hash` | SQLAlchemy `user_profiles` | Preserve non-null target; first-device PIN becomes family PIN |
+| `session_token` | (example) | Preserve non-null target |
+| `permission_flags` | (example) | Preserve non-null target; per-profile independent |
+
+Customize this table for your project's actual security-sensitive fields.
+
+### Overwrite Protection Pattern
+
+Instead of full-record overwrite:
+
+```python
+# UNSAFE — replaces entire row including security columns
+session.merge(UserProfile(**local_data))
+```
+
+Use explicit column updates that preserve security values:
+
+```python
+# SAFE — update only data columns, preserve security fields
+target = session.get(UserProfile, user_id)
+security_fields = {"parent_pin_hash", "session_token", "permission_flags"}
+for key, value in local_data.items():
+    if key not in security_fields:
+        setattr(target, key, value)
+    elif getattr(target, key) is None:
+        setattr(target, key, value)  # only fill if target is null
+session.commit()
+```
+-->

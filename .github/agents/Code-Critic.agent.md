@@ -521,6 +521,7 @@ _To identify peers: grep for the field name in function signatures (criterion a)
 - [ ] Input validation present
 - [ ] Sensitive data not logged
 - [ ] Authentication/authorization checks
+- [ ] Full-record overwrite operations (JS: `setDoc`/`replaceOne`/spread; Python: `session.merge`/dict unpacking; Java: `repository.save`/`entityManager.merge`) in migration code preserve non-null security-sensitive target values
 
 ### 3. Performance Perspective
 
