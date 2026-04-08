@@ -2,7 +2,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
 .SYNOPSIS
-    Contract tests for D9-owned handoff persistence wording.
+    Contract tests for handoff persistence wording and pipeline gate markers.
 
 .DESCRIPTION
     Locks the execution handoff persistence contract across:
@@ -21,8 +21,9 @@
             - Solution-Designer issue-body persistence remains unconditional
             - Canonical plan and design markers remain unchanged
             - Latest-comment-wins lookup and bundle plan naming remain unchanged
+            - First-contact provenance gate trigger and marker reference present
 
-        These tests actively enforce the D9-owned handoff persistence wording contract for issue #186 and guard against future contract drift.
+        These tests actively enforce the D9-owned handoff persistence wording contract (issue #186) and the provenance gate trigger contract (issue #300), guarding against future contract drift.
 #>
 
 Describe 'execution handoff persistence contract' {
@@ -52,6 +53,7 @@ Describe 'execution handoff persistence contract' {
         $script:LatestCommentWinsPattern = '(?is)(if multiple matching comments exist, use the most recently posted one|latest matching comment)'
         $script:D9SuppressionRequiresTierDurabilityPattern = '(?is)Smart resume found ALL prior-session artifacts required by the current pipeline tier.{0,400}abbreviated pipeline:.*plan-issue-\{ID\}.*required durable handoff artifact.{0,400}full pipeline:.*experience-owner-complete-\{ID\}.*design-phase-complete-\{ID\}.*plan-issue-\{ID\}.*design-issue-\{ID\}.*durable handoff comments.{0,300}D9 suppression requires those prior-session durable handoff artifacts when the selected tier needs them, not just phase markers'
         $script:BundleD9SuppressionPattern = '(?is)For multi-issue bundles, ALL required prior-session markers and durable handoff comments for ALL bundled issues \(not just the primary issue\) must already exist before D9 may be suppressed'
+        $script:ProvenanceGateMarkerPattern = '(?i)first-contact-assessed-\{ID\}'
         $script:AssertSharedDocContract = {
             param(
                 [string]$Content,
@@ -66,28 +68,28 @@ Describe 'execution handoff persistence contract' {
 
         $script:SharedDocContracts = @(
             @{
-                Name = 'copilot-instructions'
-                Path = $script:CopilotInstructions
+                Name          = 'copilot-instructions'
+                Path          = $script:CopilotInstructions
                 LegacyPattern = '(?is)optionally persisted as GitHub issue comments|use GitHub issue comments for cross-session durability'
             },
             @{
-                Name = 'tracking-format.instructions'
-                Path = $script:TrackingInstructions
+                Name          = 'tracking-format.instructions'
+                Path          = $script:TrackingInstructions
                 LegacyPattern = '(?is)Issue-Planner can optionally post the plan as a GitHub issue comment|optionally posts as a GitHub issue comment with `<!-- plan-issue-\{ID\} -->` marker'
             },
             @{
-                Name = 'start-issue.prompt'
-                Path = $script:StartIssuePrompt
+                Name          = 'start-issue.prompt'
+                Path          = $script:StartIssuePrompt
                 LegacyPattern = '(?is)or GitHub issue comment if the plan was persisted there|Issue-Planner can optionally post the plan as a GitHub issue comment'
             },
             @{
-                Name = 'plan-storage'
-                Path = $script:PlanStorage
+                Name          = 'plan-storage'
+                Path          = $script:PlanStorage
                 LegacyPattern = '(?is)Issue-Planner \(opt-in\)|opt-in "Yes" at plan creation|Providing an opt-in GitHub issue comment'
             },
             @{
-                Name = 'hub-mode-ux'
-                Path = $script:HubModeUx
+                Name          = 'hub-mode-ux'
+                Path          = $script:HubModeUx
                 LegacyPattern = '(?is)Issue-Planner creates a single bundled plan named .* posted as a GitHub issue comment to each bundled issue'
             }
         )
@@ -136,5 +138,12 @@ Describe 'execution handoff persistence contract' {
         $planStorage | Should -Match '<!-- plan-issue-\{ID\} -->' -Because 'the durable plan comment marker must remain canonical'
         $planStorage | Should -Match '<!-- design-issue-\{ID\} -->' -Because 'the durable design comment marker must remain canonical'
         $codeConductor | Should -Match $script:LatestCommentWinsPattern -Because 'the lookup contract must keep latest-comment-wins semantics'
+    }
+
+    It 'requires copilot-instructions to describe the first-contact provenance gate trigger' {
+        $content = & $script:ReadContent -Path $script:CopilotInstructions
+
+        $content | Should -Match $script:ProvenanceGateMarkerPattern -Because 'copilot-instructions must reference the first-contact-assessed marker for the provenance gate trigger'
+        $content | Should -Match '(?is)First-Contact Provenance Gate' -Because 'copilot-instructions must contain the provenance gate section heading'
     }
 }

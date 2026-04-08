@@ -32,7 +32,7 @@ Pipeline-based agent orchestration:
 - **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
 - **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invocable: false`)
 - **Skills** (16): Loaded on demand by agents from `.github/skills/`
-- **Instructions** (5): Shared rules loaded by agents from `.github/instructions/`
+- **Instructions** (6): Shared rules loaded by agents from `.github/instructions/`
 
 ## Key Conventions
 
@@ -129,6 +129,36 @@ Execute the PowerShell code block from `additionalContext` in the terminal. Repo
 Continue with the user's original request regardless of whether cleanup was run, skipped, or declined. This automatic run-once guard applies only to the startup path; explicit or manual detector runs still remain available after the automatic guard fires.
 
 > **Silent skip conditions**: Skip the entire check when neither `$env:COPILOT_ORCHESTRA_ROOT` nor `$env:WORKFLOW_TEMPLATE_ROOT` is set, `pwsh` is not available, or the script produces non-JSON output. See `.github/instructions/session-startup.instructions.md` for full edge case details.
+
+## First-Contact Provenance Gate
+
+When a user-invocable agent receives a request referencing an existing GitHub issue, evaluate whether the issue framing has been validated in the current session before executing.
+
+### Step 1 — Extract issue ID
+
+Parse the user's request for a GitHub issue reference (`#N`, `issue N`, etc.). If no issue ID is determinable, skip the entire gate silently and continue with the user's request.
+
+### Step 2 — Check warm-handoff markers
+
+Check session memory for any warm-handoff markers for this issue: `plan-issue-{ID}`, `design-issue-{ID}`, `experience-owner-complete-{ID}`, `design-phase-complete-{ID}`. If any are found, the issue framing was already validated in this session — skip the gate silently.
+
+### Step 3 — Check prior assessment marker
+
+Use `mcp_github_issue_read` with `method: get_comments` to check for `<!-- first-contact-assessed-{ID} -->` in the issue's comments. If found, skip the gate silently (previously assessed). If MCP tools are unavailable or the API call fails, fail open — skip the marker check and proceed to Step 4.
+
+### Step 4 — Self-filtering
+
+Skip the gate silently for agents with `user-invocable: false` in their frontmatter. Subagents dispatched by Code-Conductor already operate within an assessed session context.
+
+### Step 5 — Run assessment
+
+Load `.github/instructions/provenance-gate.instructions.md` for the full three-question assessment protocol (root cause vs. symptom, mechanism fitness, scope accuracy). If the instructions file is absent (plugin distribution), apply a minimal inline assessment: read the issue body, verify the stated root cause is specific and traceable, and present the developer gate via `#tool:vscode/askQuestions`.
+
+### Step 6 — Record marker
+
+After the developer responds, post `<!-- first-contact-assessed-{ID} -->` as a GitHub issue comment. If posting fails, record the assessment in session memory instead and proceed. In multi-issue bundles, the gate fires per unique issue ID.
+
+> **See** `.github/instructions/provenance-gate.instructions.md` for the full assessment protocol, edge cases, and known limitations.
 
 ## Build & Run
 
