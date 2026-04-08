@@ -593,6 +593,8 @@ exit 99
             $result.Action | Should -Be 'created'
             $capturedText = Get-Content -Raw -Path $capture.ArgsFile
             $capturedText | Should -Match 'implementation-clarity'          # pattern / level info
+            $capturedText | Should -Match '(?s)--title\s+\[Systemic Fix\] agent-prompt — implementation-clarity' # title uses extracted category with em-dash
+            $capturedText | Should -Not -Match '(?s)--title\s+\[Systemic Fix\] agent-prompt:implementation-clarity' # must NOT leak full pattern_key into title
             $capturedText | Should -Match '245'                             # evidence PR
             $capturedText | Should -Match 'Code-Critic\.agent\.md'          # target file
             $capturedText | Should -Match 'defensive validation'            # proposed change
