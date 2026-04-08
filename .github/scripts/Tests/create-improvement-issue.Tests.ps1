@@ -145,7 +145,7 @@ exit 99
 
         # ── standard base params for splatting ───────────────────────
         $script:BaseParams = @{
-            PatternKey              = 'agent-prompt::implementation-clarity'
+            PatternKey              = 'agent-prompt:implementation-clarity'
             EvidencePrs             = @(245, 248, 252)
             FirstEmittedAt          = '2026-04-03T10:00:00Z'
             FixTypeLevel            = 5
@@ -242,7 +242,7 @@ exit 99
             & $script:WriteCalibrationFile -Path $calPath -Data @{
                 proposals_emitted = @(
                     @{
-                        pattern_key      = 'agent-prompt::implementation-clarity'
+                        pattern_key      = 'agent-prompt:implementation-clarity'
                         evidence_prs     = @(245, 248, 252)
                         first_emitted_at = '2026-04-03T10:00:00Z'
                         fix_issue_number = 270
@@ -269,7 +269,7 @@ exit 99
             & $script:WriteCalibrationFile -Path $calPath -Data @{
                 proposals_emitted = @(
                     @{
-                        pattern_key      = 'agent-prompt::implementation-clarity'
+                        pattern_key      = 'agent-prompt:implementation-clarity'
                         evidence_prs     = @(245, 248, 252)
                         first_emitted_at = '2026-04-03T10:00:00Z'
                     }
@@ -296,7 +296,7 @@ exit 99
             & $script:WriteCalibrationFile -Path $calPath -Data @{
                 proposals_emitted = @(
                     @{
-                        pattern_key      = 'skill::something-else'
+                        pattern_key      = 'skill:something-else'
                         evidence_prs     = @(100)
                         first_emitted_at = '2026-01-01T00:00:00Z'
                         fix_issue_number = 50
@@ -631,7 +631,7 @@ exit 99
             & $script:WriteCalibrationFile -Path $calPath -Data @{
                 proposals_emitted = @(
                     @{
-                        pattern_key      = 'agent-prompt::implementation-clarity'
+                        pattern_key      = 'agent-prompt:implementation-clarity'
                         evidence_prs     = @(245, 248, 252)
                         first_emitted_at = '2026-04-03T10:00:00Z'
                     }
@@ -651,7 +651,7 @@ exit 99
             $result.Action | Should -Be 'created'
             $updatedCal = Get-Content -Raw -Path $calPath | ConvertFrom-Json
             $matchedEntry = $updatedCal.proposals_emitted |
-                Where-Object { $_.pattern_key -eq 'agent-prompt::implementation-clarity' }
+                Where-Object { $_.pattern_key -eq 'agent-prompt:implementation-clarity' }
             $matchedEntry.fix_issue_number | Should -Be 270
         }
     }

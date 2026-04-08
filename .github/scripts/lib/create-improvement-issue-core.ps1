@@ -10,6 +10,12 @@ function Get-CIIFlexProperty {
     return $null
 }
 
+function Get-CIICategory {
+    param([string]$PatternKey)
+    $parts = $PatternKey -split ':', 2
+    if ($parts.Count -gt 1) { return $parts[1] } else { return $PatternKey }
+}
+
 function Test-CIIPatternKeyExists {
     param([object[]]$Proposals, [string]$PatternKey)
     foreach ($prop in $Proposals) {
@@ -45,8 +51,7 @@ function Search-CIIGitHubDedup {
         [string]$Repo,
         [string]$GhCliPath
     )
-    $parts = $PatternKey -split '::'
-    $category = if ($parts.Count -gt 1) { $parts[1] } else { $PatternKey }
+    $category = Get-CIICategory -PatternKey $PatternKey
     $output = & $GhCliPath issue list --repo $Repo --state open --search "[Systemic Fix] $SystemicFixType $category" --json 'number,title' 2>$null
     if ($LASTEXITCODE -ne 0) { return $null }
     $issues = $output | ConvertFrom-Json -ErrorAction SilentlyContinue
@@ -146,8 +151,7 @@ function New-CIIIssueBody {
     )
 
     $sb = [System.Text.StringBuilder]::new()
-    $parts = $PatternKey -split '::'
-    $category = if ($parts.Count -gt 1) { $parts[1] } else { $PatternKey }
+    $category = Get-CIICategory -PatternKey $PatternKey
     [void]$sb.AppendLine("## [Systemic Fix] $SystemicFixType — $category")
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine("**Pattern key**: ``$PatternKey``")
@@ -322,8 +326,7 @@ function Invoke-CreateImprovementIssue {
         -FixTypeOverride $FixTypeOverride `
         -UpstreamPreflightPassed $UpstreamPreflightPassed
 
-    $parts = $PatternKey -split '::'
-    $category = if ($parts.Count -gt 1) { $parts[1] } else { $PatternKey }
+    $category = Get-CIICategory -PatternKey $PatternKey
     $title = "[Systemic Fix] $SystemicFixType — $category"
     $labelArgs = @($Labels | ForEach-Object { '--label'; $_ })
 
