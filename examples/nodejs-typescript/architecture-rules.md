@@ -322,3 +322,56 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
   res.status(500).json({ error: { code: 'INTERNAL_ERROR', message: 'An unexpected error occurred' } });
 });
 ```
+
+<!--
+## Migration Safety
+
+When your project includes data migration (merging records from multiple sources, syncing across
+devices, or migrating between storage backends), security-sensitive fields require special handling.
+Full-record overwrite operations (`setDoc`, `replaceOne`, spread assignment) can silently replace
+a non-null security value with null when the source record lacks that field.
+
+### Security-Sensitive Fields
+
+Enumerate security-sensitive fields per data store. These fields must never be silently overwritten
+by null or absent source values during migration.
+
+| Field | Data Store | Merge Strategy |
+|-------|-----------|----------------|
+| `parentPinHash` | Firestore `users` | Preserve non-null target; first-device PIN becomes family PIN |
+| `sessionToken` | (example) | Preserve non-null target |
+| `permissionFlags` | (example) | Preserve non-null target; per-profile independent |
+
+Customize this table for your project's actual security-sensitive fields.
+
+### Overwrite Protection Pattern
+
+Instead of full-record overwrite:
+
+```typescript
+// UNSAFE — overwrites security fields with source values (including null)
+await setDoc(doc(db, 'users', userId), localProfile);
+```
+
+Use field-level merge that preserves security values:
+
+```typescript
+// SAFE — read target security fields, merge explicitly
+const targetSnap = await getDoc(doc(db, 'users', userId));
+const targetData = targetSnap.exists() ? targetSnap.data() : {};
+
+const {
+  parentPinHash,
+  sessionToken,
+  permissionFlags,
+  ...dataFields
+} = localProfile;
+const merged = {
+  ...dataFields,
+  parentPinHash: targetData.parentPinHash ?? parentPinHash,
+  sessionToken: targetData.sessionToken ?? sessionToken,
+  permissionFlags: targetData.permissionFlags ?? permissionFlags,
+};
+await setDoc(doc(db, 'users', userId), merged);
+```
+-->
