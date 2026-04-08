@@ -953,6 +953,10 @@ Gates execute in order; each gate can short-circuit with a non-`created` action:
 
 All private helpers use the `CII` prefix (e.g., `Get-CIIFlexProperty`, `Test-CIIPatternKeyExists`, `Search-CIIConsolidationCandidate`). Shared helpers like `Get-FlexProperty` are copied as CII-prefixed versions rather than dot-sourcing `aggregate-review-scores-core.ps1`, avoiding scope pollution across dot-sourced files.
 
+#### `pattern_key` Delimiter Contract
+
+`pattern_key` values use the format `{systemic_fix_type}:{category}` with a single `:` delimiter — produced by `aggregate-review-scores.ps1` (e.g., `instruction:security`) and consumed by `create-improvement-issue-core.ps1`. The consumer helper `Get-CIICategory` splits on the first `:` only (`-split ':', 2`) so that future extensions to either segment cannot break extraction. Producer and consumer must use single `:` as the delimiter.
+
 #### Delegation Boundary
 
 Process-Review §4.9 Step 4 delegates to `create-improvement-issue.ps1` rather than calling `gh issue create` directly. §4.9 constructs parameters from its root cause analysis output (Steps 1–3) and handles four action results:
