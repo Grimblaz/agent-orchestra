@@ -12,6 +12,9 @@ targeting specific test files.
 The fix must be **model-agnostic**: explicit guardrails in the shared agent context so that any
 model follows the same lean terminal pattern.
 
+Issue #313 extends this design with a kill-before-retry protocol and port-check diagnostic script,
+addressing the within-step retry gap that the Terminal Lifecycle Protocol does not cover.
+
 ## Implemented Surface
 
 | File | Role |
@@ -22,6 +25,9 @@ model follows the same lean terminal pattern.
 | `.github/scripts/lib/quick-validate-core.ps1` | Quick-validate library — `Invoke-QuickValidate` (TD6) |
 | `.github/scripts/quick-validate.ps1` | Quick-validate CLI wrapper (TD6) |
 | `.github/scripts/Tests/quick-validate.Tests.ps1` | Pester tests for quick-validate (TD6) |
+| `.github/scripts/lib/check-port-core.ps1` | Port-availability check library — `Invoke-CheckPort` (TD7) |
+| `.github/scripts/check-port.ps1` | Port-check CLI wrapper (TD7) |
+| `.github/scripts/Tests/check-port.Tests.ps1` | Pester tests for check-port (TD7) |
 
 ## Design Decisions
 
@@ -154,6 +160,30 @@ See the `prosecution_depth` BeforeAll block for the canonical reference implemen
 then commit the updated fixture files. This is a manual step (no CI automation) done when
 test assumptions about live PR data may have drifted.
 
+### D9 — Kill-before-retry protocol in `copilot-instructions.md`
+
+Issue #313 added a `### Terminal Retry Hygiene` subsection after `### Terminal Cleanup` in
+`copilot-instructions.md`. The 5-step protocol (Record → Kill → Log → Check port → Start)
+targets the within-step retry gap that the Terminal Lifecycle Protocol (#294) doesn't cover.
+Kill-before-retry and Terminal Cleanup are complementary, non-overlapping: kill-before-retry
+acts immediately before a retry within the same step; Terminal Cleanup acts at step boundaries.
+
+### D10 — Port-check diagnostic script (`check-port.ps1`)
+
+A new script following the Script Library Convention (lib + wrapper + Pester tests). Uses
+`TcpListener` loopback bind to detect port availability and enriches with
+`Get-NetTCPConnection` on Windows (guarded by cmdlet availability check). Returns JSON
+`{InUse, Pid, ProcessName}`. Diagnostic-only and non-blocking — agents proceed with retry
+regardless of output. Private helpers use `CP` prefix per naming convention.
+
+### D11 — Updated `kill_terminal` availability note
+
+The `kill_terminal` availability note in Code-Conductor's Terminal Lifecycle Protocol was updated
+from "not currently in the VS Code deferred tools inventory" to "is a deferred tool — load via
+`tool_search_tool_regex`". Forward-compatible: agents try to load the tool and degrade to
+preserve-all when unavailable (version regression or restricted tool surface). The degradation
+behavior specification is preserved.
+
 ## Rejected Alternatives
 
 ### R1 — Extend `session-cleanup-detector.ps1` with a `pwsh` process count check
@@ -190,6 +220,10 @@ operating correctly.
 - `.github/scripts/lib/quick-validate-core.ps1` — consolidated quick-validate library (TD6)
 - `.github/scripts/quick-validate.ps1` — CLI wrapper (TD6)
 - `.github/scripts/Tests/quick-validate.Tests.ps1` — Pester tests (TD6)
+- `.github/copilot-instructions.md` — `### Terminal Retry Hygiene` subsection (D9)
+- `.github/scripts/lib/check-port-core.ps1` — port-check library (D10)
+- `.github/scripts/check-port.ps1` — CLI wrapper (D10)
+- `.github/scripts/Tests/check-port.Tests.ps1` — Pester tests (D10)
 
 ### Explicit Non-Goals
 

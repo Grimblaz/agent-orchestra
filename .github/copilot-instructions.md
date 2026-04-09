@@ -238,3 +238,19 @@ Code-Conductor manages background terminal lifecycle via its Terminal Lifecycle 
 **Logging**: After each cleanup sweep, CC logs: `"Terminal cleanup: killed N completed, preserved M active, K unknown/already-gone"`.
 
 **Subagent gap**: Subagent-spawned background terminals are not tracked by CC. Subagents follow the `isBackground: false` preference (see `### isBackground Default` above), minimizing background terminal creation.
+
+### Terminal Retry Hygiene
+
+When retrying a failed command that was run in a background terminal (`isBackground: true` / `mode: async`), follow this kill-before-retry protocol:
+
+1. **Record** the terminal ID returned by `run_in_terminal` from the failed attempt
+2. **Kill** the failed terminal via `kill_terminal` using that specific terminal ID — load the tool first via `tool_search_tool_regex` if not already loaded
+3. **Log and proceed** if `kill_terminal` fails (non-fatal — tool may be unavailable in restricted contexts or version regressions)
+4. **Check port** (dev servers only): before restarting a server, run `pwsh -NoProfile -NonInteractive -File .github/scripts/check-port.ps1 -Port {PORT}` to verify the port was released — output is JSON `{"InUse":true/false,"Pid":...,"ProcessName":...}`; if the port is still in use, log the diagnostic and proceed with the retry (non-blocking)
+5. **Start** the new attempt in a fresh terminal
+
+**Scope**: This protocol applies to within-step retry loops for `isBackground: true` / `mode: async` terminals that have trackable IDs. Phase-boundary cleanup of accumulated terminals remains governed by `### Terminal Cleanup` above and Code-Conductor's Terminal Lifecycle Protocol.
+
+**Interaction with Terminal Cleanup**: Kill-before-retry and Terminal Cleanup are complementary, non-overlapping. Kill-before-retry acts immediately before a retry within the same step; Terminal Cleanup acts at step boundaries. Neither subsumes the other. If both target the same terminal ID, the first successful kill wins — subsequent attempts are non-fatal no-ops.
+
+**Degradation**: Both `kill_terminal` failures and `check-port.ps1` errors are non-blocking. The protocol degrades gracefully to retry-without-kill when tools are unavailable.
