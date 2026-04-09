@@ -986,11 +986,11 @@ Background terminals spawned via `run_in_terminal(isBackground: true)` persist i
 **Completion check before kill**:
 
 1. Call `get_terminal_output` for the tracked terminal ID.
-2. Output ends with a PowerShell prompt (`PS ...>`) → **confirmed completed** → safe to `kill_terminal`. (`kill_terminal` is a deferred tool — load it via `tool_search_tool_regex` with pattern `kill_terminal` before first use in a session.)
+2. Output ends with a PowerShell prompt (`PS ...>`) → **confirmed completed** → safe to `kill_terminal`.
 3. Output shows ongoing activity (no PS prompt at end) → **active** → preserve.
 4. Output is empty, unclear, or `get_terminal_output` fails → **unknown** → preserve.
 
-> **Note**: `kill_terminal` is not currently in the VS Code deferred tools inventory. When the tool is unavailable, the protocol degrades gracefully to **preserve-all** — all terminals are preserved regardless of completion status. The completion-check logic above is retained so the protocol can be re-activated when `kill_terminal` becomes available.
+> **Note**: `kill_terminal` is a deferred tool — load it via `tool_search_tool_regex` with pattern `kill_terminal` before first use in a session. When the tool is unavailable (version regression or restricted tool surface), the protocol degrades gracefully to **preserve-all** — all terminals are preserved regardless of completion status. The completion-check logic above is retained so the protocol can be re-activated when `kill_terminal` becomes available.
 
 Only kill terminals with **confirmed completion**. All other states → preserve. When `kill_terminal` is unavailable, log the preserve-all degradation and continue.
 
