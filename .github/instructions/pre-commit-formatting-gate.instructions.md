@@ -35,7 +35,7 @@ Pass all `.md` files as arguments in a single invocation, or iterate one at a ti
 
 ### Step 3 — Whitespace normalization lane
 
-Pass remaining non-`.md` files to the whitespace normalizer:
+Filter the remaining file list to exclude `.md` and `.ps1` files, then pass them to the whitespace normalizer:
 
 ```powershell
 pwsh -NoProfile -NonInteractive -File .github/scripts/normalize-whitespace.ps1 -Path <file>
@@ -43,7 +43,7 @@ pwsh -NoProfile -NonInteractive -File .github/scripts/normalize-whitespace.ps1 -
 
 Run one file at a time, or loop over the list.
 
-**Important**: `normalize-whitespace.ps1` has an internal allowlist — it processes only: `.json`, `.jsonc`, `.yml`, `.yaml`, `.psd1`, `.txt`, `.gitignore`, `.gitattributes`, `.editorconfig`. Files with other extensions are skipped with a warning (exit code 0, warning to stderr). This is expected behavior, not an error.
+**Important**: `normalize-whitespace.ps1` has an internal allowlist — it processes only: `.json`, `.jsonc`, `.yml`, `.yaml`, `.psd1`, `.txt`, `.gitignore`, `.gitattributes`, `.editorconfig`. Files with other extensions are skipped with a warning (exit code 0, warning on the PowerShell warning stream). This is expected behavior, not an error.
 
 ### Step 4 — Check for changes and commit
 
