@@ -109,7 +109,39 @@ The combined result after issues #219 and #248 is a two-layer contributor workfl
 - The pre-commit hook keeps semantic formatting on Markdown and `.ps1` files while adding a scoped whitespace-only safety net for allowlisted config/text files.
 - Warning paths remain explicit and non-blocking, so contributors can still commit when optional tooling is missing.
 - Partial-staging behavior is unchanged: any rewritten file is fully re-staged, and contributors need to review staged hunks accordingly.
+- Code-Conductor's Step 4 formatting gate provides a final backstop pass on all branch-changed files before validation evidence capture, closing the gap between agent raw writes and VS Code's format-on-save expectations.
 
 ## Source Of Truth
 
 This document records the repo state after issue #219 and its extension in issue #248. The implementation source of truth is the current content of `.githooks/pre-commit`, `.editorconfig`, `.github/scripts/normalize-whitespace.ps1`, `.vscode/settings.json`, and `CONTRIBUTING.md`.
+
+Issue #299 adds the formatting gate instruction at `.github/instructions/pre-commit-formatting-gate.instructions.md` and a Step 4 sub-step reference in `.github/agents/Code-Conductor.agent.md`.
+
+## Formatting Gate (Issue #299)
+
+Issue #299 adds a formatting gate to Code-Conductor's Step 4 (Create PR) flow. This gate is a backstop that runs the same formatting tools (markdownlint-cli2 and normalize-whitespace.ps1) on all branch-changed files before validation evidence capture. It complements the pre-commit hook (commit-time, staged files) and the per-step advisory in copilot-instructions.md.
+
+### Design Decisions
+
+| ID | Decision | Rationale |
+| --- | --- | --- |
+| FG-D1 | Pre-commit passthrough — CC runs existing formatting pipeline on changed files before commit | Uses existing infrastructure (markdownlint-cli2, normalize-whitespace.ps1). No new tools. Content reaches the commit already in "final form." |
+| FG-D2 | One-shot before git commit — single formatting pass on all branch-changed files, not per-step | Simpler implementation; single insertion point in CC's Step 4. Mid-session "Keep" may still show intermediate formatting, but commits and PRs are clean. |
+| FG-D3 | CLI-only formatting, aligned with pre-commit hook — uses markdownlint-cli2 --fix and normalize-whitespace.ps1 | Deterministic; same tools as the pre-commit hook; avoids introducing new formatting tooling. |
+| FG-D4 | Shared instruction file — gate implemented as .github/instructions/pre-commit-formatting-gate.instructions.md | Keeps CC's directive count stable (81/128). Reusable by other agents. Keeps formatting logic maintainable in one place. |
+| FG-D5 | File scope: git diff --name-only --diff-filter=ACM main..HEAD — format all Added/Copied/Modified files on the branch | Ensures the entire PR is formatter-compliant. --diff-filter=ACM excludes deletions to avoid passing non-existent paths to formatters. |
+| FG-D6 | Non-blocking gate — if tools unavailable, warn and proceed | Mirrors the pre-commit hook's non-blocking philosophy (D7). Formatting is hygiene, not a hard gate. |
+| FG-D7 | PowerShell .ps1 formatting excluded from the backstop | Pre-commit hook handles .ps1 via Invoke-Formatter. PS files change infrequently. Explicit scope exclusion. |
+| FG-D8 | Formatting gate runs before validation evidence capture in Step 4 | Ordering: end-to-end → scope → migration completeness (conditional) → design doc → formatting gate → validation evidence → git push → PR create. |
+| FG-D9 | Layered formatting model — per-step advisory + Step 4 backstop | copilot-instructions.md advisory is first layer; CC's Step 4 one-shot is the backstop for anything that slipped through. |
+| FG-D10 | Runs within CC's explicit Step 4 commit-and-push flow | Step 4 already owns git push and PR creation. The "No auto-commit" convention prevents silent commits during implementation steps but does not apply to Step 4's explicit commit flow. |
+
+### Rejected Alternatives
+
+| Alternative | Why rejected |
+| --- | --- |
+| Instruction guidance only (agents try to produce formatter-compliant output) | LLMs can't reliably produce byte-perfect formatted output. Needs a backstop. |
+| Disable VS Code format-on-save | Breaks real-time formatting for manual edits. |
+| Per-step formatting pass | More complex; runs formatters many times per session. Can be added as a follow-up. |
+| Inline in CC's agent definition | CC is at 81/128 directives. Shared instruction file keeps count stable. |
+| Post-push formatting (original #299 proposal) | Only catches PR-bound drift, not the triage burden at "Keep" time. |
