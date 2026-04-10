@@ -323,6 +323,40 @@ app.use((err: Error, req: Request, res: Response, _next: NextFunction) => {
 });
 ```
 
+## Code Review Pitfalls
+
+Rules for Code-Critic prosecution passes. These pitfalls are specific to JS/TS and are commonly masked by TypeScript's structural type system or mock-based test patterns.
+
+### Prototype-Chain Preservation
+
+Object spread (`{...obj}`) and `Object.assign({}, obj)` copy only own enumerable properties. When `obj` is a class instance, every method defined on the prototype chain becomes `undefined` on the copy. TypeScript's structural type system does not flag this because the interface is satisfied structurally. Mock-based tests also mask it because mocks define methods directly on the object.
+
+#### ❌ PROHIBITED
+
+```typescript
+// Wrapper/proxy/decorator that strips the prototype chain
+function wrapWithTracking(repo: TaskRepository): TaskRepository {
+  const tracked = { ...repo };           // ❌ Methods from prototype are lost
+  // or: const tracked = Object.assign({}, repo);  // ❌ Same problem
+  return tracked;
+}
+```
+
+#### ✅ SAFE
+
+```typescript
+// Preserve the prototype chain when copying a class instance
+function wrapWithTracking(repo: TaskRepository): TaskRepository {
+  const tracked = Object.assign(
+    Object.create(Object.getPrototypeOf(repo)),
+    repo,
+  );
+  return tracked;
+}
+```
+
+**Scope**: Applies when the source object is a class instance in a wrapper, proxy, decorator, or factory function. Plain-object spread (`{...plainObj}`) is not affected.
+
 <!--
 ## Migration Safety
 

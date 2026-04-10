@@ -110,6 +110,16 @@ At each major step, decide whether to proceed autonomously or pause for user inp
 - **Checkpoint examples**: issue number needed, ambiguous scope or persona, conflicting signals in research, architectural constraints unclear
 - **Hub-mode guidance**: When called by Code-Conductor as part of the full pipeline, target 2–3 `#tool:vscode/askQuestions` calls — one for scope or persona ambiguity, one for key framing decisions, and one to confirm CE Gate scenario drafts with the user.
 
+### Hub/Consumer Classification Gate
+
+Before framing, classify whether the issue proposes adding content that primarily manifests in one language's type system, runtime, or framework to a hub agent (any `.agent.md` in `.github/agents/`). Hub agents are language-agnostic — language-specific review rules, prosecution perspectives, and behavioral patterns belong in consumer-repo artifacts:
+
+- **Review rules / pitfalls** → `examples/{stack}/architecture-rules.md`
+- **Stack-specific conventions** → `examples/{stack}/copilot-instructions.md`
+- **Reusable cross-stack skills** → `.github/skills/{skill-name}/`
+
+If the gate fires, redirect the proposal to the appropriate consumer artifact and frame the issue accordingly. The user may override with explicit rationale if the proposed content is genuinely language-agnostic.
+
 ### Customer Problem Statement
 
 Write the customer-facing problem statement in non-technical language:
