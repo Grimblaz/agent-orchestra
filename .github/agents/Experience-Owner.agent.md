@@ -241,6 +241,7 @@ Called by Code-Conductor as a subagent during the CE Gate step. Exercises scenar
    - Customer surface type and tool availability
 2. Verify the dev environment is running
 3. Note the Design Intent reference — this frames the evaluation
+4. Parse `[requires: service-name:port]` annotations on delegated scenarios (see bdd-scenarios skill § Service Dependency Annotations). For each unique port, run `pwsh -NoProfile -NonInteractive -File .github/scripts/check-port.ps1 -Port {port}` — if `InUse` is `false`, mark the scenario `INCONCLUSIVE (required service unavailable: service-name:port)` and skip it. Fail-open: if the script is unavailable or fails, proceed with all scenarios.
 
 ### Systematic Scenario Exercise
 
