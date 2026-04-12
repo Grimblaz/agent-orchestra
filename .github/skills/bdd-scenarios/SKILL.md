@@ -73,6 +73,20 @@ BDD classification performed by Issue-Planner when BDD is enabled:
 
 Override rule: when in doubt, classify as `[manual]`. Test-Writer may reclassify `[auto]`↔`[manual]` during implementation; note the change in the plan and CE Gate evidence.
 
+## Service Dependency Annotations
+
+Scenarios that require external services (auth emulators, backend APIs, databases) declare dependencies via `[requires: service-name:port]` annotations on the scenario heading, after the type tag:
+
+```markdown
+### S1 — User completes sign-in (Functional) [requires: firebase-emulator:9099]
+### S4 — OAuth flow with provider (Functional) [requires: auth-service:8080] [requires: api-gateway:3000]
+```
+
+- **Format**: `[requires: service-name:port]` — service-name is a human-readable label; port is the TCP port number
+- **Multiple services**: Use separate `[requires:]` annotations per dependency (AND semantics — all must be available)
+- **Extraction regex**: `\[requires:\s*([^:\]]+):(\d+)\]` — captures service name (group 1) and port (group 2)
+- **CE Gate behavior**: Code-Conductor extracts annotations before delegation, checks each port via `check-port.ps1`, and marks scenarios with unavailable services as `INCONCLUSIVE (required service unavailable: service-name:port)` — excluding them from runner dispatch and Experience-Owner delegation. Fail-open: if `check-port.ps1` is unavailable or fails, all scenarios proceed normally.
+
 ## Scenario ID Lifecycle
 
 - IDs are **immutable after plan approval** — once S1, S2, S3 are assigned in the issue body and the plan is approved, those IDs do not change.
