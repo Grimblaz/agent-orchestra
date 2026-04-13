@@ -71,7 +71,7 @@ When opted out: validation ladder, RC conformance, and progress checkpoints stil
 
 ## Related Files
 
-- [.github/instructions/step-commit.instructions.md](.github/instructions/step-commit.instructions.md) — full protocol
-- [.github/agents/Code-Conductor.agent.md](.github/agents/Code-Conductor.agent.md) — D12/D13 detection, step commit gate, diff-scoping prerequisite
-- [CUSTOMIZATION.md](CUSTOMIZATION.md) — consumer-facing opt-out documentation
-- [Documents/Design/pre-commit-formatting.md](Documents/Design/pre-commit-formatting.md) — independent formatting gate
+- [.github/instructions/step-commit.instructions.md](../../.github/instructions/step-commit.instructions.md) — full protocol
+- [.github/agents/Code-Conductor.agent.md](../../.github/agents/Code-Conductor.agent.md) — D12/D13 detection, step commit gate, diff-scoping prerequisite
+- [CUSTOMIZATION.md](../../CUSTOMIZATION.md) — consumer-facing opt-out documentation
+- [pre-commit-formatting.md](pre-commit-formatting.md) — independent formatting gate
