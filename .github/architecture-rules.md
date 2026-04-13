@@ -33,7 +33,7 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 - Internal agents (`user-invocable: false`) must NOT be directly user-invocable; they MAY appear in agent `handoffs` lists as subagents
 - Agents must NOT reference deleted agents (e.g., Plan-Architect, Issue-Designer) — validate with `grep`
 - Skills must NOT contain agent logic — they provide knowledge, not orchestration
-- No agent may auto-commit — all commits are manual by the user
+- Only Code-Conductor may auto-commit, and only after validation ladder and RC conformance gate pass; specialist agents must NOT commit; consumers may opt out via `## Commit Policy` section
 - `.github/copilot-instructions.md` must NOT contain TODO markers — it holds real project context
 
 ## File Format Rules

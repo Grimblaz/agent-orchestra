@@ -13,6 +13,11 @@ REST API for inventory management, supporting product tracking, stock adjustment
 - **Build Tool**: Poetry
 - **Testing**: pytest + httpx
 
+<!-- ## Commit Policy
+auto-commit: disabled
+To disable Code-Conductor's validated step commits (default-on),
+uncomment this section. See CUSTOMIZATION.md#commit-policy for details. -->
+
 ## BDD Framework
 
 bdd: behave

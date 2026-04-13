@@ -12,6 +12,11 @@ Microservice handling order processing for an e-commerce platform. This is an **
 - **Build Tool**: Gradle 8.x
 - **Testing**: JUnit 5, Mockito, TestContainers
 
+<!-- ## Commit Policy
+auto-commit: disabled
+To disable Code-Conductor's validated step commits (default-on),
+uncomment this section. See CUSTOMIZATION.md#commit-policy for details. -->
+
 ## BDD Framework
 
 bdd: cucumber

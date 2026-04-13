@@ -192,6 +192,33 @@ When you run `/setup` and opt into Phase 5, the wizard can generate starter file
 
 If any file already exists, Phase 5 asks before overwriting (`.vscode/settings.json`, `.vscode/mcp.json`) or skips silently (`.vscode/extensions.json`). `.gitignore` additions are always additive — no existing lines are removed.
 
+## Commit Policy
+
+By default, Code-Conductor auto-commits after each validated plan step. Each commit represents a state that has passed the validation ladder (Tier 1) and RC conformance gate — no untested code is committed.
+
+### Opting Out
+
+To disable per-step auto-commits, add this section to your project's `.github/copilot-instructions.md`:
+
+```markdown
+## Commit Policy
+
+auto-commit: disabled
+```
+
+The value is case-insensitive (`disabled`, `Disabled`, and `DISABLED` are all recognized).
+
+When opted out:
+
+- The validation ladder and RC conformance gate still run at every step (unchanged)
+- Progress checkpoints (`— ✅ DONE`) still update in session memory (unchanged)
+- Code-Conductor will prompt you to commit manually when needed (e.g., before post-fix review diff scoping)
+- The formatting gate in Step 4 (PR creation) may still auto-commit formatting fixes — this is independent of per-step commits and runs unconditionally
+
+### Squash-on-Merge Recommendation
+
+Whether auto-commits are enabled or disabled, squash-on-merge is recommended for feature branches. The per-step commits are valuable during review for understanding logical boundaries, but the main branch benefits from clean single-commit-per-feature history.
+
 ## Troubleshooting
 
 **Agents not following instructions?**

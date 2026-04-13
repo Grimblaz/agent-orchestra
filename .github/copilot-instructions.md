@@ -32,7 +32,7 @@ Pipeline-based agent orchestration:
 - **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
 - **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invocable: false`)
 - **Skills** (16): Loaded on demand by agents from `.github/skills/`
-- **Instructions** (7): Shared rules loaded by agents from `.github/instructions/`
+- **Instructions** (8): Shared rules loaded by agents from `.github/instructions/`
 
 ## Key Conventions
 
@@ -40,7 +40,7 @@ Pipeline-based agent orchestration:
 - Skills use `SKILL.md` with `name` and `description` frontmatter in `.github/skills/{skill-name}/`
 - Instruction files use `.instructions.md` extension in `.github/instructions/`
 - Design documents go in `Documents/Design/`, decision records in `Documents/Decisions/`
-- No auto-commit behavior in any agent — users commit manually
+- Code-Conductor auto-commits after each validated step by default (see `## Commit Policy` opt-out in consumer `copilot-instructions.md`); specialist agents do not commit independently
 - Plans are saved to session memory (`/memories/session/plan-issue-{ID}.md`), which is the same-session source of truth for implementation handoff
 - Design context is cached in session memory (`/memories/session/design-issue-{ID}.md`), reused by Issue-Planner when the current snapshot is still valid and refreshed from the issue body when missing or after current-pass issue/design updates; Solution-Designer still persists design details to the issue body unconditionally during design
 - VS Code auto-compacts conversation when context fills; session memory (`/memories/session/`) survives compaction within the same conversation. At D9, if the user explicitly chooses Stop / Pause / resume later, Code-Conductor persists durable GitHub handoff comments with `<!-- plan-issue-{ID} -->` / `<!-- design-issue-{ID} -->`; Continue uses session memory only

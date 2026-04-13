@@ -75,6 +75,22 @@ This enables agents to interact directly with GitHub issues and PRs without exte
 
 > **Note**: If you also use the copilot-orchestra plugin (via `chat.plugins.marketplaces`), do not add `chat.agentFilesLocations` — this creates duplicate agents in the chat picker. See [CUSTOMIZATION.md — Troubleshooting](CUSTOMIZATION.md#troubleshooting) for fix steps.
 
+### Validated Step Commits
+
+Code-Conductor auto-commits after each validated plan step by default. Each step commit captures a proven-good state (Tier 1 validation + RC conformance gate passed) with a structured commit message:
+
+```text
+step(N): {step-title}
+
+Plan: issue-{ID}, Step N of M
+Agents: Code-Smith, Test-Writer
+Validation: Tier 1 ✅
+```
+
+This means feature branches will have multiple small commits per plan. Squash-on-merge is recommended to keep the main branch clean. The per-step commits remain valuable during review for understanding logical boundaries.
+
+To disable per-step auto-commits, see the [Commit Policy](CUSTOMIZATION.md#commit-policy) section in the Customization Guide.
+
 ### Session Startup Check
 
 This template includes a session startup check (inline in `.github/copilot-instructions.md`) that uses the session-memory marker `/memories/session/session-startup-check-complete.md` as a run-once guard before any automatic detector run. The first automatic check in a conversation looks for post-merge cleanup work, records that marker after the automatic check runs, and avoids repeated prompts from later agent hops even if cleanup is declined. The automatic check targets stale branches and issue-scoped tracking artifacts, not persistent calibration data. Requires PowerShell 7+ (`pwsh`) and `COPILOT_ORCHESTRA_ROOT` (or `WORKFLOW_TEMPLATE_ROOT`) set; if neither root variable is set, `pwsh` is unavailable, or the detector returns non-JSON output, the automatic check skips silently as documented in `.github/instructions/session-startup.instructions.md`. If session-memory access fails, the workflow fails open and still runs the detector. Manual detector runs remain available.

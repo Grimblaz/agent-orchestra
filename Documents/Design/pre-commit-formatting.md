@@ -134,7 +134,7 @@ Issue #299 adds a formatting gate to Code-Conductor's Step 4 (Create PR) flow. T
 | FG-D7 | PowerShell .ps1 formatting excluded from the backstop | Pre-commit hook handles .ps1 via Invoke-Formatter. PS files change infrequently. Explicit scope exclusion. |
 | FG-D8 | Formatting gate runs before validation evidence capture in Step 4 | Ordering: end-to-end → scope → migration completeness (conditional) → design doc → formatting gate → validation evidence → git push → PR create. |
 | FG-D9 | Layered formatting model — per-step advisory + Step 4 backstop | copilot-instructions.md advisory is first layer; CC's Step 4 one-shot is the backstop for anything that slipped through. |
-| FG-D10 | Runs within CC's explicit Step 4 commit-and-push flow | Step 4 already owns git push and PR creation. The "No auto-commit" convention prevents silent commits during implementation steps but does not apply to Step 4's explicit commit flow. |
+| FG-D10 | Runs within CC's explicit Step 4 commit-and-push flow | Step 4 already owns git push and PR creation. Step commits (with `--no-verify`) handle validated-state commits during implementation steps; the formatting gate in Step 4 remains the backstop with hooks firing normally. |
 
 ### Rejected Alternatives
 

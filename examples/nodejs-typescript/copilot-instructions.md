@@ -13,6 +13,11 @@ REST API for task management, supporting task creation, assignment, and status t
 - **Build Tool**: npm / tsc
 - **Testing**: Jest + Supertest
 
+<!-- ## Commit Policy
+auto-commit: disabled
+To disable Code-Conductor's validated step commits (default-on),
+uncomment this section. See CUSTOMIZATION.md#commit-policy for details. -->
+
 ## BDD Framework
 
 bdd: cucumber.js
