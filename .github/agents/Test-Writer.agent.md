@@ -93,6 +93,9 @@ For PBT rollout policy and guardrails, follow `.github/skills/property-based-tes
 - Parameterized tests for formulas
 - Integration tests over unit tests where appropriate
 - PBT complements unit tests; does not replace requirement-focused examples
+- Test file organization should mirror architecture layers when the project defines them (see `.github/architecture-rules.md`)
+- Mock/stub at layer boundaries (interfaces between layers), not deep internals — keeps tests resilient to refactoring within a layer
+- Integration test scope should exercise adjacent layers together per the dependency direction in `.github/architecture-rules.md`
 
 **UI Component Tests (`*.test.tsx`)**:
 
@@ -300,6 +303,10 @@ Generated stubs are pending by default (e.g., `return 'pending'` in cucumber.js)
 
 - Reference `.github/skills/verification-before-completion/SKILL.md`
 - Evidence before claims: run the repository's configured coverage command from `.github/copilot-instructions.md` before claiming coverage is sufficient
+
+**When checking architecture compliance:**
+
+- Consult `.github/architecture-rules.md` — Layer boundaries, dependency rules, and naming conventions
 
 ---
 
