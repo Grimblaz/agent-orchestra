@@ -24,7 +24,7 @@ This template supports two distribution models:
 
 2. Open Extensions view (`Ctrl+Shift+X`), search `@agentPlugins copilot-orchestra`, install.
 
-> **Note**: If you use the plugin, you will not receive **automatic** loading of `.github/instructions/` files (the plugin does not distribute these). The session-startup check requires `COPILOT_ORCHESTRA_ROOT` (or the fallback `WORKFLOW_TEMPLATE_ROOT`) — it silently skips for users who haven't set either variable. For full instruction support, use the clone/fork model and enable `chat.instructionsFilesLocations` — or combine the plugin with `chat.instructionsFilesLocations` pointing to a local clone (see the Warning callout below and the wizard's Option 1).
+> **Note**: If you use the plugin, you will not receive **automatic** loading of `.github/instructions/` files (the plugin does not distribute these). The session-startup check requires `COPILOT_ORCHESTRA_ROOT` (or the fallback `WORKFLOW_TEMPLATE_ROOT`) — it silently skips for users who haven't set either variable. Similarly, the First-Contact Provenance Gate's full three-question assessment requires `provenance-gate.instructions.md` — plugin users receive a minimal inline assessment fallback instead. For full instruction support, use the clone/fork model and enable `chat.instructionsFilesLocations` — or combine the plugin with `chat.instructionsFilesLocations` pointing to a local clone (see the Warning callout below and the wizard's Option 1).
 
 <!-- blockquote separator: prevents Note and Warning from merging in GitHub Markdown -->
 
@@ -138,7 +138,7 @@ The Copilot Orchestra includes a session startup check (inline in `.github/copil
 |---|---|
 | `chat.agentFilesLocations` | All workflow agents available in every repository |
 | `chat.agentSkillsLocations` | All workflow skills available in every repository |
-| `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories (includes session-startup) |
+| `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories (includes session-startup and provenance-gate) |
 | `chat.promptFilesLocations` | Shared prompt files (e.g. `/setup`) available in every repository |
 
 > **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/copilot-orchestra/.github/instructions"`. Apply the same format to all four settings above.
