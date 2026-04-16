@@ -42,14 +42,14 @@ Improve the UI through short, measurable polish loops. Each pass should identify
 
 ### Generic UI Principles
 
-| Principle            | What to Check                                    |
-| -------------------- | ------------------------------------------------ |
-| Readability          | Text contrast, font sizes, line height           |
-| Visual Hierarchy     | Clear focal points and emphasis                  |
-| Spacing              | Consistent padding, margins, and breathing room  |
-| Alignment            | Grid alignment and edge consistency              |
-| Consistency          | Similar elements styled similarly                |
-| Feedback             | Hover, active, loading, and empty-state clarity  |
+| Principle        | What to Check                                   |
+| ---------------- | ----------------------------------------------- |
+| Readability      | Text contrast, font sizes, line height          |
+| Visual Hierarchy | Clear focal points and emphasis                 |
+| Spacing          | Consistent padding, margins, and breathing room |
+| Alignment        | Grid alignment and edge consistency             |
+| Consistency      | Similar elements styled similarly               |
+| Feedback         | Hover, active, loading, and empty-state clarity |
 
 ### Product-Facing Checks
 
@@ -72,11 +72,11 @@ Improve the UI through short, measurable polish loops. Each pass should identify
 
 ## Iteration Parameters
 
-| Parameter  | Default   | Typical Override Example                       |
-| ---------- | --------- | ---------------------------------------------- |
-| Iterations | 5         | `Polish Dashboard 3 times`                     |
-| Scope      | Full page | `Polish just the SummaryCard component`        |
-| Focus      | All       | `Focus on spacing and alignment`               |
+| Parameter  | Default   | Typical Override Example                |
+| ---------- | --------- | --------------------------------------- |
+| Iterations | 5         | `Polish Dashboard 3 times`              |
+| Scope      | Full page | `Polish just the SummaryCard component` |
+| Focus      | All       | `Focus on spacing and alignment`        |
 
 ## Output Formats
 
@@ -135,10 +135,10 @@ Improve the UI through short, measurable polish loops. Each pass should identify
 
 ## Gotchas
 
-| Trigger                                      | Gotcha                                                            | Fix                                                                |
-| -------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------ |
-| The before and after screenshots look alike | The pass changed code without producing visible improvement       | Reduce scope and choose 3-5 changes with clearer visual impact     |
+| Trigger                                     | Gotcha                                                      | Fix                                                            |
+| ------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------- |
+| The before and after screenshots look alike | The pass changed code without producing visible improvement | Reduce scope and choose 3-5 changes with clearer visual impact |
 
-| Trigger                                  | Gotcha                                                      | Fix                                                             |
-| ---------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------- |
-| Tailwind tweaks pile up element by element | The layout becomes inconsistent and harder to maintain      | Fix spacing and alignment at the layout or container level first |
+| Trigger                                    | Gotcha                                                 | Fix                                                              |
+| ------------------------------------------ | ------------------------------------------------------ | ---------------------------------------------------------------- |
+| Tailwind tweaks pile up element by element | The layout becomes inconsistent and harder to maintain | Fix spacing and alignment at the layout or container level first |

@@ -2,6 +2,7 @@
 name: validation-methodology
 description: Reusable validation and review methodology for staged validation, failure triage, and prosecution-depth setup. Use when running validation ladders, triaging failures, or executing adversarial review passes. DO NOT USE FOR: CE Gate orchestration, specialist dispatch ownership, or step execution flow (keep those in Code-Conductor).
 ---
+
 <!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Copilot Orchestra; assumes the owning agent already controls routing, step order, and specialist handoffs. -->
 
 # Validation Methodology
@@ -87,11 +88,11 @@ Run exactly 3 independent prosecution passes per review cycle. The pass count is
 
 Before composing pass prompts, classify the PR change type using `git diff --name-only main..HEAD` and include the classification in each pass prompt:
 
-| Change type | Condition | Active perspectives |
-| --- | --- | --- |
+| Change type          | Condition                                                                     | Active perspectives                                                                                                                                                    |
+| -------------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `documentation-only` | All changed files are `.md`, `.instructions.md`, `.prompt.md`, or `.agent.md` | Architecture docs-misrepresentation only, Implementation Clarity, Script & Automation doc-audit when shell blocks are present, and the doc-clarity portion of Patterns |
-| `mixed` | Changed files include both source/scripts and docs | All perspectives |
-| `code` | Changed files include source code, scripts, or runtime config | All perspectives |
+| `mixed`              | Changed files include both source/scripts and docs                            | All perspectives                                                                                                                                                       |
+| `code`               | Changed files include source code, scripts, or runtime config                 | All perspectives                                                                                                                                                       |
 
 Evaluate the rows in order. `mixed` takes priority over `code` for source-plus-doc changes.
 
@@ -144,6 +145,6 @@ Keep those decisions in the owning agent.
 
 ## Gotchas
 
-| Trigger | Gotcha | Fix |
-| --- | --- | --- |
+| Trigger                                                                                | Gotcha                                                                                                | Fix                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Copying specialist routing, CE Gate ownership, or step-order decisions into this skill | The skill stops being reusable methodology and starts stealing orchestration authority from the agent | Keep routing, step execution flow, durable handoff ownership, and CE Gate orchestration in the owning agent; move only reusable validation and review method text here |

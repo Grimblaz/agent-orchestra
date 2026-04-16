@@ -145,10 +145,10 @@ Judgment does not implement fixes. It produces the ruling and the evidence packa
 
 ## Gotchas
 
-| Trigger                                   | Gotcha                                                      | Fix                                                                 |
-| ----------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------- |
-| The judge repeats the prosecutor verbatim | The ruling becomes a rubber stamp instead of independent    | Read the cited artifact directly and state what was verified        |
+| Trigger                                   | Gotcha                                                   | Fix                                                          |
+| ----------------------------------------- | -------------------------------------------------------- | ------------------------------------------------------------ |
+| The judge repeats the prosecutor verbatim | The ruling becomes a rubber stamp instead of independent | Read the cited artifact directly and state what was verified |
 
-| Trigger                              | Gotcha                                                         | Fix                                                               |
-| ------------------------------------ | -------------------------------------------------------------- | ----------------------------------------------------------------- |
-| A ruling omits the structured block  | Downstream consumers must parse prose or fail to route cleanly | Emit the `judge-rulings` block immediately after the score summary |
+| Trigger                             | Gotcha                                                         | Fix                                                                |
+| ----------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
+| A ruling omits the structured block | Downstream consumers must parse prose or fail to route cleanly | Emit the `judge-rulings` block immediately after the score summary |

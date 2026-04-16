@@ -80,10 +80,10 @@ Make documentation reflect the shipped state of the repository. Treat deletion o
 
 ## Gotchas
 
-| Trigger                                       | Gotcha                                                             | Fix                                                                 |
-| --------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------- |
-| Updating docs from intent instead of code     | Documentation drifts toward the plan rather than the shipped state | Verify names, paths, and behavior against the current implementation |
+| Trigger                                   | Gotcha                                                             | Fix                                                                  |
+| ----------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| Updating docs from intent instead of code | Documentation drifts toward the plan rather than the shipped state | Verify names, paths, and behavior against the current implementation |
 
-| Trigger                                      | Gotcha                                                            | Fix                                                          |
-| -------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------ |
-| Turning a domain design doc into issue notes | The file becomes a changelog and stops reflecting the current UX  | Rewrite the doc around current domain behavior and delete drift |
+| Trigger                                      | Gotcha                                                           | Fix                                                             |
+| -------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------- |
+| Turning a domain design doc into issue notes | The file becomes a changelog and stops reflecting the current UX | Rewrite the doc around current domain behavior and delete drift |

@@ -65,12 +65,12 @@ Default to responding in chat.
 
 The following rules are enforced at all judgment phases. Each `## 🚨 CRITICAL:` marker below references these gates.
 
-| Gate                                  | Rule                                                    |
-| ------------------------------------- | ------------------------------------------------------- |
-| G1 — No plain-text questions          | Every question MUST use `#tool:vscode/askQuestions`     |
+| Gate                                  | Rule                                                                                                                              |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| G1 — No plain-text questions          | Every question MUST use `#tool:vscode/askQuestions`                                                                               |
 | G2 — Always call Code-Review-Response | Within the review pipeline, Code-Critic prosecution output must pass through Code-Review-Response judgment before reaching users. |
-| G3 — Deferred-Significant threshold   | 1+ day effort estimate → auto-track, never abandon      |
-| G4 — Score summary mandatory          | Every judgment MUST include the score summary table     |
+| G3 — Deferred-Significant threshold   | 1+ day effort estimate → auto-track, never abandon                                                                                |
+| G4 — Score summary mandatory          | Every judgment MUST include the score summary table                                                                               |
 
 ## 🚨 CRITICAL: Review Intake Modes
 

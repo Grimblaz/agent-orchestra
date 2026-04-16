@@ -101,10 +101,10 @@ If those questions are answered with verified evidence, stop researching and han
 
 ## Gotchas
 
-| Trigger                                               | Gotcha                                                                | Fix                                                               |
-| ----------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Treating one matching file as proof of a repo pattern | A local exception is misreported as a convention                      | Verify the pattern across multiple owning files or call sites     |
+| Trigger                                               | Gotcha                                           | Fix                                                           |
+| ----------------------------------------------------- | ------------------------------------------------ | ------------------------------------------------------------- |
+| Treating one matching file as proof of a repo pattern | A local exception is misreported as a convention | Verify the pattern across multiple owning files or call sites |
 
-| Trigger                                               | Gotcha                                                                | Fix                                                               |
-| ----------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Leaving multiple viable approaches in the final notes | Planning stays ambiguous and downstream agents must redo the judgment | Choose one recommendation and delete superseded alternatives      |
+| Trigger                                               | Gotcha                                                                | Fix                                                          |
+| ----------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Leaving multiple viable approaches in the final notes | Planning stays ambiguous and downstream agents must redo the judgment | Choose one recommendation and delete superseded alternatives |

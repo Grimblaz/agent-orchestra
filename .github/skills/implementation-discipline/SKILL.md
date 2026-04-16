@@ -81,10 +81,10 @@ Then run the repository validation command required by the current task.
 
 ## Gotchas
 
-| Trigger                                      | Gotcha                                                            | Fix                                                                 |
-| -------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Coding directly to satisfy a narrow assertion | Tests pass while the actual requirement or wiring remains missing | Re-check production wiring and design requirements before handoff    |
+| Trigger                                       | Gotcha                                                            | Fix                                                               |
+| --------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Coding directly to satisfy a narrow assertion | Tests pass while the actual requirement or wiring remains missing | Re-check production wiring and design requirements before handoff |
 
-| Trigger                                   | Gotcha                                                           | Fix                                                                  |
-| ----------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Copying logic into a new helper or class  | The change creates a second source of truth that drifts later    | Search first, inject the existing dependency, and delegate           |
+| Trigger                                  | Gotcha                                                        | Fix                                                        |
+| ---------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------- |
+| Copying logic into a new helper or class | The change creates a second source of truth that drifts later | Search first, inject the existing dependency, and delegate |

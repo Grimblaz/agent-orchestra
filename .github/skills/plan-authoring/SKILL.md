@@ -113,6 +113,6 @@ If discovery becomes long or tool-heavy, compact before drafting. Preserve the k
 | --------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------- |
 | Discovery starts writing implementation steps early | The plan inherits assumptions before feasibility and scope are checked | Keep discovery read-only and delay the full plan until alignment ends |
 
-| Trigger                                         | Gotcha                                                                      | Fix                                                                         |
-| ----------------------------------------------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Trigger                                               | Gotcha                                                                     | Fix                                                                          |
+| ----------------------------------------------------- | -------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
 | CE Gate is drafted from mechanics instead of outcomes | The plan exercises the surface but misses design intent and customer value | Reuse Experience-Owner scenarios when present, or derive both scenario types |

@@ -187,12 +187,12 @@ all members, not only the first or primary record.
 | 100% line coverage with assertions that don't verify correctness       | Coverage is green; mutations survive                                                 | Run mutation testing; require ≥80% score; review asserts on each changed line    |
 | Organizing tests as one method per production method                   | Misses behavior variations and error cases; becomes a checklist                      | Organize by scenario/behavior with descriptive names; use `@Nested` groups       |
 
-| Trigger                                                          | Gotcha                                                                    | Fix                                                                        |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| An integration test uses a helper that sets state directly       | The test never proves the real production path or wiring works            | Invoke the real service, pipeline, handler, or workflow under test         |
+| Trigger                                                    | Gotcha                                                         | Fix                                                                |
+| ---------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
+| An integration test uses a helper that sets state directly | The test never proves the real production path or wiring works | Invoke the real service, pipeline, handler, or workflow under test |
 
-| Trigger                                                          | Gotcha                                                                    | Fix                                                                        |
-| ---------------------------------------------------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Mocking inside a layer instead of at its boundary                | Tests become implementation-aware and break during harmless refactors     | Stub only the external seam and let the layer's internal collaborators run |
+| Trigger                                           | Gotcha                                                                | Fix                                                                        |
+| ------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Mocking inside a layer instead of at its boundary | Tests become implementation-aware and break during harmless refactors | Stub only the external seam and let the layer's internal collaborators run |
 
 For detailed examples of each anti-pattern, see `references/anti-patterns.md`.

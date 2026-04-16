@@ -124,6 +124,7 @@ For terminal and validation execution guardrails, load `.github/skills/terminal-
 Any future pre-response trigger step runs **before** the Core Workflow, stays outside the numbered workflow list, and does not renumber, replace, or subsume Step 0. Issue Transition remains Step 0 and the first numbered workflow step after any pre-response trigger handling completes.
 
 <!-- markdownlint-disable-next-line MD029 -->
+
 0. **Issue Transition (Step 0, before implementation)**:
    - Cleanup note: The `.github/copilot-instructions.md` "Session Startup Check" detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `$copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }; pwsh "$copilotRoot/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly (only if `$copilotRoot` is non-empty — requires `COPILOT_ORCHESTRA_ROOT` or `WORKFLOW_TEMPLATE_ROOT` to be set).
    - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
@@ -473,27 +474,27 @@ Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFE
 
 When delegating to subagents, instruct them to use the relevant skill(s):
 
-| Skill                            | When to Instruct Subagent to Use                                                   |
-| -------------------------------- | ---------------------------------------------------------------------------------- |
-| `adversarial-review`             | Running prosecution passes or defense perspectives with Code-Critic                |
-| `customer-experience`            | Framing customer journeys or capturing CE evidence with Experience-Owner           |
-| `design-exploration`             | Researching and converging technical design options with Solution-Designer         |
-| `documentation-finalization`     | Updating design docs, READMEs, or implementation-facing docs with Doc-Keeper       |
-| `frontend-design`                | Designing new UI components, screens, or evaluating for uniqueness                 |
-| `implementation-discipline`      | Implementing bounded plan steps or verifying production wiring with Code-Smith     |
-| `parallel-execution`             | Coordinating concurrent implementation paths, convergence gates, or triage routing |
-| `plan-authoring`                 | Drafting or refining execution plans with Issue-Planner                            |
-| `property-based-testing`         | Adding randomized testing, validating input ranges, or verifying invariants        |
-| `refactoring-methodology`        | Running a proportionate structural cleanup pass with Refactor-Specialist           |
-| `research-methodology`           | Gathering verified multi-file findings for a research document with Research-Agent |
-| `review-judgment`                | Ruling on prosecution plus defense ledgers with Code-Review-Response               |
-| `skill-creator`                  | Adding new skills, updating skill templates, or reviewing skill structure          |
-| `software-architecture`          | Evaluating layer boundaries, dependency flow, or ADR-level decisions               |
-| `systematic-debugging`           | Debugging failures, investigating flaky tests, or tracking root causes             |
-| `test-driven-development`        | Writing tests first, red-green-refactor, or validating quality gates               |
-| `ui-iteration`                   | Running screenshot-driven UI polish passes with UI-Iterator                        |
-| `ui-testing`                     | Writing component-level React tests, fixing flaky tests, or establishing patterns  |
-| `webapp-testing`                 | Creating or improving browser-based E2E coverage, test stability, or CI            |
+| Skill                        | When to Instruct Subagent to Use                                                   |
+| ---------------------------- | ---------------------------------------------------------------------------------- |
+| `adversarial-review`         | Running prosecution passes or defense perspectives with Code-Critic                |
+| `customer-experience`        | Framing customer journeys or capturing CE evidence with Experience-Owner           |
+| `design-exploration`         | Researching and converging technical design options with Solution-Designer         |
+| `documentation-finalization` | Updating design docs, READMEs, or implementation-facing docs with Doc-Keeper       |
+| `frontend-design`            | Designing new UI components, screens, or evaluating for uniqueness                 |
+| `implementation-discipline`  | Implementing bounded plan steps or verifying production wiring with Code-Smith     |
+| `parallel-execution`         | Coordinating concurrent implementation paths, convergence gates, or triage routing |
+| `plan-authoring`             | Drafting or refining execution plans with Issue-Planner                            |
+| `property-based-testing`     | Adding randomized testing, validating input ranges, or verifying invariants        |
+| `refactoring-methodology`    | Running a proportionate structural cleanup pass with Refactor-Specialist           |
+| `research-methodology`       | Gathering verified multi-file findings for a research document with Research-Agent |
+| `review-judgment`            | Ruling on prosecution plus defense ledgers with Code-Review-Response               |
+| `skill-creator`              | Adding new skills, updating skill templates, or reviewing skill structure          |
+| `software-architecture`      | Evaluating layer boundaries, dependency flow, or ADR-level decisions               |
+| `systematic-debugging`       | Debugging failures, investigating flaky tests, or tracking root causes             |
+| `test-driven-development`    | Writing tests first, red-green-refactor, or validating quality gates               |
+| `ui-iteration`               | Running screenshot-driven UI polish passes with UI-Iterator                        |
+| `ui-testing`                 | Writing component-level React tests, fixing flaky tests, or establishing patterns  |
+| `webapp-testing`             | Creating or improving browser-based E2E coverage, test stability, or CI            |
 
 <!-- Keep in sync: when adding or removing a delegation skill in .github/skills/, update this table (delegation-scoped: only skills Code-Conductor instructs subagents to use). Always also update Process-Review's Skill Mapping Reference table (all-skills scope). -->
 

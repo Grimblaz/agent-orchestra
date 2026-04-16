@@ -104,6 +104,6 @@ The agent remains responsible for the actual GitHub issue update and completion 
 | ----------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------- |
 | The design jumps straight to one solution | Trade-offs stay hidden and planning inherits untested assumptions | Present 2-3 viable options before converging on a recommendation |
 
-| Trigger                                     | Gotcha                                                               | Fix                                                        |
-| ------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Trigger                                     | Gotcha                                                                | Fix                                                       |
+| ------------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------- |
 | Decisions are documented before convergence | The durable record freezes ambiguity and forces planning rework later | Discuss first, then document only the confirmed direction |

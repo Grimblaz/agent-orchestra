@@ -163,10 +163,10 @@ tags: [Optional: List of relevant tags or categories, e.g., `infrastructure`, `p
 
 ## Gotchas
 
-| Trigger                                    | Gotcha                                                           | Fix                                                                 |
-| ------------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Writing recommendations as requirements    | The spec over-commits optional guidance as mandatory behavior    | Label requirements, constraints, and guidelines separately          |
+| Trigger                                 | Gotcha                                                        | Fix                                                        |
+| --------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------- |
+| Writing recommendations as requirements | The spec over-commits optional guidance as mandatory behavior | Label requirements, constraints, and guidelines separately |
 
-| Trigger                                  | Gotcha                                                          | Fix                                                                 |
-| ---------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |
-| Depending on unstated repo context       | Readers cannot implement or review the spec without side input  | Expand definitions, assumptions, and interfaces until self-contained |
+| Trigger                            | Gotcha                                                         | Fix                                                                  |
+| ---------------------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Depending on unstated repo context | Readers cannot implement or review the spec without side input | Expand definitions, assumptions, and interfaces until self-contained |

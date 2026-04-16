@@ -227,10 +227,10 @@ Artifacts:
 
 ## Gotchas
 
-| Trigger                                                  | Gotcha                                                              | Fix                                                                    |
-| -------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Reviewing a workflow from memory instead of artifacts    | The analysis becomes opinion-heavy and misses the actual defect path | Reconstruct the timeline from plans, commits, terminal evidence, and outputs |
+| Trigger                                               | Gotcha                                                               | Fix                                                                          |
+| ----------------------------------------------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Reviewing a workflow from memory instead of artifacts | The analysis becomes opinion-heavy and misses the actual defect path | Reconstruct the timeline from plans, commits, terminal evidence, and outputs |
 
-| Trigger                                                  | Gotcha                                                              | Fix                                                                    |
-| -------------------------------------------------------- | ------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| Treating a skill gap as proof that the skill was required | The audit becomes a box-checking exercise instead of a judgment call | Compare the missed skill against the actual phase needs and evidence    |
+| Trigger                                                   | Gotcha                                                               | Fix                                                                  |
+| --------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Treating a skill gap as proof that the skill was required | The audit becomes a box-checking exercise instead of a judgment call | Compare the missed skill against the actual phase needs and evidence |

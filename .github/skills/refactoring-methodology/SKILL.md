@@ -81,10 +81,10 @@ Use a concise analysis with these sections when reporting refactor work:
 
 ## Gotchas
 
-| Trigger                                         | Gotcha                                                           | Fix                                                                 |
-| ----------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Trigger                                        | Gotcha                                                                   | Fix                                                                   |
+| ---------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------- |
 | Saying "no refactor needed" after a quick skim | Obvious extractions and duplication survive because analysis was shallow | Check file size, duplication, and function complexity before deciding |
 
-| Trigger                                      | Gotcha                                                           | Fix                                                                  |
-| -------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Treating unused new data as later cleanup    | The PR ships an incomplete feature under a refactor label        | Identify the missing integration point and fix it in the same change |
+| Trigger                                   | Gotcha                                                    | Fix                                                                  |
+| ----------------------------------------- | --------------------------------------------------------- | -------------------------------------------------------------------- |
+| Treating unused new data as later cleanup | The PR ships an incomplete feature under a refactor label | Identify the missing integration point and fix it in the same change |

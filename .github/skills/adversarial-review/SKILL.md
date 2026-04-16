@@ -154,24 +154,31 @@ When a perspective gate is not triggered, replace the full section with:
 ## Review Findings
 
 ### ✅ Architecture: PASS/FAIL
+
 {findings or compact N/A}
 
 ### ✅ Security: PASS/FAIL
+
 {findings or compact N/A}
 
 ### ✅ Performance: PASS/FAIL
+
 {findings or compact N/A}
 
 ### ✅ Patterns: PASS/FAIL
+
 {findings or compact N/A}
 
 ### ✅ Implementation Clarity: PASS/FAIL
+
 {findings or compact N/A}
 
 ### ✅ Script & Automation: PASS/FAIL
+
 {findings or compact N/A}
 
 ## Summary
+
 {overall verdict and key actions}
 ```
 
@@ -195,15 +202,19 @@ Output format:
 ## Design Challenge Report
 
 ### §D1 — Feasibility & Risk
+
 {findings or checked-no-issues summary}
 
 ### §D2 — Scope & Completeness
+
 {findings or checked-no-issues summary}
 
 ### §D3 — Integration & Impact
+
 {findings or checked-no-issues summary}
 
 ### Summary
+
 {highest-risk items and overall confidence}
 ```
 
@@ -229,15 +240,19 @@ Output format:
 ## Product-Alignment Challenge Report
 
 ### §P1 — Product Direction Fit
+
 {findings or checked-no-issues summary}
 
 ### §P2 — Customer Experience Coherence
+
 {findings or checked-no-issues summary}
 
 ### §P3 — Planned-Work Alignment
+
 {findings or checked-no-issues summary}
 
 ### Summary
+
 {most important alignment risks and confidence}
 ```
 
@@ -287,10 +302,10 @@ When representing an external review ledger:
 
 ## Gotchas
 
-| Trigger                                  | Gotcha                                                               | Fix                                                                  |
-| ---------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Review starts from "looks fine"        | The pass turns into a summary instead of an adversarial investigation | Begin from likely failure modes and gather evidence against them      |
+| Trigger                         | Gotcha                                                                | Fix                                                              |
+| ------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Review starts from "looks fine" | The pass turns into a summary instead of an adversarial investigation | Begin from likely failure modes and gather evidence against them |
 
-| Trigger                                | Gotcha                                                            | Fix                                                                 |
-| -------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------- |
-| A finding has a citation but no break  | The judge cannot tell whether it is a defect or a preference      | State the concrete failure mode or downgrade the item before output |
+| Trigger                               | Gotcha                                                       | Fix                                                                 |
+| ------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------- |
+| A finding has a citation but no break | The judge cannot tell whether it is a defect or a preference | State the concrete failure mode or downgrade the item before output |

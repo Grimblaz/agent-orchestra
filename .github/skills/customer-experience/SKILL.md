@@ -121,10 +121,10 @@ Keep the summary evidence-only. Do not score findings, recommend fixes, or colla
 
 ## Gotchas
 
-| Trigger                                        | Gotcha                                                                | Fix                                                                    |
-| ---------------------------------------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Trigger                                        | Gotcha                                                                | Fix                                                                     |
+| ---------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------- |
 | Only functional scenarios are drafted upstream | CE Gate can prove correctness while missing design-intent regressions | Always include at least one intent scenario alongside functional checks |
 
-| Trigger                                   | Gotcha                                                      | Fix                                                         |
-| ----------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------------- |
+| Trigger                                   | Gotcha                                                         | Fix                                                             |
+| ----------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------- |
 | Multi-surface work falls back to one path | Unexercised surfaces look covered even when no evidence exists | Enumerate each surface group and mark uncovered ones explicitly |
