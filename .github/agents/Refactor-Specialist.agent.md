@@ -49,6 +49,8 @@ A **proactive** code quality specialist that actively hunts for refactoring oppo
 
 Use the `refactoring-methodology` skill (`.github/skills/refactoring-methodology/SKILL.md`) for the reusable analysis workflow, checklist, output format, and verification pattern.
 
+For terminal and validation execution guardrails, load `.github/skills/terminal-hygiene/SKILL.md`.
+
 ## 🎯 Proactive Hunting Stance
 
 **Your job is to find improvement opportunities, not rubber-stamp "no changes needed".**

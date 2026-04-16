@@ -93,6 +93,8 @@ Performs retrospective analysis of development process to improve future executi
 
 For reusable retrospective workflow, evidence gathering, root-cause framing, report construction, scenario routing, and skill-usage audit methodology, load `.github/skills/process-analysis/SKILL.md`.
 
+For terminal and validation execution guardrails, load `.github/skills/terminal-hygiene/SKILL.md`.
+
 **Deviation Detection**:
 
 - Compare actual execution vs intended workflow (plan in session memory or issue comment vs git history)

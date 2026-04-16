@@ -29,6 +29,8 @@ A specification must define the requirements, constraints, and interfaces for th
 
 Use the `specification-authoring` skill (`.github/skills/specification-authoring/SKILL.md`) for the reusable authoring workflow, specification template, and ambiguity-reduction checklist.
 
+For terminal and validation execution guardrails, load `.github/skills/terminal-hygiene/SKILL.md`.
+
 ## File Deletion Procedure
 
 If maintaining specs requires removing a file, run the following command from the repository root in PowerShell:

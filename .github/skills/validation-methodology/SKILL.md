@@ -45,6 +45,10 @@ Always include the failure evidence, attempted diagnosis, and the next action in
 
 Use this method for code-review phases where independent prosecution, defense, and judgment need to converge on an evidence-based outcome.
 
+### Pre-Review Gate
+
+Before calling the prosecutor, run the repository validation commands that clear trivial lint, typecheck, or harness failures. The review cycle should spend its budget on substantive defects, not on already-known validation noise.
+
 ### Prosecution Depth Setup
 
 Before composing pass prompts:
@@ -106,6 +110,23 @@ For `documentation-only` reviews, include only the changed files in the reading 
 - Preserve all `pass: N` tags in the merged ledger.
 - When findings are deduplicated, credit the earliest pass.
 
+### Defense And Judgment
+
+After the merged ledger is finalized:
+
+1. Run exactly 1 defense pass against the merged prosecution ledger.
+2. Run exactly 1 judge pass against the merged prosecution ledger and defense output.
+3. Do not implement accepted fixes until the prosecution, defense, and judgment sequence completes.
+
+If the owning agent supports an express lane for strictly mechanical low-severity findings, partition those findings only after the merged prosecution ledger is available. The owning agent still owns whether express lane exists and how routed findings are dispatched.
+
+### Reusable Review Heuristics
+
+- Complete the full prosecution to defense to judgment cycle before fix routing.
+- Avoid blind retries; carry forward the failure evidence and current hypothesis with each re-delegation.
+- Preserve the change-type classification and any prosecution-depth exclusions in every prosecution prompt.
+- Keep merged-ledger deduplication evidence-based: same evidence at the same file and line collapses; materially different evidence remains additive.
+
 ## Boundaries
 
 This skill does not decide:
@@ -113,8 +134,11 @@ This skill does not decide:
 - which agent speaks next
 - when a step begins or ends
 - how accepted findings are routed to specialists
+- whether express-lane routing is available or how it dispatches
 - when CE Gate orchestration or PR creation runs
+- when review-mode entry, post-fix prosecution entry, or post-judgment follow-up occurs
 - whether durable handoff state is written
+- whether calibration or other write-back side effects occur
 
 Keep those decisions in the owning agent.
 

@@ -82,6 +82,8 @@ For parallel/serial Build-Test protocol and defect taxonomy, follow `.github/ski
 
 For PBT rollout policy and guardrails, follow `.github/skills/property-based-testing/SKILL.md`.
 
+For terminal and validation execution guardrails, load `.github/skills/terminal-hygiene/SKILL.md`.
+
 **Core Mandate**: Write tests that describe WHAT the system should do, not HOW it does it. Tests are specifications expressed in code and should read like documentation of expected behavior.
 
 **UI Component Tests (`*.test.tsx`)**:

@@ -117,6 +117,8 @@ Frame the feature as a customer problem before technical design begins.
 
 Load `.github/skills/customer-experience/SKILL.md` for reusable upstream framing methodology, question preparation, scenario drafting, design-intent framing, surface/readiness assessment, and downstream CE evidence capture structure.
 
+If the consumer repo includes a `## BDD Framework` section, also load `.github/skills/bdd-scenarios/SKILL.md` and author structured G/W/T scenarios using that guidance. Use `### SN — {title} (Type)` headings for scenario entries. Write Given/When/Then clauses in customer language with no technical jargon, implementation detail, or code terms. If `## BDD Framework` is not enabled, fall back to natural-language scenarios instead of forcing structured G/W/T output.
+
 ### Hub/Consumer Classification Gate
 
 Before proceeding, classify whether the issue proposes adding content that primarily manifests in one language's type system, runtime, or framework to a hub agent (any `.agent.md` in `.github/agents/`). Hub agents are language-agnostic — language-specific review rules, prosecution perspectives, and behavioral patterns belong in consumer-repo artifacts:

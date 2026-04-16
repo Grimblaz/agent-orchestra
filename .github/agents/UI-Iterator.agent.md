@@ -66,6 +66,8 @@ A systematic UI refinement mode using screenshot-based iteration. Evaluates curr
 
 Load `.github/skills/ui-iteration/SKILL.md` for the reusable polish loop, screenshot requirements, evaluation criteria, iteration defaults, output formats, and Tailwind/UI polish heuristics.
 
+For terminal and validation execution guardrails, load `.github/skills/terminal-hygiene/SKILL.md`.
+
 ## Browser Tools Reference
 
 For dev server lifecycle, navigation defaults, cleanup, and deterministic error handling, follow:

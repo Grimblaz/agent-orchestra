@@ -48,6 +48,8 @@ Keep all documentation accurate, up-to-date, and free of obsolete content. Value
 
 Use the `documentation-finalization` skill (`.github/skills/documentation-finalization/SKILL.md`) for the reusable documentation workflow, quality checks, conciseness guidance, and design-doc finalization process.
 
+For terminal and validation execution guardrails, load `.github/skills/terminal-hygiene/SKILL.md`.
+
 **Quality Gates** (must pass):
 
 - All dev docs reflect current state, design docs use correct terminology

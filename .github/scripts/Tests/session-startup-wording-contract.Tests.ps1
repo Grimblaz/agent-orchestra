@@ -21,11 +21,28 @@ Describe 'session startup wording contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CopilotInstructions = Join-Path $script:RepoRoot '.github\copilot-instructions.md'
         $script:SessionStartupSkill = Join-Path $script:RepoRoot '.github\skills\session-startup\SKILL.md'
         $script:CanonicalMarkerPath = '/memories/session/session-startup-check-complete.md'
         $script:DetectorCommandPattern = '(?ms)^pwsh -NoProfile -NonInteractive -File "\$copilotRoot/\.github/scripts/session-cleanup-detector\.ps1"\s*$'
         $script:ContractHeadingPattern = '(?m)^### Canonical Automatic Startup Guard Contract\s*$'
+        $script:PipelineEntryAgents = @(
+            @{
+                Name = 'Experience-Owner'
+                Path = Join-Path $script:RepoRoot '.github\agents\Experience-Owner.agent.md'
+            },
+            @{
+                Name = 'Solution-Designer'
+                Path = Join-Path $script:RepoRoot '.github\agents\Solution-Designer.agent.md'
+            },
+            @{
+                Name = 'Issue-Planner'
+                Path = Join-Path $script:RepoRoot '.github\agents\Issue-Planner.agent.md'
+            },
+            @{
+                Name = 'Code-Conductor'
+                Path = Join-Path $script:RepoRoot '.github\agents\Code-Conductor.agent.md'
+            }
+        )
         $script:ExpectedContract = [ordered]@{
             sessionStartupMarkerPath                    = $script:CanonicalMarkerPath
             checkMarkerBeforeAutomaticDetectorRun       = $true
@@ -111,21 +128,23 @@ Describe 'session startup wording contract' {
         $step4 | Should -Match ([regex]::Escape($script:CanonicalMarkerPath)) -Because 'the session-startup skill Step 4 must record the same canonical session-memory marker path'
     }
 
-    It 'requires copilot-instructions to retain the session-startup trigger stub' {
-        $instructions = & $script:GetDocumentState -Path $script:CopilotInstructions
-        $content = $instructions.Content
-        $sessionStartupSectionMatch = [regex]::Match($content, '(?ms)^## Session Startup Check\s*\r?\n(?<body>.*?)(?=^## |\z)')
+    It 'requires the four pipeline-entry agents to carry the session-startup trigger stub with the canonical wording shape' {
+        $script:PipelineEntryAgents.Count | Should -Be 4 -Because 'the startup trigger contract is owned by exactly the four pipeline-entry agents'
 
-        $content | Should -Match '(?m)^## Session Startup Check\s*$' -Because 'copilot-instructions must retain the Session Startup Check trigger-stub section'
-        $sessionStartupSectionMatch.Success | Should -BeTrue -Because 'copilot-instructions must keep a bounded Session Startup Check section'
+        foreach ($agent in $script:PipelineEntryAgents) {
+            $document = & $script:GetDocumentState -Path $agent.Path
+            $content = $document.Content
+            $processSectionMatch = [regex]::Match($content, '(?ms)^## Process\s*\r?\n(?<body>.*?)(?=^## |\z)')
 
-        $sessionStartupSection = $sessionStartupSectionMatch.Groups['body'].Value
+            $processSectionMatch.Success | Should -BeTrue -Because "$($agent.Name) must keep a bounded Process section for pre-response trigger handling"
 
-        $sessionStartupSection | Should -Match ([regex]::Escape("before responding to the user's first message")) -Because 'copilot-instructions must retain the startup timing phrase for the trigger stub'
-        $sessionStartupSection | Should -Match ([regex]::Escape('session-startup')) -Because 'copilot-instructions must still reference the session-startup skill from the trigger stub'
-        $sessionStartupSection | Should -Match '(?is)Skip the automatic startup check silently when neither .*? is set' -Because 'copilot-instructions must retain the silent-skip summary for missing startup root environment variables'
-        $sessionStartupSection | Should -Match '(?is)`pwsh`.*?(unavailable|missing)' -Because 'copilot-instructions must retain the silent-skip summary for missing pwsh'
-        $sessionStartupSection | Should -Match '(?is)non-JSON output' -Because 'copilot-instructions must retain the silent-skip summary for non-JSON detector output'
+            $processSection = $processSectionMatch.Groups['body'].Value
+
+            $processSection | Should -Match ([regex]::Escape('Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.')) -Because "$($agent.Name) must retain the canonical startup timing phrase in its Process section"
+            $processSection | Should -Match '(?is)Skip the automatic startup check silently when neither .*? is set' -Because "$($agent.Name) must retain the silent-skip summary for missing startup root environment variables"
+            $processSection | Should -Match '(?is)`pwsh`.*?(unavailable|missing)' -Because "$($agent.Name) must retain the silent-skip summary for missing pwsh"
+            $processSection | Should -Match '(?is)non-JSON output' -Because "$($agent.Name) must retain the silent-skip summary for non-JSON detector output"
+        }
     }
 
     It 'requires the session-startup skill to publish the canonical automatic startup guard contract' {

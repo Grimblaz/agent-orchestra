@@ -105,9 +105,23 @@ Quick checklist before declaring mode for a step:
 - If plan assumptions drift from code reality, adapt steps before delegation and record rationale.
 - **No scope exemption**: Code-Conductor must NEVER create plans directly, regardless of change size, scope classification tier, or multi-issue bundling. All plans are created by Issue-Planner — unconditionally.
 
+## Process
+
+Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.
+
+Skip the automatic startup check silently when neither `$env:COPILOT_ORCHESTRA_ROOT` nor `$env:WORKFLOW_TEMPLATE_ROOT` is set, `pwsh` is unavailable, or the detector returns non-JSON output.
+
+When this user-invocable agent receives a request referencing an existing GitHub issue, load the `provenance-gate` skill and follow its protocol.
+
+Skip the gate silently when no issue ID can be determined, existing warm handoff markers or a prior `<!-- first-contact-assessed-{ID} -->` assessment marker are present, or the current agent is not user-invocable.
+After the developer responds with any option except `Needs rework - stop here`, record the assessment marker using the skill's protocol.
+If MCP tools are unavailable or the API call fails, fail open and use the skill's fallback recording path.
+
+For terminal and validation execution guardrails, load `.github/skills/terminal-hygiene/SKILL.md`.
+
 ## Core Workflow
 
-Any future pre-response trigger step runs **before** the Core Workflow and does not renumber, replace, or subsume Step 0. Step 0 remains the first numbered workflow step after any pre-response trigger handling completes.
+Any future pre-response trigger step runs **before** the Core Workflow, stays outside the numbered workflow list, and does not renumber, replace, or subsume Step 0. Issue Transition remains Step 0 and the first numbered workflow step after any pre-response trigger handling completes.
 
 <!-- markdownlint-disable-next-line MD029 -->
 0. **Issue Transition (Step 0, before implementation)**:
@@ -320,7 +334,7 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 
 ## Review Reconciliation Loop (Mandatory)
 
-Use the `validation-methodology` skill (`.github/skills/validation-methodology/SKILL.md`) for the reusable review-reconciliation method: prosecution-depth setup, change-type classification, fixed 3-pass critic mechanics, prosecution-depth exclusions, and merged-ledger deduplication rules.
+Use the `validation-methodology` skill (`.github/skills/validation-methodology/SKILL.md`) for the reusable review-reconciliation method: pre-review gate, prosecution-depth setup, change-type classification, fixed 3-pass critic mechanics, defense and judgment sequencing, prosecution-depth exclusions, and merged-ledger deduplication rules.
 
 Code-Conductor retains the orchestration around that method: review-mode entry, express-lane routing, post-judgment routing, post-fix prosecution decisions, CE Gate sequencing, and any side-effecting write-back such as calibration re-activation entries.
 
@@ -342,9 +356,6 @@ Route express-eligible findings directly to the specialist dispatch queue with a
 **Scope restriction**: Express lane applies to **standard code review prosecution and post-fix targeted prosecution only** — it does NOT apply to proxy prosecution (GitHub review intake), CE prosecution, or design/plan review prosecution. (In proxy prosecution sessions, Code-Conductor does not have access to the diff context required to verify criteria 2 and 3. R4 and R5 still apply to proxy prosecution sessions.)
 
 **Tier 1 re-validation required**: After the specialist applies an express-lane fix, re-run Tier 1 validation (build + lint/typecheck + tests) before proceeding. (When batched under R4, Tier 1 re-validation runs once after all express-lane specialist fixes in the batch are applied.) If Tier 1 fails, route the failure via the Failure Triage Rule and resolve it before proceeding.
-
-- **Defense pass**: Invoke Code-Critic with the merged prosecution ledger and the marker `"Use defense review perspectives"`. Defense reviews the full ledger in a single pass and emits a Defense Report.
-- **Judge pass**: Invoke Code-Review-Response with both the merged prosecution ledger and the defense report. Judge rules final on all items and emits a score summary.
 
 #### Post-Judgment Re-Activation Detection
 
@@ -454,9 +465,6 @@ Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFE
 
 - **NEVER use Code-Smith for test files** — always use Test-Writer, even for "simple" fixes
 - **UI-Iterator is user-invoked** for polish passes, NOT part of standard implementation flow
-- **PRE-REVIEW GATE**: Before calling Code-Critic, run project validation commands (see `.github/copilot-instructions.md`) to clear trivial lint/type issues
-- **MANDATORY**: After Code-Critic returns, ALWAYS call Code-Review-Response to judge and categorize findings. Code-Conductor then routes accepted fixes to appropriate specialists per the Agent Selection table.
-- **MANDATORY**: During review phases, run the full prosecution → defense → judge pipeline to completion before implementing accepted fixes.
 - **SIGNIFICANT IMPROVEMENT RULE**: For out-of-scope/non-blocking improvements estimated >1 day, create a follow-up GitHub issue automatically (with links back to the PR/review comment). Do not block in-scope fixes on that work unless it is an AC requirement.
 - **Tech-debt closure**: When the plan resolves a GitHub issue labeled `tech-debt`, include `Closes #tech-debt-N` in the PR body alongside the main `Closes #{issue}` — GitHub will auto-close both on merge.
 - **Mixed tasks** (e.g., review feedback): Split by file type — test changes → Test-Writer, source changes → Code-Smith, doc changes → Doc-Keeper
@@ -467,15 +475,25 @@ When delegating to subagents, instruct them to use the relevant skill(s):
 
 | Skill                            | When to Instruct Subagent to Use                                                   |
 | -------------------------------- | ---------------------------------------------------------------------------------- |
+| `adversarial-review`             | Running prosecution passes or defense perspectives with Code-Critic                |
+| `customer-experience`            | Framing customer journeys or capturing CE evidence with Experience-Owner           |
+| `design-exploration`             | Researching and converging technical design options with Solution-Designer         |
+| `documentation-finalization`     | Updating design docs, READMEs, or implementation-facing docs with Doc-Keeper       |
 | `frontend-design`                | Designing new UI components, screens, or evaluating for uniqueness                 |
+| `implementation-discipline`      | Implementing bounded plan steps or verifying production wiring with Code-Smith     |
+| `parallel-execution`             | Coordinating concurrent implementation paths, convergence gates, or triage routing |
+| `plan-authoring`                 | Drafting or refining execution plans with Issue-Planner                            |
+| `property-based-testing`         | Adding randomized testing, validating input ranges, or verifying invariants        |
+| `refactoring-methodology`        | Running a proportionate structural cleanup pass with Refactor-Specialist           |
+| `research-methodology`           | Gathering verified multi-file findings for a research document with Research-Agent |
+| `review-judgment`                | Ruling on prosecution plus defense ledgers with Code-Review-Response               |
 | `skill-creator`                  | Adding new skills, updating skill templates, or reviewing skill structure          |
 | `software-architecture`          | Evaluating layer boundaries, dependency flow, or ADR-level decisions               |
-| `test-driven-development`        | Writing tests first, red-green-refactor, or validating quality gates               |
-| `ui-testing`                     | Writing component-level React tests, fixing flaky tests, or establishing patterns  |
 | `systematic-debugging`           | Debugging failures, investigating flaky tests, or tracking root causes             |
+| `test-driven-development`        | Writing tests first, red-green-refactor, or validating quality gates               |
+| `ui-iteration`                   | Running screenshot-driven UI polish passes with UI-Iterator                        |
+| `ui-testing`                     | Writing component-level React tests, fixing flaky tests, or establishing patterns  |
 | `webapp-testing`                 | Creating or improving browser-based E2E coverage, test stability, or CI            |
-| `parallel-execution`             | Coordinating concurrent implementation paths, convergence gates, or triage routing |
-| `property-based-testing`         | Adding randomized testing, validating input ranges, or verifying invariants        |
 
 <!-- Keep in sync: when adding or removing a delegation skill in .github/skills/, update this table (delegation-scoped: only skills Code-Conductor instructs subagents to use). Always also update Process-Review's Skill Mapping Reference table (all-skills scope). -->
 
@@ -483,6 +501,10 @@ Include in prompt: _"Use the `{skill-name}` skill (`.github/skills/{skill-name}/
 
 **Skill-specific instructions**:
 
+- **Implementation work**: Load `implementation-discipline`. Add `software-architecture` when the change affects boundaries or new seams.
+- **Review work**: Load `adversarial-review` for Code-Critic prosecution or defense passes and `review-judgment` for Code-Review-Response judgment.
+- **Planning and design work**: Load `plan-authoring`, `design-exploration`, or `customer-experience` to match the delegated phase.
+- **Documentation and refactoring**: Load `documentation-finalization` for Doc-Keeper and `refactoring-methodology` for Refactor-Specialist.
 - **Debugging**: Load `systematic-debugging` skill. Follow Iron Law: root cause before fixes.
 - **Testing**: Load `test-driven-development` and/or `ui-testing` as appropriate.
 - **UI Work**: Load `frontend-design` for styling and component structure.

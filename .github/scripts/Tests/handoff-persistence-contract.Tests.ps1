@@ -33,10 +33,30 @@ Describe 'execution handoff persistence contract' {
         $script:IssuePlanner = Join-Path $script:RepoRoot '.github\agents\Issue-Planner.agent.md'
         $script:CodeConductor = Join-Path $script:RepoRoot '.github\agents\Code-Conductor.agent.md'
         $script:CopilotInstructions = Join-Path $script:RepoRoot '.github\copilot-instructions.md'
+        $script:ExperienceOwner = Join-Path $script:RepoRoot '.github\agents\Experience-Owner.agent.md'
+        $script:SolutionDesigner = Join-Path $script:RepoRoot '.github\agents\Solution-Designer.agent.md'
         $script:TrackingInstructions = Join-Path $script:RepoRoot '.github\instructions\tracking-format.instructions.md'
         $script:StartIssuePrompt = Join-Path $script:RepoRoot '.github\prompts\start-issue.prompt.md'
         $script:PlanStorage = Join-Path $script:RepoRoot 'Documents\Design\plan-storage.md'
         $script:HubModeUx = Join-Path $script:RepoRoot 'Documents\Design\hub-mode-ux.md'
+        $script:PipelineEntryAgents = @(
+            @{
+                Name = 'Experience-Owner'
+                Path = $script:ExperienceOwner
+            },
+            @{
+                Name = 'Solution-Designer'
+                Path = $script:SolutionDesigner
+            },
+            @{
+                Name = 'Issue-Planner'
+                Path = $script:IssuePlanner
+            },
+            @{
+                Name = 'Code-Conductor'
+                Path = $script:CodeConductor
+            }
+        )
 
         $script:ReadContent = {
             param([string]$Path)
@@ -140,13 +160,22 @@ Describe 'execution handoff persistence contract' {
         $codeConductor | Should -Match $script:LatestCommentWinsPattern -Because 'the lookup contract must keep latest-comment-wins semantics'
     }
 
-    It 'requires copilot-instructions to describe the first-contact provenance gate trigger' {
-        $content = & $script:ReadContent -Path $script:CopilotInstructions
+    It 'requires the four pipeline-entry agents to describe the first-contact provenance gate trigger' {
+        $script:PipelineEntryAgents.Count | Should -Be 4 -Because 'the provenance trigger contract is owned by exactly the four pipeline-entry agents'
 
-        $content | Should -Match $script:ProvenanceGateMarkerPattern -Because 'copilot-instructions must reference the first-contact-assessed marker for the provenance gate trigger'
-        $content | Should -Match '(?is)First-Contact Provenance Gate' -Because 'copilot-instructions must contain the provenance gate section heading'
-        $content | Should -Match '(?is)(any option except|except).{0,60}Needs rework' -Because 'copilot-instructions or its referenced instructions must describe conditional marker posting (skip on Needs rework)'
-        $content | Should -Match '(?is)(MCP tools are unavailable|API call fails).{0,80}fail open' -Because 'copilot-instructions must describe fail-open semantics when MCP tools are unavailable'
+        foreach ($agent in $script:PipelineEntryAgents) {
+            $content = & $script:ReadContent -Path $agent.Path
+            $processSectionMatch = [regex]::Match($content, '(?ms)^## Process\s*\r?\n(?<body>.*?)(?=^## |\z)')
+
+            $processSectionMatch.Success | Should -BeTrue -Because "$($agent.Name) must keep a bounded Process section for pre-response trigger handling"
+
+            $processSection = $processSectionMatch.Groups['body'].Value
+
+            $processSection | Should -Match ([regex]::Escape('When this user-invocable agent receives a request referencing an existing GitHub issue, load the `provenance-gate` skill and follow its protocol.')) -Because "$($agent.Name) must reference the provenance-gate skill from its Process section"
+            $processSection | Should -Match $script:ProvenanceGateMarkerPattern -Because "$($agent.Name) must reference the first-contact-assessed marker for the provenance gate trigger"
+            $processSection | Should -Match '(?is)(any option except|except).{0,60}Needs rework' -Because "$($agent.Name) must describe conditional marker posting (skip on Needs rework)"
+            $processSection | Should -Match '(?is)(MCP tools are unavailable|API call fails).{0,80}fail open' -Because "$($agent.Name) must describe fail-open semantics when MCP tools are unavailable"
+        }
     }
 
     It 'requires provenance-gate skill file to exist and use the same marker pattern' {

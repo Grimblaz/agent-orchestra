@@ -57,6 +57,8 @@ A professional self-review agent that performs comprehensive analysis of code qu
 
 Load `.github/skills/adversarial-review/SKILL.md` for the reusable prosecution methodology, six-perspective review checklist, design/product challenge procedures, defense workflow, proxy-review scoring process, browser-review method, and standard report formats.
 
+For terminal and validation execution guardrails while running review checks, load `.github/skills/terminal-hygiene/SKILL.md`.
+
 ## 🚨 CRITICAL: Read-Only Mode
 
 **YOU MUST NEVER MAKE CHANGES TO CODE OR FILES**

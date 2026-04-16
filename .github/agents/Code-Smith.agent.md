@@ -74,6 +74,8 @@ For Build-Test orchestration (Requirement Contract, defect triage, convergence g
 
 Use the `implementation-discipline` skill (`.github/skills/implementation-discipline/SKILL.md`) for the reusable pre-implementation review, minimal-coding rules, delegation-over-duplication guidance, and markdown hygiene.
 
+For terminal and validation execution guardrails, load `.github/skills/terminal-hygiene/SKILL.md`.
+
 **🚨 Bad Test Detection (CRITICAL - STOP IMMEDIATELY)**:
 
 If you encounter ANY of these situations, **STOP WORK IMMEDIATELY** and return:
