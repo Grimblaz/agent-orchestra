@@ -71,7 +71,7 @@ Check:
 - Architecture-rule compliance and layer direction
 - Integration wiring for new components
 - Data integration for newly introduced fields, constants, and maps
-- Domain-alignment mismatches across validators, parsers, and converters
+- Domain-alignment mismatches across validators, parsers, and converters — identify peers via field-name grep, plan consultation for aliases, and call-chain tracing
 
 ### 2. Security
 

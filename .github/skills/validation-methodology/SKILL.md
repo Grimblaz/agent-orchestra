@@ -54,7 +54,7 @@ Before calling the prosecutor, run the repository validation commands that clear
 
 Before composing pass prompts:
 
-1. Run `aggregate-review-scores.ps1` and capture `prosecution_depth:` output.
+1. Run `.github/scripts/aggregate-review-scores.ps1` and capture `prosecution_depth:` output.
 2. Parse the per-category recommendations into a depth map (`category` → `full` / `light` / `skip`).
 3. Check `override_active:`. If it is `true`, force all categories to `full` and skip further depth logic.
 4. Record the depth map for later re-activation checks.
