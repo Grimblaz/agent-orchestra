@@ -4,8 +4,8 @@ name: implementation-discipline
 description: Minimal implementation workflow for plan-driven coding. Use when preparing a small implementation slice, applying requirements-first coding discipline, or verifying that new code delegates instead of duplicating behavior. DO NOT USE FOR: test authoring strategy (use test-driven-development) or refactoring-only passes (use refactoring-methodology)
 ---
 
-<!-- markdownlint-disable-file MD041 MD003 -->
 <!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Copilot Orchestra; assumes implementation work is plan-driven and validated in-repo. -->
+<!-- markdownlint-disable-file MD041 MD003 -->
 
 # Implementation Discipline
 

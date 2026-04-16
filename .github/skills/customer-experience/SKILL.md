@@ -4,8 +4,8 @@ name: customer-experience
 description: Reusable customer framing and CE evidence methodology. Use when turning issue scope into customer journeys, drafting functional plus intent scenarios, or capturing CE Gate evidence against design intent. DO NOT USE FOR: GitHub setup, completion-marker ownership, or adversarial CE prosecution and judgment (keep those in Experience-Owner.agent.md)
 ---
 
-<!-- markdownlint-disable-file MD041 MD003 -->
 <!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Copilot Orchestra; assumes pipeline-entry agents retain GitHub ownership, trigger routing, and completion-marker responsibilities. -->
+<!-- markdownlint-disable-file MD041 MD003 -->
 
 # Customer Experience
 

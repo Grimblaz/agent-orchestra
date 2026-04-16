@@ -4,8 +4,8 @@ name: refactoring-methodology
 description: Proactive refactoring workflow for touched files and nearby debt. Use when hunting extraction opportunities, evaluating duplication or oversized files, or improving structure without changing intended behavior. DO NOT USE FOR: adversarial defect review (use adversarial-review) or net-new feature implementation (use implementation-discipline)
 ---
 
-<!-- markdownlint-disable-file MD041 MD003 -->
 <!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Copilot Orchestra; assumes repository refactors are validated against existing tests and architecture rules. -->
+<!-- markdownlint-disable-file MD041 MD003 -->
 
 # Refactoring Methodology
 

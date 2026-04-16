@@ -4,8 +4,8 @@ name: specification-authoring
 description: Structured authoring guidance for formal specification documents. Use when drafting machine-readable requirements, filling the repository specification template, or refining interfaces and acceptance criteria into a self-contained spec. DO NOT USE FOR: implementation planning (use plan-authoring) or broad design exploration (use brainstorming)
 ---
 
-<!-- markdownlint-disable-file MD041 MD003 -->
 <!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Copilot Orchestra; outputs repository-local specification documents. -->
+<!-- markdownlint-disable-file MD041 MD003 -->
 
 # Specification Authoring
 

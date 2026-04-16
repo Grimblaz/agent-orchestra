@@ -4,8 +4,8 @@ name: plan-authoring
 description: Reusable implementation-plan authoring methodology. Use when running read-only discovery, drafting execution steps with CE Gate coverage, or preparing a plan for adversarial stress-testing and approval. DO NOT USE FOR: plan persistence, approval-policy enforcement, or direct implementation work (keep those in Issue-Planner.agent.md or use implementation-discipline)
 ---
 
-<!-- markdownlint-disable-file MD041 MD003 -->
 <!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Copilot Orchestra; assumes Issue-Planner retains no-edit boundaries, approval prompting, and session-memory persistence semantics. -->
+<!-- markdownlint-disable-file MD041 MD003 -->
 
 # Plan Authoring
 
