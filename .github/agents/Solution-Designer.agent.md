@@ -59,6 +59,18 @@ Design exploration and documentation agent. Explores options collaboratively wit
 
 **Pipeline**: Experience-Owner (optional, customer framing) → Solution-Designer (optional, technical design) → Issue-Planner → Code-Conductor
 
+## Process
+
+Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.
+
+Skip the automatic startup check silently when neither `$env:COPILOT_ORCHESTRA_ROOT` nor `$env:WORKFLOW_TEMPLATE_ROOT` is set, `pwsh` is unavailable, or the detector returns non-JSON output.
+
+When this user-invocable agent receives a request referencing an existing GitHub issue, load the `provenance-gate` skill and follow its protocol.
+
+Skip the gate silently when no issue ID can be determined, existing warm handoff markers or a prior `<!-- first-contact-assessed-{ID} -->` assessment marker are present, or the current agent is not user-invocable.
+After the developer responds with any option except `Needs rework - stop here`, record the assessment marker using the skill's protocol.
+If MCP tools are unavailable or the API call fails, fail open and use the skill's fallback recording path.
+
 ## Questioning Policy (Mandatory)
 
 Every design decision, approval request, or branch-point question **MUST** use `#tool:vscode/askQuestions`. This is not negotiable.
@@ -81,25 +93,7 @@ Create a feature branch if one doesn't already exist.
 
 Design exploration happens in **conversation**, not documents. Discuss first, document after decisions.
 
-### Load Skills First
-
-Before researching domain topics, load the appropriate skill:
-
-- **Domain rules and terminology**: load the project-relevant skill from `.github/skills/` when available
-- **Design trade-offs**: `.github/skills/brainstorming/SKILL.md`
-- **Browser tools patterns**: `.github/instructions/browser-tools.instructions.md` (if present); `.github/instructions/browser-mcp.instructions.md` (if present — legacy from pre-#55 project setups; Playwright MCP fallback)
-
-### View Current App (Optional)
-
-When the design involves UI changes, new screens, or modifications to existing views, and browser tools are available, use them to see what currently exists before proposing changes.
-
-1. **Check dev server**: Verify the project's configured local preview URL is running (see `.github/copilot-instructions.md` and `.github/instructions/browser-tools.instructions.md` (if present) for startup details)
-2. **Navigate**: Use `openBrowserPage` to visit relevant routes or screens for the feature under design
-3. **Capture**: Use `screenshotPage` to capture current state — screenshots appear in conversation output for grounding design discussion.
-4. **Inspect**: Use `readPage` for accessibility tree / DOM structure when layout details matter
-5. **Share**: Include screenshots in conversation to ground design discussions in reality rather than assumptions
-
-This is optional context-gathering — skip if the design is purely backend/domain logic or the change is well-understood.
+Load `.github/skills/design-exploration/SKILL.md` for reusable research sequencing, optional current-app inspection, option comparison, question preparation, end-to-end design summarization, testing-scope selection, and design-payload preparation.
 
 ### Hub/Consumer Classification Gate
 
@@ -110,52 +104,6 @@ Before proceeding, classify whether the issue proposes adding content that prima
 - **Reusable cross-stack skills** → `.github/skills/{skill-name}/`
 
 If the gate fires, redirect the proposal to the appropriate consumer artifact and frame the issue accordingly. The user may override with explicit rationale if the proposed content is genuinely language-agnostic.
-
-### Collaboration Pattern
-
-For each design decision:
-
-1. **Research**: Search skills, `Documents/Research/`, `Documents/Design/`, `Documents/Decisions/`, and external patterns
-   - Check `.github/architecture-rules.md` for existing architecture constraints, layer boundaries, and dependency rules
-2. **Present options**: 2-3 options with explicit pros AND cons for each. Label one "Recommended" with rationale grounded in project goals and constraints.
-3. **Ask for decision**: Use `#tool:vscode/askQuestions` with a concise prompt summarizing the options (e.g., "Option A (recommended): X. Option B: Y. Option C: Z. Which do you prefer?"). Full reasoning MUST be presented in conversation text before the call — conversation text is the primary reading experience in direct invocation. Also embed full reasoning in option descriptions: recommended option gets detailed trade-off analysis; alternatives get 1-line summaries to manage total prompt length. If total description content exceeds ~4K chars, further abbreviate alternatives. **Hard rule**: Never present options in text and then end your turn. Ending a turn with options but without immediately calling `#tool:vscode/askQuestions` wastes a premium request.
-   - **`/fork` for significant trade-offs**: When an alternative option has substantial trade-offs worth exploring in depth, and exploring it in-thread would pollute the main design path, suggest `/fork` to branch the conversation. Example: "I can explore Option B in depth in a parallel thread — type `/fork` and describe what you want to explore there. We'll continue refining Option A here." Note: fork findings don't return automatically — share key discoveries back in this thread before finalizing.
-4. **Record**: Note the decision for later documentation.
-
-Repeat until all design questions are resolved.
-
-### End-to-End Description (Before Finalizing)
-
-Before wrapping up design, present a complete picture:
-
-1. **Summary**: What we're building, key decisions made
-2. **User Experience**: What users see/do differently, where in UI, and what feedback they receive
-3. **System Touchpoints**: Screens/components, domain/application systems, data model changes, interactions with existing features.
-4. **Edge Cases**: Unusual scenarios and conflicts with existing behavior
-
-### Testing Scope
-
-Decide testing requirements using this guide:
-
-| Change Type                            | Unit | Integration | E2E |
-| -------------------------------------- | ---- | ----------- | --- |
-| Single system change                   | ✅   | ❌          | ❌  |
-| Internal refactor (no behavior change) | ✅   | ❌          | ❌  |
-| Cross-system feature                   | ✅   | ✅          | ❌  |
-| New user-facing feature                | ✅   | Maybe       | ✅  |
-| Critical path change                   | ✅   | ✅          | ✅  |
-
-Identify specific integration test scenarios ([System A] + [System B] → [Expected Outcome]) and E2E user journeys.
-
-### Document Decisions
-
-After user confirms decisions (not during exploration):
-
-- Prepare design content for the **issue body** (full design details, decisions, rationale, acceptance criteria)
-- Standalone decision records in `Documents/Decisions/` are created by Doc-Keeper during the implementation phase — Solution-Designer captures decision rationale in the issue body
-- No TypeScript, no implementation phases — those belong in Issue-Planner
-- Pseudo-code only when prose is unclear, keep abstract (e.g., "BaseValue × Modifier × ConstraintFactor")
-- **Note**: A domain-based design doc under `Documents/Design/{domain-slug}.md` is committed with the implementation code (same PR by Code-Conductor, delegated to Doc-Keeper), not during design phase
 
 ## Adversarial Design Challenge
 

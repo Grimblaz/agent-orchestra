@@ -1,10 +1,10 @@
-<!-- markdownlint-disable-file MD041 MD003 MD033 -->
-<!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Copilot Orchestra; assumes tests are authored against repo-defined commands, architecture rules, and quality thresholds. -->
 ---
-
 name: test-driven-development
 description: Test-Driven Development workflow guidance, quality standards, and practical patterns. Use when writing tests first, implementing to pass tests, validating quality gates, or refactoring safely. DO NOT USE FOR: debugging existing failures (use systematic-debugging), React component test patterns (use ui-testing), E2E browser tests (use webapp-testing), randomized property verification (use property-based-testing), or architecture evaluation and design decisions (use software-architecture)
 ---
+
+<!-- markdownlint-disable-file MD041 MD003 MD033 -->
+<!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Copilot Orchestra; assumes tests are authored against repo-defined commands, architecture rules, and quality thresholds. -->
 
 # Test-Driven Development Skill
 

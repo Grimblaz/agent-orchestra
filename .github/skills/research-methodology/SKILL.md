@@ -1,10 +1,11 @@
-<!-- markdownlint-disable-file MD041 MD003 -->
-<!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Copilot Orchestra; assumes evidence is gathered from workspace and approved external sources. -->
 ---
 
 name: research-methodology
 description: Evidence-driven research methodology for technical analysis and recommendation building. Use when gathering verified findings, cross-referencing internal and external sources, or converging multiple options into one recommended approach. DO NOT USE FOR: implementation work (use implementation-discipline) or debugging a live failure path (use systematic-debugging)
 ---
+
+<!-- markdownlint-disable-file MD041 MD003 -->
+<!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Copilot Orchestra; assumes evidence is gathered from workspace and approved external sources. -->
 
 # Research Methodology
 

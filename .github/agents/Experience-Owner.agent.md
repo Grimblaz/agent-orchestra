@@ -72,6 +72,18 @@ Customer experience bookend. Frames features in customer language upstream (befo
 Issue → @Experience-Owner (upstream framing) → @Solution-Designer → @Issue-Planner → @Code-Conductor (implementation + CE Gate) → PR
 CE Gate flow: @Code-Conductor → @Experience-Owner (evidence capture) → @Code-Conductor → Code-Critic CE prosecution → defense → judge
 
+## Process
+
+Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.
+
+Skip the automatic startup check silently when neither `$env:COPILOT_ORCHESTRA_ROOT` nor `$env:WORKFLOW_TEMPLATE_ROOT` is set, `pwsh` is unavailable, or the detector returns non-JSON output.
+
+When this user-invocable agent receives a request referencing an existing GitHub issue, load the `provenance-gate` skill and follow its protocol.
+
+Skip the gate silently when no issue ID can be determined, existing warm handoff markers or a prior `<!-- first-contact-assessed-{ID} -->` assessment marker are present, or the current agent is not user-invocable.
+After the developer responds with any option except `Needs rework - stop here`, record the assessment marker using the skill's protocol.
+If MCP tools are unavailable or the API call fails, fail open and use the skill's fallback recording path.
+
 ## Questioning Policy (Mandatory)
 
 Every decision, approval request, or branch-point question **MUST** use `#tool:vscode/askQuestions`. This is not negotiable.
@@ -103,12 +115,7 @@ When the user has not yet created an issue, Experience-Owner creates it. Follow 
 
 Frame the feature as a customer problem before technical design begins.
 
-### Collaboration Pattern
-
-At each major step, decide whether to proceed autonomously or pause for user input. Default to autonomous continuation within a step; pause between steps only when a user decision is required.
-
-- **Checkpoint examples**: issue number needed, ambiguous scope or persona, conflicting signals in research, architectural constraints unclear
-- **Hub-mode guidance**: When called by Code-Conductor as part of the full pipeline, target 2–3 `#tool:vscode/askQuestions` calls — one for scope or persona ambiguity, one for key framing decisions, and one to confirm CE Gate scenario drafts with the user.
+Load `.github/skills/customer-experience/SKILL.md` for reusable upstream framing methodology, question preparation, scenario drafting, design-intent framing, surface/readiness assessment, and downstream CE evidence capture structure.
 
 ### Hub/Consumer Classification Gate
 
@@ -119,77 +126,6 @@ Before proceeding, classify whether the issue proposes adding content that prima
 - **Reusable cross-stack skills** → `.github/skills/{skill-name}/`
 
 If the gate fires, redirect the proposal to the appropriate consumer artifact and frame the issue accordingly. The user may override with explicit rationale if the proposed content is genuinely language-agnostic.
-
-### Customer Problem Statement
-
-Write the customer-facing problem statement in non-technical language:
-
-- What does the customer experience today that is unsatisfactory?
-- What would a good outcome look like from the customer's perspective?
-- What user segments are affected and how do their needs differ?
-
-### User Journeys
-
-Map the journeys affected by this feature:
-
-- **Current journey**: What does the customer do today (including workarounds)?
-- **Target journey**: What should the customer experience after this feature ships?
-- **Edge journeys**: Variance for different user segments or usage contexts
-
-### Scenarios
-
-Write 2–4 customer-perspective scenarios:
-
-- **Functional scenarios**: Verifies the feature works (e.g., "Authenticate as a new user and verify the welcome flow completes without error")
-- **Intent scenarios**: Verifies design intent was achieved (e.g., "Verify the welcome flow communicates the product's value proposition within the first 3 steps")
-
-Scenarios become the CE Gate checklist for downstream validation.
-
-#### Structured Scenario Authoring (BDD opt-in)
-
-When the consumer repo's `copilot-instructions.md` contains a `## BDD Framework` section, write scenarios in G/W/T (Given/When/Then) format using the `bdd-scenarios` skill (`.github/skills/bdd-scenarios/SKILL.md`). When the `## BDD Framework` section is absent, use the current natural-language scenario format above (default fallback).
-
-**Heading convention**: `### SN — {title} (Type)` where N is a sequential integer and Type is `Functional` or `Intent`.
-
-```markdown
-### S1 — User completes onboarding (Functional)
-
-Given a new user has opened the application for the first time
-When they follow the onboarding prompts
-Then they reach the home screen with personalized content
-```
-
-**Customer-language principle**: G/W/T keywords are structural framing only. Write clause content in customer terms — no method names, no file paths, no implementation details.
-
-### Named Design Decisions (D1–DN)
-
-As design decisions are made (during Solution-Designer and Issue-Planner phases), record them in the issue body using the D1–DN convention. Experience-Owner sets up the D1–DN section structure during upstream framing — decisions are populated progressively as Solution-Designer and Issue-Planner formalize them. Experience-Owner is responsible for giving each decision a customer-perspective name and framing it in user-outcome terms. These become the systematic verification checklist at the CE Gate.
-
-### Customer Surface Identification
-
-Identify the customer-facing surface type:
-
-- Web UI → native browser tools (`openBrowserPage` + `screenshotPage`) or Playwright MCP fallback
-- REST / GraphQL API → `curl` or `httpie` in terminal
-- CLI → invoke command in terminal with test args
-- SDK → example invocation in terminal
-- Batch / pipeline → invoke with representative test data
-- None → CE Gate not applicable; document reason. Process-only and docs-only issues may remain `ce_gate: false` when they do not change a customer-facing runtime surface.
-
-If the same feature spans 3 or more customer-facing surfaces, name each distinct surface group explicitly before planning begins. Group surfaces by journey meaning, not by component reuse. At minimum, keep these groups separate when present: deep-task/detail surfaces, checklist/flow surfaces, summary/preview surfaces, and parent/admin setup surfaces.
-
-### Design Intent Reference
-
-Summarize the key UX goal this feature is meant to achieve (1–2 sentences). This becomes the "Design Intent" field in the `[CE GATE]` plan step, and Code-Conductor reads it when delegating to Experience-Owner for CE Gate evidence capture, and passes it to Code-Critic for intent match evaluation.
-
-### CE Gate Readiness Assessment
-
-Document:
-
-1. Surface type (identified above)
-2. Tool availability (browser tools enabled? API accessible locally? CLI invocable?)
-3. Manual fallback if primary CE Gate tool is unavailable. Manual fallback must still enumerate every distinct surface group in scope and explicitly mark each unexercised surface as uncovered with a reason; uncovered surfaces do not inherit coverage from sibling surfaces.
-4. Draft scenarios (2–4, both functional and intent types)
 
 ## Update Issue with Customer Framing
 
@@ -232,53 +168,7 @@ Called by Code-Conductor as a subagent during the CE Gate step. Exercises scenar
 
 **Phase 2 conditional delegation**: When Phase 2 BDD runner dispatch is active, Code-Conductor determines the delegation scope before calling Experience-Owner. Experience-Owner receives only the scenarios CC delegates: `[manual]` only (if all `[auto]` runners passed), all scenarios (if runner pre-check failed or CC is in Phase 1 mode), or a mixed list (if some `[auto]` runners failed). Exercise whatever scenarios are in the delegation list — do not attempt to exercise scenarios that were not delegated (the runner has already covered them).
 
-### Before Exercising Scenarios
-
-1. Read the issue body to retrieve:
-   - CE Gate scenarios (functional + intent)
-   - Named design decisions (D1–DN) to verify
-   - Design intent reference
-   - Customer surface type and tool availability
-2. Verify the dev environment is running
-3. Note the Design Intent reference — this frames the evaluation
-4. Parse `[requires: service-name:port]` annotations on delegated scenarios (see bdd-scenarios skill § Service Dependency Annotations). For each unique port, run `pwsh -NoProfile -NonInteractive -File .github/scripts/check-port.ps1 -Port {port}` — if `InUse` is `false`, mark the scenario `INCONCLUSIVE (required service unavailable: service-name:port)` and skip it. Fail-open: if the script is unavailable or fails, proceed with all scenarios.
-
-### Systematic Scenario Exercise
-
-For each scenario:
-
-1. Exercise it using the appropriate tool (browser, curl, terminal)
-2. Capture evidence (screenshot, terminal output, API response body)
-3. Note: PASS / FAIL / INCONCLUSIVE with captured evidence
-
-### D1–DN Systematic Verification
-
-For each named design decision (D1, D2, … DN):
-
-1. Read the decision description from the issue body
-2. Exercise the relevant scenario or interaction that would reveal whether this decision was followed
-3. Note: VERIFIED (evidence shows decision was honored) / NOT VERIFIED (cannot confirm from evidence) / VIOLATED (evidence contradicts decision)
-
-### Exploratory Validation
-
-After scripted scenarios, perform unscripted exploration:
-
-- Navigate the feature freely as a customer would
-- Observe the end-to-end flow holistically
-- Look for gaps not covered by scripted scenarios
-- Note any friction, confusion, or unexpected behavior
-
-This is the "now that we can see the completed product, does it accomplish the goals we set out to achieve?" step.
-
-### Evidence Handoff
-
-Return to Code-Conductor with a structured evidence summary:
-
-- Scenario results (PASS / FAIL / INCONCLUSIVE for each) — when BDD is enabled, label each result with its scenario ID: e.g., `S1: PASS`, `S2: FAIL`, `S3: INCONCLUSIVE`. Code-Conductor's pre-flight check and Code-Critic's CE prosecution mode both rely on S-IDs appearing in the evidence summary.
-- D1–DN verification results
-- Exploratory validation observations
-- Screenshots or output captured (as references)
-- **DO NOT** include prosecution findings, scores, or recommendations — that is Code-Critic's job
+Load `.github/skills/customer-experience/SKILL.md` for the reusable downstream workflow covering delegated scenario exercise, evidence capture, named-decision verification, exploratory validation, and structured evidence summaries.
 
 Code-Conductor then passes this evidence to Code-Critic with the marker `"Use CE review perspectives"`.
 
