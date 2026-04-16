@@ -72,17 +72,7 @@ Implements code to satisfy the approved tests and plan, writing minimal code (YA
 
 For Build-Test orchestration (Requirement Contract, defect triage, convergence gate, loop budget), follow `.github/skills/parallel-execution/SKILL.md`.
 
-**Pre-Implementation Review**:
-
-- Always review the plan and project architecture first
-- Keep the domain/core logic layer "pure" (framework-agnostic, no UI/runtime coupling) and follow the project architecture rules (see `.github/architecture-rules.md`)
-- Before coding, outline an implementation plan (high-level steps, files to change)
-- Apply the "Replaceability Test" ("If we switch UI tech, would this code change? If yes → UI layer, if no → domain/core logic layer")
-
-**Implementation Standards**:
-
-- Do not add speculative features or extra methods – focus only on passing the existing tests
-- Use meaningful names, helper functions, and straightforward logic
+Use the `implementation-discipline` skill (`.github/skills/implementation-discipline/SKILL.md`) for the reusable pre-implementation review, minimal-coding rules, delegation-over-duplication guidance, and markdown hygiene.
 
 **🚨 Bad Test Detection (CRITICAL - STOP IMMEDIATELY)**:
 
@@ -152,54 +142,6 @@ Your job is NOT just "make tests pass" — you must ensure the solution meets re
 
 In parallel mode, this check is mandatory before claiming implementation complete.
 
-**Conciseness & Quality Rules**:
-
-- **Extract helper methods** when functions approach or exceed project-configured complexity/size limits
-- **Maximum file size**: follow project-configured lint and architecture standards in `.github/copilot-instructions.md`
-- **DRY principle**: Use existing utilities, don't duplicate logic
-- **Single Responsibility**: Each method should do one thing well
-- **Avoid premature optimization**: Write clear code first, optimize if needed
-
-**🚨 Extraction Must Delegate (Critical)**:
-
-When creating new files or classes that need existing calculations:
-
-1. **Search first**: Does this formula/logic exist elsewhere? (`grep_search` for key terms)
-2. **Inject, don't copy**: If logic exists, inject the dependency and call it
-3. **Extend via composition**: Use pipelines/strategies/decorators, not duplication
-
-**Anti-pattern to AVOID**:
-
-```typescript
-// ❌ WRONG - Duplicated formula in new file
-class NewProcessor {
-  calculate(a, b) {
-    return a.quantity * a.unitPrice; // Copied from CalculationService!
-  }
-}
-```
-
-**Correct pattern**:
-
-```typescript
-// ✅ RIGHT - Delegates to existing system
-class NewProcessor {
-  constructor(private calculator: CalculationService) {}
-  calculate(a, b) {
-    return this.calculator.calculateSubtotal(a, b); // Single source of truth
-  }
-}
-```
-
-See `.github/architecture-rules.md` → "Extraction & Extension Principles" for details.
-
-**🔧 When extracting code**: Load `.github/skills/software-architecture/SKILL.md` and apply full architecture review (layer placement, SOLID, naming, file size guidelines).
-
-**Workflow**:
-
-- After implementing each change, run the tests for quick feedback
-- Only push code changes once tests and build succeed
-
 **Goal**: Translate requirements into code within architecture rules, adding just-enough implementation to meet the tests.
 
 ---
@@ -208,6 +150,7 @@ See `.github/architecture-rules.md` → "Extraction & Extension Principles" for 
 
 **When implementing domain/core logic layer code or organizing modules:**
 
+- Load `implementation-discipline` for the implementation workflow and delegation-first coding rules
 - Load `.github/skills/software-architecture/SKILL.md` for Clean Architecture and layer rules
 
 **When debugging issues:**
@@ -218,46 +161,6 @@ See `.github/architecture-rules.md` → "Extraction & Extension Principles" for 
 **When implementing UI components:**
 
 - Reference `.github/skills/frontend-design/SKILL.md` for aesthetic guidance
-
----
-
-## 📋 Markdown Quality Standards
-
-**When creating or editing markdown files, ensure quality:**
-
-### Automated Linting
-
-The project uses `markdownlint-cli2` for markdown quality.
-
-**Scope**: Apply linting ONLY to permanent documentation:
-
-- ✅ `Documents/**/*.md` (feature docs, guides, ADRs)
-- ✅ `.github/**/*.md` (PR templates, workflows, agents)
-- ✅ `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`
-- ❌ `.copilot-tracking/**/*.md` (transient work-in-progress files)
-
-**Check Quality**: `npx markdownlint-cli2 "**/*.md" "!node_modules" "!.copilot-tracking" "!.copilot-tracking-archive"`
-
-**Auto-Fix**: `npx markdownlint-cli2 --fix "**/*.md" "!node_modules" "!.copilot-tracking" "!.copilot-tracking-archive"`
-
-### Quality Checklist
-
-After creating/editing **permanent** markdown files:
-
-1. **Blank Lines**: Proper spacing around headings, lists, code blocks
-2. **List Formatting**: Consistent indentation and spacing
-3. **Code Blocks**: Include language specifiers (`csharp`, `powershell`, etc.)
-4. **No Trailing Spaces**: Clean line endings
-5. **Heading Hierarchy**: Logical H1 → H2 → H3 structure
-
-### When to Lint
-
-- **After creating permanent documentation**: Run auto-fix to ensure consistency
-- **Before handoff for `.github/` or `Documents/` changes**: Include linting in verification steps
-- **During PR review**: Mention if linting was applied
-- **Skip for `.copilot-tracking/`**: Work-in-progress files don't require linting
-
-**Configuration**: See `.markdownlint.jsonc` for project-specific rules (line length disabled, etc.)
 
 ---
 

@@ -44,50 +44,9 @@ Documentation specialist focused on keeping project documentation accurate, comp
 
 Keep all documentation accurate, up-to-date, and free of obsolete content. Value deletion as much as addition.
 
-**Core Mandate**: Documentation as source of truth - ensure design docs use the same names, method signatures, and entity references as actual implementation.
+**Core Mandate**: Documentation is a source of truth. Design docs must use the same names, method signatures, and entity references as the actual implementation.
 
-**Documentation Areas**:
-
-1. **Development Docs** (status docs, architecture docs, setup docs)
-   - Update "Current State", mark completed phases ✅, remove "not yet implemented"
-   - Update entity schemas/formulas to match code, verify file paths, update timelines
-
-2. **Design Docs** (feature specifications, system behavior docs, UX/API contracts)
-   - Verify terminology matches (class/method names), update code examples
-   - Check unlock conditions/formulas match code, remove placeholders ("TBD")
-
-3. **Decision Docs** (ADRs): Create new decision records from issue body design content; keep date-prefixed ADRs accurate; remove obsolete decision docs
-
-4. **Design Document Authorship** (when delegated by Code-Conductor)
-   - Create new domain-based design files under `Documents/Design/{domain-slug}.md` when no existing design doc in `Documents/Design/` covers this feature area
-   - Update existing domain design files when a feature extends or modifies an existing design area
-   - Use domain-slug naming: lowercase with hyphens, representing the feature area (e.g., `review-pipeline.md`, `hook-system.md`, `setup-wizard.md`)
-   - Content: reflect the **current design state** of the domain — not a per-issue changelog; incorporate design details from the issue body
-   - Target 150–250 lines per file; split by sub-domain if a file grows beyond 500 lines
-
-**Quality Checks**:
-
-- Remove obsolete content (value deletion), consolidate duplicates, validate file paths/cross-references
-- Remove "TBD"/"coming soon" language, ensure consistent formatting, verify technical accuracy
-
-**Conciseness Guidelines**:
-
-- **Target length**: 150-250 lines per document (ideal)
-- **Maximum length**: 500 lines (split into focused files if larger)
-- **Style**: Reference other docs instead of duplicating content
-- **Split trigger**: If doc serves multiple purposes or hard to navigate, split by topic
-- **Value deletion**: Removing obsolete content is as important as adding new content
-
-**Update Process**:
-
-1. Review implementation (read plan/changes files, understand what implemented)
-2. Update development docs (current state, data/architecture notes, execution flow docs)
-3. Update design docs (feature specs, capability docs, domain behavior docs)
-4. Create new decision records from issue body content where new decisions were documented; update existing ADRs and mark [DOCUMENTED].
-5. Remove obsolete content (old schemas, placeholders, duplicates)
-6. Verify terminology consistency (class/method/property names match code)
-
-**Markdown Linting**: `npx markdownlint-cli2 --fix "**/*.md" "!node_modules" "!.copilot-tracking"`
+Use the `documentation-finalization` skill (`.github/skills/documentation-finalization/SKILL.md`) for the reusable documentation workflow, quality checks, conciseness guidance, and design-doc finalization process.
 
 **Quality Gates** (must pass):
 
@@ -120,6 +79,7 @@ See also: [Experience-Owner](Experience-Owner.agent.md) for customer framing doc
 
 **When updating standards-heavy documentation:**
 
+- Load `documentation-finalization` for the documentation process and deletion-first cleanup workflow
 - Load relevant project guidance from `.github/copilot-instructions.md` and `.github/architecture-rules.md`
 
 **Note**: Doc-Keeper primarily handles documentation formatting and accuracy. Most deep implementation skills are owned by implementation agents.
