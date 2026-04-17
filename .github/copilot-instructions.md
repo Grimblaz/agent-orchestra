@@ -31,7 +31,7 @@ Pipeline-based agent orchestration:
 
 - **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
 - **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invocable: false`)
-- **Skills** (19): Loaded on demand by agents from `.github/skills/`
+- **Skills** (32): Loaded on demand by agents from `.github/skills/`
 - **Instructions** (6): Shared rules loaded by agents from `.github/instructions/`
 
 ## Key Conventions
@@ -53,20 +53,6 @@ Pipeline-based agent orchestration:
 This repo uses the Code-Critic / Code-Review-Response scored prosecution → defense → judge review protocol.
 
 Load the relevant agent guidance and follow that protocol for code review, design review, CE review, GitHub review, and post-fix review.
-
-## Session Startup Check
-
-At the start of every new conversation, **before responding to the user's first message**, load the `session-startup` skill and follow its protocol.
-
-Skip the automatic startup check silently when neither `$env:COPILOT_ORCHESTRA_ROOT` nor `$env:WORKFLOW_TEMPLATE_ROOT` is set, `pwsh` is unavailable, or the detector returns non-JSON output.
-
-## First-Contact Provenance Gate
-
-When a user-invocable agent receives a request referencing an existing GitHub issue, load the `provenance-gate` skill and follow its protocol.
-
-Skip the gate silently when no issue ID can be determined, existing warm handoff markers or a prior `<!-- first-contact-assessed-{ID} -->` assessment marker are present, or the current agent is not user-invocable.
-After the developer responds with any option except `Needs rework - stop here`, record the assessment marker using the skill's protocol.
-If MCP tools are unavailable or the API call fails, fail open and use the skill's fallback recording path.
 
 ## Build & Run
 

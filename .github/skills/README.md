@@ -20,29 +20,42 @@ Each skill should use this flow:
 
 This keeps prompts concise while preserving depth when needed.
 
-## Available Skills (19)
+## Available Skills (32)
 
 | Skill | Purpose | Status |
 | ----- | ------- | ------ |
+| `adversarial-review` | Evidence-first prosecution and defense methodology for review workflows | ✅ Included |
 | `bdd-scenarios` | Structured Given/When/Then scenario authoring with ID traceability and CE Gate coverage gap detection | ✅ Included |
 | `brainstorming` | Structured Socratic questioning for exploring ideas and solutions | ✅ Included |
-| `frontend-design` | Guide for creating distinctive UI designs that avoid generic templates | ✅ Included |
-| `skill-creator` | Guide for creating new skills with proper frontmatter format | ✅ Included |
-| `software-architecture` | Clean Architecture, SOLID principles, and architectural decision guidance | ✅ Included |
-| `systematic-debugging` | 4-phase debugging process (Observe, Hypothesize, Test, Fix) | ✅ Included |
-| `test-driven-development` | TDD workflow guidance, quality standards, and practical patterns | ✅ Included |
-| `ui-testing` | Resilient React component testing strategies focusing on user behavior | ✅ Included |
-| `verification-before-completion` | Evidence-based verification checklist before marking work complete | ✅ Included |
-| `webapp-testing` | Playwright end-to-end testing guidance for web apps | ✅ Included |
-| `parallel-execution` | Build-test orchestration protocol for parallel or serial implementation lanes | ✅ Included |
-| `property-based-testing` | Incremental rollout policy for property-based testing | ✅ Included |
 | `browser-canvas-testing` | VS Code native browser tool behavior for canvas-based games | ✅ Included |
 | `code-review-intake` | Deterministic GitHub review intake workflow with ledger-based judgment | ✅ Included |
+| `customer-experience` | Reusable customer framing and CE evidence methodology | ✅ Included |
+| `design-exploration` | Technical design option comparison and decision-framing workflow | ✅ Included |
+| `documentation-finalization` | Documentation cleanup and design-doc maintenance workflow | ✅ Included |
+| `frontend-design` | Guide for creating distinctive UI designs that avoid generic templates | ✅ Included |
+| `implementation-discipline` | Minimal implementation workflow for plan-driven coding | ✅ Included |
+| `parallel-execution` | Build-test orchestration protocol for parallel or serial implementation lanes | ✅ Included |
+| `plan-authoring` | Implementation-plan authoring methodology | ✅ Included |
 | `post-pr-review` | Post-merge checklist for archiving, documentation, versioning, and release tagging | ✅ Included |
+| `process-analysis` | Retrospective and process-analysis methodology for workflow review | ✅ Included |
 | `process-troubleshooting` | Five-scenario guide for diagnosing common orchestration failure patterns | ✅ Included |
+| `property-based-testing` | Incremental rollout policy for property-based testing | ✅ Included |
 | `provenance-gate` | First-contact issue-framing assessment for cold pickups | ✅ Included |
+| `refactoring-methodology` | Proportionate refactoring workflow for touched files and nearby debt | ✅ Included |
+| `research-methodology` | Evidence-driven technical research and recommendation workflow | ✅ Included |
+| `review-judgment` | Single-shot review judgment and scoring methodology | ✅ Included |
 | `session-startup` | Automatic startup cleanup guard for new conversations | ✅ Included |
 | `terminal-hygiene` | Terminal and test execution guardrails for Copilot Orchestra workflows | ✅ Included |
+| `skill-creator` | Guide for creating new skills with proper frontmatter format | ✅ Included |
+| `software-architecture` | Clean Architecture, SOLID principles, and architectural decision guidance | ✅ Included |
+| `specification-authoring` | Structured authoring guidance for formal specifications | ✅ Included |
+| `systematic-debugging` | 4-phase debugging process (Observe, Hypothesize, Test, Fix) | ✅ Included |
+| `test-driven-development` | TDD workflow guidance, quality standards, and practical patterns | ✅ Included |
+| `ui-iteration` | Screenshot-driven UI polish workflow | ✅ Included |
+| `ui-testing` | Resilient React component testing strategies focusing on user behavior | ✅ Included |
+| `validation-methodology` | Staged validation and review methodology for implementation workflows | ✅ Included |
+| `verification-before-completion` | Evidence-based verification checklist before marking work complete | ✅ Included |
+| `webapp-testing` | Playwright end-to-end testing guidance for web apps | ✅ Included |
 
 ## How to Use a Skill
 

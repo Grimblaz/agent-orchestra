@@ -1,7 +1,10 @@
 ---
 name: test-driven-development
-description: Test-Driven Development workflow guidance, quality standards, and practical patterns. Use when writing tests first, implementing to pass tests, validating quality gates, or refactoring safely. DO NOT USE FOR: debugging existing failures (use systematic-debugging), React component test patterns (use ui-testing), E2E browser tests (use webapp-testing), randomized property verification (use property-based-testing), or architecture evaluation and design decisions (use software-architecture).
+description: Test-Driven Development workflow guidance, quality standards, and practical patterns. Use when writing tests first, implementing to pass tests, validating quality gates, or refactoring safely. DO NOT USE FOR: debugging existing failures (use systematic-debugging), React component test patterns (use ui-testing), E2E browser tests (use webapp-testing), randomized property verification (use property-based-testing), or architecture evaluation and design decisions (use software-architecture)
 ---
+
+<!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Copilot Orchestra; assumes tests are authored against repo-defined commands, architecture rules, and quality thresholds. -->
+<!-- markdownlint-disable-file MD041 MD003 MD033 -->
 
 # Test-Driven Development Skill
 
@@ -45,6 +48,48 @@ Quality gates are enforced in priority order:
 - **No reflection hacks**: Don't test private methods via reflection
 - **Test rules, not formulas**: "higher values produce larger results" not exact arithmetic
 - **Keep test files focused**: Split by behavior if tests become unwieldy
+
+## Behavior Quality Standards
+
+- Use business-language test names that describe expected outcomes, not method names or internal branches
+- Prefer one observable behavior per test with a clear Arrange-Act-Assert structure
+- Cover realistic edge cases and requirement boundaries, not speculative permutations
+- Use parameterized tests for data tables, formulas, or repeated rule checks that differ only by inputs and outcomes
+- Treat every added test as a requirement statement; avoid "vibe coding" assertions that do not map to a concrete behavior
+
+## Integration-First Test Strategy
+
+Prefer the narrowest test that still exercises the real behavior, but bias toward integration tests when meaningful behavior depends on collaboration between adjacent components or layers.
+
+- Mock or stub at explicit layer boundaries, not deep inside a layer's own internals
+- Exercise adjacent layers together when the architecture permits it, so wiring failures are caught where they matter
+- Verify production code paths directly in integration tests; do not simulate the system with custom test helpers that bypass the real integration
+- If a test could pass while the production wiring is missing, it is too synthetic for the intended confidence level
+
+### Critical Integration Rule
+
+Integration tests must call actual production code paths, not helper functions that manually recreate the expected side effects.
+
+**Wrong**: A helper mutates state directly and the test asserts on that fake state.
+
+**Right**: The test invokes the real pipeline, service, controller, or workflow that is responsible for the state change.
+
+Why this matters: helper-driven tests can stay green even when the real system is not wired in.
+
+## Quality Gates In Practice
+
+- Run the repository's configured test command for fast red-green feedback
+- Use the repository's configured coverage threshold for the domain under test
+- Use mutation testing to evaluate assertion strength when the project supports it
+- Prefer incremental mutation runs during development and broader validation in CI or completion gates
+- Report coverage and mutation results as evidence, not as substitutes for behavior-focused assertions
+
+## Refactor Safely
+
+- Refactor only after the current behavior is proven green
+- Remove duplication in tests as long as the behavior remains easy to read
+- Keep factories and helpers subordinate to readability; do not hide the behavior under heavy indirection
+- When a refactor changes test setup shape, confirm the assertions still describe user-visible or domain-visible behavior
 
 ## Collection / Iteration Coverage
 
@@ -141,5 +186,13 @@ all members, not only the first or primary record.
 | `assertThat(health).isEqualTo(150)` with an exact formula match        | Breaks on any formula tweak; encodes the implementation, not the business rule       | Test comparative invariant (`highVit.health > lowVit.health`) not exact values   |
 | 100% line coverage with assertions that don't verify correctness       | Coverage is green; mutations survive                                                 | Run mutation testing; require ≥80% score; review asserts on each changed line    |
 | Organizing tests as one method per production method                   | Misses behavior variations and error cases; becomes a checklist                      | Organize by scenario/behavior with descriptive names; use `@Nested` groups       |
+
+| Trigger                                                    | Gotcha                                                         | Fix                                                                |
+| ---------------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
+| An integration test uses a helper that sets state directly | The test never proves the real production path or wiring works | Invoke the real service, pipeline, handler, or workflow under test |
+
+| Trigger                                           | Gotcha                                                                | Fix                                                                        |
+| ------------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Mocking inside a layer instead of at its boundary | Tests become implementation-aware and break during harmless refactors | Stub only the external seam and let the layer's internal collaborators run |
 
 For detailed examples of each anti-pattern, see `references/anti-patterns.md`.

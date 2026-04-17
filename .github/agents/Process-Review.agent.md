@@ -91,6 +91,10 @@ Action: Use "Update Instructions" handoff → doc-keeper to update coding standa
 
 Performs retrospective analysis of development process to improve future execution.
 
+For reusable retrospective workflow, evidence gathering, root-cause framing, report construction, scenario routing, and skill-usage audit methodology, load `.github/skills/process-analysis/SKILL.md`.
+
+For terminal and validation execution guardrails, load `.github/skills/terminal-hygiene/SKILL.md`.
+
 **Deviation Detection**:
 
 - Compare actual execution vs intended workflow (plan in session memory or issue comment vs git history)
@@ -148,131 +152,15 @@ Performs retrospective analysis of development process to improve future executi
 
 ## When to Use This Agent
 
-**Recommended Triggers**:
+Use this agent after workflow execution, when process confusion needs a retrospective, or when Code-Conductor invokes Track 2 CE Gate systemic analysis.
 
-- ✅ After completing a feature/PR (sprint retrospective)
-- ✅ When workflow feels inefficient or confusing
-- ✅ Before starting complex multi-phase work (process validation)
-- ✅ After significant deviations detected (course correction)
-- ✅ Periodically (every 3-5 PRs) for continuous improvement
-- ✅ When team members report process pain points
-- ✅ When a CE Gate defect is found during implementation (Track 2 systemic analysis — invoked by Code-Conductor as a subagent)
-
-**Red Flags Indicating Need**:
-
-- Multiple agent switches without clear handoffs
-- Rework due to skipped validation steps
-- Confusion about which agent to use
-- Premature implementation (code before tests)
-- Quality gates failing unexpectedly
-- Documentation conflicts discovered late
-
-**When NOT to Use This Agent**:
-
-- ❌ During active feature implementation (wait for completion)
-- ❌ For code review (use code-critic instead)
-- ❌ For planning new features (use issue-planner)
-- ❌ For bug fixes (not a process issue)
+For the broader reusable trigger list, red-flag heuristics, and retrospective timing guidance, load `.github/skills/process-analysis/SKILL.md`.
 
 ---
 
 ## Analysis Framework
 
-### 1. Execution Timeline Review
-
-**Gather Evidence**:
-
-```powershell
-# Review recent commits and their sequence
-git log --oneline --decorate -20  # history — no built-in tool equivalent
-
-# Check current branch changes
-git diff main...HEAD --stat  # cross-branch diff — no built-in tool equivalent
-
-# Review file modification times
-Get-ChildItem -Recurse -File | Where-Object {$_.LastWriteTime -gt (Get-Date).AddDays(-7)} | Sort-Object LastWriteTime  # file modification timestamps — no built-in tool equivalent
-```
-
-**Analyze**:
-
-- Chronological order of file changes
-- Frequency of agent switches
-- Time between test creation and implementation
-- Validation command execution timing
-
-### 2. Plan Adherence Check
-
-**Compare**:
-
-- Plan tasks vs actual git commits
-- Intended phases vs actual execution order
-- Agent assignments vs conversation history
-- Success criteria vs final metrics
-
-**Questions**:
-
-- Were phases completed in order?
-- Did correct agents handle each phase?
-- Were validation commands run at boundaries?
-- Were quality gates met before proceeding?
-
-### 3. Documentation Consistency Audit
-
-**Scan for**:
-
-- Use `grep_search` with query `plan-tracking` and `includePattern: "**/*.md"` to find references to plan-tracking concepts
-- Use `grep_search` with query `implementation-workflow` to find implementation-workflow references
-- Use `grep_search` with query `OBSOLETE|DEPRECATED` (set `isRegexp: true`) and `includePattern: "**/*.md"` to identify files with stale content markers
-
-**Verify**:
-
-- Agent cross-references are valid
-- Instructions don't conflict
-- Templates match actual usage patterns
-- Examples are current and accurate
-
-### 4. Workflow Efficiency Assessment
-
-**Metrics**:
-
-- **Handoff Count**: Fewer handoffs with clear purpose = better
-- **Rework Cycles**: Rework indicates process gaps
-- **Validation Failures**: Late failures = missing gates
-- **Documentation Lookups**: Excessive = unclear guidance
-- **Prompt Frequency**: Count of decision prompts per PR/review cycle
-- **Prompt Timing**: % of prompts occurring late-stage vs early-stage
-- **Escalation Packet Completeness**: % including summary/evidence/impact/AC/scope/options+recommendation
-- **Adversarial Pipeline Completion**: Stages completed per review cycle (prosecution passes, defense pass, judge pass); flag any skipped stages
-
-**Scoring** (0-10 scale):
-
-- **Adherence**: How well did we follow the plan?
-- **Efficiency**: How streamlined was the workflow?
-- **Quality**: Did we maintain standards throughout?
-- **Clarity**: Were roles and responsibilities clear?
-
-### 4.5 Terminal Stall Audit
-
-**Purpose**: Detect command stalls, waiting loops, and missing timeout/escalation handling that slow workflow execution.
-
-**What to Review**:
-
-- Terminal commands that run without meaningful output for extended periods
-- Repeated retries of the same command without hypothesis changes
-- Missing timeout boundaries for long-running checks
-- Delayed escalation when commands block progress
-
-**Evidence Sources**:
-
-- Terminal transcript timestamps and last-command history
-- Command duration patterns across similar tasks
-- Notes in changes/review files indicating blocked execution
-
-**Recommendations**:
-
-- Add explicit timeout and retry guidance to process instructions
-- Define escalation points when a command exceeds expected runtime
-- Require brief stall notes in process artifacts for future diagnosis
+Load `.github/skills/process-analysis/SKILL.md` for the standard retrospective workflow covering execution timeline review, plan adherence, documentation consistency, workflow efficiency, terminal stall analysis, report construction, scenario routing, and skill-usage audits.
 
 ### 4.6 CE Gate Defect Analysis (Track 2)
 
@@ -635,210 +523,9 @@ For each proposal from Step 3 where `previously_proposed: false`:
 
 **Guardrail**: Advisory only — this agent does NOT apply guardrail changes directly. Proposals require human approval. Code-Conductor handles application through normal change orchestration (Doc-Keeper for instruction/skill updates, Code-Smith for agent prompt changes, per D6).
 
-### 5. Root Cause Analysis
+### 5. Standard Retrospective Analysis
 
-**For each deviation, ask**:
-
-1. **What happened?** (Observable facts)
-2. **Why did it happen?** (Root cause)
-3. **Was guidance clear?** (Documentation issue)
-4. **Was guidance followed?** (Execution issue)
-5. **How can we prevent recurrence?** (Improvement)
-
-**Common Root Causes**:
-
-- Unclear agent boundaries
-- Missing validation checkpoints
-- Conflicting instructions
-- Incomplete examples/templates
-- Role confusion (coordinator vs implementer)
-
----
-
-## Report Structure
-
-### Executive Summary
-
-- **Period Analyzed**: Date range or feature scope
-- **Overall Assessment**: 1-2 sentence verdict
-- **Key Finding**: Most critical issue discovered
-- **Priority Recommendation**: Top improvement opportunity
-
-### Deviations Detected
-
-**For each deviation**:
-
-- **Category**: [Agent Violation / Phase Skip / Validation Miss / Documentation Conflict]
-- **Evidence**: Specific files, commits, or conversation excerpts
-- **Impact**: How did this affect quality or efficiency?
-- **Severity**: [🔴 Critical / 🟡 Moderate / 🟢 Minor]
-
-### Workflow Efficiency Metrics
-
-- **Adherence Score**: X/10 (plan compliance)
-- **Efficiency Score**: X/10 (streamlined workflow)
-- **Quality Score**: X/10 (standards maintained)
-- **Clarity Score**: X/10 (role clarity)
-- **Overall Health**: Average of above
-
-### Documentation Issues
-
-- **Conflicts Found**: List of contradictory instructions
-- **Orphaned Files**: Files with no references
-- **Gaps Identified**: Missing guidance areas
-- **Reference Errors**: Broken cross-references
-
-### Improvement Recommendations
-
-**High Priority** (implement immediately):
-
-- Specific, actionable changes
-- Target files to modify
-- Expected impact
-
-**Medium Priority** (next sprint):
-
-- Process enhancements
-- Template improvements
-- Training needs
-
-**Low Priority** (backlog):
-
-- Nice-to-have optimizations
-- Long-term strategic improvements
-
-### Action Items
-
-- [ ] Update [file] with [specific change]
-- [ ] Add validation checkpoint at [phase boundary]
-- [ ] Clarify [agent] responsibilities in [section]
-- [ ] Create example for [common scenario]
-- [ ] Schedule retrospective discussion
-
----
-
-## Best Practices
-
-**Be Objective**:
-
-- Focus on evidence, not assumptions
-- Cite specific examples
-- Avoid blame, focus on systems
-
-**Be Specific**:
-
-- Don't say "process was unclear"
-- Say "project guidance doesn't specify when to run required validation commands from `.github/copilot-instructions.md`"
-
-**Be Actionable**:
-
-- Don't say "improve documentation"
-- Say "add validation checklist to plan-tracking.instructions.md, lines 45-50"
-
-**Be Balanced**:
-
-- Highlight what worked well
-- Acknowledge tradeoffs in recommendations
-- Consider resource constraints
-
-**Be Forward-Looking**:
-
-- Prevent future issues, don't just diagnose past ones
-- Suggest systemic improvements, not one-off fixes
-- Build better habits through better systems
-
----
-
-## Common Scenarios
-
-For detailed scenario analysis, load `.github/skills/process-troubleshooting/SKILL.md`.
-
-Symptom-keyword routing:
-
-- **Code before tests, implementations in test-writer mode** → Premature Implementation
-- **Multiple agents handling same phase, role overlap** → Agent Confusion
-- **Quality gate failures discovered late, rework needed** → Validation Gaps
-- **Contradictory instructions, confusion about standards** → Documentation Conflicts
-- **Agent blocked by long-running or hung terminal commands** → Terminal Stall
-
----
-
-## Integration with Workflow
-
-**Timing**:
-
-- **After Feature Complete**: Analyze the feature workflow
-- **Before Sprint Planning**: Review last sprint patterns
-- **During Confusion**: Stop and analyze current state
-- **Periodic Health Check**: Monthly review of trends
-
-**Handoffs**:
-
-- **To doc-keeper**: Implement approved improvements
-- **To issue-planner**: Update planning templates
-- **To team**: Share findings in retrospective
-
-**Artifacts**:
-
-- Review report (`.copilot-tracking/reviews/{date}-process-review.md`)
-- Action items added to backlog
-- Updated documentation (via doc-keeper)
-
----
-
-## Example Review Output
-
-```markdown
-# Process Review: Feature Delivery Workflow
-
-**Period**: November 16, 2025 (implementation cycle)
-**Overall**: 🟡 Moderate Adherence (6/10)
-**Key Finding**: Validation and handoff checkpoints were inconsistently applied
-**Priority**: Add explicit boundary validation checklist
-
-## Deviations
-
-1. 🟡 **Implementation Started Before Test Baseline Completed**
-
-- **Evidence**: Feature source files added before failing baseline tests were captured
-- **Impact**: Reduced confidence in test-first workflow and caused rework
-- **Root Cause**: Missing explicit gate between test creation and implementation start
-- **Fix**: Require baseline failure evidence before implementation handoff
-
-2. 🟢 **Documentation Redundancy**
-
-- **Evidence**: Multiple process docs had overlapping workflow guidance
-- **Impact**: Confusion about which to follow
-- **Root Cause**: Guidance evolved across files without consolidation
-- **Fix**: ✅ Consolidated process guidance into one canonical instruction file
-
-3. 🟡 **Terminal Stall Not Escalated**
-
-- **Evidence**: Repeated validation command attempts with long no-output periods
-- **Impact**: Lost cycle time and delayed handoff decisions
-- **Root Cause**: No explicit stall threshold or escalation step in checklist
-- **Fix**: Add Terminal Stall Audit + timeout/escalation policy
-
-## Recommendations
-
-**High Priority**:
-
-- [ ] Add to role instructions: "Capture and record baseline test state before implementation handoff."
-- [ ] Add to workflow checklist: "Run required validation commands defined in `.github/copilot-instructions.md` at phase boundaries."
-- [ ] Add Terminal Stall Audit thresholds, retry limits, and escalation path.
-
-**Medium Priority**:
-
-- [ ] Create reusable boundary-check checklist template for planning agents
-- [ ] Add generic example workflow for evidence-based handoffs
-
-## Metrics
-
-- Adherence: 6/10 (most phases followed, key gate missed)
-- Efficiency: 6/10 (stall time and rework reduced flow)
-- Quality: 8/10 (outcomes acceptable, process controls inconsistent)
-- Clarity: 6/10 (role boundaries mostly clear, escalation unclear)
-```
+For the reusable root-cause questions, common root-cause taxonomy, report structure, best practices, scenario routing, workflow integration guidance, and skill-usage audit methodology, load `.github/skills/process-analysis/SKILL.md`.
 
 ---
 
@@ -850,52 +537,7 @@ Symptom-keyword routing:
 
 ## Skills Reference
 
-**When verifying process completion:**
+**Reusable retrospective methodology:**
 
-- Reference `.github/skills/verification-before-completion/SKILL.md` for evidence-based checks
-
----
-
-## Skill Usage Audit
-
-When reviewing a completed workflow, audit skill usage:
-
-### Checklist
-
-1. **List agents called**: Which agents were invoked during the workflow?
-2. **List skills instructed**: Which skills were explicitly mentioned in delegation prompts?
-3. **Cross-reference with mapping**: Per the Skill Mapping Reference table below, which skills SHOULD have been used?
-4. **Identify gaps**: Any applicable skills that weren't instructed?
-
-### Skill Mapping Reference
-
-| Skill                            | When Applicable                                                                                       |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `brainstorming`                  | Exploring features, unclear requirements, or design trade-offs                                        |
-| `browser-canvas-testing`         | Canvas element interaction, game objects, clickElement failures                                       |
-| `code-review-intake`             | GitHub review comments, Code-Critic reconciliation, intake mode                                       |
-| `frontend-design`                | Designing UI components, screens, or evaluating distinctiveness                                       |
-| `parallel-execution`             | Coordinating parallel implementation lanes, convergence gates                                         |
-| `post-pr-review`                 | Post-merge cleanup, tracking archival, docs, strategic assessment                                     |
-| `process-troubleshooting`        | Diagnosing premature implementation, agent confusion, validation gaps, doc conflicts, terminal stalls |
-| `property-based-testing`         | Randomized testing, input ranges, invariant verification                                              |
-| `skill-creator`                  | Adding new skills, updating templates, reviewing skill structure                                      |
-| `software-architecture`          | Layer boundaries, dependency flow, ADR-level decisions                                                |
-| `systematic-debugging`           | Debugging failures, flaky tests, tracking root causes                                                 |
-| `test-driven-development`        | Writing tests first, red-green-refactor, quality gates                                                |
-| `ui-testing`                     | Component-level React tests, flaky test fixes, React patterns                                         |
-| `verification-before-completion` | Before PRs, releases, or any completion declaration                                                   |
-| `webapp-testing`                 | Browser-based E2E coverage, test stability, CI execution                                              |
-
-<!-- Keep in sync: when adding or removing any skill in .github/skills/, update this table (all-skills scope). Update Code-Conductor's Skill Mapping table only if the skill is a delegation target (a skill Code-Conductor instructs a subagent to use). -->
-
-### Output Format
-
-```markdown
-## Skill Usage Audit
-
-| Phase | Agent          | Skills Instructed         | Should Have Used          | Gap? |
-| ----- | -------------- | ------------------------- | ------------------------- | ---- |
-| 1     | Research-Agent | None                      | `brainstorming`           | ⚠️   |
-| 2     | Test-Writer    | `test-driven-development` | `test-driven-development` | ✅   |
-```
+- Load `.github/skills/process-analysis/SKILL.md` for standard retrospective workflow, report structure, scenario routing, and skill-usage audits
+- Reference `.github/skills/verification-before-completion/SKILL.md` when the review needs evidence-based completion checks

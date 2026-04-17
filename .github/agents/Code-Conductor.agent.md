@@ -95,7 +95,7 @@ Quick checklist before declaring mode for a step:
 
 ## Usage Examples
 
-- **Full implementation flow**: locate plan, delegate step-by-step, run validation ladder, reconcile review, create PR with evidence.
+- **Full implementation flow**: locate plan, delegate step-by-step, apply the validation-methodology skill, create PR with evidence.
 - **Research-first flow**: gather context from design/decision docs, then escalate with `#tool:vscode/askQuestions` to confirm plan path/options.
 
 ## Plan Creation Strategy
@@ -105,12 +105,28 @@ Quick checklist before declaring mode for a step:
 - If plan assumptions drift from code reality, adapt steps before delegation and record rationale.
 - **No scope exemption**: Code-Conductor must NEVER create plans directly, regardless of change size, scope classification tier, or multi-issue bundling. All plans are created by Issue-Planner — unconditionally.
 
+## Process
+
+Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.
+
+Skip the automatic startup check silently when neither `$env:COPILOT_ORCHESTRA_ROOT` nor `$env:WORKFLOW_TEMPLATE_ROOT` is set, `pwsh` is unavailable, or the detector returns non-JSON output.
+
+When this user-invocable agent receives a request referencing an existing GitHub issue, load the `provenance-gate` skill and follow its protocol.
+
+Skip the gate silently when no issue ID can be determined, existing warm handoff markers or a prior `<!-- first-contact-assessed-{ID} -->` assessment marker are present, or the current agent is not user-invocable.
+After the developer responds with any option except `Needs rework - stop here`, record the assessment marker using the skill's protocol.
+If MCP tools are unavailable or the API call fails, fail open and use the skill's fallback recording path.
+
+For terminal and validation execution guardrails, load `.github/skills/terminal-hygiene/SKILL.md`.
+
 ## Core Workflow
+
+Any future pre-response trigger step runs **before** the Core Workflow, stays outside the numbered workflow list, and does not renumber, replace, or subsume Step 0. Issue Transition remains Step 0 and the first numbered workflow step after any pre-response trigger handling completes.
 
 <!-- markdownlint-disable-next-line MD029 -->
 
 0. **Issue Transition (Step 0, before implementation)**:
-   - Cleanup note: The `.github/copilot-instructions.md` "Session Startup Check" detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `$copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }; pwsh "$copilotRoot/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly (only if `$copilotRoot` is non-empty — requires `COPILOT_ORCHESTRA_ROOT` or `WORKFLOW_TEMPLATE_ROOT` to be set).
+   - Cleanup note: The `session-startup` skill (loaded by pipeline-entry agents) detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `$copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }; pwsh "$copilotRoot/.github/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly (only if `$copilotRoot` is non-empty — requires `COPILOT_ORCHESTRA_ROOT` or `WORKFLOW_TEMPLATE_ROOT` to be set).
    - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
    - If planning is unnecessary, explicitly note "Step 0 skipped: no planning transition required" and continue.
 
@@ -319,62 +335,11 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 
 ## Review Reconciliation Loop (Mandatory)
 
-Use this loop for code review phases to drive evidence-based alignment before execution.
+Use the `validation-methodology` skill (`.github/skills/validation-methodology/SKILL.md`) for the reusable review-reconciliation method: pre-review gate, prosecution-depth setup, change-type classification, fixed 3-pass critic mechanics, defense and judgment sequencing, prosecution-depth exclusions, and merged-ledger deduplication rules.
 
-### Prosecution Depth Setup
+Code-Conductor retains the orchestration around that method: review-mode entry, express-lane routing, post-judgment routing, post-fix prosecution decisions, CE Gate sequencing, and any side-effecting write-back such as calibration re-activation entries.
 
-Before composing pass prompts, obtain prosecution depth recommendations:
-
-1. Run `aggregate-review-scores.ps1` and capture `prosecution_depth:` output
-2. Parse per-category recommendations → build depth map (`category` → `full`/`light`/`skip`)
-3. Check `override_active:` — if `true`, force all categories to `full` (skip further depth logic)
-4. Record the depth map for post-judgment re-activation reference
-5. Log brief: `"Prosecution depth: N full, N light, N skip"`
-6. Compose per-pass exclusion instructions:
-   - **Pass 1**: Exclude `skip` categories
-   - **Passes 2-3**: Exclude `skip` AND `light` categories
-7. Safe fallback: if aggregate script **fails**, **YAML parsing fails**, or **`prosecution_depth:` block is absent from parsed output** → all categories `full`. Log: `'Prosecution depth: all full (fallback — {reason})'`
-
-Append the following exclusion section to each Code-Critic pass prompt:
-
-```text
-**Prosecution Depth Exclusions (pass {N} of 3)**:
-The following categories have been excluded from this pass based on calibration data.
-Do NOT generate findings in these categories — they will be discarded.
-Excluded: {comma-separated list of excluded categories, or "none"}
-```
-
-**Post-fix prosecution exception**: Post-fix prosecution always runs at full depth for all categories — do NOT compose or apply prosecution depth exclusion instructions for post-fix passes.
-
-### Critic Pass Protocol (Fixed)
-
-**3 independent Code-Critic passes** run per review cycle. The 3-pass count is fixed. Per-category perspective depth is calibration-adjusted based on sustained finding rates.
-
-**Multi-pass execution protocol** (3 passes per cycle, parallel):
-
-Each pass is an **independent invocation** of Code-Critic — not a duplicate. LLM-based review has inherent coverage variance: the same code surface reviewed separately will surface complementary issues. Multiple passes increase defect detection probability without changing the review scope.
-
-**Change-type classification (before composing pass prompts)**:
-
-Classify the PR change type using `git diff --name-only main..HEAD` (cross-branch diff — no built-in tool equivalent) and include the classification in each pass prompt:
-
-| Change type          | Condition                                                                     | Active perspectives                                                                                                                                                                                       |
-| -------------------- | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `documentation-only` | All changed files are `.md`, `.instructions.md`, `.prompt.md`, or `.agent.md` | Architecture (§1, docs-misrepresentation check only), Implementation Clarity (§5), Script & Automation (doc-audit sub-gate, if `.md` files contain shell blocks), Patterns doc-clarity angle (§4 partial) |
-| `mixed`              | Changed files include both source/scripts AND docs                            | All 6 perspectives                                                                                                                                                                                        |
-| `code` (default)     | Changed files include source code, scripts, or runtime config                 | All 6 perspectives                                                                                                                                                                                        |
-
-> **Precedence**: Evaluate rows in order; the first matching condition applies. `mixed` takes priority over `code` for source+docs PRs.
-
-Include in each pass prompt: `"Change type: {classification}. Per Code-Critic's 'When to apply' gates, mark out-of-scope perspectives as ⏭️ N/A — do not expand them."` For `documentation-only` reviews, include only the changed files in the file reading list — do not include supporting context files (exception: always include `.github/architecture-rules.md` for the §1 docs-misrepresentation check).
-
-- Launch all 3 passes **in parallel** as independent subagent invocations.
-- Label each call: `"This is adversarial review pass N of M. Conduct your review independently. Prior passes have already been run. Look for anything they may have missed. Tag each finding with 'pass: N' in the automation-routing fields (where N is your pass number, e.g. pass: 1, pass: 2, pass: 3)."`
-- Do NOT skip passes because a prior pass "already covered" the code. That reasoning defeats the purpose.
-- Do NOT merge passes into one call — each must be a separate subagent invocation.
-- After all passes complete, merge all findings into a single ledger. Deduplicate only when two passes flag **identical evidence at the same file/line** — different framing of the same issue counts as one finding. Complementary findings from different passes are additive. Preserve `pass: N` tags in the merged ledger. For deduplicated findings, the **earliest pass** gets credit (lowest pass number).
-
-#### Express Lane Gate (R6, Standard and Post-Fix Code Review Only)
+### Express Lane Gate (R6, Standard and Post-Fix Code Review Only)
 
 After merging and deduplicating the prosecution ledger, partition findings before the defense pass:
 
@@ -392,9 +357,6 @@ Route express-eligible findings directly to the specialist dispatch queue with a
 **Scope restriction**: Express lane applies to **standard code review prosecution and post-fix targeted prosecution only** — it does NOT apply to proxy prosecution (GitHub review intake), CE prosecution, or design/plan review prosecution. (In proxy prosecution sessions, Code-Conductor does not have access to the diff context required to verify criteria 2 and 3. R4 and R5 still apply to proxy prosecution sessions.)
 
 **Tier 1 re-validation required**: After the specialist applies an express-lane fix, re-run Tier 1 validation (build + lint/typecheck + tests) before proceeding. (When batched under R4, Tier 1 re-validation runs once after all express-lane specialist fixes in the batch are applied.) If Tier 1 fails, route the failure via the Failure Triage Rule and resolve it before proceeding.
-
-- **Defense pass**: Invoke Code-Critic with the merged prosecution ledger and the marker `"Use defense review perspectives"`. Defense reviews the full ledger in a single pass and emits a Defense Report.
-- **Judge pass**: Invoke Code-Review-Response with both the merged prosecution ledger and the defense report. Judge rules final on all items and emits a score summary.
 
 #### Post-Judgment Re-Activation Detection
 
@@ -504,9 +466,6 @@ Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFE
 
 - **NEVER use Code-Smith for test files** — always use Test-Writer, even for "simple" fixes
 - **UI-Iterator is user-invoked** for polish passes, NOT part of standard implementation flow
-- **PRE-REVIEW GATE**: Before calling Code-Critic, run project validation commands (see `.github/copilot-instructions.md`) to clear trivial lint/type issues
-- **MANDATORY**: After Code-Critic returns, ALWAYS call Code-Review-Response to judge and categorize findings. Code-Conductor then routes accepted fixes to appropriate specialists per the Agent Selection table.
-- **MANDATORY**: During review phases, run the full prosecution → defense → judge pipeline to completion before implementing accepted fixes.
 - **SIGNIFICANT IMPROVEMENT RULE**: For out-of-scope/non-blocking improvements estimated >1 day, create a follow-up GitHub issue automatically (with links back to the PR/review comment). Do not block in-scope fixes on that work unless it is an AC requirement.
 - **Tech-debt closure**: When the plan resolves a GitHub issue labeled `tech-debt`, include `Closes #tech-debt-N` in the PR body alongside the main `Closes #{issue}` — GitHub will auto-close both on merge.
 - **Mixed tasks** (e.g., review feedback): Split by file type — test changes → Test-Writer, source changes → Code-Smith, doc changes → Doc-Keeper
@@ -515,19 +474,27 @@ Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFE
 
 When delegating to subagents, instruct them to use the relevant skill(s):
 
-| Skill                            | When to Instruct Subagent to Use                                                   |
-| -------------------------------- | ---------------------------------------------------------------------------------- |
-| `brainstorming`                  | Exploring new features, evaluating approaches, or complex decisions                |
-| `frontend-design`                | Designing new UI components, screens, or evaluating for uniqueness                 |
-| `skill-creator`                  | Adding new skills, updating skill templates, or reviewing skill structure          |
-| `software-architecture`          | Evaluating layer boundaries, dependency flow, or ADR-level decisions               |
-| `test-driven-development`        | Writing tests first, red-green-refactor, or validating quality gates               |
-| `ui-testing`                     | Writing component-level React tests, fixing flaky tests, or establishing patterns  |
-| `systematic-debugging`           | Debugging failures, investigating flaky tests, or tracking root causes             |
-| `verification-before-completion` | Before PRs, releases, marking tickets done, or any completion declaration          |
-| `webapp-testing`                 | Creating or improving browser-based E2E coverage, test stability, or CI            |
-| `parallel-execution`             | Coordinating concurrent implementation paths, convergence gates, or triage routing |
-| `property-based-testing`         | Adding randomized testing, validating input ranges, or verifying invariants        |
+| Skill                        | When to Instruct Subagent to Use                                                   |
+| ---------------------------- | ---------------------------------------------------------------------------------- |
+| `adversarial-review`         | Running prosecution passes or defense perspectives with Code-Critic                |
+| `customer-experience`        | Framing customer journeys or capturing CE evidence with Experience-Owner           |
+| `design-exploration`         | Researching and converging technical design options with Solution-Designer         |
+| `documentation-finalization` | Updating design docs, READMEs, or implementation-facing docs with Doc-Keeper       |
+| `frontend-design`            | Designing new UI components, screens, or evaluating for uniqueness                 |
+| `implementation-discipline`  | Implementing bounded plan steps or verifying production wiring with Code-Smith     |
+| `parallel-execution`         | Coordinating concurrent implementation paths, convergence gates, or triage routing |
+| `plan-authoring`             | Drafting or refining execution plans with Issue-Planner                            |
+| `property-based-testing`     | Adding randomized testing, validating input ranges, or verifying invariants        |
+| `refactoring-methodology`    | Running a proportionate structural cleanup pass with Refactor-Specialist           |
+| `research-methodology`       | Gathering verified multi-file findings for a research document with Research-Agent |
+| `review-judgment`            | Ruling on prosecution plus defense ledgers with Code-Review-Response               |
+| `skill-creator`              | Adding new skills, updating skill templates, or reviewing skill structure          |
+| `software-architecture`      | Evaluating layer boundaries, dependency flow, or ADR-level decisions               |
+| `systematic-debugging`       | Debugging failures, investigating flaky tests, or tracking root causes             |
+| `test-driven-development`    | Writing tests first, red-green-refactor, or validating quality gates               |
+| `ui-iteration`               | Running screenshot-driven UI polish passes with UI-Iterator                        |
+| `ui-testing`                 | Writing component-level React tests, fixing flaky tests, or establishing patterns  |
+| `webapp-testing`             | Creating or improving browser-based E2E coverage, test stability, or CI            |
 
 <!-- Keep in sync: when adding or removing a delegation skill in .github/skills/, update this table (delegation-scoped: only skills Code-Conductor instructs subagents to use). Always also update Process-Review's Skill Mapping Reference table (all-skills scope). -->
 
@@ -535,6 +502,10 @@ Include in prompt: _"Use the `{skill-name}` skill (`.github/skills/{skill-name}/
 
 **Skill-specific instructions**:
 
+- **Implementation work**: Load `implementation-discipline`. Add `software-architecture` when the change affects boundaries or new seams.
+- **Review work**: Load `adversarial-review` for Code-Critic prosecution or defense passes and `review-judgment` for Code-Review-Response judgment.
+- **Planning and design work**: Load `plan-authoring`, `design-exploration`, or `customer-experience` to match the delegated phase.
+- **Documentation and refactoring**: Load `documentation-finalization` for Doc-Keeper and `refactoring-methodology` for Refactor-Specialist.
 - **Debugging**: Load `systematic-debugging` skill. Follow Iron Law: root cause before fixes.
 - **Testing**: Load `test-driven-development` and/or `ui-testing` as appropriate.
 - **UI Work**: Load `frontend-design` for styling and component structure.
@@ -543,25 +514,11 @@ Include in prompt: _"Use the `{skill-name}` skill (`.github/skills/{skill-name}/
 
 ## Validation Ladder (Mandatory)
 
-Validation must run in this **graduated 4-tier order** (fail-fast to comprehensive, then manual):
+Use the `validation-methodology` skill (`.github/skills/validation-methodology/SKILL.md`) for the graduated 4-tier validation ladder and the Failure Triage Rule.
 
-1. **Tier 1 — Build & Validate** (run all automated checks together and report all failures before fixing): quick-validate commands (see `.github/copilot-instructions.md`), lint/typecheck, and the full test suite (project test command; see `.github/copilot-instructions.md`). Prefer running lint/typecheck before tests if the project supports it — syntax errors are cheaper to surface than test failures. For migration-type issues, also run the migration completeness scan described in Step 4 (Create PR). _Projects with slow test suites (10+ minute full runs) can override in their `.github/copilot-instructions.md` to split Tier 1 into two sub-passes: (1) quick-validate, lint/typecheck, and targeted tests (touched modules), then (2) the full test suite. To activate, add `<!-- slow-test-suite: true -->` anywhere in `.github/copilot-instructions.md`._
-2. **Tier 2 — Structural validation** (project architecture validation commands; see `.github/architecture-rules.md` and `.github/copilot-instructions.md`)
-3. **Tier 3 — Strength validation** (project coverage/robustness commands as configured; see `.github/copilot-instructions.md`)
-4. **Tier 4 — Independent review + Customer Experience Gate** (prosecution → defense → judge pipeline, then post-fix targeted prosecution (if triggered), then CE Gate — see the Customer Experience Gate (CE Gate), Post-Fix Targeted Prosecution Pass, and Review Reconciliation Loop sections below)
-
-Do not skip ahead when an earlier tier fails. Resolve failures at the current tier, then continue upward.
-
-### Failure Triage Rule
-
-When any validation tier fails, classify first, then route:
-
-- `code defect` → route to Code-Smith with failing evidence
-- `test defect` → route to Test-Writer with failure analysis
-- `harness/env defect` → route to the responsible specialist/tooling path
-- `rc-divergence` → conditional sequential pair: dispatch Code-Smith first with the divergent AC items (fix implementation to match the Requirement Contract); after Code-Smith returns, re-run incremental validation (Tier 1), then CC re-evaluates all AC items in the step's RC; if all satisfied → advance; if divergence persists → dispatch Test-Writer with instruction: "Re-derive test assertions from the Requirement Contract, not from the corrected implementation." After Test-Writer returns, CC re-runs incremental validation and re-evaluates all AC items to determine resolution. 1 dedicated correction cycle outside the main 3-cycle convergence budget; if unresolved after 1 cycle, escalate via `#tool:vscode/askQuestions` with unresolved AC items and recommended options.
-
-Always include failure evidence, attempted diagnosis, and next action in the handoff prompt. Avoid blind retries.
+- Code-Conductor keeps the orchestration around that ladder: incremental validation timing during step execution, post-fix review entry, CE Gate sequencing, and PR-gate ownership.
+- Tier 4 in this agent continues through the review, post-fix, and CE Gate sections below.
+- When routing a failed tier, always include the failure evidence, attempted diagnosis, and next action in the handoff prompt.
 
 ## Customer Experience Gate (CE Gate)
 

@@ -32,7 +32,10 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 
 - Internal agents (`user-invocable: false`) must NOT be directly user-invocable; they MAY appear in agent `handoffs` lists as subagents
 - Agents must NOT reference deleted agents (e.g., Plan-Architect, Issue-Designer) — validate with `grep`
-- Skills must NOT contain agent logic — they provide knowledge, not orchestration
+- Skills must NOT own orchestration boundaries such as user-turn routing, agent handoffs, commit authority, issue-state transitions, or Code-Conductor's step execution loop
+- Skills MAY contain reusable methodology and protocol content, including ordered workflows, checklists, decision heuristics, and evidence requirements that agents load on demand
+- Concrete boundary examples: Code-Conductor's validation ladder may live in a skill, but CE Gate orchestration and subagent routing stay in the agent; test-driven-development may hold Test-Writer methodology, but conditional delegation and execution flow stay in Test-Writer; session-startup, provenance-gate, and terminal-hygiene remain portable skills while the trigger points that invoke them stay in agents
+- `guidance-complexity` remains agent-only in issue #344; do not move that rule set into a skill as part of this architecture split
 - Only Code-Conductor may auto-commit, and only after validation ladder and RC conformance gate pass; specialist agents must NOT commit; consumers may opt out via `## Commit Policy` section
 - `.github/copilot-instructions.md` must NOT contain TODO markers — it holds real project context
 

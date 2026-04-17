@@ -1,3 +1,5 @@
+<!-- markdownlint-disable MD041 -->
+
 ````instructions
 # Project: Inventory Service
 
@@ -137,36 +139,6 @@ poetry run ruff check . && poetry run mypy .
 ```bash
 poetry install && poetry run ruff check .
 ```
-
-## First-Contact Provenance Gate
-
-When a user-invocable agent receives a request referencing an existing GitHub issue, evaluate whether the issue framing has been validated in the current session before executing.
-
-### Step 1 — Extract issue ID
-
-Parse the user's request for a GitHub issue reference (`#N`, `issue N`, etc.). If no issue ID is determinable, skip the entire gate silently and continue with the user's request.
-
-### Step 2 — Check warm-handoff markers
-
-Check session memory for `plan-issue-{ID}` or `design-issue-{ID}` markers for this issue. Also check GitHub issue comments (via `mcp_github_issue_read` with `method: get_comments`) for `<!-- experience-owner-complete-{ID} -->` or `<!-- design-phase-complete-{ID} -->`. If any are found in either location, the issue framing was already validated — skip the gate silently.
-
-### Step 3 — Check prior assessment marker
-
-Use `mcp_github_issue_read` with `method: get_comments` to check for `<!-- first-contact-assessed-{ID} -->` in the issue's comments. Also check session memory at `/memories/session/first-contact-assessed-{ID}.md` for a prior assessment marker. If found in either location, skip the gate silently (previously assessed). If MCP tools are unavailable or the API call fails, fail open — skip the GitHub marker check and proceed to Step 4.
-
-### Step 4 — Self-filtering
-
-Skip the gate silently for agents with `user-invocable: false` in their frontmatter. Subagents dispatched by Code-Conductor already operate within an assessed session context.
-
-### Step 5 — Run assessment
-
-Load the `provenance-gate` skill from `.github/skills/provenance-gate/SKILL.md` for the full three-question assessment protocol (root cause vs. symptom, mechanism fitness, scope accuracy). If the skill file is absent, apply a minimal inline assessment: read the issue body, verify the stated root cause is specific and traceable, and present the developer gate via `#tool:vscode/askQuestions`.
-
-### Step 6 — Record marker
-
-After the developer responds (any option except 'Needs rework — stop here'), post `<!-- first-contact-assessed-{ID} -->` as a GitHub issue comment. If posting fails, record the assessment in session memory at `/memories/session/first-contact-assessed-{ID}.md` instead and proceed. In multi-issue bundles, the gate fires per unique issue ID.
-
-> **See** `.github/skills/provenance-gate/SKILL.md` for the full assessment protocol, edge cases, and known limitations.
 
 ## Related Documentation
 
