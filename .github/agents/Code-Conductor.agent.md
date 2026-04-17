@@ -74,6 +74,22 @@ When Code-Conductor orchestrates **hub mode** (any pipeline tier — full or abb
 - Do **not** prompt for routine per-finding approvals when fixes are high-confidence and bounded.
 - Interruption budget: maximum **1 non-blocking decision prompt per review cycle** by default.
 
+### Continuation Contract (Mandatory)
+
+**Anti-pattern — premature silent stop**: Ending a turn without having created a PR and without using `#tool:vscode/askQuestions` is a protocol violation. If you are uncertain whether to continue:
+
+1. Default: **continue to the next pipeline phase**
+2. If genuinely blocked (missing information, ambiguous requirement, broken environment): use `#tool:vscode/askQuestions` with options "Continue to next phase" (recommended) / "Stop here — I'll resume later"
+3. **Never silently stop.** Every session must end with either a PR URL or an `#tool:vscode/askQuestions` call.
+
+Key continuation points where models commonly stall (proceed autonomously through all of these):
+
+- After implementation steps complete → proceed to validation
+- After validation passes → proceed to code review
+- After code review completes → proceed to CE Gate
+- After CE Gate completes → proceed to PR creation
+- After PR creation → report completion with PR URL
+
 </critical_rules>
 
 ## Overview
@@ -284,7 +300,11 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
 
 <stopping_rules>
 
-**Hard stop rule**: Never report implementation complete if no PR URL is available.
+**Hard stop rules**:
+
+1. Never report implementation complete if no PR URL is available.
+2. Never end a session without either (a) a PR URL or (b) an `#tool:vscode/askQuestions` call explaining why the pipeline cannot continue.
+3. "I'm not sure if I should continue" is never a valid reason to stop silently — use `#tool:vscode/askQuestions`.
 
 </stopping_rules>
 

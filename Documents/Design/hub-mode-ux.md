@@ -221,3 +221,34 @@ This design also keeps the fix narrow. It does not widen into a general git-stat
 | `.github/scripts/Tests/branch-authority-gate-contract.Tests.ps1` | Added contract coverage that locks the Code-Conductor wording for canonical source, per-mutation placement, mismatch stop/reconcile behavior, and non-destructive duplicate handling. |
 | `.github/scripts/Tests/branch-authority-gate.Tests.ps1` | Added deterministic git-mock coverage for the ordered proof set, ambiguity handling, same-tip duplicate blocking, divergent-branch blocking, and the narrow no-mutation continue path. |
 | `Documents/Design/hub-mode-ux.md` | Added the synced durable design section for the branch-authority hub-mode contract so the committed design doc matches the implemented orchestration behavior. |
+
+---
+
+## Issue #354 Additions: Continuation Contract
+
+### Summary
+
+Issue #354 adds a Continuation Contract inside Code-Conductor's `<critical_rules>` XML block and expands `<stopping_rules>` to prevent premature silent stops during pipeline orchestration. GPT models were silently abandoning the pipeline mid-execution because continuation rules lived outside the highest-weight XML-tagged sections, and the single stopping rule only covered false completion claims — not silent abandonment.
+
+### Design Decisions
+
+| ID | Decision | Details |
+|----|----------|---------|
+| D27 | Continuation Contract inside `<critical_rules>` | Added a Continuation Contract section inside the `<critical_rules>` XML block. GPT models give highest weight to XML-tagged sections; placing continuation rules there ensures adherence across model families. The contract defines a 3-step escalation ladder: continue autonomously → use askQuestions when uncertain → never silently stop without a PR URL or explicit user decision. |
+| D28 | Key continuation checkpoints | The contract enumerates 5 key continuation checkpoints where models commonly stall: after implementation steps complete (proceed to validation), after validation passes (proceed to code review), after code review completes (proceed to CE Gate), after CE Gate completes (proceed to PR creation), and after PR creation (report completion with PR URL). Each checkpoint explicitly instructs the model to proceed autonomously to the next pipeline phase. |
+| D29 | Expanded stopping rules | `<stopping_rules>` expanded from 1 rule to 3 hard stop rules. The original rule (never report complete without PR URL) is preserved; two new rules cover silent abandonment (never stop without PR URL or explicit user decision via askQuestions) and uncertainty-as-stop-reason ("I'm not sure if I should continue" is never a valid reason to stop silently — use askQuestions). |
+
+### Rationale
+
+D27: The existing autonomy principle appeared in list context near end-of-file — neither inside `<critical_rules>` nor in any XML-tagged block. For models with weaker instruction-following, competing instructions at 1000+ lines dilute adherence to any single rule. Placing the continuation contract inside `<critical_rules>` gives it the highest structural weight.
+
+D28: Model uncertainty about whether to continue wasn't framed as a decision point requiring askQuestions. The 5 checkpoints address the empirically observed stall points — after implementation (proceed to validation), after validation (proceed to review), after review (proceed to CE Gate), after CE Gate (proceed to PR creation), and after PR creation (report completion) — converting "should I continue?" from implicit judgment into an explicit "always proceed" rule.
+
+D29: The original single stopping rule prevented false completion claims but not silent mid-pipeline abandonment. The expanded 3-rule set closes both failure modes: silent abandonment and uncertainty-driven stops.
+
+### Files Changed (Issue #354)
+
+| File | Change |
+|------|--------|
+| `.github/agents/Code-Conductor.agent.md` | Added Continuation Contract inside `<critical_rules>` with 3-step escalation ladder and 5 key continuation checkpoints; expanded `<stopping_rules>` from 1 rule to 3 hard stop rules covering silent abandonment |
+| `.github/scripts/Tests/continuation-contract.Tests.ps1` | Added contract test validating continuation contract language exists inside `<critical_rules>`, key checkpoint coverage, and expanded stopping rules |
