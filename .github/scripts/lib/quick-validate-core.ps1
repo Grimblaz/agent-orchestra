@@ -103,8 +103,35 @@ function Test-QVGuidanceComplexity {
     }
 }
 
+function Get-QVExistingPSScriptAnalyzerPaths {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RootPath,
+        [string]$ScriptsPath
+    )
+
+    $paths = [System.Collections.Generic.List[string]]::new()
+
+    if ($ScriptsPath -and (Test-Path $ScriptsPath)) {
+        $paths.Add((Resolve-Path $ScriptsPath).Path)
+    }
+
+    $skillScriptsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'skills'
+    if (Test-Path $skillScriptsPath) {
+        $skillScriptFiles = @(Get-ChildItem -Path $skillScriptsPath -Filter '*.ps1' -File -Recurse |
+                Where-Object { $_.DirectoryName -match '[\\/]scripts$' })
+        foreach ($file in $skillScriptFiles) {
+            $paths.Add($file.FullName)
+        }
+    }
+
+    return $paths.ToArray()
+}
+
 function Test-QVPSScriptAnalyzer {
     param(
+        [Parameter(Mandatory)]
+        [string]$RootPath,
         [Parameter(Mandatory)]
         [string]$ScriptsPath,
         [Parameter(Mandatory)]
@@ -116,13 +143,28 @@ function Test-QVPSScriptAnalyzer {
         return [PSCustomObject]@{ Name = 'PSScriptAnalyzer'; Passed = 'SKIP'; Detail = 'PSScriptAnalyzer not installed — skipping' }
     }
 
-    $resolvedScripts = (Resolve-Path $ScriptsPath).Path
-    $analyzerParams = @{ Path = $resolvedScripts; Recurse = $true }
-    if (Test-Path $SettingsPath) {
-        $analyzerParams['Settings'] = (Resolve-Path $SettingsPath).Path
+    $resolvedPaths = @(Get-QVExistingPSScriptAnalyzerPaths -RootPath $RootPath -ScriptsPath $ScriptsPath)
+    if ($resolvedPaths.Count -eq 0) {
+        return [PSCustomObject]@{ Name = 'PSScriptAnalyzer'; Passed = $true; Detail = '' }
     }
 
-    $issues = @(Invoke-ScriptAnalyzer @analyzerParams)
+    $resolvedSettingsPath = $null
+    if (Test-Path $SettingsPath) {
+        $resolvedSettingsPath = (Resolve-Path $SettingsPath).Path
+    }
+
+    $issues = foreach ($path in $resolvedPaths) {
+        $analyzerParams = @{ Path = $path }
+        if ((Get-Item $path).PSIsContainer) {
+            $null = $analyzerParams.Add('Recurse', $true)
+        }
+        if ($resolvedSettingsPath) {
+            $null = $analyzerParams.Add('Settings', $resolvedSettingsPath)
+        }
+
+        Invoke-ScriptAnalyzer @analyzerParams
+    }
+    $issues = @($issues)
     if ($issues.Count -eq 0) {
         return [PSCustomObject]@{ Name = 'PSScriptAnalyzer'; Passed = $true; Detail = '' }
     }
@@ -131,6 +173,48 @@ function Test-QVPSScriptAnalyzer {
         Name   = 'PSScriptAnalyzer'
         Passed = $false
         Detail = "$($issues.Count) issue(s) found"
+    }
+}
+
+function Test-QVSkillAssetJsonParse {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RootPath
+    )
+
+    $skillsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'skills'
+    if (-not (Test-Path $skillsPath)) {
+        return [PSCustomObject]@{ Name = 'SkillAssetJsonParse'; Passed = $true; Detail = '' }
+    }
+
+    $jsonFiles = @(Get-ChildItem -Path $skillsPath -Filter '*.json' -File -Recurse |
+            Where-Object { $_.DirectoryName -match '[\\/]assets$' })
+    if ($jsonFiles.Count -eq 0) {
+        return [PSCustomObject]@{ Name = 'SkillAssetJsonParse'; Passed = $true; Detail = '' }
+    }
+
+    $invalidFiles = [System.Collections.Generic.List[string]]::new()
+    foreach ($file in $jsonFiles) {
+        try {
+            Get-Content -Path $file.FullName -Raw | ConvertFrom-Json | Out-Null
+        }
+        catch {
+            $invalidFiles.Add($file.FullName)
+        }
+    }
+
+    if ($invalidFiles.Count -eq 0) {
+        return [PSCustomObject]@{ Name = 'SkillAssetJsonParse'; Passed = $true; Detail = '' }
+    }
+
+    $relativePaths = $invalidFiles | ForEach-Object {
+        [System.IO.Path]::GetRelativePath($RootPath, $_)
+    }
+
+    return [PSCustomObject]@{
+        Name   = 'SkillAssetJsonParse'
+        Passed = $false
+        Detail = "$($invalidFiles.Count) JSON file(s) failed to parse: $($relativePaths -join ', ')"
     }
 }
 
@@ -187,8 +271,11 @@ function Invoke-QuickValidate {
         try { $results.Add((Test-QVGuidanceComplexity -ScriptPath $GuidanceComplexityScriptPath)) }
         catch { $results.Add([PSCustomObject]@{ Name = 'GuidanceComplexity'; Passed = $false; Detail = "Error: $_" }) }
         # 9. PSScriptAnalyzer
-        try { $results.Add((Test-QVPSScriptAnalyzer -ScriptsPath $ScriptsPath -SettingsPath $PSScriptAnalyzerSettingsPath)) }
+        try { $results.Add((Test-QVPSScriptAnalyzer -RootPath $RootPath -ScriptsPath $ScriptsPath -SettingsPath $PSScriptAnalyzerSettingsPath)) }
         catch { $results.Add([PSCustomObject]@{ Name = 'PSScriptAnalyzer'; Passed = $false; Detail = "Error: $_" }) }
+        # 10. SkillAssetJsonParse
+        try { $results.Add((Test-QVSkillAssetJsonParse -RootPath $RootPath)) }
+        catch { $results.Add([PSCustomObject]@{ Name = 'SkillAssetJsonParse'; Passed = $false; Detail = "Error: $_" }) }
 
         $passCount = @($results | Where-Object { $_.Passed -eq $true }).Count
         $failCount = @($results | Where-Object { $_.Passed -eq $false }).Count

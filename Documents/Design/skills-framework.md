@@ -2,7 +2,7 @@
 
 ## Summary
 
-The skills framework provides domain-specific knowledge modules loaded on demand by agents from `.github/skills/`. Under the thin-agents/fat-skills direction for issue #344, skills hold reusable methodology and protocol content, while agents retain orchestration boundaries such as routing, identity, trigger points, and commit authority. The repository now ships 32 skills after moving reusable methodology out of agents without changing agent interfaces. Hub skills may be extended by project-specific supplement skills (named `{project}-{hub-skill-name}`) that layer additional constraints on top of their defaults.
+The skills framework provides domain-specific knowledge modules loaded on demand by agents from `.github/skills/`. Under the thin-agents/fat-skills direction for issue #344, skills hold reusable methodology and protocol content, while agents retain orchestration boundaries such as routing, identity, trigger points, and commit authority. The repository now ships 33 skills after moving reusable methodology out of agents without changing agent interfaces. Hub skills may be extended by project-specific supplement skills (named `{project}-{hub-skill-name}`) that layer additional constraints on top of their defaults.
 
 ---
 
@@ -33,7 +33,7 @@ Issue #344 changes the skills boundary from "skills are reference material" to "
 
 ## Skill Inventory Direction
 
-### Currently Shipped Inventory (32 Skills)
+### Currently Shipped Inventory (33 Skills)
 
 | Skill | Directory | Purpose |
 |-------|-----------|---------|
@@ -57,6 +57,7 @@ Issue #344 changes the skills boundary from "skills are reference material" to "
 | `refactoring-methodology` | `.github/skills/refactoring-methodology/` | Proactive refactoring workflow for touched files and nearby debt |
 | `research-methodology` | `.github/skills/research-methodology/` | Evidence-driven research methodology for technical analysis and recommendation building |
 | `review-judgment` | `.github/skills/review-judgment/` | Reusable single-shot review judgment methodology for scoring prosecution and defense ledgers |
+| `routing-tables` | `.github/skills/routing-tables/` | Concise reference for canonical routing metadata, enum values, and gate criteria shared between agents and deterministic consumers |
 | `session-startup` | `.github/skills/session-startup/` | Automatic startup cleanup guard for new conversations |
 | `skill-creator` | `.github/skills/skill-creator/` | Guide for creating new skills in this system with proper frontmatter format |
 | `software-architecture` | `.github/skills/software-architecture/` | Clean Architecture, SOLID principles, and architectural decision guidance |
@@ -98,6 +99,8 @@ description: What skill does. Use when {trigger conditions}. DO NOT USE FOR: {ne
 
 Supporting files (e.g., `patterns.md`, `playwright-setup.md`) may live alongside `SKILL.md` in the same directory. Skills provide knowledge and procedural guidance — they must NOT contain agent orchestration logic.
 
+Skills may also include optional `assets/` and `scripts/` subdirectories for supporting files. `assets/` holds static data such as JSON or YAML lookup tables, while `scripts/` holds deterministic helper scripts that consume or validate the shared skill data. This matches the current architecture rules and supports skills such as `routing-tables`, which ships both human-readable guidance and JSON routing assets.
+
 For issue #344, "must NOT contain agent orchestration logic" means skills do not decide which agent speaks next, when a trigger fires, whether a commit occurs, or how Code-Conductor advances between plan steps. Skills may contain the reusable protocol an agent follows once the agent has decided to invoke that skill.
 
 ---
@@ -108,6 +111,9 @@ For issue #344, "must NOT contain agent orchestration logic" means skills do not
 |--------|------|
 | Moved | `.claude/skills/*` → `.github/skills/*` |
 | Renamed | `.github/skills/tdd-workflow/` → `.github/skills/test-driven-development/` |
+| Created | `.github/skills/routing-tables/SKILL.md` |
+| Created | `.github/skills/routing-tables/assets/routing-config.json` |
+| Created | `.github/skills/routing-tables/assets/gate-criteria.json` |
 | Created | `.github/skills/webapp-testing/SKILL.md` |
 | Created | `.github/skills/webapp-testing/patterns.md` |
 | Created | `.github/skills/webapp-testing/playwright-setup.md` |
@@ -125,4 +131,4 @@ For issue #344, "must NOT contain agent orchestration logic" means skills do not
 - Each `SKILL.md` has valid frontmatter with `name` and `description`
 - `validate-architecture.ps1` checks `.github/skills` path
 - VS Code skill discovery works with `chat.useAgentSkills` enabled
-- Current shipped inventory is 32 skills, and all plugin plus documentation surfaces should describe that same count consistently
+- Current shipped inventory is 33 skills, and all plugin plus documentation surfaces should describe that same count consistently

@@ -97,14 +97,7 @@ If after genuine adversarial effort you find no issues, state what you checked a
 
 When the prompt contains one of the following markers, switch modes before reviewing:
 
-| Marker in prompt                       | Mode                          | Passes       |
-| -------------------------------------- | ----------------------------- | ------------ |
-| _(none / default)_                     | Code prosecution              | 3 (parallel) |
-| `"Use design review perspectives"`     | Design/plan prosecution       | 2 (parallel) |
-| `"Use product-alignment perspectives"` | Product-alignment prosecution | 1            |
-| `"Use defense review perspectives"`    | Defense                       | 1            |
-| `"Use CE review perspectives"`         | CE prosecution                | 1            |
-| `"Score and represent GitHub review"`  | Proxy prosecution             | 1            |
+Load `.github/skills/routing-tables/SKILL.md` and use `Invoke-RoutingLookup -Table review_mode_routing -Key Marker -Value "{marker}"` for the canonical marker-to-mode mapping in `.github/skills/routing-tables/assets/routing-config.json`. When no marker is present, default to `code_prosecution` with the standard 3-pass parallel structure.
 
 **Conflict rule**: Priority order (most specific wins): defense > CE > proxy > product-alignment > design > code. Exception: `"Use code review perspectives"` always overrides `"Use design review perspectives"` and forces Code Review Mode.
 
@@ -173,15 +166,17 @@ Every finding must be categorized with the appropriate evidence:
 
 Every finding must also include these automation-routing fields:
 
-- `severity`: critical | high | medium | low
-- `points`: 10 (critical/high) | 5 (medium) | 1 (low) — assigned by prosecutor; judge may override
+- Load `.github/skills/routing-tables/SKILL.md` when assigning canonical automation-routing values. The authoritative enum values and points mapping live in `.github/skills/routing-tables/assets/routing-config.json` under `enums`.
+- `severity`: use the canonical `enums.severity` values
+- `points`: use the canonical `enums.points_mapping` values — assigned by prosecutor; judge may override
 - `confidence`: high | medium | low
 - `id`: F1 | F2 | F3 | … — sequential label within this review cycle; used by defense and judge to cross-reference findings by ID. Assign in order of appearance.
 - `pass`: 1 | 2 | 3 — prosecution pass number that originated this finding. Code prosecution and design/plan prosecution; omit in CE review, proxy prosecution, and defense mode.
-- `category`: architecture | security | performance | pattern | implementation-clarity | script-automation | documentation-audit — the active prosecution perspective for this finding. Code prosecution only; use `n/a` in CE review, design review, product-alignment prosecution, and proxy prosecution modes. For findings that span multiple perspectives, use the primary perspective.
-- `blast_radius`: localized | module | cross-module | system-wide
-- `authority_needed`: yes | no
-- `systemic_fix_type`: instruction | skill | agent-prompt | plan-template | none — root cause classification: what kind of guardrail would prevent this defect class? Filled in by prosecutor during each prosecution pass (code, design/plan, product-alignment, CE, and proxy prosecution). Always emit this field; use `none` when no specific guardrail type applies.
+- `confidence`: use the canonical `enums.confidence` values
+- `category`: use the canonical `enums.category` values — the active prosecution perspective for this finding. Code prosecution only; use `n/a` in CE review, design review, product-alignment prosecution, and proxy prosecution modes. For findings that span multiple perspectives, use the primary perspective.
+- `blast_radius`: use the canonical `enums.blast_radius` values
+- `authority_needed`: use the canonical `enums.authority_needed` values
+- `systemic_fix_type`: use the canonical `enums.systemic_fix_type` values — root cause classification: what kind of guardrail would prevent this defect class? Filled in by prosecutor during each prosecution pass (code, design/plan, product-alignment, CE, and proxy prosecution). Always emit this field; use `none` when no specific guardrail type applies.
 
 **Root cause tagging**: After identifying each finding, tag the `systemic_fix_type` — ask: _What kind of guardrail would prevent this defect class?_ This is a lightweight classification, not a full root cause analysis — Process-Review will perform deeper analysis on sustained findings retrospectively (Sub C).
 

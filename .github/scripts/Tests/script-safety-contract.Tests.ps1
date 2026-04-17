@@ -11,8 +11,8 @@
       - $knownCategories in aggregate-review-scores.ps1 must contain exactly the 7 mandated taxonomy values
 
     Production scripts are defined as all .ps1 files under .github/scripts/ (root and /lib/)
-    excluding the Tests/ subdirectory. Update these tests only when the underlying safety
-    contract intentionally changes.
+    plus skill scripts under .github/skills/**/scripts/, excluding test files. Update these
+    tests only when the underlying safety contract intentionally changes.
 #>
 
 Describe 'script safety contract' {
@@ -20,24 +20,32 @@ Describe 'script safety contract' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptsRoot = Join-Path -Path $script:RepoRoot -ChildPath '.github' -AdditionalChildPath 'scripts'
+        $script:SkillsRoot = Join-Path -Path $script:RepoRoot -ChildPath '.github' -AdditionalChildPath 'skills'
         $script:AggregateReviewScores = Join-Path $script:ScriptsRoot 'aggregate-review-scores.ps1'
         $script:AggregateReviewScoresCore = Join-Path $script:ScriptsRoot 'lib\aggregate-review-scores-core.ps1'
 
-        $script:ProductionScripts = Get-ChildItem -Path $script:ScriptsRoot -Recurse -Filter '*.ps1' |
-            Where-Object { $_.DirectoryName -notmatch '[/\\]Tests([/\\]|$)' }
+        $script:ProductionScripts = @(
+            Get-ChildItem -Path $script:ScriptsRoot -Recurse -Filter '*.ps1' |
+                Where-Object { $_.DirectoryName -notmatch '[/\\]Tests([/\\]|$)' }
+                Get-ChildItem -Path $script:SkillsRoot -Recurse -Filter '*.ps1' |
+                    Where-Object {
+                        $_.DirectoryName -match '[/\\]scripts([/\\]|$)' -and
+                        $_.DirectoryName -notmatch '[/\\]Tests([/\\]|$)'
+                    }
+                ) | Sort-Object -Property FullName -Unique
 
-        # Canonical taxonomy — sorted alphabetically for deterministic comparison
-        $script:MandatedCategories = @(
-            'architecture', 'documentation-audit', 'implementation-clarity',
-            'pattern', 'performance', 'script-automation', 'security'
-        )
-    }
+                # Canonical taxonomy — sorted alphabetically for deterministic comparison
+                $script:MandatedCategories = @(
+                    'architecture', 'documentation-audit', 'implementation-clarity',
+                    'pattern', 'performance', 'script-automation', 'security'
+                )
+            }
 
-    It 'script safety: production scripts must not use Invoke-Expression or iex aliases' {
-        $violations = $script:ProductionScripts | Where-Object {
-            $content = Get-Content -Path $_.FullName -Raw
-            $content -match '(?i)Invoke-Expression|\biex\b'
-        } | Select-Object -ExpandProperty Name
+            It 'script safety: production scripts must not use Invoke-Expression or iex aliases' {
+                $violations = $script:ProductionScripts | Where-Object {
+                    $content = Get-Content -Path $_.FullName -Raw
+                    $content -match '(?i)Invoke-Expression|\biex\b'
+                } | Select-Object -ExpandProperty Name
 
         $violations | Should -HaveCount 0 -Because 'Invoke-Expression and its iex alias allow arbitrary code execution from strings, creating command-injection risk; use explicit cmdlet calls or operator pipelines instead'
     }

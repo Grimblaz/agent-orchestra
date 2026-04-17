@@ -7,7 +7,7 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 | Directory                | Purpose                                              | Allowed Contents                                               |
 | ------------------------ | ---------------------------------------------------- | -------------------------------------------------------------- |
 | `.github/agents/`        | Agent definitions                                    | `*.agent.md` files with YAML frontmatter                      |
-| `.github/skills/{name}/` | Domain-specific knowledge                            | `SKILL.md` with frontmatter, supporting files                 |
+| `.github/skills/{name}/` | Domain-specific knowledge                            | `SKILL.md` with frontmatter, plus optional `assets/` and `scripts/` subdirectories for supporting files |
 | `.github/instructions/`  | Shared rules loaded by agents                        | `*.instructions.md` files                                     |
 | `.github/prompts/`       | Prompt files and workflow templates                  | `*.prompt.md` with frontmatter; supporting `*.md` templates   |
 | `.github/scripts/`       | Automation scripts invoked by agents or instructions | `*.ps1` PowerShell scripts                                    |
@@ -17,6 +17,13 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 | `Documents/Design/`      | Design documents (committed with implementation PRs) | `{domain-slug}.md`                                            |
 | `Documents/Decisions/`   | Standalone decision records                          | Markdown files                                                 |
 | `examples/`              | Example configurations for different tech stacks     | Subdirectories per stack                                       |
+
+## Layer Model
+
+- Skills: Fat, on-demand methodology, judgment, documentation, and supporting data
+- Harness: Agent files keep routing, context, safety, and decision authority
+- Deterministic/Application bottom layer: Same-input, same-output evaluation and concrete tools/code
+- Resolvers: Structured context and routing data that helps load the right skill or content
 
 ## Dependency Rules
 
@@ -33,6 +40,7 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 - Internal agents (`user-invocable: false`) must NOT be directly user-invocable; they MAY appear in agent `handoffs` lists as subagents
 - Agents must NOT reference deleted agents (e.g., Plan-Architect, Issue-Designer) — validate with `grep`
 - Skills must NOT own orchestration boundaries such as user-turn routing, agent handoffs, commit authority, issue-state transitions, or Code-Conductor's step execution loop
+- Skills MAY contain static data files (JSON, YAML) in `assets/` and deterministic evaluation scripts in `scripts/` that agents invoke for routing decisions
 - Skills MAY contain reusable methodology and protocol content, including ordered workflows, checklists, decision heuristics, and evidence requirements that agents load on demand
 - Concrete boundary examples: Code-Conductor's validation ladder may live in a skill, but CE Gate orchestration and subagent routing stay in the agent; test-driven-development may hold Test-Writer methodology, but conditional delegation and execution flow stay in Test-Writer; session-startup, provenance-gate, and terminal-hygiene remain portable skills while the trigger points that invoke them stay in agents
 - `guidance-complexity` remains agent-only in issue #344; do not move that rule set into a skill as part of this architecture split
@@ -53,6 +61,7 @@ Optional frontmatter: `handoffs`, `user-invocable` (defaults to `true` if omitte
 
 Required frontmatter: `name`, `description`
 Must live in `.github/skills/{skill-name}/SKILL.md`
+Supporting files MAY live under optional `.github/skills/{skill-name}/assets/` and `.github/skills/{skill-name}/scripts/` subdirectories
 
 ### Instruction Files (`.instructions.md`)
 

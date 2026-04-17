@@ -146,25 +146,7 @@ Skip hub mode entirely when the user invokes a specific slash command (e.g., `/i
 
 Before calling any upstream agent, classify the issue scope to determine the appropriate pipeline tier. Use `#tool:vscode/askQuestions` with your analysis and recommendation.
 
-**5-criterion rubric for abbreviated tier** (ALL five must hold):
-
-1. Acceptance criteria are clearly defined or the change is self-evident from the issue title
-2. Implementation touches ≤3 files in a single domain (no cross-cutting changes)
-3. No new user-facing behavior is introduced (configuration, internal protocol, documentation-only)
-4. No cross-cutting architectural changes (no shared interfaces, new abstractions, or multi-agent contracts)
-5. No CE Gate scenarios are needed (no customer-facing surface affected)
-
-**Default to full pipeline when**: any criterion is absent, the issue is ambiguous, or the scope is sparse. When in doubt, choose full.
-
-**Two-tier table**:
-
-| Phase                               | Full pipeline | Abbreviated pipeline |
-| ----------------------------------- | ------------- | -------------------- |
-| Experience-Owner                    | ✅            | ❌ (skip)            |
-| Solution-Designer                   | ✅            | ❌ (skip)            |
-| Issue-Planner (incl. design review) | ✅            | ✅ (required)        |
-| D9 Checkpoint                       | ✅            | ✅ (required)        |
-| Implementation                      | ✅            | ✅                   |
+Load `.github/skills/routing-tables/SKILL.md` and evaluate the canonical abbreviated-tier rubric with `Test-GateCriteria -Gate scope_classification -Criteria @{ ... }`. The five abbreviated-tier criteria, the default-to-`full` rule when any criterion is absent, and the authoritative full-vs-abbreviated phase matrix all live in `.github/skills/routing-tables/assets/gate-criteria.json`.
 
 **User override**: Always present both tiers as options and recommend one — the user may choose either regardless of your analysis. This is how scope override (D5) is implemented.
 
@@ -316,18 +298,7 @@ For PBT rollout guidance, use `.github/skills/property-based-testing/SKILL.md`.
 
 ## Agent Selection
 
-| File Type / Task                                                                                                     | Keywords                                          | Agent                |
-| -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- | -------------------- |
-| `*.test.*`, test suites, fixtures                                                                                    | test, assertion, flaky, coverage                  | Test-Writer          |
-| `src/**/*.ts`, `src/**/*.tsx` (new behavior)                                                                         | implement, feature, bugfix, logic                 | Code-Smith           |
-| `src/**/*.ts`, `src/**/*.tsx` (restructure existing)                                                                 | refactor, simplify, extract, dedupe               | Refactor-Specialist  |
-| UI source files (visual polish)                                                                                      | ui polish, spacing, alignment, styling            | UI-Iterator          |
-| `*.md`, `README.*`, `CHANGELOG.*`                                                                                    | docs, guide, changelog                            | Doc-Keeper           |
-| Session memory `/memories/session/plan-issue-{ID}.md` or GitHub issue comment with `<!-- plan-issue-{ID} -->` marker | plan, acceptance criteria, sequencing             | Issue-Planner        |
-| CE Gate evidence capture (downstream); upstream customer framing, scenarios, design intent                           | ce gate, customer, experience, journey, scenarios | Experience-Owner     |
-| Code review (read-only)                                                                                              | review, risks, quality, critique                  | Code-Critic          |
-| Categorize review feedback (read-only)                                                                               | judge, score, prosecution, defense, categorize    | Code-Review-Response |
-| Process/systemic gap analysis                                                                                        | ce-gate-defect, process-gap, systemic             | Process-Review       |
+Load `.github/skills/routing-tables/SKILL.md` for the canonical specialist-dispatch mapping. When a step or finding maps cleanly to a listed file or task pattern, use `Invoke-RoutingLookup -Table specialist_dispatch -Key FilePattern -Value "{pattern}"`. When dispatch depends on task intent or keyword matching rather than a literal file-pattern lookup, consult the `specialist_dispatch` entries in `.github/skills/routing-tables/assets/routing-config.json` and apply the surrounding routing rules in this agent.
 
 > **native Explore vs Research-Agent**: Use the native Explore subagent for lightweight read-only fact-finding (runs on a fast model in a short-lived context — the returned summary is typically smaller than running equivalent tool calls inline). Use Research-Agent when analysis is deep/multi-file and the result needs to be persisted to a research document for future reference. When in doubt: Explore for discovery, Research-Agent for output that must survive compaction.
 >
@@ -343,14 +314,7 @@ Code-Conductor retains the orchestration around that method: review-mode entry, 
 
 After merging and deduplicating the prosecution ledger, partition findings before the defense pass:
 
-A finding qualifies for the **express lane** (bypasses defense+judge, routes directly to specialist) only when ALL six criteria are met:
-
-1. **Severity is `low`** — as rated by prosecution output (the only severity level below medium in the `critical | high | medium | low` schema)
-2. **Fix type is strictly mechanical**: string literal changes, import path fixes, comment corrections, or formatting fixes — exhaustive list; no other fix types qualify
-3. **No logic changes**: the fix does not add, remove, or modify any `if`/`else`/`switch`/loop/return/guard clause or conditional short-circuit (`&&`/`||` guard reordering)
-4. **No test file cascade**: the fix does not require changes to any test file or assertion
-5. **Changed value not in stored IDs or DB schema**: backward compatibility is not at risk
-6. **Scope ≤ 1 file**: the fix touches exactly one file
+Load `.github/skills/routing-tables/SKILL.md` and evaluate the canonical six-condition express-lane gate with `Test-GateCriteria -Gate express_lane -Criteria @{ ... }`. The authoritative criteria and default non-qualifying outcome live in `.github/skills/routing-tables/assets/gate-criteria.json`.
 
 Route express-eligible findings directly to the specialist dispatch queue with an `express_lane: true` marker. All remaining findings continue to the defense → judge pipeline as normal.
 
@@ -435,8 +399,7 @@ When the review originated from GitHub (proxy prosecution pipeline), Code-Conduc
 
 **When to run** — Mandatory when any of the following apply after all specialists apply all accepted main-review findings:
 
-- ≥1 accepted finding was Critical or High severity
-- Any accepted fix modifies control flow — defined as: adding/changing/removing `if`/`else`/`switch` branches, loop structure changes (`for`/`while`/`forEach` — bounds, iteration variable, or `break`/`continue`), guard clause additions/removals, try/catch restructuring, early returns, or conditional short-circuit reordering (`&&`/`||` guard reordering) — inspect the fix diff computed in Diff scoping below to evaluate this condition.
+Load `.github/skills/routing-tables/SKILL.md` and use `Test-GateCriteria -Gate post_fix_trigger -Criteria @{ ... }` against the canonical trigger conditions in `.github/skills/routing-tables/assets/gate-criteria.json`. Preserve the same OR semantics: accepted `critical` or `high` findings can trigger immediately from the main-review judge output, while control-flow-trigger evaluation still happens only after Tier 1 re-validation and diff scoping.
 
 Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFERRED-SIGNIFICANT, no fixes applied).
 
@@ -474,27 +437,7 @@ Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFE
 
 When delegating to subagents, instruct them to use the relevant skill(s):
 
-| Skill                        | When to Instruct Subagent to Use                                                   |
-| ---------------------------- | ---------------------------------------------------------------------------------- |
-| `adversarial-review`         | Running prosecution passes or defense perspectives with Code-Critic                |
-| `customer-experience`        | Framing customer journeys or capturing CE evidence with Experience-Owner           |
-| `design-exploration`         | Researching and converging technical design options with Solution-Designer         |
-| `documentation-finalization` | Updating design docs, READMEs, or implementation-facing docs with Doc-Keeper       |
-| `frontend-design`            | Designing new UI components, screens, or evaluating for uniqueness                 |
-| `implementation-discipline`  | Implementing bounded plan steps or verifying production wiring with Code-Smith     |
-| `parallel-execution`         | Coordinating concurrent implementation paths, convergence gates, or triage routing |
-| `plan-authoring`             | Drafting or refining execution plans with Issue-Planner                            |
-| `property-based-testing`     | Adding randomized testing, validating input ranges, or verifying invariants        |
-| `refactoring-methodology`    | Running a proportionate structural cleanup pass with Refactor-Specialist           |
-| `research-methodology`       | Gathering verified multi-file findings for a research document with Research-Agent |
-| `review-judgment`            | Ruling on prosecution plus defense ledgers with Code-Review-Response               |
-| `skill-creator`              | Adding new skills, updating skill templates, or reviewing skill structure          |
-| `software-architecture`      | Evaluating layer boundaries, dependency flow, or ADR-level decisions               |
-| `systematic-debugging`       | Debugging failures, investigating flaky tests, or tracking root causes             |
-| `test-driven-development`    | Writing tests first, red-green-refactor, or validating quality gates               |
-| `ui-iteration`               | Running screenshot-driven UI polish passes with UI-Iterator                        |
-| `ui-testing`                 | Writing component-level React tests, fixing flaky tests, or establishing patterns  |
-| `webapp-testing`             | Creating or improving browser-based E2E coverage, test stability, or CI            |
+Load `.github/skills/routing-tables/SKILL.md` and consult the `skill_mapping` reference entries in `.github/skills/routing-tables/assets/routing-config.json` when deciding which reusable skills to name in a delegation prompt. Treat that mapping as a canonical reference list for when each skill is relevant; decision authority for the actual delegation remains here.
 
 <!-- Keep in sync: when adding or removing a delegation skill in .github/skills/, update this table (delegation-scoped: only skills Code-Conductor instructs subagents to use). Always also update Process-Review's Skill Mapping Reference table (all-skills scope). -->
 
@@ -528,14 +471,7 @@ Run this gate as the final step before PR creation (Tier 4, after the post-fix t
 
 Read the plan's `[CE GATE]` step to identify the customer surface. Pass this surface type information to Experience-Owner when delegating evidence capture (step 3 of the Scenario Exercise Protocol). If no `[CE GATE]` step exists, infer from the change type and include the inferred surface type in the Experience-Owner delegation:
 
-| Surface Type        | Tool / Method                                                                           |
-| ------------------- | --------------------------------------------------------------------------------------- |
-| Web UI              | Native browser tools (`openBrowserPage` + `screenshotPage`); Playwright MCP as fallback |
-| REST / GraphQL      | `curl` or `httpie` in terminal                                                          |
-| CLI                 | Invoke command in terminal with test args                                               |
-| SDK                 | Example invocation in terminal                                                          |
-| Batch / pipeline    | Invoke with representative test data                                                    |
-| No customer surface | Skip with documented reason (`⏭️ CE Gate not applicable — {reason}`)                    |
+Load `.github/skills/routing-tables/SKILL.md` and use `Invoke-RoutingLookup -Table surface_identification -Key Surface -Value "{surface}"` for the canonical surface-to-tool mapping in `.github/skills/routing-tables/assets/routing-config.json`. Preserve the same behavior: native browser tools remain the primary Web UI path with Playwright MCP fallback, terminal invocations remain the default for REST/GraphQL, CLI, SDK, and batch surfaces, and `No customer surface` still emits `⏭️ CE Gate not applicable — {reason}`.
 
 ### Scenario Exercise Protocol
 
