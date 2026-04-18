@@ -23,6 +23,8 @@ Describe 'session startup wording contract' {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:SessionStartupSkill = Join-Path $script:RepoRoot '.github\skills\session-startup\SKILL.md'
         $script:CanonicalMarkerPath = '/memories/session/session-startup-check-complete.md'
+        $script:CanonicalTriggerText = 'Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.'
+        $script:LegacySilentSkipSummary = 'Skip the automatic startup check silently when neither `$env:COPILOT_ORCHESTRA_ROOT` nor `$env:WORKFLOW_TEMPLATE_ROOT` is set, `pwsh` is unavailable, or the detector returns non-JSON output.'
         $script:DetectorCommandPattern = '(?ms)^pwsh -NoProfile -NonInteractive -File "\$copilotRoot/\.github/skills/session-startup/scripts/session-cleanup-detector\.ps1"\s*$'
         $script:ContractHeadingPattern = '(?m)^### Canonical Automatic Startup Guard Contract\s*$'
         $script:PipelineEntryAgents = @(
@@ -134,16 +136,19 @@ Describe 'session startup wording contract' {
         foreach ($agent in $script:PipelineEntryAgents) {
             $document = & $script:GetDocumentState -Path $agent.Path
             $content = $document.Content
+            $topBodyMatch = [regex]::Match($content, '(?ms)\A---\r?\n.*?^---[ \t]*\r?\n(?<topBody>.*?)(?=^## |\z)')
             $processSectionMatch = [regex]::Match($content, '(?ms)^## Process\s*\r?\n(?<body>.*?)(?=^## |\z)')
 
-            $processSectionMatch.Success | Should -BeTrue -Because "$($agent.Name) must keep a bounded Process section for pre-response trigger handling"
+            $topBodyMatch.Success | Should -BeTrue -Because "$($agent.Name) must keep a bounded top-of-body region between frontmatter and the first section heading"
+            $processSectionMatch.Success | Should -BeTrue -Because "$($agent.Name) must keep a bounded Process section for provenance-gate instructions"
 
+            $topBody = $topBodyMatch.Groups['topBody'].Value
             $processSection = $processSectionMatch.Groups['body'].Value
 
-            $processSection | Should -Match ([regex]::Escape('Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.')) -Because "$($agent.Name) must retain the canonical startup timing phrase in its Process section"
-            $processSection | Should -Match '(?is)Skip the automatic startup check silently when neither .*? is set' -Because "$($agent.Name) must retain the silent-skip summary for missing startup root environment variables"
-            $processSection | Should -Match '(?is)`pwsh`.*?(unavailable|missing)' -Because "$($agent.Name) must retain the silent-skip summary for missing pwsh"
-            $processSection | Should -Match '(?is)non-JSON output' -Because "$($agent.Name) must retain the silent-skip summary for non-JSON detector output"
+            ([regex]::Matches($content, [regex]::Escape($script:CanonicalTriggerText))).Count | Should -Be 1 -Because "$($agent.Name) must include the startup trigger exactly once"
+            $topBody | Should -Match ('(?ms)\S.*\r?\n\r?\n' + [regex]::Escape($script:CanonicalTriggerText) + '\s*\z') -Because "$($agent.Name) must make the startup trigger the final top-of-body paragraph immediately before the first section heading"
+            $processSection | Should -Not -Match ([regex]::Escape($script:CanonicalTriggerText)) -Because "$($agent.Name) must not retain the startup trigger inside its Process section"
+            $content | Should -Not -Match ([regex]::Escape($script:LegacySilentSkipSummary)) -Because "$($agent.Name) must not retain the legacy silent-skip summary anywhere in the file"
         }
     }
 
