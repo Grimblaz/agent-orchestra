@@ -25,8 +25,8 @@ addressing the within-step retry gap that the Terminal Lifecycle Protocol does n
 | `.github/scripts/lib/quick-validate-core.ps1` | Quick-validate library — `Invoke-QuickValidate` (TD6) |
 | `.github/scripts/quick-validate.ps1` | Quick-validate CLI wrapper (TD6) |
 | `.github/scripts/Tests/quick-validate.Tests.ps1` | Pester tests for quick-validate (TD6) |
-| `.github/scripts/lib/check-port-core.ps1` | Port-availability check library — `Invoke-CheckPort` (TD7) |
-| `.github/scripts/check-port.ps1` | Port-check CLI wrapper (TD7) |
+| `.github/skills/terminal-hygiene/scripts/check-port-core.ps1` | Port-availability check library — `Invoke-CheckPort` (TD7) |
+| `.github/skills/terminal-hygiene/scripts/check-port.ps1` | Port-check CLI wrapper (TD7) |
 | `.github/scripts/Tests/check-port.Tests.ps1` | Pester tests for check-port (TD7) |
 
 ## Design Decisions
@@ -37,7 +37,7 @@ The guardrails live in `copilot-instructions.md` (frontmatter `applyTo: "**"`), 
 automatically by every agent including subagents. This is the only location that reaches all
 execution contexts.
 
-`safe-operations.instructions.md` was considered but rejected — it is not loaded by all subagents.
+The former shared instruction-file delivery path was considered but rejected — the current `safe-operations` skill reaches this guidance without relying on a shared instruction path.
 A Code-Conductor-only section was considered but rejected — subagents bypass it. The new section
 explicitly **supplements** (does not replace) agent-specific terminal guidance such as
 Code-Conductor's Terminal Non-Interactive Guardrails.
@@ -221,8 +221,8 @@ operating correctly.
 - `.github/scripts/quick-validate.ps1` — CLI wrapper (TD6)
 - `.github/scripts/Tests/quick-validate.Tests.ps1` — Pester tests (TD6)
 - `.github/copilot-instructions.md` — `### Terminal Retry Hygiene` subsection (D9)
-- `.github/scripts/lib/check-port-core.ps1` — port-check library (D10)
-- `.github/scripts/check-port.ps1` — CLI wrapper (D10)
+- `.github/skills/terminal-hygiene/scripts/check-port-core.ps1` — port-check library (D10)
+- `.github/skills/terminal-hygiene/scripts/check-port.ps1` — CLI wrapper (D10)
 - `.github/scripts/Tests/check-port.Tests.ps1` — Pester tests (D10)
 
 ### Explicit Non-Goals

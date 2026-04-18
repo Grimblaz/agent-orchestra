@@ -2,7 +2,7 @@
 
 ## Problem Context
 
-The Pester test suite for `.github/scripts/` originally spawned a child `pwsh` process for every test
+The Pester test suite for the workflow's PowerShell CLI wrappers originally spawned a child `pwsh` process for every test
 case. Across 218 deterministic tests covering 6 production scripts, this produced ~134 child-process
 spawns and a ~216s test run — long enough to hit VS Code Copilot timeout limits and impede the
 edit-test loop.
@@ -23,9 +23,11 @@ integration tests that call the live GitHub API remain, with timing subject to n
 
 ## Decision
 
-Extract each script's logic into a `lib/{name}-core.ps1` library file that exports a single
+Extract each script's logic into a sibling `*-core.ps1` library file that exports a single
 `Invoke-*` function. Keep the original script as a thin CLI wrapper that dot-sources the library and
-calls the function.
+calls the function. Skill-owned automation keeps both wrapper and core in the skill's `scripts/`
+directory; repo-level automation may still live under `.github/scripts/` when it is not owned by a
+skill.
 
 This preserves the public CLI contract of every script while allowing Pester tests to dot-source the
 library and invoke the function in-process — no child `pwsh` spawning required.
@@ -34,9 +36,9 @@ library and invoke the function in-process — no child `pwsh` spawning required
 
 ### File and function naming
 
-- Library path: `.github/scripts/lib/{script-name}-core.ps1`
+- Library path: `.github/skills/{skill-name}/scripts/{script-name}-core.ps1` for skill-owned automation, or `.github/scripts/{script-name}-core.ps1` for repo-level automation
 - Exported function: `Invoke-{PascalCase}` (one public function per library)
-- Example: `aggregate-review-scores.ps1` → `lib/aggregate-review-scores-core.ps1` →
+- Example: `.github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1` → `aggregate-review-scores-core.ps1` →
   `Invoke-AggregateReviewScores`
 
 ### Function signature
@@ -128,7 +130,7 @@ Test files dot-source the library directly and invoke the function in-process:
 
 ```powershell
 BeforeAll {
-    $script:LibFile = Join-Path $PSScriptRoot '../lib/backfill-calibration-core.ps1'
+  $script:LibFile = Join-Path $PSScriptRoot '../../skills/calibration-pipeline/scripts/backfill-calibration-core.ps1'
     . $script:LibFile
 
     $script:InvokeFn = {
@@ -181,8 +183,8 @@ for git mock infrastructure and legitimately requires child-process spawning.
   shadows one with the other.
 - **Wrapper stays minimal**: No logic may live in both the wrapper and the library. Duplication
   creates drift.
-- **Path coupling**: If a library file is renamed or moved, both the wrapper (`$PSScriptRoot/lib/`)
-  and the test (`$PSScriptRoot/../lib/`) must be updated.
+- **Path coupling**: If a library file is renamed or moved, both the wrapper (`$PSScriptRoot/`)
+  and the test path to `.github/skills/{skill-name}/scripts/` must be updated.
 - **Residual spawns**: `session-cleanup-detector` tests that exercise git mock `.cmd` wrappers still
   spawn child processes. This is a known limitation deferred to a follow-up.
 

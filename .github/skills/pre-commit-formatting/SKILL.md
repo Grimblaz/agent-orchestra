@@ -1,3 +1,8 @@
+---
+name: pre-commit-formatting
+description: Backstop formatting workflow used during PR creation. Use when applying the final markdown and whitespace formatting gate before validation evidence capture. DO NOT USE FOR: per-step implementation formatting advice or PowerShell formatting rules outside this gate.
+---
+
 # Pre-Commit Formatting Gate
 
 ## Purpose
@@ -89,3 +94,9 @@ This gate assumes:
 - The default branch is named `main` (used in the `git diff` base ref)
 
 Consumer repos cloned from this template should adjust the branch name if their default branch differs.
+
+## Gotchas
+
+| Trigger                     | Gotcha                                                                        | Fix                                                                |
+| --------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| Running the formatting gate | `git add -A` sweeps unrelated working-tree changes into the formatting commit | Stage only the files collected from the explicit changed-file list |

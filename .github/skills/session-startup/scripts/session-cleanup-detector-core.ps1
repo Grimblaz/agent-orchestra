@@ -4,6 +4,8 @@
     Library for session-cleanup-detector logic. Dot-source this file and call Invoke-SessionCleanupDetector.
 #>
 
+. "$PSScriptRoot/session-startup-git-helpers.ps1"
+
 function Test-SCDPersistentTrackingFile {
     param(
         [Parameter(Mandatory)]
@@ -35,33 +37,6 @@ function Test-SCDPersistentTrackingFile {
 
     return $false
 }
-
-function Get-SCDDefaultBranch {
-    <#
-    .SYNOPSIS
-        Resolves the remote default branch using the same multi-strategy pattern as
-        post-merge-cleanup.ps1: symbolic-ref → show-ref main → show-ref master → 'main'.
-    #>
-    $branch = (git symbolic-ref refs/remotes/origin/HEAD 2>$null) -replace 'refs/remotes/origin/', ''
-    if ($LASTEXITCODE -ne 0) { $branch = $null }
-    if (-not $branch) {
-        git show-ref --verify --quiet refs/remotes/origin/main 2>$null
-        if ($LASTEXITCODE -eq 0) { $branch = 'main' }
-    }
-    if (-not $branch) {
-        git show-ref --verify --quiet refs/remotes/origin/master 2>$null
-        if ($LASTEXITCODE -eq 0) { $branch = 'master' }
-    }
-    if (-not $branch) {
-        $localHead = (git symbolic-ref HEAD 2>$null)
-        if ($LASTEXITCODE -eq 0 -and $localHead) {
-            $branch = $localHead -replace 'refs/heads/', ''
-        }
-    }
-    if (-not $branch) { $branch = 'main' }
-    return $branch
-}
-
 function Invoke-SessionCleanupDetector {
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -227,11 +202,11 @@ function Invoke-SessionCleanupDetector {
                 if ($item.BranchName) {
                     foreach ($b in $item.AllBranches) {
                         $safeB = $b -replace "'", "''"
-                        $out += "pwsh '$safeRoot/.github/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -FeatureBranch '$safeB'"
+                        $out += "pwsh '$safeRoot/.github/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -FeatureBranch '$safeB'"
                     }
                 }
                 else {
-                    $out += "pwsh '$safeRoot/.github/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete  # branch not found locally; archives tracking files only"
+                    $out += "pwsh '$safeRoot/.github/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete  # branch not found locally; archives tracking files only"
                 }
             }
             else {
@@ -254,7 +229,7 @@ function Invoke-SessionCleanupDetector {
         $lines += '```powershell'
         if ($staleBranch.IssueId) {
             $lines += '# Run in a PowerShell (pwsh) terminal:'
-            $lines += "pwsh '$safeRoot/.github/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
+            $lines += "pwsh '$safeRoot/.github/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
         }
         else {
             $lines += "git checkout '$escapedDefault' && git pull && git branch -d '$escaped'  # use -D to force if already confirmed merged"
@@ -279,7 +254,7 @@ function Invoke-SessionCleanupDetector {
         $lines += '```powershell'
         if ($staleBranch.IssueId) {
             $lines += '# Run in a PowerShell (pwsh) terminal:'
-            $lines += "pwsh '$safeRoot/.github/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
+            $lines += "pwsh '$safeRoot/.github/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
             if ($dedupedCleanup.Count -gt 0) {
                 $lines += (Get-TrackingCommands -Items $dedupedCleanup)
             }

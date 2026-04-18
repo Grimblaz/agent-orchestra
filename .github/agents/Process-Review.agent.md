@@ -206,7 +206,7 @@ Emit exactly this structure when returning results to Code-Conductor:
 $healthReportTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "health-report-${PID}.md"
 $complexityTempFile = Join-Path ([System.IO.Path]::GetTempPath()) "complexity-output-${PID}.json"
 try {
-    $complexityOutput = pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json
+    $complexityOutput = pwsh -NoProfile -NonInteractive -File .github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json
     if ($null -ne $complexityOutput -and $null -eq $complexityOutput.error) {
         $complexityOutput | ConvertTo-Json -Depth 5 | Set-Content -Path $complexityTempFile -Encoding UTF8
     } else {
@@ -226,9 +226,9 @@ If the script cannot be executed (script file not found, pwsh unavailable) or ou
 
 ```powershell
 if ($null -ne $complexityTempFile -and (Test-Path $complexityTempFile)) {
-    pwsh -NoProfile -NonInteractive -File .github/scripts/aggregate-review-scores.ps1 -ComplexityJsonPath $complexityTempFile -OutputPath $healthReportTempFile
+  pwsh -NoProfile -NonInteractive -File .github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1 -ComplexityJsonPath $complexityTempFile -OutputPath $healthReportTempFile
 } else {
-    pwsh -NoProfile -NonInteractive -File .github/scripts/aggregate-review-scores.ps1 -OutputPath $healthReportTempFile
+  pwsh -NoProfile -NonInteractive -File .github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1 -OutputPath $healthReportTempFile
 }
 ```
 
@@ -368,7 +368,7 @@ For each entry already marked `<!-- gotcha-status: upstream:{url} -->`: check if
 - Skipped: {reason or "none"}
 ```
 
-**Guardrail**: This section reads and writes `local-gotchas.instructions.md` to update status markers, and creates GitHub issues. It does NOT modify any other agent, skill, or system instruction file. Issue creation must follow output-capture verification (§2a) and deduplication search (§2c) from `safe-operations.instructions.md`. For rule-addition proposals, apply the prevention-analysis advisory (§2d) from `safe-operations.instructions.md` before the §2c dedup search.
+**Guardrail**: This section reads and writes `local-gotchas.instructions.md` to update status markers, and creates GitHub issues. It does NOT modify any other agent, skill, or system instruction file. Issue creation must follow output-capture verification (§2a) and deduplication search (§2c) from `.github/skills/safe-operations/SKILL.md`. For rule-addition proposals, apply the prevention-analysis advisory (§2d) from `.github/skills/safe-operations/SKILL.md` before the §2c dedup search.
 
 ### 4.9 Root Cause Analysis & Guardrail Proposals
 
@@ -414,10 +414,12 @@ For each pattern being considered for a guardrail proposal with `systemic_fix_ty
 
 1. **Read finding content**: Examine the evidence citations (PR numbers + finding IDs) from the script output. Access the finding details from calibration data or PR bodies to understand the specific defect pattern.
 2. **Search target by type**: Based on `systemic_fix_type`, search the relevant files:
-   - `instruction` → `.github/instructions/*.instructions.md`
-   - `skill` → `.github/skills/*/SKILL.md`
-   - `agent-prompt` → `.github/agents/*.agent.md`
-   - `plan-template` → Issue-Planner plan style guide section
+
+- `instruction` → consumer instruction files that remain in `.github/instructions/*.instructions.md` (for example `local-gotchas.instructions.md`, `browser-tools.instructions.md`, `browser-mcp.instructions.md`); for hub-migrated shared workflow guidance, search the owning skill file under `.github/skills/*/SKILL.md` instead
+- `skill` → `.github/skills/*/SKILL.md`
+- `agent-prompt` → `.github/agents/*.agent.md`
+- `plan-template` → Issue-Planner plan style guide section
+
 3. **Draft guardrail rule**: Identify the specific missing rule or strengthening needed. Write a concrete proposed change (what to add, which file, which section).
 
 **Step 3 — Emit proposals**:
@@ -427,9 +429,9 @@ For each identified guardrail, emit in the report using this format:
 ```yaml
 guardrail_proposals:
   - pattern: "Missing input validation rule"
-    systemic_fix_type: instruction
+    systemic_fix_type: skill
     category: security
-    target_file: .github/instructions/safe-operations.instructions.md
+    target_file: .github/skills/safe-operations/SKILL.md
     target_section: "Section 1: File Operation Rules"
     compression_advisory: "none — ceiling not exceeded"  # advisory text if compression_required is true, otherwise "none — ceiling not exceeded"
     proposed_change: "Add rule: all user-facing endpoints must validate input against schema before processing"
@@ -475,7 +477,7 @@ For each proposal from Step 3 where `previously_proposed: false`:
 3. **Invoke the script** via terminal:
 
    ```powershell
-   pwsh -NoProfile -NonInteractive -File .github/scripts/create-improvement-issue.ps1 @params
+   pwsh -NoProfile -NonInteractive -File .github/skills/calibration-pipeline/scripts/create-improvement-issue.ps1 @params
    ```
 
    Parse the exit code and stdout for the result summary.

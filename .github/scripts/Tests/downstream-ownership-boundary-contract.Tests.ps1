@@ -8,7 +8,7 @@
     Locks the issue #196 downstream ownership contract across:
       - .github/agents/Code-Conductor.agent.md
       - Documents/Design/hub-mode-ux.md
-      - .github/instructions/safe-operations.instructions.md
+    - .github/skills/safe-operations/SKILL.md
       - .github/agents/Process-Review.agent.md
 
         The files must describe the same semantics for:
@@ -33,7 +33,7 @@ Describe 'downstream ownership boundary contract' {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:CodeConductor = Join-Path $script:RepoRoot '.github/agents/Code-Conductor.agent.md'
         $script:HubModeUx = Join-Path $script:RepoRoot 'Documents/Design/hub-mode-ux.md'
-        $script:SafeOperations = Join-Path $script:RepoRoot '.github/instructions/safe-operations.instructions.md'
+        $script:SafeOperations = Join-Path $script:RepoRoot '.github/skills/safe-operations/SKILL.md'
         $script:ProcessReview = Join-Path $script:RepoRoot '.github/agents/Process-Review.agent.md'
 
         $script:ReadContent = {

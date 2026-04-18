@@ -24,7 +24,7 @@ The feature is a 3-piece design that keeps Code-Conductor's directive count stab
 |-------|----------|------|
 | Opt-out detection (D12) | CC Step 1 (plan load) | Reads consumer `copilot-instructions.md` once; sets `auto_commit_enabled` flag for the session |
 | Step commit gate | CC Step 3 (step loop) | Checks `auto_commit_enabled` before loading the instruction file |
-| Protocol | `.github/instructions/step-commit.instructions.md` | Self-contained 7-step protocol loaded by reference (FG-D4 pattern) |
+| Protocol | `.github/skills/step-commit/SKILL.md` | Self-contained 7-step protocol loaded by reference (FG-D4 pattern) |
 
 **Relationship to formatting gate**: Independent mechanisms. Step commits capture pre-formatting validated state per step; the formatting gate runs at PR creation time (CC Step 4). Step commits use `--no-verify` to bypass hooks — formatting is the hook's concern, not the step commit's.
 
@@ -41,7 +41,7 @@ The feature is a 3-piece design that keeps Code-Conductor's directive count stab
 | D1 | Step commits are implementation-only (no spec/test separation) | Single commit per step keeps the model simple; per-step refactor is already folded into the step |
 | D2 | Default-on with opt-out via `## Commit Policy` / `auto-commit: disabled` | Most workflows benefit; opt-out for squash-only or manual-commit teams |
 | D3 | Commits happen after validation ladder + RC conformance | No untested code is committed |
-| D4 | Self-contained instruction file (FG-D4 pattern) | Avoids CC directive bloat; protocol loaded by reference only when enabled |
+| D4 | Self-contained skill file (FG-D4 pattern) | Avoids CC directive bloat; protocol loaded by reference only when enabled |
 | D5 | Detection at plan-load time; flag persists for session | Single read of consumer config; no per-step re-parsing |
 | D6 | Explicit file list staging (never `git add -A`) | Prevents sweeping unrelated working-tree changes into a step commit |
 | D7 | `step(N): {title}` message format with `Plan:`, `Agents:`, `Validation:` trailers | Machine-parseable for D13 reconciliation; human-readable for reviewers |
@@ -71,7 +71,7 @@ When opted out: validation ladder, RC conformance, and progress checkpoints stil
 
 ## Related Files
 
-- [.github/instructions/step-commit.instructions.md](../../.github/instructions/step-commit.instructions.md) — full protocol
+- `.github/skills/step-commit/SKILL.md` — full protocol
 - [.github/agents/Code-Conductor.agent.md](../../.github/agents/Code-Conductor.agent.md) — D12/D13 detection, step commit gate, diff-scoping prerequisite
 - [CUSTOMIZATION.md](../../CUSTOMIZATION.md) — consumer-facing opt-out documentation
 - [pre-commit-formatting.md](pre-commit-formatting.md) — independent formatting gate

@@ -62,7 +62,7 @@ param(
     [string]$OutputPath = ''
 )
 
-. "$PSScriptRoot/lib/aggregate-review-scores-core.ps1"
+. "$PSScriptRoot/aggregate-review-scores-core.ps1"
 
 # OutputPath is wrapper-only; remove before splatting to core function
 $null = $PSBoundParameters.Remove('OutputPath')

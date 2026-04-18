@@ -55,8 +55,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot '.github\scripts\aggregate-review-scores.ps1'
-        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        $script:ScriptFile = Join-Path $script:RepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:LibFile
 
         # Master temp root — all per-test dirs live under here
@@ -2633,7 +2633,7 @@ exit 0
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
-            $configPath = Join-Path $script:RepoRoot '.github/config/guidance-complexity.json'
+            $configPath = Join-Path $script:RepoRoot '.github/skills/calibration-pipeline/assets/guidance-complexity.json'
             $configBackup = Get-Content -Path $configPath -Raw
             try {
                 # Write custom config with persistent_threshold=2
@@ -2758,8 +2758,8 @@ Describe 'aggregate-review-scores -HealthReport parameter and return shape contr
 
     BeforeAll {
         $script:HRRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:HRScriptFile = Join-Path $script:HRRepoRoot '.github\scripts\aggregate-review-scores.ps1'
-        $script:HRLibFile = Join-Path $script:HRRepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        $script:HRScriptFile = Join-Path $script:HRRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores.ps1'
+        $script:HRLibFile = Join-Path $script:HRRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:HRLibFile
 
         # Isolated temp root for mock-gh artifacts
@@ -2927,7 +2927,7 @@ Describe 'Format-HealthReport core content' {
 
     BeforeAll {
         $script:FHRRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:FHRLibFile = Join-Path $script:FHRRepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        $script:FHRLibFile = Join-Path $script:FHRRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:FHRLibFile
 
         # ---------------------------------------------------------------
@@ -3229,7 +3229,7 @@ Describe 'Directional indicators via temporal split' {
 
     BeforeAll {
         $script:TSSRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:TSSLibFile = Join-Path $script:TSSRepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        $script:TSSLibFile = Join-Path $script:TSSRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:TSSLibFile
         $script:TSSTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-tss-$([System.Guid]::NewGuid().ToString('N'))"
@@ -3479,7 +3479,7 @@ Describe 'Fix Effectiveness: per-category contribution enrichment' {
 
     BeforeAll {
         $script:FERepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:FELibFile = Join-Path $script:FERepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        $script:FELibFile = Join-Path $script:FERepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:FELibFile
         $script:FETempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-fe-$([System.Guid]::NewGuid().ToString('N'))"
@@ -3847,7 +3847,7 @@ Describe 'Fix Effectiveness: Measure-FixEffectiveness' {
 
     BeforeAll {
         $script:CFERepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CFELibFile = Join-Path $script:CFERepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        $script:CFELibFile = Join-Path $script:CFERepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:CFELibFile
 
         # Helper: build a PrContribution entry
@@ -4294,7 +4294,7 @@ Describe 'Fix Effectiveness: merge-date discovery' {
 
     BeforeAll {
         $script:MDRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:MDLibFile = Join-Path $script:MDRepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        $script:MDLibFile = Join-Path $script:MDRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:MDLibFile
         $script:MDTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-md-$([System.Guid]::NewGuid().ToString('N'))"
@@ -4751,7 +4751,7 @@ Describe 'Read-only mode and insufficient data handling' {
 
     BeforeAll {
         $script:RORepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ROLibFile = Join-Path $script:RORepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        $script:ROLibFile = Join-Path $script:RORepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:ROLibFile
         $script:ROTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-ro-$([System.Guid]::NewGuid().ToString('N'))"
@@ -4949,7 +4949,7 @@ Describe 'Fix Effectiveness: Format-HealthReport section rendering' {
 
     BeforeAll {
         $script:FHRFERepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:FHRFELibFile = Join-Path $script:FHRFERepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        $script:FHRFELibFile = Join-Path $script:FHRFERepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:FHRFELibFile
 
         # ---------------------------------------------------------------
@@ -5261,7 +5261,7 @@ Describe 'Fix Effectiveness: integration tests' {
 
     BeforeAll {
         $script:FEIRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:FEILibFile = Join-Path $script:FEIRepoRoot '.github\scripts\lib\aggregate-review-scores-core.ps1'
+        $script:FEILibFile = Join-Path $script:FEIRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:FEILibFile
         $script:FEITempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-fei-$([System.Guid]::NewGuid().ToString('N'))"

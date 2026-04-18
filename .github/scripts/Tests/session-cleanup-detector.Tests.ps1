@@ -24,8 +24,8 @@ Describe 'session-cleanup-detector.ps1 — env var fallback' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot '.github\scripts\session-cleanup-detector.ps1'
-        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\session-cleanup-detector-core.ps1'
+        $script:ScriptFile = Join-Path $script:RepoRoot '.github\skills\session-startup\scripts\session-cleanup-detector.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github\skills\session-startup\scripts\session-cleanup-detector-core.ps1'
         . $script:LibFile
 
         # Snapshot env vars so every test starts from a known baseline
@@ -213,8 +213,8 @@ Describe 'session-cleanup-detector.ps1 — calibration tracking exclusion' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot '.github\scripts\session-cleanup-detector.ps1'
-        . (Join-Path $script:RepoRoot '.github\scripts\lib\session-cleanup-detector-core.ps1')
+        $script:ScriptFile = Join-Path $script:RepoRoot '.github\skills\session-startup\scripts\session-cleanup-detector.ps1'
+        . (Join-Path $script:RepoRoot '.github\skills\session-startup\scripts\session-cleanup-detector-core.ps1')
 
         $script:SavedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
         $script:SavedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT

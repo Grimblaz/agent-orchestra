@@ -23,7 +23,7 @@ Describe 'session startup wording contract' {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:SessionStartupSkill = Join-Path $script:RepoRoot '.github\skills\session-startup\SKILL.md'
         $script:CanonicalMarkerPath = '/memories/session/session-startup-check-complete.md'
-        $script:DetectorCommandPattern = '(?ms)^pwsh -NoProfile -NonInteractive -File "\$copilotRoot/\.github/scripts/session-cleanup-detector\.ps1"\s*$'
+        $script:DetectorCommandPattern = '(?ms)^pwsh -NoProfile -NonInteractive -File "\$copilotRoot/\.github/skills/session-startup/scripts/session-cleanup-detector\.ps1"\s*$'
         $script:ContractHeadingPattern = '(?m)^### Canonical Automatic Startup Guard Contract\s*$'
         $script:PipelineEntryAgents = @(
             @{

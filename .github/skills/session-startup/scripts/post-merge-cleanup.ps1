@@ -12,11 +12,11 @@
 
 .EXAMPLE
     # Parameterized (explicit)
-    pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber 36 -FeatureBranch "feature/issue-36-janitor-to-hook"
+    pwsh .github/skills/session-startup/scripts/post-merge-cleanup.ps1 -IssueNumber 36 -FeatureBranch "feature/issue-36-janitor-to-hook"
 
 .EXAMPLE
     # With GitHub CLI (close issue via gh)
-    pwsh .github/scripts/post-merge-cleanup.ps1 -IssueNumber 36 -FeatureBranch "feature/issue-36-janitor-to-hook" -UseGh
+    pwsh .github/skills/session-startup/scripts/post-merge-cleanup.ps1 -IssueNumber 36 -FeatureBranch "feature/issue-36-janitor-to-hook" -UseGh
 #>
 
 [CmdletBinding()]
@@ -43,6 +43,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+. "$PSScriptRoot/session-startup-git-helpers.ps1"
 
 function Get-RepoFromOrigin {
     $originUrl = (git remote get-url origin) 2>$null
@@ -107,24 +109,7 @@ $remaining = (Get-ChildItem -Path $trackingRoot -Recurse -File -ErrorAction Sile
 Write-Output "Archived $archivedCount file(s). Tracking files remaining: $remaining"
 
 # Determine default branch defensively (try multiple strategies before assuming 'main')
-$defaultBranch = (git symbolic-ref refs/remotes/origin/HEAD 2>$null) -replace 'refs/remotes/origin/', ''
-
-if (-not $defaultBranch) {
-    git show-ref --verify --quiet refs/remotes/origin/main 2>$null
-    if ($LASTEXITCODE -eq 0) { $defaultBranch = 'main' }
-}
-
-if (-not $defaultBranch) {
-    git show-ref --verify --quiet refs/remotes/origin/master 2>$null
-    if ($LASTEXITCODE -eq 0) { $defaultBranch = 'master' }
-}
-
-if (-not $defaultBranch) {
-    $localHead = (git symbolic-ref HEAD 2>$null)
-    if ($localHead) { $defaultBranch = $localHead -replace 'refs/heads/', '' }
-}
-
-if (-not $defaultBranch) { $defaultBranch = 'main' }  # ultimate fallback
+$defaultBranch = Get-SCDDefaultBranch
 
 if (-not $SkipGitUpdate) {
     Write-Output "Switching to $defaultBranch and pulling latest..."

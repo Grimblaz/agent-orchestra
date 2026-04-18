@@ -235,7 +235,7 @@ function Invoke-QuickValidate {
             $RootPath = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         }
         if (-not $GuidanceComplexityScriptPath) {
-            $GuidanceComplexityScriptPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'scripts', 'measure-guidance-complexity.ps1'
+            $GuidanceComplexityScriptPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'skills', 'guidance-measurement', 'scripts', 'measure-guidance-complexity.ps1'
         }
         if (-not $PSScriptAnalyzerSettingsPath) {
             $PSScriptAnalyzerSettingsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'config', 'PSScriptAnalyzerSettings.psd1'

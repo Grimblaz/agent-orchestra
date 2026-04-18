@@ -49,7 +49,7 @@ VS Code 1.110 renamed the questioning tool from `ask_questions` to `vscode/askQu
 | `.github/agents/Code-Conductor.agent.md` | Added `vscode/askQuestions` as first entry in tools frontmatter; replaced all 24 bare references; added `## Context Management for Long Sessions` section with `/compact` guidance |
 | `.github/agents/Solution-Designer.agent.md` | Added `"vscode/askQuestions"` to tools frontmatter; added `## Questioning Policy (Mandatory)` section with zero-tolerance pattern |
 | `.github/agents/Code-Review-Response.agent.md` | Added `"vscode/askQuestions"` as first entry in tools frontmatter |
-| `.github/instructions/code-review-intake.instructions.md` | 1 reference replaced |
+| `.github/skills/code-review-intake/SKILL.md` | Current home of the GitHub review intake protocol (migrated from the former instruction file) |
 | `.github/skills/parallel-execution/SKILL.md` | 1 reference replaced |
 | `.github/prompts/setup.prompt.md` | 3 references replaced |
 | `.github/skills/skill-creator/SKILL.md` | Added `## Built-in Creation Commands (VS Code 1.110+)` section: `/create-skill`, `/create-agent`, `/create-prompt`, `/create-instruction`; fallback blockquote for 1.108–1.109 users |
@@ -372,7 +372,7 @@ rework_cycles: N                 # code review fix loops only (not CE Gate loops
 | `.github/agents/Issue-Planner.agent.md` | Plan template updated (prosecution → defense → judge); `review_loop_budget` removed |
 | `.github/agents/Process-Review.agent.md` | Reconciliation loop metrics updated to prosecution/defense/judge terminology |
 | `.github/copilot-instructions.md` | Code-Critic Adversarial Review Protocol section updated (5 modes, all pipeline stages) |
-| `.github/instructions/code-review-intake.instructions.md` | GitHub Review Mode → Proxy Prosecution Pipeline; loop budget → convergence section |
+| `.github/skills/code-review-intake/SKILL.md` | GitHub Review Mode → Proxy Prosecution Pipeline; loop budget → convergence section |
 | `.github/skills/code-review-intake/SKILL.md` | Mirror of instructions file changes |
 | `.github/agents/Code-Critic.agent.md` | Added `id` and `pass` fields to automation-routing fields in Finding Categories; added `pass: N` omission notes to proxy prosecution and CE prosecution output descriptions |
 
@@ -391,7 +391,7 @@ Extends the scored adversarial review system to aggregate per-finding data acros
 ```text
 PR merged → pipeline-metrics in PR body (with per-finding entries)
                     ↓
-Process-Review invoked → runs .github/scripts/aggregate-review-scores.ps1
+Process-Review invoked → runs .github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1
                     ↓
 Script: gh pr list → gh pr view (each) → parse pipeline-metrics → compute calibration
                     ↓
@@ -431,7 +431,7 @@ CRR now emits a `<!-- judge-rulings -->` YAML block after the Markdown score sum
 
 ### Calibration Profile
 
-The aggregation script (`.github/scripts/aggregate-review-scores.ps1`) outputs YAML to stdout with:
+The aggregation script (`.github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1`) outputs YAML to stdout with:
 
 - Weighted sustain rates per prosecution category (per-category `sufficient_data: true` when ≥ 15 effective findings)
 - Defense block includes `defense_findings_count: N` (raw count), `defense_effective_count: X.X` (decay-weighted), and `defense_sufficient_data: true/false` (threshold: effective_count ≥ 5.0) before `defense_success_rate` and `defense_challenge_rate`
@@ -440,7 +440,7 @@ The aggregation script (`.github/scripts/aggregate-review-scores.ps1`) outputs Y
 - `bias_direction` (slightly_prosecution | slightly_defense | balanced)
 - `insufficient_data: true` when effective_sample_size < 5; `skipped_prs: N` emitted in both the insufficient-data block and the full calibration block (count of PRs skipped due to `gh` errors during processing)
 
-CE Gate planning note: when a script emits a new output block in more than one conditional path, the plan requires at least one CE Gate scenario for each path where the block appears. Each scenario's acceptance criterion must specify the expected behavior of every consuming agent in that path, not merely output format. The motivating example is the issue #213 `aggregate-review-scores.ps1` to Process-Review normal-path versus early-exit or `insufficient_data` path split. If the block appears in only one conditional path, this rule is out of scope.
+CE Gate planning note: when a script emits a new output block in more than one conditional path, the plan requires at least one CE Gate scenario for each path where the block appears. Each scenario's acceptance criterion must specify the expected behavior of every consuming agent in that path, not merely output format. The motivating example is issue #213 `.github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1` normal-path versus early-exit or `insufficient_data` path split. If the block appears in only one conditional path, this rule is out of scope.
 
 ### Health Report Mode (Issue #259)
 
@@ -455,7 +455,7 @@ Passing `-HealthReport` to `aggregate-review-scores.ps1` (or `Invoke-AggregateRe
 | **Systemic Pattern Alerts** | Systemic patterns meeting threshold, sorted by sustained count |
 | **Fix Effectiveness** | Per-fix sustain rate comparison — before/after split windows with improved/unchanged/worsened indicators, insufficient-data and no-before-data edge cases, awaiting-merge placeholder |
 
-`-HealthReport` is **read-only**: all three write-back paths (calibration file write, `guidance-complexity.json`, `write-calibration-entry.ps1`) are skipped. Add `-OutputPath <file>` to write the report to a file instead of stdout; if the write fails, the script falls back to stdout.
+`-HealthReport` is **read-only**: all three write-back paths (calibration file write, `.github/skills/calibration-pipeline/assets/guidance-complexity.json`, `.github/skills/calibration-pipeline/scripts/write-calibration-entry.ps1`) are skipped. Add `-OutputPath <file>` to write the report to a file instead of stdout; if the write fails, the script falls back to stdout.
 
 **Process-Review §4.7** passes `-HealthReport -OutputPath $healthReportTempFile` in its Step 0 and displays the file in Step 5.
 
@@ -506,7 +506,7 @@ All recommendations cite the specific file, section, and suggested change. Proce
 | `.github/agents/Code-Critic.agent.md` | Added `category` field to automation-routing output fields |
 | `.github/agents/Code-Conductor.agent.md` | Enriched `<!-- pipeline-metrics -->` with `metrics_version: 2`, `findings:` array, and population instructions; added `pass: N` tagging to prosecution pass prompts; added earliest-pass dedup credit rule; added `### PR Body Pipeline Metrics` section with 12-field metrics template and default value rules |
 | `.github/agents/Process-Review.agent.md` | Added §4.7 Calibration Analysis section |
-| `.github/scripts/aggregate-review-scores.ps1` | New script — reads merged PRs, computes calibration profile |
+| `.github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1` | New script — reads merged PRs, computes calibration profile |
 | `Documents/Design/code-review.md` | This file — cross-session learning pipeline section |
 | `.github/agents/Code-Review-Response.agent.md` | Added `<!-- judge-rulings -->` structured YAML block requirement; added `Pass` column to score summary table template; added `id` field to finding schema; split example into code-prosecution and non-code-prosecution variants |
 
@@ -806,7 +806,7 @@ Extends `aggregate-review-scores.ps1` to aggregate sustained findings by `system
 | D52 | Kaizen metric location | Script computes and emits as `kaizen_metric:` in YAML output | Deterministic, Pester-testable; script already has prosecution_depth data (`categories_at_skip` / `categories_at_light`). |
 | D53 | Upstream flow integration | §4.9 has own inline upstream mechanics (same patterns as §4.8, `[Systemic Fix]` format) | §4.8 (gotchas) runs only during full retrospective; root cause analysis runs during calibration (all modes). §4.9 must be self-contained. |
 | D54 | Approval UX | Code-Conductor orchestrates proposal application through normal change flow | Process-Review is advisory only; Code-Conductor handles all change orchestration. User reviews proposals in calibration report, then applies via normal flow. |
-| D-263-1 | §2d gate ordering | §2d consolidation check runs first (before calibration dedup and GitHub search) | safe-operations.instructions.md §2d contract mandates this order |
+| D-263-1 | §2d gate ordering | §2d consolidation check runs first (before calibration dedup and GitHub search) | `.github/skills/safe-operations/SKILL.md §2d` mandates this order |
 | D-263-2 | D10 ceiling advisory | Advisory only (included in issue body) rather than hard rejection | Matches D2/D8 convention — ceiling exceeding alone should not block proposals |
 | D-263-3 | Consolidation-candidate action | Return `consolidation-candidate` to caller rather than auto-consolidating | Preserves §2d advisory character — semantic judgment belongs to Process-Review, not the script |
 | D-263-4 | Classification heuristic | Keyword heuristic on `ProposedChange` text for agent-prompt level classification | More accurate than `PatternKey` alone; `ProposedChange` contains the specific guardrail description |
@@ -913,7 +913,7 @@ Labels: enhancement, priority: medium
 
 ### Automated Issue Creation: `create-improvement-issue.ps1`
 
-Dedicated script for creating `[Systemic Fix]` GitHub issues from Process-Review §4.9 root cause analysis output. Follows the `write-calibration-entry.ps1` pattern: a thin CLI wrapper at `.github/scripts/create-improvement-issue.ps1` delegates to `Invoke-CreateImprovementIssue` in `.github/scripts/lib/create-improvement-issue-core.ps1`.
+Dedicated script for creating `[Systemic Fix]` GitHub issues from Process-Review §4.9 root cause analysis output. Follows the `write-calibration-entry.ps1` pattern: a thin CLI wrapper at `.github/skills/calibration-pipeline/scripts/create-improvement-issue.ps1` delegates to `Invoke-CreateImprovementIssue` in `.github/skills/calibration-pipeline/scripts/create-improvement-issue-core.ps1`.
 
 #### Parameters
 
@@ -941,7 +941,7 @@ Returns a structured hashtable:
 
 Gates execute in order; each gate can short-circuit with a non-`created` action:
 
-1. **§2d consolidation-candidate check** — `Search-CIIConsolidationCandidate` queries open `[Systemic Fix]` issues via `gh issue list` (WITHOUT `--search`). Returns `consolidation-candidate` to caller for semantic judgment rather than auto-consolidating (D-263-3). Ordered first per safe-operations.instructions.md §2d contract (D-263-1).
+1. **§2d consolidation-candidate check** — `Search-CIIConsolidationCandidate` queries open `[Systemic Fix]` issues via `gh issue list` (WITHOUT `--search`). Returns `consolidation-candidate` to caller for semantic judgment rather than auto-consolidating (D-263-3). Ordered first per `.github/skills/safe-operations/SKILL.md §2d` (D-263-1).
 2. **Calibration dedup** — `Test-CIIPatternKeyExists` checks `proposals_emitted` for matching `pattern_key` with a non-null `fix_issue_number` (presence-only check). If both match, returns skipped-dedup; if `fix_issue_number` is absent or null, proceeds to Gate 3 (backward compatibility for pre-linkage entries). Future enhancement: check whether the linked issue is closed and re-propose if so.
 3. **GitHub search dedup** — `Search-CIIGitHubDedup` queries via `gh issue list` WITH `--search` for title-based dedup.
 4. **D10 ceiling advisory** — `Get-CIICeilingAdvisory` reads pre-computed JSON from the `-ComplexityJsonPath` parameter (produced by §4.7 Step 0's `measure-guidance-complexity.ps1` invocation) and inspects `.agent.md` files at level ≥ 4. Advisory only — included in issue body but does not block creation (D-263-2).
@@ -993,7 +993,7 @@ Process-Review §4.9 Step 4 delegates to `create-improvement-issue.ps1` rather t
 
 | File | Change |
 |------|--------|
-| `.github/scripts/aggregate-review-scores.ps1` | Added `systemic_patterns:` and `kaizen_metric:` YAML output; `proposals_emitted` write-back; `Test-PatternProposed` helper |
+| `.github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1` | Added `systemic_patterns:` and `kaizen_metric:` YAML output; `proposals_emitted` write-back; `Test-PatternProposed` helper |
 | `.github/scripts/Tests/aggregate-review-scores.Tests.ps1` | 16 new Pester tests across 3 contexts (systemic patterns, kaizen metric, proposals write-back) |
 | `.github/agents/Process-Review.agent.md` | Added §4.9 section; updated §4.7 integration note and subagent invocation note |
 | `Documents/Design/code-review.md` | This section |

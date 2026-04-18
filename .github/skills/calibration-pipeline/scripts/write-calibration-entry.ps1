@@ -19,7 +19,7 @@ param(
     [string]$ReactivationEventJson
 )
 
-. "$PSScriptRoot/lib/write-calibration-entry-core.ps1"
+. "$PSScriptRoot/write-calibration-entry-core.ps1"
 
 $result = Invoke-WriteCalibrationEntry @PSBoundParameters
 if ($result.Output) { Write-Output $result.Output }

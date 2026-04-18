@@ -115,7 +115,7 @@ The combined result after issues #219 and #248 is a two-layer contributor workfl
 
 This document records the repo state after issue #219 and its extension in issue #248. The implementation source of truth is the current content of `.githooks/pre-commit`, `.editorconfig`, `.github/scripts/normalize-whitespace.ps1`, `.vscode/settings.json`, and `CONTRIBUTING.md`.
 
-Issue #299 adds the formatting gate instruction at `.github/instructions/pre-commit-formatting-gate.instructions.md` and a Step 4 sub-step reference in `.github/agents/Code-Conductor.agent.md`.
+Issue #299 introduced the formatting gate; its current protocol lives at `.github/skills/pre-commit-formatting/SKILL.md`, with the Step 4 sub-step reference in `.github/agents/Code-Conductor.agent.md`.
 
 ## Formatting Gate (Issue #299)
 
@@ -128,7 +128,7 @@ Issue #299 adds a formatting gate to Code-Conductor's Step 4 (Create PR) flow. T
 | FG-D1 | Pre-commit passthrough — CC runs existing formatting pipeline on changed files before commit | Uses existing infrastructure (markdownlint-cli2, normalize-whitespace.ps1). No new tools. Content reaches the commit already in "final form." |
 | FG-D2 | One-shot before git commit — single formatting pass on all branch-changed files, not per-step | Simpler implementation; single insertion point in CC's Step 4. Mid-session "Keep" may still show intermediate formatting, but commits and PRs are clean. |
 | FG-D3 | CLI-only formatting, aligned with pre-commit hook — uses markdownlint-cli2 --fix and normalize-whitespace.ps1 | Deterministic; same tools as the pre-commit hook; avoids introducing new formatting tooling. |
-| FG-D4 | Shared instruction file — gate implemented as .github/instructions/pre-commit-formatting-gate.instructions.md | Keeps CC's directive count stable (81/128). Reusable by other agents. Keeps formatting logic maintainable in one place. |
+| FG-D4 | Shared skill file — gate implemented as `.github/skills/pre-commit-formatting/SKILL.md` | Keeps CC's directive count stable (81/128). Reusable by other agents. Keeps formatting logic maintainable in one place. |
 | FG-D5 | File scope: git diff --name-only --diff-filter=ACM main..HEAD — format all Added/Copied/Modified files on the branch | Ensures the entire PR is formatter-compliant. --diff-filter=ACM excludes deletions to avoid passing non-existent paths to formatters. |
 | FG-D6 | Non-blocking gate — if tools unavailable, warn and proceed | Mirrors the pre-commit hook's non-blocking philosophy (D7). Formatting is hygiene, not a hard gate. |
 | FG-D7 | PowerShell .ps1 formatting excluded from the backstop | Pre-commit hook handles .ps1 via Invoke-Formatter. PS files change infrequently. Explicit scope exclusion. |

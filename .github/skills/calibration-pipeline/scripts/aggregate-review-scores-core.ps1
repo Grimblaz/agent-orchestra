@@ -576,7 +576,7 @@ function Invoke-AggregateReviewScores {
 
     # Read persistent_threshold from guidance-complexity config (Phase 2 D7)
     $persistentThreshold = 3  # default when config is absent or unreadable
-    $complexityConfigPath = Join-Path (Split-Path -Parent $script:_ARSCoreLibDir) '../config/guidance-complexity.json'
+    $complexityConfigPath = Join-Path $script:_ARSCoreLibDir '../assets/guidance-complexity.json'
     if (Test-Path $complexityConfigPath) {
         try {
             $complexityCfg = Get-Content $complexityConfigPath -Raw | ConvertFrom-Json

@@ -10,13 +10,13 @@ Guardrail additions accumulate asymmetrically — new rules are proposed with no
 
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
-| D1 | How to detect complexity | **Regex script with calibration override** — `measure-guidance-complexity.ps1` counts directive density per agent (MUST/NEVER/ALWAYS/REQUIRED/MANDATORY keywords + checklist items `- [ ]`/`- [x]`), excluding fenced code block content; soft ceilings in `.github/config/guidance-complexity.json` (committed, not gitignored); override comments (`<!-- complexity-override: {reason} -->`) for false positives; section count + nesting depth as supplemental signals. Script always exits 0 (advisory). | Automated, Pester-testable, integrates with quick-validate; soft ceilings avoid blocking deployment |
+| D1 | How to detect complexity | **Regex script with calibration override** — `.github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1` counts directive density per agent (MUST/NEVER/ALWAYS/REQUIRED/MANDATORY keywords + checklist items `- [ ]`/`- [x]`), excluding fenced code block content; soft ceilings in `.github/skills/calibration-pipeline/assets/guidance-complexity.json` (committed, not gitignored); override comments (`<!-- complexity-override: {reason} -->`) for false positives; section count + nesting depth as supplemental signals. Script always exits 0 (advisory). | Automated, Pester-testable, integrates with quick-validate; soft ceilings avoid blocking deployment |
 | D2 | How to trigger compression | **Complexity ceiling trigger** — when an agent exceeds its soft ceiling, guardrail proposals targeting that agent in Process-Review §4.9 are tagged `compression_required: true` with advisory guidance (does NOT block the proposal). Scoped to `agent-prompt` proposals only (instruction/skill/plan-template proposals have no per-agent ceilings). | Creates symmetric pressure: simplify before adding; advisory ensures proposals aren't silently dropped |
 | D3 | What retirement means | **Consolidation + archival** — compress to general principles + examples, move specifics to `Documents/Archive/retired-rules/` with metadata (source agent, section, version range, restoration instructions). | Knowledge preserved; context reduced; rollback easy; compound-signal guard prevents premature retirement |
 | D4 | How to distinguish structural vs. rule-level | **Hybrid** — script defaults `prevention_level: unknown`; Process-Review §4.9 evaluates against upstream catch hierarchy and reclassifies to `structural` or `rule-level`. | Deterministic default where possible; flexible reasoning for novel patterns |
 | D5 | How to measure quality after consolidation | **Consolidation event tracking + regression threshold** — record events in calibration data; sustain rate monitoring with +10pp regression threshold; human review (not auto-rollback). | Uses existing infrastructure; regression detection is meaningful and non-destructive |
 | D6 | How to extract agent sections to skills | **Skill reference stubs** — 2-3 line stub in agent ("what and when"), full procedure in skill ("how"); 4 extraction criteria defined (see [Agent-to-Skill Extraction Criteria](#agent-to-skill-extraction-criteria)); **framework only — no immediate extractions**; §4.8 gets widened trigger + monitoring to collect evidence for future extraction/retirement decision. | Framework-first; candidates emerge from monitoring data; §4.8 needs fair chance before extraction |
-| D7 | Persistent over-ceiling detection | **`complexity_over_ceiling_history` write-back** — `aggregate-review-scores.ps1` gains `-ComplexityJsonPath` parameter and tracks per-agent over-ceiling history in calibration JSON; `persistent_threshold` in `guidance-complexity.json` controls extraction advisory trigger. | Enables compound-signal retirement and regression detection; requires calibration data maturity (Phase 2) |
+| D7 | Persistent over-ceiling detection | **`complexity_over_ceiling_history` write-back** — `.github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1` gains `-ComplexityJsonPath` parameter and tracks per-agent over-ceiling history in calibration JSON; `persistent_threshold` in `.github/skills/calibration-pipeline/assets/guidance-complexity.json` controls extraction advisory trigger. | Enables compound-signal retirement and regression detection; requires calibration data maturity (Phase 2) |
 | D8 | Tiered advisory | **Extraction replaces compression** — when an agent's `consecutive_count ≥ persistent_threshold`, §4.9 emits `extraction_recommended: true` instead of compression advisory; D8 fires exclusively (D2 suppressed when D8 fires). | Avoids repeated compression of already-compressed sections; extraction is higher-leverage when compression has been sustained |
 | D9 | Agent creation complexity budget | **Convention + quick-validate gate** — new agents must not exceed 80% of `default_ceiling.max_directives` at creation time; enforced at PR time via the existing `agents_over_ceiling.Count  # should be 0` quick-validate check. | Prevents ceiling violations at agent-creation time without additional infrastructure |
 | D10 | Implementation capacity gate | **CC autonomous decision rule** — when Code-Conductor begins implementing a rule-addition issue (`systemic_fix_type: agent-prompt`), it checks whether the target agent exceeds its soft ceiling (`measure-guidance-complexity.ps1`). If over ceiling, CC autonomously creates a compression prerequisite issue and blocks the rule-addition until the compression issue is closed AND the agent ≤ ceiling. Exempt: issues reducing directive count (compression, extraction, consolidation). Complements the D2/D8 advisory system with implementation-time enforcement. | Preserves D2/D8 advisory semantics; same autonomy pattern as improvement-first (§2a); no infrastructure gate required — CC is self-enforcing |
@@ -27,13 +27,13 @@ Guardrail additions accumulate asymmetrically — new rules are proposed with no
 
 ### Phase 1 — Data-Independent (Ships With This PR)
 
-- **D1**: `measure-guidance-complexity.ps1` + `.github/config/guidance-complexity.json` + quick-validate integration
+- **D1**: `.github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1` + `.github/skills/calibration-pipeline/assets/guidance-complexity.json` + quick-validate integration
 - **D2**: Compression trigger wiring in Process-Review §4.9 (ceiling flag, advisory guidance)
 - **D6**: Extraction criteria documented; Process-Review §4.8 trigger widened to calibration-inclusive mode; invocation monitoring added
 
 ### Phase 2 — Consolidation Monitoring & Tiered Advisory (Ships With This PR)
 
-- **D7**: Persistent over-ceiling detection — `-ComplexityJsonPath` parameter, `complexity_over_ceiling_history` write-back, `consolidation_events[]` (`aggregate-review-scores.ps1`)
+- **D7**: Persistent over-ceiling detection — `-ComplexityJsonPath` parameter, `complexity_over_ceiling_history` write-back, `consolidation_events[]` (`.github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1`)
 - **D8**: Tiered advisory in Process-Review §4.9 — extraction advisory replaces compression advisory when `consecutive_count >= persistent_threshold`
 - **D9**: Agent Creation Complexity Budget — convention documented, enforced by existing quick-validate gate
 
@@ -89,7 +89,7 @@ When an agent exceeds its directive ceiling, consolidate related rules into gene
 
 ## Complexity Ceiling Configuration
 
-Config file at `.github/config/guidance-complexity.json`. Schema:
+Config file at `.github/skills/calibration-pipeline/assets/guidance-complexity.json`. Schema:
 
 ```json
 {
@@ -125,13 +125,13 @@ When those conditions are met, reduce the ceiling by 10 directives and reassess 
 
 | Artifact | Change | Phase |
 |---|---|---|
-| `.github/scripts/measure-guidance-complexity.ps1` | New — directive density counting script | 1 |
-| `.github/config/guidance-complexity.json` | New — soft ceilings config per agent (committed) | 1 |
+| `.github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1` | New — directive density counting script | 1 |
+| `.github/skills/calibration-pipeline/assets/guidance-complexity.json` | New — soft ceilings config per agent (committed) | 1 |
 | `copilot-instructions.md` (Quick-validate) | Modified — add D1 script to pre-merge check list | 1 |
 | `Process-Review.agent.md` §4.7 | Modified — invoke `measure-guidance-complexity.ps1` in run-scripts phase | 1 |
 | `Process-Review.agent.md` §4.8 | Modified — widen trigger to calibration-inclusive mode + monitoring note | 1 |
 | `Process-Review.agent.md` §4.9 | Modified — `compression_required` flag when ceiling exceeded | 1 |
-| `.github/scripts/aggregate-review-scores.ps1` | Modified — `-ComplexityJsonPath` parameter, `complexity_over_ceiling_history` write-back, `extraction_agents:` output, `consolidation_events[]` | 2 |
+| `.github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1` | Modified — `-ComplexityJsonPath` parameter, `complexity_over_ceiling_history` write-back, `extraction_agents:` output, `consolidation_events[]` | 2 |
 | `Documents/Archive/retired-rules/` | New convention — archive for retired rules with restoration metadata | 2 |
 
 **Net-new artifacts capped**: 1 script + 1 config (Phase 1). Phase 2 modifies existing files only (plus archive convention).
@@ -146,7 +146,7 @@ Implements the data-dependent mechanisms from D7–D9 that require calibration h
 
 ### D7 — Persistent Over-Ceiling Detection
 
-`aggregate-review-scores.ps1` gains a `-ComplexityJsonPath` parameter (type `[string]`, optional) that receives the path to the JSON output from `measure-guidance-complexity.ps1`. When provided, the script tracks per-agent over-ceiling history in the calibration JSON under `complexity_over_ceiling_history`.
+`.github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1` gains a `-ComplexityJsonPath` parameter (type `[string]`, optional) that receives the path to the JSON output from `.github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1`. When provided, the script tracks per-agent over-ceiling history in the calibration JSON under `complexity_over_ceiling_history`.
 
 **History entry schema** (per agent filename):
 
@@ -163,7 +163,7 @@ Implements the data-dependent mechanisms from D7–D9 that require calibration h
 
 **Idempotency**: The `last_pr_number` field prevents re-incrementing `consecutive_count` when the aggregate script is run multiple times with the same calibration state (e.g., on model switch resume). Increment is skipped when `last_pr_number == $maxMergedPrNumber`.
 
-**`persistent_threshold`** (authoritative source: `.github/config/guidance-complexity.json`): The consecutive-run count at which the extraction advisory fires. Default value: `3`. Read by `aggregate-review-scores.ps1` directly from the config file (not from the complexity JSON temp file) to keep the config as the single source of truth.
+**`persistent_threshold`** (authoritative source: `.github/skills/calibration-pipeline/assets/guidance-complexity.json`): The consecutive-run count at which the extraction advisory fires. Default value: `3`. Read by `.github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1` directly from the config file (not from the complexity JSON temp file) to keep the config as the single source of truth.
 
 **`extraction_agents:` YAML output**: After processing, the aggregate script emits an `extraction_agents:` block listing every agent whose `consecutive_count >= persistent_threshold`:
 
@@ -194,12 +194,12 @@ This block is consumed by §4.9 Step 1b during the same Process-Review calibrati
 
 New agents should be designed to fit within the soft ceiling from the outset. This is a convention, not an automated check; the quick-validate gate (`agents_over_ceiling.Count  # should be 0`) enforces it at PR time.
 
-**Convention**: When creating a new agent, its initial directive density should not exceed 80% of the `default_ceiling.max_directives` value in `guidance-complexity.json` (currently **102 directives** with the default ceiling of 128). This leaves headroom for guardrail additions over the agent's lifecycle before compression becomes necessary.
+**Convention**: When creating a new agent, its initial directive density should not exceed 80% of the `default_ceiling.max_directives` value in `.github/skills/calibration-pipeline/assets/guidance-complexity.json` (currently **102 directives** with the default ceiling of 128). This leaves headroom for guardrail additions over the agent's lifecycle before compression becomes necessary.
 
 **Verification workflow**: After any agent addition or modification, run:
 
 ```powershell
-(pwsh -NoProfile -NonInteractive -File .github/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json).agents_over_ceiling.Count  # should be 0
+(pwsh -NoProfile -NonInteractive -File .github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1 | ConvertFrom-Json).agents_over_ceiling.Count  # should be 0
 ```
 
 This is already part of the Quick-validate suite in `.github/copilot-instructions.md`.
@@ -253,10 +253,10 @@ Consolidation events provide evidence for D5 monitoring (quality regression thre
 The data flow for D7/D8 in a Process-Review calibration run (§4.7):
 
 ```text
-measure-guidance-complexity.ps1
+.github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1
    → $complexityOutput (in-memory PSCustomObject)
    → $complexityTempFile (temp JSON in $env:TEMP)
-aggregate-review-scores.ps1 -ComplexityJsonPath $complexityTempFile
+.github/skills/calibration-pipeline/scripts/aggregate-review-scores.ps1 -ComplexityJsonPath $complexityTempFile
    → reads agents_over_ceiling from temp file
    → updates complexity_over_ceiling_history in calibration JSON (atomic write-back)
    → emits extraction_agents: block in YAML output
@@ -265,9 +265,9 @@ aggregate-review-scores.ps1 -ComplexityJsonPath $complexityTempFile
 Temp file cleanup: Remove-Item $complexityTempFile
 ```
 
-**Error handling**: If `measure-guidance-complexity.ps1` fails or produces non-JSON output, `$complexityTempFile = $null` and the aggregate script runs without `-ComplexityJsonPath` (backward compatible — no complexity history tracking for that run).
+**Error handling**: If `.github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1` fails or produces non-JSON output, `$complexityTempFile = $null` and the aggregate script runs without `-ComplexityJsonPath` (backward compatible — no complexity history tracking for that run).
 
-**`persistent_threshold` authority**: The value lives in `.github/config/guidance-complexity.json` (key: `persistent_threshold`). The aggregate script reads it via `$PSScriptRoot/../config/guidance-complexity.json`. §4.9 reads the value from the `extraction_agents:` YAML block produced by the aggregate script — §4.9 never reads the config file directly.
+**`persistent_threshold` authority**: The value lives in `.github/skills/calibration-pipeline/assets/guidance-complexity.json` (key: `persistent_threshold`). The aggregate script reads it from the sibling `../assets/guidance-complexity.json` path. §4.9 reads the value from the `extraction_agents:` YAML block produced by the aggregate script — §4.9 never reads the config file directly.
 
 ### Archive Convention
 
@@ -317,7 +317,7 @@ When a rule section is retired as part of D3 (compound-signal retirement), move 
 **Phase 1 (this PR):**
 
 - `measure-guidance-complexity.ps1` exists and counts directive density per agent, excluding fenced code block content, with Pester test coverage
-- `.github/config/guidance-complexity.json` defines soft ceilings per agent file (committed to repo, not gitignored)
+- `.github/skills/calibration-pipeline/assets/guidance-complexity.json` defines soft ceilings per agent file (committed to repo, not gitignored)
 - Quick-validate includes complexity check using `(..).agents_over_ceiling.Count  # should be 0` pattern
 - Process-Review §4.9 references complexity ceiling and flags `compression_required: true` when ceiling exceeded (advisory only, scoped to `agent-prompt` proposals)
 - Process-Review §4.8 trigger widened to run in calibration-only mode, with invocation monitoring note

@@ -13,7 +13,7 @@ The `/setup` prompt (`setup.prompt.md`) is a 6-phase interactive wizard that con
 | D1 | Setup approach | Wizard generates scaffolding files directly | Users get a working repo state after a single prompt run; no manual copy-paste |
 | D2 | Frontmatter key | `agent: agent` | VS Code 1.109+ deprecated the `mode` key. `mode: ask` was also wrong in value — Ask mode has no tool access, and Phase 0 (terminal commands) and Phase 5 (file creation) both require tools |
 | D3 | Phase structure | 6 phases with skip gates at Phases 1–5 (Phase 4 conditional) | Phases can be re-run safely; experienced users skip phases they've already completed |
-| D4 | Shared instruction file | `safe-operations.instructions.md` extracted from Countdown-Clash patterns | Single source of truth for file-operation and issue-creation rules; loaded globally via `chat.instructionsFilesLocations` |
+| D4 | Shared workflow safety guidance | `safe-operations` skill (`.github/skills/safe-operations/SKILL.md`) extracted from Countdown-Clash patterns | Single source of truth for file-operation and issue-creation rules; delivered through skills rather than a shared hub instruction path |
 | D5 | browser-tools.instructions.md | Per-project generated file, not shipped in template | Browser tool config is project-specific; non-web projects get no irrelevant instructions |
 | D6 | Phase 5d default | VS Code 1.110+ native browser tools primary; Playwright MCP optional | Reduces friction for new users to zero — just enable `workbench.browser.enableChatTools`; no MCP server required |
 
@@ -52,14 +52,14 @@ Phase 0 also runs `code --version`, `pwsh --version`, `git --version`, and `gh -
 
 ---
 
-## `safe-operations.instructions.md` — Shared Instruction File
+## `safe-operations` Skill
 
-Extracted from Countdown-Clash patterns and placed in `.github/instructions/safe-operations.instructions.md`. Contains two sections:
+Originally introduced as an instruction file, then migrated to `.github/skills/safe-operations/SKILL.md`. It contains two sections:
 
 1. **File Operation Rules** — correct tools by operation, FORBIDDEN PowerShell write commands (Set-Content, Out-File, Add-Content, New-Item -Value, echo redirect, .NET static IO methods), read-only operation preferences.
 2. **Issue Creation Rules** — improvement-first decision rule (< 1 day: in-PR; > 1 day: create follow-up issue), priority label requirement for every `gh issue create` call.
 
-Loaded globally via `chat.instructionsFilesLocations` in the VS Code user `settings.json` (from the Phase 1 `/setup` snippet), alongside individual agent `instructions:` lists.
+For clone-based setups, it is loaded from `.github/skills/` via `chat.agentSkillsLocations`. For plugin users, it ships with the plugin because it is a skill.
 
 ---
 
@@ -68,7 +68,7 @@ Loaded globally via `chat.instructionsFilesLocations` in the VS Code user `setti
 | File | Change |
 |------|--------|
 | `.github/prompts/setup.prompt.md` | Rewritten 81 → 345+ lines; 2-stage → 6-phase wizard; `agent: agent` frontmatter; Phase 0 pre-flight checks; opt-in tech stack guidance in Phase 2; Opus recommendation |
-| `.github/instructions/safe-operations.instructions.md` | Created — file-op + issue-creation rules |
+| `.github/skills/safe-operations/SKILL.md` | Current home of the file-op + issue-creation rules (migrated from the former instruction file) |
 | `.github/copilot-instructions.md` | Instruction count 3 → 4; PowerShell replaces POSIX commands |
 | `README.md` | Quick Start updated to reflect 6-phase wizard; empty-workspace note; Opus recommendation |
 | `CUSTOMIZATION.md` | Phase table; hook tip; scaffolding section; empty-workspace note |

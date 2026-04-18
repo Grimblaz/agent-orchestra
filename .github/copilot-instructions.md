@@ -6,7 +6,7 @@ applyTo: "**"
 
 ## Overview
 
-Multi-agent workflow system for GitHub Copilot. Provides specialized agents, skills, instruction files, and prompt templates that orchestrate AI-assisted software development.
+Multi-agent workflow system for GitHub Copilot. Provides specialized agents, skills, and prompt templates that orchestrate AI-assisted software development.
 
 ## Technology Stack
 
@@ -31,14 +31,14 @@ Pipeline-based agent orchestration:
 
 - **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
 - **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invocable: false`)
-- **Skills** (32): Loaded on demand by agents from `.github/skills/`
-- **Instructions** (6): Shared rules loaded by agents from `.github/instructions/`
+- **Skills** (39): Loaded on demand by agents from `.github/skills/`
+- **Instruction files**: Repo-local instruction files remain under `.github/instructions/`, while shared workflow rules load from skills
 
 ## Key Conventions
 
 - Agent files use `.agent.md` extension with YAML frontmatter (`name`, `description`, `tools`, `handoffs`, `user-invocable`)
 - Skills use `SKILL.md` with `name` and `description` frontmatter in `.github/skills/{skill-name}/`
-- Instruction files use `.instructions.md` extension in `.github/instructions/`
+- Instruction files use `.instructions.md` extension in `.github/instructions/`; shared workflow guidance is migrating to skill-owned `SKILL.md` files
 - Design documents go in `Documents/Design/`, decision records in `Documents/Decisions/`
 - Code-Conductor auto-commits after each validated step by default (see `## Commit Policy` opt-out in consumer `copilot-instructions.md`); specialist agents do not commit independently
 - Plans are saved to session memory (`/memories/session/plan-issue-{ID}.md`), which is the same-session source of truth for implementation handoff
@@ -74,15 +74,19 @@ pwsh -NoProfile -NonInteractive -File .github/scripts/quick-validate.ps1
 
 ### Script Library Convention
 
-Production scripts under `.github/scripts/` are split into a `lib/{name}-core.ps1` library (containing the logic as an `Invoke-*` function) and a thin CLI wrapper that dot-sources the library and calls the function. Tests dot-source `lib/` files directly and call the function in-process, avoiding per-test `pwsh` child process spawning. Private helpers inside a library embed a short uppercase prefix in the noun segment (`NW`, `WCE`, `SCD`) to avoid name collisions across dot-sourced files (e.g., `Test-NWAllowlistedPath`, `Test-WCEHasProperty`, `Get-SCDDefaultBranch`).
+Production automation lives either under `.github/scripts/` or under the owning skill's `scripts/` directory, with thin CLI wrappers dot-sourcing companion `*-core.ps1` libraries where applicable. Tests dot-source the core libraries directly and call the function in-process, avoiding per-test `pwsh` child process spawning. Private helpers inside a library embed a short uppercase prefix in the noun segment (`NW`, `WCE`, `SCD`) to avoid name collisions across dot-sourced files (e.g., `Test-NWAllowlistedPath`, `Test-WCEHasProperty`, `Get-SCDDefaultBranch`).
 
 ```powershell
 # Example: call aggregate-review-scores logic in-process
-. .github/scripts/lib/aggregate-review-scores-core.ps1
+. .github/skills/calibration-pipeline/scripts/aggregate-review-scores-core.ps1
 Invoke-AggregateReviewScores -Repo owner/name
 # Example: with mock gh CLI for tests (no live API calls)
 # Invoke-AggregateReviewScores -Repo owner/name -GhCliPath $mockGhScript
 ```
+
+## Safe Operations
+
+When choosing workspace tools, reading or mutating files, or creating follow-up GitHub issues, load the `safe-operations` skill and follow its protocol.
 
 ## Quick-validate (used by agents before every PR)
 

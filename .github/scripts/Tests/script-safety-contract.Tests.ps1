@@ -21,8 +21,8 @@ Describe 'script safety contract' {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptsRoot = Join-Path -Path $script:RepoRoot -ChildPath '.github' -AdditionalChildPath 'scripts'
         $script:SkillsRoot = Join-Path -Path $script:RepoRoot -ChildPath '.github' -AdditionalChildPath 'skills'
-        $script:AggregateReviewScores = Join-Path $script:ScriptsRoot 'aggregate-review-scores.ps1'
-        $script:AggregateReviewScoresCore = Join-Path $script:ScriptsRoot 'lib\aggregate-review-scores-core.ps1'
+        $script:AggregateReviewScores = Join-Path $script:SkillsRoot 'calibration-pipeline\scripts\aggregate-review-scores.ps1'
+        $script:AggregateReviewScoresCore = Join-Path $script:SkillsRoot 'calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
 
         $script:ProductionScripts = @(
             Get-ChildItem -Path $script:ScriptsRoot -Recurse -Filter '*.ps1' |

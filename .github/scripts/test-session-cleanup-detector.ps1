@@ -16,7 +16,7 @@ param([switch]$Verbose)
 
 $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $PSCommandPath
-$detectorPath = Join-Path $scriptDir 'session-cleanup-detector.ps1'
+$detectorPath = Join-Path $scriptDir '..\skills\session-startup\scripts\session-cleanup-detector.ps1'
 
 $script:passed = 0
 $script:failed = 0

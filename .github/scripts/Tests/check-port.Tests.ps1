@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     RED-phase tests for a port-availability checker.
-    Target library: .github/scripts/lib/check-port-core.ps1
+    Target library: .github/skills/terminal-hygiene/scripts/check-port-core.ps1
     Exported function: Invoke-CheckPort -Port [int]
     Private helpers (mocked): Test-CPSocketBind, Get-CPWindowsPortInfo
 
@@ -17,7 +17,7 @@ Describe 'check-port.ps1' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:LibFile = Join-Path $script:RepoRoot '.github/scripts/lib/check-port-core.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github/skills/terminal-hygiene/scripts/check-port-core.ps1'
         . $script:LibFile
     }
 

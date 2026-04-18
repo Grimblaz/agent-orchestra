@@ -1,3 +1,8 @@
+---
+name: step-commit
+description: Discrete validated-step commit workflow for Code-Conductor. Use when capturing per-step validated work as structured commits. DO NOT USE FOR: deciding whether auto-commit is enabled or replacing the PR-time formatting gate.
+---
+
 # Step Commit Protocol
 
 ## Purpose
@@ -97,3 +102,9 @@ On failure:
 ## Formatting Note
 
 Formatting stays in Code-Conductor's Step 4 (Create PR) — step commits capture the pre-formatting validated state. The formatting gate runs at PR creation time (Step 4), not per step. Pre-commit hooks are bypassed during step commits via `--no-verify`.
+
+## Gotchas
+
+| Trigger                 | Gotcha                                                                    | Fix                                                                 |
+| ----------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Capturing a step commit | Broad staging picks up unrelated work and corrupts the validated snapshot | Stage only the explicit changed-file list returned by the SCM query |

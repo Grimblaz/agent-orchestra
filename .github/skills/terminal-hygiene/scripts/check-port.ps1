@@ -6,7 +6,6 @@ param(
     [int]$Port
 )
 
-. "$PSScriptRoot/lib/check-port-core.ps1"
-
+. "$PSScriptRoot/check-port-core.ps1"
 $result = Invoke-CheckPort -Port $Port
 $result | ConvertTo-Json -Compress

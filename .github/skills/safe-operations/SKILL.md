@@ -1,3 +1,8 @@
+---
+name: safe-operations
+description: Safe file-operation and issue-creation protocol for Copilot Orchestra. Use when choosing workspace tools, avoiding unsafe file writes, or creating GitHub issues under the workflow rules. DO NOT USE FOR: application-level debugging or replacing agent judgment on whether work is in scope.
+---
+
 # Safe Operations Instructions
 
 ## Purpose
@@ -159,3 +164,9 @@ Before creating any issue that proposes **adding a new rule, directive, or guida
 - Bug reports, configuration fixes, or documentation corrections
 
 **Override**: This is advisory guidance — agent judgment determines the outcome. Users may always direct issue creation regardless of this advisory.
+
+## Gotchas
+
+| Trigger                                 | Gotcha                                                             | Fix                                                                                                   |
+| --------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
+| Editing workspace files from PowerShell | Silent encoding or line-ending corruption slips into tracked files | Use the designated file tools for content changes and keep terminal writes for move/delete cases only |

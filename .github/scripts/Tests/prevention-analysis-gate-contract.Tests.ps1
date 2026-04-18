@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Locks the issue #240 prevention analysis gate contract across:
-      - .github/instructions/safe-operations.instructions.md (§2d — same-principle consolidation gate)
+    - .github/skills/safe-operations/SKILL.md (§2d — same-principle consolidation gate)
       - .github/agents/Code-Conductor.agent.md (Auto-Tracking §2d reference, CE Gate Track 2 §2d reference, D10 capacity check)
       - .github/agents/Process-Review.agent.md (§4.8 §2d reference, §4.9 §2d reference + prevention_gate_outcome field)
       - Documents/Design/guidance-complexity.md (D10 decision record)
@@ -30,7 +30,7 @@ Describe 'prevention analysis gate contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SafeOps = Join-Path $script:RepoRoot '.github/instructions/safe-operations.instructions.md'
+        $script:SafeOps = Join-Path $script:RepoRoot '.github/skills/safe-operations/SKILL.md'
         $script:CodeConductor = Join-Path $script:RepoRoot '.github/agents/Code-Conductor.agent.md'
         $script:ProcessReview = Join-Path $script:RepoRoot '.github/agents/Process-Review.agent.md'
         $script:DesignDoc = Join-Path $script:RepoRoot 'Documents/Design/guidance-complexity.md'
@@ -48,7 +48,7 @@ Describe 'prevention analysis gate contract' {
         $script:Section49 = [regex]::Match($script:PRContent, '(?is)### 4\.9\b.*?(?=### 4\.\d+|\Z)').Value
     }
 
-    It 'requires §2d heading to exist in safe-operations.instructions.md' {
+    It 'requires §2d heading to exist in safe-operations/SKILL.md' {
         $script:SafeOpsContent | Should -Match '### 2d\.' `
             -Because '§2d issue-prevention gate section must be added to safe-operations before any dependent agents can reference it'
     }

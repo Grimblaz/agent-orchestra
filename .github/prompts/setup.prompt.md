@@ -87,7 +87,7 @@ Before proceeding, check whether the user has the copilot-orchestra (or legacy w
 > "It looks like you have the copilot-orchestra plugin installed (found in your VS Code settings). Adding `chat.agentFilesLocations` at the same time will cause duplicate agents to appear in the chat picker.
 >
 > **Option 1 — Keep plugin, skip agent settings (recommended if you just want to use the workflow)**:
-> Continue Phase 1, but in Step 1.2 only add `chat.instructionsFilesLocations` and `chat.promptFilesLocations`. Skip `chat.agentFilesLocations` (the plugin already provides that). If `chat.agentFilesLocations` is already present in your `settings.json` from a previous setup, **remove it now** — it conflicts with the plugin and will cause duplicates regardless of which settings you add next.
+> Continue Phase 1, but in Step 1.2 only add `chat.promptFilesLocations`. Add `chat.instructionsFilesLocations` only if you keep repo-local instruction files such as generated consumer instructions in a local clone. Skip `chat.agentFilesLocations`. `chat.agentSkillsLocations` is optional and safe with the plugin, but not required because the plugin already provides the shared workflow skills. If `chat.agentFilesLocations` is already present in your `settings.json` from a previous setup, **remove it now** to avoid duplicate agents.
 >
 > **Option 2 — Uninstall plugin, use full clone settings (use this if you want to customize agents or add project-specific instructions)**:
 > Continue with all four settings. First uninstall the plugin from the Extensions view (`Ctrl+Shift+X`, search `@agentPlugins copilot-orchestra` (or `workflow-template` if using the legacy name), uninstall). This gives you local editable copies of all agents and skills.
@@ -141,9 +141,6 @@ export COPILOT_ORCHESTRA_ROOT="/path/to/copilot-orchestra"
 {
   "chat.agentFilesLocations": ["<your-path>/copilot-orchestra/.github/agents"],
   "chat.agentSkillsLocations": ["<your-path>/copilot-orchestra/.github/skills"],
-  "chat.instructionsFilesLocations": {
-    "<your-path>/copilot-orchestra/.github/instructions": true
-  },
   "chat.promptFilesLocations": {
     "<your-path>/copilot-orchestra/.github/prompts": true
   }
@@ -152,14 +149,15 @@ export COPILOT_ORCHESTRA_ROOT="/path/to/copilot-orchestra"
 
 Replace `<your-path>` with the absolute path from Step 1.1.
 
-| Setting                           | What it enables                                                   |
-| --------------------------------- | ----------------------------------------------------------------- |
-| `chat.agentFilesLocations`        | All workflow agents available in every repository                 |
-| `chat.agentSkillsLocations`       | All workflow skills available in every repository                 |
-| `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories       |
-| `chat.promptFilesLocations`       | Shared prompt files (e.g. `/setup`) available in every repository |
+| Setting                     | What it enables                                                   |
+| --------------------------- | ----------------------------------------------------------------- |
+| `chat.agentFilesLocations`  | All workflow agents available in every repository                 |
+| `chat.agentSkillsLocations` | All workflow skills available in every repository                 |
+| `chat.promptFilesLocations` | Shared prompt files (e.g. `/setup`) available in every repository |
 
-> **Windows path format**: Use forward slashes or escaped backslashes: `"C:/Users/you/copilot-orchestra/.github/instructions"` or `"C:\\Users\\you\\copilot-orchestra\\.github\\instructions"`.
+> **Optional**: Add `chat.instructionsFilesLocations` only when you want VS Code to load repo-local instruction files that remain under `.github/instructions/`, such as generated consumer instructions. The migrated hub workflow guidance now ships through skills instead.
+>
+> **Windows path format**: Use forward slashes or escaped backslashes: `"C:/Users/you/copilot-orchestra/.github/prompts"` or `"C:\\Users\\you\\copilot-orchestra\\.github\\prompts"`.
 
 **Step 1.3** — Confirm: "Have you applied the command and settings above?" Wait for confirmation before continuing to Phase 2.
 

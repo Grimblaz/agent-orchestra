@@ -11,7 +11,7 @@ param(
     [string]$GhCliPath = 'gh'
 )
 
-. "$PSScriptRoot/lib/backfill-calibration-core.ps1"
+. "$PSScriptRoot/backfill-calibration-core.ps1"
 
 $result = Invoke-BackfillCalibration @PSBoundParameters
 if ($result.Output) { Write-Output $result.Output }

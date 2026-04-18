@@ -77,7 +77,7 @@ Only the `plans/` subdirectory was removed. The `research/` subdirectory and any
 
 - `.github/agents/Issue-Planner.agent.md` — Section 6: plan persistence
 - `.github/agents/Code-Conductor.agent.md` — Step 1: plan retrieval
-- `.github/instructions/tracking-format.instructions.md` — YAML frontmatter spec for `.copilot-tracking/` research files (does not cover session-memory plan YAML; see Issue-Planner Section 6 above)
+- `.github/skills/tracking-format/SKILL.md` — YAML frontmatter spec for `.copilot-tracking/` research files (does not cover session-memory plan YAML; see Issue-Planner Section 6 above)
 
 ---
 

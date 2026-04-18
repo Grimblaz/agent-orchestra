@@ -69,7 +69,7 @@ When retrying a failed command that ran in a background terminal (`isBackground:
 1. Record the terminal ID returned by `run_in_terminal`.
 2. Kill that terminal via `kill_terminal` using the same terminal ID, loading the tool first with `tool_search_tool_regex` if needed.
 3. If `kill_terminal` fails, log it and proceed. This is non-fatal.
-4. For dev servers, run `pwsh -NoProfile -NonInteractive -File .github/scripts/check-port.ps1 -Port {PORT}` before restart to verify the port was released. If the port is still in use, log the diagnostic and proceed.
+4. For dev servers, run `pwsh -NoProfile -NonInteractive -File .github/skills/terminal-hygiene/scripts/check-port.ps1 -Port {PORT}` before restart to verify the port was released. If the port is still in use, log the diagnostic and proceed.
 5. Start the retry in a fresh terminal.
 
 Scope notes:

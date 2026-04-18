@@ -8,8 +8,8 @@ This template supports two distribution models:
 
 | Model | How to Install | What You Get |
 |-------|---------------|--------------|
-| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 14 agents, 33 skills, 9 slash commands (`/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish`, `/experience`, `/orchestrate`) — instantly available |
-| **Clone/Fork** | `git clone` or use as template | Everything above PLUS 6 shared instruction files (auto-loaded by VS Code), project templates, and examples |
+| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 14 agents, 39 skills, 9 slash commands (`/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish`, `/experience`, `/orchestrate`) — instantly available |
+| **Clone/Fork** | `git clone` or use as template | Everything above PLUS editable prompts, project templates, examples, and any repo-local instruction files you choose to keep under `.github/instructions/` |
 
 ### Plugin Installation
 
@@ -24,7 +24,7 @@ This template supports two distribution models:
 
 2. Open Extensions view (`Ctrl+Shift+X`), search `@agentPlugins copilot-orchestra`, install.
 
-> **Note**: If you use the plugin, you will not receive **automatic** loading of `.github/instructions/` files (the plugin does not distribute these). The session-startup and provenance-gate behaviors still ship through the distributed skills plus the pipeline-entry agents that invoke them, but any remaining shared instruction files require a clone/fork plus `chat.instructionsFilesLocations`. The session-startup check also requires `COPILOT_ORCHESTRA_ROOT` (or the fallback `WORKFLOW_TEMPLATE_ROOT`) and silently skips when neither variable is set. No extra startup or provenance trigger section is required in your project's `copilot-instructions.md`; the portable trigger wiring now lives in the shipped agent files. For full instruction support, use the clone/fork model and enable `chat.instructionsFilesLocations` — or combine the plugin with `chat.instructionsFilesLocations` pointing to a local clone (see the Warning callout below and the wizard's Option 1).
+> **Note**: If you use the plugin, you still receive the shared workflow guidance that now ships through skills, including `safe-operations`, `step-commit`, `pre-commit-formatting`, and `tracking-format`. `chat.instructionsFilesLocations` is only needed for repo-local instruction files that are intentionally still instructions, such as generated consumer files under `.github/instructions/`. The session-startup check also requires `COPILOT_ORCHESTRA_ROOT` (or the fallback `WORKFLOW_TEMPLATE_ROOT`) and silently skips when neither variable is set. No extra startup or provenance trigger section is required in your project's `copilot-instructions.md`; the portable trigger wiring now lives in the shipped agent files.
 
 <!-- blockquote separator: prevents Note and Warning from merging in GitHub Markdown -->
 
@@ -34,7 +34,7 @@ This template supports two distribution models:
 > |---------|-----------------|-----|
 > | `chat.agentFilesLocations` | ❌ No | Plugin already distributes agents — combining creates duplicates |
 > | `chat.agentSkillsLocations` | ✅ Yes | Skills handled by priority — combining with plugin does not create duplicates |
-> | `chat.instructionsFilesLocations` | ✅ Yes | Plugin does NOT distribute instruction files — no duplication |
+> | `chat.instructionsFilesLocations` | ✅ Yes | Use only for repo-local instruction files that remain under `.github/instructions/`; migrated hub workflow guidance now ships via skills |
 > | `chat.promptFilesLocations` | ✅ Likely | Plugin distributes prompts as slash commands (not via `promptFilesLocations`); deduplication is expected but unconfirmed on VS Code 1.110 |
 >
 > If you're seeing duplicate agents in the chat picker, see the **Troubleshooting** section below.
@@ -125,9 +125,6 @@ The Copilot Orchestra includes a session startup check carried by the pipeline-e
 {
   "chat.agentFilesLocations": ["/absolute/path/to/copilot-orchestra/.github/agents"],
   "chat.agentSkillsLocations": ["/absolute/path/to/copilot-orchestra/.github/skills"],
-  "chat.instructionsFilesLocations": {
-    "/absolute/path/to/copilot-orchestra/.github/instructions": true
-  },
   "chat.promptFilesLocations": {
     "/absolute/path/to/copilot-orchestra/.github/prompts": true
   }
@@ -138,10 +135,11 @@ The Copilot Orchestra includes a session startup check carried by the pipeline-e
 |---|---|
 | `chat.agentFilesLocations` | All workflow agents available in every repository |
 | `chat.agentSkillsLocations` | All workflow skills available in every repository |
-| `chat.instructionsFilesLocations` | Shared instruction files apply across all your repositories (the remaining 6 `.instructions.md` files) |
 | `chat.promptFilesLocations` | Shared prompt files (e.g. `/setup`) available in every repository |
 
-> **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/copilot-orchestra/.github/instructions"`. Apply the same format to all four settings above.
+> **Optional**: Add `chat.instructionsFilesLocations` only if you keep repo-local instruction files in your clone or target repo, for example generated consumer files like `.github/instructions/browser-tools.instructions.md`. It is no longer required for the migrated hub workflow guidance, which now ships via skills.
+>
+> **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/copilot-orchestra/.github/prompts"`. Apply the same format to every path-based setting above.
 >
 > **Migration note**: If you previously configured `chat.hookFilesLocations`, you can safely remove it — hooks have been replaced by the session startup check carried in the pipeline-entry agent files.
 

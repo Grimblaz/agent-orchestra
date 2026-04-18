@@ -93,8 +93,8 @@ Added alongside the portability fix to close a gap found in the post-PR review o
 | `.github/hooks/session-cleanup.json` | `SessionStart` hook configuration; resolves scripts via `$WORKFLOW_TEMPLATE_ROOT`; structured JSON error when unset | **Deleted** — retired in issue #109 |
 | `.github/instructions/session-startup.instructions.md` | Historical intermediate delivery vehicle between the retired hook and the current skill; checked the session-memory run-once marker `/memories/session/session-startup-check-complete.md` before the automatic detector run, recorded the marker after the first automatic startup check, and used `$env:COPILOT_ORCHESTRA_ROOT` (fallback: `$env:WORKFLOW_TEMPLATE_ROOT`) for script paths | **Historical** — superseded by `.github/skills/session-startup/SKILL.md` (issue #345) |
 | `.github/skills/session-startup/SKILL.md` | Current detailed protocol for the startup self-check; preserves the run-once marker, fail-open behavior, and detector/script path rules while `.github/copilot-instructions.md` remains the trigger stub | Active |
-| `.github/scripts/session-cleanup-detector.ps1` | Dual-path detection: branch check + issue-scoped tracking file check; persistent calibration paths are excluded; emits cleanup command paths using `$env:COPILOT_ORCHESTRA_ROOT` (fallback: `$env:WORKFLOW_TEMPLATE_ROOT`) | Active — updated (issue #185) |
-| `.github/scripts/post-merge-cleanup.ps1` | Archives tracking files, deletes local/remote branch, syncs default branch | Active — unchanged |
+| `.github/skills/session-startup/scripts/session-cleanup-detector.ps1` | Dual-path detection: branch check + issue-scoped tracking file check; persistent calibration paths are excluded; emits cleanup command paths using `$env:COPILOT_ORCHESTRA_ROOT` (fallback: `$env:WORKFLOW_TEMPLATE_ROOT`) | Active — updated (issue #185, migrated to skill path in issue #360) |
+| `.github/skills/session-startup/scripts/post-merge-cleanup.ps1` | Archives tracking files, deletes local/remote branch, syncs default branch | Active — migrated to skill path in issue #360 |
 
 ---
 

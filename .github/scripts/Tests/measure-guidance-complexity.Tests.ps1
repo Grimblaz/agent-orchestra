@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Contract under test:
-      - Accepts -ConfigPath (default .github/config/guidance-complexity.json)
+    - Accepts -ConfigPath (default .github/skills/calibration-pipeline/assets/guidance-complexity.json)
       - Accepts -AgentsPath (default .github/agents/*.agent.md)
       - Counts directive keywords case-insensitively, whole-word only:
           MUST, NEVER, ALWAYS, REQUIRED, MANDATORY
@@ -35,7 +35,7 @@ Describe 'measure-guidance-complexity.ps1' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\measure-guidance-complexity-core.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github\skills\guidance-measurement\scripts\measure-guidance-complexity-core.ps1'
         . $script:LibFile
 
         # Session-scoped temp root — all per-test dirs live under here

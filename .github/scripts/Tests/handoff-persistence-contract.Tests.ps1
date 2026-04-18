@@ -9,7 +9,7 @@
       - .github/agents/Issue-Planner.agent.md
       - .github/agents/Code-Conductor.agent.md
       - .github/copilot-instructions.md
-      - .github/instructions/tracking-format.instructions.md
+    - .github/skills/tracking-format/SKILL.md
       - .github/prompts/start-issue.prompt.md
       - Documents/Design/plan-storage.md
       - Documents/Design/hub-mode-ux.md
@@ -35,7 +35,7 @@ Describe 'execution handoff persistence contract' {
         $script:CopilotInstructions = Join-Path $script:RepoRoot '.github\copilot-instructions.md'
         $script:ExperienceOwner = Join-Path $script:RepoRoot '.github\agents\Experience-Owner.agent.md'
         $script:SolutionDesigner = Join-Path $script:RepoRoot '.github\agents\Solution-Designer.agent.md'
-        $script:TrackingInstructions = Join-Path $script:RepoRoot '.github\instructions\tracking-format.instructions.md'
+        $script:TrackingInstructions = Join-Path $script:RepoRoot '.github\skills\tracking-format\SKILL.md'
         $script:StartIssuePrompt = Join-Path $script:RepoRoot '.github\prompts\start-issue.prompt.md'
         $script:PlanStorage = Join-Path $script:RepoRoot 'Documents\Design\plan-storage.md'
         $script:HubModeUx = Join-Path $script:RepoRoot 'Documents\Design\hub-mode-ux.md'
@@ -93,7 +93,7 @@ Describe 'execution handoff persistence contract' {
                 LegacyPattern = '(?is)optionally persisted as GitHub issue comments|use GitHub issue comments for cross-session durability'
             },
             @{
-                Name          = 'tracking-format.instructions'
+                Name          = 'tracking-format skill'
                 Path          = $script:TrackingInstructions
                 LegacyPattern = '(?is)Issue-Planner can optionally post the plan as a GitHub issue comment|optionally posts as a GitHub issue comment with `<!-- plan-issue-\{ID\} -->` marker'
             },

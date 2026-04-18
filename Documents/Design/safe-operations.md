@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`safe-operations.instructions.md` establishes two categories of safety guardrails that apply to all agents in this workflow:
+The `safe-operations` skill (`.github/skills/safe-operations/SKILL.md`) establishes two categories of safety guardrails that apply to all agents in this workflow:
 
 1. **File operation safety** — Prevents silent file corruption by banning PowerShell write commands and directing agents to dedicated VS Code tools, including a read-only tool preference sub-rule that eliminates unnecessary terminal dialogs.
 2. **Issue creation rules** — Ensures every automatically-created GitHub issue carries a priority label and that non-blocking improvements are triaged consistently rather than silently dropped or scope-creeping the current PR.

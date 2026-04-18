@@ -28,7 +28,7 @@ param(
     [switch]$SkipConsolidation
 )
 
-. "$PSScriptRoot/lib/create-improvement-issue-core.ps1"
+. "$PSScriptRoot/create-improvement-issue-core.ps1"
 
 $result = Invoke-CreateImprovementIssue @PSBoundParameters
 if ($result.Output) { Write-Output $result.Output }

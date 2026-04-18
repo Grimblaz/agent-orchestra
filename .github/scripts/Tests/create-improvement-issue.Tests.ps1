@@ -13,7 +13,10 @@
 
 Describe 'Invoke-CreateImprovementIssue' -Tag 'no-gh' {
     BeforeAll {
-        . "$PSScriptRoot/../lib/create-improvement-issue-core.ps1"
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:CorePath = Join-Path $script:RepoRoot '.github\skills\calibration-pipeline\scripts\create-improvement-issue-core.ps1'
+        $script:WrapperPath = Join-Path $script:RepoRoot '.github\skills\calibration-pipeline\scripts\create-improvement-issue.ps1'
+        . $script:CorePath
 
         # ── temp root for all test data ──────────────────────────────
         $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "cii-tests-$([System.Guid]::NewGuid().ToString('N'))"
@@ -168,7 +171,7 @@ exit 99
     # ═══════════════════════════════════════════════════════════════════
     Context 'CLI wrapper (create-improvement-issue.ps1)' -Tag 'no-gh' {
         It 'wrapper script exists, dot-sources lib, and has matching params' {
-            $wrapperPath = "$PSScriptRoot/../create-improvement-issue.ps1"
+            $wrapperPath = $script:WrapperPath
             $wrapperPath | Should -Exist
 
             $wrapperContent = Get-Content -Raw -Path $wrapperPath
@@ -418,7 +421,7 @@ exit 99
                 -IssueCreateOutput 'https://github.com/Grimblaz/copilot-orchestra/issues/207'
             $params = $script:BaseParams.Clone()
             $params.GhCliPath = $mock
-            $params.TargetFile = '.github/instructions/safe-operations.instructions.md'
+            $params.TargetFile = '.github/skills/safe-operations/SKILL.md'
             $params.ComplexityJsonPath = $complexityPath
 
             # Act

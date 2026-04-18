@@ -15,7 +15,7 @@
     JSON to stdout conforming to the hookSpecificOutput schema for session startup.
 #>
 
-. "$PSScriptRoot/lib/session-cleanup-detector-core.ps1"
+. "$PSScriptRoot/session-cleanup-detector-core.ps1"
 
 $repoRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } elseif ($env:WORKFLOW_TEMPLATE_ROOT) { $env:WORKFLOW_TEMPLATE_ROOT } else { '' }
 

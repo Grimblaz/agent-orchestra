@@ -1,3 +1,8 @@
+---
+name: tracking-format
+description: Tracking-file frontmatter and coordination format guidance. Use when creating or reviewing local tracking files and related handoff conventions. DO NOT USE FOR: session-memory plan authoring rules outside the documented references here.
+---
+
 # Tracking Format Instructions
 
 ## Purpose
@@ -82,12 +87,12 @@ Use one of these standardized priority levels:
 
 When deriving priority from a GitHub issue label, use this mapping:
 
-| GitHub label | Frontmatter value |
-| --- | --- |
-| `priority: high` | `p1` |
-| `priority: medium` | `p2` |
-| `priority: low` | `p3` |
-| (unlabeled) | `p2` (default) |
+| GitHub label       | Frontmatter value |
+| ------------------ | ----------------- |
+| `priority: high`   | `p1`              |
+| `priority: medium` | `p2`              |
+| `priority: low`    | `p3`              |
+| (unlabeled)        | `p2` (default)    |
 
 ## File Naming Convention
 
@@ -169,12 +174,12 @@ Plans saved to session memory (`/memories/session/plan-issue-{ID}.md`) do not ne
 
 When using a cloud agent (e.g., Codex) for implementation, it creates its own branch from `main` and cannot read local files or VS Code session memory. Session memory remains the same-session source of truth; durable GitHub handoff comments are written only if the user explicitly stops or pauses at Code-Conductor's D9 checkpoint:
 
-| Phase | Agent | Output Location |
-| --- | --- | --- |
-| Design | Solution-Designer | Updates **issue body** with full design details |
-| Planning | Issue-Planner | Saves plan to session memory (`/memories/session/plan-issue-{ID}.md`) and caches design context at `/memories/session/design-issue-{ID}.md` |
-| D9 handoff | Code-Conductor | Continue: reads session memory only. Stop / Pause: writes durable GitHub issue comments with `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` markers when the latest persisted handoff is missing or changed |
-| Implementation | Code-Conductor | Reads plan from session memory first, then the latest matching GitHub issue comment; reads design cache from session memory first, then the latest matching GitHub issue comment, then the issue body. Commits design doc to `Documents/Design/{domain-slug}.md` with the implementation PR |
+| Phase          | Agent             | Output Location                                                                                                                                                                                                                                                                             |
+| -------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Design         | Solution-Designer | Updates **issue body** with full design details                                                                                                                                                                                                                                             |
+| Planning       | Issue-Planner     | Saves plan to session memory (`/memories/session/plan-issue-{ID}.md`) and caches design context at `/memories/session/design-issue-{ID}.md`                                                                                                                                                 |
+| D9 handoff     | Code-Conductor    | Continue: reads session memory only. Stop / Pause: writes durable GitHub issue comments with `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` markers when the latest persisted handoff is missing or changed                                                                    |
+| Implementation | Code-Conductor    | Reads plan from session memory first, then the latest matching GitHub issue comment; reads design cache from session memory first, then the latest matching GitHub issue comment, then the issue body. Commits design doc to `Documents/Design/{domain-slug}.md` with the implementation PR |
 
 ### Rules
 
@@ -199,3 +204,9 @@ This format is a template. Projects may add custom fields as needed:
 - `customer_impact` - Business impact notes
 
 Maintain consistency within your project's tracking files.
+
+## Gotchas
+
+| Trigger                     | Gotcha                                                                    | Fix                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Writing a new tracking file | Session-memory plan rules get mixed into local `.copilot-tracking/` files | Use this format only for local tracking files and keep plan state in session memory |

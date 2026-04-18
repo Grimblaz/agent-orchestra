@@ -16,7 +16,7 @@ Run-once startup guard for the automatic session-cleanup detector.
 
 ## Purpose
 
-Apply a session-memory run-once guard before any automatic startup detector invocation so the detector runs at most once automatically per conversation while remaining available for explicit manual use. This replaced the retired VS Code `SessionStart` hook and uses `.github/scripts/session-cleanup-detector.ps1` to find stale tracking artifacts from merged pull requests.
+Apply a session-memory run-once guard before any automatic startup detector invocation so the detector runs at most once automatically per conversation while remaining available for explicit manual use. This replaced the retired VS Code `SessionStart` hook and uses `.github/skills/session-startup/scripts/session-cleanup-detector.ps1` to find stale tracking artifacts from merged pull requests.
 
 ## Session Startup Check
 
@@ -49,7 +49,7 @@ Run the following command in the terminal, using the root path resolved in Step 
 
 ```powershell
 $copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }
-pwsh -NoProfile -NonInteractive -File "$copilotRoot/.github/scripts/session-cleanup-detector.ps1"
+pwsh -NoProfile -NonInteractive -File "$copilotRoot/.github/skills/session-startup/scripts/session-cleanup-detector.ps1"
 ```
 
 This keeps the detector path valid both in copilot-orchestra and in downstream repos that set the root environment variable.
@@ -74,7 +74,7 @@ The detector returns one of two JSON shapes.
 {
   "hookSpecificOutput": {
     "hookEventName": "SessionStart",
-    "additionalContext": "**Post-merge cleanup detected** - stale tracking artifacts found:\n\n- `.copilot-tracking/issue-42-my-feature.yml`\n\nTo clean up, run:\n```powershell\n# Run in a PowerShell (pwsh) terminal:\npwsh '/path/to/copilot-orchestra/.github/scripts/post-merge-cleanup.ps1' -IssueNumber 42 -FeatureBranch 'feature/issue-42-my-feature'\n```\n"
+    "additionalContext": "**Post-merge cleanup detected** - stale tracking artifacts found:\n\n- `.copilot-tracking/issue-42-my-feature.yml`\n\nTo clean up, run:\n```powershell\n# Run in a PowerShell (pwsh) terminal:\npwsh '/path/to/copilot-orchestra/.github/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber 42 -FeatureBranch 'feature/issue-42-my-feature'\n```\n"
   }
 }
 ````
