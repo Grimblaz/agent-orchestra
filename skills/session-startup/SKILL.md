@@ -116,6 +116,8 @@ These are normal conditions in repos that have not configured Copilot Orchestra 
 
 ---
 
+> **D3b soft exemption**: unlike the other five platform-split skills, this SKILL.md retains Copilot-specific invocation details (see §Trigger) because the session-startup trigger path is Copilot-native. The canonical routing footer below still applies and is byte-identical across all six split skills; the exemption is specific to this skill's Trigger section, not the footer.
+
 ## Platform-specific invocation
 
 This skill's methodology is tool-agnostic. Platform-specific routing lives alongside:

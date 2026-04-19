@@ -29,6 +29,21 @@ A multi-agent workflow system for GitHub Copilot that orchestrates AI-assisted s
 
 ---
 
+## Install as Plugin (Claude Code)
+
+Claude Code auto-discovers `agents/` and `skills/` at the repo root via `.claude-plugin/plugin.json` (metadata only). Install via the built-in marketplace commands:
+
+```text
+/plugin marketplace add Grimblaz/copilot-orchestra
+/plugin install copilot-orchestra@grimblaz-marketplace
+```
+
+All 14 agents and 39 skills are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (metadata-only manifest preserves auto-discovery).
+
+**What requires clone/fork**: Same as the VS Code plugin — `.github/instructions/` and project templates are not distributed through the plugin surface.
+
+---
+
 ## Quick Start — Two Steps
 
 ### Step 1: Clone or fork this template

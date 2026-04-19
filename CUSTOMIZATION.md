@@ -130,7 +130,7 @@ This file defines structural rules for your codebase. Include:
 
 ### 3. Agent Definitions (Optional)
 
-Agents in `.github/agents/` work without customization. If you want to tweak behavior:
+Agents in `agents/` (at the repo root) work without customization. If you want to tweak behavior:
 
 - Agent files use YAML frontmatter (`---`) with fields like `name`, `description`, `tools`, `handoffs`
 - Focus on adjusting a specific agent's responsibilities or interaction patterns
@@ -138,7 +138,7 @@ Agents in `.github/agents/` work without customization. If you want to tweak beh
 
 ### 4. Add Domain Skills (Optional)
 
-Create project-specific knowledge packages in `.github/skills/`:
+Create project-specific knowledge packages in `skills/` (at the repo root):
 
 ```bash
 # In Copilot Chat:
@@ -152,7 +152,7 @@ Each skill needs a `SKILL.md` file with `name` and `description` frontmatter. VS
 To share agents across all repositories in your org:
 
 - Place agent files in an `agents/` folder at the root of your org's `.github` or `.github-private` repository
-- Repository-level agents in `.github/agents/` override org defaults
+- Repository-level agents in `agents/` (at the repo root) override org defaults
 
 ### 6. Session Startup Check (Optional)
 
@@ -168,8 +168,8 @@ The Copilot Orchestra includes a session startup check carried by the pipeline-e
 
 ```json
 {
-  "chat.agentFilesLocations": ["/absolute/path/to/copilot-orchestra/.github/agents"],
-  "chat.agentSkillsLocations": ["/absolute/path/to/copilot-orchestra/.github/skills"],
+  "chat.agentFilesLocations": ["/absolute/path/to/copilot-orchestra/agents"],
+  "chat.agentSkillsLocations": ["/absolute/path/to/copilot-orchestra/skills"],
   "chat.promptFilesLocations": {
     "/absolute/path/to/copilot-orchestra/.github/prompts": true
   }
@@ -216,7 +216,7 @@ $env:COPILOT_ORCHESTRA_ROOT = "C:\path\to\copilot-orchestra"
 export COPILOT_ORCHESTRA_ROOT="/path/to/copilot-orchestra"
 ```
 
-**What it does**: At the start of each conversation, the first automatic startup check uses the session-memory marker `/memories/session/session-startup-check-complete.md` to ensure the detector runs only once automatically per conversation. That automatic check looks for a deleted upstream branch (indicating a merged PR) or stale issue-scoped `.copilot-tracking/` files for merged issues. Persistent calibration data is excluded from cleanup detection. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`. If neither root environment variable is set, `pwsh` is unavailable, the detector script is missing, or the detector returns non-JSON output, the automatic check skips silently. If session-memory access fails, the detector still runs; explicit manual detector runs remain available after the automatic guard fires. For the full protocol, load the `session-startup` skill from `.github/skills/session-startup/SKILL.md`.
+**What it does**: At the start of each conversation, the first automatic startup check uses the session-memory marker `/memories/session/session-startup-check-complete.md` to ensure the detector runs only once automatically per conversation. That automatic check looks for a deleted upstream branch (indicating a merged PR) or stale issue-scoped `.copilot-tracking/` files for merged issues. Persistent calibration data is excluded from cleanup detection. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`. If neither root environment variable is set, `pwsh` is unavailable, the detector script is missing, or the detector returns non-JSON output, the automatic check skips silently. If session-memory access fails, the detector still runs; explicit manual detector runs remain available after the automatic guard fires. For the full protocol, load the `session-startup` skill from `skills/session-startup/SKILL.md`.
 
 **Requires**: PowerShell 7+ (`pwsh`) installed on PATH and `COPILOT_ORCHESTRA_ROOT` (or `WORKFLOW_TEMPLATE_ROOT`) set.
 

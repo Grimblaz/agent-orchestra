@@ -1,7 +1,7 @@
 {
   "name": "copilot-orchestra",
   "version": "1.14.0",
-  "description": "Multi-agent workflow system. Pipeline-based agent orchestration: Issue -> Design -> Plan -> Implement -> Review -> PR.",
+  "description": "Multi-agent workflow system for Claude Code. Pipeline-based agent orchestration: Issue → Design → Plan → Implement → Review → PR.",
   "author": {
     "name": "Grimblaz"
   },
