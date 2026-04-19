@@ -1,0 +1,21 @@
+{
+  "name": "copilot-orchestra",
+  "version": "1.14.0",
+  "description": "Multi-agent workflow system. Pipeline-based agent orchestration: Issue -> Design -> Plan -> Implement -> Review -> PR.",
+  "author": {
+    "name": "Grimblaz"
+  },
+  "homepage": "https://github.com/Grimblaz/copilot-orchestra",
+  "repository": "https://github.com/Grimblaz/copilot-orchestra",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "agents",
+    "orchestration",
+    "code-review",
+    "planning",
+    "tdd",
+    "multi-agent",
+    "pipeline"
+  ]
+}

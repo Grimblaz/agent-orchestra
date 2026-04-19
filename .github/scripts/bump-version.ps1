@@ -4,10 +4,15 @@
     Bumps the version string across all version-bearing files in the repo.
 
 .DESCRIPTION
-    Updates the version in plugin.json, marketplace.json (2 occurrences), and README.md
-    (1 occurrence) — 4 occurrences total across 3 files.
+    Updates the version in .github/plugin.json, .claude-plugin/plugin.json,
+    .github/plugin/marketplace.json (2 occurrences), and README.md (1 occurrence)
+    — 5 occurrences total across 4 files.
 
-    Before writing, verifies that all 4 current version values agree. If any differ,
+    The two plugin manifests are dual-written: Copilot reads .github/plugin.json,
+    Claude Code reads .claude-plugin/plugin.json. Cache invalidation in Claude Code
+    depends on the version bumping, so dual-write is non-optional (see ADR-0002).
+
+    Before writing, verifies that all current version values agree. If any differ,
     the script exits with an error and prints which file has the conflicting value.
 
 .PARAMETER Version
@@ -53,16 +58,19 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
 # --- Resolve file paths ---
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '../..')
 $pluginJson = Join-Path $repoRoot '.github/plugin.json'
+$claudePluginJson = Join-Path $repoRoot '.claude-plugin/plugin.json'
 $marketplaceJson = Join-Path $repoRoot '.github/plugin/marketplace.json'
 $readme = Join-Path $repoRoot 'README.md'
 
 # --- Read files into memory (written back as UTF-8 without BOM) ---
 $pluginContent = [System.IO.File]::ReadAllText($pluginJson)
+$claudePluginContent = [System.IO.File]::ReadAllText($claudePluginJson)
 $marketplaceContent = [System.IO.File]::ReadAllText($marketplaceJson)
 $readmeContent = [System.IO.File]::ReadAllText($readme)
 
 # --- Extract current versions ---
 $pluginVersion = [regex]::Match($pluginContent, '"version":\s*"([\d.]+)"').Groups[1].Value
+$claudePluginVersion = [regex]::Match($claudePluginContent, '"version":\s*"([\d.]+)"').Groups[1].Value
 $marketplaceMatches = [regex]::Matches($marketplaceContent, '"version":\s*"([\d.]+)"')
 if ($marketplaceMatches.Count -ne 2) {
     Fail "Expected exactly 2 'version' fields in marketplace.json, found $($marketplaceMatches.Count)"
@@ -73,7 +81,8 @@ $readmeVersion = [regex]::Match($readmeContent, 'version-v([\d.]+)-blue').Groups
 
 # --- Pre-bump consistency check ---
 $allVersions = [ordered]@{
-    'plugin.json'                       = $pluginVersion
+    '.github/plugin.json'               = $pluginVersion
+    '.claude-plugin/plugin.json'        = $claudePluginVersion
     'marketplace.json (metadata)'       = $marketplaceVersion1
     'marketplace.json (plugin version)' = $marketplaceVersion2
     'README.md'                         = $readmeVersion
@@ -98,9 +107,10 @@ Write-Host "Current version: ${Yellow}$currentVersion${Reset}"
 if ($DryRun) {
     Write-Host "${Yellow}Dry run — no files will be modified${Reset}"
     Write-Host "  Would update .github/plugin.json: $currentVersion → $Version"
+    Write-Host "  Would update .claude-plugin/plugin.json: $currentVersion → $Version"
     Write-Host "  Would update .github/plugin/marketplace.json: $currentVersion → $Version (2 occurrences)"
     Write-Host "  Would update README.md: $currentVersion → $Version"
-    Write-Host "${Green}✓${Reset} Dry run complete — 4 occurrences across 3 files"
+    Write-Host "${Green}✓${Reset} Dry run complete — 5 occurrences across 4 files"
     exit 0
 }
 
@@ -113,6 +123,10 @@ $updatedPlugin = $pluginContent -replace '"version":\s*"[\d.]+"', "`"version`": 
 [System.IO.File]::WriteAllText($pluginJson, $updatedPlugin, $utf8NoBom)
 Write-Host "  ${Green}✓${Reset} Updated .github/plugin.json"
 
+$updatedClaudePlugin = $claudePluginContent -replace '"version":\s*"[\d.]+"', "`"version`": `"$Version`""
+[System.IO.File]::WriteAllText($claudePluginJson, $updatedClaudePlugin, $utf8NoBom)
+Write-Host "  ${Green}✓${Reset} Updated .claude-plugin/plugin.json"
+
 $updatedMarketplace = $marketplaceContent -replace '"version":\s*"[\d.]+"', "`"version`": `"$Version`""
 [System.IO.File]::WriteAllText($marketplaceJson, $updatedMarketplace, $utf8NoBom)
 Write-Host "  ${Green}✓${Reset} Updated .github/plugin/marketplace.json (2 occurrences)"
@@ -121,4 +135,4 @@ $updatedReadme = $readmeContent -replace 'version-v[\d.]+-blue', "version-v$Vers
 [System.IO.File]::WriteAllText($readme, $updatedReadme, $utf8NoBom)
 Write-Host "  ${Green}✓${Reset} Updated README.md"
 
-Write-Host "${Green}✓${Reset} Version bumped to $Version across 4 occurrences in 3 files"
+Write-Host "${Green}✓${Reset} Version bumped to $Version across 5 occurrences in 4 files"
