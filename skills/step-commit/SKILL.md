@@ -88,7 +88,7 @@ On failure:
 1. Warn in conversation output
 2. Increment a consecutive-failure counter (tracked in conversation context)
 3. Reset the counter to zero after any successful step commit.
-4. If the consecutive-failure counter reaches ≥2, escalate via `#tool:vscode/askQuestions`:
+4. If the consecutive-failure counter reaches ≥2, escalate via the platform's structured question tool (see `platforms/` for invocation details):
 
    > Step commits failing repeatedly — check hooks/git state. Continue without auto-commits?
    >
@@ -108,3 +108,12 @@ Formatting stays in Code-Conductor's Step 4 (Create PR) — step commits capture
 | Trigger                 | Gotcha                                                                    | Fix                                                                 |
 | ----------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------- |
 | Capturing a step commit | Broad staging picks up unrelated work and corrupts the validated snapshot | Stage only the explicit changed-file list returned by the SCM query |
+
+---
+
+## Platform-specific invocation
+
+This skill's methodology is tool-agnostic. Platform-specific routing lives alongside:
+
+- Copilot: [platforms/copilot.md](platforms/copilot.md)
+- Claude Code: [platforms/claude.md](platforms/claude.md)

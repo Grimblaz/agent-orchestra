@@ -67,7 +67,7 @@ If the work spans multiple distinct customer surfaces, keep coverage separate by
 
 ## Question Preparation
 
-When customer framing requires user input, prepare 2-3 concrete options with one recommended path, full trade-off reasoning for the recommendation, and short trade-off summaries for the alternatives. The agent still owns the mandatory `#tool:vscode/askQuestions` policy and any invocation-specific approval behavior.
+When customer framing requires user input, prepare 2-3 concrete options with one recommended path, full trade-off reasoning for the recommendation, and short trade-off summaries for the alternatives. The agent still owns the mandatory structured-question policy (see `platforms/` for the Copilot and Claude Code invocation) and any invocation-specific approval behavior.
 
 ## Downstream CE Evidence Capture
 
@@ -128,3 +128,12 @@ Keep the summary evidence-only. Do not score findings, recommend fixes, or colla
 | Trigger                                   | Gotcha                                                         | Fix                                                             |
 | ----------------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------- |
 | Multi-surface work falls back to one path | Unexercised surfaces look covered even when no evidence exists | Enumerate each surface group and mark uncovered ones explicitly |
+
+---
+
+## Platform-specific invocation
+
+This skill's methodology is tool-agnostic. Platform-specific routing lives alongside:
+
+- Copilot: [platforms/copilot.md](platforms/copilot.md)
+- Claude Code: [platforms/claude.md](platforms/claude.md)

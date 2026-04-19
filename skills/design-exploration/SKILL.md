@@ -60,7 +60,7 @@ When user input is needed, prepare concise options with:
 - Alternatives with brief summaries of why they are weaker or riskier
 - Enough context that the agent can ask for a decision without relying on transcript archaeology
 
-The agent still owns the mandatory `#tool:vscode/askQuestions` policy and approval behavior.
+The agent still owns the mandatory structured-question policy (see `platforms/` for the Copilot and Claude Code invocation) and approval behavior.
 
 ### 6. Describe the Complete Design
 
@@ -107,3 +107,12 @@ The agent remains responsible for the actual GitHub issue update and completion 
 | Trigger                                     | Gotcha                                                                | Fix                                                       |
 | ------------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------- |
 | Decisions are documented before convergence | The durable record freezes ambiguity and forces planning rework later | Discuss first, then document only the confirmed direction |
+
+---
+
+## Platform-specific invocation
+
+This skill's methodology is tool-agnostic. Platform-specific routing lives alongside:
+
+- Copilot: [platforms/copilot.md](platforms/copilot.md)
+- Claude Code: [platforms/claude.md](platforms/claude.md)

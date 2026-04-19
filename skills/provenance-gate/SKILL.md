@@ -101,7 +101,7 @@ Assessment output: `Scope accurate` / `Scope incomplete - {missing areas}` / `Sc
 
 ## Developer Gate
 
-After the assessment, present the summary with `#tool:vscode/askQuestions` and these options:
+After the assessment, present the summary via the platform's structured question tool (see `platforms/` for invocation details) with these options:
 
 1. `I wrote this / I'm fully briefed`
 2. `Assessment looks right - proceed with caution`
@@ -148,3 +148,12 @@ Run the gate once per unique issue ID.
 | Trigger                   | Gotcha                                                                   | Fix                                                                               |
 | ------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
 | MCP comment posting fails | Treating marker persistence as mandatory would block the assessment path | Fail open, write `/memories/session/first-contact-assessed-{ID}.md`, and continue |
+
+---
+
+## Platform-specific invocation
+
+This skill's methodology is tool-agnostic. Platform-specific routing lives alongside:
+
+- Copilot: [platforms/copilot.md](platforms/copilot.md)
+- Claude Code: [platforms/claude.md](platforms/claude.md)

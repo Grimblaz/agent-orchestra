@@ -113,3 +113,12 @@ These are normal conditions in repos that have not configured Copilot Orchestra 
 | Trigger                                     | Gotcha                                                                              | Fix                                                                                   |
 | ------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
 | Running the detector manually after startup | Treating the run-once guard as a global prohibition blocks legitimate manual checks | Keep manual detector runs available; the guard only limits the automatic startup path |
+
+---
+
+## Platform-specific invocation
+
+This skill's methodology is tool-agnostic. Platform-specific routing lives alongside:
+
+- Copilot: [platforms/copilot.md](platforms/copilot.md)
+- Claude Code: [platforms/claude.md](platforms/claude.md)
