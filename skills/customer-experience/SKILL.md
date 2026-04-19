@@ -65,6 +65,18 @@ Identify the customer-facing surface and how CE Gate work should exercise it:
 
 If the work spans multiple distinct customer surfaces, keep coverage separate by journey meaning. A manual fallback must still enumerate every distinct surface group and mark uncovered groups explicitly instead of inheriting coverage from exercised siblings.
 
+## Hub/Consumer Classification Gate
+
+Before finalizing upstream framing, classify whether the issue proposes adding content that primarily manifests in one language's type system, runtime, or framework to a hub agent (any `.agent.md` in `agents/`). Hub agents are language-agnostic — language-specific review rules, prosecution perspectives, and behavioral patterns belong in consumer-repo artifacts:
+
+- **Review rules / pitfalls** → `examples/{stack}/architecture-rules.md`
+- **Stack-specific conventions** → `examples/{stack}/copilot-instructions.md`
+- **Reusable cross-stack skills** → `skills/{skill-name}/`
+
+If the gate fires, redirect the proposal to the appropriate consumer artifact and reframe the issue accordingly. The user may override with explicit rationale if the proposed content is genuinely language-agnostic.
+
+This gate applies equally to upstream framing (Experience-Owner) and downstream design exploration (Solution-Designer); run it once per issue and carry the result forward.
+
 ## Question Preparation
 
 When customer framing requires user input, prepare 2-3 concrete options with one recommended path, full trade-off reasoning for the recommendation, and short trade-off summaries for the alternatives. The agent still owns the mandatory structured-question policy (see `platforms/` for the Copilot and Claude Code invocation) and any invocation-specific approval behavior.

@@ -97,6 +97,83 @@ Before approval, prepare the draft plan for adversarial review:
 
 The agent remains responsible for the approval prompt contract and for persisting the approved plan.
 
+### Post-Judge Reconciliation
+
+After the judge rules, cross-check any plan changes made during the prosecution incorporation phase against the judge's final rulings. If a prosecution finding that was incorporated was subsequently disproved by defense and confirmed rejected by the judge, revert the plan change derived from that finding.
+
+Exception: if the incorporation was user-confirmed (the finding was escalated via the platform's structured-question tool and the user confirmed it), do not silently revert — instead, flag the conflict in the Plan Stress-Test entry as `judge-rejected / user-confirmed` and surface it for user reconsideration before presenting the final plan draft.
+
+Update the `Plan Stress-Test` summary block by replacing the `Judge: pending` placeholder in each entry with the judge's final ruling. Keep the Prosecution field intact.
+
+## Plan Style Guide
+
+### Plan-markdown template
+
+```markdown
+## Plan: {Title (2-10 words)}
+
+{TL;DR — what, how, why. Reference key decisions. (30-200 words)}
+
+**Steps**
+
+1. {Action with file path links and `symbol` refs}
+2. {Next step}
+
+**Verification**
+{How to test: commands, tests, manual checks}
+
+**Decisions** (if applicable)
+
+- {Decision: chose X over Y}
+
+**Plan Stress-Test** (summary of Code-Critic review)
+
+- Challenge: {finding} — Prosecution: {incorporated | dismissed with rationale | escalated+confirmed | escalated+rejected} — Judge: {pending → replaced with: sustained | rejected | judge-rejected/user-confirmed}
+- Overall confidence: {high | medium | low} — {one-sentence rationale}
+```
+
+### Base rules
+
+- No code blocks — describe changes, link to files and symbols.
+- No questions at the end — ask via the platform's structured-question tool during the workflow.
+- Include execution metadata (mode + requirement contract expectations) so implementers can execute without re-deriving process rules.
+- When a step crosses a layer boundary (as defined in `.github/architecture-rules.md`), note the dependency direction and verify it aligns with documented architecture rules. Scope steps to a single layer where feasible.
+- Insert a dedicated **`[CE GATE]`** numbered step as the final implementation step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Format: `N. [CE GATE] — Surface: {type} — Design Intent: {link or one-line summary} — Scenarios: {functional + intent} — Method: {how each scenario is exercised}`. When BDD is enabled, list each scenario by ID with classification: `SN: {description} [auto/manual]`. The `[CE GATE]` step is blocking — advancement past it requires either completion or the documented skip marker. Omit only when `ce_gate: false`.
+- For backend/non-UI/CLI projects, the CE Gate surface is the API or CLI — identify appropriate scenarios for customer-perspective verification.
+- Keep the plan scannable.
+
+### Specialized rules
+
+- **Agent-file insertion strategies** — when a step modifies `.agent.md` files, categorize each file as exactly one of: (a) **clean insert** — no existing identity/personality text at the canonical insertion point (top of body, immediately before the main heading); (b) **fragment replacement** — existing identity/personality text is present at the canonical insertion point; (c) **stance-preserving insert** — a named stance section sits at the insertion point and must be preserved. Behavioral guidance found elsewhere in the body (not at the canonical insertion point) does not qualify as a fragment — classify those files as clean inserts.
+- **Migration-type issues** — issues involving pattern replacement, API migration, rename/move across files, or signal phrases like "replace X with Y", "migrate from A to B", "rename Z across the codebase", or "remove all references to W" — require that **Step 1 of the plan MUST be an exhaustive repo scan**. The scan produces the authoritative list of files to update; the issue author's file list must not be relied on as complete. Subsequent steps must be scoped to scan-discovered files only — additions require a documented reason.
+- **Removal steps** — when a step removes a concept, feature, section, or phrase from a file, the Requirement Contract must include a completeness validation grep confirming zero remaining references in the target file and any other files that referenced it.
+- **Cross-file constants** — when a step (a) implements or modifies a script or module that consumes enumerated values produced by another file (stage names, category strings, enum labels), or (b) creates or modifies a file that authoritatively defines enumerated values consumed by scripts, the Requirement Contract must: (i) for case (a) name the authoritative source file; for case (b) identify all known consumer scripts via grep — and (ii) list the exact allowed values as a quoted string enum (example format: `Allowed values: 'main' | 'postfix' | 'ce'`).
+- **Multi-tier statistical output** — when a step involves a statistical output schema with multiple independent sub-sections (calibration scripts, metrics aggregators), the Requirement Contract must enumerate each output section that requires a `sufficient_data` gate rather than describing gating as a single aggregate requirement.
+- **CE Gate multi-path output coverage** — when a script emits a new output block in more than one conditional path, require at least one CE Gate scenario for each path where the block appears. Each scenario's acceptance criterion must specify the expected behavior of every consuming agent in that path, not merely output format.
+- **New-section ordering** — when a step creates a new section with multiple sub-items (subsections, list items, blocks), list them in the intended reading/document order and annotate "add in this order" so placement is deterministic.
+- **Security-sensitive field carve-out** — when a step defers conflict resolution for a data migration, the Requirement Contract must enumerate security-sensitive fields (auth hashes, tokens, permission flags) and specify their merge semantics separately from data fields. If no security-sensitive fields exist, state that explicitly.
+
+### Agent-capability verification
+
+When any plan step characterizes another agent's capabilities, permissions, or scope, verify the claim against that agent's own specification (read the agent's `.agent.md` file) before finalizing the requirement contract.
+
+## Plan Approval Prompt Format
+
+When asking for plan approval, treat the approval prompt as a decision-card-first consent surface. The approval dialog must stand on its own so the user can approve from the dialog alone without depending on the transcript or conversation history.
+
+The approval prompt must include a mandatory approval card in this compact labeled shape:
+
+- `Change:` one sentence describing the planned behavior or workflow change in user-relevant terms.
+- `No change:` one sentence naming the meaningful boundary, exclusion, or non-goal the user might otherwise assume is included.
+- `Trade-off:` the main compromise, watchpoint, or cost the user is accepting.
+- `Areas:` the affected files, workflow areas, or systems at a glance.
+
+`Execution:` is conditional. Include it only when execution shape materially affects approval — for example, plans with more than three steps, plans using parallel execution lanes, or cases where sequencing itself is likely to change the approval decision. When present, summarize the plan shape rather than restating every step.
+
+Prefer exact files only when there are a few high-signal paths. When exact files are noisy, collapse to grouped areas or area-level summaries instead of a raw file dump. If exclusions are implicit, derive `No change` from the plan boundary, non-goals, or unaffected surfaces. If `Change` or `No change` still cannot be stated concretely after those fallbacks, stop and clarify before asking for approval.
+
+Present the plan as a **DRAFT**, then immediately ask for approval via the platform's structured-question tool. Never end a turn after presenting a draft without calling the approval tool — this wastes a user turn just to say "looks good."
+
 ## Context Management
 
 If discovery becomes long or tool-heavy, compact before drafting. Preserve the key decisions, rejected alternatives, acceptance criteria, open questions, and CE Gate assessment so the plan draft starts from stable context instead of a partially remembered transcript.

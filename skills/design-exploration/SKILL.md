@@ -92,6 +92,33 @@ Once decisions are settled, prepare the material the agent will persist:
 
 The agent remains responsible for the actual GitHub issue update and completion marker.
 
+## Design Challenge (3-Pass, Non-Blocking)
+
+After design decisions are confirmed with the user and before updating the issue body, stress-test the design with three independent Code-Critic prosecution passes. This is **non-blocking** — challenges inform the design but do not gate it, and the design-challenge pipeline intentionally stops after prosecution (no defense or judge pass). The full prosecution + defense + judge pipeline is reserved for implementation-plan stress-testing in `plan-authoring`.
+
+### Pass composition
+
+- **Passes 1 and 2** — design review perspectives (Feasibility & Risk, Scope & Completeness, Integration & Impact). Tag each finding with `pass: 1` or `pass: 2`. Give each pass the full design content, acceptance criteria, scope, and confirmed constraints.
+- **Pass 3** — product-alignment perspectives (Product Direction Fit, Customer Experience Coherence, Planned-Work Alignment). Tag with `pass: 3`. In addition to the design content, provide the issue body, any `Documents/Design/` and `Documents/Decisions/` files, project guidance (`README.md`, `CUSTOMIZATION.md`, `copilot-instructions.md`), and planned-work artifacts (`ROADMAP.md`, `NEXT-STEPS.md`) if present. Note absence of planned-work artifacts explicitly.
+
+Run all three passes independently — do not share findings between passes before merging.
+
+### Merge and deduplicate
+
+After all three reports return, merge into a single ledger. Deduplication rule: same perspective target (the specific decision, AC, or scope element being questioned) + same failure mode = duplicate. Keep the earliest pass's finding and annotate with `also_flagged_by: [pass N]`. Cross-perspective duplicates (e.g., §D2 and §P2 flagging the same concern) are also merged.
+
+### Dispositions
+
+For each merged finding, decide:
+
+- **Incorporate** — refine the design and note the change
+- **Dismiss** — record rationale inline with the finding
+- **Escalate** — flag for explicit user decision before proceeding
+
+If any finding is escalated, the agent must ask the user (via the platform's structured-question tool) before updating the issue body. Present the challenge summary alongside the design so the user can see what was challenged and how each finding was handled.
+
+See `adversarial-review` for the full prosecution workflow and output schemas that each pass follows.
+
 ## Related Guidance
 
 - Load `software-architecture` when the design changes dependency direction or layer boundaries
