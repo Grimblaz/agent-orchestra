@@ -62,6 +62,11 @@ Describe 'Issue #367 path-migration sweep gate' -Tag 'issue-367', 'sweep-gate' {
                 'Documents/Decisions/0367-sweep-ledger.md'
             )
             'post-mv' = @(
+                'agents/*.agent.md'
+                'skills/*'
+                'skills/*/*'
+                'skills/*/*/*'
+                'skills/*/*/*/*'
                 '.github/scripts/Tests/*.Tests.ps1'
                 '.github/scripts/validate-architecture.ps1'
                 '.github/scripts/lib/*.ps1'
@@ -84,9 +89,10 @@ Describe 'Issue #367 path-migration sweep gate' -Tag 'issue-367', 'sweep-gate' {
                 'CONTRIBUTING.md'
                 'examples/*/README.md'
                 'Documents/Decisions/0367-sweep-ledger.md'
+                # files with $copilotRoot/.github/skills not yet updated (Step 6 owns)
                 'skills/post-pr-review/SKILL.md'
-                'skills/session-startup/*'
-                'skills/session-startup/*/*'
+                'skills/session-startup/SKILL.md'
+                'skills/session-startup/scripts/*.ps1'
                 'skills/guidance-measurement/scripts/*.ps1'
                 'agents/Code-Conductor.agent.md'
             )
