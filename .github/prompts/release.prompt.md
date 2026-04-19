@@ -64,7 +64,7 @@ pwsh .github/scripts/bump-version.ps1 -Version {next-version}
 Then commit and push:
 
 ```powershell
-git add .github/plugin.json .github/plugin/marketplace.json README.md
+git add plugin.json .claude-plugin/plugin.json .claude-plugin/marketplace.json .github/plugin/marketplace.json README.md
 git commit -m "chore: bump version to {next-version}"
 git push
 ```
@@ -102,7 +102,7 @@ Format the notes to match the established release pattern:
 - {Bullet point detail}
 - {Bullet point detail}
 
-**Full Changelog**: https://github.com/Grimblaz/copilot-orchestra/compare/{previous-tag}...v{next-version}
+**Full Changelog**: https://github.com/Grimblaz/agent-orchestra/compare/{previous-tag}...v{next-version}
 ```
 
 Show the drafted release notes and ask the user to confirm or edit before creating the release.

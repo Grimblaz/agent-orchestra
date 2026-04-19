@@ -2,7 +2,7 @@
 
 ## Summary
 
-copilot-orchestra targets **GitHub Copilot in VS Code** as its sole supported tool.
+agent-orchestra targets **GitHub Copilot in VS Code** as its sole supported tool.
 The system previously shipped a Claude Code (Anthropic CLI) compatibility layer —
 `CLAUDE.md` project-context files and `.claude/commands/*.md` slash commands — but
 this layer was removed in issue #175. Every agent, skill, and instruction file is
@@ -11,6 +11,8 @@ authored entirely as GitHub Copilot artifacts.
 ---
 
 ## Design Decisions
+
+> **D1 — Superseded by [ADR-0001](../Decisions/0001-cross-tool-support.md)** (2026-04-19, issue #367). The rationale for single-tool focus (dual-maintenance of parallel context files) no longer applies once both tools consume the same `skills/` and `agents/` content via plugin distribution. The original decision text is preserved below for historical context.
 
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|

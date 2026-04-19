@@ -42,5 +42,5 @@ Each example template contains an HTML-commented `## Migration Safety` section w
 
 ## Related
 
-- Issue [#291](https://github.com/Medevs/Copilot-Orchestra/issues/291)
+- Issue [#291](https://github.com/Medevs/Agent-Orchestra/issues/291)
 - Consumer repo issue: Windgust-Questbook #157

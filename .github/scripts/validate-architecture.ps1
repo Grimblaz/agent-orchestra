@@ -61,19 +61,25 @@ function Test-DirectoryStructure {
     Write-ValidationHeader "Directory Structure"
 
     # [CUSTOMIZE] Define your required directories
-    $RequiredDirectories = @(
-        ".github/agents"
-        ".github/skills"
-        "examples"
-        ".github"
+    # Issue #367: agents/ and skills/ may live at repo root (post-mv) or under
+    # .github/ (pre-mv) during the migration. Accept either location.
+    $RequiredDirectoryClusters = @(
+        @{ Name = 'agents'; Candidates = @('agents', '.github/agents') }
+        @{ Name = 'skills'; Candidates = @('skills', '.github/skills') }
+        @{ Name = 'examples'; Candidates = @('examples') }
+        @{ Name = '.github'; Candidates = @('.github') }
     )
 
-    foreach ($dir in $RequiredDirectories) {
-        if (Test-Path $dir) {
-            Write-Success "Directory exists: $dir"
+    foreach ($cluster in $RequiredDirectoryClusters) {
+        $found = $null
+        foreach ($candidate in $cluster.Candidates) {
+            if (Test-Path $candidate) { $found = $candidate; break }
+        }
+        if ($found) {
+            Write-Success "Directory exists: $found"
         }
         else {
-            Write-Failure "Missing required directory: $dir"
+            Write-Failure "Missing required directory: $($cluster.Name) (looked for: $($cluster.Candidates -join ', '))"
         }
     }
 }
@@ -303,7 +309,7 @@ function Test-DocumentationCoverage {
 
 try {
     Write-Host "`n╔════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "║   Architecture Validation - Copilot Orchestra        ║" -ForegroundColor Cyan
+    Write-Host "║   Architecture Validation - Agent Orchestra        ║" -ForegroundColor Cyan
     Write-Host "╚════════════════════════════════════════════════════════╝`n" -ForegroundColor Cyan
 
     Write-Host "Starting validation at $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`n"

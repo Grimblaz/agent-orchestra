@@ -3,3 +3,5 @@
 .claude/
 plan-issue-*.md
 pester-*.txt
+testResults.xml
+.issue-*-progress.md

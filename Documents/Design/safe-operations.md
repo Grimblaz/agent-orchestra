@@ -94,6 +94,6 @@ The following approaches were considered and rejected during the design of this 
 
 ## Source
 
-- Issue #67: [feat: add read-only tool preference guardrail](https://github.com/Grimblaz/copilot-orchestra/issues/67)
-- Issue #127: [feat: add deduplication guard to issue creation protocol](https://github.com/Grimblaz/copilot-orchestra/issues/127)
-- Issue #132: [feat: built-in-tool-first enforcement](https://github.com/Grimblaz/copilot-orchestra/issues/132)
+- Issue #67: [feat: add read-only tool preference guardrail](https://github.com/Grimblaz/agent-orchestra/issues/67)
+- Issue #127: [feat: add deduplication guard to issue creation protocol](https://github.com/Grimblaz/agent-orchestra/issues/127)
+- Issue #132: [feat: built-in-tool-first enforcement](https://github.com/Grimblaz/agent-orchestra/issues/132)

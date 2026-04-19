@@ -6,17 +6,17 @@
 
 .DESCRIPTION
     Locks the issue #211 guidance complexity contract across:
-      - .github/agents/Process-Review.agent.md (§4.7, §4.8, §4.9)
-    - .github/skills/calibration-pipeline/assets/guidance-complexity.json
-    - .github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1
+      - agents/Process-Review.agent.md (§4.7, §4.8, §4.9)
+    - skills/calibration-pipeline/assets/guidance-complexity.json
+    - skills/guidance-measurement/scripts/measure-guidance-complexity.ps1
       - Documents/Design/guidance-complexity.md
 
         The files must satisfy:
             - §4.7 invokes measure-guidance-complexity.ps1 and makes output available to §4.9
             - §4.9 references compression_required and agents_over_ceiling, scoped to agent-prompt proposals
             - §4.8 and §4.9 share consistent trigger scope: both skip only CE Gate Track 2, both run during calibration-only mode
-            - .github/skills/calibration-pipeline/assets/guidance-complexity.json exists with a valid schema (version + default_ceiling.max_directives)
-            - .github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1 exists
+            - skills/calibration-pipeline/assets/guidance-complexity.json exists with a valid schema (version + default_ceiling.max_directives)
+            - skills/guidance-measurement/scripts/measure-guidance-complexity.ps1 exists
             - Documents/Design/guidance-complexity.md documents D1, D2, and the compression concept
 
         These tests lock the landed issue #211 wiring so future edits to Process-Review, the config, or the
@@ -27,9 +27,9 @@ Describe 'guidance complexity ceiling contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ProcessReview = Join-Path $script:RepoRoot '.github/agents/Process-Review.agent.md'
-        $script:ConfigPath = Join-Path $script:RepoRoot '.github/skills/calibration-pipeline/assets/guidance-complexity.json'
-        $script:ScriptPath = Join-Path $script:RepoRoot '.github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1'
+        $script:ProcessReview = Join-Path $script:RepoRoot 'agents/Process-Review.agent.md'
+        $script:ConfigPath = Join-Path $script:RepoRoot 'skills/calibration-pipeline/assets/guidance-complexity.json'
+        $script:ScriptPath = Join-Path $script:RepoRoot 'skills/guidance-measurement/scripts/measure-guidance-complexity.ps1'
         $script:DesignDoc = Join-Path $script:RepoRoot 'Documents/Design/guidance-complexity.md'
 
         $script:ProcessReviewContent = Get-Content -Path $script:ProcessReview -Raw
@@ -93,7 +93,7 @@ Describe 'guidance complexity ceiling contract' {
 
     It 'requires the guidance-complexity config file to exist with a valid schema' {
         Test-Path -Path $script:ConfigPath | Should -BeTrue `
-            -Because '.github/skills/calibration-pipeline/assets/guidance-complexity.json must be committed to the repo'
+            -Because 'skills/calibration-pipeline/assets/guidance-complexity.json must be committed to the repo'
         { $null = Get-Content -Path $script:ConfigPath -Raw | ConvertFrom-Json } | Should -Not -Throw `
             -Because 'guidance-complexity.json must be parseable as valid JSON'
         $configJson = Get-Content -Path $script:ConfigPath -Raw | ConvertFrom-Json
@@ -115,7 +115,7 @@ Describe 'guidance complexity ceiling contract' {
 
     It 'requires measure-guidance-complexity.ps1 to exist' {
         Test-Path -Path $script:ScriptPath | Should -BeTrue `
-            -Because '.github/skills/guidance-measurement/scripts/measure-guidance-complexity.ps1 must exist — it is invoked by §4.7 and referenced by contract'
+            -Because 'skills/guidance-measurement/scripts/measure-guidance-complexity.ps1 must exist — it is invoked by §4.7 and referenced by contract'
     }
 
     It 'requires the design doc to document D1, D2, and the compression concept' {

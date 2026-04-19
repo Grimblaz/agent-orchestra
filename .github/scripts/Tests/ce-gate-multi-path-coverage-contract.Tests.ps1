@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Locks the issue #216 CE Gate multi-path coverage contract across:
-      - .github/agents/Issue-Planner.agent.md
+      - agents/Issue-Planner.agent.md
       - Documents/Design/code-review.md
 
         The files must describe the same semantics for:
@@ -24,7 +24,7 @@ Describe 'ce gate multi-path output coverage contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:IssuePlanner = Join-Path $script:RepoRoot '.github\agents\Issue-Planner.agent.md'
+        $script:IssuePlanner = Join-Path $script:RepoRoot 'agents\Issue-Planner.agent.md'
         $script:CodeReviewDesign = Join-Path $script:RepoRoot 'Documents\Design\code-review.md'
 
         $script:ReadContent = {

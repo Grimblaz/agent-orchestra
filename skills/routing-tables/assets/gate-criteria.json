@@ -1,0 +1,130 @@
+{
+  "scope_classification": {
+    "source": "agents/Code-Conductor.agent.md",
+    "all_must_hold": true,
+    "outcome_if_all_true": "abbreviated",
+    "default_outcome": "full",
+    "criteria": [
+      {
+        "id": "acceptance_criteria_clear",
+        "text": "Acceptance criteria are clearly defined or the change is self-evident from the issue title"
+      },
+      {
+        "id": "touches_three_or_fewer_files_in_single_domain",
+        "text": "Implementation touches <=3 files in a single domain (no cross-cutting changes)"
+      },
+      {
+        "id": "no_new_user_facing_behavior",
+        "text": "No new user-facing behavior is introduced (configuration, internal protocol, documentation-only)"
+      },
+      {
+        "id": "no_cross_cutting_architectural_changes",
+        "text": "No cross-cutting architectural changes (no shared interfaces, new abstractions, or multi-agent contracts)"
+      },
+      {
+        "id": "no_ce_gate_scenarios_needed",
+        "text": "No CE Gate scenarios are needed (no customer-facing surface affected)"
+      }
+    ],
+    "default_rule": "Default to full pipeline when any criterion is absent, the issue is ambiguous, or the scope is sparse. When in doubt, choose full.",
+    "user_override": {
+      "allowed": true,
+      "text": "Always present both tiers as options and recommend one - the user may choose either regardless of your analysis."
+    },
+    "tier_table": [
+      {
+        "phase": "Experience-Owner",
+        "full_pipeline": true,
+        "abbreviated_pipeline": false,
+        "abbreviated_note": "skip"
+      },
+      {
+        "phase": "Solution-Designer",
+        "full_pipeline": true,
+        "abbreviated_pipeline": false,
+        "abbreviated_note": "skip"
+      },
+      {
+        "phase": "Issue-Planner (incl. design review)",
+        "full_pipeline": true,
+        "abbreviated_pipeline": true,
+        "abbreviated_note": "required"
+      },
+      {
+        "phase": "D9 Checkpoint",
+        "full_pipeline": true,
+        "abbreviated_pipeline": true,
+        "abbreviated_note": "required"
+      },
+      {
+        "phase": "Implementation",
+        "full_pipeline": true,
+        "abbreviated_pipeline": true
+      }
+    ]
+  },
+  "express_lane": {
+    "source": "agents/Code-Conductor.agent.md",
+    "all_must_hold": true,
+    "outcome_if_all_true": "express_lane",
+    "default_outcome": "defense_and_judge_pipeline",
+    "applicable_review_stages": ["main", "postfix"],
+    "excluded_review_modes": ["proxy", "ce", "design_plan"],
+    "criteria": [
+      {
+        "id": "severity_low",
+        "text": "Severity is low - as rated by prosecution output (the only severity level below medium in the critical | high | medium | low schema)"
+      },
+      {
+        "id": "strictly_mechanical_fix_type",
+        "text": "Fix type is strictly mechanical: string literal changes, import path fixes, comment corrections, or formatting fixes - exhaustive list; no other fix types qualify"
+      },
+      {
+        "id": "no_logic_changes",
+        "text": "No logic changes: the fix does not add, remove, or modify any if/else/switch/loop/return/guard clause or conditional short-circuit (&&/|| guard reordering)"
+      },
+      {
+        "id": "no_test_file_cascade",
+        "text": "No test file cascade: the fix does not require changes to any test file or assertion"
+      },
+      {
+        "id": "no_stored_id_or_schema_risk",
+        "text": "Changed value not in stored IDs or DB schema: backward compatibility is not at risk"
+      },
+      {
+        "id": "scope_one_file_or_less",
+        "text": "Scope <= 1 file: the fix touches exactly one file"
+      }
+    ],
+    "revalidation_required": "Tier 1 re-validation required after the specialist applies an express-lane fix."
+  },
+  "post_fix_trigger": {
+    "source": "agents/Code-Conductor.agent.md",
+    "recursion_guard": "This step is never triggered by another post-fix prosecution - only by a main review cycle (code review or GitHub intake proxy prosecution).",
+    "trigger_logic": "any",
+    "trigger_conditions": [
+      {
+        "id": "accepted_high_or_critical_finding",
+        "text": ">=1 accepted finding was Critical or High severity"
+      },
+      {
+        "id": "accepted_fix_modifies_control_flow",
+        "text": "Any accepted fix modifies control flow",
+        "control_flow_changes": [
+          "adding, changing, or removing if/else/switch branches",
+          "loop structure changes for for/while/forEach, including bounds, iteration variable, or break/continue",
+          "guard clause additions or removals",
+          "try/catch restructuring",
+          "early returns",
+          "conditional short-circuit reordering (&&/|| guard reordering)"
+        ]
+      }
+    ],
+    "skip_condition": "Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFERRED-SIGNIFICANT, no fixes applied).",
+    "evaluation_ordering": [
+      "Condition 1 (severity) is evaluable immediately from the main-review judge output.",
+      "Condition 2 (control flow) requires the fix diff and is evaluated after Tier 1 re-validation and diff scoping.",
+      "If condition 1 does not trigger alone, proceed through Tier 1 re-validation and diff scoping before making the final skip decision."
+    ]
+  }
+}

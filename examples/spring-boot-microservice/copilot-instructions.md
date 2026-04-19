@@ -95,7 +95,7 @@ com.example.orderservice/
 - Unit tests for services (mock dependencies)
 - Integration tests for repositories (TestContainers)
 - API tests for controllers (MockMvc)
-- Follow TDD workflow from `.github/skills/test-driven-development/`
+- Follow TDD workflow from `skills/test-driven-development/`
 
 ## Database Conventions
 
@@ -133,4 +133,4 @@ When interacting with external services:
 
 - [Architecture Rules](architecture-rules.md)
 - [Tech Debt Tracking](TECH-DEBT.md)
-- [TDD Workflow](../../.github/skills/test-driven-development/SKILL.md)
+- [TDD Workflow](../../skills/test-driven-development/SKILL.md)

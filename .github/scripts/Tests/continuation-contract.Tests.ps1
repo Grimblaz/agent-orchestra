@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Locks the issue #354 continuation contract in:
-      - .github/agents/Code-Conductor.agent.md
+      - agents/Code-Conductor.agent.md
 
         The file must describe the same semantics for:
             - a Continuation Contract heading inside <critical_rules>
@@ -22,7 +22,7 @@ Describe 'continuation contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeConductor = Join-Path $script:RepoRoot '.github\agents\Code-Conductor.agent.md'
+        $script:CodeConductor = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
 
         $script:ReadContent = {
             param([string]$Path)

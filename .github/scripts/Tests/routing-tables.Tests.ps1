@@ -21,8 +21,8 @@ Describe 'routing tables deterministic contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:RoutingTablesCore = Join-Path $script:RepoRoot '.github\skills\routing-tables\scripts\routing-tables-core.ps1'
-        $script:RoutingConfigPath = Join-Path $script:RepoRoot '.github\skills\routing-tables\assets\routing-config.json'
+        $script:RoutingTablesCore = Join-Path $script:RepoRoot 'skills\routing-tables\scripts\routing-tables-core.ps1'
+        $script:RoutingConfigPath = Join-Path $script:RepoRoot 'skills\routing-tables\assets\routing-config.json'
 
         . $script:RoutingTablesCore
     }
@@ -148,7 +148,7 @@ Describe 'routing tables asset parity contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:RoutingConfigPath = Join-Path $script:RepoRoot '.github\skills\routing-tables\assets\routing-config.json'
+        $script:RoutingConfigPath = Join-Path $script:RepoRoot 'skills\routing-tables\assets\routing-config.json'
         $script:ScriptSafetyContract = Join-Path $script:RepoRoot '.github\scripts\Tests\script-safety-contract.Tests.ps1'
     }
 

@@ -4,6 +4,20 @@
     Library for plugin preflight validation logic. Dot-source and call Invoke-PluginPreflight.
 #>
 
+function Resolve-PluginContentPath {
+    # Issue #367: resolve agents/ or skills/ at either the new repo-root location
+    # or the legacy .github/ location, so validators run green mid-migration.
+    param(
+        [Parameter(Mandatory)][string]$RootPath,
+        [Parameter(Mandatory)][ValidateSet('agents', 'skills')][string]$ContentName
+    )
+    $preferred = Join-Path -Path $RootPath -ChildPath $ContentName
+    if (Test-Path -LiteralPath $preferred) { return $preferred }
+    $fallback = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath $ContentName
+    if (Test-Path -LiteralPath $fallback) { return $fallback }
+    return $preferred
+}
+
 function Invoke-PluginPreflight {
     [CmdletBinding()]
     param(
@@ -19,7 +33,7 @@ function Invoke-PluginPreflight {
             $RootPath = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         }
         if (-not $PluginJsonPath) {
-            $PluginJsonPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'plugin.json'
+            $PluginJsonPath = Join-Path -Path $RootPath -ChildPath 'plugin.json'
         }
 
         $results = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -32,8 +46,10 @@ function Invoke-PluginPreflight {
                 return _PreflightSummary $results
             }
             $manifest = Get-Content -Path $PluginJsonPath -Raw | ConvertFrom-Json
-            # VS Code resolves paths in plugin.json relative to the manifest's directory,
-            # not the plugin/repo root.
+            # VS Code resolves paths in plugin.json relative to the manifest's directory.
+            # The manifest sits at the plugin/repo root (relocated from .github/plugin.json
+            # in v2.0.0 per issue #367 D10), so manifest-relative and plugin-root-relative
+            # resolution are equivalent — paths read as `./agents/` and `./skills/{name}/`.
             $manifestDir = Split-Path -Parent (Resolve-Path -LiteralPath $PluginJsonPath)
             $results.Add([PSCustomObject]@{ Name = 'PluginJsonExists'; Passed = $true; Detail = '' })
         }
@@ -75,7 +91,7 @@ function Invoke-PluginPreflight {
 
         # --- 4. Agent directory contains expected .agent.md files ---
         try {
-            $agentDir = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'agents'
+            $agentDir = Resolve-PluginContentPath -RootPath $RootPath -ContentName 'agents'
             $agentFiles = @(Get-ChildItem -Path $agentDir -Filter '*.agent.md' -File -ErrorAction SilentlyContinue)
             $expectedAgentCount = 14
             if ($agentFiles.Count -eq $expectedAgentCount) {
@@ -106,7 +122,7 @@ function Invoke-PluginPreflight {
         # --- 6. Skill count in plugin.json matches filesystem ---
         try {
             $declaredSkillCount = @($manifest.skills).Count
-            $fsSkillCount = @(Get-ChildItem -Path (Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'skills') -Directory -ErrorAction SilentlyContinue).Count
+            $fsSkillCount = @(Get-ChildItem -Path (Resolve-PluginContentPath -RootPath $RootPath -ContentName 'skills') -Directory -ErrorAction SilentlyContinue).Count
             if ($declaredSkillCount -eq $fsSkillCount) {
                 $results.Add([PSCustomObject]@{ Name = 'SkillCountMatch'; Passed = $true; Detail = "$declaredSkillCount skills declared and on disk" })
             }

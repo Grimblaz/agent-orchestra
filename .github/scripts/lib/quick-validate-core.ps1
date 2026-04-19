@@ -4,6 +4,20 @@
     Library for quick-validate logic. Dot-source this file and call Invoke-QuickValidate.
 #>
 
+function Resolve-QVContentPath {
+    # Issue #367: resolve agents/ or skills/ at either the new repo-root location
+    # or the legacy .github/ location, so validators run green mid-migration.
+    param(
+        [Parameter(Mandatory)][string]$RootPath,
+        [Parameter(Mandatory)][ValidateSet('agents', 'skills')][string]$ContentName
+    )
+    $preferred = Join-Path -Path $RootPath -ChildPath $ContentName
+    if (Test-Path -LiteralPath $preferred) { return $preferred }
+    $fallback = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath $ContentName
+    if (Test-Path -LiteralPath $fallback) { return $fallback }
+    return $preferred
+}
+
 function Test-QVLegacyReference {
     param(
         [Parameter(Mandatory)]
@@ -15,8 +29,12 @@ function Test-QVLegacyReference {
         [string[]]$ExtraExcludeNames = @()
     )
 
-    $githubPath = Join-Path $RootPath '.github'
-    if (-not (Test-Path $githubPath)) {
+    $scanRoots = @()
+    foreach ($candidate in @('.github', 'agents', 'skills')) {
+        $path = Join-Path $RootPath $candidate
+        if (Test-Path $path) { $scanRoots += $path }
+    }
+    if ($scanRoots.Count -eq 0) {
         return [PSCustomObject]@{ Name = $Name; Passed = $true; Detail = '' }
     }
 
@@ -25,7 +43,7 @@ function Test-QVLegacyReference {
         $excludePattern += '|' + (($ExtraExcludeNames | ForEach-Object { [regex]::Escape($_) }) -join '|')
     }
 
-    $mdFiles = Get-ChildItem -Path $githubPath -Recurse -Filter '*.md' |
+    $mdFiles = Get-ChildItem -Path $scanRoots -Recurse -Filter '*.md' |
         Where-Object { $_.Name -notmatch $excludePattern }
 
     $hits = @($mdFiles | Select-String -Pattern $Pattern -SimpleMatch)
@@ -33,7 +51,14 @@ function Test-QVLegacyReference {
         return [PSCustomObject]@{ Name = $Name; Passed = $true; Detail = '' }
     }
 
-    $fileList = ($hits | ForEach-Object { $_.RelativePath($githubPath) ?? $_.Path }) -join ', '
+    $rootFull = (Resolve-Path -LiteralPath $RootPath).Path.TrimEnd([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+    $fileList = ($hits | ForEach-Object {
+            $p = $_.Path
+            if ($p.StartsWith($rootFull, [StringComparison]::OrdinalIgnoreCase)) {
+                $p.Substring($rootFull.Length).TrimStart([IO.Path]::DirectorySeparatorChar, [IO.Path]::AltDirectorySeparatorChar)
+            }
+            else { $p }
+        }) -join ', '
     return [PSCustomObject]@{ Name = $Name; Passed = $false; Detail = "$($hits.Count) reference(s) found: $fileList" }
 }
 
@@ -47,7 +72,7 @@ function Test-QVSkillFrontmatter {
         [string]$Pattern
     )
 
-    $skillsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'skills'
+    $skillsPath = Resolve-QVContentPath -RootPath $RootPath -ContentName 'skills'
     if (-not (Test-Path $skillsPath)) {
         return [PSCustomObject]@{ Name = $CheckName; Passed = $true; Detail = '' }
     }
@@ -87,7 +112,7 @@ function Test-QVSkillNameMatch {
         [string]$RootPath
     )
 
-    $skillsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'skills'
+    $skillsPath = Resolve-QVContentPath -RootPath $RootPath -ContentName 'skills'
     if (-not (Test-Path $skillsPath)) {
         return [PSCustomObject]@{ Name = 'SkillNameMatch'; Passed = $true; Detail = '' }
     }
@@ -178,7 +203,7 @@ function Get-QVExistingPSScriptAnalyzerPaths {
         $paths.Add((Resolve-Path $ScriptsPath).Path)
     }
 
-    $skillScriptsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'skills'
+    $skillScriptsPath = Resolve-QVContentPath -RootPath $RootPath -ContentName 'skills'
     if (Test-Path $skillScriptsPath) {
         $skillScriptFiles = @(Get-ChildItem -Path $skillScriptsPath -Filter '*.ps1' -File -Recurse |
                 Where-Object { $_.DirectoryName -match '[\\/]scripts$' })
@@ -244,7 +269,7 @@ function Test-QVSkillAssetJsonParse {
         [string]$RootPath
     )
 
-    $skillsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'skills'
+    $skillsPath = Resolve-QVContentPath -RootPath $RootPath -ContentName 'skills'
     if (-not (Test-Path $skillsPath)) {
         return [PSCustomObject]@{ Name = 'SkillAssetJsonParse'; Passed = $true; Detail = '' }
     }
@@ -297,7 +322,8 @@ function Invoke-QuickValidate {
             $RootPath = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         }
         if (-not $GuidanceComplexityScriptPath) {
-            $GuidanceComplexityScriptPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'skills', 'guidance-measurement', 'scripts', 'measure-guidance-complexity.ps1'
+            $skillsRoot = Resolve-QVContentPath -RootPath $RootPath -ContentName 'skills'
+            $GuidanceComplexityScriptPath = Join-Path -Path $skillsRoot -ChildPath 'guidance-measurement' -AdditionalChildPath 'scripts', 'measure-guidance-complexity.ps1'
         }
         if (-not $PSScriptAnalyzerSettingsPath) {
             $PSScriptAnalyzerSettingsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'config', 'PSScriptAnalyzerSettings.psd1'

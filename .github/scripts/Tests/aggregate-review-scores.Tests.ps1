@@ -21,7 +21,7 @@
 
       Fixtures:
         fixtures/github-docs-window.json            — 10-PR merged window from github/docs
-        fixtures/copilot-orchestra-nonmetrics.json  — non-metrics PRs from Grimblaz/copilot-orchestra
+        fixtures/agent-orchestra-nonmetrics.json  — non-metrics PRs from Grimblaz/agent-orchestra
 
       Toggle:
         Default (no env var)  → fixture mode (fixtures must be present)
@@ -55,8 +55,8 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores.ps1'
-        $script:LibFile = Join-Path $script:RepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
+        $script:ScriptFile = Join-Path $script:RepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:LibFile
 
         # Master temp root — all per-test dirs live under here
@@ -73,7 +73,7 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
         # ------------------------------------------------------------------
         $script:FixtureDir = Join-Path $PSScriptRoot 'fixtures'
         $script:FixtureDocsPath = Join-Path $script:FixtureDir 'github-docs-window.json'
-        $script:FixtureOrchPath = Join-Path $script:FixtureDir 'copilot-orchestra-nonmetrics.json'
+        $script:FixtureOrchPath = Join-Path $script:FixtureDir 'agent-orchestra-nonmetrics.json'
         $script:FixtureMode = $false
         $script:FixtureGhPath = $null
 
@@ -131,9 +131,9 @@ Describe 'aggregate-review-scores.ps1 -CalibrationFile' {
                 Set-Content -Path $normOrchFile -Encoding UTF8
 
             # Create argument-dispatching fixture mock script.
-            # Dispatches: repo view → Grimblaz/copilot-orchestra JSON
+            # Dispatches: repo view → Grimblaz/agent-orchestra JSON
             #             pr list --repo github/docs → docs fixture
-            #             pr list (other) → copilot-orchestra fixture
+            #             pr list (other) → agent-orchestra fixture
             $script:FixtureGhPath = Join-Path $script:TempRoot 'fixture-gh.ps1'
             @"
 #Requires -Version 7.0
@@ -141,7 +141,7 @@ param()
 `$sub  = if (`$args.Count -gt 0) { `$args[0] } else { '' }
 `$sub2 = if (`$args.Count -gt 1) { `$args[1] } else { '' }
 if (`$sub -eq 'repo' -and `$sub2 -eq 'view') {
-    Write-Output '{"nameWithOwner":"Grimblaz/copilot-orchestra"}'
+    Write-Output '{"nameWithOwner":"Grimblaz/agent-orchestra"}'
     exit 0
 }
 if (`$sub -eq 'pr' -and `$sub2 -eq 'list') {
@@ -332,8 +332,8 @@ exit 0
                     $refreshDocsJson = $liveDocsRaw  # already valid JSON string from gh
                 }
 
-                # Refresh copilot-orchestra-nonmetrics.json
-                $liveOrchRaw = & gh pr list --repo 'Grimblaz/copilot-orchestra' `
+                # Refresh agent-orchestra-nonmetrics.json
+                $liveOrchRaw = & gh pr list --repo 'Grimblaz/agent-orchestra' `
                     --state merged --limit 100 --json 'number,mergedAt,body' 2>$null
                 if ($LASTEXITCODE -eq 0 -and $liveOrchRaw) {
                     $liveOrchParsed = @($liveOrchRaw | ConvertFrom-Json) |
@@ -523,7 +523,7 @@ exit 0
                 return @($script:FixtureOrchNormalized | ForEach-Object { [int]$_.number })
             }
             if (-not $script:GhAvailable) { return @(9901) }   # guard for no-gh fallback
-            $allPrJson = & gh pr list --repo 'Grimblaz/copilot-orchestra' --state merged --limit 100 --json 'number,body' 2>$null
+            $allPrJson = & gh pr list --repo 'Grimblaz/agent-orchestra' --state merged --limit 100 --json 'number,body' 2>$null
             if ($allPrJson) {
                 return @(($allPrJson | ConvertFrom-Json) |
                         Where-Object { $_.body -notmatch 'pipeline-metrics' } |
@@ -2633,7 +2633,7 @@ exit 0
             if (-not $script:GhAvailable) { Set-ItResult -Skipped -Because 'gh CLI not found'; return }
 
             $workDir = & $script:NewWorkDir
-            $configPath = Join-Path $script:RepoRoot '.github/skills/calibration-pipeline/assets/guidance-complexity.json'
+            $configPath = Join-Path $script:RepoRoot 'skills/calibration-pipeline/assets/guidance-complexity.json'
             $configBackup = Get-Content -Path $configPath -Raw
             try {
                 # Write custom config with persistent_threshold=2
@@ -2758,8 +2758,8 @@ Describe 'aggregate-review-scores -HealthReport parameter and return shape contr
 
     BeforeAll {
         $script:HRRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:HRScriptFile = Join-Path $script:HRRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores.ps1'
-        $script:HRLibFile = Join-Path $script:HRRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
+        $script:HRScriptFile = Join-Path $script:HRRepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores.ps1'
+        $script:HRLibFile = Join-Path $script:HRRepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:HRLibFile
 
         # Isolated temp root for mock-gh artifacts
@@ -2927,7 +2927,7 @@ Describe 'Format-HealthReport core content' {
 
     BeforeAll {
         $script:FHRRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:FHRLibFile = Join-Path $script:FHRRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
+        $script:FHRLibFile = Join-Path $script:FHRRepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:FHRLibFile
 
         # ---------------------------------------------------------------
@@ -3229,7 +3229,7 @@ Describe 'Directional indicators via temporal split' {
 
     BeforeAll {
         $script:TSSRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:TSSLibFile = Join-Path $script:TSSRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
+        $script:TSSLibFile = Join-Path $script:TSSRepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:TSSLibFile
         $script:TSSTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-tss-$([System.Guid]::NewGuid().ToString('N'))"
@@ -3479,7 +3479,7 @@ Describe 'Fix Effectiveness: per-category contribution enrichment' {
 
     BeforeAll {
         $script:FERepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:FELibFile = Join-Path $script:FERepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
+        $script:FELibFile = Join-Path $script:FERepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:FELibFile
         $script:FETempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-fe-$([System.Guid]::NewGuid().ToString('N'))"
@@ -3847,7 +3847,7 @@ Describe 'Fix Effectiveness: Measure-FixEffectiveness' {
 
     BeforeAll {
         $script:CFERepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CFELibFile = Join-Path $script:CFERepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
+        $script:CFELibFile = Join-Path $script:CFERepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:CFELibFile
 
         # Helper: build a PrContribution entry
@@ -4294,7 +4294,7 @@ Describe 'Fix Effectiveness: merge-date discovery' {
 
     BeforeAll {
         $script:MDRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:MDLibFile = Join-Path $script:MDRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
+        $script:MDLibFile = Join-Path $script:MDRepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:MDLibFile
         $script:MDTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-md-$([System.Guid]::NewGuid().ToString('N'))"
@@ -4736,7 +4736,7 @@ findings:
             Set-ItResult -Skipped -Because 'PESTER_LIVE_GH not enabled'
         }
         # Call real gh CLI with the same argument format used in discovery loop
-        $output = gh pr list --repo Grimblaz/copilot-orchestra --state merged --json 'number,mergedAt' --sort updated --limit 1 2>&1
+        $output = gh pr list --repo Grimblaz/agent-orchestra --state merged --json 'number,mergedAt' --sort updated --limit 1 2>&1
         $parsed = $output | ConvertFrom-Json
         $parsed | Should -Not -BeNullOrEmpty -Because 'gh must return at least one merged PR'
         $parsed[0].mergedAt | Should -Not -BeNullOrEmpty -Because 'mergedAt field must be present in gh JSON output'
@@ -4751,7 +4751,7 @@ Describe 'Read-only mode and insufficient data handling' {
 
     BeforeAll {
         $script:RORepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ROLibFile = Join-Path $script:RORepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
+        $script:ROLibFile = Join-Path $script:RORepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:ROLibFile
         $script:ROTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-ro-$([System.Guid]::NewGuid().ToString('N'))"
@@ -4949,7 +4949,7 @@ Describe 'Fix Effectiveness: Format-HealthReport section rendering' {
 
     BeforeAll {
         $script:FHRFERepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:FHRFELibFile = Join-Path $script:FHRFERepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
+        $script:FHRFELibFile = Join-Path $script:FHRFERepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:FHRFELibFile
 
         # ---------------------------------------------------------------
@@ -5261,7 +5261,7 @@ Describe 'Fix Effectiveness: integration tests' {
 
     BeforeAll {
         $script:FEIRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:FEILibFile = Join-Path $script:FEIRepoRoot '.github\skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
+        $script:FEILibFile = Join-Path $script:FEIRepoRoot 'skills\calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
         . $script:FEILibFile
         $script:FEITempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-fei-$([System.Guid]::NewGuid().ToString('N'))"

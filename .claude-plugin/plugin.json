@@ -1,0 +1,21 @@
+{
+  "name": "agent-orchestra",
+  "version": "2.0.0",
+  "description": "Multi-agent workflow system for Claude Code. Pipeline-based agent orchestration: Issue → Design → Plan → Implement → Review → PR.",
+  "author": {
+    "name": "Grimblaz"
+  },
+  "homepage": "https://github.com/Grimblaz/agent-orchestra",
+  "repository": "https://github.com/Grimblaz/agent-orchestra",
+  "license": "MIT",
+  "keywords": [
+    "workflow",
+    "agents",
+    "orchestration",
+    "code-review",
+    "planning",
+    "tdd",
+    "multi-agent",
+    "pipeline"
+  ]
+}

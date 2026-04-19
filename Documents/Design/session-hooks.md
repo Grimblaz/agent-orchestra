@@ -1,6 +1,8 @@
 # Design: Session Hooks
 
-> **⚠️ Superseded — Issue #109**: The VS Code `SessionStart` hook was retired due to unreliable firing across different repositories. It was first replaced by `.github/instructions/session-startup.instructions.md`, and is now delivered by the `session-startup` skill with a per-agent self-check trigger in the four pipeline-entry agent files at conversation start. The cleanup script remained unchanged, but later detector work added a session-memory run-once guard using `/memories/session/session-startup-check-complete.md`, updated the detector to treat persistent calibration data as non-cleanup state, preserved explicit manual detector runs, and moved the per-agent trigger stub from `## Process` to the first content line after each pipeline-entry agent's role description so the startup check has higher positional priority under context pressure. Another behavioral change is `WORKFLOW_TEMPLATE_ROOT` unset behavior (hook era: surfaced an actionable error via `additionalContext`; instruction/skill era: silently skips before the script runs). Historical context below is preserved for reference.
+> **⚠️ Superseded — Issue #109**: The VS Code `SessionStart` hook was retired due to unreliable firing across different repositories. It was first replaced by `.github/instructions/session-startup.instructions.md`, and is now delivered by the `session-startup` skill with a per-agent self-check trigger in the four pipeline-entry agent files at conversation start. The cleanup script remained unchanged, but later detector work added a session-memory run-once guard using `/memories/session/session-startup-check-complete.md`, updated the detector to treat persistent calibration data as non-cleanup state, preserved explicit manual detector runs, and moved the per-agent trigger stub from `## Process` to the first content line after each pipeline-entry agent's role description so the startup check has higher positional priority under context pressure. Another behavioral change is `WORKFLOW_TEMPLATE_ROOT` unset behavior (hook era: surfaced an actionable error via `additionalContext`; instruction/skill era: silently skipped before the script runs). Historical context below is preserved for reference.
+>
+> **v2.0.0 update (agent-orchestra rename)**: The `COPILOT_ORCHESTRA_ROOT` / `WORKFLOW_TEMPLATE_ROOT` env-var surface described in D7, D9, and the setup-requirement text below was removed in v2.0.0. The detector wrapper at `skills/session-startup/scripts/session-cleanup-detector.ps1` now self-resolves its repo root via `$PSScriptRoot`, so no environment variables are required for either plugin-cache or direct-clone installs. Silent-skip still applies when `pwsh` is unavailable or the detector returns non-JSON output.
 
 ## Summary
 
@@ -63,11 +65,11 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 
 ## Root Env Var Portability
 
-The hook is consumed by downstream repos via `chat.hookFilesLocations`. The hook JSON runs in the downstream workspace, but scripts live in the copilot-orchestra repo — a relative path would not resolve.
+The hook is consumed by downstream repos via `chat.hookFilesLocations`. The hook JSON runs in the downstream workspace, but scripts live in the agent-orchestra repo — a relative path would not resolve.
 
 **Solution**: All script path resolution uses `$COPILOT_ORCHESTRA_ROOT` (primary) or `$WORKFLOW_TEMPLATE_ROOT` (fallback) (set once at machine level). In the instruction era, if neither is set, the startup check silently skips before the detector runs. Session-memory access failures are different: the automatic guard fails open and still runs the detector.
 
-**Setup requirement**: Users must set `COPILOT_ORCHESTRA_ROOT` (or the legacy `WORKFLOW_TEMPLATE_ROOT`) to the absolute path of their copilot-orchestra clone before the startup check will function. Documented in `CUSTOMIZATION.md` Section 6.
+**Setup requirement**: Users must set `COPILOT_ORCHESTRA_ROOT` (or the legacy `WORKFLOW_TEMPLATE_ROOT`) to the absolute path of their agent-orchestra clone before the startup check will function. Documented in `CUSTOMIZATION.md` Section 6.
 
 ---
 

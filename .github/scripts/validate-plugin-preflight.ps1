@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     Verifies that plugin.json accurately describes the repository:
-    - Manifest exists at .github/plugin.json and parses
+    - Manifest exists at plugin.json (repo root) and parses
     - Placeholder author/repository values have been replaced
     - All declared agent and skill paths exist on disk
     - Agent count is 14, declared skill count matches filesystem

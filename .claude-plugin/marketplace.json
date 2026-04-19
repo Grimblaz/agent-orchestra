@@ -1,0 +1,25 @@
+{
+  "name": "agent-orchestra",
+  "owner": {
+    "name": "Grimblaz"
+  },
+  "metadata": {
+    "description": "Multi-agent workflow system. Pipeline-based agent orchestration: Issue -> Design -> Plan -> Implement -> Review -> PR.",
+    "version": "2.0.0"
+  },
+  "plugins": [
+    {
+      "name": "agent-orchestra",
+      "source": "./",
+      "description": "Multi-agent workflow system with 14 specialized agents and 39 skills.",
+      "version": "2.0.0",
+      "author": {
+        "name": "Grimblaz"
+      },
+      "homepage": "https://github.com/Grimblaz/agent-orchestra",
+      "repository": "https://github.com/Grimblaz/agent-orchestra",
+      "license": "MIT",
+      "keywords": ["workflow", "agents", "orchestration", "code-review", "planning", "tdd", "multi-agent", "pipeline"]
+    }
+  ]
+}

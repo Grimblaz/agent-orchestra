@@ -11,7 +11,7 @@
       - $knownCategories in aggregate-review-scores.ps1 must contain exactly the 7 mandated taxonomy values
 
     Production scripts are defined as all .ps1 files under .github/scripts/ (root and /lib/)
-    plus skill scripts under .github/skills/**/scripts/, excluding test files. Update these
+    plus skill scripts under skills/**/scripts/, excluding test files. Update these
     tests only when the underlying safety contract intentionally changes.
 #>
 
@@ -20,7 +20,7 @@ Describe 'script safety contract' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptsRoot = Join-Path -Path $script:RepoRoot -ChildPath '.github' -AdditionalChildPath 'scripts'
-        $script:SkillsRoot = Join-Path -Path $script:RepoRoot -ChildPath '.github' -AdditionalChildPath 'skills'
+        $script:SkillsRoot = Join-Path -Path $script:RepoRoot -ChildPath 'skills'
         $script:AggregateReviewScores = Join-Path $script:SkillsRoot 'calibration-pipeline\scripts\aggregate-review-scores.ps1'
         $script:AggregateReviewScoresCore = Join-Path $script:SkillsRoot 'calibration-pipeline\scripts\aggregate-review-scores-core.ps1'
 

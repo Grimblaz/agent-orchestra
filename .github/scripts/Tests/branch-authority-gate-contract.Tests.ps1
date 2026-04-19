@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Locks the issue #205 branch-authority contract in:
-      - .github/agents/Code-Conductor.agent.md
+      - agents/Code-Conductor.agent.md
 
         The file must describe the same semantics for:
             - attached branch context is advisory only
@@ -22,7 +22,7 @@ Describe 'branch authority gate contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeConductor = Join-Path $script:RepoRoot '.github\agents\Code-Conductor.agent.md'
+        $script:CodeConductor = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
         $script:HubModeUx = Join-Path $script:RepoRoot 'Documents\Design\hub-mode-ux.md'
 
         $script:ReadContent = {

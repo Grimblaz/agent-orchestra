@@ -13,7 +13,7 @@ Setup has six phases. Each phase includes a skip gate so you can jump to exactly
 
 > **Before you start**
 >
-> - Run `/setup` in your **target project workspace** (the repo you want to configure) — not inside the copilot-orchestra repo itself.
+> - Run `/setup` in your **target project workspace** (the repo you want to configure) — not inside the agent-orchestra repo itself.
 > - If your workspace is brand-new and completely empty, don't worry — Phase 0 will automatically create a `README.md` placeholder. (VS Code's workspace context provider crashes on zero-file workspaces; Phase 0 handles this.)
 > - **Recommended model**: Claude Opus — this wizard benefits from deep reasoning for architecture and tech stack decisions. _(o3 or GPT-4o also work well if Opus is unavailable.)_
 
@@ -35,9 +35,11 @@ List the user-visible (non-hidden) files in the workspace root, excluding `.git/
 
 **Pre-flight check 2 — Wrong workspace**
 
-Check whether `.github/agents/` exists and contains 10 or more `.agent.md` files. If it does:
+<!-- legacy-path -->
+Check whether `agents/` at the repo root exists and contains 10 or more `.agent.md` files (pre-1.14 clones may have them at `.github/agents/` instead). If it does:
+<!-- /legacy-path -->
 
-- Warn: "⚠️ This workspace looks like the copilot-orchestra repo itself, not a target project. `/setup` should be run in the repo you want to configure, not in the template."
+- Warn: "⚠️ This workspace looks like the agent-orchestra repo itself, not a target project. `/setup` should be run in the repo you want to configure, not in the template."
 - Ask: "Would you like to continue anyway (e.g., you're intentionally reconfiguring this repo), or stop here?"
 - If the user chooses to stop: end the wizard.
 - If the user chooses to continue: proceed with version checks.
@@ -68,13 +70,13 @@ After reporting:
 
 ### Plugin Overlap Check
 
-Before proceeding, check whether the user has the copilot-orchestra (or legacy workflow-template) plugin already installed. This prevents accidentally creating duplicate agents by combining plugin distribution with clone-path settings.
+Before proceeding, check whether the user has the agent-orchestra (or legacy workflow-template) plugin already installed. This prevents accidentally creating duplicate agents by combining plugin distribution with clone-path settings.
 
 **Step**: Run the command for the user's OS (determined by context from the cwd shown in Phase 0 or the path separator the user provides — Windows paths start with a drive letter):
 
-- **Windows**: `Select-String -Path "$env:APPDATA\Code\User\settings.json" -Pattern "Grimblaz/(workflow-template|copilot-orchestra)" -Quiet 2>$null`
-- **macOS**: `grep -qE "Grimblaz/(workflow-template|copilot-orchestra)" "$HOME/Library/Application Support/Code/User/settings.json" 2>/dev/null && echo True`
-- **Linux**: `grep -qE "Grimblaz/(workflow-template|copilot-orchestra)" "$HOME/.config/Code/User/settings.json" 2>/dev/null && echo True`
+- **Windows**: `Select-String -Path "$env:APPDATA\Code\User\settings.json" -Pattern "Grimblaz/(workflow-template|agent-orchestra)" -Quiet 2>$null`
+- **macOS**: `grep -qE "Grimblaz/(workflow-template|agent-orchestra)" "$HOME/Library/Application Support/Code/User/settings.json" 2>/dev/null && echo True`
+- **Linux**: `grep -qE "Grimblaz/(workflow-template|agent-orchestra)" "$HOME/.config/Code/User/settings.json" 2>/dev/null && echo True`
 
 > **Important**: Use string search (`Select-String` on Windows, `grep` on macOS/Linux), NOT `ConvertFrom-Json` — VS Code `settings.json` is JSONC (allows comments) and `ConvertFrom-Json` will fail on files with comments.
 
@@ -82,15 +84,15 @@ Before proceeding, check whether the user has the copilot-orchestra (or legacy w
 
 > **Scope note**: This check only covers the standard VS Code stable installation path (`Code`). VS Code Insiders (`Code - Insiders`) and VSCodium users are not detected — if you know you use Insiders or VSCodium, treat this as `True` if the plugin is installed. In Dev Container and Remote-SSH contexts, the host `settings.json` is not accessible from the container filesystem; the check will always fail silently and skip — this is expected.
 
-**If the command returns `True`** (the copilot-orchestra or workflow-template marketplace entry is present in your VS Code settings): inform the user:
+**If the command returns `True`** (the agent-orchestra or workflow-template marketplace entry is present in your VS Code settings): inform the user:
 
-> "It looks like you have the copilot-orchestra plugin installed (found in your VS Code settings). Adding `chat.agentFilesLocations` at the same time will cause duplicate agents to appear in the chat picker.
+> "It looks like you have the agent-orchestra plugin installed (found in your VS Code settings). Adding `chat.agentFilesLocations` at the same time will cause duplicate agents to appear in the chat picker.
 >
 > **Option 1 — Keep plugin, skip agent settings (recommended if you just want to use the workflow)**:
 > Continue Phase 1, but in Step 1.2 only add `chat.promptFilesLocations`. Add `chat.instructionsFilesLocations` only if you keep repo-local instruction files such as generated consumer instructions in a local clone. Skip `chat.agentFilesLocations`. `chat.agentSkillsLocations` is optional and safe with the plugin, but not required because the plugin already provides the shared workflow skills. If `chat.agentFilesLocations` is already present in your `settings.json` from a previous setup, **remove it now** to avoid duplicate agents.
 >
 > **Option 2 — Uninstall plugin, use full clone settings (use this if you want to customize agents or add project-specific instructions)**:
-> Continue with all four settings. First uninstall the plugin from the Extensions view (`Ctrl+Shift+X`, search `@agentPlugins copilot-orchestra` (or `workflow-template` if using the legacy name), uninstall). This gives you local editable copies of all agents and skills.
+> Continue with all four settings. First uninstall the plugin from the Extensions view (`Ctrl+Shift+X`, search `@agentPlugins agent-orchestra` (or `workflow-template` if using the legacy name), uninstall). This gives you local editable copies of all agents and skills.
 >
 > Which option do you prefer?"
 >
@@ -98,56 +100,34 @@ Before proceeding, check whether the user has the copilot-orchestra (or legacy w
 
 **If the command returns no output** (plugin not installed): continue normally to the skip gate below.
 
-> **Skip gate**: Run `echo $env:COPILOT_ORCHESTRA_ROOT` (Windows) or `echo $COPILOT_ORCHESTRA_ROOT` (macOS/Linux) in a terminal. If empty, also check `echo $env:WORKFLOW_TEMPLATE_ROOT` / `echo $WORKFLOW_TEMPLATE_ROOT` as a fallback.
+> **Skip gate**: Ask: "Do you already have `chat.agentFilesLocations` (or the other `chat.*Locations` settings) pointing at your agent-orchestra clone in your VS Code user `settings.json`?"
 >
-> - If either prints a valid path to an existing directory → ask: "Root path is already configured (`<path>`). Skip Phase 1?" If yes, skip to Phase 2.
-> - If it prints a path but the directory no longer exists → inform the user the path is stale and offer to update it.
-> - If it is empty or not set → continue with Phase 1 below.
+> - If yes and the paths are still valid → skip to Phase 2.
+> - If paths are stale (clone moved) → offer to update them.
+> - If not configured → continue with Phase 1 below.
 
 If not configured, ask:
 
-1. **Absolute path to your copilot-orchestra clone** — the folder where you cloned this repository (e.g., `C:\Users\you\copilot-orchestra` or `/Users/you/copilot-orchestra`)
+1. **Absolute path to your agent-orchestra clone** — the folder where you cloned this repository (e.g., `C:\Users\you\agent-orchestra` or `/Users/you/agent-orchestra`)
 2. **Your OS** — Windows, macOS, or Linux
+
+> **v2.0.0 note**: No environment variables are required. The session-startup script self-resolves its repo root via `$PSScriptRoot`, so you only need to configure the VS Code settings below.
 
 Once you have those answers:
 
-**Step 1.1** — Show the exact command to set `COPILOT_ORCHESTRA_ROOT` permanently:
-
-For **Windows** (recommended — persists across all sessions):
-
-```powershell
-[System.Environment]::SetEnvironmentVariable('COPILOT_ORCHESTRA_ROOT', 'C:\path\to\copilot-orchestra', 'User')
-```
-
-For **Windows** (PowerShell profile — session-scope only, not recommended for VS Code GUI launch):
-
-```powershell
-# Add to $PROFILE:
-$env:COPILOT_ORCHESTRA_ROOT = "C:\path\to\copilot-orchestra"
-```
-
-For **macOS/Linux**:
-
-```bash
-# Add to ~/.zshrc or ~/.bashrc:
-export COPILOT_ORCHESTRA_ROOT="/path/to/copilot-orchestra"
-```
-
-> **Important**: VS Code launched from the Start Menu or a desktop shortcut may not run your PowerShell profile. Use the permanent approach to ensure `COPILOT_ORCHESTRA_ROOT` is always available — the Session Startup Check (in `.github/copilot-instructions.md`) silently skips if neither `COPILOT_ORCHESTRA_ROOT` nor `WORKFLOW_TEMPLATE_ROOT` is set.
-
-**Step 1.2** — Show the VS Code settings to add to your user `settings.json` (`Ctrl+,` → open `settings.json`):
+**Step 1.1** — Show the VS Code settings to add to your user `settings.json` (`Ctrl+,` → open `settings.json`):
 
 ```json
 {
-  "chat.agentFilesLocations": ["<your-path>/copilot-orchestra/.github/agents"],
-  "chat.agentSkillsLocations": ["<your-path>/copilot-orchestra/.github/skills"],
+  "chat.agentFilesLocations": ["<your-path>/agent-orchestra/agents"],
+  "chat.agentSkillsLocations": ["<your-path>/agent-orchestra/skills"],
   "chat.promptFilesLocations": {
-    "<your-path>/copilot-orchestra/.github/prompts": true
+    "<your-path>/agent-orchestra/.github/prompts": true
   }
 }
 ```
 
-Replace `<your-path>` with the absolute path from Step 1.1.
+Replace `<your-path>` with the absolute path to your agent-orchestra clone.
 
 | Setting                     | What it enables                                                   |
 | --------------------------- | ----------------------------------------------------------------- |
@@ -157,9 +137,9 @@ Replace `<your-path>` with the absolute path from Step 1.1.
 
 > **Optional**: Add `chat.instructionsFilesLocations` only when you want VS Code to load repo-local instruction files that remain under `.github/instructions/`, such as generated consumer instructions. The migrated hub workflow guidance now ships through skills instead.
 >
-> **Windows path format**: Use forward slashes or escaped backslashes: `"C:/Users/you/copilot-orchestra/.github/prompts"` or `"C:\\Users\\you\\copilot-orchestra\\.github\\prompts"`.
+> **Windows path format**: Use forward slashes or escaped backslashes: `"C:/Users/you/agent-orchestra/.github/prompts"` or `"C:\\Users\\you\\agent-orchestra\\.github\\prompts"`.
 
-**Step 1.3** — Confirm: "Have you applied the command and settings above?" Wait for confirmation before continuing to Phase 2.
+**Step 1.2** — Confirm: "Have you applied the settings above?" Wait for confirmation before continuing to Phase 2.
 
 ---
 
@@ -228,13 +208,13 @@ If generating scaffolding:
 
 Check whether `.gitignore` exists in the workspace root.
 
-- If it does not exist → create it with the Copilot Orchestra entries below plus a comment.
+- If it does not exist → create it with the Agent Orchestra entries below plus a comment.
 - If it exists → read the current contents. Append ONLY the lines that are not already present. Do not add duplicates.
 
 Lines to ensure are present:
 
 ```
-# Copilot Orchestra tracking (agent scaffolding — local only)
+# Agent Orchestra tracking (agent scaffolding — local only)
 /.copilot-tracking/
 /.copilot-tracking-archive/
 
@@ -350,7 +330,7 @@ Use tools in this priority order:
 For canvas games (Phaser 3, WebGL, etc.), use `runPlaywrightCode` with `page.mouse.click(cssX, cssY)`:
 
 - Convert game-space coordinates to CSS page coordinates via `getBoundingClientRect()`
-- Load `.github/skills/browser-canvas-testing/SKILL.md` for the full formula and worked example
+- Load `skills/browser-canvas-testing/SKILL.md` for the full formula and worked example
 ```
 
 Replace `{PORT}` with the user's dev server port, `{FRAMEWORK}` with the framework name from Phase 2, and `{RUN_COMMAND}` with the run command from Phase 4.
@@ -398,34 +378,29 @@ Follow the format in `examples/nodejs-typescript/copilot-instructions.md` (or th
 
 > **If Phase 3 was skipped**: Omit the Architecture section from the generated `copilot-instructions.md` and add a comment: `# Architecture: see .github/architecture-rules.md`. Do not hallucinate architecture details — leave those details to the existing rules file.
 
-**Auto-derive `copilot-orchestra-repo`** (If Phase 2 was just generated, also run this step):
+**Auto-derive `agent-orchestra-repo`** (If Phase 2 was just generated, also run this step):
 
-Run the following in a terminal to resolve the upstream repo slug:
+If the user's workspace has a local `agent-orchestra` clone path configured in VS Code `chat.agentFilesLocations` (from Phase 1), attempt to resolve the upstream remote slug from it:
 
 ```powershell
-# Resolve the Copilot Orchestra root
-$copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }
-
-# Get the upstream remote URL (fail silently on any error)
-$remoteUrl = git -C "$copilotRoot" remote get-url origin 2>$null
-
-# Parse owner/repo from HTTPS or SSH URL; strip any trailing slash
-$repoSlug = if ($remoteUrl -match 'github\.com[:/](.+?)(?:\.git)?$') { $Matches[1].TrimEnd('/') } else { $null }
+# Pass the user's configured clone path as $clonePath (from Phase 1); skip silently if unavailable.
+$remoteUrl = git -C "$clonePath" remote get-url origin 2>$null
+$repoSlug  = if ($remoteUrl -match 'github\.com[:/](.+?)(?:\.git)?$') { $Matches[1].TrimEnd('/') } else { $null }
 ```
 
-If `$repoSlug` cannot be resolved (env vars absent, git command fails, URL doesn't match known GitHub patterns) → skip silently. No user prompt or error message.
+If `$repoSlug` cannot be resolved (no clone path known, git command fails, URL doesn't match known GitHub patterns) → skip silently. No user prompt or error message. Plugin-only installs where no clone exists always hit this skip path.
 
 If resolved:
 
-1. **Idempotency check**: Read `.github/copilot-instructions.md` and check if it already contains a line starting with `copilot-orchestra-repo:`. If present → skip (already injected).
-2. **Inject**: Use the `replace_string_in_file` tool to append `copilot-orchestra-repo: {resolved-value}` as a new line at the end of `.github/copilot-instructions.md`. Do **not** use shell-level file-append commands — the file-write tool avoids encoding issues.
+1. **Idempotency check**: Read `.github/copilot-instructions.md` and check if it already contains a line starting with `agent-orchestra-repo:` or the legacy `copilot-orchestra-repo:`. If either is present → skip (already injected; consumers upgrading from v1.x may still have the legacy key — see README §"Migrating from copilot-orchestra" for the rename).
+2. **Inject**: Use the `replace_string_in_file` tool to append `agent-orchestra-repo: {resolved-value}` as a new line at the end of `.github/copilot-instructions.md`. Do **not** use shell-level file-append commands — the file-write tool avoids encoding issues.
 
-   **Forming the anchor**: Use the last non-empty line of the file as `old_str`, and set `new_str` to `{last-line}\ncopilot-orchestra-repo: {value}`. If the file was freshly generated in the same session, its closing lines are already known — use them directly. Example:
+   **Forming the anchor**: Use the last non-empty line of the file as `old_str`, and set `new_str` to `{last-line}\nagent-orchestra-repo: {value}`. If the file was freshly generated in the same session, its closing lines are already known — use them directly. Example:
 
    ```
    # If copilot-instructions.md ends with: quick-validate: true
    # old_str = "quick-validate: true"
-   # new_str = "quick-validate: true\ncopilot-orchestra-repo: owner/repo"
+   # new_str = "quick-validate: true\nagent-orchestra-repo: owner/repo"
    ```
 
 **If Phase 3 was completed or regenerated** → Generate `.github/architecture-rules.md`:

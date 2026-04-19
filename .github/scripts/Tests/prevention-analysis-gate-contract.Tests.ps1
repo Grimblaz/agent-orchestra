@@ -6,9 +6,9 @@
 
 .DESCRIPTION
     Locks the issue #240 prevention analysis gate contract across:
-    - .github/skills/safe-operations/SKILL.md (§2d — same-principle consolidation gate)
-      - .github/agents/Code-Conductor.agent.md (Auto-Tracking §2d reference, CE Gate Track 2 §2d reference, D10 capacity check)
-      - .github/agents/Process-Review.agent.md (§4.8 §2d reference, §4.9 §2d reference + prevention_gate_outcome field)
+    - skills/safe-operations/SKILL.md (§2d — same-principle consolidation gate)
+      - agents/Code-Conductor.agent.md (Auto-Tracking §2d reference, CE Gate Track 2 §2d reference, D10 capacity check)
+      - agents/Process-Review.agent.md (§4.8 §2d reference, §4.9 §2d reference + prevention_gate_outcome field)
       - Documents/Design/guidance-complexity.md (D10 decision record)
 
     The files must satisfy:
@@ -30,9 +30,9 @@ Describe 'prevention analysis gate contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SafeOps = Join-Path $script:RepoRoot '.github/skills/safe-operations/SKILL.md'
-        $script:CodeConductor = Join-Path $script:RepoRoot '.github/agents/Code-Conductor.agent.md'
-        $script:ProcessReview = Join-Path $script:RepoRoot '.github/agents/Process-Review.agent.md'
+        $script:SafeOps = Join-Path $script:RepoRoot 'skills/safe-operations/SKILL.md'
+        $script:CodeConductor = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
+        $script:ProcessReview = Join-Path $script:RepoRoot 'agents/Process-Review.agent.md'
         $script:DesignDoc = Join-Path $script:RepoRoot 'Documents/Design/guidance-complexity.md'
 
         $script:SafeOpsContent = Get-Content -Path $script:SafeOps -Raw

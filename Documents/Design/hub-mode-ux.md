@@ -173,7 +173,7 @@ Issue #196 adds a repository-ownership guardrail to hub mode so downstream orche
 
 D13-D15: The trust failure in issue #196 was not caused by shared guidance reads; it was caused by mutation scope widening without an explicit boundary check. Requiring both the pre-edit ownership gate and the mid-run fail-closed stop fixes that at the point where scope can expand.
 
-D16: Reusing the existing upstream-routing path keeps the workflow legible. The repo already has conventions for `copilot-orchestra-repo` resolution, dedup-first issue creation, priority labeling, output capture, and the local `process-gap-upstream` fallback when the upstream repo cannot be resolved or upstream access is unavailable. This ownership-boundary fallback is intentionally separate from Process-Review's gotcha-specific `upstream-gotcha` flow, so the stop path stays deterministic instead of collapsing two mechanisms into one.
+D16: Reusing the existing upstream-routing path keeps the workflow legible. The repo already has conventions for `agent-orchestra-repo` resolution, dedup-first issue creation, priority labeling, output capture, and the local `process-gap-upstream` fallback when the upstream repo cannot be resolved or upstream access is unavailable. This ownership-boundary fallback is intentionally separate from Process-Review's gotcha-specific `upstream-gotcha` flow, so the stop path stays deterministic instead of collapsing two mechanisms into one.
 
 D17-D18: Repository awareness avoids false positives for legitimate shared-workflow maintenance, while the external-context rule closes the loophole where an already-dirty local upstream clone could be misread as permission to continue cross-repo edits.
 

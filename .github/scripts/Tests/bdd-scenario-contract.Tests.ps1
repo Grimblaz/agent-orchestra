@@ -6,12 +6,12 @@
 
 .DESCRIPTION
     Locks the Phase 1 (issue #223) and Phase 2 (issue #227) BDD framework contracts in:
-      - .github/agents/Experience-Owner.agent.md
-      - .github/agents/Issue-Planner.agent.md
-      - .github/agents/Code-Conductor.agent.md
-      - .github/agents/Code-Critic.agent.md
-      - .github/agents/Test-Writer.agent.md
-      - .github/skills/bdd-scenarios/SKILL.md
+      - agents/Experience-Owner.agent.md
+      - agents/Issue-Planner.agent.md
+      - agents/Code-Conductor.agent.md
+      - agents/Code-Critic.agent.md
+      - agents/Test-Writer.agent.md
+      - skills/bdd-scenarios/SKILL.md
 
         Phase 1 contracts (issue #223):
             - Conditional G/W/T authoring when ## BDD Framework section is present
@@ -34,7 +34,7 @@ Describe 'Experience-Owner BDD scenario contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ExperienceOwner = Join-Path $script:RepoRoot '.github\agents\Experience-Owner.agent.md'
+        $script:ExperienceOwner = Join-Path $script:RepoRoot 'agents\Experience-Owner.agent.md'
         $script:Content = Get-Content -Path $script:ExperienceOwner -Raw
 
         $script:GwtConditionalPattern = '(?is)(## BDD Framework).{0,300}(G/W/T|Given.{0,10}When.{0,10}Then|structured scenario).{0,300}(natural.{0,30}language|fallback)'
@@ -68,7 +68,7 @@ Describe 'Issue-Planner BDD classification contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:IssuePlanner = Join-Path $script:RepoRoot '.github\agents\Issue-Planner.agent.md'
+        $script:IssuePlanner = Join-Path $script:RepoRoot 'agents\Issue-Planner.agent.md'
         $script:IPContent = Get-Content -Path $script:IssuePlanner -Raw
     }
 
@@ -93,7 +93,7 @@ Describe 'Code-Conductor BDD CE Gate pre-flight contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeConductor = Join-Path $script:RepoRoot '.github\agents\Code-Conductor.agent.md'
+        $script:CodeConductor = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
         $script:CCContent = Get-Content -Path $script:CodeConductor -Raw
     }
 
@@ -122,7 +122,7 @@ Describe 'Code-Critic BDD CE prosecution contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeCritic = Join-Path $script:RepoRoot '.github\agents\Code-Critic.agent.md'
+        $script:CodeCritic = Join-Path $script:RepoRoot 'agents\Code-Critic.agent.md'
         $script:CriticContent = Get-Content -Path $script:CodeCritic -Raw
     }
 
@@ -147,7 +147,7 @@ Describe 'bdd-scenarios SKILL.md Phase 2 contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SkillFile = Join-Path $script:RepoRoot '.github\skills\bdd-scenarios\SKILL.md'
+        $script:SkillFile = Join-Path $script:RepoRoot 'skills\bdd-scenarios\SKILL.md'
         $script:SkillContent = Get-Content -Path $script:SkillFile -Raw
     }
 
@@ -176,7 +176,7 @@ Describe 'Test-Writer BDD Phase 2 Gherkin generation contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:TestWriter = Join-Path $script:RepoRoot '.github\agents\Test-Writer.agent.md'
+        $script:TestWriter = Join-Path $script:RepoRoot 'agents\Test-Writer.agent.md'
         $script:TWContent = Get-Content -Path $script:TestWriter -Raw
     }
 
@@ -201,7 +201,7 @@ Describe 'Code-Conductor BDD Phase 2 runner dispatch contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeConductor = Join-Path $script:RepoRoot '.github\agents\Code-Conductor.agent.md'
+        $script:CodeConductor = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
         $script:CCContent = Get-Content -Path $script:CodeConductor -Raw
     }
 
@@ -230,7 +230,7 @@ Describe 'Code-Critic BDD Phase 2 runner evidence evaluation contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeCritic = Join-Path $script:RepoRoot '.github\agents\Code-Critic.agent.md'
+        $script:CodeCritic = Join-Path $script:RepoRoot 'agents\Code-Critic.agent.md'
         $script:CriticContent = Get-Content -Path $script:CodeCritic -Raw
     }
 

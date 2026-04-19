@@ -116,7 +116,7 @@ API calls.
 | File | Content |
 | --- | --- |
 | `.github/scripts/Tests/fixtures/github-docs-window.json` | 10-PR merged window from `github/docs`; full PR bodies |
-| `.github/scripts/Tests/fixtures/copilot-orchestra-nonmetrics.json` | Non-metrics PRs from `Grimblaz/copilot-orchestra`; bodies stripped to `"(non-metrics)"` |
+| `.github/scripts/Tests/fixtures/agent-orchestra-nonmetrics.json` | Non-metrics PRs from `Grimblaz/agent-orchestra`; bodies stripped to `"(non-metrics)"` |
 
 **Toggle** (`PESTER_LIVE_GH` env var):
 

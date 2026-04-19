@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+agents/** linguist-generated=false
+skills/** linguist-generated=false
+.claude-plugin/** linguist-generated=false

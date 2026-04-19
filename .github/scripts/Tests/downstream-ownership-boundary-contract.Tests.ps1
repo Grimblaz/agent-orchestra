@@ -6,10 +6,10 @@
 
 .DESCRIPTION
     Locks the issue #196 downstream ownership contract across:
-      - .github/agents/Code-Conductor.agent.md
+      - agents/Code-Conductor.agent.md
       - Documents/Design/hub-mode-ux.md
-    - .github/skills/safe-operations/SKILL.md
-      - .github/agents/Process-Review.agent.md
+    - skills/safe-operations/SKILL.md
+      - agents/Process-Review.agent.md
 
         The files must describe the same semantics for:
             - exactly three work classes for downstream orchestration scope
@@ -31,10 +31,10 @@ Describe 'downstream ownership boundary contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeConductor = Join-Path $script:RepoRoot '.github/agents/Code-Conductor.agent.md'
+        $script:CodeConductor = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
         $script:HubModeUx = Join-Path $script:RepoRoot 'Documents/Design/hub-mode-ux.md'
-        $script:SafeOperations = Join-Path $script:RepoRoot '.github/skills/safe-operations/SKILL.md'
-        $script:ProcessReview = Join-Path $script:RepoRoot '.github/agents/Process-Review.agent.md'
+        $script:SafeOperations = Join-Path $script:RepoRoot 'skills/safe-operations/SKILL.md'
+        $script:ProcessReview = Join-Path $script:RepoRoot 'agents/Process-Review.agent.md'
 
         $script:ReadContent = {
             param([string]$Path)
@@ -53,7 +53,7 @@ Describe 'downstream ownership boundary contract' {
         $script:SafeOperationsDedupPattern = '(?is)Deduplication Check.{0,260}Before every `gh issue create`, search for existing open issues'
         $script:SafeOperationsPriorityLabelPattern = '(?is)Priority Label Requirement.{0,260}Every `gh issue create` command run by any agent.{0,120}(?:\*\*)?MUST(?:\*\*)? include a `--label` flag specifying a priority'
         $script:SafeOperationsOutputCapturePattern = '(?is)Output capture.{0,260}capture the returned issue URL.{0,260}Do not re-run'
-        $script:ProcessReviewGotchaFallbackPattern = '(?is)gh access to \{copilot-orchestra-repo\} failed.{0,220}fall back to creating a local GitHub issue labeled `upstream-gotcha` and `priority: medium`'
+        $script:ProcessReviewGotchaFallbackPattern = '(?is)gh access to \{agent-orchestra-repo\} failed.{0,220}fall back to creating a local GitHub issue labeled `upstream-gotcha` and `priority: medium`'
         $script:RepositoryAwareBypassPattern = '(?is)(repository-aware|shared(?:-| )workflow repo itself|active issue itself belongs to the shared(?:-| )workflow repo).{0,260}(valid in-scope|normal in-scope work|shared-agent edits remain normal in-scope work)'
         $script:DirtyUpstreamStatePattern = '(?is)(pre-existing upstream dirty state|pre-existing upstream edits|upstream edits are already present in the local clone).{0,240}(external state|not permission|does not grant permission)'
 

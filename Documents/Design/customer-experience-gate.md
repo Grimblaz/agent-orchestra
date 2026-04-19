@@ -20,7 +20,7 @@ This design also retired the `notify-agent-sync.yml` dispatch workflow, as agent
 | D6 | Project-level configuration | Optional `ce_gate` section in `copilot-instructions.md`; graceful inference if missing | Explicit when available; graceful when not; not a hard stop if absent |
 | D7 | Experience-Owner tooling check | Experience-Owner identifies customer surface, verifies tool availability, notes manual fallback | Catches tooling blockers during design, not implementation |
 | D8 | "No systemic gap" as valid outcome | Valid Track 2 outcome; logged in PR body; no issue created | Not every CE Gate defect has a systemic root cause; prevents artificial findings |
-| D9 | Cross-repo issue creation | Best-effort in copilot-orchestra repo; fallback to current repo with `process-gap-upstream` label | Does not block the workflow; captures findings regardless of permissions |
+| D9 | Cross-repo issue creation | Best-effort in agent-orchestra repo; fallback to current repo with `process-gap-upstream` label | Does not block the workflow; captures findings regardless of permissions |
 | D10 | PR body format | Add "CE Gate Result" (always) and "Process Gaps Found" (when applicable) | Integrated into canonical format; auditable |
 | D11 | Dispatch workflow removal | Delete `notify-agent-sync.yml`; remove CUSTOMIZATION.md Section 7 | Users consume agents via VS Code file location settings — no push-based sync needed |
 

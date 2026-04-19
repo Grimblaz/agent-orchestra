@@ -6,8 +6,8 @@
 
 .DESCRIPTION
     Contract under test:
-    - Accepts -ConfigPath (default .github/skills/calibration-pipeline/assets/guidance-complexity.json)
-      - Accepts -AgentsPath (default .github/agents/*.agent.md)
+    - Accepts -ConfigPath (default skills/calibration-pipeline/assets/guidance-complexity.json)
+      - Accepts -AgentsPath (default agents/*.agent.md)
       - Counts directive keywords case-insensitively, whole-word only:
           MUST, NEVER, ALWAYS, REQUIRED, MANDATORY
       - "mustard" and "should" do NOT count (not whole-word directive keywords)
@@ -28,14 +28,14 @@
         output includes some field/text indicating default was used
 
     Isolation: all tests write temp .agent.md files to a session-scoped temp
-    root. No real .github/agents/*.agent.md files are used.
+    root. No real agents/*.agent.md files are used.
 #>
 
 Describe 'measure-guidance-complexity.ps1' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:LibFile = Join-Path $script:RepoRoot '.github\skills\guidance-measurement\scripts\measure-guidance-complexity-core.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot 'skills\guidance-measurement\scripts\measure-guidance-complexity-core.ps1'
         . $script:LibFile
 
         # Session-scoped temp root — all per-test dirs live under here

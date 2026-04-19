@@ -1,6 +1,6 @@
 # Node.js / TypeScript Example
 
-This directory contains example configuration files for a Node.js / TypeScript project using Express and Copilot Orchestra.
+This directory contains example configuration files for a Node.js / TypeScript project using Express and Agent Orchestra.
 
 ## Contents
 
@@ -27,8 +27,8 @@ Copy the files you need to your project's `.github/` directory:
 
 ```bash
 # From your project root
-cp /path/to/copilot-orchestra/examples/nodejs-typescript/copilot-instructions.md .github/
-cp /path/to/copilot-orchestra/examples/nodejs-typescript/architecture-rules.md .github/
+cp /path/to/agent-orchestra/examples/nodejs-typescript/copilot-instructions.md .github/
+cp /path/to/agent-orchestra/examples/nodejs-typescript/architecture-rules.md .github/
 ```
 
 Then edit them to match your actual project name, versions, and conventions.
@@ -72,7 +72,7 @@ your-project/
 ├── .github/
 │   ├── copilot-instructions.md    # ← From this example
 │   ├── architecture-rules.md      # ← From this example
-│   ├── agents/                    # ← From copilot-orchestra
+│   ├── agents/                    # ← From agent-orchestra
 │   └── ...
 ├── src/
 │   └── ...
@@ -94,6 +94,6 @@ your-project/
 ## See Also
 
 - [Main Customization Guide](../../CUSTOMIZATION.md)
-- [Agent Definitions](../../.github/agents/)
+- [Agent Definitions](../../agents/)
 - [Spring Boot Microservice Example](../spring-boot-microservice/)
 - [Python Example](../python/)

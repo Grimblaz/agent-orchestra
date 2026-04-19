@@ -35,8 +35,8 @@ Describe 'write-calibration-entry.ps1' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot '.github\skills\calibration-pipeline\scripts\write-calibration-entry.ps1'
-        $script:LibFile = Join-Path $script:RepoRoot '.github\skills\calibration-pipeline\scripts\write-calibration-entry-core.ps1'
+        $script:ScriptFile = Join-Path $script:RepoRoot 'skills\calibration-pipeline\scripts\write-calibration-entry.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot 'skills\calibration-pipeline\scripts\write-calibration-entry-core.ps1'
         . $script:LibFile
 
         # Master temp root — all per-test dirs live under here

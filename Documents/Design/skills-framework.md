@@ -1,5 +1,9 @@
 # Design: Skills Framework
 
+<!-- migration-note-begin -->
+> **Superseded in v1.14 (issue #367)**: the skill registry and path references in this design doc describe the v1.13 layout where skills lived at `.github/skills/`. In v1.14 skills moved to `skills/` at the repo root to enable Claude Code auto-discovery. See [`Documents/Decisions/0001-cross-tool-support.md`](../Decisions/0001-cross-tool-support.md) and [`Documents/Decisions/0002-claude-code-plugin-schema.md`](../Decisions/0002-claude-code-plugin-schema.md) for the current shape. The historical `.github/skills/` references below are retained for the issue-#344 record.
+<!-- migration-note-end -->
+
 ## Summary
 
 The skills framework provides domain-specific knowledge modules loaded on demand by agents from `.github/skills/`. Under the thin-agents/fat-skills direction for issue #344, skills hold reusable methodology and protocol content, while agents retain orchestration boundaries such as routing, identity, trigger points, and commit authority. The repository now ships 33 skills after moving reusable methodology out of agents without changing agent interfaces. Hub skills may be extended by project-specific supplement skills (named `{project}-{hub-skill-name}`) that layer additional constraints on top of their defaults.
@@ -63,7 +67,7 @@ Issue #344 changes the skills boundary from "skills are reference material" to "
 | `software-architecture` | `.github/skills/software-architecture/` | Clean Architecture, SOLID principles, and architectural decision guidance |
 | `specification-authoring` | `.github/skills/specification-authoring/` | Structured authoring guidance for formal specification documents |
 | `systematic-debugging` | `.github/skills/systematic-debugging/` | 4-phase debugging process (Observe, Hypothesize, Test, Fix) for complex issues |
-| `terminal-hygiene` | `.github/skills/terminal-hygiene/` | Terminal and test execution guardrails for Copilot Orchestra workflows |
+| `terminal-hygiene` | `.github/skills/terminal-hygiene/` | Terminal and test execution guardrails for Agent Orchestra workflows |
 | `test-driven-development` | `.github/skills/test-driven-development/` | Test-Driven Development workflow guidance, quality standards, and practical patterns |
 | `ui-iteration` | `.github/skills/ui-iteration/` | Reusable screenshot-driven UI polish workflow for iterative visual refinement |
 | `ui-testing` | `.github/skills/ui-testing/` | Resilient React component testing strategies focusing on user behavior |

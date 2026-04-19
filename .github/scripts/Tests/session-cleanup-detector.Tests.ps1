@@ -6,41 +6,33 @@
 
 .DESCRIPTION
     Contract:
-      Test A – ONLY COPILOT_ORCHESTRA_ROOT set (valid path) → exit 0 (primary var honoured)
-      Test B – ONLY WORKFLOW_TEMPLATE_ROOT set (valid path)  → exit 0 (legacy fallback works)
-      Test D – BOTH vars set                                 → exit 0 (primary var takes priority)
-      Test C – NEITHER var set                               → exit non-zero AND output JSON
-                                                               mentions both var names
-            Test E – ONLY calibration cache present                → exit 0 with '{}'
-            Test F – Calibration + stale issue tracking artifact   → reports only the stale issue artifact
-            Test G – Calibration + stale branch                    → still reports the stale branch
+      Test A – valid -RepoRoot                               → exit 0
+      Test B – empty -RepoRoot                               → exit non-zero with plugin-install guidance
+      Test C – wrapper smoke (no env vars, $PSScriptRoot)    → exit 0
+      Test E – ONLY calibration cache present                → exit 0 with '{}'
+      Test F – Calibration + stale issue tracking artifact   → reports only the stale issue artifact
+      Test G – Calibration + stale branch                    → still reports the stale branch
 
-    Tests A-D are existing env-var coverage. Tests E-G are RED coverage for
-    issue #185 and should fail until calibration files are excluded from stale
-    tracking detection.
+    Tests A-C cover the repo-root resolution contract after env var removal
+    (v2.0.0 — the wrapper now resolves repo root via $PSScriptRoot). Tests
+    E-G are the calibration-exclusion coverage originally added for issue #185.
 #>
 
-Describe 'session-cleanup-detector.ps1 — env var fallback' {
+Describe 'session-cleanup-detector.ps1 — repo root resolution' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot '.github\skills\session-startup\scripts\session-cleanup-detector.ps1'
-        $script:LibFile = Join-Path $script:RepoRoot '.github\skills\session-startup\scripts\session-cleanup-detector-core.ps1'
+        $script:ScriptFile = Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector-core.ps1'
         . $script:LibFile
+    }
 
-        # Snapshot env vars so every test starts from a known baseline
-        $script:SavedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
-        $script:SavedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
-
-        # In-process helper: mirrors the wrapper's env-var-to-parameter resolution.
-        # Pester v5 isolation: helper stored as a script-scoped scriptblock so
-        # It blocks can call it via & $script:InvokeDetector.
-        $script:InvokeDetector = {
-            # Mirror the wrapper's env-var resolution logic (in-process)
-            $repoRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } elseif ($env:WORKFLOW_TEMPLATE_ROOT) { $env:WORKFLOW_TEMPLATE_ROOT } else { '' }
+    Context 'when -RepoRoot is a valid path' {
+        It 'exits 0' {
             Push-Location $script:RepoRoot
             try {
-                return Invoke-SessionCleanupDetector -RepoRoot $repoRoot
+                $result = Invoke-SessionCleanupDetector -RepoRoot $script:RepoRoot
+                $result.ExitCode | Should -Be 0 -Because 'a valid repo root should satisfy the resolution gate'
             }
             finally {
                 Pop-Location
@@ -48,163 +40,23 @@ Describe 'session-cleanup-detector.ps1 — env var fallback' {
         }
     }
 
-    AfterAll {
-        # Restore whatever was set before the suite ran
-        $env:COPILOT_ORCHESTRA_ROOT = $script:SavedOrchestra
-        $env:WORKFLOW_TEMPLATE_ROOT = $script:SavedWorkflow
-    }
-
-    # ------------------------------------------------------------------
-    # Test A — primary var COPILOT_ORCHESTRA_ROOT honoured
-    # Verifies COPILOT_ORCHESTRA_ROOT is accepted as the primary env var
-    # ------------------------------------------------------------------
-    Context 'when only COPILOT_ORCHESTRA_ROOT is set' {
-        It 'exits 0 and does not produce an env-var-missing error' {
-            $savedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
-            $savedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
-            try {
-                $env:COPILOT_ORCHESTRA_ROOT = $script:RepoRoot
-                Remove-Item Env:WORKFLOW_TEMPLATE_ROOT -ErrorAction SilentlyContinue
-
-                $result = & $script:InvokeDetector
-
-                # The script must not exit with the env-var-error code
-                $result.ExitCode | Should -Be 0 -Because 'COPILOT_ORCHESTRA_ROOT should satisfy the env-var gate'
-            }
-            finally {
-                $env:COPILOT_ORCHESTRA_ROOT = $savedOrchestra
-                $env:WORKFLOW_TEMPLATE_ROOT = $savedWorkflow
-            }
-        }
-    }
-
-    # ------------------------------------------------------------------
-    # Test B — legacy fallback WORKFLOW_TEMPLATE_ROOT still works
-    # GREEN: existing behaviour; should pass before and after the change
-    # ------------------------------------------------------------------
-    Context 'when only WORKFLOW_TEMPLATE_ROOT is set' {
-        It 'exits 0 and does not produce an env-var-missing error' {
-            $savedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
-            $savedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
-            try {
-                Remove-Item Env:COPILOT_ORCHESTRA_ROOT -ErrorAction SilentlyContinue
-                $env:WORKFLOW_TEMPLATE_ROOT = $script:RepoRoot
-
-                $result = & $script:InvokeDetector
-
-                $result.ExitCode | Should -Be 0 -Because 'WORKFLOW_TEMPLATE_ROOT is the existing accepted var'
-            }
-            finally {
-                $env:COPILOT_ORCHESTRA_ROOT = $savedOrchestra
-                $env:WORKFLOW_TEMPLATE_ROOT = $savedWorkflow
-            }
-        }
-    }
-
-    # ------------------------------------------------------------------
-    # Test D — both vars set → COPILOT_ORCHESTRA_ROOT takes priority
-    # Verifies the fallback chain resolves the primary var first
-    # ------------------------------------------------------------------
-    Context 'when both env vars are set' {
-        It 'exits 0 with COPILOT_ORCHESTRA_ROOT taking priority' {
-            $savedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
-            $savedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
-            try {
-                $env:COPILOT_ORCHESTRA_ROOT = $script:RepoRoot
-                $env:WORKFLOW_TEMPLATE_ROOT = $script:RepoRoot
-
-                $result = & $script:InvokeDetector
-
-                $result.ExitCode | Should -Be 0 -Because 'COPILOT_ORCHESTRA_ROOT should be resolved first when both are set'
-            }
-            finally {
-                $env:COPILOT_ORCHESTRA_ROOT = $savedOrchestra
-                $env:WORKFLOW_TEMPLATE_ROOT = $savedWorkflow
-            }
-        }
-    }
-
-    # ------------------------------------------------------------------
-    # Test C — neither var set → exit non-zero, both names in output
-    # Verifies exit non-zero and both env var names appear in output
-    # ------------------------------------------------------------------
-    Context 'when neither env var is set' {
+    Context 'when -RepoRoot is empty' {
         It 'exits non-zero' {
-            $savedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
-            $savedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
-            try {
-                Remove-Item Env:COPILOT_ORCHESTRA_ROOT -ErrorAction SilentlyContinue
-                Remove-Item Env:WORKFLOW_TEMPLATE_ROOT -ErrorAction SilentlyContinue
-
-                $result = & $script:InvokeDetector
-
-                $result.ExitCode | Should -Not -Be 0 -Because 'missing env vars must signal failure'
-            }
-            finally {
-                $env:COPILOT_ORCHESTRA_ROOT = $savedOrchestra
-                $env:WORKFLOW_TEMPLATE_ROOT = $savedWorkflow
-            }
+            $result = Invoke-SessionCleanupDetector -RepoRoot ''
+            $result.ExitCode | Should -Not -Be 0 -Because 'empty repo root must signal failure'
         }
 
-        It 'includes COPILOT_ORCHESTRA_ROOT in the error JSON' {
-            $savedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
-            $savedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
-            try {
-                Remove-Item Env:COPILOT_ORCHESTRA_ROOT -ErrorAction SilentlyContinue
-                Remove-Item Env:WORKFLOW_TEMPLATE_ROOT -ErrorAction SilentlyContinue
-
-                $result = & $script:InvokeDetector
-
-                $result.Output | Should -Match 'COPILOT_ORCHESTRA_ROOT' `
-                    -Because 'the error message must name the new primary env var'
-            }
-            finally {
-                $env:COPILOT_ORCHESTRA_ROOT = $savedOrchestra
-                $env:WORKFLOW_TEMPLATE_ROOT = $savedWorkflow
-            }
-        }
-
-        It 'includes WORKFLOW_TEMPLATE_ROOT in the error JSON' {
-            $savedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
-            $savedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
-            try {
-                Remove-Item Env:COPILOT_ORCHESTRA_ROOT -ErrorAction SilentlyContinue
-                Remove-Item Env:WORKFLOW_TEMPLATE_ROOT -ErrorAction SilentlyContinue
-
-                $result = & $script:InvokeDetector
-
-                $result.Output | Should -Match 'WORKFLOW_TEMPLATE_ROOT' `
-                    -Because 'the error message must also name the legacy fallback var'
-            }
-            finally {
-                $env:COPILOT_ORCHESTRA_ROOT = $savedOrchestra
-                $env:WORKFLOW_TEMPLATE_ROOT = $savedWorkflow
-            }
+        It 'emits a plugin-install hint in the error JSON' {
+            $result = Invoke-SessionCleanupDetector -RepoRoot ''
+            $result.Output | Should -Match 'agent-orchestra|plugin' `
+                -Because 'the error message must direct users to the plugin install path'
         }
     }
 
-    # ------------------------------------------------------------------
-    # Wrapper smoke test — validates env-var-to-parameter translation
-    # Intentional pwsh spawn: tests the wrapper's env-var resolution path
-    # (covers requirement: at least 1 test verifies the wrapper contract)
-    # ------------------------------------------------------------------
-    Context 'wrapper env-var smoke test' {
-        It 'exits 0 when COPILOT_ORCHESTRA_ROOT is set via wrapper (pwsh -File)' {
-            $savedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
-            $savedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
-            try {
-                $env:COPILOT_ORCHESTRA_ROOT = $script:RepoRoot
-                Remove-Item Env:WORKFLOW_TEMPLATE_ROOT -ErrorAction SilentlyContinue
-
-                $null = & pwsh -NoProfile -NonInteractive -File $script:ScriptFile 2>$null
-                $exitCode = $LASTEXITCODE
-
-                $exitCode | Should -Be 0 -Because 'wrapper must translate COPILOT_ORCHESTRA_ROOT env var to -RepoRoot parameter'
-            }
-            finally {
-                $env:COPILOT_ORCHESTRA_ROOT = $savedOrchestra
-                $env:WORKFLOW_TEMPLATE_ROOT = $savedWorkflow
-            }
+    Context 'wrapper smoke test' {
+        It 'exits 0 with no env vars set (repo root resolved via $PSScriptRoot)' {
+            $null = & pwsh -NoProfile -NonInteractive -File $script:ScriptFile 2>$null
+            $LASTEXITCODE | Should -Be 0 -Because 'wrapper must resolve repo root via $PSScriptRoot without any env vars'
         }
     }
 }
@@ -213,11 +65,9 @@ Describe 'session-cleanup-detector.ps1 — calibration tracking exclusion' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot '.github\skills\session-startup\scripts\session-cleanup-detector.ps1'
-        . (Join-Path $script:RepoRoot '.github\skills\session-startup\scripts\session-cleanup-detector-core.ps1')
+        $script:ScriptFile = Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector.ps1'
+        . (Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector-core.ps1')
 
-        $script:SavedOrchestra = $env:COPILOT_ORCHESTRA_ROOT
-        $script:SavedWorkflow = $env:WORKFLOW_TEMPLATE_ROOT
         $script:SavedPath = $env:PATH
 
         $script:NewMockGitDir = {
@@ -364,8 +214,6 @@ exit $LASTEXITCODE
     }
 
     AfterAll {
-        $env:COPILOT_ORCHESTRA_ROOT = $script:SavedOrchestra
-        $env:WORKFLOW_TEMPLATE_ROOT = $script:SavedWorkflow
         $env:PATH = $script:SavedPath
     }
 

@@ -1,9 +1,11 @@
-# Copilot Orchestra
+# Agent Orchestra
 
-[![Version](https://img.shields.io/badge/version-v1.13.0-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v2.0.0-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
-A multi-agent workflow system for GitHub Copilot that orchestrates AI-assisted software development across specialized agents.
+A multi-agent workflow system that orchestrates AI-assisted software development across specialized agents in GitHub Copilot and Claude Code.
+
+> **Renamed from `copilot-orchestra` in v2.0.0.** See the [migration section](#migrating-from-copilot-orchestra) below for the one-time steps to switch over.
 
 ## Install as Plugin (VS Code 1.110+)
 
@@ -16,16 +18,31 @@ A multi-agent workflow system for GitHub Copilot that orchestrates AI-assisted s
    ```json
    {
      "chat.plugins.enabled": true,
-     "chat.plugins.marketplaces": ["Grimblaz/copilot-orchestra"]
+     "chat.plugins.marketplaces": ["Grimblaz/agent-orchestra"]
    }
    ```
 
-2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins copilot-orchestra` and install.
+2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins agent-orchestra` and install.
 3. **Use** — All 14 agents and 39 skills are immediately available in VS Code Chat.
 
 **What's included in the plugin**: 14 agents, 39 skills, and 9 slash commands (`/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish`, `/experience`, `/orchestrate`).
 
 **What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo.
+
+---
+
+## Install as Plugin (Claude Code)
+
+Claude Code auto-discovers `agents/` and `skills/` at the repo root via `.claude-plugin/plugin.json` (metadata only). Install via the built-in marketplace commands:
+
+```text
+/plugin marketplace add Grimblaz/agent-orchestra
+/plugin install agent-orchestra@agent-orchestra
+```
+
+All 14 agents and 39 skills are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (metadata-only manifest preserves auto-discovery).
+
+**What requires clone/fork**: Same as the VS Code plugin — `.github/instructions/` and project templates are not distributed through the plugin surface.
 
 ---
 
@@ -49,7 +66,7 @@ Type `/setup` in GitHub Copilot Chat. It runs in six phases with skip gates:
 > **Recommended model**: Claude Opus — the setup wizard benefits from deep reasoning for architecture and tech stack decisions. *(o3 or GPT-4o also work well if Opus is unavailable.)*
 
 - **Phase 0** — Auto-detects prerequisites (VS Code version, pwsh, git, gh CLI)
-- **Phase 1** — One-time user setup: sets `COPILOT_ORCHESTRA_ROOT`, adds agents and skills to your VS Code settings, and wires repo-local instruction files only when your clone or generated consumer setup actually uses them. Skip if already configured.
+- **Phase 1** — One-time user setup: adds agents and skills to your VS Code settings, and wires repo-local instruction files only when your clone or generated consumer setup actually uses them. Skip if already configured.
 - **Phase 2** — Collects project basics (name, language, framework, database). Skip if `copilot-instructions.md` already exists.
 - **Phase 3** — Collects architecture and conventions. Skip if `architecture-rules.md` already exists.
 - **Phase 4** — Collects build, run, test, lint, and quick-validate commands. Skip offered if Phases 2, 3, and 5 are all skipped.
@@ -121,13 +138,13 @@ These agents are hidden from the picker (`user-invocable: false`) and are used a
 
 Code-Smith, Test-Writer, Refactor-Specialist, Doc-Keeper, Research-Agent, Process-Review, Specification
 
-> See `.github/agents/` for full definitions of all 14 agents.
+> See `agents/` (repo root) for full definitions of all 14 agents.
 
 ---
 
 ## Skills Framework
 
-Skills are domain-specific knowledge packages in `.github/skills/` that agents load on demand:
+Skills are domain-specific knowledge packages in `skills/` (repo root) that agents load on demand:
 
 | Skill | When it's used |
 |-------|---------------|
@@ -149,9 +166,9 @@ Skills are domain-specific knowledge packages in `.github/skills/` that agents l
 | **bdd-scenarios** | Structured Given/When/Then scenario authoring and CE Gate coverage checks |
 | **provenance-gate** | First-contact issue-framing assessment for cold pickups |
 | **session-startup** | Automatic startup cleanup guard for new conversations |
-| **terminal-hygiene** | Terminal and test execution guardrails for Copilot Orchestra workflows |
+| **terminal-hygiene** | Terminal and test execution guardrails for Agent Orchestra workflows |
 
-> **VS Code 1.108+**: Skills are auto-discovered from `.github/skills/` when `chat.useAgentSkills` is enabled.
+> **VS Code 1.108+**: Skills are auto-discovered from `skills/` (repo root) when `chat.useAgentSkills` is enabled.
 
 ---
 
@@ -161,9 +178,9 @@ Skills are domain-specific knowledge packages in `.github/skills/` that agents l
 | ---- | ------- | ----- |
 | `.github/copilot-instructions.md` | Project context, tech stack, conventions | Generated by `/setup` or created manually |
 | `.github/architecture-rules.md` | Layer rules, dependency rules, naming | Generated by `/setup` or created manually |
-| `.github/skills/safe-operations/SKILL.md` | Universal file-operation safety rules and issue-creation patterns (priority labels, improvement-first decision) | Included — auto-discovered from `.github/skills/` when agent skills are enabled |
-| `.github/agents/*.agent.md` | Agent definitions | Ready to use, customize as needed |
-| `.github/skills/*/SKILL.md` | Domain knowledge | Ready to use, add your own |
+| `skills/safe-operations/SKILL.md` | Universal file-operation safety rules and issue-creation patterns (priority labels, improvement-first decision) | Included — auto-discovered from `skills/` when agent skills are enabled |
+| `agents/*.agent.md` | Agent definitions | Ready to use, customize as needed |
+| `skills/*/SKILL.md` | Domain knowledge | Ready to use, add your own |
 
 ---
 
@@ -186,14 +203,18 @@ You can make all agents available globally in VS Code — not just in repos that
 ```json
 {
   "chat.agentFilesLocations": [
-    "/path/to/your/copilot-orchestra/.github/agents"
+    "/path/to/your/agent-orchestra/agents"
   ]
 }
 ```
 
-Replace `/path/to/your/copilot-orchestra` with the absolute path to where you cloned this repo. VS Code will load agent definitions from that folder for all workspaces.
+Replace `/path/to/your/agent-orchestra` with the absolute path to where you cloned this repo. VS Code will load agent definitions from that folder for all workspaces.
 
-> **Warning**: VS Code loads agents additively from all configured sources — there is no name-based deduplication. If you add a global path **and** also have the plugin installed, or if a project workspace also has `.github/agents/`, you will see duplicate agents in the chat picker. Choose one source: either set a global path (above) **or** install the plugin, not both. If you're seeing duplicates, see [CUSTOMIZATION.md — Troubleshooting](CUSTOMIZATION.md#troubleshooting).
+<!-- legacy-path -->
+> **Upgrading from v1.13 or earlier?** Agents lived at `.github/agents/` before v1.14. If your `settings.json` still points at `/path/to/your/agent-orchestra/.github/agents`, update it to `/path/to/your/agent-orchestra/agents`. See [CUSTOMIZATION.md — Migrating from pre-1.14 layouts](CUSTOMIZATION.md#migrating-from-pre-114-layouts-issue-367).
+<!-- /legacy-path -->
+
+> **Warning**: VS Code loads agents additively from all configured sources — there is no name-based deduplication. If you add a global path **and** also have the plugin installed, or if a project workspace also has `agents/` at the repo root, you will see duplicate agents in the chat picker. Choose one source: either set a global path (above) **or** install the plugin, not both. If you're seeing duplicates, see [CUSTOMIZATION.md — Troubleshooting](CUSTOMIZATION.md#troubleshooting).
 
 ---
 
@@ -213,15 +234,22 @@ See **[CONTRIBUTING.md](CONTRIBUTING.md)** for recommended VS Code settings.
 ## Repository Structure
 
 ```text
+agents/                  # Agent definitions (repo root)
+skills/                  # Skill definitions (repo root)
+
 .github/
-├── agents/              # Agent definitions
 ├── copilot-instructions.md  # Your project context (generate via /setup)
 ├── architecture-rules.md    # Your architecture rules (generate via /setup)
 ├── instructions/        # Output format and PR review guidelines
 ├── prompts/             # Slash command prompt files
 ├── scripts/             # Post-merge cleanup and session detector
-├── skills/              # Skill definitions
 └── templates/           # Implementation plan template
+
+plugin.json              # VS Code/Copilot plugin manifest at repo root (paths ./agents/ + ./skills/)
+
+.claude-plugin/
+├── plugin.json          # Claude Code plugin manifest (metadata-only; auto-discovers repo-root agents/ + skills/)
+└── marketplace.json     # Claude Code marketplace catalog (enables /plugin marketplace add Grimblaz/agent-orchestra)
 
 examples/
 ├── spring-boot-microservice/   # Java / Spring Boot example
@@ -236,44 +264,58 @@ Documents/
 
 ---
 
-## Migrating from workflow-template
+## Migrating from copilot-orchestra
 
-If you previously set up the repo when it was named `workflow-template`, here is what changes for you:
+v2.0.0 renames the repo from `copilot-orchestra` to `agent-orchestra` and removes the previously-required `COPILOT_ORCHESTRA_ROOT` / `WORKFLOW_TEMPLATE_ROOT` environment variables. The session-startup script now self-resolves its repo root via `$PSScriptRoot`.
 
-### 1. Update your environment variable
+### 1. Remove the obsolete environment variables (optional cleanup)
 
-The primary env var is now `COPILOT_ORCHESTRA_ROOT`. Your existing `WORKFLOW_TEMPLATE_ROOT` continues to work as a fallback — you don't need to change it immediately. To move fully to the new name:
+The detector script ignores these vars now — you can leave them set or unset without effect. To clean up:
 
 **Windows (permanent)**:
 
 ```powershell
-[System.Environment]::SetEnvironmentVariable('COPILOT_ORCHESTRA_ROOT', 'C:\path\to\copilot-orchestra', 'User')
+[System.Environment]::SetEnvironmentVariable('COPILOT_ORCHESTRA_ROOT', $null, 'User')
+[System.Environment]::SetEnvironmentVariable('WORKFLOW_TEMPLATE_ROOT', $null, 'User')
 ```
 
-**macOS/Linux**:
+**macOS/Linux** (also remove any matching `export` lines from your shell profile):
 
 ```bash
-export COPILOT_ORCHESTRA_ROOT="/path/to/copilot-orchestra"
+unset COPILOT_ORCHESTRA_ROOT
+unset WORKFLOW_TEMPLATE_ROOT
 ```
 
 ### 2. Update your VS Code plugin settings
 
-Follow these steps in order:
+1. **Uninstall the old plugin**: In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins copilot-orchestra` and uninstall it.
+2. **Update settings**: Change the `chat.plugins.marketplaces` entry in your VS Code user `settings.json` to `["Grimblaz/agent-orchestra"]`.
+3. **Install the new plugin**: Search `@agentPlugins agent-orchestra` in the Extensions view and install it.
 
-1. **Uninstall the old plugin**: In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins workflow-template` and uninstall it.
-2. **Update settings**: Change the `chat.plugins.marketplaces` entry in your VS Code user `settings.json` to:
+### 3. Update Claude Code plugin (if installed)
 
-   ```json
-   {
-     "chat.plugins.marketplaces": ["Grimblaz/copilot-orchestra"]
-   }
-   ```
+Reinstall the plugin from the new marketplace path:
 
-3. **Install the new plugin**: In the Extensions view, search `@agentPlugins copilot-orchestra` and install it.
+```text
+/plugin marketplace add Grimblaz/agent-orchestra
+/plugin install agent-orchestra@agent-orchestra
+```
 
-### 3. Git remote (no action needed)
+### 4. Git remote (no action needed)
 
-GitHub automatically redirects `github.com/Grimblaz/workflow-template` to the new URL. Existing clones and remotes continue to work without any changes.
+GitHub automatically redirects `github.com/Grimblaz/copilot-orchestra` to the new URL. Existing clones and remotes continue to work without any changes — though running `git remote set-url` with the new name avoids the redirect hop.
+
+### 5. Rename `copilot-orchestra-repo` in `.github/copilot-instructions.md`
+
+If your downstream repo has a `copilot-orchestra-repo:` field in `.github/copilot-instructions.md` (used by the Process-Review upstream-gotcha flow), rename it to `agent-orchestra-repo:`. Process-Review reads both names during the transition — the legacy key continues to work — but new injections (via `/setup`) use the new name, and a future release will drop the legacy fallback. One-line change:
+
+```text
+# Before
+copilot-orchestra-repo: Grimblaz/copilot-orchestra
+
+# After
+agent-orchestra-repo: Grimblaz/agent-orchestra
+```
 
 ---
 

@@ -235,7 +235,7 @@ When the unified evidence record contains a `source` field, Code-Critic applies 
 | BDD enabled | `## BDD Framework` heading present in `copilot-instructions.md` | G/W/T authoring required; S-IDs mandatory; pre-flight gate active |
 | BDD disabled | Heading absent | Natural-language CE scenarios; no S-IDs; pre-flight gate skipped |
 
-The template repo (`Copilot-Orchestra`) ships BDD-**disabled**. Example repos (`examples/*/copilot-instructions.md`) ship with a `## BDD Framework` section and a commented note showing how to remove it.
+The template repo (`Agent-Orchestra`) ships BDD-**disabled**. Example repos (`examples/*/copilot-instructions.md`) ship with a `## BDD Framework` section and a commented note showing how to remove it.
 
 ---
 

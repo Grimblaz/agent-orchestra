@@ -18,13 +18,13 @@ This template supports two distribution models:
    ```json
    {
      "chat.plugins.enabled": true,
-     "chat.plugins.marketplaces": ["Grimblaz/copilot-orchestra"]
+     "chat.plugins.marketplaces": ["Grimblaz/agent-orchestra"]
    }
    ```
 
-2. Open Extensions view (`Ctrl+Shift+X`), search `@agentPlugins copilot-orchestra`, install.
+2. Open Extensions view (`Ctrl+Shift+X`), search `@agentPlugins agent-orchestra`, install.
 
-> **Note**: If you use the plugin, you still receive the shared workflow guidance that now ships through skills, including `safe-operations`, `step-commit`, `pre-commit-formatting`, and `tracking-format`. `chat.instructionsFilesLocations` is only needed for repo-local instruction files that are intentionally still instructions, such as generated consumer files under `.github/instructions/`. The session-startup check also requires `COPILOT_ORCHESTRA_ROOT` (or the fallback `WORKFLOW_TEMPLATE_ROOT`) and silently skips when neither variable is set. No extra startup or provenance trigger section is required in your project's `copilot-instructions.md`; the portable trigger wiring now lives in the shipped agent files.
+> **Note**: If you use the plugin, you still receive the shared workflow guidance that now ships through skills, including `safe-operations`, `step-commit`, `pre-commit-formatting`, and `tracking-format`. `chat.instructionsFilesLocations` is only needed for repo-local instruction files that are intentionally still instructions, such as generated consumer files under `.github/instructions/`. The session-startup check now self-resolves its repo root via `$PSScriptRoot` — no environment variable is required. No extra startup or provenance trigger section is required in your project's `copilot-instructions.md`; the portable trigger wiring now lives in the shipped agent files.
 
 <!-- blockquote separator: prevents Note and Warning from merging in GitHub Markdown -->
 
@@ -47,22 +47,37 @@ This template supports two distribution models:
 | All 39 skills in Configure Skills menu | ✅ Works | Nothing |
 | 9 slash commands (`/setup`, `/design`, etc.) | ✅ Works | Nothing |
 | Shared workflow skills (`safe-operations`, `step-commit`, etc.) | ✅ Works | Nothing |
-| Session startup check (`COPILOT_ORCHESTRA_ROOT`) | ⚠️ Silently skips | Set `COPILOT_ORCHESTRA_ROOT` env var (optional — only needed if you want the startup check) |
+| Session startup check | ✅ Works | Nothing (self-resolves via `$PSScriptRoot` — no env var required in v2.0.0+) |
 | Project-aware agent guidance | ⚠️ Generic only | Copy `copilot-instructions.md` and `architecture-rules.md` to your project's `.github/` directory |
 | `chat.instructionsFilesLocations` rules | ⚠️ Not distributed | Add `chat.instructionsFilesLocations` pointing to your clone if needed |
-| Scripts from `.github/scripts/` (e.g. post-PR cleanup) | ❌ Not accessible without env var | Use manual archive method documented in `post-pr-review` skill, or set `COPILOT_ORCHESTRA_ROOT` |
+| Scripts from `.github/scripts/` (e.g. post-PR cleanup) | ✅ Works | Nothing (scripts self-resolve their plugin-cache path) |
 | `/release` slash command | ❌ Intentionally excluded | Clone or fork the repo (maintainer workflow only) |
 
 #### Script portability for plugin users
 
-Skills that invoke PowerShell scripts fall into two categories:
+All skills' PowerShell scripts self-resolve their sibling paths via `$PSScriptRoot`, so they work identically whether invoked from the plugin cache or a clone/fork. This is the v2.0.0 design — no environment variable configuration is required.
 
-| Category | Scripts | Plugin behavior |
-|----------|---------|-----------------|
-| **Portable** — use `$PSScriptRoot` to locate siblings | `routing-tables-core.ps1`, `check-port.ps1` | ✅ Work from plugin cache path |
-| **Workspace-bound** — rely on `COPILOT_ORCHESTRA_ROOT` or CWD defaults | `measure-guidance-complexity-core.ps1`, `session-cleanup-detector-core.ps1` | ⚠️ Require env var or clone/fork |
+If a skill's script produces no output when invoked from the plugin, file an issue with the skill name and reproduction steps; silent failure is a regression, not an expected limitation.
 
-If a skill's script silently produces no output when invoked via the plugin, it is likely workspace-bound. Set `COPILOT_ORCHESTRA_ROOT` to your clone path, or switch to the clone/fork install.
+<!-- migration-note-begin -->
+### Migrating from pre-1.14 layouts (issue #367)
+
+Starting in v1.14.0, agents and skills live at the repo root (`agents/` and `skills/`) rather than under `.github/`. This lets Claude Code auto-discover them via `.claude-plugin/plugin.json` while Copilot loads them through `plugin.json` (also at the repo root — relocated from `.github/plugin.json` in v2.0.0 so Copilot paths read as `./agents/` + `./skills/{name}/` without `..` escapes). Existing consumers must:
+
+1. Remove any `chat.agentFilesLocations` entry pointing at `.github/agents` from `settings.json`.
+2. If a consumer referenced `$copilotRoot/.github/skills/...` runtime paths, update to `$copilotRoot/skills/...`.
+3. Reinstall the orchestra as a plugin in both tools.
+
+<!-- legacy-path -->
+Example of a pre-1.14 `settings.json` entry that should be removed:
+
+```json
+{
+  "chat.agentFilesLocations": ["/absolute/path/to/agent-orchestra/.github/agents"]
+}
+```
+<!-- /legacy-path -->
+<!-- migration-note-end -->
 
 ---
 
@@ -75,7 +90,7 @@ Open GitHub Copilot Chat, run the **`/setup`** command. Setup runs in six phases
 | Phase | What it does | Skip available? |
 |-------|-------------|------------------|
 | **Phase 0** — Prerequisites | Auto-detects VS Code version, pwsh, git, and gh CLI; checks for empty workspace (creates `README.md` placeholder if needed) and wrong workspace | No — runs automatically |
-| **Phase 1** — User Setup | Sets `COPILOT_ORCHESTRA_ROOT` and VS Code settings (one-time, machine-level) | Yes — skips if already configured |
+| **Phase 1** — User Setup | Configures VS Code `chat.*Locations` settings (one-time, machine-level) | Yes — skips if already configured |
 | **Phase 2** — Project Basics | Collects project name, language, framework, database | Yes — skips if `copilot-instructions.md` already exists |
 | **Phase 3** — Architecture | Collects architecture style, conventions, build tool | Yes — skips if `architecture-rules.md` already exists |
 | **Phase 4** — Commands | Collects build, run, test, lint, and quick-validate commands | Yes — offered when Phases 2, 3, and 5 are all skipped |
@@ -110,7 +125,7 @@ This file defines structural rules for your codebase. Include:
 
 ### 3. Agent Definitions (Optional)
 
-Agents in `.github/agents/` work without customization. If you want to tweak behavior:
+Agents in `agents/` (at the repo root) work without customization. If you want to tweak behavior:
 
 - Agent files use YAML frontmatter (`---`) with fields like `name`, `description`, `tools`, `handoffs`
 - Focus on adjusting a specific agent's responsibilities or interaction patterns
@@ -118,7 +133,7 @@ Agents in `.github/agents/` work without customization. If you want to tweak beh
 
 ### 4. Add Domain Skills (Optional)
 
-Create project-specific knowledge packages in `.github/skills/`:
+Create project-specific knowledge packages in `skills/` (at the repo root):
 
 ```bash
 # In Copilot Chat:
@@ -132,26 +147,26 @@ Each skill needs a `SKILL.md` file with `name` and `description` frontmatter. VS
 To share agents across all repositories in your org:
 
 - Place agent files in an `agents/` folder at the root of your org's `.github` or `.github-private` repository
-- Repository-level agents in `.github/agents/` override org defaults
+- Repository-level agents in `agents/` (at the repo root) override org defaults
 
 ### 6. Session Startup Check (Optional)
 
-> **Tip**: If you're using the setup wizard (`/setup`), Phase 1 handles `COPILOT_ORCHESTRA_ROOT` and all VS Code settings automatically.
+> **Tip**: If you're using the setup wizard (`/setup`), Phase 1 handles the VS Code settings automatically.
 >
 > The steps below are the manual equivalent — follow them if you prefer to configure without the wizard, or if you need to adjust an existing configuration.
 
-The Copilot Orchestra includes a session startup check carried by the pipeline-entry agent files and delivered by the `session-startup` skill. It applies a session-memory run-once guard before any automatic detector invocation. The guard uses the marker `/memories/session/session-startup-check-complete.md`. The first automatic check in a conversation looks for stale feature branches and leftover issue-scoped tracking files, records that marker after the automatic startup check runs, and prevents repeated prompts from later agent hops even if cleanup is declined. Persistent calibration data under `.copilot-tracking/calibration/` is not cleanup work.
+The Agent Orchestra includes a session startup check carried by the pipeline-entry agent files and delivered by the `session-startup` skill. It applies a session-memory run-once guard before any automatic detector invocation. The guard uses the marker `/memories/session/session-startup-check-complete.md`. The first automatic check in a conversation looks for stale feature branches and leftover issue-scoped tracking files, records that marker after the automatic startup check runs, and prevents repeated prompts from later agent hops even if cleanup is declined. Persistent calibration data under `.copilot-tracking/calibration/` is not cleanup work.
 
-**Setup — two steps:**
+**Setup — one step:**
 
-**Step 1**: Add to your user VS Code settings (`settings.json`):
+Add to your user VS Code settings (`settings.json`):
 
 ```json
 {
-  "chat.agentFilesLocations": ["/absolute/path/to/copilot-orchestra/.github/agents"],
-  "chat.agentSkillsLocations": ["/absolute/path/to/copilot-orchestra/.github/skills"],
+  "chat.agentFilesLocations": ["/absolute/path/to/agent-orchestra/agents"],
+  "chat.agentSkillsLocations": ["/absolute/path/to/agent-orchestra/skills"],
   "chat.promptFilesLocations": {
-    "/absolute/path/to/copilot-orchestra/.github/prompts": true
+    "/absolute/path/to/agent-orchestra/.github/prompts": true
   }
 }
 ```
@@ -164,41 +179,15 @@ The Copilot Orchestra includes a session startup check carried by the pipeline-e
 
 > **Optional**: Add `chat.instructionsFilesLocations` only if you keep repo-local instruction files in your clone or target repo, for example generated consumer files like `.github/instructions/browser-tools.instructions.md`. It is no longer required for the migrated hub workflow guidance, which now ships via skills.
 >
-> **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/copilot-orchestra/.github/prompts"`. Apply the same format to every path-based setting above.
+> **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/agent-orchestra/.github/prompts"`. Apply the same format to every path-based setting above.
 >
 > **Migration note**: If you previously configured `chat.hookFilesLocations`, you can safely remove it — hooks have been replaced by the session startup check carried in the pipeline-entry agent files.
 
-**Step 2**: Set the `COPILOT_ORCHESTRA_ROOT` environment variable to the absolute path of your local copilot-orchestra clone. Without this, the session startup check will not run cleanup scripts. (If you already have `WORKFLOW_TEMPLATE_ROOT` set, it works as a fallback — no immediate action needed.)
+> **v2.0.0 env var removal**: Earlier versions required `COPILOT_ORCHESTRA_ROOT` (or `WORKFLOW_TEMPLATE_ROOT`) for the session startup check to locate its scripts. v2.0.0 makes the script self-resolve via `$PSScriptRoot`, so no env var configuration is needed. You can safely unset any old `COPILOT_ORCHESTRA_ROOT` / `WORKFLOW_TEMPLATE_ROOT` values — the detector ignores them now.
 
-**Windows (permanent — recommended)**:
+**What it does**: At the start of each conversation, the first automatic startup check uses the session-memory marker `/memories/session/session-startup-check-complete.md` to ensure the detector runs only once automatically per conversation. That automatic check looks for a deleted upstream branch (indicating a merged PR) or stale issue-scoped `.copilot-tracking/` files for merged issues. Persistent calibration data is excluded from cleanup detection. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`. If `pwsh` is unavailable, the detector script is missing, or the detector returns non-JSON output, the automatic check skips silently. If session-memory access fails, the detector still runs; explicit manual detector runs remain available after the automatic guard fires. For the full protocol, load the `session-startup` skill from `skills/session-startup/SKILL.md`.
 
-Set via System Properties > Advanced > Environment Variables, or from a PowerShell terminal:
-
-```powershell
-[System.Environment]::SetEnvironmentVariable('COPILOT_ORCHESTRA_ROOT', 'C:\path\to\copilot-orchestra', 'User')
-```
-
-This persists across all sessions, including VS Code launched from the Start Menu or GUI.
-
-**Windows (PowerShell profile — session-scope only)**:
-
-Add to your PowerShell profile (`$PROFILE`):
-
-```powershell
-$env:COPILOT_ORCHESTRA_ROOT = "C:\path\to\copilot-orchestra"
-```
-
-> **Note**: Profile-set variables are only available in shells where the profile is loaded. VS Code launched from the Start Menu or a desktop shortcut may not run your PowerShell profile, causing `COPILOT_ORCHESTRA_ROOT` to appear unset. Use the permanent approach above if this happens.
-
-**macOS/Linux (shell profile)**:
-
-```bash
-export COPILOT_ORCHESTRA_ROOT="/path/to/copilot-orchestra"
-```
-
-**What it does**: At the start of each conversation, the first automatic startup check uses the session-memory marker `/memories/session/session-startup-check-complete.md` to ensure the detector runs only once automatically per conversation. That automatic check looks for a deleted upstream branch (indicating a merged PR) or stale issue-scoped `.copilot-tracking/` files for merged issues. Persistent calibration data is excluded from cleanup detection. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`. If neither root environment variable is set, `pwsh` is unavailable, the detector script is missing, or the detector returns non-JSON output, the automatic check skips silently. If session-memory access fails, the detector still runs; explicit manual detector runs remain available after the automatic guard fires. For the full protocol, load the `session-startup` skill from `.github/skills/session-startup/SKILL.md`.
-
-**Requires**: PowerShell 7+ (`pwsh`) installed on PATH and `COPILOT_ORCHESTRA_ROOT` (or `WORKFLOW_TEMPLATE_ROOT`) set.
+**Requires**: PowerShell 7+ (`pwsh`) installed on PATH.
 
 ### 7. Project Scaffolding (Phase 5 of Setup Wizard)
 
@@ -206,7 +195,7 @@ When you run `/setup` and opt into Phase 5, the wizard can generate starter file
 
 | File | What it does |
 |------|-------------|
-| `.gitignore` additions | Appends copilot-orchestra tracking dirs (`/.copilot-tracking/`, `/.copilot-tracking-archive/`) and optional entries (`screenshots/`, `/.playwright-mcp/`) — additive only, never removes existing lines |
+| `.gitignore` additions | Appends agent-orchestra tracking dirs (`/.copilot-tracking/`, `/.copilot-tracking-archive/`) and optional entries (`screenshots/`, `/.playwright-mcp/`) — additive only, never removes existing lines |
 | `.vscode/settings.json` | Editor defaults: `formatOnSave`, `files.exclude`, `search.exclude`; web projects also add `workbench.browser.enableChatTools: true` for VS Code 1.110+ native browser tools |
 | `.vscode/extensions.json` | Empty recommendations array for you to populate |
 | `.vscode/mcp.json` *(web projects, optional)* | Playwright MCP config — optional fallback for users who prefer it over VS Code 1.110+ native browser tools |
@@ -269,8 +258,8 @@ VS Code 1.110+ includes an Agent Debug panel that gives real-time visibility int
 
 VS Code loads agents additively from all configured sources — there is no name-based deduplication. Any of these combinations will cause every agent to appear twice:
 
-1. **Plugin installed + working in a cloned repo** — the plugin loads agents from GitHub; the workspace `.github/agents/` folder loads them again. Fix: uninstall the plugin, or close the copilot-orchestra folder from your VS Code workspace (not recommended — prefer uninstalling the plugin if you want the clone experience).
+1. **Plugin installed + working in a cloned repo** — the plugin loads agents from GitHub; the workspace `.github/agents/` folder loads them again. Fix: uninstall the plugin, or close the agent-orchestra folder from your VS Code workspace (not recommended — prefer uninstalling the plugin if you want the clone experience).
 2. **Plugin installed + `chat.agentFilesLocations` in settings** — two sources, two copies of every agent. Fix: remove `chat.agentFilesLocations` from your VS Code user settings (keep `chat.agentSkillsLocations`, `chat.instructionsFilesLocations`, and `chat.promptFilesLocations` — those are safe).
-3. **Global `chat.agentFilesLocations` + working in a repo with `.github/agents/`** — global path and workspace auto-discovery both find the agents. Fix: remove `chat.agentFilesLocations` from user settings if you only need agents in the copilot-orchestra clone.
+3. **Global `chat.agentFilesLocations` + working in a repo with `.github/agents/`** — global path and workspace auto-discovery both find the agents. Fix: remove `chat.agentFilesLocations` from user settings if you only need agents in the agent-orchestra clone.
 
 > **Quick fix checklist**: Open VS Code user `settings.json` (`Ctrl+,` → open `settings.json`) and check for `chat.agentFilesLocations` and `chat.plugins.marketplaces`. Having entries for both plugin and clone-path settings is the most common cause of duplicates.

@@ -143,5 +143,5 @@ poetry install && poetry run ruff check .
 ## Related Documentation
 
 - [Architecture Rules](architecture-rules.md)
-- [TDD Workflow](../../.github/skills/test-driven-development/SKILL.md)
+- [TDD Workflow](../../skills/test-driven-development/SKILL.md)
 ````

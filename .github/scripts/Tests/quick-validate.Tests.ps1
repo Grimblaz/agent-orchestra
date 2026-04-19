@@ -41,14 +41,14 @@ Describe 'Invoke-QuickValidate' -Tag 'unit' {
 
         # ---------------------------------------------------------------
         # Helper: build a minimal valid fixture tree under TestDrive:\
-        # Includes .github\agents, .github\skills\test-skill, .github\scripts
+        # Includes agents, skills\test-skill, .github\scripts
         # All files pass every check by default.
         # ---------------------------------------------------------------
         $script:NewFixture = {
             param([string]$Root = "TestDrive:\qv-$([System.Guid]::NewGuid().ToString('N'))")
 
-            $agentsDir = Join-Path $Root '.github\agents'
-            $skillDir = Join-Path $Root '.github\skills\test-skill'
+            $agentsDir = Join-Path $Root 'agents'
+            $skillDir = Join-Path $Root 'skills\test-skill'
             $scriptsDir = Join-Path $Root '.github\scripts'
 
             New-Item -ItemType Directory -Path $agentsDir  -Force | Out-Null
@@ -145,7 +145,7 @@ Write-Output 'ok'
 
         It 'reports FAIL when Plan-Architect reference found' {
             $root = & $script:NewFixture
-            $agentFile = Join-Path $root '.github\agents\tainted.agent.md'
+            $agentFile = Join-Path $root 'agents\tainted.agent.md'
             Set-Content -Path $agentFile -Value 'Delegate to Plan-Architect for planning.' -Encoding UTF8
 
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
@@ -162,7 +162,7 @@ Write-Output 'ok'
 
         It 'reports FAIL when Janitor reference found' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root '.github\skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
             # Overwrite with content that still passes SKILL frontmatter checks but has Janitor
             Set-Content -Path $skillFile -Value @'
 ---
@@ -192,7 +192,7 @@ None.
 
         It 'reports FAIL when Issue-Designer reference found' {
             $root = & $script:NewFixture
-            $agentFile = Join-Path $root '.github\agents\bad.agent.md'
+            $agentFile = Join-Path $root 'agents\bad.agent.md'
             Set-Content -Path $agentFile -Value 'Route to Issue-Designer.' -Encoding UTF8
 
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
@@ -208,7 +208,7 @@ None.
 
         It 'reports FAIL when workflow-template reference found' {
             $root = & $script:NewFixture
-            $agentFile = Join-Path $root '.github\agents\bad.agent.md'
+            $agentFile = Join-Path $root 'agents\bad.agent.md'
             Set-Content -Path $agentFile -Value 'Uses the workflow-template pattern.' -Encoding UTF8
 
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
@@ -296,7 +296,7 @@ None.
 
         It 'reports FAIL when SKILL.md missing Use when/before in description' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root '.github\skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 name: test-skill
@@ -324,7 +324,7 @@ None.
 
         It 'reports FAIL when SKILL.md missing DO NOT USE FOR: in description' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root '.github\skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 name: test-skill
@@ -351,7 +351,7 @@ None.
 
         It 'reports FAIL when SKILL.md missing ## Gotchas heading' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root '.github\skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 name: test-skill
@@ -516,7 +516,7 @@ No gotchas section here.
 
         It 'reports FAIL when name field does not match directory name' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root '.github\skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 name: wrong-name
@@ -547,7 +547,7 @@ None.
 
         It 'reports FAIL when name contains an invalid character (slash)' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root '.github\skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 name: test-skill/bad
@@ -576,7 +576,7 @@ None.
 
         It 'reports FAIL when name field is missing from SKILL.md' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root '.github\skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 description: Test skill. Use when testing. DO NOT USE FOR: nothing.
@@ -605,7 +605,7 @@ None.
 
         It 'reports FAIL when name appears only in body (not frontmatter)' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root '.github\skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 description: Test skill. Use when testing. DO NOT USE FOR: nothing.
@@ -634,7 +634,7 @@ None.
 
         It 'reports PASS when name has indented frontmatter key' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root '.github\skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
   name: test-skill
@@ -661,7 +661,7 @@ None.
 
         It 'reports PASS when no skills directory exists' {
             $root = "TestDrive:\qv-noskills-$([System.Guid]::NewGuid().ToString('N'))"
-            New-Item -ItemType Directory -Path (Join-Path $root '.github\agents') -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $root 'agents') -Force | Out-Null
             New-Item -ItemType Directory -Path (Join-Path $root '.github\scripts') -Force | Out-Null
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
 
@@ -702,7 +702,7 @@ None.
         It 'returns ExitCode 1 when any check fails' {
             $root = & $script:NewFixture
             # Inject a single legacy reference to cause one failure
-            $agentFile = Join-Path $root '.github\agents\tainted.agent.md'
+            $agentFile = Join-Path $root 'agents\tainted.agent.md'
             Set-Content -Path $agentFile -Value 'See Plan-Architect for details.' -Encoding UTF8
 
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()

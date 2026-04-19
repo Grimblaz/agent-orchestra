@@ -2,7 +2,7 @@
 
 ## Summary
 
-The `/setup` prompt (`setup.prompt.md`) is a 6-phase interactive wizard that configures a new or existing repository for Copilot Orchestra. It generates scaffolding files directly, asks before overwriting, and guards against re-runs on already-configured repos. The wizard is safe to re-run at any time; skip gates at each phase prevent redundant work.
+The `/setup` prompt (`setup.prompt.md`) is a 6-phase interactive wizard that configures a new or existing repository for Agent Orchestra. It generates scaffolding files directly, asks before overwriting, and guards against re-runs on already-configured repos. The wizard is safe to re-run at any time; skip gates at each phase prevent redundant work.
 
 ---
 
@@ -24,7 +24,7 @@ The `/setup` prompt (`setup.prompt.md`) is a 6-phase interactive wizard that con
 | Phase | Name | Focus | Skip Gate |
 |-------|------|-------|-----------|
 | 0 | Prerequisites Check | Pre-flight checks + tool version detection | None — always runs |
-| 1 | User Setup | Set `COPILOT_ORCHESTRA_ROOT` env var (machine-level) | Already set to a valid path |
+| 1 | User Setup | Configure VS Code `chat.*Locations` settings so agents and instructions are discovered from the clone | Settings already configured |
 | 2 | Project Basics | Generate `.github/copilot-instructions.md` | File already exists (keep or regenerate) |
 | 3 | Architecture & Conventions | Generate `.github/architecture-rules.md` | File already exists (keep or regenerate) |
 | 4 | Commands | Collect build / run / test / lint commands | All of Phases 2, 3, and 5 are skipped |
@@ -36,7 +36,7 @@ Three checks run before any file creation:
 
 - **Check 0**: Display working directory and confirm before any file creation — gates all subsequent file writes to prevent silent creation in the wrong repo.
 - **Check 1**: If workspace has zero user-visible files (excluding `.git/`), create a `README.md` placeholder automatically. Workaround for VS Code's workspace context provider crash on empty workspaces (`Cannot read properties of undefined (reading 'fileName')`).
-- **Check 2**: If `.github/agents/` contains 10+ `.agent.md` files, warn that this may be the copilot-orchestra repo itself (heuristic: the template ships 14 agents; target projects rarely have 10+ at setup time).
+- **Check 2**: If `.github/agents/` contains 10+ `.agent.md` files, warn that this may be the agent-orchestra repo itself (heuristic: the template ships 14 agents; target projects rarely have 10+ at setup time).
 
 Phase 0 also runs `code --version`, `pwsh --version`, `git --version`, and `gh --version` to detect prerequisites automatically.
 

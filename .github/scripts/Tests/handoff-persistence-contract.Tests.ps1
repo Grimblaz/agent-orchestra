@@ -6,10 +6,10 @@
 
 .DESCRIPTION
     Locks the execution handoff persistence contract across:
-      - .github/agents/Issue-Planner.agent.md
-      - .github/agents/Code-Conductor.agent.md
+      - agents/Issue-Planner.agent.md
+      - agents/Code-Conductor.agent.md
       - .github/copilot-instructions.md
-    - .github/skills/tracking-format/SKILL.md
+    - skills/tracking-format/SKILL.md
       - .github/prompts/start-issue.prompt.md
       - Documents/Design/plan-storage.md
       - Documents/Design/hub-mode-ux.md
@@ -30,12 +30,12 @@ Describe 'execution handoff persistence contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:IssuePlanner = Join-Path $script:RepoRoot '.github\agents\Issue-Planner.agent.md'
-        $script:CodeConductor = Join-Path $script:RepoRoot '.github\agents\Code-Conductor.agent.md'
+        $script:IssuePlanner = Join-Path $script:RepoRoot 'agents\Issue-Planner.agent.md'
+        $script:CodeConductor = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
         $script:CopilotInstructions = Join-Path $script:RepoRoot '.github\copilot-instructions.md'
-        $script:ExperienceOwner = Join-Path $script:RepoRoot '.github\agents\Experience-Owner.agent.md'
-        $script:SolutionDesigner = Join-Path $script:RepoRoot '.github\agents\Solution-Designer.agent.md'
-        $script:TrackingInstructions = Join-Path $script:RepoRoot '.github\skills\tracking-format\SKILL.md'
+        $script:ExperienceOwner = Join-Path $script:RepoRoot 'agents\Experience-Owner.agent.md'
+        $script:SolutionDesigner = Join-Path $script:RepoRoot 'agents\Solution-Designer.agent.md'
+        $script:TrackingInstructions = Join-Path $script:RepoRoot 'skills\tracking-format\SKILL.md'
         $script:StartIssuePrompt = Join-Path $script:RepoRoot '.github\prompts\start-issue.prompt.md'
         $script:PlanStorage = Join-Path $script:RepoRoot 'Documents\Design\plan-storage.md'
         $script:HubModeUx = Join-Path $script:RepoRoot 'Documents\Design\hub-mode-ux.md'
@@ -179,7 +179,7 @@ Describe 'execution handoff persistence contract' {
     }
 
     It 'requires provenance-gate skill file to exist and use the same marker pattern' {
-        $skillPath = Join-Path $PSScriptRoot '../../skills/provenance-gate/SKILL.md'
+        $skillPath = Join-Path $PSScriptRoot '../../../skills/provenance-gate/SKILL.md'
 
         Test-Path $skillPath | Should -BeTrue -Because 'provenance-gate/SKILL.md must exist as the full assessment protocol'
         $skillContent = Get-Content -Path $skillPath -Raw

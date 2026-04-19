@@ -1,0 +1,260 @@
+{
+  "specialist_dispatch": {
+    "source": "agents/Code-Conductor.agent.md",
+    "entries": [
+      {
+        "file_type_or_task": "*.test.*, test suites, fixtures",
+        "file_patterns": ["*.test.*"],
+        "keywords": ["test", "assertion", "flaky", "coverage"],
+        "agent": "Test-Writer"
+      },
+      {
+        "file_type_or_task": "src/**/*.ts, src/**/*.tsx (new behavior)",
+        "file_patterns": ["src/*.ts", "src/*.tsx"],
+        "keywords": ["implement", "feature", "bugfix", "logic"],
+        "agent": "Code-Smith"
+      },
+      {
+        "file_type_or_task": "*.ps1",
+        "file_patterns": ["*.ps1"],
+        "keywords": ["script", "automation", "powershell"],
+        "agent": "Code-Smith"
+      },
+      {
+        "file_type_or_task": "src/**/*.ts, src/**/*.tsx (restructure existing)",
+        "keywords": ["refactor", "simplify", "extract", "dedupe"],
+        "agent": "Refactor-Specialist"
+      },
+      {
+        "file_type_or_task": "UI source files (visual polish)",
+        "keywords": ["ui polish", "spacing", "alignment", "styling"],
+        "agent": "UI-Iterator"
+      },
+      {
+        "file_type_or_task": "*.md, README.*, CHANGELOG.*",
+        "file_patterns": ["*.md", "README.*", "CHANGELOG.*"],
+        "keywords": ["docs", "guide", "changelog"],
+        "agent": "Doc-Keeper"
+      },
+      {
+        "file_type_or_task": "Session memory /memories/session/plan-issue-{ID}.md or GitHub issue comment with <!-- plan-issue-{ID} --> marker",
+        "keywords": ["plan", "acceptance criteria", "sequencing"],
+        "agent": "Issue-Planner"
+      },
+      {
+        "file_type_or_task": "CE Gate evidence capture (downstream); upstream customer framing, scenarios, design intent",
+        "keywords": ["ce gate", "customer", "experience", "journey", "scenarios"],
+        "agent": "Experience-Owner"
+      },
+      {
+        "file_type_or_task": "Code review (read-only)",
+        "keywords": ["review", "risks", "quality", "critique"],
+        "agent": "Code-Critic"
+      },
+      {
+        "file_type_or_task": "Categorize review feedback (read-only)",
+        "keywords": ["judge", "score", "prosecution", "defense", "categorize"],
+        "agent": "Code-Review-Response"
+      },
+      {
+        "file_type_or_task": "Process/systemic gap analysis",
+        "keywords": ["ce-gate-defect", "process-gap", "systemic"],
+        "agent": "Process-Review"
+      }
+    ]
+  },
+  "review_mode_routing": {
+    "source": "agents/Code-Critic.agent.md",
+    "default_mode": "code_prosecution",
+    "entries": [
+      {
+        "marker": null,
+        "mode": "code_prosecution",
+        "passes": 3,
+        "parallel": true
+      },
+      {
+        "marker": "Use design review perspectives",
+        "mode": "design_plan_prosecution",
+        "passes": 2,
+        "parallel": true
+      },
+      {
+        "marker": "Use product-alignment perspectives",
+        "mode": "product_alignment_prosecution",
+        "passes": 1,
+        "parallel": false
+      },
+      {
+        "marker": "Use defense review perspectives",
+        "mode": "defense",
+        "passes": 1,
+        "parallel": false
+      },
+      {
+        "marker": "Use CE review perspectives",
+        "mode": "ce_prosecution",
+        "passes": 1,
+        "parallel": false
+      },
+      {
+        "marker": "Score and represent GitHub review",
+        "mode": "proxy_prosecution",
+        "passes": 1,
+        "parallel": false
+      }
+    ],
+    "conflict_rule": {
+      "priority_order": [
+        "defense",
+        "ce_prosecution",
+        "proxy_prosecution",
+        "product_alignment_prosecution",
+        "design_plan_prosecution",
+        "code_prosecution"
+      ],
+      "override_rules": [
+        {
+          "marker": "Use code review perspectives",
+          "overrides_marker": "Use design review perspectives",
+          "forced_mode": "code_prosecution"
+        }
+      ]
+    }
+  },
+  "surface_identification": {
+    "source": "agents/Code-Conductor.agent.md",
+    "entries": [
+      {
+        "surface_type": "Web UI",
+        "tool_or_method": "Native browser tools (openBrowserPage + screenshotPage)",
+        "fallback": "Playwright MCP as fallback"
+      },
+      {
+        "surface_type": "REST / GraphQL",
+        "tool_or_method": "curl or httpie in terminal"
+      },
+      {
+        "surface_type": "CLI",
+        "tool_or_method": "Invoke command in terminal with test args"
+      },
+      {
+        "surface_type": "SDK",
+        "tool_or_method": "Example invocation in terminal"
+      },
+      {
+        "surface_type": "Batch / pipeline",
+        "tool_or_method": "Invoke with representative test data"
+      },
+      {
+        "surface_type": "No customer surface",
+        "tool_or_method": "Skip with documented reason",
+        "status_result_template": "⏭️ CE Gate not applicable — {reason}"
+      }
+    ]
+  },
+  "skill_mapping": {
+    "source": "agents/Code-Conductor.agent.md",
+    "reference_only": true,
+    "entries": [
+      {
+        "skill": "adversarial-review",
+        "when_to_use": "Running prosecution passes or defense perspectives with Code-Critic"
+      },
+      {
+        "skill": "customer-experience",
+        "when_to_use": "Framing customer journeys or capturing CE evidence with Experience-Owner"
+      },
+      {
+        "skill": "design-exploration",
+        "when_to_use": "Researching and converging technical design options with Solution-Designer"
+      },
+      {
+        "skill": "documentation-finalization",
+        "when_to_use": "Updating design docs, READMEs, or implementation-facing docs with Doc-Keeper"
+      },
+      {
+        "skill": "frontend-design",
+        "when_to_use": "Designing new UI components, screens, or evaluating for uniqueness"
+      },
+      {
+        "skill": "implementation-discipline",
+        "when_to_use": "Implementing bounded plan steps or verifying production wiring with Code-Smith"
+      },
+      {
+        "skill": "parallel-execution",
+        "when_to_use": "Coordinating concurrent implementation paths, convergence gates, or triage routing"
+      },
+      {
+        "skill": "plan-authoring",
+        "when_to_use": "Drafting or refining execution plans with Issue-Planner"
+      },
+      {
+        "skill": "property-based-testing",
+        "when_to_use": "Adding randomized testing, validating input ranges, or verifying invariants"
+      },
+      {
+        "skill": "refactoring-methodology",
+        "when_to_use": "Running a proportionate structural cleanup pass with Refactor-Specialist"
+      },
+      {
+        "skill": "research-methodology",
+        "when_to_use": "Gathering verified multi-file findings for a research document with Research-Agent"
+      },
+      {
+        "skill": "review-judgment",
+        "when_to_use": "Ruling on prosecution plus defense ledgers with Code-Review-Response"
+      },
+      {
+        "skill": "skill-creator",
+        "when_to_use": "Adding new skills, updating skill templates, or reviewing skill structure"
+      },
+      {
+        "skill": "software-architecture",
+        "when_to_use": "Evaluating layer boundaries, dependency flow, or ADR-level decisions"
+      },
+      {
+        "skill": "systematic-debugging",
+        "when_to_use": "Debugging failures, investigating flaky tests, or tracking root causes"
+      },
+      {
+        "skill": "test-driven-development",
+        "when_to_use": "Writing tests first, red-green-refactor, or validating quality gates"
+      },
+      {
+        "skill": "ui-iteration",
+        "when_to_use": "Running screenshot-driven UI polish passes with UI-Iterator"
+      },
+      {
+        "skill": "ui-testing",
+        "when_to_use": "Writing component-level React tests, fixing flaky tests, or establishing patterns"
+      },
+      {
+        "skill": "webapp-testing",
+        "when_to_use": "Creating or improving browser-based E2E coverage, test stability, or CI"
+      }
+    ]
+  },
+  "enums": {
+    "severity": ["critical", "high", "medium", "low"],
+    "points_mapping": {
+      "critical": 10,
+      "high": 10,
+      "medium": 5,
+      "low": 1
+    },
+    "confidence": ["high", "medium", "low"],
+    "category": [
+      "architecture",
+      "security",
+      "performance",
+      "pattern",
+      "implementation-clarity",
+      "script-automation",
+      "documentation-audit"
+    ],
+    "blast_radius": ["localized", "module", "cross-module", "system-wide"],
+    "authority_needed": ["yes", "no"],
+    "systemic_fix_type": ["instruction", "skill", "agent-prompt", "plan-template", "none"]
+  }
+}

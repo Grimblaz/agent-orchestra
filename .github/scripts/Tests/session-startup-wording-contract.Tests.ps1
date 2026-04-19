@@ -6,7 +6,7 @@
 
 .DESCRIPTION
         Locks the contributor-facing startup-check contract in:
-            - .github/skills/session-startup/SKILL.md
+            - skills/session-startup/SKILL.md
 
                 The skill must describe the canonical semantics for:
             - one canonical session-memory marker path for the automatic startup guard
@@ -21,28 +21,28 @@ Describe 'session startup wording contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SessionStartupSkill = Join-Path $script:RepoRoot '.github\skills\session-startup\SKILL.md'
+        $script:SessionStartupSkill = Join-Path $script:RepoRoot 'skills\session-startup\SKILL.md'
         $script:CanonicalMarkerPath = '/memories/session/session-startup-check-complete.md'
         $script:CanonicalTriggerText = 'Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.'
         $script:LegacySilentSkipSummary = 'Skip the automatic startup check silently when neither `$env:COPILOT_ORCHESTRA_ROOT` nor `$env:WORKFLOW_TEMPLATE_ROOT` is set, `pwsh` is unavailable, or the detector returns non-JSON output.'
-        $script:DetectorCommandPattern = '(?ms)^pwsh -NoProfile -NonInteractive -File "\$copilotRoot/\.github/skills/session-startup/scripts/session-cleanup-detector\.ps1"\s*$'
+        $script:DetectorCommandPattern = '(?ms)^pwsh -NoProfile -NonInteractive -File "[^"]*skills/session-startup/scripts/session-cleanup-detector\.ps1"\s*$'
         $script:ContractHeadingPattern = '(?m)^### Canonical Automatic Startup Guard Contract\s*$'
         $script:PipelineEntryAgents = @(
             @{
                 Name = 'Experience-Owner'
-                Path = Join-Path $script:RepoRoot '.github\agents\Experience-Owner.agent.md'
+                Path = Join-Path $script:RepoRoot 'agents\Experience-Owner.agent.md'
             },
             @{
                 Name = 'Solution-Designer'
-                Path = Join-Path $script:RepoRoot '.github\agents\Solution-Designer.agent.md'
+                Path = Join-Path $script:RepoRoot 'agents\Solution-Designer.agent.md'
             },
             @{
                 Name = 'Issue-Planner'
-                Path = Join-Path $script:RepoRoot '.github\agents\Issue-Planner.agent.md'
+                Path = Join-Path $script:RepoRoot 'agents\Issue-Planner.agent.md'
             },
             @{
                 Name = 'Code-Conductor'
-                Path = Join-Path $script:RepoRoot '.github\agents\Code-Conductor.agent.md'
+                Path = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
             }
         )
         $script:ExpectedContract = [ordered]@{
