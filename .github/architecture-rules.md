@@ -20,10 +20,12 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 
 ## Layer Model
 
-- Skills: Fat, on-demand methodology, judgment, documentation, and supporting data
-- Harness: Agent files keep routing, context, safety, and decision authority
-- Deterministic/Application bottom layer: Same-input, same-output evaluation and concrete tools/code
-- Resolvers: Structured context and routing data that helps load the right skill or content
+| Layer | Purpose | In Copilot Orchestra |
+|-------|---------|---------------------|
+| **Top (fat)** | Skills — judgment, methodology, process, documentation, and supporting data loaded on demand | `.github/skills/` |
+| **Middle (thin)** | Harness — routing, context management, safety, and decision authority | Agent files (`.github/agents/`) |
+| **Bottom** | Application — deterministic same-input/same-output evaluation, concrete tools, consumer codebase | `.github/scripts/`, `.github/skills/{name}/scripts/`, VS Code tools, GitHub API |
+| **Resolvers** | Structured routing/context lookup data that helps load the right skill or content | `.github/skills/{name}/assets/` (JSON/YAML), `.github/instructions/` |
 
 ## Dependency Rules
 
@@ -34,14 +36,14 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 - Agents MAY load instructions from `.github/instructions/`
 - User-facing agents MAY delegate to internal agents as subagents
 - Skills MAY reference other skills or instructions by file path
+- Skills MAY contain static data files (JSON, YAML) in `assets/` and deterministic evaluation scripts in `scripts/` that agents invoke for routing decisions
+- Skills MAY contain reusable methodology and protocol content, including ordered workflows, checklists, decision heuristics, and evidence requirements that agents load on demand
 
 ### Forbidden
 
 - Internal agents (`user-invocable: false`) must NOT be directly user-invocable; they MAY appear in agent `handoffs` lists as subagents
 - Agents must NOT reference deleted agents (e.g., Plan-Architect, Issue-Designer) — validate with `grep`
 - Skills must NOT own orchestration boundaries such as user-turn routing, agent handoffs, commit authority, issue-state transitions, or Code-Conductor's step execution loop
-- Skills MAY contain static data files (JSON, YAML) in `assets/` and deterministic evaluation scripts in `scripts/` that agents invoke for routing decisions
-- Skills MAY contain reusable methodology and protocol content, including ordered workflows, checklists, decision heuristics, and evidence requirements that agents load on demand
 - Concrete boundary examples: Code-Conductor's validation ladder may live in a skill, but CE Gate orchestration and subagent routing stay in the agent; test-driven-development may hold Test-Writer methodology, but conditional delegation and execution flow stay in Test-Writer; session-startup, provenance-gate, and terminal-hygiene remain portable skills while the trigger points that invoke them stay in agents
 - The `guidance-complexity` D10 ceiling and prompt-facing guidance rules remain agent-only; issue #360 may move the measurement script and related tooling into the `guidance-measurement` skill without moving the rule set itself
 - Only Code-Conductor may auto-commit, and only after validation ladder and RC conformance gate pass; specialist agents must NOT commit; consumers may opt out via `## Commit Policy` section
@@ -72,6 +74,10 @@ Must live in `.github/instructions/`
 
 - Agent files: `{Agent-Name}.agent.md` (PascalCase with hyphens)
 - Skill directories: `{skill-name}/` (lowercase with hyphens)
+- Skill core libraries: `{name}-core.ps1` (mirrors `.github/scripts/lib/` — dot-sourced by CLI wrappers)
+- Skill CLI wrappers & standalone scripts: lowercase-with-hyphens, descriptive (e.g., `post-merge-cleanup.ps1`)
+- Skill helper modules: `{descriptive-name}-helpers.ps1` (non-Invoke-* utility functions)
+- Skill asset files: lowercase-with-hyphens, descriptive (e.g., `routing-config.json`, `gate-criteria.json`)
 - Instruction files: `{topic}.instructions.md` (lowercase with hyphens)
 - Design documents: `{domain-slug}.md` (lowercase with hyphens)
 
