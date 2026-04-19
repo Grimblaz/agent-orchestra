@@ -6,14 +6,17 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 
 | Directory                | Purpose                                              | Allowed Contents                                               |
 | ------------------------ | ---------------------------------------------------- | -------------------------------------------------------------- |
-| `.github/agents/`        | Agent definitions                                    | `*.agent.md` files with YAML frontmatter                      |
-| `.github/skills/{name}/` | Domain-specific knowledge                            | `SKILL.md` with frontmatter, plus optional `assets/` and `scripts/` subdirectories for supporting files |
+| `agents/`                | Agent definitions (repo root — enables Claude Code auto-discovery) | `*.agent.md` files with YAML frontmatter                      |
+| `skills/{name}/`         | Domain-specific knowledge (repo root — enables Claude Code auto-discovery) | `SKILL.md` with frontmatter, plus optional `assets/`, `scripts/`, and `platforms/` subdirectories for supporting files |
+| `skills/{name}/platforms/` | Platform-specific invocation snippets for a skill  | `copilot.md`, `claude.md` — loaded by the owning SKILL.md's canonical routing footer |
 | `.github/instructions/`  | Shared rules loaded by agents                        | `*.instructions.md` files                                     |
 | `.github/prompts/`       | Prompt files and workflow templates                  | `*.prompt.md` with frontmatter; supporting `*.md` templates   |
 | `.github/scripts/`       | Automation scripts invoked by agents or instructions | `*.ps1` PowerShell scripts                                    |
 | `.github/scripts/lib/`   | Library modules dot-sourced by CLI wrappers and tests | `{name}-core.ps1` files exposing `Invoke-*` functions; the corresponding CLI script in `.github/scripts/` is a thin wrapper that dot-sources the library and relays results |
 | `.github/config/`        | Committed configuration files consumed by automation scripts | JSON config files                                      |
-| `.github/plugin/`        | VS Code agent plugin manifests                       | `plugin.json`, `marketplace.json`                             |
+| `.github/plugin.json`    | Copilot/VS Code plugin manifest (paths relative to `.github/`, so `../agents/` + `../skills/...`) | `plugin.json` |
+| `.claude-plugin/plugin.json` | Claude Code plugin manifest (metadata only; Claude Code auto-discovers repo-root `agents/` + `skills/`) | `plugin.json` |
+| `.github/plugin/`        | Marketplace manifest for the Copilot plugin          | `marketplace.json`                                             |
 | `Documents/Design/`      | Design documents (committed with implementation PRs) | `{domain-slug}.md`                                            |
 | `Documents/Decisions/`   | Standalone decision records                          | Markdown files                                                 |
 | `examples/`              | Example configurations for different tech stacks     | Subdirectories per stack                                       |
@@ -22,17 +25,26 @@ These rules define the structural constraints for Copilot Orchestra. All agents 
 
 | Layer | Purpose | In Copilot Orchestra |
 |-------|---------|---------------------|
-| **Top (fat)** | Skills — judgment, methodology, process, documentation, and supporting data loaded on demand | `.github/skills/` |
-| **Middle (thin)** | Harness — routing, context management, safety, and decision authority | Agent files (`.github/agents/`) |
-| **Bottom** | Application — deterministic same-input/same-output evaluation, concrete tools, consumer codebase | `.github/scripts/`, `.github/skills/{name}/scripts/`, VS Code tools, GitHub API |
-| **Resolvers** | Structured routing/context lookup data that helps load the right skill or content | `.github/skills/{name}/assets/` (JSON/YAML), `.github/instructions/` |
+| **Top (fat)** | Skills — judgment, methodology, process, documentation, and supporting data loaded on demand | `skills/` (repo root) |
+| **Middle (thin)** | Harness — routing, context management, safety, and decision authority | Agent files (`agents/` at repo root) |
+| **Bottom** | Application — deterministic same-input/same-output evaluation, concrete tools, consumer codebase | `.github/scripts/`, `skills/{name}/scripts/`, VS Code tools, GitHub API |
+| **Resolvers** | Structured routing/context lookup data that helps load the right skill or content | `skills/{name}/assets/` (JSON/YAML), `.github/instructions/` |
+
+## platforms/ Convention
+
+Some skills depend on platform-specific tool invocations that differ between Copilot (VS Code) and Claude Code. Those skills keep their methodology tool-agnostic inside `SKILL.md` and split platform-specific invocation guidance into sibling files:
+
+- `skills/{name}/platforms/copilot.md` — VS Code / Copilot invocation (e.g., `#tool:vscode/askQuestions`)
+- `skills/{name}/platforms/claude.md` — Claude Code invocation (e.g., `AskUserQuestion`)
+
+Each such skill ends with a byte-identical canonical routing footer listing both platform files. The footer keeps skill methodology portable across tools while letting each platform layer in its own tool bindings. D3b exemption: `session-startup` retains inline Copilot-specific methodology because its trigger path is Copilot-native.
 
 ## Dependency Rules
 
 ### Allowed
 
 - Agents MAY reference other agents via `handoffs` frontmatter
-- Agents MAY load skills from `.github/skills/` on demand
+- Agents MAY load skills from `skills/` (repo root) on demand
 - Agents MAY load instructions from `.github/instructions/`
 - User-facing agents MAY delegate to internal agents as subagents
 - Skills MAY reference other skills or instructions by file path
@@ -62,8 +74,8 @@ Optional frontmatter: `handoffs`, `user-invocable` (defaults to `true` if omitte
 ### Skill Files (`SKILL.md`)
 
 Required frontmatter: `name`, `description`
-Must live in `.github/skills/{skill-name}/SKILL.md`
-Supporting files MAY live under optional `.github/skills/{skill-name}/assets/` and `.github/skills/{skill-name}/scripts/` subdirectories
+Must live in `skills/{skill-name}/SKILL.md` at the repo root
+Supporting files MAY live under optional `skills/{skill-name}/assets/`, `skills/{skill-name}/scripts/`, and `skills/{skill-name}/platforms/` subdirectories
 
 ### Instruction Files (`.instructions.md`)
 
@@ -75,6 +87,7 @@ Must live in `.github/instructions/`
 - Agent files: `{Agent-Name}.agent.md` (PascalCase with hyphens)
 - Skill directories: `{skill-name}/` (lowercase with hyphens)
 - Skill core libraries: `{name}-core.ps1` (mirrors `.github/scripts/lib/` — dot-sourced by CLI wrappers)
+- Skill platform files: `platforms/{platform}.md` where `{platform}` is `copilot` or `claude`
 - Skill CLI wrappers & standalone scripts: lowercase-with-hyphens, descriptive (e.g., `post-merge-cleanup.ps1`)
 - Skill helper modules: `{descriptive-name}-helpers.ps1` (non-Invoke-* utility functions)
 - Skill asset files: lowercase-with-hyphens, descriptive (e.g., `routing-config.json`, `gate-criteria.json`)
