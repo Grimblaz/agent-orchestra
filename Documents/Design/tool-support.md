@@ -12,6 +12,8 @@ authored entirely as GitHub Copilot artifacts.
 
 ## Design Decisions
 
+> **D1 — Superseded by [ADR-0001](../Decisions/0001-cross-tool-support.md)** (2026-04-19, issue #367). The rationale for single-tool focus (dual-maintenance of parallel context files) no longer applies once both tools consume the same `skills/` and `agents/` content via plugin distribution. The original decision text is preserved below for historical context.
+
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
 | D1 | Tool target | GitHub Copilot only (Claude Code support removed) | `CLAUDE.md` and `.github/copilot-instructions.md` duplicated all project context; dual-maintenance overhead with no net user benefit. Copilot-only focus removed ~831 lines of redundant scaffolding and reduces template complexity. |
