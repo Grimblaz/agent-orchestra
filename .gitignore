@@ -1,4 +1,5 @@
 .copilot-tracking/
 .copilot-tracking-archive/
+.claude/
 plan-issue-*.md
 pester-*.txt

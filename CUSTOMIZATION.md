@@ -39,6 +39,31 @@ This template supports two distribution models:
 >
 > If you're seeing duplicate agents in the chat picker, see the **Troubleshooting** section below.
 
+#### What works out of the box vs. what you need to set up yourself
+
+| Feature | Plugin | What you need |
+|---------|--------|---------------|
+| All 14 agents in chat picker | ✅ Works | Nothing |
+| All 39 skills in Configure Skills menu | ✅ Works | Nothing |
+| 9 slash commands (`/setup`, `/design`, etc.) | ✅ Works | Nothing |
+| Shared workflow skills (`safe-operations`, `step-commit`, etc.) | ✅ Works | Nothing |
+| Session startup check (`COPILOT_ORCHESTRA_ROOT`) | ⚠️ Silently skips | Set `COPILOT_ORCHESTRA_ROOT` env var (optional — only needed if you want the startup check) |
+| Project-aware agent guidance | ⚠️ Generic only | Copy `copilot-instructions.md` and `architecture-rules.md` to your project's `.github/` directory |
+| `chat.instructionsFilesLocations` rules | ⚠️ Not distributed | Add `chat.instructionsFilesLocations` pointing to your clone if needed |
+| Scripts from `.github/scripts/` (e.g. post-PR cleanup) | ❌ Not accessible without env var | Use manual archive method documented in `post-pr-review` skill, or set `COPILOT_ORCHESTRA_ROOT` |
+| `/release` slash command | ❌ Intentionally excluded | Clone or fork the repo (maintainer workflow only) |
+
+#### Script portability for plugin users
+
+Skills that invoke PowerShell scripts fall into two categories:
+
+| Category | Scripts | Plugin behavior |
+|----------|---------|-----------------|
+| **Portable** — use `$PSScriptRoot` to locate siblings | `routing-tables-core.ps1`, `check-port.ps1` | ✅ Work from plugin cache path |
+| **Workspace-bound** — rely on `COPILOT_ORCHESTRA_ROOT` or CWD defaults | `measure-guidance-complexity-core.ps1`, `session-cleanup-detector-core.ps1` | ⚠️ Require env var or clone/fork |
+
+If a skill's script silently produces no output when invoked via the plugin, it is likely workspace-bound. Set `COPILOT_ORCHESTRA_ROOT` to your clone path, or switch to the clone/fork install.
+
 ---
 
 ## Quick Option: Setup Wizard

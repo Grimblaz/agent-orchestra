@@ -81,6 +81,68 @@ function Test-QVSkillFrontmatter {
     }
 }
 
+function Test-QVSkillNameMatch {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RootPath
+    )
+
+    $skillsPath = Join-Path -Path $RootPath -ChildPath '.github' -AdditionalChildPath 'skills'
+    if (-not (Test-Path $skillsPath)) {
+        return [PSCustomObject]@{ Name = 'SkillNameMatch'; Passed = $true; Detail = '' }
+    }
+
+    $skillDirs = @(Get-ChildItem -Path $skillsPath -Directory)
+    $failures = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($dir in $skillDirs) {
+        $skillFile = Join-Path -Path $dir.FullName -ChildPath 'SKILL.md'
+        if (-not (Test-Path $skillFile)) { continue }
+
+        # Read only the YAML frontmatter so a stray `name:` in the body cannot
+        # masquerade as the declared name. Allow leading whitespace on the key.
+        $lines = Get-Content -Path $skillFile -TotalCount 40
+        $frontmatter = @()
+        if ($lines -and $lines[0] -match '^---\s*$') {
+            for ($i = 1; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '^---\s*$') { break }
+                $frontmatter += $lines[$i]
+            }
+        }
+        $nameMatch = $frontmatter | Select-String -Pattern '^\s*name:\s*(.+?)\s*$' | Select-Object -First 1
+        if (-not $nameMatch) {
+            $failures.Add("$($dir.Name)/SKILL.md: missing 'name:' field in frontmatter")
+            continue
+        }
+
+        $declaredName = $nameMatch.Matches[0].Groups[1].Value.Trim().Trim('"').Trim("'")
+
+        if ($declaredName -ne $dir.Name) {
+            $failures.Add("$($dir.Name)/SKILL.md: name '$declaredName' does not match directory '$($dir.Name)'")
+            continue
+        }
+        # VS Code silently drops skills whose name contains slash/colon/dot
+        # or exceeds 64 chars. See agent-skills docs.
+        if ($declaredName -match '[/:.]') {
+            $failures.Add("$($dir.Name)/SKILL.md: name contains invalid character (/ : .)")
+            continue
+        }
+        if ($declaredName.Length -gt 64) {
+            $failures.Add("$($dir.Name)/SKILL.md: name exceeds 64 chars ($($declaredName.Length))")
+        }
+    }
+
+    if ($failures.Count -eq 0) {
+        return [PSCustomObject]@{ Name = 'SkillNameMatch'; Passed = $true; Detail = '' }
+    }
+
+    return [PSCustomObject]@{
+        Name   = 'SkillNameMatch'
+        Passed = $false
+        Detail = "$($failures.Count) issue(s): $($failures -join '; ')"
+    }
+}
+
 function Test-QVGuidanceComplexity {
     param(
         [Parameter(Mandatory)]
@@ -276,6 +338,9 @@ function Invoke-QuickValidate {
         # 10. SkillAssetJsonParse
         try { $results.Add((Test-QVSkillAssetJsonParse -RootPath $RootPath)) }
         catch { $results.Add([PSCustomObject]@{ Name = 'SkillAssetJsonParse'; Passed = $false; Detail = "Error: $_" }) }
+        # 11. SkillNameMatch
+        try { $results.Add((Test-QVSkillNameMatch -RootPath $RootPath)) }
+        catch { $results.Add([PSCustomObject]@{ Name = 'SkillNameMatch'; Passed = $false; Detail = "Error: $_" }) }
 
         $passCount = @($results | Where-Object { $_.Passed -eq $true }).Count
         $failCount = @($results | Where-Object { $_.Passed -eq $false }).Count

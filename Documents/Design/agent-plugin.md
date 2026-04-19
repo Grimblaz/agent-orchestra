@@ -7,7 +7,7 @@
 
 ## Problem
 
-Users cloning or forking the full repository get 13 agents, 14 skills, and slash commands auto-discovered by VS Code. However this requires a repo copy — plugin-only install was not possible.
+Users cloning or forking the full repository get 14 agents, 39 skills, and slash commands auto-discovered by VS Code. However this requires a repo copy — plugin-only install was not possible.
 
 VS Code 1.110 introduced an experimental agent plugin system (`chat.plugins.enabled` setting) that allows distributing agents, skills, and slash commands via a GitHub-hosted manifest without requiring a clone.
 
@@ -29,7 +29,7 @@ The `.github/plugin/` directory was chosen (rather than root) to keep plugin inf
 ```json
 {
   "agents": ["./.github/agents"],
-  "skills": [ /* 14 individual skill directory paths */ ],
+  "skills": [ /* 39 individual skill directory paths */ ],
   "commands": [
     "./.github/prompts/setup.prompt.md",
     "./.github/prompts/start-issue.prompt.md",
@@ -115,8 +115,8 @@ The 7 new slash commands (`/design`, `/plan`, `/implement`, `/review`, `/polish`
 
 | Feature | Plugin | Clone/Fork |
 |---------|--------|------------|
-| 13 agents | ✅ | ✅ |
-| 14 skills | ✅ | ✅ |
+| 14 agents | ✅ | ✅ |
+| 39 skills | ✅ | ✅ |
 | `/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish`, `/experience`, `/orchestrate` slash commands | ✅ | ✅ |
 | `/release` slash command | ❌ not in plugin.json | ✅ auto-discovered |
 | `.github/instructions/` (shared rules; `session-startup` operational content inlined into `.github/copilot-instructions.md`) | ❌ not distributed | ✅ auto-discovered |

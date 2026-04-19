@@ -2,17 +2,17 @@
   "name": "copilot-orchestra",
   "metadata": {
     "description": "Multi-agent workflow system for GitHub Copilot",
-    "version": "1.11.0"
+    "version": "1.12.0"
   },
   "owner": {
-    "name": "YOUR-ORG"
+    "name": "Grimblaz"
   },
   "plugins": [
     {
       "name": "copilot-orchestra",
       "source": ".",
       "description": "Multi-agent workflow system for GitHub Copilot with 14 specialized agents, 39 skills, and pipeline orchestration.",
-      "version": "1.11.0"
+      "version": "1.12.0"
     }
   ]
 }
