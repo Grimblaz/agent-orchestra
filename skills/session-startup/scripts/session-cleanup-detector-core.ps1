@@ -202,11 +202,11 @@ function Invoke-SessionCleanupDetector {
                 if ($item.BranchName) {
                     foreach ($b in $item.AllBranches) {
                         $safeB = $b -replace "'", "''"
-                        $out += "pwsh '$safeRoot/.github/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -FeatureBranch '$safeB'"
+                        $out += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -FeatureBranch '$safeB'"
                     }
                 }
                 else {
-                    $out += "pwsh '$safeRoot/.github/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete  # branch not found locally; archives tracking files only"
+                    $out += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete  # branch not found locally; archives tracking files only"
                 }
             }
             else {
@@ -229,7 +229,7 @@ function Invoke-SessionCleanupDetector {
         $lines += '```powershell'
         if ($staleBranch.IssueId) {
             $lines += '# Run in a PowerShell (pwsh) terminal:'
-            $lines += "pwsh '$safeRoot/.github/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
+            $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
         }
         else {
             $lines += "git checkout '$escapedDefault' && git pull && git branch -d '$escaped'  # use -D to force if already confirmed merged"
@@ -254,7 +254,7 @@ function Invoke-SessionCleanupDetector {
         $lines += '```powershell'
         if ($staleBranch.IssueId) {
             $lines += '# Run in a PowerShell (pwsh) terminal:'
-            $lines += "pwsh '$safeRoot/.github/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
+            $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
             if ($dedupedCleanup.Count -gt 0) {
                 $lines += (Get-TrackingCommands -Items $dedupedCleanup)
             }

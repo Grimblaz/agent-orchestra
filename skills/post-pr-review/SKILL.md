@@ -28,11 +28,11 @@ This document provides a standardized checklist for agents to follow after a Pul
 
 ```powershell
 # Preferred (clone/fork only): use the cleanup script (handles archival, branch deletion, git sync)
-# Requires $env:COPILOT_ORCHESTRA_ROOT or $env:WORKFLOW_TEMPLATE_ROOT to be set and .github/skills/session-startup/scripts/ to be on disk.
+# Requires $env:COPILOT_ORCHESTRA_ROOT or $env:WORKFLOW_TEMPLATE_ROOT to be set and skills/session-startup/scripts/ to be on disk.
 # Plugin-only users: use the manual archive method below.
 $copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }
 if (-not $copilotRoot) { Write-Error 'Set COPILOT_ORCHESTRA_ROOT or WORKFLOW_TEMPLATE_ROOT to your copilot-orchestra repo path first.'; return }
-pwsh "$copilotRoot/.github/skills/session-startup/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description
+pwsh "$copilotRoot/skills/session-startup/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description
 
 # Or manual archive only (PowerShell):
 $archivePath = Join-Path ".copilot-tracking-archive" (Get-Date -Format 'yyyy') (Get-Date -Format 'MM') "issue-{ID}"
@@ -49,7 +49,7 @@ Get-ChildItem .copilot-tracking -Recurse -File |
 - Files moved to `.copilot-tracking-archive/{year}/{month}/issue-{ID}/`
 - No tracking files remain in `.copilot-tracking/research/` for this issue
 
-> **Automation**: The `.github/copilot-instructions.md` "Session Startup Check" detects stale tracking files and prompts you at the start of your next conversation — cleanup requires one confirmation. You can also run the script directly: `$copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }; pwsh "$copilotRoot/.github/skills/session-startup/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description` (requires COPILOT_ORCHESTRA_ROOT or WORKFLOW_TEMPLATE_ROOT to be set)
+> **Automation**: The `.github/copilot-instructions.md` "Session Startup Check" detects stale tracking files and prompts you at the start of your next conversation — cleanup requires one confirmation. You can also run the script directly: `$copilotRoot = if ($env:COPILOT_ORCHESTRA_ROOT) { $env:COPILOT_ORCHESTRA_ROOT } else { $env:WORKFLOW_TEMPLATE_ROOT }; pwsh "$copilotRoot/skills/session-startup/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description` (requires COPILOT_ORCHESTRA_ROOT or WORKFLOW_TEMPLATE_ROOT to be set)
 
 ### 2. Update Documentation
 
@@ -140,7 +140,7 @@ git push origin --delete feature/issue-{ID}-description
 
 **Note**: Some projects auto-delete branches on PR merge. Verify your project settings.
 
-> **Automation**: Branch deletion is also handled by `.github/skills/session-startup/scripts/post-merge-cleanup.ps1` when invoked via the "Session Startup Check" cleanup flow (see Section 1 above).
+> **Automation**: Branch deletion is also handled by `skills/session-startup/scripts/post-merge-cleanup.ps1` when invoked via the "Session Startup Check" cleanup flow (see Section 1 above).
 
 ### 6. Strategic Assessment (Pre-Merge)
 

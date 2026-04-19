@@ -9,16 +9,16 @@
     Always exits 0 — ceilings are advisory (soft).
 
 .PARAMETER ConfigPath
-    Path to guidance-complexity.json config. Defaults to .github/skills/calibration-pipeline/assets/guidance-complexity.json.
+    Path to guidance-complexity.json config. Defaults to skills/calibration-pipeline/assets/guidance-complexity.json.
     Missing file is handled gracefully (built-in default ceiling of 150 is used).
 
 .PARAMETER AgentsPath
-    Glob/path to agent files. Defaults to .github/agents/*.agent.md.
+    Glob/path to agent files. Defaults to agents/*.agent.md.
 #>
 [CmdletBinding()]
 param(
-    [string]$ConfigPath = '.github/skills/calibration-pipeline/assets/guidance-complexity.json',
-    [string]$AgentsPath = '.github/agents/*.agent.md'
+    [string]$ConfigPath = 'skills/calibration-pipeline/assets/guidance-complexity.json',
+    [string]$AgentsPath = 'agents/*.agent.md'
 )
 
 . "$PSScriptRoot/measure-guidance-complexity-core.ps1"

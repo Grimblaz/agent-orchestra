@@ -64,6 +64,26 @@ Skills that invoke PowerShell scripts fall into two categories:
 
 If a skill's script silently produces no output when invoked via the plugin, it is likely workspace-bound. Set `COPILOT_ORCHESTRA_ROOT` to your clone path, or switch to the clone/fork install.
 
+<!-- migration-note-begin -->
+### Migrating from pre-1.14 layouts (issue #367)
+
+Starting in v1.14.0, agents and skills live at the repo root (`agents/` and `skills/`) rather than under `.github/`. This lets Claude Code auto-discover them via `.claude-plugin/plugin.json` while Copilot continues to load them through `.github/plugin.json`. Existing consumers must:
+
+1. Remove any `chat.agentFilesLocations` entry pointing at `.github/agents` from `settings.json`.
+2. If a consumer referenced `$copilotRoot/.github/skills/...` runtime paths, update to `$copilotRoot/skills/...`.
+3. Reinstall the orchestra as a plugin in both tools.
+
+<!-- legacy-path -->
+Example of a pre-1.14 `settings.json` entry that should be removed:
+
+```json
+{
+  "chat.agentFilesLocations": ["/absolute/path/to/copilot-orchestra/.github/agents"]
+}
+```
+<!-- /legacy-path -->
+<!-- migration-note-end -->
+
 ---
 
 ## Quick Option: Setup Wizard

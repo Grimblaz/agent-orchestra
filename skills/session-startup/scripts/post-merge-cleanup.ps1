@@ -12,11 +12,11 @@
 
 .EXAMPLE
     # Parameterized (explicit)
-    pwsh .github/skills/session-startup/scripts/post-merge-cleanup.ps1 -IssueNumber 36 -FeatureBranch "feature/issue-36-janitor-to-hook"
+    pwsh skills/session-startup/scripts/post-merge-cleanup.ps1 -IssueNumber 36 -FeatureBranch "feature/issue-36-janitor-to-hook"
 
 .EXAMPLE
     # With GitHub CLI (close issue via gh)
-    pwsh .github/skills/session-startup/scripts/post-merge-cleanup.ps1 -IssueNumber 36 -FeatureBranch "feature/issue-36-janitor-to-hook" -UseGh
+    pwsh skills/session-startup/scripts/post-merge-cleanup.ps1 -IssueNumber 36 -FeatureBranch "feature/issue-36-janitor-to-hook" -UseGh
 #>
 
 [CmdletBinding()]
@@ -60,13 +60,13 @@ function Remove-EmptyDirectory {
     param([string]$Root)
     if (-not (Test-Path $Root)) { return }
     Get-ChildItem -Path $Root -Recurse -Directory |
-    Sort-Object FullName -Descending |
-    ForEach-Object {
-        $hasFiles = Get-ChildItem -Path $_.FullName -Recurse -File -ErrorAction SilentlyContinue
-        if (-not $hasFiles -and $PSCmdlet.ShouldProcess($_.FullName, 'Remove empty directory')) {
-            Remove-Item -LiteralPath $_.FullName -Force
+        Sort-Object FullName -Descending |
+        ForEach-Object {
+            $hasFiles = Get-ChildItem -Path $_.FullName -Recurse -File -ErrorAction SilentlyContinue
+            if (-not $hasFiles -and $PSCmdlet.ShouldProcess($_.FullName, 'Remove empty directory')) {
+                Remove-Item -LiteralPath $_.FullName -Force
+            }
         }
-    }
 }
 
 Write-Output "== Post-merge cleanup: issue #$IssueNumber =="

@@ -150,8 +150,8 @@ function Invoke-MeasureGuidanceComplexity {
     [CmdletBinding()]
     [OutputType([hashtable])]
     param(
-        [string]$ConfigPath = '.github/skills/calibration-pipeline/assets/guidance-complexity.json',
-        [string]$AgentsPath = '.github/agents/*.agent.md'
+        [string]$ConfigPath = 'skills/calibration-pipeline/assets/guidance-complexity.json',
+        [string]$AgentsPath = 'agents/*.agent.md'
     )
 
     $ErrorActionPreference = 'Stop'

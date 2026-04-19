@@ -201,7 +201,7 @@ Describe 'Issue #367 path-migration sweep gate' -Tag 'issue-367', 'sweep-gate' {
                 $content = Get-Content -LiteralPath $full -Raw -ErrorAction SilentlyContinue
                 if ($null -eq $content) { continue }
                 $closeCount = ([regex]::Matches($content, $closePattern)).Count
-                $openCount = ([regex]::Matches($content, $openPattern)).Count - $closeCount
+                $openCount = ([regex]::Matches($content, $openPattern)).Count
                 if ($openCount -ne $closeCount) {
                     $unbalanced += ('{0}: {1} open / {2} close' -f $file, $openCount, $closeCount)
                 }
