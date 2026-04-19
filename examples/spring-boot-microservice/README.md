@@ -97,5 +97,5 @@ your-project/
 ## See Also
 
 - [Main Customization Guide](../../CUSTOMIZATION.md)
-- [Agent Definitions](../../.github/agents/)
-- [TDD Workflow Skill](../../.github/skills/test-driven-development/)
+- [Agent Definitions](../../agents/)
+- [TDD Workflow Skill](../../skills/test-driven-development/)

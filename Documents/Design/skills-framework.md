@@ -1,5 +1,9 @@
 # Design: Skills Framework
 
+<!-- migration-note-begin -->
+> **Superseded in v1.14 (issue #367)**: the skill registry and path references in this design doc describe the v1.13 layout where skills lived at `.github/skills/`. In v1.14 skills moved to `skills/` at the repo root to enable Claude Code auto-discovery. See [`Documents/Decisions/0001-cross-tool-support.md`](../Decisions/0001-cross-tool-support.md) and [`Documents/Decisions/0002-claude-code-plugin-schema.md`](../Decisions/0002-claude-code-plugin-schema.md) for the current shape. The historical `.github/skills/` references below are retained for the issue-#344 record.
+<!-- migration-note-end -->
+
 ## Summary
 
 The skills framework provides domain-specific knowledge modules loaded on demand by agents from `.github/skills/`. Under the thin-agents/fat-skills direction for issue #344, skills hold reusable methodology and protocol content, while agents retain orchestration boundaries such as routing, identity, trigger points, and commit authority. The repository now ships 33 skills after moving reusable methodology out of agents without changing agent interfaces. Hub skills may be extended by project-specific supplement skills (named `{project}-{hub-skill-name}`) that layer additional constraints on top of their defaults.

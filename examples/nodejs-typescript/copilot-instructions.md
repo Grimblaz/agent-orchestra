@@ -144,5 +144,5 @@ npm run build && npm run lint
 ## Related Documentation
 
 - [Architecture Rules](architecture-rules.md)
-- [TDD Workflow](../../.github/skills/test-driven-development/SKILL.md)
+- [TDD Workflow](../../skills/test-driven-development/SKILL.md)
 ````

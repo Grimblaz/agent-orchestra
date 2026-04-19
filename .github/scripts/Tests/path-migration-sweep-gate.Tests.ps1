@@ -41,6 +41,11 @@ Describe 'Issue #367 path-migration sweep gate' -Tag 'issue-367', 'sweep-gate' {
             'CUSTOMIZATION.md'
             'examples/*/copilot-instructions.md'
             '.github/scripts/Tests/path-migration-sweep-gate.Tests.ps1'
+            '.github/scripts/validate-architecture.ps1'
+            # v1.14 upgrade guides carry legacy refs inside fenced blocks
+            'README.md'
+            'CONTRIBUTING.md'
+            '.github/prompts/setup.prompt.md'
         )
 
         # Per-phase additional allow-list entries (in-flight files not yet updated).

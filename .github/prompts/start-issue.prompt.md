@@ -160,7 +160,7 @@ After completing setup with this prompt:
 
 ### Plan Storage
 
-Issue-Planner saves the plan to session memory at `/memories/session/plan-issue-[ISSUE_NUMBER].md` and caches design context at `/memories/session/design-issue-[ISSUE_NUMBER].md` using the `vscode/memory` tool. The plan includes YAML frontmatter (see Issue-Planner Section 6 in `.github/agents/Issue-Planner.agent.md` for field definitions) and a `## Plan` heading with the full implementation steps. Continue implementation uses session memory only as the same-session source of truth. At D9, if the user explicitly chooses Stop / Pause / resume later, Code-Conductor persists durable GitHub issue comments with the `<!-- plan-issue-[ISSUE_NUMBER] -->` and `<!-- design-issue-[ISSUE_NUMBER] -->` markers for cross-session or cloud-agent handoff.
+Issue-Planner saves the plan to session memory at `/memories/session/plan-issue-[ISSUE_NUMBER].md` and caches design context at `/memories/session/design-issue-[ISSUE_NUMBER].md` using the `vscode/memory` tool. The plan includes YAML frontmatter (see Issue-Planner Section 6 in `agents/Issue-Planner.agent.md` for field definitions) and a `## Plan` heading with the full implementation steps. Continue implementation uses session memory only as the same-session source of truth. At D9, if the user explicitly chooses Stop / Pause / resume later, Code-Conductor persists durable GitHub issue comments with the `<!-- plan-issue-[ISSUE_NUMBER] -->` and `<!-- design-issue-[ISSUE_NUMBER] -->` markers for cross-session or cloud-agent handoff.
 
 ---
 

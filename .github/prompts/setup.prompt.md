@@ -35,7 +35,9 @@ List the user-visible (non-hidden) files in the workspace root, excluding `.git/
 
 **Pre-flight check 2 — Wrong workspace**
 
-Check whether `.github/agents/` exists and contains 10 or more `.agent.md` files. If it does:
+<!-- legacy-path -->
+Check whether `agents/` at the repo root exists and contains 10 or more `.agent.md` files (pre-1.14 clones may have them at `.github/agents/` instead). If it does:
+<!-- /legacy-path -->
 
 - Warn: "⚠️ This workspace looks like the copilot-orchestra repo itself, not a target project. `/setup` should be run in the repo you want to configure, not in the template."
 - Ask: "Would you like to continue anyway (e.g., you're intentionally reconfiguring this repo), or stop here?"
@@ -139,8 +141,8 @@ export COPILOT_ORCHESTRA_ROOT="/path/to/copilot-orchestra"
 
 ```json
 {
-  "chat.agentFilesLocations": ["<your-path>/copilot-orchestra/.github/agents"],
-  "chat.agentSkillsLocations": ["<your-path>/copilot-orchestra/.github/skills"],
+  "chat.agentFilesLocations": ["<your-path>/copilot-orchestra/agents"],
+  "chat.agentSkillsLocations": ["<your-path>/copilot-orchestra/skills"],
   "chat.promptFilesLocations": {
     "<your-path>/copilot-orchestra/.github/prompts": true
   }
@@ -350,7 +352,7 @@ Use tools in this priority order:
 For canvas games (Phaser 3, WebGL, etc.), use `runPlaywrightCode` with `page.mouse.click(cssX, cssY)`:
 
 - Convert game-space coordinates to CSS page coordinates via `getBoundingClientRect()`
-- Load `.github/skills/browser-canvas-testing/SKILL.md` for the full formula and worked example
+- Load `skills/browser-canvas-testing/SKILL.md` for the full formula and worked example
 ```
 
 Replace `{PORT}` with the user's dev server port, `{FRAMEWORK}` with the framework name from Phase 2, and `{RUN_COMMAND}` with the run command from Phase 4.

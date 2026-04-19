@@ -14,7 +14,7 @@ Multi-agent workflow system for GitHub Copilot. Provides specialized agents, ski
 - **Framework**: VS Code Custom Agents (`.agent.md` format with YAML frontmatter)
 - **Build Tool**: None (no compiled code)
 - **Testing**: Pester (`.github/scripts/Tests/`), plus manual verification and grep-based structural checks
-- **BDD Framework (opt-in)**: Structured G/W/T scenarios with scenario ID traceability and CE Gate coverage gap detection. Consumer repos enable by adding a `## BDD Framework` section to their `copilot-instructions.md`. Template ships BDD-disabled; see `.github/skills/bdd-scenarios/SKILL.md` for authoring patterns. **Phase 2 (runner dispatch)**: add `bdd: {framework}` under the heading (recognized values: `cucumber.js`, `behave`, `jest-cucumber`, `cucumber`) to enable Gherkin file generation by Test-Writer and automated runner dispatch at CE Gate time by Code-Conductor.
+- **BDD Framework (opt-in)**: Structured G/W/T scenarios with scenario ID traceability and CE Gate coverage gap detection. Consumer repos enable by adding a `## BDD Framework` section to their `copilot-instructions.md`. Template ships BDD-disabled; see `skills/bdd-scenarios/SKILL.md` for authoring patterns. **Phase 2 (runner dispatch)**: add `bdd: {framework}` under the heading (recognized values: `cucumber.js`, `behave`, `jest-cucumber`, `cucumber`) to enable Gherkin file generation by Test-Writer and automated runner dispatch at CE Gate time by Code-Conductor.
 
 ## Architecture
 
@@ -31,13 +31,13 @@ Pipeline-based agent orchestration:
 
 - **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
 - **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invocable: false`)
-- **Skills** (39): Loaded on demand by agents from `.github/skills/`
+- **Skills** (39): Loaded on demand by agents from `skills/` (repo root)
 - **Instruction files**: Repo-local instruction files remain under `.github/instructions/`, while shared workflow rules load from skills
 
 ## Key Conventions
 
 - Agent files use `.agent.md` extension with YAML frontmatter (`name`, `description`, `tools`, `handoffs`, `user-invocable`)
-- Skills use `SKILL.md` with `name` and `description` frontmatter in `.github/skills/{skill-name}/`
+- Skills use `SKILL.md` with `name` and `description` frontmatter in `skills/{skill-name}/` at the repo root
 - Instruction files use `.instructions.md` extension in `.github/instructions/`; shared workflow guidance is migrating to skill-owned `SKILL.md` files
 - Design documents go in `Documents/Design/`, decision records in `Documents/Decisions/`
 - Code-Conductor auto-commits after each validated step by default (see `## Commit Policy` opt-out in consumer `copilot-instructions.md`); specialist agents do not commit independently
@@ -69,7 +69,7 @@ pwsh -NoProfile -NonInteractive -Command "Invoke-Pester .github/scripts/Tests/ -
 pwsh -NoProfile -NonInteractive -File .github/scripts/quick-validate.ps1
 
 # Check agent count
-(Get-ChildItem .github/agents/*.agent.md).Count  # should be 14
+(Get-ChildItem agents/*.agent.md).Count  # should be 14
 ```
 
 ### Script Library Convention
@@ -78,7 +78,7 @@ Production automation lives either under `.github/scripts/` or under the owning 
 
 ```powershell
 # Example: call aggregate-review-scores logic in-process
-. .github/skills/calibration-pipeline/scripts/aggregate-review-scores-core.ps1
+. skills/calibration-pipeline/scripts/aggregate-review-scores-core.ps1
 Invoke-AggregateReviewScores -Repo owner/name
 # Example: with mock gh CLI for tests (no live API calls)
 # Invoke-AggregateReviewScores -Repo owner/name -GhCliPath $mockGhScript

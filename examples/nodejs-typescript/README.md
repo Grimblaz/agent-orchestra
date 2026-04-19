@@ -94,6 +94,6 @@ your-project/
 ## See Also
 
 - [Main Customization Guide](../../CUSTOMIZATION.md)
-- [Agent Definitions](../../.github/agents/)
+- [Agent Definitions](../../agents/)
 - [Spring Boot Microservice Example](../spring-boot-microservice/)
 - [Python Example](../python/)
