@@ -603,6 +603,62 @@ None.
             $check.Detail | Should -Match 'missing' -Because 'detail should explain the missing name field'
         }
 
+        It 'reports FAIL when name appears only in body (not frontmatter)' {
+            $root = & $script:NewFixture
+            $skillFile = Join-Path $root '.github\skills\test-skill\SKILL.md'
+            Set-Content -Path $skillFile -Value @'
+---
+description: Test skill. Use when testing. DO NOT USE FOR: nothing.
+---
+
+# Test Skill
+
+name: test-skill
+
+## Gotchas
+
+None.
+'@ -Encoding UTF8
+
+            $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
+
+            $result = Invoke-QuickValidate `
+                -RootPath $root `
+                -GuidanceComplexityScriptPath $mockScript `
+                -ScriptsPath (Join-Path $root '.github\scripts')
+
+            $check = $result.Results | Where-Object { $_.Name -eq 'SkillNameMatch' }
+            $check.Passed | Should -BeFalse -Because 'name in body should not satisfy frontmatter requirement'
+            $check.Detail | Should -Match 'missing' -Because 'frontmatter has no name field'
+        }
+
+        It 'reports PASS when name has indented frontmatter key' {
+            $root = & $script:NewFixture
+            $skillFile = Join-Path $root '.github\skills\test-skill\SKILL.md'
+            Set-Content -Path $skillFile -Value @'
+---
+  name: test-skill
+  description: Test skill. Use when testing. DO NOT USE FOR: nothing.
+---
+
+# Test Skill
+
+## Gotchas
+
+None.
+'@ -Encoding UTF8
+
+            $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
+
+            $result = Invoke-QuickValidate `
+                -RootPath $root `
+                -GuidanceComplexityScriptPath $mockScript `
+                -ScriptsPath (Join-Path $root '.github\scripts')
+
+            $check = $result.Results | Where-Object { $_.Name -eq 'SkillNameMatch' }
+            $check.Passed | Should -BeTrue -Because 'leading whitespace before name: is valid YAML'
+        }
+
         It 'reports PASS when no skills directory exists' {
             $root = "TestDrive:\qv-noskills-$([System.Guid]::NewGuid().ToString('N'))"
             New-Item -ItemType Directory -Path (Join-Path $root '.github\agents') -Force | Out-Null

@@ -99,13 +99,23 @@ function Test-QVSkillNameMatch {
         $skillFile = Join-Path -Path $dir.FullName -ChildPath 'SKILL.md'
         if (-not (Test-Path $skillFile)) { continue }
 
-        $nameLine = Select-String -Path $skillFile -Pattern '^name:\s*(.+?)\s*$' | Select-Object -First 1
-        if (-not $nameLine) {
-            $failures.Add("$($dir.Name)/SKILL.md: missing 'name:' field")
+        # Read only the YAML frontmatter so a stray `name:` in the body cannot
+        # masquerade as the declared name. Allow leading whitespace on the key.
+        $lines = Get-Content -Path $skillFile -TotalCount 40
+        $frontmatter = @()
+        if ($lines -and $lines[0] -match '^---\s*$') {
+            for ($i = 1; $i -lt $lines.Count; $i++) {
+                if ($lines[$i] -match '^---\s*$') { break }
+                $frontmatter += $lines[$i]
+            }
+        }
+        $nameMatch = $frontmatter | Select-String -Pattern '^\s*name:\s*(.+?)\s*$' | Select-Object -First 1
+        if (-not $nameMatch) {
+            $failures.Add("$($dir.Name)/SKILL.md: missing 'name:' field in frontmatter")
             continue
         }
 
-        $declaredName = $nameLine.Matches[0].Groups[1].Value.Trim().Trim('"').Trim("'")
+        $declaredName = $nameMatch.Matches[0].Groups[1].Value.Trim().Trim('"').Trim("'")
 
         if ($declaredName -ne $dir.Name) {
             $failures.Add("$($dir.Name)/SKILL.md: name '$declaredName' does not match directory '$($dir.Name)'")

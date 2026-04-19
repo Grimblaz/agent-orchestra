@@ -46,7 +46,7 @@ function Invoke-PluginPreflight {
         try {
             $authorName = $manifest.author.name
             $repo = $manifest.repository
-            if ($authorName -like '*YOUR*' -or $repo -like '*YOUR*') {
+            if ($authorName -like '*YOUR-ORG*' -or $repo -like '*YOUR-ORG*' -or $repo -like '*YOUR-REPO*') {
                 $results.Add([PSCustomObject]@{ Name = 'PlaceholdersReplaced'; Passed = $false; Detail = "Placeholder values remain: author='$authorName' repository='$repo'" })
             }
             else {
@@ -57,7 +57,9 @@ function Invoke-PluginPreflight {
 
         # --- 3. All declared agent paths exist ---
         try {
-            $agentPaths = @($manifest.agents)
+            # Filter out null/empty entries so a malformed manifest produces a precise
+            # 'Missing: <empty>' rather than a generic Resolve-Path failure.
+            $agentPaths = @($manifest.agents | Where-Object { $_ })
             $missingAgents = @($agentPaths | ForEach-Object {
                     $abs = Resolve-Path -LiteralPath (Join-Path $manifestDir $_) -ErrorAction SilentlyContinue
                     if (-not $abs) { $_ }
@@ -87,7 +89,7 @@ function Invoke-PluginPreflight {
 
         # --- 5. All declared skill paths exist ---
         try {
-            $skillPaths = @($manifest.skills)
+            $skillPaths = @($manifest.skills | Where-Object { $_ })
             $missingSkills = @($skillPaths | ForEach-Object {
                     $abs = Resolve-Path -LiteralPath (Join-Path $manifestDir $_) -ErrorAction SilentlyContinue
                     if (-not $abs) { $_ }
@@ -116,7 +118,7 @@ function Invoke-PluginPreflight {
 
         # --- 7. All declared command paths exist ---
         try {
-            $commandPaths = @($manifest.commands)
+            $commandPaths = @($manifest.commands | Where-Object { $_ })
             $missingCommands = @($commandPaths | ForEach-Object {
                     $abs = Resolve-Path -LiteralPath (Join-Path $manifestDir $_) -ErrorAction SilentlyContinue
                     if (-not $abs) { $_ }

@@ -97,6 +97,18 @@ $($commandEntries -join ",`n")
             $check = $result.Results | Where-Object { $_.Name -eq 'PluginJsonExists' }
             $check.Passed | Should -BeFalse
         }
+
+        It 'reports FAIL with parse error detail when plugin.json is malformed JSON' {
+            $root = & $script:NewFixture
+            $pjPath = Join-Path $root '.github\plugin\plugin.json'
+            Set-Content -Path $pjPath -Value '{ "name": "broken"' -Encoding UTF8
+            $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
+            $check = $result.Results | Where-Object { $_.Name -eq 'PluginJsonExists' }
+            $check.Passed | Should -BeFalse
+            $check.Detail | Should -Match 'Parse error'
+            $result.Results.Count | Should -Be 1
+            $result.ExitCode | Should -Be 1
+        }
     }
 
     # ==================================================================

@@ -29,7 +29,7 @@ The `.github/plugin/` directory was chosen (rather than root) to keep plugin inf
 ```json
 {
   "agents": ["./.github/agents"],
-  "skills": [ /* 14 individual skill directory paths */ ],
+  "skills": [ /* 39 individual skill directory paths */ ],
   "commands": [
     "./.github/prompts/setup.prompt.md",
     "./.github/prompts/start-issue.prompt.md",
