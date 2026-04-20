@@ -49,8 +49,8 @@ thinned; they remain byte-identical to their state before Phase 0.3.
 ### Platform-Specific Invocations
 
 Copilot tool names (`#tool:vscode/askQuestions`, `vscode/memory`) and Claude tool names
-(`AskUserQuestion`) live exclusively in the `## Platform-specific invocation` footer at the bottom
-of each agent file. No platform-specific wording appears in body sections.
+(`AskUserQuestion`) live in YAML frontmatter (`tools:`) and the `## Platform-specific invocation`
+footer at the bottom of each agent file — not in body sections.
 
 ---
 

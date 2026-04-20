@@ -72,7 +72,7 @@ Every decision, approval request, or branch-point question must go through the p
 
 ## GitHub Setup
 
-Create a feature branch if one doesn't already exist. Extract issue number; ask via structured-question tool if missing. `git checkout -b feature/issue-{NUMBER}-{slug}` (verify on `main` first). Update issue status.
+Create a feature branch if one doesn't already exist. Extract issue number; ask via structured-question tool if missing. `git checkout -b feature/issue-{NUMBER}-{slug}` (verify on `main` first). Update issue status to "In Progress".
 
 ## Safe-Operations Compliance
 

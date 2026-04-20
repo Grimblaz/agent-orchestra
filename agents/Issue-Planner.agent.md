@@ -42,7 +42,7 @@ Before the first substantive response in a new conversation, load the `session-s
 - Use the platform's structured-question tool freely to clarify requirements — don't make large assumptions.
 - Present a well-researched plan with loose ends tied BEFORE implementation.
 - Embed context-appropriate reasoning in every structured-question call. For plan approval, follow the **Plan Approval Prompt Format** in `skills/plan-authoring/SKILL.md`.
-- When invoked as a subagent (e.g., via Claude Code's `/plan`), treat the dispatch prompt as the primary user contact. Surface ambiguities upfront rather than pausing mid-pipeline; mid-stream `AskUserQuestion`/structured-question calls may not produce visible pauses in subagent mode.
+- When invoked as a subagent, treat the dispatch prompt as the primary user contact. Surface ambiguities upfront rather than pausing mid-pipeline; mid-stream structured-question calls may not produce visible pauses.
 
 ## Process
 
@@ -59,7 +59,7 @@ Cycle through the phases below iteratively based on user input.
 
 ## 2. Discovery
 
-Load `skills/plan-authoring/SKILL.md` for the reusable discovery workflow, CE Gate input handling, and stress-test preparation. Dispatch a read-only subagent to gather context, identify blockers, surface the customer-facing surface and CE Gate method, and avoid drafting the full plan during discovery.
+Load `skills/plan-authoring/SKILL.md` for the reusable discovery workflow, CE Gate input handling, and stress-test preparation. Dispatch a read-only subagent to gather context, identify blockers, identify the customer-facing surface and CE Gate method, and avoid drafting the full plan during discovery.
 
 ## 3. Alignment
 
@@ -122,4 +122,4 @@ Load `skills/plan-authoring/SKILL.md` for compaction guidance. Compact proactive
 The methodology above is tool-agnostic. Platform-specific activation:
 
 - Copilot: `@issue-planner` or `Use issue-planner mode`. Plan persistence uses `vscode/memory` at `/memories/session/plan-issue-{id}.md`.
-- Claude Code: dispatched as a subagent via `/plan`; the `issue-planner` subagent handles plan authoring in isolation to protect main-context budget for the adversarial-review pipeline. Plan persistence uses a GitHub issue comment with the `<!-- plan-issue-{ID} -->` marker.
+- Claude Code: dispatched as a subagent via `/plan`; the `issue-planner` subagent handles plan authoring in isolation to protect main-context budget for the adversarial-review pipeline. Plan persistence uses a GitHub issue comment with the `<!-- plan-issue-{ID} -->` marker. When invoked as a subagent via `/plan`, `AskUserQuestion` calls mid-pipeline may not produce a visible pause — front-load questions in the dispatch-prompt response.
