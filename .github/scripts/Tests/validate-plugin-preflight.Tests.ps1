@@ -179,6 +179,17 @@ $($skillEntries -join ",`n")
             $check.Passed | Should -BeFalse
             $check.Detail | Should -Match 'skill-5'
         }
+
+        It 'reports PASS for SkillPathsExist and SkillCountMatch when skills is a directory string' {
+            $root = & $script:NewFixture
+            $pjPath = Join-Path $root 'plugin.json'
+            $json = Get-Content $pjPath -Raw | ConvertFrom-Json
+            $json.skills = 'skills/'
+            $json | ConvertTo-Json -Depth 10 | Set-Content $pjPath -Encoding UTF8
+            $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
+            ($result.Results | Where-Object { $_.Name -eq 'SkillPathsExist' }).Passed | Should -BeTrue
+            ($result.Results | Where-Object { $_.Name -eq 'SkillCountMatch' }).Passed | Should -BeTrue
+        }
     }
 
     # ==================================================================
@@ -194,13 +205,24 @@ $($skillEntries -join ",`n")
             $check.Passed | Should -BeTrue
         }
 
-        It 'reports FAIL when manifest declares the silently-ignored `commands` field' {
+        It 'reports PASS when manifest declares the commands field' {
             $root = & $script:NewFixture -IncludeUnsupportedCommandsField
             $pjPath = Join-Path $root 'plugin.json'
             $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
             $check = $result.Results | Where-Object { $_.Name -eq 'NoUnsupportedFields' }
+            $check.Passed | Should -BeTrue
+        }
+
+        It 'reports FAIL when manifest declares an unknown field' {
+            $root = & $script:NewFixture
+            $pjPath = Join-Path $root 'plugin.json'
+            $json = Get-Content $pjPath -Raw | ConvertFrom-Json
+            $json | Add-Member -NotePropertyName 'foobar' -NotePropertyValue 'test'
+            $json | ConvertTo-Json -Depth 10 | Set-Content $pjPath -Encoding UTF8
+            $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
+            $check = $result.Results | Where-Object { $_.Name -eq 'NoUnsupportedFields' }
             $check.Passed | Should -BeFalse
-            $check.Detail | Should -Match 'commands'
+            $check.Detail | Should -Match 'foobar'
         }
     }
 
