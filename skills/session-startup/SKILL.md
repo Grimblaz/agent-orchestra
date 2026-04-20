@@ -113,6 +113,8 @@ If the paired load succeeds, cite it with `Shared body loaded — proceeding as 
 
 If you are not in a paired-body context, skip this step silently.
 
+If the same shared body is loaded more than once in a conversation, the load is idempotent — loading the same file a second time is harmless and does not require deduplication logic.
+
 Enforcement paths: inline dispatch (`/experience`, `/design`) is enforced by command-file read-and-adopt; subagent dispatch (`/plan` and Agent tool) is enforced by Step 9. Both paths end in the same citation and halt-on-failure behavior.
 
 ## Silent Skip Conditions

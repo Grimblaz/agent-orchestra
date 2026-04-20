@@ -22,7 +22,7 @@ Describe 'Claude shell/shared-body parity contract' {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:AgentsDirectory = Join-Path $script:RepoRoot 'agents'
         $script:CanonicalTriggerText = 'Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.'
-        $script:ParitySuffixPattern = '($|: |\s+\(|\s+)'
+        $script:ParitySuffixPattern = '($|: |\s+\(|\s*$)'
 
         $script:GetDocumentState = {
             param([string]$Path)
@@ -133,6 +133,7 @@ Describe 'Claude shell/shared-body parity contract' {
         $script:ShellDocuments = @(
             Get-ChildItem -Path $script:AgentsDirectory -Filter '*.md' -File |
                 Where-Object { $_.Name -notlike '*.agent.md' } |
+                Where-Object { (Get-Content -Path $_.FullName -Raw) -match [regex]::Escape($script:CanonicalTriggerText) } |
                 ForEach-Object {
                     $shell = & $script:GetDocumentState -Path $_.FullName
                     $hasCanonicalTrigger = $shell.Content -match [regex]::Escape($script:CanonicalTriggerText)
@@ -155,7 +156,7 @@ Describe 'Claude shell/shared-body parity contract' {
                         ''
                     }
                     else {
-                        Join-Path $script:RepoRoot ($bodyPointer -replace '/', '\')
+                        Join-Path $script:RepoRoot $bodyPointer
                     }
 
                     $bodyDocument = if ([string]::IsNullOrWhiteSpace($bodyPath)) {
@@ -186,12 +187,11 @@ Describe 'Claude shell/shared-body parity contract' {
         )
     }
 
-    It 'requires discovered Claude shells to exist as shared-methodology pairs with the canonical startup stub in the top body' {
-        if ($script:ShellDocuments.Count -eq 0) {
-            Set-ItResult -Skipped -Because 'no paired-body shells discovered'
-            return
-        }
+    It 'discovers at least one paired-body shell to enforce parity against' {
+        $script:ShellDocuments.Count | Should -BeGreaterThan 0 -Because 'parity enforcement requires at least one Claude shell in agents/ — if this fails, the discovery glob or filter may be broken'
+    }
 
+    It 'requires discovered Claude shells to exist as shared-methodology pairs with the canonical startup stub in the top body' {
         foreach ($shell in $script:ShellDocuments) {
             $shell.HasCanonicalTrigger | Should -BeTrue -Because "$($shell.Name) must include the canonical session-startup trigger stub"
             $shell.HasSharedMethodology | Should -BeTrue -Because "$($shell.Name) must include a Shared methodology section"
@@ -204,12 +204,8 @@ Describe 'Claude shell/shared-body parity contract' {
     }
 
     It 'requires every shell token to match exactly one shared-body H2 heading' {
-        if ($script:ShellDocuments.Count -eq 0) {
-            Set-ItResult -Skipped -Because 'no paired-body shells discovered'
-            return
-        }
-
         foreach ($shell in $script:ShellDocuments) {
+            $shell.BodyContent | Should -Not -BeNullOrEmpty -Because "$($shell.Name) must have a readable shared body before bijection can be verified"
             foreach ($token in $shell.ShellTokens) {
                 $headingMatches = @(& $script:GetHeadingMatchesForToken -Token $token -BodyHeadings $shell.BodyHeadings)
 
@@ -219,12 +215,8 @@ Describe 'Claude shell/shared-body parity contract' {
     }
 
     It 'requires every shared-body H2 heading to map back to exactly one shell token with matching counts' {
-        if ($script:ShellDocuments.Count -eq 0) {
-            Set-ItResult -Skipped -Because 'no paired-body shells discovered'
-            return
-        }
-
         foreach ($shell in $script:ShellDocuments) {
+            $shell.BodyContent | Should -Not -BeNullOrEmpty -Because "$($shell.Name) must have a readable shared body before bijection can be verified"
             $shell.ShellTokens.Count | Should -Be $shell.BodyHeadings.Count -Because "$($shell.Name) must enumerate every shared-body H2 heading except the platform footer"
 
             foreach ($heading in $shell.BodyHeadings) {
