@@ -2,6 +2,7 @@
 name: issue-planner
 description: Researches and outlines multi-step implementation plans with CE Gate coverage and adversarial review. Use when a GitHub issue is ready for implementation planning.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
+user-invocable: false
 ---
 
 # Issue-Planner (Claude Code shell)
