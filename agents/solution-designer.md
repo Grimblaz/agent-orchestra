@@ -2,6 +2,7 @@
 name: solution-designer
 description: Technical design exploration and issue documentation — explores architecture options, documents decisions, updates GitHub issues. Use when a GitHub issue needs technical design exploration before planning.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
+user-invocable: false
 ---
 
 # Solution-Designer (Claude Code shell)

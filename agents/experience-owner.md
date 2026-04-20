@@ -2,6 +2,7 @@
 name: experience-owner
 description: Customer experience bookend — frames features as customer journeys upstream, captures CE Gate evidence downstream. Use for customer framing of a GitHub issue or for CE Gate evidence capture after implementation.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
+user-invocable: false
 ---
 
 # Experience-Owner (Claude Code shell)
