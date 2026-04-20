@@ -121,7 +121,15 @@ function Invoke-PluginPreflight {
 
         # --- 6. Skill count in plugin.json matches filesystem ---
         try {
-            $declaredSkillCount = @($manifest.skills).Count
+            $skillsValue = $manifest.skills
+            if ($skillsValue -is [string]) {
+                # String format (e.g. "skills/"): resolve relative to manifest dir, count subdirectories
+                $skillsDirPath = Join-Path $manifestDir $skillsValue
+                $declaredSkillCount = @(Get-ChildItem -Path $skillsDirPath -Directory -ErrorAction SilentlyContinue).Count
+            }
+            else {
+                $declaredSkillCount = @($skillsValue).Count
+            }
             $fsSkillCount = @(Get-ChildItem -Path (Resolve-PluginContentPath -RootPath $RootPath -ContentName 'skills') -Directory -ErrorAction SilentlyContinue).Count
             if ($declaredSkillCount -eq $fsSkillCount) {
                 $results.Add([PSCustomObject]@{ Name = 'SkillCountMatch'; Passed = $true; Detail = "$declaredSkillCount skills declared and on disk" })
@@ -132,18 +140,17 @@ function Invoke-PluginPreflight {
         }
         catch { $results.Add([PSCustomObject]@{ Name = 'SkillCountMatch'; Passed = $false; Detail = "Error: $_" }) }
 
-        # --- 7. Manifest does not declare unsupported fields ---
-        # VS Code 1.110 schema: name, description, version, author, skills, agents,
-        # hooks, mcpServers. A `commands` field is silently ignored — guard against
-        # re-introduction since slash-command intent should live in skills/agents.
+        # --- 7. Manifest does not declare unknown fields ---
+        # Shared plugin-format known fields per the GitHub Copilot CLI plugin reference.
         try {
+            $allowedFields = @('name', 'description', 'version', 'author', 'skills', 'agents', 'hooks', 'mcpServers', 'commands', 'repository')
             $manifestProps = @($manifest.PSObject.Properties.Name)
-            $unsupported = @($manifestProps | Where-Object { $_ -eq 'commands' })
+            $unsupported = @($manifestProps | Where-Object { $_ -notin $allowedFields })
             if ($unsupported.Count -eq 0) {
                 $results.Add([PSCustomObject]@{ Name = 'NoUnsupportedFields'; Passed = $true; Detail = '' })
             }
             else {
-                $results.Add([PSCustomObject]@{ Name = 'NoUnsupportedFields'; Passed = $false; Detail = "Manifest declares fields VS Code ignores: $($unsupported -join ', ')" })
+                $results.Add([PSCustomObject]@{ Name = 'NoUnsupportedFields'; Passed = $false; Detail = "Manifest declares unknown fields: $($unsupported -join ', ')" })
             }
         }
         catch { $results.Add([PSCustomObject]@{ Name = 'NoUnsupportedFields'; Passed = $false; Detail = "Error: $_" }) }
