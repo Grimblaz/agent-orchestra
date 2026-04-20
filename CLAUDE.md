@@ -4,9 +4,9 @@ Agent Orchestra is a multi-agent workflow system originally built for GitHub Cop
 
 ## Quick start
 
-Install the plugin from the marketplace if you have not already:
+Install the plugin from the marketplace if you have not already. Run this inside Claude Code (not a system shell):
 
-```bash
+```text
 /plugin install agent-orchestra@agent-orchestra
 ```
 

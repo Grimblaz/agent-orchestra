@@ -29,7 +29,7 @@ When the shared body refers to a Copilot tool, use the Claude Code equivalent:
 | "the platform's structured-question tool"   | `AskUserQuestion`              |
 | `#tool:vscode/askQuestions`                 | `AskUserQuestion`              |
 | `github/*` MCP operations                   | `gh` CLI via `Bash`            |
-| Browser tools (`browser/*`)                 | Not required for upstream framing; use `WebFetch` only if an external page is needed |
+| Browser tools (`browser/*`)                 | **Upstream framing**: not required; use `WebFetch` only if an external page is needed. **Downstream CE Gate** may need interactive UI exercise (clicks, form fills, canvas, multi-step journeys) that `WebFetch` cannot cover — fall back to the Claude-in-Chrome tools (`mcp__Claude_in_Chrome__*`) or the computer-use tools (`mcp__computer-use__*`) for those flows; the evidence captured (screenshots, DOM reads, network logs) is what matters, not the automation surface |
 | Subagent dispatch (`#tool:agent/runSubagent`) | `Agent` tool                   |
 | Session memory (`vscode/memory`)            | Not used in Claude Code — persistence is via GitHub issue comment markers only |
 

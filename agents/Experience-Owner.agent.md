@@ -123,7 +123,7 @@ Customer framing complete — design intent defined, scenarios drafted, CE Gate 
 
 Hard-stop rule: never conclude an upstream framing session without creating durable artifacts. Before ending the session, verify all of the following:
 
-- [ ] **GitHub issue updated** with customer problem statement, user journeys, scenarios, surface identification, and design intent reference.
+- [ ] **GitHub issue updated** with customer problem statement, user journeys, scenarios, surface identification, design intent reference, and CE Gate readiness assessment.
 - [ ] **Completion comment posted** with the `<!-- experience-owner-complete-{ISSUE_NUMBER} -->` marker.
 
 If either is incomplete, complete it first. **Exception**: if the session was purely exploratory (user explicitly said "just brainstorming"), note this exception and skip documentation. Exploratory status must be explicit, not assumed.

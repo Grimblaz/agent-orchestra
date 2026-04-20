@@ -172,7 +172,7 @@ ce_gate: {true|false}
 
 **Escalation flag**: if during plan creation the scope is discovered to exceed the issue's stated scope (touches multiple systems, requires design decisions not documented in the issue body, or introduces cross-cutting concerns), add `escalation_recommended: true` and `escalation_reason: "{reason}"` to the YAML frontmatter. Code-Conductor reads this field after receiving the plan and offers the user re-entry to the full pipeline from the appropriate upstream phase. In direct `/plan` invocations, the field is valid but Code-Conductor is not in the flow — no automated re-entry prompt will be presented; the user must act on the escalation reason manually.
 
-After saving, stop at the persistence handoff. Do not ask a separate GitHub persistence question during planning, and do not post durable handoff comments from Issue-Planner. If the user later chooses to pause, resume, or switch models at Code-Conductor's D9 checkpoint, Code-Conductor owns any durable GitHub persistence using the existing `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` marker contract.
+After saving the plan per the platform's persistence convention, stop. Do not ask a separate GitHub persistence question during planning, and do not post additional handoff comments beyond the plan-persistence comment that the platform-specific invocation mandates (none for Copilot session-memory persistence; the `<!-- plan-issue-{ID} -->` comment itself for Claude Code). If the user later chooses to pause, resume, or switch models at Code-Conductor's D9 checkpoint, Code-Conductor owns any subsequent durable GitHub persistence (including the `<!-- design-issue-{ID} -->` cache marker) using the latest-comment-wins contract.
 
 ## Context Management
 

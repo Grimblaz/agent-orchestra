@@ -9,8 +9,8 @@ Dispatch the `issue-planner` subagent to produce an implementation plan for the 
 
 **Pre-flight**:
 
-1. Require an issue number (the plan is posted as a durable comment on that issue).
-2. If the issue body does not yet have design (`<!-- design-phase-complete-{ID} -->` marker), note that and ask the user whether to run `/design` first or to plan from whatever framing already exists.
+1. Require an issue number (the plan is posted as a durable comment on that issue). If missing, use the `AskUserQuestion` tool.
+2. Check the issue's comments/timeline for the `<!-- design-phase-complete-{ID} -->` marker (design completion lives on a comment, not in the issue body). If the marker is not present on the issue, use `AskUserQuestion` to ask whether to run `/design` first or to plan from whatever framing already exists.
 
 **Dispatch**:
 

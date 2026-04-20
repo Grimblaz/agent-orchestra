@@ -9,8 +9,8 @@ Dispatch the `solution-designer` subagent to do technical design exploration for
 
 **Pre-flight**:
 
-1. Require an issue number (the subagent needs a durable record to update).
-2. If the issue body does not yet have customer framing (`<!-- experience-owner-complete-{ID} -->` marker), note that and ask the user whether to run `/experience` first or to proceed without upstream framing.
+1. Require an issue number (the subagent needs a durable record to update). If missing, use the `AskUserQuestion` tool.
+2. Check the issue's comments/timeline for the `<!-- experience-owner-complete-{ID} -->` marker (upstream framing completion lives on a comment, not in the issue body). If the marker is not present on the issue, use `AskUserQuestion` to ask whether to run `/experience` first or to proceed without upstream framing.
 
 **Dispatch**:
 

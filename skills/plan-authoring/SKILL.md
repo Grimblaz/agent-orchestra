@@ -117,7 +117,11 @@ Update the `Plan Stress-Test` summary block by replacing the `Judge: pending` pl
 **Steps**
 
 1. {Action with file path links and `symbol` refs}
+   - Execution Mode: {serial | parallel}
+   - Requirement Contract: acceptance-criteria slice; invariants/edge cases; non-goals.
 2. {Next step}
+   - Execution Mode: {serial | parallel}
+   - Requirement Contract: …
 
 **Verification**
 {How to test: commands, tests, manual checks}

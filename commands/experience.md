@@ -10,7 +10,7 @@ Dispatch the `experience-owner` subagent to do customer framing for the provided
 **Pre-flight**:
 
 1. If the arguments reference an existing GitHub issue (e.g., `#369` or a URL), include that context in the dispatch.
-2. If there are no arguments, ask the user whether this is upstream framing (issue to frame) or downstream CE Gate (issue with a branch ready to exercise).
+2. If there are no arguments, use the `AskUserQuestion` tool to ask whether this is upstream framing (issue to frame) or downstream CE Gate (issue with a branch ready to exercise).
 
 **Dispatch**:
 
