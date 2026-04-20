@@ -26,17 +26,15 @@ Describe 'Claude shell/shared-body parity contract' {
 
         $script:GetDocumentState = {
             param([string]$Path)
-
             if (-not (Test-Path $Path)) {
-                return @{
-                    Path    = $Path
-                    Content = ''
-                }
+                return @{ Path = $Path; Content = '' }
             }
-
-            return @{
-                Path    = $Path
-                Content = Get-Content -Path $Path -Raw
+            try {
+                $content = Get-Content -Path $Path -Raw -ErrorAction Stop
+                return @{ Path = $Path; Content = $content }
+            }
+            catch {
+                return @{ Path = $Path; Content = ''; Error = $_.Exception.Message }
             }
         }
 
@@ -189,6 +187,15 @@ Describe 'Claude shell/shared-body parity contract' {
 
     It 'discovers at least one paired-body shell to enforce parity against' {
         $script:ShellDocuments.Count | Should -BeGreaterThan 0 -Because 'parity enforcement requires at least one Claude shell in agents/ — if this fails, the discovery glob or filter may be broken'
+    }
+
+    It 'requires every agents/*.md file (excluding *.agent.md) to carry the canonical session-startup trigger stub' {
+        $allShellFiles = Get-ChildItem -Path $script:AgentsDirectory -Filter '*.md' -File |
+            Where-Object { $_.Name -notlike '*.agent.md' }
+        foreach ($shellFile in $allShellFiles) {
+            $content = Get-Content -Path $shellFile.FullName -Raw
+            $content | Should -Match ([regex]::Escape($script:CanonicalTriggerText)) -Because "$($shellFile.Name) must carry the canonical session-startup trigger stub to be discoverable and to activate Step 9 runtime enforcement"
+        }
     }
 
     It 'requires discovered Claude shells to exist as shared-methodology pairs with the canonical startup stub in the top body' {

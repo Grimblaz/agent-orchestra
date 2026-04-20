@@ -68,11 +68,19 @@ Describe 'session startup wording contract' {
                 }
             }
 
-            $content = Get-Content -Path $Path -Raw
-
-            return @{
-                Path    = $Path
-                Content = $content
+            try {
+                $content = Get-Content -Path $Path -Raw -ErrorAction Stop
+                return @{
+                    Path    = $Path
+                    Content = $content
+                }
+            }
+            catch {
+                return @{
+                    Path    = $Path
+                    Content = ''
+                    Error   = $_.Exception.Message
+                }
             }
         }
 
