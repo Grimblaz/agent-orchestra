@@ -50,12 +50,13 @@ Authoritative schema block — the dispatch prompt-text carrier. Consumer script
 
 ```yaml
 # --- subagent-env-handshake v1 schema begin ---
-parent_head: <sha>                        # string, 40 hex chars, output of `git rev-parse HEAD` in the parent
-parent_branch: <branch-name>              # string, output of `git rev-parse --abbrev-ref HEAD` in the parent
-parent_cwd: <absolute-path>               # string, output of `pwd` in the parent
-parent_dirty_fingerprint: <12-hex>        # string, SHA-256(LF-normalized `git status --porcelain`) truncated :12
-workspace_mode: <shared|worktree>         # enum. v1: 'shared' is the only active value; 'worktree' is reserved → error path.
-handshake_issued_at: <iso-8601-utc>       # string, parent-side `(Get-Date).ToUniversalTime().ToString('o')` or equivalent
+parent_head: <sha> # string, 40 hex chars, output of `git rev-parse HEAD` in the parent
+parent_branch: <branch-name> # string, output of `git rev-parse --abbrev-ref HEAD` in the parent
+# Note: on detached HEAD, this field is the literal string `HEAD` on both sides — comparison succeeds; commit identity is still verified via `parent_head`
+parent_cwd: <absolute-path> # string, output of `pwd` in the parent
+parent_dirty_fingerprint: <12-hex> # string, SHA-256(LF-normalized `git status --porcelain`) truncated :12
+workspace_mode: <shared|worktree> # enum. v1: 'shared' is the only active value; 'worktree' is reserved → error path.
+handshake_issued_at: <iso-8601-utc> # string, parent-side `(Get-Date).ToUniversalTime().ToString('o')` or equivalent
 # --- subagent-env-handshake v1 schema end ---
 ```
 
@@ -67,22 +68,24 @@ Parent dispatch code that cannot invoke PowerShell (e.g., the markdown in `comma
 
 ```markdown
 <!-- subagent-env-handshake v1 -->
+
 parent_head: 0000000000000000000000000000000000000000
 parent_branch: main
 parent_cwd: /absolute/path/to/repo
-parent_dirty_fingerprint: 0000000000
+parent_dirty_fingerprint: 000000000000
 workspace_mode: shared
 handshake_issued_at: 1970-01-01T00:00:00.0000000Z
+
 <!-- /subagent-env-handshake -->
 ```
 
 Field names and order MUST match the schema block above. Drift is locked by the schema-parity Pester test in `.github/scripts/Tests/subagent-env-handshake.Tests.ps1`.
 
-## Subagent contract — match / mismatch / error
+## Subagent contract — match / mismatch / error / missing-handshake
 
 When a dispatched subagent loads, its first action (before shared-body load, before any tree-grounded claim) is:
 
-1. Parse the `<!-- subagent-env-handshake v1 -->` block from the dispatch prompt. If absent → error path.
+1. Parse the `<!-- subagent-env-handshake v1 -->` block from the dispatch prompt. If absent → **missing-handshake** path.
 2. Run live git verification via `Bash`:
    - `git rev-parse HEAD`
    - `git rev-parse --abbrev-ref HEAD`
@@ -94,7 +97,7 @@ When a dispatched subagent loads, its first action (before shared-body load, bef
 
 ### Match path
 
-All six fields match. The subagent proceeds to shared-body load / role work with no environmental caveat. Tree-grounded findings carry implicit environmental consistency because the handshake matched.
+All **four** working-tree fields match. The subagent proceeds to shared-body load / role work with no environmental caveat. Tree-grounded findings carry implicit environmental consistency because the handshake matched.
 
 ### Mismatch path (ND-2 default: halt)
 
@@ -104,12 +107,14 @@ One or more of `parent_head`, `parent_branch`, `parent_cwd`, `parent_dirty_finge
 ## Finding: environment-divergence (halting)
 
 **Expected (from parent handshake):**
+
 - HEAD: {parent_head}
 - branch: {parent_branch}
 - CWD: {parent_cwd}
 - dirty fingerprint: {parent_dirty_fingerprint}
 
 **Observed (live git verification):**
+
 - HEAD: {observed_head}
 - branch: {observed_branch}
 - CWD: {observed_cwd}
@@ -144,7 +149,7 @@ The SKILL exposes two equivalent carriers so both PowerShell and markdown caller
 1. **PowerShell helper** (dot-sourceable): `skills/subagent-env-handshake/scripts/New-SubagentDispatchPrompt.ps1`. Use from PowerShell-driven dispatch sites. Deterministic output; unit-tested for fingerprint stability.
 2. **Inline prose template** (above): construct from Bash values in markdown command files. Field order must match the schema block.
 
-Both forms produce byte-identical output for identical inputs. The schema-parity Pester test locks this.
+Both forms produce field-identical output for identical inputs. Scenario (f) validates field names and order.
 
 ### Parent-side error handling
 
@@ -160,11 +165,21 @@ If the parent's `git` invocations fail during construction (non-zero exit on `gi
 
 Research or non-tree-dependent dispatches may skip the handshake entirely; opt-in is intentional (ND-3).
 
+> **CWD capture (Windows)**: Always capture `parent_cwd` using `pwd` in the Bash tool, not `(Get-Location).Path` in PowerShell. On Windows, PowerShell produces `C:\Users\...` while the Bash tool produces `/c/Users/...`; these formats will never compare equal and will trigger a mismatch halt.
+
 **Cross-references:**
 
 - Pilot site (this feature): `commands/plan.md` → `agents/issue-planner.md` (the only existing real `Agent`-tool dispatch in the Claude plugin as of 2026-04-20).
 - Related plan hygiene: [#389](https://github.com/Grimblaz/agent-orchestra/issues/389) — plugin version bump required for cache invalidation when this skill ships.
 - Copilot exemption: `scope: claude-only` — Copilot's subagent model shares the parent workspace with different tool bindings, so tree-view divergence does not arise. No Copilot-side port is planned.
+
+## Gotchas
+
+- **CWD format mismatch (Windows):** Always capture `parent_cwd` using `pwd` in the Bash tool, not `(Get-Location).Path` in PowerShell. PowerShell produces `C:\Users\...`; Bash produces `/c/Users/...`. They will never compare equal and will cause a spurious mismatch halt on every Windows dispatch.
+- **Detached HEAD:** When the parent is in detached-HEAD state, `git branch --show-current` returns an empty string. `parent_branch` will be recorded as `HEAD` (or empty depending on the capture command). The subagent's live branch check must tolerate this — do not assume `parent_branch` is always a branch name.
+- **sha256sum availability:** `sha256sum` is not available on macOS by default (use `shasum -a 256` instead) and may be absent in some CI images. The parent-side helper must guard against missing commands; on failure, skip dirty-fingerprint construction and dispatch without the field rather than halting the parent.
+- **Missing-handshake is not an error:** Subagents dispatched without a handshake block (research tasks, Copilot dispatch, pre-adoption callers) route to `missing-handshake` → `environment-unverified`, not to `error`. Do not conflate the two paths.
+- **Schema-parity test enforces byte identity:** The Pester contract test verifies that the `## Finding: environment-divergence (halting)` block in the verifier stub is byte-identical to the copy in this SKILL.md. If you edit the finding template here, you must update the fixture too (and vice versa), or the test will fail.
 
 ## Reproducer Evidence (from design phase)
 
@@ -174,9 +189,9 @@ Pinned from the ND-5 reproducer run during the #383 design phase (2026-04-20). T
 
 **Reproducer — Claude Code official docs (`code.claude.com/docs/en/sub-agents`, verified 2026-04-20):**
 
-- **Line 225** (default dispatch model): *"A subagent starts in the main conversation's current working directory. Within a subagent, `cd` commands do not persist between Bash or PowerShell tool calls and do not affect the main conversation's working directory."* → The default is **shared live working tree**, not a snapshot.
-- **Line 246** (opt-in isolation): *"[isolation: worktree] runs the subagent in a temporary git worktree, giving it an isolated copy of the repository."* → Worktree isolation is a **frontmatter opt-in**, not the default.
-- **Line 223** (injected env context): *"Subagents receive only this system prompt (plus basic environment details like working directory), not the full Claude Code system prompt."* → The subagent receives a small `<env>` block (working dir, branch, status, recent commits) **injected once at dispatch time**.
+- **Line 225** (default dispatch model): _"A subagent starts in the main conversation's current working directory. Within a subagent, `cd` commands do not persist between Bash or PowerShell tool calls and do not affect the main conversation's working directory."_ → The default is **shared live working tree**, not a snapshot.
+- **Line 246** (opt-in isolation): _"[isolation: worktree] runs the subagent in a temporary git worktree, giving it an isolated copy of the repository."_ → Worktree isolation is a **frontmatter opt-in**, not the default.
+- **Line 223** (injected env context): _"Subagents receive only this system prompt (plus basic environment details like working directory), not the full Claude Code system prompt."_ → The subagent receives a small `<env>` block (working dir, branch, status, recent commits) **injected once at dispatch time**.
 
 **In-session parent evidence:** the parent session's own injected `<env>` block captured at conversation start became stale within the session — at dispatch time the `<env>` said `feature/issue-382-runtime-shared-body-enforcement` / HEAD `a9bc897`, while the live `git rev-parse HEAD` returned `feature/issue-383-subagent-env-consistency` / HEAD `6bf7aaa`. Divergence reproduced live.
 

@@ -20,7 +20,7 @@ Dispatch the `issue-planner` subagent to produce an implementation plan for the 
    - `git rev-parse HEAD`
    - `git rev-parse --abbrev-ref HEAD`
    - `pwd`
-   - `git status --porcelain | tr -d '\r' | sha256sum | cut -c1-12` (LF-normalized SHA-256:12)
+   - `git status --porcelain | tr -d '\r' | (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-12` (LF-normalized SHA-256:12)
 2. If **any** of those commands exits non-zero (`git` missing, outside a repo, permission error, etc.), **skip handshake construction entirely** and proceed straight to dispatch without the block. The subagent's Step 0 missing-handshake branch will handle the fallback (tag tree-grounded findings `environment-unverified`). Do not fabricate placeholder values.
 3. Otherwise, construct the handshake block by copying the SKILL.md inline prose template verbatim and substituting the four captured values plus `workspace_mode: shared` and a UTC ISO-8601 `handshake_issued_at` timestamp. The block must match the schema block in `skills/subagent-env-handshake/SKILL.md` field-for-field and in canonical order. Do not rename, reorder, or omit fields.
 4. Prepend the handshake block as the **first content** of the `prompt` parameter passed to the `Agent` tool in the dispatch step below. Issue context / instructions follow the `<!-- /subagent-env-handshake -->` closing comment.

@@ -77,7 +77,7 @@ on this dispatch. The parent session should reconcile the divergence
 explicitly acknowledge the mismatch) and re-dispatch.
 ```
 
-This template is the authoritative finding shape. Drift between this quoted copy and the SKILL.md source is caught by grep-level validation in the verification step.
+This template is the authoritative finding shape. Drift between this quoted copy and the SKILL.md source is detected when the `## Finding: environment-divergence (halting)` heading diverges — Scenario (d) locks the heading. Full template-body parity is not automatically enforced.
 
 ## Shared methodology
 

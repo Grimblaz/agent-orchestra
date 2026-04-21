@@ -41,6 +41,7 @@ function Read-SubagentEnvHandshakeBlock {
         parent_dirty_fingerprint, workspace_mode, handshake_issued_at —
         or $null if no well-formed block is present.
     #>
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -96,6 +97,7 @@ function Invoke-SubagentEnvHandshakeVerifier {
           - finding_heading — for mismatch: '## Finding: environment-divergence (halting)'
           - tag          — for error / missing-handshake: 'environment-unverified'
     #>
+    [OutputType([hashtable])]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -141,6 +143,9 @@ function Invoke-SubagentEnvHandshakeVerifier {
     }
 
     $diverged = @()
+    # Compares the four live-verifiable fields only (ND-4 scope).
+    # workspace_mode: handled above via reserved-value check.
+    # handshake_issued_at: excluded — no live counterpart; timestamp cannot be re-derived by subagent.
     foreach ($field in @('parent_head', 'parent_branch', 'parent_cwd', 'parent_dirty_fingerprint')) {
         if ($handshake[$field] -ne $Observed[$field]) {
             $diverged += $field

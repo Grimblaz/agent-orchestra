@@ -104,6 +104,22 @@ Describe 'subagent-env-handshake v1 contract' {
             $fp = Get-DirtyTreeFingerprint -PorcelainOutput 'anything'
             $fp | Should -Match '^[0-9a-f]{12}$'
         }
+
+        It 'returns a 12-char lowercase hex fingerprint for empty (clean-tree) porcelain output' {
+            $fp = Get-DirtyTreeFingerprint -PorcelainOutput ''
+            $fp | Should -Match '^[0-9a-f]{12}$'
+            # SHA-256 of empty bytes: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+            $fp | Should -Be 'e3b0c44298fc'
+        }
+
+        It 'returns a 12-char lowercase hex string via the live git code path' {
+            if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
+                Set-ItResult -Skipped -Because 'git not available in test environment'
+                return
+            }
+            $fp = Get-DirtyTreeFingerprint
+            $fp | Should -Match '^[0-9a-f]{12}$'
+        }
     }
 
     Context 'Scenario (c) — verifier match path' {
@@ -181,6 +197,14 @@ Describe 'subagent-env-handshake v1 contract' {
             $result = Invoke-SubagentEnvHandshakeVerifier `
                 -PromptText $worktreeBlock `
                 -Observed $script:SampleObserved
+            $result.outcome | Should -Be 'error'
+            $result.tag | Should -Be 'environment-unverified'
+        }
+
+        It 'returns error with environment-unverified tag when Observed is null' {
+            $result = Invoke-SubagentEnvHandshakeVerifier `
+                -PromptText $script:SampleBlock `
+                -Observed $null
             $result.outcome | Should -Be 'error'
             $result.tag | Should -Be 'environment-unverified'
         }

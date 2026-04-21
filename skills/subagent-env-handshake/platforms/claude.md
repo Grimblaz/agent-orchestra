@@ -17,6 +17,8 @@ Subagent Claude shells (e.g., `agents/issue-planner.md`) add a `## Step 0: Envir
 
 The `claude-shell-parity` bijection test enforces parity on backtick-enumerated tokens inside the `## Shared methodology` enumeration paragraph only, not on all shell H2s, so adding the Step 0 H2 does not break parity provided the ordering is: canonical session-startup stub → Step 0 → `## Shared methodology`.
 
+> **CWD capture (Windows)**: Always capture `parent_cwd` using `pwd` in the Bash tool, not `(Get-Location).Path` in PowerShell. On Windows, PowerShell produces `C:\Users\...` while the Bash tool produces `/c/Users/...`; these formats will never compare equal and will trigger a mismatch halt.
+
 ## Copilot exemption
 
 Copilot's subagent dispatch model shares the parent workspace with different tool bindings; tree-view divergence does not arise. No Copilot platform file exists for this skill.
