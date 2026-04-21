@@ -31,7 +31,8 @@ Follow these steps exactly.
   "recordMarkerAfterFirstAutomaticStartupCheck": true,
   "recordMarkerRegardlessOfCleanupChoice": true,
   "failOpenOnSessionMemoryAccessError": true,
-  "manualDetectorRunsRemainAllowed": true
+  "manualDetectorRunsRemainAllowed": true,
+  "confirmSharedBodyLoadForAgentShells": true
 }
 ```
 
@@ -98,7 +99,23 @@ If the user confirms, run all lines from the code block inside `additionalContex
 
 ### Step 8 — Continue with the user's request
 
-Continue with the user's original request regardless of whether cleanup was run, skipped, or declined. This automatic run-once guard applies only to the startup path; explicit or manual detector runs still remain allowed after the automatic guard fires.
+After the automatic cleanup-detector path is complete, continue with the user's original request only after completing any other applicable startup steps below, including Step 9 when it applies. This automatic run-once guard applies only to the cleanup-detector path; explicit or manual detector runs still remain allowed after the automatic guard fires.
+
+### Step 9 — Confirm paired shared-body load (agent shells with a paired body)
+
+This step is not gated by the session-startup run-once marker and fires on every agent-role adoption in the conversation, including every subagent dispatch. Do not wrap this step in the Step 2 or Step 4 marker guard.
+
+If you are operating as an agent shell at `agents/{name}.md` whose body contains a `## Shared methodology` section naming a paired `agents/{Name}.agent.md`, load that paired file via the platform's file-read tool before proceeding.
+
+If that load fails, emit exactly: `⚠️ Shared-body load failed for agents/{Name}.agent.md — {error}. This run cannot continue without the canonical methodology; surface this to the user and stop.` After emitting that message, do not make any further tool calls, subagent dispatches, structured-question calls, or any other agent actions.
+
+If the paired load succeeds, cite it with `Shared body loaded — proceeding as {AgentName}` and include the full-form H2 body names exactly as they appear in the shared body, excluding `Platform-specific invocation`.
+
+If you are not in a paired-body context, skip this step silently.
+
+If the same shared body is loaded more than once in a conversation, the load is idempotent — loading the same file a second time is harmless and does not require deduplication logic.
+
+Enforcement paths: subagent dispatch (`/plan` and Agent tool) is enforced by Step 9 — this step fires before the agent acts and halts on failure. Inline dispatch (`/experience`, `/design`) currently relies on command-file prose to read and adopt the paired body; the citation and halt-on-failure contract is not currently enforced on that path. Issue #396 tracks bringing inline dispatch to full parity with Step 9.
 
 ## Silent Skip Conditions
 

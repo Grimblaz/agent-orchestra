@@ -24,6 +24,8 @@ Describe 'session startup wording contract' {
         $script:SessionStartupSkill = Join-Path $script:RepoRoot 'skills\session-startup\SKILL.md'
         $script:CanonicalMarkerPath = '/memories/session/session-startup-check-complete.md'
         $script:CanonicalTriggerText = 'Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.'
+        # NOTE: An identical copy of this constant exists in claude-shell-parity.Tests.ps1.
+        # Both must be kept in sync. A shared library consolidation is tracked as a follow-up issue.
         $script:LegacySilentSkipSummary = 'Skip the automatic startup check silently when neither `$env:COPILOT_ORCHESTRA_ROOT` nor `$env:WORKFLOW_TEMPLATE_ROOT` is set, `pwsh` is unavailable, or the detector returns non-JSON output.'
         $script:DetectorCommandPattern = '(?ms)^pwsh -NoProfile -NonInteractive -File "[^"]*skills/session-startup/scripts/session-cleanup-detector\.ps1"\s*$'
         $script:ContractHeadingPattern = '(?m)^### Canonical Automatic Startup Guard Contract\s*$'
@@ -52,6 +54,7 @@ Describe 'session startup wording contract' {
             recordMarkerRegardlessOfCleanupChoice       = $true
             failOpenOnSessionMemoryAccessError          = $true
             manualDetectorRunsRemainAllowed             = $true
+            confirmSharedBodyLoadForAgentShells         = $true
         }
 
         $script:GetDocumentState = {
@@ -65,11 +68,19 @@ Describe 'session startup wording contract' {
                 }
             }
 
-            $content = Get-Content -Path $Path -Raw
-
-            return @{
-                Path    = $Path
-                Content = $content
+            try {
+                $content = Get-Content -Path $Path -Raw -ErrorAction Stop
+                return @{
+                    Path    = $Path
+                    Content = $content
+                }
+            }
+            catch {
+                return @{
+                    Path    = $Path
+                    Content = ''
+                    Error   = $_.Exception.Message
+                }
             }
         }
 
@@ -111,7 +122,7 @@ Describe 'session startup wording contract' {
                 return @{}
             }
 
-            return $match.Groups['json'].Value | ConvertFrom-Json -AsHashtable
+            return $match.Groups['json'].Value | ConvertFrom-Json
         }
 
         $script:ConvertToCanonicalJson = {
@@ -163,6 +174,24 @@ Describe 'session startup wording contract' {
         (& $script:ConvertToCanonicalJson -Value $contract) | Should -Be $expectedJson -Because 'the session-startup skill must publish the exact startup guard contract'
     }
 
+    It 'requires Step 9 to describe shared-body load with Read + cite + halt semantics for agent shells' {
+        $skill = & $script:GetDocumentState -Path $script:SessionStartupSkill
+        $step9 = & $script:GetStepSection -Content $skill.Content -StepNumber 9
+        $warningGlyph = [string]([char]0x26A0) + [char]0xFE0F
+        $successCitation = 'Shared body loaded ' + [char]0x2014 + ' proceeding as'
+
+        # 240-char budget: room for the guard-clause sentence (~120 chars) plus paragraph reformatting headroom
+        $step9 | Should -Match '(?is)(not gated by .*run-once marker|outside .*run-once guard|fires on every agent-role adoption).{0,240}(every subagent dispatch|Do not wrap this step in the Step 2 or Step 4 marker guard)' -Because 'Step 9 must keep shared-body loading outside the session-startup run-once guard'
+        $step9 | Should -Match ([regex]::Escape('agents/{Name}.agent.md')) -Because 'Step 9 must name the paired shared-body path pattern literally'
+        $step9 | Should -Match ('(?s)' + [regex]::Escape($warningGlyph) + '.*cannot continue without the canonical methodology') -Because 'Step 9 must require the canonical halt message when the shared-body load fails'
+        $step9 | Should -Match ([regex]::Escape('Shared-body load failed for agents/')) -Because 'Step 9 must name the halt path prefix in the canonical halt message'
+        $step9 | Should -Match ([regex]::Escape('surface this to the user and stop')) -Because 'Step 9 must require the agent to surface the failure and stop'
+        $step9 | Should -Match '(?is)further tool calls|no further.*agent actions|further.*subagent' -Because 'Step 9 must prohibit any further tool calls or agent actions after the halt message'
+        $step9 | Should -Match ([regex]::Escape($successCitation)) -Because 'Step 9 must require the canonical success citation'
+        $step9 | Should -Match ([regex]::Escape("platform's file-read tool")) -Because 'Step 9 must describe loading the paired body with a platform-neutral file-read tool reference'
+        $step9 | Should -Not -Match '(?i)(?<![\w-])Read tool\b' -Because 'Step 9 must not hardcode the Copilot-specific Read tool name'
+    }
+
     It 'requires the session-startup skill to describe the run-once guard in the canonical order' {
         $skill = & $script:GetDocumentState -Path $script:SessionStartupSkill
         $guardCheck = & $script:GetHeadingIndex -Content $skill.Content -HeadingPattern '(?m)^### Step 2 — Check the automatic run-once guard\s*$'
@@ -187,5 +216,6 @@ Describe 'session startup wording contract' {
         $step3 | Should -Match $script:DetectorCommandPattern -Because 'the session-startup skill must preserve the automatic detector command'
         $step4 | Should -Match '(?is)(fail open).{0,200}(allow later automatic checks|still run the detector)' -Because 'the session-startup skill must state that session-memory write failures fail open'
         $step8 | Should -Match '(?is)(explicit|manual).{0,80}(manual|detector).{0,160}(remain|still).{0,120}(allowed|possible|available)' -Because 'the session-startup skill must keep manual detector invocation available after the automatic startup check'
+        $step8 | Should -Match 'Step 9' -Because 'Step 8 must explicitly reference Step 9 to establish the sequencing dependency'
     }
 }
