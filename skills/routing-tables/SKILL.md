@@ -18,7 +18,7 @@ This skill is the human-readable companion to the routing data in `assets/routin
 `assets/routing-config.json` contains five top-level sections:
 
 - `specialist_dispatch`: file and task routing entries from Code-Conductor's Agent Selection table; deterministic `FilePattern` consumers should use the optional `file_patterns` arrays rather than parsing `file_type_or_task`
-- `review_mode_routing`: prompt-marker to review-mode mapping from Code-Critic, including conflict resolution
+- `review_mode_routing`: selector-line marker to review-mode mapping from Code-Critic, including conflict resolution
 - `surface_identification`: CE Gate surface to tool mapping from Code-Conductor; `No customer surface` carries the exact status marker template in `status_result_template`
 - `skill_mapping`: delegation guidance from Code-Conductor's Skill Mapping table; this is a reference list, not a strict deterministic router
 - `enums`: canonical current enum values used by review and routing outputs
@@ -39,9 +39,9 @@ Planning artifacts and plan markers route to Issue-Planner. CE Gate evidence cap
 
 ## Review Mode Routing
 
-Review mode routing is driven by prompt markers. No marker means normal code prosecution with three parallel passes. Design review perspectives switch to design or plan prosecution with two parallel passes. Product-alignment, defense, CE prosecution, and GitHub proxy prosecution each run as single-pass modes.
+Review mode routing is driven by explicit top-level selector lines of the form `Review mode selector: "{marker}"`. No selector line means normal code prosecution with three parallel passes. Design review perspectives switch to design or plan prosecution with two parallel passes. Product-alignment, defense, CE prosecution, and GitHub proxy prosecution each run as single-pass modes.
 
-When multiple markers appear, the conflict rule applies in strict priority order: defense, then CE, then proxy, then product-alignment, then design, then code. One explicit override exists: `Use code review perspectives` beats `Use design review perspectives` and forces normal code prosecution.
+When multiple selector lines appear, the conflict rule applies in strict priority order: defense, then CE, then proxy, then product-alignment, then design, then lite code prosecution, then standard code prosecution. One explicit override exists: `Review mode selector: "Use code review perspectives"` beats `Review mode selector: "Use design review perspectives"` and forces normal code prosecution.
 
 ## Surface Identification
 

@@ -86,6 +86,18 @@
         "parallel": false
       },
       {
+        "marker": "Use code review perspectives",
+        "mode": "code_prosecution",
+        "passes": 3,
+        "parallel": true
+      },
+      {
+        "marker": "Use lite code review perspectives",
+        "mode": "code_prosecution_lite",
+        "passes": 1,
+        "parallel": false
+      },
+      {
         "marker": "Use defense review perspectives",
         "mode": "defense",
         "passes": 1,
@@ -111,6 +123,7 @@
         "proxy_prosecution",
         "product_alignment_prosecution",
         "design_plan_prosecution",
+        "code_prosecution_lite",
         "code_prosecution"
       ],
       "override_rules": [
