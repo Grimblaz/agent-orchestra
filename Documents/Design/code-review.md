@@ -72,13 +72,13 @@ VS Code 1.110 renamed the questioning tool from `ask_questions` to `vscode/askQu
 
 ## Design Review Mode
 
-Added in issue #73. Code-Critic gains a second operating mode triggered by the marker `"Use design review perspectives"`.
+Added in issue #73. Code-Critic gains a second operating mode triggered by the selector line `Review mode selector: "Use design review perspectives"`.
 
 ### Decision Summary
 
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
-| D7 | Activation mechanism | Marker string in prompt | Avoids runtime ambiguity; callers always know which mode they're requesting |
+| D7 | Activation mechanism | Explicit top-level selector line | Avoids runtime ambiguity; callers always know which mode they're requesting |
 | D8 | Pass count for design review | 3-pass parallel (2 standard design + 1 product-alignment) | Matches the coverage-variance rationale for code review; adds an explicit product/experience/planned-work alignment lens per issue #131 |
 | D9 | Review perspectives | 3 (Feasibility & Risk, Scope & Completeness, Integration & Impact) | Covers the three most common plan failure modes without overlap |
 | D10 | Blocking behavior | Non-blocking (caller decides) | Code-Critic has no veto over design decisions; findings inform, not gate |
@@ -86,7 +86,7 @@ Added in issue #73. Code-Critic gains a second operating mode triggered by the m
 
 ### Design Review Mode Behavior
 
-- **Trigger**: Prompt contains the literal string `"Use design review perspectives"`
+- **Trigger**: Prompt prepends the top-level selector line `Review mode selector: "Use design review perspectives"`
 - **Output format**: `## Design Challenge Report` with three perspective sections (§D1, §D2, §D3) and a Summary
 - **Finding format**: Same as code review (Issue / Concern / Nit with severity, confidence, failure_mode)
 - **Scope**: Designs and implementation plans only — not code diffs
@@ -123,14 +123,14 @@ Replaced the rebuttal-based adversarial review pipeline with a structured Prosec
 
 | # | Decision | Choice | Rationale |
 |---|----------|--------|----------|
-| D11a | Defense mechanism | Code-Critic with `"Use defense review perspectives"` marker | Same agent with different persona is simpler than a new "Code-Defender" agent; avoids agent proliferation |
+| D11a | Defense mechanism | Code-Critic with `Review mode selector: "Use defense review perspectives"` | Same agent with different persona is simpler than a new "Code-Defender" agent; avoids agent proliferation |
 | D12 | CE prosecution executor | Code-Critic (separate pass after Code-Conductor exercises scenarios) | Separation of execution (Code-Conductor) and review (Code-Critic) avoids the fox-guarding-henhouse problem of Code-Conductor evaluating its own CE work |
 | D13 | Rebuttal rounds | Removed; replaced by single defense pass + judge | Defense pass gives prosecution a structured adversarial challenge; single-shot judge with async user scoring replaces unlimited rebuttal rounds |
 | D14 | Per-pass counter-review (3×) | Not used; single defense pass | 3× defense overhead for marginal benefit; merged prosecution ledger gives defense full context in one pass |
 | D15 | Judge convergence | Single-shot; user scoring (+1/-1) provides async correction | Sample sizes too small for mid-cycle calibration; visibility first, then build learning pipeline |
 | D16 | Opt-out for lightweight issues | Not supported | Quality is non-negotiable — full pipeline always runs |
 | D17 | `review_loop_budget` | Removed from plan format | No longer needed; pipeline stages are fixed (3 prosecution + 1 defense + 1 judge) |
-| D18 | Mode conflict resolution | Priority order: defense > CE > proxy > product-alignment > design > code | Most-specific mode wins; avoids ambiguous multi-marker prompts |
+| D18 | Mode conflict resolution | Priority order: defense > CE > proxy > product-alignment > design > lite > code | Most-specific mode wins; avoids ambiguous multi-marker prompts |
 | D19 | Judge-only CRR separation | Code-Review-Response stops at judgment — no fix delegation | Conductor is the orchestrator; CRR doing delegation created conflicting responsibility chains |
 | D20 | Post-judgment routing in Conductor | All post-judgment fix routing logic lives in Code-Conductor | Single responsibility: CRR judges, Conductor executes. Gaps addressed: AC cross-check, effort estimation, auto-tracking, GitHub response posting |
 | D21 | Post-fix prosecution pass | Full pipeline (3 prosecution + defense + judge), diff-scoped, triggered by Critical/High or control-flow fix, loop budget 1 | Catches fix-introduced defects missed by one-shot review; full pipeline maintains adversarial principle; tight scope keeps cost proportionate. **Superseded by D36** (1+1 post-fix prosecution). |
@@ -159,14 +159,36 @@ Prosecutor assigns severity; judge may override.
 
 ### Code-Critic Modes
 
-| Marker in prompt | Mode | Passes | Perspectives |
+| Selector line | Mode | Passes | Perspectives |
 |-----------------|------|--------|-------------|
 | *(none / default)* | Code prosecution | 3 (parallel) | 6 code perspectives |
-| `"Use design review perspectives"` | Design/plan prosecution | 2 (parallel) | 3 design perspectives (passes 1–2) |
-| `"Use product-alignment perspectives"` | Product-alignment prosecution | 1 | 3 product-alignment perspectives (pass 3) |
-| `"Use defense review perspectives"` | Defense | 1 | Presume innocent; disprove each finding |
-| `"Use CE review perspectives"` | CE prosecution | 1 | Functional + Intent + Error States |
-| `"Score and represent GitHub review"` | Proxy prosecution | 1 | Validate/score external findings |
+| `Review mode selector: "Use lite code review perspectives"` | Lite code prosecution | 1 | All 6 standard code-review perspectives in one compact pass |
+| `Review mode selector: "Use design review perspectives"` | Design/plan prosecution | 2 (parallel) | 3 design perspectives (passes 1–2) |
+| `Review mode selector: "Use product-alignment perspectives"` | Product-alignment prosecution | 1 | 3 product-alignment perspectives (pass 3) |
+| `Review mode selector: "Use defense review perspectives"` | Defense | 1 | Presume innocent; disprove each finding |
+| `Review mode selector: "Use CE review perspectives"` | CE prosecution | 1 | Functional + Intent + Error States |
+| `Review mode selector: "Score and represent GitHub review"` | Proxy prosecution | 1 | Validate/score external findings |
+
+### Current Claude Review Surface (Issue #379)
+
+Phase 2 ships a Claude-native review surface under the `orchestra-review-*` command namespace. The standard entrypoints are `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, and `/orchestra:review-judge`.
+
+**Claude shells**:
+
+- `agents/code-critic.md` is the Claude shell for prosecution and defense flows. Its Step 0 environment handshake verification is required for the `code-critic` commands because those dispatches make tree-grounded claims.
+- `agents/code-review-response.md` is the Claude shell for judgment. `/orchestra:review-judge` may carry the same handshake block as context, but that handshake is optional because the judge shell does not gate execution on a Step 0 verifier.
+
+**Mode routing contract**:
+
+- Claude commands do not rely on incidental marker text inside quoted ledgers or carried context.
+- The active review mode is selected by prepending an explicit top-level line in the prompt body: `Review mode selector: "{marker}"`.
+- Current shipped selectors are `Review mode selector: "Use code review perspectives"`, `Review mode selector: "Use lite code review perspectives"`, and `Review mode selector: "Use defense review perspectives"`.
+
+**Lite mode shape**:
+
+- `/orchestra:review-lite` is the small-change path.
+- Lite mode is exactly one compact prosecution pass that still covers all six standard code-review perspectives before defense and judge run.
+- This is a proportional-cost variant of the canonical review, not a perspective subset.
 
 ---
 
@@ -185,6 +207,12 @@ Code-Conductor invokes →
           → [if triggered] Post-fix targeted prosecution (1+1 passes, diff-scoped; if pass 1 finds issues → defense → judge; otherwise ends)
               → Code-Conductor routes post-fix accepted findings (loop budget: 1)
 ```
+
+**Claude command mapping**:
+
+- `/orchestra:review` runs the canonical prosecution -> defense -> judge pipeline.
+- `/orchestra:review-lite` runs one compact all-perspectives prosecution pass -> defense -> judge.
+- `/orchestra:review-prosecute`, `/orchestra:review-defend`, and `/orchestra:review-judge` expose the three stages as power-user rerun entrypoints.
 
 **Design/plan review** (3× prosecution):
 
@@ -234,7 +262,7 @@ GitHub comments arrive → Code-Conductor routes →
 
 ### Defense Mode Specification
 
-**Activation marker**: `"Use defense review perspectives"`
+**Activation selector**: `Review mode selector: "Use defense review perspectives"`
 
 **Persona**: Adversarial defense — presume innocent. Your job is to find why each finding is wrong.
 
@@ -427,7 +455,7 @@ The `<!-- pipeline-metrics -->` format is extended from 18-field flat YAML (v1) 
 
 ### Code-Review-Response Structured Output
 
-CRR now emits a `<!-- judge-rulings -->` YAML block after the Markdown score summary table. Code-Conductor reads this for per-finding data; falls back to parsing the Markdown table if the block is absent.
+CRR now emits the Markdown score summary, the `<!-- code-review-complete-{PR} -->` completion marker, and the `<!-- judge-rulings -->` YAML block in the same payload. For GitHub-backed review flows, the completion marker and `judge-rulings` block stay in the same PR comment rather than being split across separate comments. Code-Conductor reads this for per-finding data; falls back to parsing the Markdown table if the block is absent.
 
 ### Calibration Profile
 

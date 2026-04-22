@@ -93,11 +93,12 @@ Emit a score table after ruling all findings.
 
 Use `—` in the Pass column when the prosecution mode does not carry a pass number.
 
-## Structured Judge Rulings Block
+## Structured Judge Output
 
-After the Markdown table, emit:
+After the Markdown table, emit the completion marker and `judge-rulings` block in the same payload:
 
 ```yaml
+<!-- code-review-complete-{PR} -->
 <!-- judge-rulings
 - id: F1
   judge_ruling: sustained
@@ -109,6 +110,8 @@ After the Markdown table, emit:
   points_awarded: D+5
 -->
 ```
+
+Keep the Markdown score summary, the `<!-- code-review-complete-{PR} -->` marker, and the `judge-rulings` block together in the same response payload. For GitHub-backed review flows, keep them in the same PR comment rather than splitting them across separate comments.
 
 Field values:
 
@@ -151,4 +154,4 @@ Judgment does not implement fixes. It produces the ruling and the evidence packa
 
 | Trigger                             | Gotcha                                                         | Fix                                                                |
 | ----------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
-| A ruling omits the structured block | Downstream consumers must parse prose or fail to route cleanly | Emit the `judge-rulings` block immediately after the score summary |
+| A ruling omits the completion marker or structured block | Downstream consumers can miss completion or fail to route cleanly | Emit `<!-- code-review-complete-{PR} -->` and the `judge-rulings` block immediately after the score summary in the same payload |
