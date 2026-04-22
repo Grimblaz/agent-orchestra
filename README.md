@@ -25,7 +25,7 @@ A multi-agent workflow system that orchestrates AI-assisted software development
 2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins agent-orchestra` and install.
 3. **Use** — All 14 agents and 39 skills are immediately available in VS Code Chat.
 
-**What's included in the plugin**: 14 agents, 39 skills, and 9 slash commands (`/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish`, `/experience`, `/orchestrate`).
+**What's included in the repo plugin payload**: 14 agents, 39 skills, and 8 command files under `commands/` (`/design`, `/experience`, `/plan`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`). VS Code currently ignores the plugin `commands` field; Claude Code and CLI consumers use it.
 
 **What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo.
 
@@ -54,7 +54,15 @@ Each agent reads its shared, tool-agnostic body from `agents/*.agent.md` and fol
 
 See [`CLAUDE.md`](CLAUDE.md) for the Claude Code user guide and [issue #369](https://github.com/Grimblaz/agent-orchestra/issues/369) for the design history.
 
-**Phase 2 and beyond** — implementation/review agents (Code-Conductor, Code-Critic, Code-Smith, Test-Writer, Doc-Keeper, Refactor-Specialist, Review-Response, Process-Review) are tracked in [issue #379](https://github.com/Grimblaz/agent-orchestra/issues/379) and later phases. Until they ship, handoffs from `/plan` fall back to Copilot or native Claude Code for implementation.
+### Phase 2 — Review pipeline live in Claude Code
+
+The Claude review surface now ships in the `orchestra-review-*` command namespace:
+
+- `/orchestra:review` — canonical entry for the full prosecution → defense → judge pipeline
+- `/orchestra:review-lite` — small-change variant with a single compact prosecution pass before defense and judge
+- `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge` — power-user and partial-rerun entry points for individual stages
+
+Implementation-side agents are still tracked in later phases. Until they ship, handoffs from `/plan` to implementation still fall back to Copilot or native Claude Code workflows.
 
 **What requires clone/fork**: same as the VS Code plugin — `.github/instructions/` and project templates are not distributed through the plugin surface.
 

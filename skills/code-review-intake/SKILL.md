@@ -3,6 +3,8 @@ name: code-review-intake
 description: "Deterministic GitHub review intake workflow with ledger-based judgment. Use when processing GitHub code review comments, reconciling Code-Critic findings, or running GitHub review intake mode. DO NOT USE FOR: pre-PR readiness checks (use verification-before-completion) or post-merge cleanup (use post-pr-review)."
 ---
 
+# Code Review Intake
+
 ## When to Use
 
 Activate this skill when the request includes any of the following trigger phrases:
@@ -19,8 +21,8 @@ Provide a deterministic intake and judgment workflow for GitHub-originated revie
 
 1. Ingest all review items from GitHub (threads, top-level comments, review summaries).
 2. Build a finding ledger where each item maps to its GitHub comment/review ID.
-3. **Proxy prosecution**: Call Code-Critic with `"Score and represent GitHub review"` marker. Code-Critic validates and scores each GitHub comment (critical/high→10 pts, medium→5 pts, low→1 pt). Output: scored prosecution ledger.
-4. **Defense pass**: Call Code-Critic with `"Use defense review perspectives"` marker, passing the prosecution ledger.
+3. **Proxy prosecution**: Call Code-Critic with the selector line `Review mode selector: "Score and represent GitHub review"`. Code-Critic validates and scores each GitHub comment (critical/high→10 pts, medium→5 pts, low→1 pt). Output: scored prosecution ledger.
+4. **Defense pass**: Call Code-Critic with the selector line `Review mode selector: "Use defense review perspectives"`, passing the prosecution ledger.
 5. **Judge pass**: Call Code-Review-Response with both prosecution ledger and defense report. Judge rules final and emits score summary.
 
 ## Hard Guardrail

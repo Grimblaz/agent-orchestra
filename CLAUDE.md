@@ -22,6 +22,26 @@ Three agents cover the journey from an issue on the board to an implementation-r
 
 Each agent reads a shared tool-agnostic body from `agents/*.agent.md` and follows the named skills for methodology. Claude-specific tool bindings (structured questions, subagent dispatch, `gh` CLI for GitHub work) are documented in each skill's `platforms/claude.md`.
 
+## Review pipeline
+
+Phase 2 adds the `orchestra-review-*` command namespace for Claude-native adversarial review:
+
+- `/orchestra:review` runs the canonical prosecution → defense → judge pipeline.
+- `/orchestra:review-lite` runs the small-change variant with one compact prosecution pass before defense and judge.
+- `/orchestra:review-prosecute`, `/orchestra:review-defend`, and `/orchestra:review-judge` let power users rerun individual stages.
+
+Handshake disposition by command:
+
+| Command | Handshake |
+| --- | --- |
+| `/orchestra:review` | Required |
+| `/orchestra:review-lite` | Required |
+| `/orchestra:review-prosecute` | Required |
+| `/orchestra:review-defend` | Required |
+| `/orchestra:review-judge` | Optional |
+
+The judge result is designed for same-comment persistence: the completion marker `<!-- code-review-complete-{PR} -->` and the `<!-- judge-rulings ... -->` YAML block travel together in one PR comment so Copilot and Claude Code can consume the same durable artifact.
+
 ## Cross-tool handoffs
 
 Handoffs between phases use durable GitHub issue comments rather than session-local state. Markers:
@@ -64,13 +84,13 @@ claude plugin uninstall <plugin@marketplace>
 
 - `agents/*.agent.md` — shared, tool-agnostic agent bodies used by both Copilot and Claude Code (capitalized filename, `.agent.md` extension)
 - `agents/{name}.md` — Claude-native subagent shells that point at the shared bodies (lowercase filename, plain `.md`)
-- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`)
+- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
 - `skills/` — reusable methodology loaded by both platforms; each skill has `platforms/claude.md` for Claude-specific invocation details
 - `platforms/` (at skill root) — platform-specific routing notes
 
 ## Not yet ported
 
-Phase 1 covers only the upstream agents. The implementation and review side — **Code-Conductor**, **Code-Smith**, **Code-Critic**, **Test-Writer**, **Doc-Keeper**, **Refactor-Specialist**, **Review-Response**, and **Process-Review** — is tracked in Phase 2 ([issue #379](https://github.com/Grimblaz/agent-orchestra/issues/379)) and later phases. Until they ship, use Claude Code directly or fall back to Copilot once the plan has been approved.
+Claude now ships the upstream pipeline plus the review surfaces. The remaining implementation-side agents — **Code-Conductor**, **Code-Smith**, **Test-Writer**, **Doc-Keeper**, **Refactor-Specialist**, **Process-Review**, **Specification**, and **UI-Iterator** — are still tracked in later phases. Until they ship, use Claude Code directly or fall back to Copilot once the plan has been approved.
 
 ## Issue #369 traces the full history
 
