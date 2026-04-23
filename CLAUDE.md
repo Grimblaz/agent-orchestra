@@ -57,6 +57,29 @@ Because the markers live on the issue, you can start a feature in Copilot, pick 
 
 When a session begins, the agent loads the `session-startup` skill. The skill checks for stale tracking artifacts from merged pull requests and offers to run the post-merge cleanup script when anything is found. The detector is run-once per conversation; manual detector runs remain available after the automatic check fires.
 
+## Releases
+
+Claude Code keys its plugin cache by the `version` declared in `.claude-plugin/plugin.json`. If an entry-point file changes without a version bump, same-version installs keep serving the older cached snapshot even though the repo changed.
+
+To prevent that, agent-assisted maintainer flows now route entry-point edits through the `plugin-release-hygiene` skill. Claude uses a committed `PostToolUse` hook and Copilot uses an auto-attached instruction file, but both mechanisms converge on the same shared release-hygiene guidance and one conversation-scoped bump decision.
+
+The `session-startup` skill also owns a Claude-only active-assist drift check. When the installed `agent-orchestra@agent-orchestra` version is behind the resolved marketplace version, the startup pass runs `claude plugin update`, reports the old and new versions, and asks whether to restart now or continue the current session under the old code.
+
+### For maintainers
+
+Supported Claude plugin CLI surface:
+
+```text
+claude plugin list
+claude plugin marketplace list
+claude plugin marketplace update
+claude plugin marketplace add <source>
+claude plugin marketplace remove <name>
+claude plugin update <plugin@marketplace>
+claude plugin install <plugin@marketplace>
+claude plugin uninstall <plugin@marketplace>
+```
+
 ## Where things live
 
 - `agents/*.agent.md` — shared, tool-agnostic agent bodies used by both Copilot and Claude Code (capitalized filename, `.agent.md` extension)

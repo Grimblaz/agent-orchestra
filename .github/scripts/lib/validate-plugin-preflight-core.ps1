@@ -141,9 +141,10 @@ function Invoke-PluginPreflight {
         catch { $results.Add([PSCustomObject]@{ Name = 'SkillCountMatch'; Passed = $false; Detail = "Error: $_" }) }
 
         # --- 7. Manifest does not declare unknown fields ---
-        # Shared plugin-format known fields per the GitHub Copilot CLI plugin reference.
+        # Shared plugin-format known fields per the GitHub Copilot CLI plugin reference,
+        # plus standard package metadata this repo already ships in plugin.json.
         try {
-            $allowedFields = @('name', 'description', 'version', 'author', 'skills', 'agents', 'hooks', 'mcpServers', 'commands', 'repository')
+            $allowedFields = @('name', 'description', 'version', 'author', 'skills', 'agents', 'hooks', 'mcpServers', 'commands', 'repository', 'license', 'keywords')
             $manifestProps = @($manifest.PSObject.Properties.Name)
             $unsupported = @($manifestProps | Where-Object { $_ -notin $allowedFields })
             if ($unsupported.Count -eq 0) {

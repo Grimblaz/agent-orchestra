@@ -12,11 +12,12 @@ Run-once startup guard for the automatic session-cleanup detector.
 - At the start of a new conversation before responding to the first user message
 - When deciding whether the automatic startup detector should run
 - When interpreting stale-state detector output and optionally running cleanup
+- When checking whether the installed Claude plugin version has drifted behind the marketplace
 - When preserving manual detector access after the automatic startup path fires
 
 ## Purpose
 
-Apply a session-memory run-once guard before any automatic startup detector invocation so the detector runs at most once automatically per conversation while remaining available for explicit manual use. This replaced the retired VS Code `SessionStart` hook and uses `skills/session-startup/scripts/session-cleanup-detector.ps1` to find stale tracking artifacts from merged pull requests.
+Apply a session-memory run-once guard before any automatic startup detector invocation so the detector runs at most once automatically per conversation while remaining available for explicit manual use. This replaced the retired VS Code `SessionStart` hook and uses `skills/session-startup/scripts/session-cleanup-detector.ps1` to find stale tracking artifacts from merged pull requests. The same run-once pass also owns the Claude-only plugin drift backstop: when `agent-orchestra@agent-orchestra` is installed but behind the resolved marketplace version, surface the update result and a restart-vs-continue decision without blocking the session on failures.
 
 ## Session Startup Check
 
@@ -97,9 +98,33 @@ If the output contains `hookSpecificOutput`, present the `additionalContext` tex
 
 If the user confirms, run all lines from the code block inside `additionalContext` in the terminal. Skip blank lines; `#`-prefixed comment lines are safe to include. Report what was cleaned up when complete.
 
+### Step 7b — Run the Claude plugin drift check
+
+After the cleanup path completes, run this Claude-only sub-step before continuing with the user's request. Copilot skips this sub-step silently because it has no version-cache analog.
+
+1. Resolve the installed plugin state from `~/.claude/plugins/installed_plugins.json`.
+2. Find the `agent-orchestra@agent-orchestra` entry and read its installed `version` plus `marketplace` field.
+3. If the file is missing, the entry is absent, or the entry has no `marketplace` field, fail open: silent-skip or emit a one-line minimal error and continue.
+4. Resolve the marketplace view of latest from `~/.claude/plugins/marketplaces/{marketplace}/.claude-plugin/plugin.json`.
+5. If the installed version is current, continue silently.
+6. If the installed version is behind, emit an inline status line before any command runs: `Drift detected — updating…`
+7. Run `claude plugin update agent-orchestra@agent-orchestra --yes` with a 30-second timeout.
+8. On success, emit the inline summary `Updated 'agent-orchestra@agent-orchestra' from {old} -> {new}. Current session runs under old code until restart.` and ask the user to choose one of these exact options: `Stop — I'll restart now` or `Continue — run under old code`.
+9. After the choice, acknowledge the selected mode explicitly. If the user continues, say that the new code goes live next session and then continue with the original request.
+10. If the update fails, retry once on transient errors. If it still fails, fail open with a minimal error plus the manual fallback command, then continue under the installed version.
+
+When the marketplace registration points at a local path instead of a GitHub remote, classify it before running the update:
+
+- Clean git repo behind `origin/main`: surface that the marketplace path is behind and include the remediation commands `claude plugin marketplace remove agent-orchestra` and `claude plugin marketplace add Grimblaz/agent-orchestra`
+- Non-git local directory: surface that the registration is a non-git local directory
+- Dirty tree or detached HEAD: surface that local marketplace remediation is skipped because the clone has local work
+- Fetch failure: fail open and continue
+
+Headless Claude runs skip the stop/continue prompt and emit the update result inline only. This sub-step shares the same run-once marker written in Step 4; do not create a second session-startup marker.
+
 ### Step 8 — Continue with the user's request
 
-After the automatic cleanup-detector path is complete, continue with the user's original request only after completing any other applicable startup steps below, including Step 9 when it applies. This automatic run-once guard applies only to the cleanup-detector path; explicit or manual detector runs still remain allowed after the automatic guard fires.
+After the automatic startup path is complete, continue with the user's original request only after completing any other applicable startup steps below, including Step 7b and Step 9 when they apply. This automatic run-once guard applies only to the cleanup-detector plus Claude drift-check path; explicit or manual detector runs still remain allowed after the automatic guard fires.
 
 ### Step 9 — Confirm paired shared-body load (agent shells with a paired body)
 

@@ -1,6 +1,11 @@
 .copilot-tracking/
 .copilot-tracking-archive/
-.claude/
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+!.claude/hooks/**
+.claude/.state/
+memory/
 plan-issue-*.md
 pester-*.txt
 testResults.xml

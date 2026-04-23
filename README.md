@@ -1,6 +1,6 @@
 # Agent Orchestra
 
-[![Version](https://img.shields.io/badge/version-v2.0.0-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v2.3.0-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system that orchestrates AI-assisted software development across specialized agents in GitHub Copilot and Claude Code.
@@ -65,6 +65,29 @@ The Claude review surface now ships in the `orchestra-review-*` command namespac
 Implementation-side agents are still tracked in later phases. Until they ship, handoffs from `/plan` to implementation still fall back to Copilot or native Claude Code workflows.
 
 **What requires clone/fork**: same as the VS Code plugin — `.github/instructions/` and project templates are not distributed through the plugin surface.
+
+---
+
+## Releases
+
+Claude Code caches plugins by the `version` in `.claude-plugin/plugin.json`. If an entry-point file changes without a version bump, cached installs keep serving the previous snapshot even though the repo content changed.
+
+Agent-assisted maintainer flows now route entry-point edits through the shared `plugin-release-hygiene` skill. Claude uses a committed `PostToolUse` hook, Copilot uses an auto-attached instruction file, and both mechanisms converge on one conversation-scoped version-bump decision.
+
+Claude sessions also run an active-assist startup drift check. When the installed `agent-orchestra@agent-orchestra` version is behind the resolved marketplace version, startup runs `claude plugin update`, reports the old and new versions, and asks whether to restart now or continue under the old code until the next session.
+
+### For maintainers
+
+```text
+claude plugin list
+claude plugin marketplace list
+claude plugin marketplace update
+claude plugin marketplace add <source>
+claude plugin marketplace remove <name>
+claude plugin update <plugin@marketplace>
+claude plugin install <plugin@marketplace>
+claude plugin uninstall <plugin@marketplace>
+```
 
 ---
 

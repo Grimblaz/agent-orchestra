@@ -56,6 +56,8 @@ Describe 'Invoke-PluginPreflight' -Tag 'unit' {
   "version": "1.13.0",
   "author": { "name": "$authorName" },
   "repository": "$repoUrl",
+    "license": "MIT",
+    "keywords": ["workflow", "agents"],
   "agents": ["./agents/"],
   "skills": [
 $($skillEntries -join ",`n")
@@ -207,6 +209,14 @@ $($skillEntries -join ",`n")
 
         It 'reports PASS when manifest declares the commands field' {
             $root = & $script:NewFixture -IncludeUnsupportedCommandsField
+            $pjPath = Join-Path $root 'plugin.json'
+            $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
+            $check = $result.Results | Where-Object { $_.Name -eq 'NoUnsupportedFields' }
+            $check.Passed | Should -BeTrue
+        }
+
+        It 'reports PASS when manifest declares license and keywords' {
+            $root = & $script:NewFixture
             $pjPath = Join-Path $root 'plugin.json'
             $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
             $check = $result.Results | Where-Object { $_.Name -eq 'NoUnsupportedFields' }
