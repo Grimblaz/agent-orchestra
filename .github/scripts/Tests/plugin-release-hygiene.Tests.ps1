@@ -5,7 +5,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:HookScript = Join-Path $script:RepoRoot '.claude\hooks\plugin-release-hygiene-hook.ps1'
+        $script:HookScript = Join-Path $script:RepoRoot 'skills\plugin-release-hygiene\scripts\plugin-release-hygiene-hook.ps1'
         $script:SkillFile = Join-Path $script:RepoRoot 'skills\plugin-release-hygiene\SKILL.md'
         $script:ClaudeGuide = Join-Path $script:RepoRoot 'CLAUDE.md'
         $script:Readme = Join-Path $script:RepoRoot 'README.md'

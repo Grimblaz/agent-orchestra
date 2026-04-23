@@ -181,7 +181,7 @@ Add to your user VS Code settings (`settings.json`):
 >
 > **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/agent-orchestra/.github/prompts"`. Apply the same format to every path-based setting above.
 >
-> **Migration note**: If you previously configured `chat.hookFilesLocations`, you can safely remove it — hooks have been replaced by the session startup check carried in the pipeline-entry agent files.
+> **Migration note**: If you previously configured `chat.hookFilesLocations`, you can safely remove it. Hooks are no longer configured through a VS Code user setting; plugin installs now load them from the shipped manifests (`plugin.json` for Copilot, `.claude-plugin/plugin.json` for Claude Code). Clone/path-based `chat.*Locations` settings continue to load agents, skills, prompts, and optional instructions, but they do not activate plugin hooks.
 
 > **v2.0.0 env var removal**: Earlier versions required `COPILOT_ORCHESTRA_ROOT` (or `WORKFLOW_TEMPLATE_ROOT`) for the session startup check to locate its scripts. v2.0.0 makes the script self-resolve via `$PSScriptRoot`, so no env var configuration is needed. You can safely unset any old `COPILOT_ORCHESTRA_ROOT` / `WORKFLOW_TEMPLATE_ROOT` values — the detector ignores them now.
 

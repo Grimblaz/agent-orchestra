@@ -17,7 +17,7 @@ Describe 'orchestra-review Claude shell coverage contract' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:AgentsDirectory = Join-Path $script:RepoRoot 'agents'
-        $script:CanonicalTriggerText = 'Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.'
+        $script:RetiredTriggerText = 'Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.'
         $script:CodeCriticShellPath = Join-Path $script:AgentsDirectory 'code-critic.md'
         $script:CodeCriticBodyPath = Join-Path $script:AgentsDirectory 'Code-Critic.agent.md'
         $script:CodeReviewResponseShellPath = Join-Path $script:AgentsDirectory 'code-review-response.md'
@@ -46,16 +46,12 @@ Describe 'orchestra-review Claude shell coverage contract' {
         }
     }
 
-    It 'keeps the two review shells eligible for generic claude-shell-parity discovery' {
-        $discoveredNames = @(
-            Get-ChildItem -Path $script:AgentsDirectory -Filter '*.md' -File |
-                Where-Object { $_.Name -notlike '*.agent.md' } |
-                Where-Object { (Get-Content -Path $_.FullName -Raw) -match [regex]::Escape($script:CanonicalTriggerText) } |
-                ForEach-Object { $_.BaseName }
-        )
+    It 'keeps the two review shells free of the retired startup trigger stub' {
+        $codeCriticShell = Get-Content -Path $script:CodeCriticShellPath -Raw
+        $codeReviewResponseShell = Get-Content -Path $script:CodeReviewResponseShellPath -Raw
 
-        $discoveredNames | Should -Contain 'code-critic'
-        $discoveredNames | Should -Contain 'code-review-response'
+        $codeCriticShell | Should -Not -Match ([regex]::Escape($script:RetiredTriggerText))
+        $codeReviewResponseShell | Should -Not -Match ([regex]::Escape($script:RetiredTriggerText))
     }
 
     It 'keeps explicit shared-body pointers for both new review shells' {

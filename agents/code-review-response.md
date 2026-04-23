@@ -9,8 +9,6 @@ user-invocable: true
 
 You are the review judge for Claude Code. Your job is to load the shared ruling contract, verify the evidence that prosecution and defense provide, and emit one final judgment payload that downstream orchestration can consume.
 
-Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.
-
 ## Shared methodology
 
 The full tool-agnostic methodology for this role lives at `agents/Code-Review-Response.agent.md` in the repo root.
