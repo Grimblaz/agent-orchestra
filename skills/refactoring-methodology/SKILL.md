@@ -1,5 +1,4 @@
 ---
-
 name: refactoring-methodology
 description: "Proactive refactoring workflow for touched files and nearby debt. Use when hunting extraction opportunities, evaluating duplication or oversized files, or improving structure without changing intended behavior. DO NOT USE FOR: adversarial defect review (use adversarial-review) or net-new feature implementation (use implementation-discipline)"
 ---
@@ -73,6 +72,39 @@ Use a concise analysis with these sections when reporting refactor work:
 - Run the project-configured validation and test commands after refactoring
 - Confirm coverage expectations still hold for the affected behavior
 - Re-check the modified files for any remaining symmetric mechanical misses
+
+## Conductor Integration
+
+In Code-Conductor workflows, **ALWAYS call Refactor-Specialist after Code-Smith completes.**
+
+Refactor-Specialist will:
+
+1. Analyze all files modified in the PR
+2. Hunt proactively for improvement opportunities
+3. Report findings (even if no action taken)
+4. Make improvements where beneficial
+
+**There is no "skip refactoring" option.** The Refactor-Specialist decides what needs improvement, not the plan or Code-Conductor.
+
+**Flow**: Code-Smith -> Refactor-Specialist -> Code-Critic
+
+**Clarification**: "Avoid broad rewrites" does NOT mean "skip refactoring" - it means keep refactoring proportionate to the PR's intent.
+
+**Proportionate refactoring (good)** means improving code you already touched (or its immediate neighbors) to reduce complexity/duplication without expanding the PR's goal. Examples:
+
+- Extract a small helper / function when the change introduced duplication in the same file
+- Rename a confusing local symbol or tighten types in the files already modified
+- Simplify a conditional / remove dead code encountered while making the change
+- Consolidate duplicated logic within the touched module(s) when it reduces future churn
+
+**Broad rewrite (avoid)** includes scope that changes the "shape" of the system beyond what the PR set out to do, such as:
+
+- Large file moves/renames or sweeping formatting churn across many files
+- Sweeping API changes (especially public/shared interfaces) just to "clean things up"
+- Re-architecting multiple systems/modules as part of a small feature/bugfix
+- Wide refactors that require updating many call sites unrelated to the original change
+
+**Decision rule (guardrail)**: If refactoring would expand beyond the PR's change intent (e.g., many unrelated files, new cross-cutting abstractions, or broad API changes), pause and escalate via `#tool:vscode/askQuestions` with options (including capturing as a `tech-debt` issue for a separate, dedicated PR) and a recommended choice.
 
 ## Related Guidance
 

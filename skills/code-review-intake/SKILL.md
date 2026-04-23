@@ -3,19 +3,15 @@ name: code-review-intake
 description: "Deterministic GitHub review intake workflow with ledger-based judgment. Use when processing GitHub code review comments, reconciling Code-Critic findings, or running GitHub review intake mode. DO NOT USE FOR: pre-PR readiness checks (use verification-before-completion) or post-merge cleanup (use post-pr-review)."
 ---
 
+<!-- markdownlint-disable-file MD041 MD003 -->
+
 # Code Review Intake
+
+Slim entryway for GitHub review intake, proxy-prosecution guardrails, and the extracted express-lane boundary reference.
 
 ## When to Use
 
-Activate this skill when the request includes any of the following trigger phrases:
-
-- `github review`
-- `review github`
-- `cr review`
-
-## Purpose
-
-Provide a deterministic intake and judgment workflow for GitHub-originated review feedback before implementation work begins.
+Activate this skill when the request includes `github review`, `review github`, or `cr review`. It is the entryway for deterministic intake and judgment of GitHub-originated review feedback before implementation begins, while shared mechanics stay indexed in extracted references.
 
 ## GitHub Review Mode (Proxy Prosecution Pipeline)
 
@@ -27,7 +23,7 @@ Provide a deterministic intake and judgment workflow for GitHub-originated revie
 
 ## Hard Guardrail
 
-In GitHub Review Mode, do not add net-new findings outside the ingested GitHub ledger.
+In GitHub Review Mode, do not add net-new findings outside the ingested GitHub ledger. GitHub review mode is proxy prosecution, so the R6 express lane does not apply. See [references/express-lane.md](references/express-lane.md) for the canonical scope restriction and Tier 1 re-validation rule.
 
 ### Safety Exception
 
@@ -59,9 +55,12 @@ Plus:
 - No unresolved evidence disputes remain.
 - User has visibility before any authority-boundary decision gate.
 
-## Convergence
-
 The proxy prosecution pipeline is single-shot: prosecution → defense → judge, with no rebuttal rounds. Judge rules final on all items. Unresolved items at low judge confidence are surfaced for user scoring via GitHub issue comment (async, non-blocking).
+
+## Composite References
+
+- [references/express-lane.md](references/express-lane.md): canonical R6 express-lane gate, its exclusion from proxy prosecution, and the Tier 1 re-validation requirement when R6 is used elsewhere
+- [../validation-methodology/references/review-reconciliation.md](../validation-methodology/references/review-reconciliation.md): shared non-GitHub review reconciliation, prosecution-depth setup, and post-fix R2 review mechanics that pair with intake after proxy judgment completes
 
 ## Gotchas
 

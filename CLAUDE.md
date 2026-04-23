@@ -10,7 +10,7 @@ Install the plugin from the marketplace if you have not already. Run this inside
 /plugin install agent-orchestra@agent-orchestra
 ```
 
-The plugin exposes three upstream agents — the full set a feature needs from intake through planning — plus a library of shared skills. Claude Code discovers them automatically once the plugin is installed.
+The plugin exposes the upstream pipeline, the review surface, the `/orchestrate` entry point, and a library of shared skills. Claude Code discovers them automatically once the plugin is installed.
 
 ## Upstream pipeline
 
@@ -21,6 +21,16 @@ Three agents cover the journey from an issue on the board to an implementation-r
 3. **Issue-Planner** — produces the implementation plan with CE Gate coverage and the full adversarial review pipeline (prosecution × 3 → defense → judge). Persists the approved plan as a GitHub issue comment with a `<!-- plan-issue-{ID} -->` marker. Activated with `/plan` or via the subagent name.
 
 Each agent reads a shared tool-agnostic body from `agents/*.agent.md` and follows the named skills for methodology. Claude-specific tool bindings (structured questions, subagent dispatch, `gh` CLI for GitHub work) are documented in each skill's `platforms/claude.md`.
+
+## Orchestration
+
+Phase 3 adds Code-Conductor to Claude Code.
+
+- `/orchestrate` dispatches the `code-conductor` shell for the full pipeline from smart resume and plan handoff through implementation, validation, CE Gate, and PR readiness.
+
+For paused Code-Conductor work, `/orchestrate` is also the Claude resume entry point. The shared workflow still uses `/implement` language in Copilot-specific paths, but Claude does not ship a `/implement` command in Phase 3.
+
+The Claude `code-conductor` shell follows the thin-shell convention: it loads the shared `agents/Code-Conductor.agent.md` body and relies on composite skills for the extracted orchestration contracts, so Copilot and Claude stay aligned on one source of truth.
 
 ## Review pipeline
 
@@ -48,6 +58,7 @@ Handoffs between phases use durable GitHub issue comments rather than session-lo
 
 - `<!-- experience-owner-complete-{ID} -->` — upstream framing complete
 - `<!-- design-phase-complete-{ID} -->` — technical design complete
+- `<!-- design-issue-{ID} -->` — durable design snapshot handoff used for D9 pause/resume and full-pipeline smart resume
 - `<!-- plan-issue-{ID} -->` — approved plan persisted
 - `<!-- first-contact-assessed-{ID} -->` — provenance gate completed for a cold pickup
 
@@ -84,13 +95,13 @@ claude plugin uninstall <plugin@marketplace>
 
 - `agents/*.agent.md` — shared, tool-agnostic agent bodies used by both Copilot and Claude Code (capitalized filename, `.agent.md` extension)
 - `agents/{name}.md` — Claude-native subagent shells that point at the shared bodies (lowercase filename, plain `.md`)
-- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
+- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
 - `skills/` — reusable methodology loaded by both platforms; each skill has `platforms/claude.md` for Claude-specific invocation details
 - `platforms/` (at skill root) — platform-specific routing notes
 
 ## Not yet ported
 
-Claude now ships the upstream pipeline plus the review surfaces. The remaining implementation-side agents — **Code-Conductor**, **Code-Smith**, **Test-Writer**, **Doc-Keeper**, **Refactor-Specialist**, **Process-Review**, **Specification**, and **UI-Iterator** — are still tracked in later phases. Until they ship, use Claude Code directly or fall back to Copilot once the plan has been approved.
+Claude now ships the upstream pipeline, the review surfaces, and Code-Conductor orchestration. The remaining implementation-side agents — **Code-Smith**, **Test-Writer**, **Doc-Keeper**, **Refactor-Specialist**, **Process-Review**, **Specification**, and **UI-Iterator** — are still tracked in later phases. Until they ship, use Code-Conductor's documented fallback paths or fall back to Copilot once the plan has been approved.
 
 ## Issue #369 traces the full history
 

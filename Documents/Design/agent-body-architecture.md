@@ -1,14 +1,18 @@
 # Design: Agent Body Architecture
 
-**Status**: Implemented in PR #393 (issue #393)
+**Status**: Implemented through Phase 0.3 and Phase 3
 
 ## Summary
 
-Phase 0.3 thinned the three Phase 1 upstream agents — Experience-Owner, Solution-Designer, and
-Issue-Planner — from ~160 lines to ~125 lines each by collapsing methodology that lives in skills
-into one-line skill-load pointers. Identity sections (completion markers, heading contracts,
-agent-specific checklist items) were preserved verbatim. Claude shells (`agents/{name}.md`) were
-left byte-identical throughout.
+Phase 0.3 established the thin-body pattern for the three Phase 1 upstream agents —
+Experience-Owner, Solution-Designer, and Issue-Planner — by collapsing reusable methodology into
+one-line skill-load pointers while preserving agent-specific identity sections verbatim.
+
+Phase 3 extended the same architecture to Code-Conductor. The shared body stayed the canonical,
+tool-agnostic contract, but large reusable methodology blocks were extracted into composite skills
+and named reference files so the body could shrink from 966 lines to <=500 without losing explicit
+load paths or orchestration boundaries. Claude parity now uses the same shared body through both
+`agents/code-conductor.md` and `commands/orchestrate.md`.
 
 ---
 
@@ -46,6 +50,42 @@ Every `.agent.md` body follows two tiers:
 delegation targets referenced by parent agents and the Claude Code plugin router. They are not
 thinned; they remain byte-identical to their state before Phase 0.3.
 
+Phase 3 added the same thin-shell wrapping model for Code-Conductor. `agents/code-conductor.md`
+is a Claude-specific shell that performs Claude-only preconditions and tool mapping, then loads the
+shared methodology from `agents/Code-Conductor.agent.md`. `commands/orchestrate.md` is the Claude
+slash-command wrapper that resolves issue context, prepares the handshake preamble, and dispatches
+the `code-conductor` shell rather than duplicating orchestration logic.
+
+### Phase 3 Extension: Code-Conductor
+
+Issue #403 applied the thin-body architecture to the largest shared agent body in the repo.
+Code-Conductor remained the orchestration owner, but reusable methodology moved out to the owning
+skills and reference files:
+
+- **Customer Experience Gate** -> `skills/customer-experience/references/`
+- **Pipeline Metrics** -> `skills/calibration-pipeline/references/`
+- **Review Reconciliation Loop** -> `skills/validation-methodology/references/` plus
+   `skills/code-review-intake/references/express-lane.md`
+- **Error-handling process** -> `skills/parallel-execution/references/error-handling.md`
+- **Refactoring integration** -> `skills/refactoring-methodology/SKILL.md` `## Conductor Integration`
+
+The important boundary did not change: Code-Conductor still owns sequencing, delegation, and PR-gate
+responsibilities. The extracted references hold reusable method text, schemas, routing contracts,
+and recovery rules; the agent body keeps only the shell responsibilities and the explicit load
+directives that point to those canonical sources.
+
+### Composite-Skill Convention
+
+Phase 3 also formalized a composite-skill pattern for large reusable methodology areas.
+
+- `SKILL.md` stays a compact entryway that defines purpose, boundaries, and when to use the skill.
+- Named `references/*.md` files carry the extracted methodology that agents load directly.
+- The entryway enumerates every reference file so the skill remains discoverable without regrowing
+   the extracted prose inline.
+
+This keeps the owning skill readable while giving shared agent bodies stable, explicit paths to the
+canonical extracted material.
+
 ### Platform-Specific Invocations
 
 Copilot tool names (`#tool:vscode/askQuestions`, `vscode/memory`) and Claude tool names
@@ -76,3 +116,10 @@ agent body. Only embed inline when the content is:
   usability (D4 precedent — annotate with "keep in sync with `{skill}` skill").
 
 Platform-specific invocations always belong in the per-agent footer, never in body sections.
+
+For large shared bodies such as Code-Conductor, prefer the Phase 3 composite-skill form over adding
+new long-form methodology back into the agent file: keep `SKILL.md` as the entryway, add or extend
+named `references/*.md` files for extracted method text, and leave the agent body with explicit
+load directives plus the orchestration decisions that only the agent can own. Future shell or
+command wrappers should continue to load the shared body rather than fork it, so Copilot and Claude
+stay aligned on one contract.

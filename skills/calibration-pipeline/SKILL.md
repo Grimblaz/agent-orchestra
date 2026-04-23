@@ -5,7 +5,13 @@ description: "Calibration and review-pipeline tooling guidance. Use when running
 
 # Calibration Pipeline
 
-This skill groups deterministic tooling and data for the calibration pipeline introduced by issue #360.
+Reusable entryway for deterministic tooling, committed assets, and pipeline-metrics reference material for the calibration pipeline introduced by issue #360.
+
+## When to Use
+
+- When running or maintaining calibration writers, aggregation scripts, or helper libraries under `scripts/`
+- When updating committed calibration data or configuration under `assets/`
+- When a workflow needs the canonical pipeline-metrics schema, verdict mapping, or findings-construction rules without re-reading Code-Conductor
 
 ## Purpose
 
@@ -17,6 +23,13 @@ This skill groups deterministic tooling and data for the calibration pipeline in
 
 - `scripts/` contains calibration writers, aggregation tools, improvement-issue helpers, and related shared helpers
 - `assets/` contains committed pipeline configuration and data consumed by those scripts
+- `references/` contains extracted pipeline-metrics contract material that other skills and agents can load directly
+
+## Composite References
+
+- [references/metrics-schema.md](references/metrics-schema.md): canonical `## Pipeline Metrics` block shape, top-level field semantics, and the `write-calibration-entry.ps1` invocation contract
+- [references/verdict-mapping.md](references/verdict-mapping.md): judge verdict to metrics-field mapping for main and post-fix review
+- [references/findings-construction.md](references/findings-construction.md): findings-array construction, backward compatibility, malformed-entry handling, and rework-cycle population rules
 
 ## Boundary
 
