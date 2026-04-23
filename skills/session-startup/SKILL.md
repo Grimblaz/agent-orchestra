@@ -9,7 +9,7 @@ Run-once startup guard for the automatic session-cleanup detector.
 
 ## When to Use
 
-- At the start of a new conversation before responding to the first user message
+- When the SessionStart hook injects `additionalContext` into the agent's first turn
 - When deciding whether the automatic startup detector should run
 - When interpreting stale-state detector output and optionally running cleanup
 - When checking whether the installed Claude plugin version has drifted behind the marketplace
@@ -17,7 +17,7 @@ Run-once startup guard for the automatic session-cleanup detector.
 
 ## Purpose
 
-Apply a session-memory run-once guard before any automatic startup detector invocation so the detector runs at most once automatically per conversation while remaining available for explicit manual use. This replaced the retired VS Code `SessionStart` hook and uses `skills/session-startup/scripts/session-cleanup-detector.ps1` to find stale tracking artifacts from merged pull requests. The same run-once pass also owns the Claude-only plugin drift backstop: when `agent-orchestra@agent-orchestra` is installed but behind the resolved marketplace version, surface the update result and a restart-vs-continue decision without blocking the session on failures.
+The trigger mechanism is now a plugin-distributed `hooks/hooks.json` SessionStart hook rather than an LLM-interpreted per-agent directive. Apply a session-memory run-once guard after that hook fires so the detector runs at most once automatically per conversation while remaining available for explicit manual use. The same run-once pass also owns the Claude-only plugin drift backstop: when `agent-orchestra@agent-orchestra` is installed but behind the resolved marketplace version, surface the update result and a restart-vs-continue decision without blocking the session on failures.
 
 ## Session Startup Check
 
@@ -39,7 +39,7 @@ Follow these steps exactly.
 
 ### Step 1 — Check prerequisites
 
-Resolve the detector script path relative to this skill file: the wrapper at `scripts/session-cleanup-detector.ps1` (in this skill's directory) self-resolves its repo root via `$PSScriptRoot`, so no environment variables are required. If `pwsh` is unavailable or the script is missing, skip the entire check silently and continue with the user's request.
+For automatic startup runs, first use any hook-injected `additionalContext` if it is already present in the agent's first turn. Resolve the detector script path relative to this skill file for manual fallback: the wrapper at `scripts/session-cleanup-detector.ps1` (in this skill's directory) self-resolves its repo root via `$PSScriptRoot`, so no environment variables are required. If `pwsh` is unavailable or the script is missing, skip the entire check silently and continue with the user's request.
 
 ### Step 2 — Check the automatic run-once guard
 
@@ -47,7 +47,7 @@ Before any automatic startup detector run, check session memory for the marker a
 
 ### Step 3 — Run the detector script
 
-Run the detector wrapper in the terminal. The wrapper self-resolves its repo root via `$PSScriptRoot`, so no env vars are needed — but the terminal's working directory in a consumer repo is usually the consumer's workspace, **not** the orchestra plugin. Invoke the script by a path that resolves from wherever the `agent-orchestra` content actually lives.
+For automatic startup runs, the plugin-distributed SessionStart hook runs the detector before the agent sees the user's request and injects the resulting `additionalContext`. This step preserves the manual fallback command contract and any contributor-side direct invocation. The wrapper self-resolves its repo root via `$PSScriptRoot`, so no env vars are needed — but the terminal's working directory in a consumer repo is usually the consumer's workspace, **not** the orchestra plugin. Invoke the script by a path that resolves from wherever the `agent-orchestra` content actually lives.
 
 **Repo clone** (contributors, CWD is the repo root — relative path works):
 
@@ -124,7 +124,7 @@ Headless Claude runs skip the stop/continue prompt and emit the update result in
 
 ### Step 8 — Continue with the user's request
 
-After the automatic startup path is complete, continue with the user's original request only after completing any other applicable startup steps below, including Step 7b and Step 9 when they apply. This automatic run-once guard applies only to the cleanup-detector plus Claude drift-check path; explicit or manual detector runs still remain allowed after the automatic guard fires.
+After the automatic startup path is complete, continue with the user's original request only after completing any other applicable startup steps below, including Step 7b and Step 9 when they apply. In hook-driven runs, this means consuming any injected `additionalContext`, recording the run-once marker, and then proceeding. This automatic run-once guard applies only to the cleanup-detector plus Claude drift-check path; explicit or manual detector runs still remain allowed after the automatic guard fires.
 
 ### Step 9 — Confirm paired shared-body load (agent shells with a paired body)
 

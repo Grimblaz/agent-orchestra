@@ -9,9 +9,9 @@
         agents/*.md and their paired shared bodies under agents/*.agent.md.
 
         For every discovered shell, these tests require:
-            - the canonical session-startup trigger stub in the shell top-of-body
             - an explicit shared-body pointer in the Shared methodology section
             - one-to-one parity between shell-enumerated shared sections and body H2 headings
+            - absence of the retired session-startup trigger stub
 
         This is the green parity-lock coverage for issue #382 Step 2.
 #>
@@ -21,7 +21,7 @@ Describe 'Claude shell/shared-body parity contract' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:AgentsDirectory = Join-Path $script:RepoRoot 'agents'
-        $script:CanonicalTriggerText = 'Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.'
+        $script:RetiredTriggerText = 'Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.'
         $script:ParitySuffixPattern = '($|: |\s+\(|\s*$)'
 
         $script:GetDocumentState = {
@@ -36,17 +36,6 @@ Describe 'Claude shell/shared-body parity contract' {
             catch {
                 return @{ Path = $Path; Content = ''; Error = $_.Exception.Message }
             }
-        }
-
-        $script:GetTopBody = {
-            param([string]$Content)
-
-            $match = [regex]::Match($Content, '(?ms)\A---\r?\n.*?^---[ \t]*\r?\n(?<topBody>.*?)(?=^## |\z)')
-            if (-not $match.Success) {
-                return ''
-            }
-
-            return $match.Groups['topBody'].Value
         }
 
         $script:GetSharedMethodologySection = {
@@ -133,9 +122,8 @@ Describe 'Claude shell/shared-body parity contract' {
                 Where-Object { $_.Name -notlike '*.agent.md' } |
                 ForEach-Object {
                     $shell = & $script:GetDocumentState -Path $_.FullName
-                    if ($shell.Content -notmatch [regex]::Escape($script:CanonicalTriggerText)) { return }
-                    $hasCanonicalTrigger = $true
                     $hasSharedMethodologyHeading = $shell.Content -match '(?m)^## Shared methodology\s*$'
+                    if (-not $hasSharedMethodologyHeading) { return }
                     $sharedMethodology = if ($hasSharedMethodologyHeading) {
                         & $script:GetSharedMethodologySection -Content $shell.Content
                     }
@@ -170,9 +158,7 @@ Describe 'Claude shell/shared-body parity contract' {
                         Name                 = $_.BaseName
                         ShellPath            = $_.FullName
                         ShellContent         = $shell.Content
-                        HasCanonicalTrigger  = $hasCanonicalTrigger
                         HasSharedMethodology = $hasSharedMethodologyHeading
-                        ShellTopBody         = & $script:GetTopBody -Content $shell.Content
                         SharedMethodology    = $sharedMethodology
                         BodyPointer          = $bodyPointer
                         BodyPath             = $bodyPath
@@ -189,22 +175,20 @@ Describe 'Claude shell/shared-body parity contract' {
         $script:ShellDocuments.Count | Should -BeGreaterThan 0 -Because 'parity enforcement requires at least one Claude shell in agents/ — if this fails, the discovery glob or filter may be broken'
     }
 
-    It 'requires every agents/*.md file (excluding *.agent.md) to carry the canonical session-startup trigger stub' {
+    It 'requires every discovered Claude shell to remove the retired session-startup trigger stub' {
         $allShellFiles = Get-ChildItem -Path $script:AgentsDirectory -Filter '*.md' -File |
             Where-Object { $_.Name -notlike '*.agent.md' }
         foreach ($shellFile in $allShellFiles) {
             $content = Get-Content -Path $shellFile.FullName -Raw
-            $content | Should -Match ([regex]::Escape($script:CanonicalTriggerText)) -Because "$($shellFile.Name) must carry the canonical session-startup trigger stub to be discoverable and to activate Step 9 runtime enforcement"
+            $content | Should -Not -Match ([regex]::Escape($script:RetiredTriggerText)) -Because "$($shellFile.Name) must not retain the retired session-startup trigger stub"
         }
     }
 
-    It 'requires discovered Claude shells to exist as shared-methodology pairs with the canonical startup stub in the top body' {
+    It 'requires discovered Claude shells to exist as shared-methodology pairs' {
         foreach ($shell in $script:ShellDocuments) {
-            $shell.HasCanonicalTrigger | Should -BeTrue -Because "$($shell.Name) must include the canonical session-startup trigger stub"
             $shell.HasSharedMethodology | Should -BeTrue -Because "$($shell.Name) must include a Shared methodology section"
             $shell.BodyPointer | Should -Not -BeNullOrEmpty -Because "$($shell.Name) must declare a literal shared-body pointer in Shared methodology"
             (Test-Path $shell.BodyPath) | Should -BeTrue -Because "$($shell.Name) must point to an existing shared body"
-            $shell.ShellTopBody | Should -Match ([regex]::Escape($script:CanonicalTriggerText)) -Because "$($shell.Name) must keep the canonical session-startup trigger in its top body"
             $shell.EnumerationParagraph | Should -Match '^After loading, follow everything under its ' -Because "$($shell.Name) must enumerate the shared-body sections it mirrors"
             $shell.ShellTokens.Count | Should -BeGreaterThan 0 -Because "$($shell.Name) must enumerate at least one shared-body section token"
         }

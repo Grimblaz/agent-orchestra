@@ -1,12 +1,12 @@
 # Design: Session Hooks
 
-> **⚠️ Superseded — Issue #109**: The VS Code `SessionStart` hook was retired due to unreliable firing across different repositories. It was first replaced by `.github/instructions/session-startup.instructions.md`, and is now delivered by the `session-startup` skill with a per-agent self-check trigger in the four pipeline-entry agent files at conversation start. The cleanup script remained unchanged, but later detector work added a session-memory run-once guard using `/memories/session/session-startup-check-complete.md`, updated the detector to treat persistent calibration data as non-cleanup state, preserved explicit manual detector runs, and moved the per-agent trigger stub from `## Process` to the first content line after each pipeline-entry agent's role description so the startup check has higher positional priority under context pressure. Another behavioral change is `WORKFLOW_TEMPLATE_ROOT` unset behavior (hook era: surfaced an actionable error via `additionalContext`; instruction/skill era: silently skipped before the script runs). Historical context below is preserved for reference.
+> **Current state — Issue #409**: hook-based delivery returned, but now through plugin-distributed hook files rather than workspace-discovered `.github/hooks/session-cleanup.json`. Claude-format installs use `hooks/hooks.json`; Copilot-format installs use root `hooks.json` because Copilot does not define `${CLAUDE_PLUGIN_ROOT}`. The `session-startup` skill remains the agent-side contract for consuming injected `additionalContext`, preserving the run-once marker `/memories/session/session-startup-check-complete.md`, and keeping manual detector runs available. The plugin-release-hygiene `PostToolUse` hook now ships through the same plugin-distributed architecture. Historical context below is preserved so the earlier hook → instruction → skill eras remain traceable.
 >
 > **v2.0.0 update (agent-orchestra rename)**: The `COPILOT_ORCHESTRA_ROOT` / `WORKFLOW_TEMPLATE_ROOT` env-var surface described in D7, D9, and the setup-requirement text below was removed in v2.0.0. The detector wrapper at `skills/session-startup/scripts/session-cleanup-detector.ps1` now self-resolves its repo root via `$PSScriptRoot`, so no environment variables are required for either plugin-cache or direct-clone installs. Silent-skip still applies when `pwsh` is unavailable or the detector returns non-JSON output.
 
 ## Summary
 
-The `SessionStart` hook replaces the retired Janitor agent by converting its mechanical post-merge cleanup work into an automated VS Code Copilot hook. The hook fires at the natural "ready for next work" moment — when the user starts a new agent session after merging a PR — and prompts for cleanup with no overhead when nothing needs cleaning. A second enhancement (`WORKFLOW_TEMPLATE_ROOT`) makes the hook portable across downstream repos that consume it via `chat.hookFilesLocations`.
+The current design uses plugin-distributed hooks to restore deterministic startup automation across both Claude Code and Copilot. Claude-format installs use `hooks/hooks.json`; Copilot-format installs use root `hooks.json`. Both carry `SessionStart` for stale-state cleanup context injection and `PostToolUse` for plugin-release-hygiene version-bump prompting. The `session-startup` skill remains responsible for run-once semantics, fail-open behavior, and manual fallback invocation, while the plugin manifests declare the appropriate hook file so installs carry the behavior automatically.
 
 Code-Critic Perspective 7 (Documentation Script Audit) was added in the same phase to close a gap where shell commands embedded in Markdown documentation went unreviewed for self-consistency. _(Merged into §6 Script & Automation as doc-audit sub-gate in issue #212.)_
 
@@ -28,6 +28,10 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 | D10 | Automatic run-once behavior | Session-memory marker `/memories/session/session-startup-check-complete.md` checked before the automatic detector run and recorded after the first automatic startup check | Prevents repeated prompts across later agent hops in the same conversation while keeping the detector script stateless and manual reruns available | Instruction |
 | D11 | Calibration cleanup noise | Treat `.copilot-tracking/calibration/**` as persistent data, not cleanup work | Avoids false-positive cleanup prompts for repo-scoped calibration state | Instruction |
 | D12 | Trigger placement within agent files | Put the `session-startup` trigger on the first content line after the role description in each pipeline-entry agent and remove the redundant silent-skip summary from `## Process` | Reduces instruction competition in crowded `## Process` sections, especially for Experience-Owner, while keeping silent-skip and run-once semantics owned by the skill contract and wording test | Skill |
+| D13 | Hook delivery comeback | Return to hook-based delivery via plugin-distributed `hooks/hooks.json` | Avoids the unreliable workspace-discovered hook mechanism from issue #109 while removing LLM-priority dependence from per-agent trigger text | Plugin hook |
+| D14 | Hook declaration path | Declare format-appropriate hook files in each manifest (`hooks/hooks.json` for Claude, `hooks.json` for Copilot) | Keeps hook delivery explicit for both tool formats while accommodating Copilot's missing plugin-root token | Plugin hook |
+| D15 | Shared hook file scope | Carry both `SessionStart` and `PostToolUse` in the same hook file | Keeps startup hygiene and release hygiene under one plugin-distributed hook surface and reduces drift between tools | Plugin hook |
+| D16 | Release-hygiene hook location | Move `plugin-release-hygiene-hook.ps1` into `skills/plugin-release-hygiene/scripts/` | Co-locates the hook script with its owning skill and removes the old `.claude/settings.json` / `.claude/hooks/` maintainer-only path | Plugin hook |
 
 ---
 
@@ -51,25 +55,24 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 1. Code-Conductor creates PR with `Closes #N` → session ends
 2. User reviews and merges PR on GitHub (issue auto-closes)
 3. User starts a new agent session (any agent)
-4. The current startup check first looks for the session-memory run-once marker `/memories/session/session-startup-check-complete.md`. If the marker is absent, the first automatic startup check runs `session-cleanup-detector.ps1`; later agent hops in the same conversation skip that automatic run.
-5. The detector evaluates two independent detection paths:
+4. The plugin-distributed `SessionStart` hook runs `session-cleanup-detector.ps1` before the agent sees the request and injects any resulting `additionalContext` into the first turn.
+5. The `session-startup` skill first looks for the session-memory run-once marker `/memories/session/session-startup-check-complete.md`. If the marker is absent, the first automatic startup check is honored; later agent hops in the same conversation skip that automatic path.
+6. The detector evaluates two independent detection paths:
    - **Branch check** (runs first): detects when the current branch has upstream tracking configured but no remote — indicating the branch was merged and remote deleted. Guards against false positives on local-only branches (no upstream = never pushed = skip).
    - **Tracking file check**: detects stale issue-scoped `.copilot-tracking/` files for issues whose remote branch is gone; persistent calibration data is excluded.
-6. After that first automatic startup check, the `session-startup` skill records `/memories/session/session-startup-check-complete.md` regardless of whether cleanup will later be accepted, declined, or skipped.
-7. The `session-startup` skill surfaces `additionalContext` describing what needs cleanup (branch signal leads when both fire).
-8. Agent asks user via `vscode/askQuestions`: context reflects which signal(s) fired — stale remote branch, stale tracking files, or both; message ends with "Clean up?"
-9. If confirmed → runs `post-merge-cleanup.ps1`
-10. Script archives files, deletes local/remote branch, syncs default branch
+7. After that first automatic startup check, the `session-startup` skill records `/memories/session/session-startup-check-complete.md` regardless of whether cleanup will later be accepted, declined, or skipped.
+8. The `session-startup` skill surfaces `additionalContext` describing what needs cleanup (branch signal leads when both fire).
+9. Agent asks user via `vscode/askQuestions`: context reflects which signal(s) fired — stale remote branch, stale tracking files, or both; message ends with "Clean up?"
+10. If confirmed → runs `post-merge-cleanup.ps1`
+11. Script archives files, deletes local/remote branch, syncs default branch
 
 ---
 
-## Root Env Var Portability
+## Plugin Distribution Architecture
 
-The hook is consumed by downstream repos via `chat.hookFilesLocations`. The hook JSON runs in the downstream workspace, but scripts live in the agent-orchestra repo — a relative path would not resolve.
+Hook delivery now ships through the plugin manifests rather than workspace-level `chat.hookFilesLocations` configuration. `.claude-plugin/plugin.json` declares `hooks/hooks.json`, while the root `plugin.json` declares `hooks.json`, so downstream installs receive the startup and release-hygiene hooks automatically in both formats.
 
-**Solution**: All script path resolution uses `$COPILOT_ORCHESTRA_ROOT` (primary) or `$WORKFLOW_TEMPLATE_ROOT` (fallback) (set once at machine level). In the instruction era, if neither is set, the startup check silently skips before the detector runs. Session-memory access failures are different: the automatic guard fails open and still runs the detector.
-
-**Setup requirement**: Users must set `COPILOT_ORCHESTRA_ROOT` (or the legacy `WORKFLOW_TEMPLATE_ROOT`) to the absolute path of their agent-orchestra clone before the startup check will function. Documented in `CUSTOMIZATION.md` Section 6.
+The detector wrapper at `skills/session-startup/scripts/session-cleanup-detector.ps1` still self-resolves its repo root via `$PSScriptRoot`, which preserves the v2.0.0 removal of `COPILOT_ORCHESTRA_ROOT` / `WORKFLOW_TEMPLATE_ROOT` as runtime requirements. Manual fallback invocation therefore remains path-stable in both repo-clone and plugin-cache contexts.
 
 ---
 
@@ -95,18 +98,21 @@ Added alongside the portability fix to close a gap found in the post-PR review o
 |------|---------|--------|
 | `.github/hooks/session-cleanup.json` | `SessionStart` hook configuration; resolves scripts via `$WORKFLOW_TEMPLATE_ROOT`; structured JSON error when unset | **Deleted** — retired in issue #109 |
 | `.github/instructions/session-startup.instructions.md` | Historical intermediate delivery vehicle between the retired hook and the current skill; checked the session-memory run-once marker `/memories/session/session-startup-check-complete.md` before the automatic detector run, recorded the marker after the first automatic startup check, and used `$env:COPILOT_ORCHESTRA_ROOT` (fallback: `$env:WORKFLOW_TEMPLATE_ROOT`) for script paths | **Historical** — superseded by `.github/skills/session-startup/SKILL.md` (issue #345) |
-| `.github/skills/session-startup/SKILL.md` | Current detailed protocol for the startup self-check; preserves the run-once marker, fail-open behavior, and detector/script path rules while the trigger stub lives in the four pipeline-entry agent files | Active |
-| `.github/skills/session-startup/scripts/session-cleanup-detector.ps1` | Dual-path detection: branch check + issue-scoped tracking file check; persistent calibration paths are excluded; emits cleanup command paths using `$env:COPILOT_ORCHESTRA_ROOT` (fallback: `$env:WORKFLOW_TEMPLATE_ROOT`) | Active — updated (issue #185, migrated to skill path in issue #360) |
-| `.github/skills/session-startup/scripts/post-merge-cleanup.ps1` | Archives tracking files, deletes local/remote branch, syncs default branch | Active — migrated to skill path in issue #360 |
+| `hooks/hooks.json` | Claude-format plugin-distributed hook configuration carrying `SessionStart` and `PostToolUse` | **Active** — introduced in issue #409 |
+| `hooks.json` | Copilot-format plugin-distributed hook configuration carrying `SessionStart` and `PostToolUse` via explicit cache-root resolution | **Active** — introduced in issue #409 |
+| `skills/session-startup/SKILL.md` | Current agent-side protocol for consuming hook-injected startup context; preserves run-once, fail-open, and manual fallback semantics | Active |
+| `skills/session-startup/scripts/session-cleanup-detector.ps1` | Dual-path detection: branch check + issue-scoped tracking file check; persistent calibration paths are excluded; emits cleanup command paths without env-var requirements | Active — updated (issue #185, migrated to skill path in issue #360) |
+| `skills/session-startup/scripts/post-merge-cleanup.ps1` | Archives tracking files, deletes local/remote branch, syncs default branch | Active — migrated to skill path in issue #360 |
+| `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1` | Plugin-distributed `PostToolUse` hook script for entry-point version-bump proposals | **Active** — moved from `.claude/hooks/` in issue #409 |
+| `.claude/settings.json` | Former maintainer-local `PostToolUse` hook configuration for release hygiene | **Deleted** — superseded by `hooks/hooks.json` in issue #409 |
 
 ---
 
 ## Requirements
 
-- ~~VS Code 1.109.3+ required for the `SessionStart` hook (Preview feature)~~ — requirement dropped; instruction-based approach works on any VS Code version with Copilot Chat
+- Plugin manifests must declare their format-appropriate hook file so installs receive the startup and release-hygiene hooks automatically
 - The automatic startup check runs at most once per conversation because the session-memory marker `/memories/session/session-startup-check-complete.md` is checked before the detector run and recorded after the first automatic startup check
 - If session-memory read or write fails, the startup flow fails open and still runs the detector rather than suppressing cleanup detection
 - Explicit manual detector runs remain available after the automatic guard fires
-- Linux/macOS without `pwsh`: instruction detects unavailability and skips silently
-- If the root environment variables are unset, the detector script is missing, or the detector returns non-JSON output, the automatic startup check skips silently
-- `COPILOT_ORCHESTRA_ROOT` (or `WORKFLOW_TEMPLATE_ROOT` as fallback) must be set for scripts to function in downstream repos
+- Linux/macOS without `pwsh`: the hook or manual fallback detects unavailability and skips silently
+- If the detector script is missing or the detector returns non-JSON output, the automatic startup check skips silently

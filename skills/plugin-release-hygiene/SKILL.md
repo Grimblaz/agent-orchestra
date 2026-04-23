@@ -3,12 +3,12 @@ name: plugin-release-hygiene
 description: "Maintainer-side version-bump guardrail and Claude startup drift backstop guidance for plugin entry-point edits. Use when entry-point files change, when choosing patch/minor/major overrides, or when documenting/running the Claude plugin update surface. DO NOT USE FOR: CI release automation, registry publishing, or purely manual non-agent edit flows."
 ---
 
-<!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Agent Orchestra; assumes the skill is loaded by a Claude PostToolUse hook or a Copilot applyTo instruction when entry-point files are edited. -->
+<!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Agent Orchestra; assumes the skill is loaded by the plugin-distributed PostToolUse hook or a Copilot applyTo instruction when entry-point files are edited. -->
 <!-- markdownlint-disable-file MD041 MD003 -->
 
 # Plugin Release Hygiene
 
-Reusable guidance for preventing plugin entry-point changes from shipping without a version bump and for keeping the Claude-side update surface explicit.
+Reusable guidance for preventing plugin entry-point changes from shipping without a version bump and for keeping the Claude-side update surface explicit. The maintainer-side trigger now lives in the plugin-distributed `PostToolUse` hook declared in `hooks/hooks.json` and runs `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1`.
 
 ## When to Use
 
