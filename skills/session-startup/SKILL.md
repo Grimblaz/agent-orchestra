@@ -55,7 +55,7 @@ For automatic startup runs, the plugin-distributed SessionStart hook runs the de
 pwsh -NoProfile -NonInteractive -File "skills/session-startup/scripts/session-cleanup-detector.ps1"
 ```
 
-**Plugin-cache install** (Copilot or Claude Code consumers, CWD is the consumer workspace — pass the plugin's absolute path). Resolve the plugin directory from the chat/IDE context (Copilot: the `chat.agentFilesLocations` entry; Claude Code: `<plugins-cache-root>/agent-orchestra/`), then:
+**Plugin-cache install** (Copilot or Claude Code consumers, CWD is the consumer workspace — pass the plugin's absolute path). Resolve the plugin directory from the installed plugin cache rather than any `chat.*Locations` setting (Copilot: the VS Code `agentPlugins/.../agent-orchestra` cache path under the active product profile; Claude Code: `<plugins-cache-root>/agent-orchestra/`), then:
 
 ```powershell
 pwsh -NoProfile -NonInteractive -File "<plugin-root>/skills/session-startup/scripts/session-cleanup-detector.ps1"
