@@ -286,10 +286,11 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
    - **Migration completeness check** (migration-type issues only — pattern replacement, rename/move, API migration; see Issue-Planner `<plan_style_guide>` for full definition): Run a final scan for remaining old-form references using `grep_search` with the old-pattern as `query` and an `includePattern` glob matching target files (e.g., `**/*.md`). Confirm result count is 0. Also use `file_search` with the same glob to confirm at least 1 file matches — a 0-match result with 0 files found indicates a misconfigured glob, not a clean repo. If `grep_search` cannot express the required filter (e.g., paths needing PowerShell `Where-Object -notmatch` exclusions), fall back to terminal `Get-ChildItem | Select-String` with documented rationale in an inline comment or annotation. If count is non-zero, fix remaining occurrences before proceeding. Include scan output as validation evidence in the PR body.
    - **Design doc (before pushing)**: Add or update a domain-based design document in `Documents/Design/`. Logic: (1) List existing files in `Documents/Design/`, excluding any `issue-{N}-*.md`-named files from domain-match candidates, (2) read their headings to find domain overlap with the current feature, (3) if exactly one match, delegate an **update** to Doc-Keeper targeting that file, (4) if two or more matches, prompt via `#tool:vscode/askQuestions`: "Multiple design docs match this feature — which should be updated?" and wait for selection before delegating, (5) if no match, delegate **creation** of a new `{domain-slug}.md` file to Doc-Keeper. **Legacy detection (idempotent)**: if `Documents/Design/` contains any `issue-{N}-*.md` pattern files, first run `gh issue list --search "Migrate Documents/Design/ to domain-based files" --state open --json number --jq length` — if the result is `0`, prompt the user via `#tool:vscode/askQuestions`: "Legacy per-issue design docs detected — create a cleanup issue to migrate them to domain-based files?" If confirmed, run `gh issue create --title "Migrate Documents/Design/ to domain-based files" --body "Legacy issue-{N}-*.md design files in Documents/Design/ should be consolidated into domain-based design files per the architecture-rules.md naming convention." --label "priority: medium"`, then continue with the current task. If result is `> 0`, skip creation silently.
    - **Formatting gate**: Load `skills/pre-commit-formatting/SKILL.md` and execute the protocol on branch-changed files. If the protocol stages and commits formatting fixes, note the formatting commit in the PR description.
+   - **Review pipeline gate (mandatory before push)**: Load `/memories/session/review-state-issue-{ID}.md` via `vscode/memory`. Confirm `prosecution: complete`, `defense: complete`, and `judgment: complete` are present. If any stage is absent or recorded as `skipped`, do NOT proceed to `git push` or PR creation. Use `#tool:vscode/askQuestions` with options: "Run missing stage now" (recommended) / "Document as intentional abbreviated review and proceed" / "Block PR creation — stop here". If the user selects the abbreviated path, record the abbreviated mode and missing stages in the PR body under a `## Review Coverage` section. If session memory is unavailable, fall back to scanning the in-session conversation for stage completion signals before proceeding.
    - **Validation evidence**: run required validation commands from plan/repo instructions and capture pass results for PR body
    - `git push -u origin {branch-name}`
    - Create PR via `github-pull-request/*` tools or `gh pr create`
-   - PR body MUST include: summary, changed files, validation evidence, migration-scan result (migration-type issues only), CE Gate result, adversarial review score table, prosecution depth summary, pipeline metrics, process gaps found (if any), and `Closes #{issue}`
+   - PR body MUST include: summary, changed files, validation evidence, migration-scan result (migration-type issues only), CE Gate result, adversarial review score table, prosecution depth summary, pipeline metrics, review coverage (abbreviated path only — include `## Review Coverage` with stages completed/skipped and abbreviated reason), process gaps found (if any), and `Closes #{issue}`
 
 5. **Report Completion**: Summarize work done, link the PR URL, and hand off to user for review
 
@@ -300,6 +301,7 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
 1. Never report implementation complete if no PR URL is available.
 2. Never end a session without either (a) a PR URL or (b) an `#tool:vscode/askQuestions` call explaining why the pipeline cannot continue.
 3. "I'm not sure if I should continue" is never a valid reason to stop silently — use `#tool:vscode/askQuestions`.
+4. Never create a PR or report review complete unless prosecution (3-pass merged ledger), defense (1 pass), and judgment (1 pass) have all completed for the current review cycle. If any stage is missing, either run the missing stage or use `#tool:vscode/askQuestions` to present options: "Run missing stage now" (recommended) / "Document as intentional abbreviated review" / "Block PR creation". Silently skipping incomplete review stages is a protocol violation.
 
 </stopping_rules>
 
@@ -330,6 +332,14 @@ Load and follow these references:
 Code-Conductor keeps only the orchestration boundary here: enter the correct review mode, apply express-lane routing only where the contract allows it, route post-judgment and post-fix outcomes, preserve any required calibration side effects, and proceed to the CE Gate in the documented sequence.
 
 GitHub-triggered review requests (`github review`, `review github`, `cr review`) still enter through the GitHub intake path described in the loaded references before the generic local review loop runs.
+
+**Review-state persistence (mandatory)**: After each stage of the main review cycle completes, write the stage completion to session memory at `/memories/session/review-state-issue-{ID}.md` using `vscode/memory`. Follow the schema in `skills/validation-methodology/references/review-reconciliation.md` under "Review Pipeline Completion Gate". This ensures compaction or resume cannot silently lose which stages ran. The minimum updates:
+
+- After prosecution merge: update `prosecution: complete` and `prosecution_passes: {N}`.
+- After defense pass: update `defense: complete`.
+- After judgment pass: update `judgment: complete` and `judgment_score: "{score}"`.
+
+If session memory is unavailable, fall back to annotating the in-progress plan file (`plan-issue-{ID}.md`) with review stage markers.
 
 ### Skill Mapping
 

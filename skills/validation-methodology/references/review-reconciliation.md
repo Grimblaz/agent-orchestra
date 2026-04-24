@@ -83,6 +83,48 @@ After the merged ledger is finalized:
 
 If the owning agent supports an express lane for strictly mechanical low-severity findings, partition those findings only after the merged prosecution ledger is available. The owning agent still owns whether express lane exists and how routed findings are dispatched. See [../../code-review-intake/references/express-lane.md](../../code-review-intake/references/express-lane.md).
 
+### Review Pipeline Completion Gate
+
+Before fix routing, before post-fix prosecution, and before CE Gate entry, verify all three stages of the main review cycle completed:
+
+| Stage | Required count | Completion signal |
+| --- | --- | --- |
+| Prosecution | 3 independent passes merged into one ledger | Merged ledger written |
+| Defense | 1 pass against merged ledger | Defense report emitted |
+| Judgment | 1 pass (Code-Review-Response) | Score summary with rulings emitted |
+
+**Hard gate rule**: If any stage is absent or was explicitly skipped, the owning agent MUST NOT proceed to fix routing, post-fix prosecution, CE Gate, or PR creation. Instead:
+
+1. Run the missing stage if the required input is available.
+2. If the required input is not available (e.g., the ledger was lost after compaction), re-run the review cycle from the first missing stage.
+3. If the abbreviated path is intentional (e.g., post-fix R2 pipeline, `review-lite` command, or explicit user override), document the abbreviated mode and the skipped stages in the PR body under `## Review Coverage`.
+
+**Review-state persistence**: After each stage completes, the owning agent writes stage completion state to session memory at `/memories/session/review-state-issue-{ID}.md`. The minimum schema:
+
+```yaml
+# review-state-issue-{ID}
+prosecution: complete   # or: skipped | in-progress
+prosecution_passes: 3   # actual pass count
+prosecution_depth: "{summary}"
+defense: complete       # or: skipped | in-progress
+judgment: complete      # or: skipped | in-progress
+judgment_score: "{score summary}"
+review_mode: full       # or: lite | post-fix | abbreviated
+abbreviated_reason: ""  # non-empty only when review_mode != full
+```
+
+This state survives context compaction and session resume, so completed vs skipped stages remain auditable. When resume detects a partially-complete review cycle (e.g., prosecution complete but defense absent), re-enter the review cycle at the first missing stage rather than silently claiming review is done.
+
+**Abbreviated path documentation**: When any stage was intentionally skipped or abbreviated, include the following in the PR body:
+
+```markdown
+## Review Coverage
+Review mode: {full | lite | abbreviated}
+Stages completed: prosecution ({N} passes), defense, judgment
+Stages skipped: {list or "none"}
+Abbreviated reason: {reason or "N/A"}
+```
+
 ### GitHub Review Intake & Judgment
 
 For `github review` / `review github` / `cr review`, follow `skills/code-review-intake/SKILL.md`. GitHub intake uses proxy prosecution: Code-Critic validates and scores each GitHub comment, then defense -> judge pipeline runs as normal.
