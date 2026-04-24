@@ -1,0 +1,229 @@
+#Requires -Version 7.0
+#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
+<#
+.SYNOPSIS
+        Contract tests for issue #412 inline-dispatch enforcement.
+
+.DESCRIPTION
+        Verifies the Claude Code command-file prose contract for issue #412 across
+        commands/experience.md, commands/design.md, and commands/plan.md.
+
+        Cross-tool asymmetry (D6 of #412): Copilot's .github/prompts/*.prompt.md files
+        are thin one-line dispatchers without a parent-side prose surface. Copilot
+        inline-dispatch enforcement is owned by the agent body and tracked in #414.
+
+        Canonical option-label assertions extract fenced YAML blocks from
+        skills/session-startup/SKILL.md and skills/provenance-gate/SKILL.md so label
+        changes cause explicit contract-test failures instead of silent drift.
+#>
+
+Describe 'inline dispatch contract' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:SessionStartupSkill = Join-Path $script:RepoRoot 'skills\session-startup\SKILL.md'
+        $script:ProvenanceGateSkill = Join-Path $script:RepoRoot 'skills\provenance-gate\SKILL.md'
+        $script:MarkerPath = '/memories/session/session-startup-check-complete.md'
+        $script:NoStaleStateNote = 'no stale state detected'
+        $script:D2FailOpenText = 'Claude Code inline currently lacks a session-memory write surface'
+        $script:PlanDeferralNote = 'Step 9 (paired-body halt-on-fail) and the provenance-gate cold-pickup assessment are enforced by the issue-planner subagent shell at agents/issue-planner.md'
+
+        $script:GetCanonicalLabels = {
+            param(
+                [string]$SkillPath,
+                [string]$Heading,
+                [int]$ExpectedCount
+            )
+
+            $content = Get-Content -Path $SkillPath -Raw -ErrorAction Stop
+            $pattern = '(?ms)^' + [regex]::Escape($Heading) + '\s*\r?\n\r?\n```yaml\r?\n(?<yaml>.*?)\r?\n```'
+            $match = [regex]::Match($content, $pattern)
+
+            $match.Success | Should -BeTrue -Because "$SkillPath must publish the $Heading fenced YAML block"
+            if (-not $match.Success) {
+                return [ordered]@{}
+            }
+
+            $labels = [ordered]@{}
+            $linePattern = '^\s+(?<key>\w+):\s*(?:''(?<single>[^'']*)''|"(?<double>[^"]*)"|(?<unquoted>\S.*?))\s*$'
+            foreach ($line in ($match.Groups['yaml'].Value -split "`r?`n")) {
+                if ($line -match '^\s*$' -or $line -match '^canonical_option_labels:\s*$') {
+                    continue
+                }
+
+                $lineMatch = [regex]::Match($line, $linePattern)
+                $lineMatch.Success | Should -BeTrue -Because "$SkillPath must keep $Heading entries as single-line YAML values"
+                if (-not $lineMatch.Success) {
+                    continue
+                }
+
+                $value = if ($lineMatch.Groups['single'].Success) {
+                    $lineMatch.Groups['single'].Value
+                }
+                elseif ($lineMatch.Groups['double'].Success) {
+                    $lineMatch.Groups['double'].Value
+                }
+                else {
+                    $lineMatch.Groups['unquoted'].Value
+                }
+
+                $labels[$lineMatch.Groups['key'].Value] = $value
+            }
+
+            $labels.Count | Should -Be $ExpectedCount -Because "$SkillPath must expose $ExpectedCount canonical labels under $Heading"
+            return $labels
+        }
+
+        $script:SessionStartupLabels = & $script:GetCanonicalLabels -SkillPath $script:SessionStartupSkill -Heading '### Inline-Dispatch Option Labels' -ExpectedCount 4
+        $script:ProvenanceLabels = & $script:GetCanonicalLabels -SkillPath $script:ProvenanceGateSkill -Heading '### Developer-Gate Option Labels' -ExpectedCount 3
+
+        $script:CommandMatrix = @(
+            @{
+                Path                   = 'commands\experience.md'
+                RequiredStatic         = @(
+                    $script:MarkerPath,
+                    $script:D2FailOpenText,
+                    $script:NoStaleStateNote,
+                    '⚠️ Shared-body load failed for agents/Experience-Owner.agent.md',
+                    'cannot continue without the canonical methodology',
+                    '<!-- first-contact-assessed-',
+                    '<!-- D6 (issue #412):'
+                )
+                RequiredSessionKeys    = @('cleanup_yes', 'cleanup_no', 'drift_stop', 'drift_continue')
+                RequiredProvenanceKeys = @('wrote_this', 'proceed_with_caution', 'needs_rework')
+                ForbiddenStatic        = @()
+                OrderedMarkers         = @(
+                    '### Step 4 — Run-once marker',
+                    '### Step 6 — Cleanup confirmation',
+                    '### Step 7b — Drift check',
+                    '### Step 9 — Paired-body halt-on-fail',
+                    '### Provenance-gate'
+                )
+            },
+            @{
+                Path                   = 'commands\design.md'
+                RequiredStatic         = @(
+                    $script:MarkerPath,
+                    $script:D2FailOpenText,
+                    $script:NoStaleStateNote,
+                    '⚠️ Shared-body load failed for agents/Solution-Designer.agent.md',
+                    'cannot continue without the canonical methodology',
+                    '<!-- first-contact-assessed-',
+                    '<!-- D6 (issue #412):'
+                )
+                RequiredSessionKeys    = @('cleanup_yes', 'cleanup_no', 'drift_stop', 'drift_continue')
+                RequiredProvenanceKeys = @('wrote_this', 'proceed_with_caution', 'needs_rework')
+                ForbiddenStatic        = @()
+                OrderedMarkers         = @(
+                    '### Step 4 — Run-once marker',
+                    '### Step 6 — Cleanup confirmation',
+                    '### Step 7b — Drift check',
+                    '### Step 9 — Paired-body halt-on-fail',
+                    '### Provenance-gate'
+                )
+            },
+            @{
+                Path                   = 'commands\plan.md'
+                RequiredStatic         = @(
+                    $script:MarkerPath,
+                    $script:D2FailOpenText,
+                    $script:NoStaleStateNote,
+                    $script:PlanDeferralNote,
+                    'See issue #412 for the parent-vs-subagent enforcement split'
+                )
+                RequiredSessionKeys    = @('cleanup_yes', 'cleanup_no', 'drift_stop', 'drift_continue')
+                RequiredProvenanceKeys = @()
+                ForbiddenStatic        = @('Shared-body load failed')
+                OrderedMarkers         = @(
+                    '### Step 4 — Run-once marker',
+                    '### Step 6 — Cleanup confirmation',
+                    '### Step 7b — Drift check',
+                    '### Step 9 + provenance-gate deferral note'
+                )
+            }
+        )
+    }
+
+    It 'extracts canonical inline-dispatch labels from the source skills' {
+        $script:SessionStartupLabels.Count | Should -Be 4
+        $script:SessionStartupLabels['cleanup_yes'] | Should -Be 'Yes — run cleanup'
+        $script:SessionStartupLabels['cleanup_no'] | Should -Be 'No — skip for now'
+        $script:SessionStartupLabels['drift_stop'] | Should -Be "Stop — I'll restart now"
+        $script:SessionStartupLabels['drift_continue'] | Should -Be 'Continue — run under old code'
+
+        $script:ProvenanceLabels.Count | Should -Be 3
+        $script:ProvenanceLabels['wrote_this'] | Should -Be "I wrote this / I'm fully briefed"
+        $script:ProvenanceLabels['proceed_with_caution'] | Should -Be 'Assessment looks right - proceed with caution'
+        $script:ProvenanceLabels['needs_rework'] | Should -Be 'Needs rework - stop here'
+    }
+
+    It 'requires each Claude command file to contain the expected inline-dispatch contract prose' {
+        foreach ($command in $script:CommandMatrix) {
+            $path = Join-Path $script:RepoRoot $command.Path
+            $content = Get-Content -Path $path -Raw -ErrorAction Stop
+
+            foreach ($required in $command.RequiredStatic) {
+                $content | Should -Match ([regex]::Escape($required)) -Because "$($command.Path) must contain required contract prose: $required"
+            }
+
+            foreach ($key in $command.RequiredSessionKeys) {
+                $label = $script:SessionStartupLabels[$key]
+                $content | Should -Match ([regex]::Escape($label)) -Because "$($command.Path) must include the canonical session-startup label '$key'"
+            }
+
+            foreach ($key in $command.RequiredProvenanceKeys) {
+                $label = $script:ProvenanceLabels[$key]
+                $content | Should -Match ([regex]::Escape($label)) -Because "$($command.Path) must include the canonical provenance-gate label '$key'"
+            }
+
+            foreach ($forbidden in $command.ForbiddenStatic) {
+                $content | Should -Not -Match ([regex]::Escape($forbidden)) -Because "$($command.Path) must not contain forbidden prose: $forbidden"
+            }
+
+            if ($command.Path -eq 'commands\plan.md') {
+                foreach ($key in $script:ProvenanceLabels.Keys) {
+                    $label = $script:ProvenanceLabels[$key]
+                    $content | Should -Not -Match ([regex]::Escape($label)) -Because 'commands\plan.md must not duplicate provenance-gate developer labels'
+                }
+            }
+        }
+    }
+
+    It 'requires the inline-dispatch step blocks to appear in the documented order' {
+        foreach ($command in $script:CommandMatrix) {
+            $path = Join-Path $script:RepoRoot $command.Path
+            $content = Get-Content -Path $path -Raw -ErrorAction Stop
+            $indices = foreach ($marker in $command.OrderedMarkers) {
+                $index = $content.IndexOf($marker, [System.StringComparison]::Ordinal)
+                $index | Should -BeGreaterThan -1 -Because "$($command.Path) must contain the ordered marker '$marker'"
+                $index
+            }
+
+            for ($i = 1; $i -lt $indices.Count; $i++) {
+                $indices[$i] | Should -BeGreaterThan $indices[$i - 1] -Because "$($command.Path) must keep inline-dispatch sections in reading order"
+            }
+
+            if ($command.Path -eq 'commands\plan.md') {
+                $preflightIndex = $content.IndexOf('## Pre-flight (parent-side, before handshake preamble)', [System.StringComparison]::Ordinal)
+                $handshakeIndex = $content.IndexOf('**Handshake preamble**', [System.StringComparison]::Ordinal)
+                $preflightIndex | Should -BeGreaterThan -1 -Because 'commands\plan.md must add the parent-side pre-flight section'
+                $handshakeIndex | Should -BeGreaterThan -1 -Because 'commands\plan.md must retain the handshake preamble heading'
+                $preflightIndex | Should -BeLessThan $handshakeIndex -Because 'commands\plan.md must place the parent-side pre-flight section before the handshake preamble'
+            }
+        }
+    }
+
+    It 'requires the plan deferral note to remain user-visible prose' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+        $line = ($content -split "`r?`n" | Where-Object { $_ -like '*Step 9 (paired-body halt-on-fail) and the provenance-gate cold-pickup assessment are enforced*' } | Select-Object -First 1)
+
+        [string]::IsNullOrWhiteSpace($line) | Should -BeFalse -Because 'commands\plan.md must contain the Step 9 + provenance-gate deferral note'
+        $line.TrimStart().StartsWith('<!--', [System.StringComparison]::Ordinal) | Should -BeFalse -Because 'commands\plan.md must keep the deferral note user-visible rather than hiding it in an HTML comment'
+    }
+
+    It 'documents the D6 Copilot asymmetry in the test header' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot '.github\scripts\Tests\inline-dispatch-contract.Tests.ps1') -Raw -ErrorAction Stop
+
+        $content | Should -Match ([regex]::Escape('Cross-tool asymmetry (D6 of #412)')) -Because 'the test header must explain the intentional Copilot asymmetry from issue #412'
+    }
+}

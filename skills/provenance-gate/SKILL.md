@@ -113,6 +113,15 @@ Interpretation:
 - `Assessment looks right - proceed with caution`: proceed and carry the concerns forward during implementation
 - `Needs rework - stop here`: stop and summarize the findings for the developer to address
 
+### Developer-Gate Option Labels
+
+```yaml
+canonical_option_labels:
+  wrote_this: "I wrote this / I'm fully briefed"
+  proceed_with_caution: "Assessment looks right - proceed with caution"
+  needs_rework: "Needs rework - stop here"
+```
+
 ## Edge Cases
 
 ### Brand-new self-authored issue
