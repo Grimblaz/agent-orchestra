@@ -108,6 +108,20 @@ Added alongside the portability fix to close a gap found in the post-PR review o
 
 ---
 
+## Inline-Dispatch Contract
+
+The inline-dispatch contract added for issue #412 enforces session-startup Steps 4, 6, and 7b on all three Claude command files: `commands/experience.md`, `commands/design.md`, and `commands/plan.md`. It also enforces Step 9 and provenance-gate on `commands/experience.md` and `commands/design.md` only. `.github/scripts/Tests/inline-dispatch-contract.Tests.ps1` asserts prose presence per command and per step using canonical option labels extracted from the fenced YAML blocks in `skills/session-startup/SKILL.md` and `skills/provenance-gate/SKILL.md`.
+
+| Command file | Enforced here | Deferred elsewhere |
+| --- | --- | --- |
+| `commands/experience.md` | Steps 4, 6, 7b, 9, provenance-gate | None |
+| `commands/design.md` | Steps 4, 6, 7b, 9, provenance-gate | None |
+| `commands/plan.md` | Steps 4, 6, 7b | Step 9 and provenance-gate defer to `agents/issue-planner.md` per D5 of #412 |
+
+Cross-tool asymmetry per D6 of #412: Copilot's `.github/prompts/*.prompt.md` files are thin one-line dispatchers without a parent-side prose surface. Copilot inline-dispatch enforcement is owned by the agent body (`agents/{Name}.agent.md`) and is tracked in #414.
+
+---
+
 ## Requirements
 
 - Plugin manifests must declare their format-appropriate hook file so installs receive the startup and release-hygiene hooks automatically

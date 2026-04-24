@@ -1,6 +1,6 @@
 # Agent Orchestra
 
-[![Version](https://img.shields.io/badge/version-v2.3.3-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v2.3.4-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system that orchestrates AI-assisted software development across specialized agents in GitHub Copilot and Claude Code.

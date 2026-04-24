@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Multi-agent workflow system. Pipeline-based agent orchestration: Issue -> Design -> Plan -> Implement -> Review -> PR.",
-    "version": "2.3.3"
+    "version": "2.3.4"
   },
   "plugins": [
     {
       "name": "agent-orchestra",
       "source": "./",
     "description": "Multi-agent workflow system with 14 specialized agents and a shared skill library.",
-      "version": "2.3.3",
+      "version": "2.3.4",
       "author": {
         "name": "Grimblaz"
       },

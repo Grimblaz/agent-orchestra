@@ -14,6 +14,34 @@ Dispatch the `issue-planner` subagent to produce an implementation plan for the 
 1. Require an issue number (the plan is posted as a durable comment on that issue). If missing, use the `AskUserQuestion` tool.
 2. Check the issue's comments/timeline for the `<!-- design-phase-complete-{ID} -->` marker (design completion lives on a comment, not in the issue body). If the marker is not present on the issue, use `AskUserQuestion` to ask whether to run `/design` first or to plan from whatever framing already exists.
 
+## Pre-flight (parent-side, before handshake preamble)
+
+### Step 4 — Run-once marker (D2 fail-open)
+
+The automatic startup guard records `/memories/session/session-startup-check-complete.md` after the first automatic startup check. Claude Code inline currently lacks a session-memory write surface; the run-once marker is a no-op on this surface. The check still proceeds; the user-friction window is bounded to the first inline command of each new session because the SessionStart hook only injects `additionalContext` on session start.
+
+### Step 6 — Cleanup confirmation
+
+When the SessionStart hook injects `additionalContext`, present that context and ask via `AskUserQuestion` whether to continue with cleanup using these exact option labels:
+
+1. `Yes — run cleanup`
+2. `No — skip for now`
+
+If `additionalContext` is absent, emit a single line saying `no stale state detected` and continue.
+
+### Step 7b — Drift check
+
+On Claude Code, run the plugin drift check after the cleanup path completes. If the installed plugin is behind the marketplace version, emit the update summary and ask via `AskUserQuestion` with these exact option labels:
+
+1. `Stop — I'll restart now`
+2. `Continue — run under old code`
+
+If Claude is running headless and cannot ask a structured question, emit the update result inline and continue.
+
+### Step 9 + provenance-gate deferral note
+
+Step 9 (paired-body halt-on-fail) and the provenance-gate cold-pickup assessment are enforced by the issue-planner subagent shell at agents/issue-planner.md, so this command file does not duplicate them. See issue #412 for the parent-vs-subagent enforcement split, which keeps subagent-side enforcement authoritative for these two contracts.
+
 **Handshake preamble** (per `skills/subagent-env-handshake/SKILL.md` — the `issue-planner` subagent is tree-dependent and may make tree-grounded claims):
 
 1. Capture live parent-side working-tree state via the `Bash` tool. Run, in order:
