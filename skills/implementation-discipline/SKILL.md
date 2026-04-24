@@ -1,5 +1,4 @@
 ---
-
 name: implementation-discipline
 description: "Minimal implementation workflow for plan-driven coding. Use when preparing a small implementation slice, applying requirements-first coding discipline, or verifying that new code delegates instead of duplicating behavior. DO NOT USE FOR: test authoring strategy (use test-driven-development) or refactoring-only passes (use refactoring-methodology)"
 ---
@@ -47,6 +46,76 @@ After implementing a slice, verify:
 4. Any JSON output created or edited is parseable and preserves required array typing.
 
 If a requirement is missing from tests but clearly part of the requested behavior, implement it anyway and call out the missing coverage.
+
+## Bad Test Detection
+
+Stop implementation immediately when a failing or newly added test is likely wrong instead of exposing a product gap.
+
+Treat these as stop conditions:
+
+- The test appears to have a bug or incorrect expectation
+- The test checks implementation details rather than behavior
+- The test assertions do not match the documented requirements
+- The test setup is incomplete or creates invalid state
+- Multiple tests fail for the same likely test-side root cause
+
+Do not modify the tests yourself, work around the test with distorted implementation, or spend time debugging test logic in the implementation lane.
+
+Instead:
+
+- Stop immediately
+- Document the specific problem
+- Return a clear report so the orchestrator can route the issue to Test-Writer
+
+Use this report shape:
+
+````markdown
+🛑 BAD TEST DETECTED - STOPPING
+
+**File**: [test file path]
+**Test**: [test name]
+**Problem**: [clear description of what is wrong]
+**Evidence**: [why the test is wrong, rather than the implementation]
+
+Returning to orchestrator for redirection to Test-Writer.
+
+```text
+
+```
+````
+
+Why this matters: implementing against a broken test wastes time and pushes the code away from the real requirement.
+
+## Implementation Requirements Verification
+
+Passing tests is not sufficient. Verify the shipped behavior against the requirement before handing work off.
+
+After implementation, confirm:
+
+1. New components are wired into production code, not only tests.
+2. Expected integration points are actually connected.
+3. The implementation satisfies the design requirements and acceptance criteria.
+4. Any JSON output created or edited is parseable and preserves required array typing.
+
+For JSON changes:
+
+- Prefer structured serializers over manual quoting.
+- Validate the final output with the language's JSON parser.
+- When array-typed fields are present, verify that single-element writes preserve array identity.
+- In PowerShell, use `return , @(...)` or `Write-Output -NoEnumerate` when array identity must survive output.
+
+If you find a requirement gap that the current tests do not cover:
+
+- Implement the missing functionality anyway.
+- Flag the missing coverage explicitly in the handoff.
+
+Use this report shape:
+
+```text
+⚠️ MISSING TEST COVERAGE:
+- [missing behavior that was implemented but not covered]
+- Recommend adding integration or behavior coverage for the missing requirement
+```
 
 ## Delegation Instead Of Duplication
 

@@ -42,6 +42,8 @@ Claude Code auto-discovers `agents/` and `skills/` at the repo root via `.claude
 
 All 14 agents and the shared skill library are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (metadata-only manifest preserves auto-discovery).
 
+The plugin payload includes all 14 shared agent definitions and the shared skill library. The Claude-specific command and specialist surface shipped today is outlined below.
+
 ### Phase 1 — Upstream agents live in Claude Code
 
 The three upstream agents are first-class Claude Code citizens:
@@ -72,7 +74,16 @@ Claude's `code-conductor` shell now ships as a thin shell over the shared `agent
 
 The durable handoff set for Claude orchestration is the same GitHub-marker contract used cross-tool: `<!-- experience-owner-complete-{ID} -->`, `<!-- design-phase-complete-{ID} -->`, `<!-- design-issue-{ID} -->`, and `<!-- plan-issue-{ID} -->` as applicable to the current resume tier.
 
-The remaining implementation specialists are still tracked in later phases. When a planned specialist shell does not exist yet, Code-Conductor follows the documented fallback paths instead of treating Claude orchestration itself as unavailable.
+#### Specialist agents
+
+Claude Code now includes the first implementation specialists for Code-Conductor dispatch:
+
+- `Code-Smith` — implementation-focused code changes against an approved plan
+- `Test-Writer` — test authoring and test-surface correction
+- `Refactor-Specialist` — structure and maintainability cleanup without changing intended behavior
+- `Doc-Keeper` — documentation finalization and stale-doc cleanup
+
+The remaining Claude-side specialist gaps are `Process-Review`, `Specification`, and `UI-Iterator`. When a plan requires one of those still-missing specialists, Code-Conductor follows the documented fallback paths instead of treating Claude orchestration itself as unavailable.
 
 **What requires clone/fork**: same as the VS Code plugin — `.github/instructions/` and project templates are not distributed through the plugin surface. If you only load agents from a clone, Claude will not pick up the plugin-distributed `SessionStart` or `PostToolUse` hooks; those automation paths require `/plugin install`.
 

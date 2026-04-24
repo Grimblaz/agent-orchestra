@@ -1,5 +1,5 @@
-#Requires -Version 7.0
-#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
+# Requires -Version 7.0
+# Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
 <#
 .SYNOPSIS
@@ -187,8 +187,9 @@ Describe 'Code-Conductor Claude shell parity contract' {
         $script:ShellLineCount | Should -BeLessOrEqual 220 -Because 'issue #403 Step 11 locks the Claude shell size ceiling'
     }
 
-    It 'keeps the Phase 3 specialist list and D1 fallback labels exact' {
+    It 'keeps the Phase 3 specialist sentence exact, adds the Phase 4 specialist sentence, and preserves D1 fallback labels' {
         $script:SpecialistSection | Should -Match 'Phase 3 Claude specialist shells available for Code-Conductor dispatch are `code-critic`, `code-review-response`, and `experience-owner`\.' -Because 'the shell must advertise the Phase 3 specialist shells exactly'
+        $script:SpecialistSection | Should -Match 'Phase 4 Claude specialist shells available for Code-Conductor dispatch are `code-smith`, `test-writer`, `refactor-specialist`, and `doc-keeper`\.' -Because 'the shell must advertise the Phase 4 specialist shells exactly'
         $script:SpecialistSection | Should -Match '(?m)^1\. Hand off this step to Copilot, resume in Claude after\s*$' -Because 'D1 fallback option 1 is locked'
         $script:SpecialistSection | Should -Match '(?m)^2\. Attempt inline in the main conversation \(no specialist dispatch\)\s*$' -Because 'D1 fallback option 2 is locked'
         $script:SpecialistSection | Should -Match '(?m)^3\. Pause here - wait for Phase 4 specialist to land\s*$' -Because 'D1 fallback option 3 is locked'

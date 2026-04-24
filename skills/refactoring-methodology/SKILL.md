@@ -56,6 +56,35 @@ Find real maintainability improvements in touched code without widening into spe
 
 If the change adds data, metadata, or configuration that is not consumed where the feature requires it, treat that as incomplete implementation. Fix it now when the integration is local and bounded; only defer when the remaining work truly requires a larger design decision.
 
+## Proactive Hunting Stance
+
+Do not rubber-stamp a touched file as "fine" without inspection.
+
+- Presume the touched code is improvable until checked.
+- Hunt for duplication, unclear naming, oversized units, and awkward control flow.
+- Apply the Boy Scout Rule within the touched area and its immediate neighbors.
+- If no improvements are needed, state what you checked and why.
+
+Success means finding proportionate maintainability improvements when they exist, not refactoring for its own sake.
+
+## Integration Gaps Are Not Tech Debt
+
+If a PR adds data that is not consumed where the feature requires it, treat that as incomplete implementation, not future cleanup.
+
+Examples:
+
+- `supportedRegions` is added but consumers do not filter by it
+- `TIER_MULTIPLIERS` exists but the pricing path does not apply it
+- priority metadata is added but the scheduler ignores it
+- one map gains new entries while symmetric related maps do not
+
+When you find unused new data:
+
+1. Identify where it should be used.
+2. Estimate the integration effort.
+3. If the fix is local and bounded, include it now.
+4. If it is genuinely larger, document why it is large rather than calling it generic tech debt.
+
 ## Output Structure
 
 Use a concise analysis with these sections when reporting refactor work:

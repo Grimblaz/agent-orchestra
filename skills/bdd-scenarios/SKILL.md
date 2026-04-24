@@ -121,6 +121,19 @@ BDD structured scenarios are only active when the consumer repo's `copilot-instr
 
 Phase 2 extends Phase 1 by converting `[auto]` scenarios into runnable `.feature` files and dispatching the consumer's BDD framework runner at CE Gate validation.
 
+## Test-Writer Phase 2 Generation
+
+When Test-Writer is active and Phase 2 is enabled, use this skill as the authority for:
+
+- activation checks
+- `[auto]` versus `[manual]` generation scope
+- output directory selection
+- `.feature` file naming
+- stub idempotency
+- warning behavior for `bdd: true` and unrecognized frameworks
+
+Keep the Test-Writer agent body thin by pointing here instead of restating the full Phase 2 procedure.
+
 ### Phase 2 Detection
 
 Phase 2 is active when **both** conditions are met in the consumer repo's `copilot-instructions.md`:

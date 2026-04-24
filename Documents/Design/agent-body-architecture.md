@@ -1,6 +1,6 @@
 # Design: Agent Body Architecture
 
-**Status**: Implemented through Phase 0.3 and Phase 3
+**Status**: Implemented through Phase 0.3, Phase 3, and Phase 4 specialist shells
 
 ## Summary
 
@@ -13,6 +13,12 @@ tool-agnostic contract, but large reusable methodology blocks were extracted int
 and named reference files so the body could shrink from 966 lines to <=500 without losing explicit
 load paths or orchestration boundaries. Claude parity now uses the same shared body through both
 `agents/code-conductor.md` and `commands/orchestrate.md`.
+
+Phase 4 extended the Claude-side thin-shell pattern to the first implementation specialists:
+`agents/code-smith.md`, `agents/test-writer.md`, `agents/refactor-specialist.md`, and
+`agents/doc-keeper.md`. Their shared Copilot bodies remained the canonical contracts, while
+specialist-specific methodology that had started to regrow inline moved into the owning shared
+skills so the Claude wrappers could stay thin and parity-focused.
 
 ---
 
@@ -74,6 +80,29 @@ responsibilities. The extracted references hold reusable method text, schemas, r
 and recovery rules; the agent body keeps only the shell responsibilities and the explicit load
 directives that point to those canonical sources.
 
+### Phase 4 Extension: Specialist Shells
+
+Issue #404 applied the same shell-plus-shared-body architecture to the first Claude-side
+implementation specialists.
+
+- `code-smith` wraps `agents/Code-Smith.agent.md`
+- `test-writer` wraps `agents/Test-Writer.agent.md`
+- `refactor-specialist` wraps `agents/Refactor-Specialist.agent.md`
+- `doc-keeper` wraps `agents/Doc-Keeper.agent.md`
+
+Each specialist shell follows the same structure used by the Phase 3 conductor shell:
+
+- a Claude-only Step 0 environment handshake block
+- a single explicit shared-body pointer
+- an H2 enumeration of the shared-body sections the shell mirrors
+- a Claude tool-mapping table for Copilot-specific references
+- a persistence-differences note that keeps durable marker ownership with Code-Conductor
+
+Phase 4 also tightened the shared-body boundary for specialists. Reusable implementation,
+testing, refactoring, and BDD procedure text moved into the owning shared skills so the
+specialist bodies could stay focused on role identity while both Copilot and Claude continued to
+load one canonical methodology source.
+
 ### Composite-Skill Convention
 
 Phase 3 also formalized a composite-skill pattern for large reusable methodology areas.
@@ -102,6 +131,7 @@ footer at the bottom of each agent file — not in body sections.
 | D4 | BDD classification rubric in Issue-Planner | Keep inline (annotated "keep in sync with `bdd-scenarios` skill") | Tabular reference material consulted repeatedly during plan authoring; a skill-load interruption mid-planning adds latency without reducing duplication meaningfully — the table must stay synchronized with the skill regardless |
 | D6 | Claude shells during body thinning | Untouched (byte-identical) | Shells serve as delegation targets; any structural change risks breaking the cross-tool handoff contract without a corresponding plugin schema update |
 | D7 | Command dispatch strategy | Option F — `/experience` and `/design` rewired to inline role adoption (live `AskUserQuestion`); `/plan` stays subagent dispatch | Inline dispatch preserves main-context budget; `/plan` adversarial review requires multi-pass reasoning that benefits from subagent isolation |
+| D8 | Specialist-shell rollout model | Thin Claude shells over canonical shared bodies | Specialist shells should add only Claude-only handshake/tool-mapping/persistence wrappers while shared skills absorb reusable methodology, keeping Copilot and Claude aligned on one contract |
 
 ---
 

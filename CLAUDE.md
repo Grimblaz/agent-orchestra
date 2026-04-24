@@ -101,7 +101,7 @@ claude plugin uninstall <plugin@marketplace>
 
 ## Not yet ported
 
-Claude now ships the upstream pipeline, the review surfaces, and Code-Conductor orchestration. The remaining implementation-side agents — **Code-Smith**, **Test-Writer**, **Doc-Keeper**, **Refactor-Specialist**, **Process-Review**, **Specification**, and **UI-Iterator** — are still tracked in later phases. Until they ship, use Code-Conductor's documented fallback paths or fall back to Copilot once the plan has been approved.
+Claude now ships the upstream pipeline, the review surfaces, Code-Conductor orchestration, and the first implementation specialists: **Code-Smith**, **Test-Writer**, **Refactor-Specialist**, and **Doc-Keeper**. The remaining implementation-side agents — **Process-Review**, **Specification**, and **UI-Iterator** — are still tracked in later phases. Until they ship, use Code-Conductor's documented fallback paths or fall back to Copilot for those specific roles once the plan has been approved.
 
 ## Issue #369 traces the full history
 

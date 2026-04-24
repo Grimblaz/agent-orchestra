@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestra",
-  "version": "2.3.3",
+    "version": "2.3.4",
   "description": "Multi-agent workflow system for Claude Code. Pipeline-based agent orchestration: Issue → Design → Plan → Implement → Review → PR.",
   "author": {
     "name": "Grimblaz"
