@@ -12,7 +12,7 @@
         are thin one-line dispatchers without a parent-side prose surface. Copilot
         inline-dispatch enforcement is owned by the agent body and tracked in #414.
 
-        Canonical option-label assertions extract YAML anchors from
+        Canonical option-label assertions extract fenced YAML blocks from
         skills/session-startup/SKILL.md and skills/provenance-gate/SKILL.md so label
         changes cause explicit contract-test failures instead of silent drift.
 #>
@@ -39,7 +39,7 @@ Describe 'inline dispatch contract' {
             $pattern = '(?ms)^' + [regex]::Escape($Heading) + '\s*\r?\n\r?\n```yaml\r?\n(?<yaml>.*?)\r?\n```'
             $match = [regex]::Match($content, $pattern)
 
-            $match.Success | Should -BeTrue -Because "$SkillPath must publish the $Heading YAML anchor"
+            $match.Success | Should -BeTrue -Because "$SkillPath must publish the $Heading fenced YAML block"
             if (-not $match.Success) {
                 return [ordered]@{}
             }
