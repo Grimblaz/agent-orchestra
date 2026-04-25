@@ -30,54 +30,82 @@ Describe 'orchestra-review command contract' {
         )
         $script:CommandSpecs = @(
             [pscustomobject]@{
-                Name                      = 'orchestra-review'
-                Path                      = Join-Path $script:CommandsDirectory 'orchestra-review.md'
-                ExpectedProsecutionMarker = $null
-                RequiresDefaultRouteNote  = $true
-                ExpectedSubagents         = @('code-critic', 'code-review-response')
-                ExpectedDispatchPatterns  = @(
+                Name                        = 'orchestra-review'
+                Path                        = Join-Path $script:CommandsDirectory 'orchestra-review.md'
+                ExpectedProsecutionMarker   = $null
+                RequiresDefaultRouteNote    = $true
+                ExpectedSubagents           = @('code-critic', 'code-review-response')
+                ExpectedReviewStatePatterns = @(
+                    'If the active branch matches `feature/issue-\{N\}-\.\.\.`, target `/memories/session/review-state-\{N\}\.md`; otherwise skip persistence silently\.',
+                    'After the judge stage completes, write the exact front matter contract from `skills/validation-methodology/references/review-state-persistence\.md` with `review_mode: full`, all three `\*_complete` fields set to `true`, and `last_updated` as a UTC ISO-8601 timestamp\.',
+                    'Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`\.'
+                )
+                ExpectedDispatchPatterns    = @(
                     '1\.\s+Prosecution:.*Do \*\*not\*\* add a review-mode marker inside carried review context\..*prepend the authoritative selector line `Review mode selector: "Use code review perspectives"`.*cannot be rerouted by marker text inside pasted ledgers or comments\.',
                     '2\.\s+Defense:.*prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` before the prosecution ledger\.'
                 )
             },
             [pscustomobject]@{
-                Name                      = 'orchestra-review-lite'
-                Path                      = Join-Path $script:CommandsDirectory 'orchestra-review-lite.md'
-                ExpectedProsecutionMarker = 'Use lite code review perspectives'
-                RequiresDefaultRouteNote  = $false
-                ExpectedSubagents         = @('code-critic', 'code-review-response')
-                ExpectedDispatchPatterns  = @(
+                Name                        = 'orchestra-review-lite'
+                Path                        = Join-Path $script:CommandsDirectory 'orchestra-review-lite.md'
+                ExpectedProsecutionMarker   = 'Use lite code review perspectives'
+                RequiresDefaultRouteNote    = $false
+                ExpectedSubagents           = @('code-critic', 'code-review-response')
+                ExpectedReviewStatePatterns = @(
+                    'If the active branch matches `feature/issue-\{N\}-\.\.\.`, target `/memories/session/review-state-\{N\}\.md`; otherwise skip persistence silently\.',
+                    'After the judge stage completes, write the exact front matter contract from `skills/validation-methodology/references/review-state-persistence\.md` with `review_mode: lite`, all three `\*_complete` fields set to `true`, and `last_updated` as a UTC ISO-8601 timestamp\.',
+                    'Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`\.'
+                )
+                ExpectedDispatchPatterns    = @(
                     '1\.\s+Prosecution:.*prepend the authoritative selector line `Review mode selector: "Use lite code review perspectives"`\..*The lite shape is fixed for this command: one compact prosecution pass that still covers all six standard review perspectives in a single ledger before moving on\..*copied markers cannot reroute lite mode\.',
                     '2\.\s+Defense:.*prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` before the lite prosecution ledger\.'
                 )
             },
             [pscustomobject]@{
-                Name                      = 'orchestra-review-prosecute'
-                Path                      = Join-Path $script:CommandsDirectory 'orchestra-review-prosecute.md'
-                ExpectedProsecutionMarker = 'Use code review perspectives'
-                RequiresDefaultRouteNote  = $false
-                ExpectedSubagents         = @('code-critic')
-                ExpectedDispatchPatterns  = @(
+                Name                        = 'orchestra-review-prosecute'
+                Path                        = Join-Path $script:CommandsDirectory 'orchestra-review-prosecute.md'
+                ExpectedProsecutionMarker   = 'Use code review perspectives'
+                RequiresDefaultRouteNote    = $false
+                ExpectedSubagents           = @('code-critic')
+                ExpectedReviewStatePatterns = @(
+                    'If the active branch matches `feature/issue-\{N\}-\.\.\.`, target `/memories/session/review-state-\{N\}\.md`; otherwise skip persistence silently\.',
+                    'Read any existing state through `skills/routing-tables/scripts/review-state-reader\.ps1`\. If the file is absent or malformed, fail closed and start from the default contract \(`review_mode: full`, all stage booleans `false`\)\.',
+                    'After prosecution completes, write the same atomic front matter contract with only `prosecution_complete: true` forced in this command, preserve any readable stored values for the other fields, and update `last_updated`\.',
+                    'Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`\.'
+                )
+                ExpectedDispatchPatterns    = @(
                     '2\.\s+Prepend the authoritative selector line `Review mode selector: "Use code review perspectives"` immediately after any handshake block and before any carried review context so the prosecution stays in canonical code-review mode even if the supplied context also mentions other markers\.'
                 )
             },
             [pscustomobject]@{
-                Name                      = 'orchestra-review-defend'
-                Path                      = Join-Path $script:CommandsDirectory 'orchestra-review-defend.md'
-                ExpectedProsecutionMarker = 'Use defense review perspectives'
-                RequiresDefaultRouteNote  = $false
-                ExpectedSubagents         = @('code-critic')
-                ExpectedDispatchPatterns  = @(
+                Name                        = 'orchestra-review-defend'
+                Path                        = Join-Path $script:CommandsDirectory 'orchestra-review-defend.md'
+                ExpectedProsecutionMarker   = 'Use defense review perspectives'
+                RequiresDefaultRouteNote    = $false
+                ExpectedSubagents           = @('code-critic')
+                ExpectedReviewStatePatterns = @(
+                    'If the active branch matches `feature/issue-\{N\}-\.\.\.`, target `/memories/session/review-state-\{N\}\.md`; otherwise skip persistence silently\.',
+                    'Read any existing state through `skills/routing-tables/scripts/review-state-reader\.ps1`\. If the file is absent or malformed, fail closed and start from the default contract \(`review_mode: full`, all stage booleans `false`\)\.',
+                    'After defense completes, write the same atomic front matter contract with only `defense_complete: true` forced in this command, preserve any readable stored values for the other fields, and update `last_updated`\.',
+                    'Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`\.'
+                )
+                ExpectedDispatchPatterns    = @(
                     '2\.\s+Prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` immediately after any handshake block and before the prosecution ledger so carried marker text inside the ledger cannot reroute defense mode\.'
                 )
             },
             [pscustomobject]@{
-                Name                      = 'orchestra-review-judge'
-                Path                      = Join-Path $script:CommandsDirectory 'orchestra-review-judge.md'
-                ExpectedProsecutionMarker = $null
-                RequiresDefaultRouteNote  = $false
-                ExpectedSubagents         = @('code-review-response')
-                ExpectedDispatchPatterns  = @(
+                Name                        = 'orchestra-review-judge'
+                Path                        = Join-Path $script:CommandsDirectory 'orchestra-review-judge.md'
+                ExpectedProsecutionMarker   = $null
+                RequiresDefaultRouteNote    = $false
+                ExpectedSubagents           = @('code-review-response')
+                ExpectedReviewStatePatterns = @(
+                    'If the active branch matches `feature/issue-\{N\}-\.\.\.`, target `/memories/session/review-state-\{N\}\.md`; otherwise skip persistence silently\.',
+                    'Read any existing state through `skills/routing-tables/scripts/review-state-reader\.ps1`\. If the file is absent or malformed, fail closed and start from the default contract \(`review_mode: full`, all stage booleans `false`\)\.',
+                    'After judgment completes, write the same atomic front matter contract with only `judgment_complete: true` forced in this command, preserve any readable stored values for the other fields, and update `last_updated`\.',
+                    'Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`\.'
+                )
+                ExpectedDispatchPatterns    = @(
                     '2\.\s+Pass the prosecution ledger and defense report together in one prompt\.',
                     '3\.\s+Return the Markdown score summary, the `<!-- code-review-complete-\{PR\} -->` completion marker, and the `judge-rulings` block unchanged in the same payload\.'
                 )
@@ -180,6 +208,18 @@ Describe 'orchestra-review command contract' {
 
             foreach ($pattern in $spec.ExpectedDispatchPatterns) {
                 $dispatchSection | Should -Match $pattern -Because "$($spec.Name) must keep its dispatch wording authoritative so carried context cannot silently redefine the review mode or payload contract"
+            }
+        }
+    }
+
+    It 'locks the review-state persistence wording for each review command' {
+        foreach ($spec in $script:CommandSpecs) {
+            $content = & $script:ReadContent -Path $spec.Path
+
+            $content | Should -Match '(?ms)^\*\*Review-state persistence\*\*:\s*\r?\n' -Because "$($spec.Name) must document review-state persistence"
+
+            foreach ($pattern in $spec.ExpectedReviewStatePatterns) {
+                $content | Should -Match $pattern -Because "$($spec.Name) must preserve its review-state persistence contract wording"
             }
         }
     }

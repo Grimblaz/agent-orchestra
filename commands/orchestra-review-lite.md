@@ -12,6 +12,12 @@ Run the compact review pipeline: one all-perspectives prosecution pass, then def
 1. Resolve the review target from the arguments or the active PR context. If neither is available, use the `AskUserQuestion` tool.
 2. Gather the diff, linked issue or plan context, and any prior review ledger that should travel with the prosecution prompt.
 
+**Review-state persistence**:
+
+1. If the active branch matches `feature/issue-{N}-...`, target `/memories/session/review-state-{N}.md`; otherwise skip persistence silently.
+2. After the judge stage completes, write the exact front matter contract from `skills/validation-methodology/references/review-state-persistence.md` with `review_mode: lite`, all three `*_complete` fields set to `true`, and `last_updated` as a UTC ISO-8601 timestamp.
+3. Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`.
+
 **Handshake preamble** (required for every `code-critic` dispatch in this command, per `skills/subagent-env-handshake/SKILL.md`):
 
 1. Capture live parent-side working-tree state via the `Bash` tool. Run, in order:

@@ -23,10 +23,11 @@ This skill is the human-readable companion to the routing data in `assets/routin
 - `skill_mapping`: delegation guidance from Code-Conductor's Skill Mapping table; this is a reference list, not a strict deterministic router
 - `enums`: canonical current enum values used by review and routing outputs
 
-`assets/gate-criteria.json` contains three top-level sections:
+`assets/gate-criteria.json` contains four top-level sections:
 
 - `scope_classification`: abbreviated-vs-full pipeline gate criteria and tier table
 - `express_lane`: low-risk fix gate criteria for routing findings directly to a specialist
+- `review_completion`: pre-PR review-completion gate that requires prosecution, defense, and judgment completion to all be recorded as true for the current review cycle
 - `post_fix_trigger`: conditions that require post-fix targeted prosecution after accepted review fixes
 
 ## Specialist Dispatch
@@ -73,11 +74,13 @@ Scope classification is an AND gate: all five abbreviated-tier criteria must hol
 
 Express lane is also an AND gate. A finding must be low severity, strictly mechanical, non-logic-changing, test-neutral, backward-compatible with respect to stored IDs and schema, and limited to one file. It only applies to main review and post-fix review routing, and Tier 1 re-validation is still required after the fix lands.
 
+Review completion is an AND gate. It fails closed unless the current review cycle records all three stage booleans as true: `prosecution_complete`, `defense_complete`, and `judgment_complete`. `review_mode` is tracked alongside the state as label metadata, but it is not part of the gate criteria.
+
 Post-fix targeted prosecution uses OR semantics for its trigger conditions: one accepted critical or high finding is enough, and any accepted fix that modifies control flow is also enough. If no findings were accepted and applied, the post-fix review is skipped.
 
 ## Interpretation Rules
 
-Use exact current values from the JSON assets when a mode, enum, or routing value needs to be preserved across prompts or scripts. Match review markers literally. For specialist dispatch file routing, use explicit `file_patterns` keys instead of parsing prose. Treat `skill_mapping` as explanatory metadata, not a replacement for human judgment. Treat `scope_classification` and `express_lane` as all-criteria gates, while `post_fix_trigger` activates when any trigger condition is met.
+Use exact current values from the JSON assets when a mode, enum, or routing value needs to be preserved across prompts or scripts. Match review markers literally. For specialist dispatch file routing, use explicit `file_patterns` keys instead of parsing prose. Treat `skill_mapping` as explanatory metadata, not a replacement for human judgment. Treat `scope_classification`, `express_lane`, and `review_completion` as all-criteria gates, while `post_fix_trigger` activates when any trigger condition is met.
 
 When an entry includes prose qualifiers, preserve them rather than compressing them away. The goal of these files is stable extraction of current rules, not reinterpretation of the orchestration policy.
 

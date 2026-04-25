@@ -98,6 +98,27 @@
     ],
     "revalidation_required": "Tier 1 re-validation required after the specialist applies an express-lane fix."
   },
+  "review_completion": {
+    "source": "agents/Code-Conductor.agent.md",
+    "all_must_hold": true,
+    "outcome_if_all_true": "complete",
+    "default_outcome": "incomplete",
+    "criteria": [
+      {
+        "id": "prosecution_complete",
+        "text": "Prosecution stage completion is recorded and true for the current review cycle"
+      },
+      {
+        "id": "defense_complete",
+        "text": "Defense stage completion is recorded and true for the current review cycle"
+      },
+      {
+        "id": "judgment_complete",
+        "text": "Judgment stage completion is recorded and true for the current review cycle"
+      }
+    ],
+    "default_rule": "Fail closed when any required stage is absent, unset, or false; only a fully recorded prosecution, defense, and judgment sequence yields complete."
+  },
   "post_fix_trigger": {
     "source": "agents/Code-Conductor.agent.md",
     "recursion_guard": "This step is never triggered by another post-fix prosecution - only by a main review cycle (code review or GitHub intake proxy prosecution).",

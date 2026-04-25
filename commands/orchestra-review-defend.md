@@ -12,6 +12,13 @@ Run only the Code-Critic defense stage against an existing prosecution ledger an
 1. Require a prosecution ledger in the supplied arguments or conversation context. If it is missing, use the `AskUserQuestion` tool.
 2. Gather any review target context that the defense pass needs for counter-evidence verification.
 
+**Review-state persistence**:
+
+1. If the active branch matches `feature/issue-{N}-...`, target `/memories/session/review-state-{N}.md`; otherwise skip persistence silently.
+2. Read any existing state through `skills/routing-tables/scripts/review-state-reader.ps1`. If the file is absent or malformed, fail closed and start from the default contract (`review_mode: full`, all stage booleans `false`).
+3. After defense completes, write the same atomic front matter contract with only `defense_complete: true` forced in this command, preserve any readable stored values for the other fields, and update `last_updated`.
+4. Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`.
+
 **Handshake preamble** (required for this `code-critic` dispatch, per `skills/subagent-env-handshake/SKILL.md`):
 
 1. Capture live parent-side working-tree state via the `Bash` tool. Run, in order:

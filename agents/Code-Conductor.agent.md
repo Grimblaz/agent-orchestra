@@ -136,6 +136,7 @@ For terminal and validation execution guardrails, load `skills/terminal-hygiene/
 Any future pre-response trigger step runs **before** the Core Workflow, stays outside the numbered workflow list, and does not renumber, replace, or subsume Step 0. Issue Transition remains Step 0 and the first numbered workflow step after any pre-response trigger handling completes.
 
 <!-- markdownlint-disable-next-line MD029 -->
+
 0. **Issue Transition (Step 0, before implementation)**:
    - Cleanup note: The `session-startup` skill (loaded by pipeline-entry agents) detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `pwsh "skills/session-startup/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly (path is relative to the agent-orchestra plugin or repo clone).
    - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
@@ -282,6 +283,7 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
 
 4. **Create PR (MANDATORY, review-ready gate)**: After all steps complete (including documentation):
    - **End-to-end check**: Does this PR actually resolve the issue? Not "all steps executed" but "the feature works." Review the full diff against the issue's acceptance criteria.
+   - **Review Completion Gate**: Before any push or PR creation step, load `skills/validation-methodology/references/review-reconciliation.md`, read the current review-state per its lookup rules, build `Criteria` from `prosecution_complete`, `defense_complete`, and `judgment_complete`, and block PR creation on `Test-GateCriteria -Gate review_completion`. On failure, re-enter the missing review stages by default; use `#tool:vscode/askQuestions` only when automatic re-entry is infeasible.
    - **Scope check**: `git diff --name-status main..HEAD` (cross-branch diff — no built-in tool equivalent) must match planned scope (no unrelated files)
    - **Migration completeness check** (migration-type issues only — pattern replacement, rename/move, API migration; see Issue-Planner `<plan_style_guide>` for full definition): Run a final scan for remaining old-form references using `grep_search` with the old-pattern as `query` and an `includePattern` glob matching target files (e.g., `**/*.md`). Confirm result count is 0. Also use `file_search` with the same glob to confirm at least 1 file matches — a 0-match result with 0 files found indicates a misconfigured glob, not a clean repo. If `grep_search` cannot express the required filter (e.g., paths needing PowerShell `Where-Object -notmatch` exclusions), fall back to terminal `Get-ChildItem | Select-String` with documented rationale in an inline comment or annotation. If count is non-zero, fix remaining occurrences before proceeding. Include scan output as validation evidence in the PR body.
    - **Design doc (before pushing)**: Add or update a domain-based design document in `Documents/Design/`. Logic: (1) List existing files in `Documents/Design/`, excluding any `issue-{N}-*.md`-named files from domain-match candidates, (2) read their headings to find domain overlap with the current feature, (3) if exactly one match, delegate an **update** to Doc-Keeper targeting that file, (4) if two or more matches, prompt via `#tool:vscode/askQuestions`: "Multiple design docs match this feature — which should be updated?" and wait for selection before delegating, (5) if no match, delegate **creation** of a new `{domain-slug}.md` file to Doc-Keeper. **Legacy detection (idempotent)**: if `Documents/Design/` contains any `issue-{N}-*.md` pattern files, first run `gh issue list --search "Migrate Documents/Design/ to domain-based files" --state open --json number --jq length` — if the result is `0`, prompt the user via `#tool:vscode/askQuestions`: "Legacy per-issue design docs detected — create a cleanup issue to migrate them to domain-based files?" If confirmed, run `gh issue create --title "Migrate Documents/Design/ to domain-based files" --body "Legacy issue-{N}-*.md design files in Documents/Design/ should be consolidated into domain-based design files per the architecture-rules.md naming convention." --label "priority: medium"`, then continue with the current task. If result is `> 0`, skip creation silently.
@@ -289,7 +291,7 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
    - **Validation evidence**: run required validation commands from plan/repo instructions and capture pass results for PR body
    - `git push -u origin {branch-name}`
    - Create PR via `github-pull-request/*` tools or `gh pr create`
-   - PR body MUST include: summary, changed files, validation evidence, migration-scan result (migration-type issues only), CE Gate result, adversarial review score table, prosecution depth summary, pipeline metrics, process gaps found (if any), and `Closes #{issue}`
+   - PR body MUST include: summary, changed files, validation evidence, migration-scan result (migration-type issues only), Review Mode, CE Gate result, adversarial review score table, prosecution depth summary, pipeline metrics, process gaps found (if any), and `Closes #{issue}`
 
 5. **Report Completion**: Summarize work done, link the PR URL, and hand off to user for review
 
@@ -324,10 +326,13 @@ Load `skills/routing-tables/SKILL.md` for the canonical specialist-dispatch mapp
 Load and follow these references:
 
 - `skills/validation-methodology/references/review-reconciliation.md`
+- `skills/validation-methodology/references/review-state-persistence.md`
 - `skills/validation-methodology/references/post-judgment-routing.md`
 - `skills/code-review-intake/references/express-lane.md`
 
-Code-Conductor keeps only the orchestration boundary here: enter the correct review mode, apply express-lane routing only where the contract allows it, route post-judgment and post-fix outcomes, preserve any required calibration side effects, and proceed to the CE Gate in the documented sequence.
+Code-Conductor keeps only the orchestration boundary here: enter the correct review mode, apply express-lane routing only where the contract allows it, route post-judgment and post-fix outcomes, preserve any required calibration side effects, enforce the Review Completion Gate before PR creation, and proceed to the CE Gate in the documented sequence.
+
+If the Review Completion Gate fails, re-enter the missing review stage or stages by default. Escalate with `#tool:vscode/askQuestions` only when the missing-stage rerun is infeasible under the current context.
 
 GitHub-triggered review requests (`github review`, `review github`, `cr review`) still enter through the GitHub intake path described in the loaded references before the generic local review loop runs.
 

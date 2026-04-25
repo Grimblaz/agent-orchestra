@@ -2,7 +2,7 @@
 
 This reference owns the reusable review-reconciliation mechanics extracted from Code-Conductor.
 
-See [post-judgment-routing.md](post-judgment-routing.md) for the paired post-judgment re-activation summary and routing index, and [../../code-review-intake/references/express-lane.md](../../code-review-intake/references/express-lane.md) for the canonical R6 express-lane gate.
+See [post-judgment-routing.md](post-judgment-routing.md) for the paired post-judgment re-activation summary and routing index, [review-state-persistence.md](review-state-persistence.md) for the pre-PR review-state contract, and [../../code-review-intake/references/express-lane.md](../../code-review-intake/references/express-lane.md) for the canonical R6 express-lane gate.
 
 ## Review Reconciliation Loop
 
@@ -82,6 +82,17 @@ After the merged ledger is finalized:
 3. Do not implement accepted fixes until the prosecution, defense, and judgment sequence completes.
 
 If the owning agent supports an express lane for strictly mechanical low-severity findings, partition those findings only after the merged prosecution ledger is available. The owning agent still owns whether express lane exists and how routed findings are dispatched. See [../../code-review-intake/references/express-lane.md](../../code-review-intake/references/express-lane.md).
+
+### Review Completion Gate
+
+Fire this gate immediately before PR creation and on any post-review resume path that intends to continue toward PR creation.
+
+- Pre-PR lookup reads `/memories/session/review-state-{ID}.md` only.
+- Post-PR resume lookup may read, in order: the durable review comment, `<!-- pipeline-metrics -->`, then session memory.
+- The caller owns criteria construction for `Test-GateCriteria -Gate review_completion`. Build `Criteria` from the three stage booleans only. `review_mode` is label-only metadata and is not part of the criteria.
+- The caller also owns the missing-stage list. Build it from the `false` stage booleans in stage order: prosecution, defense, judgment.
+- On failure, emit the exact string `❌ Review pipeline incomplete — {missing stages}`.
+- Default recovery is automatic re-entry into the missing stage or stages. Use `askQuestions` only when automatic re-entry is infeasible because required context, ledgers, or user-choice input is missing.
 
 ### GitHub Review Intake & Judgment
 

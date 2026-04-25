@@ -78,6 +78,26 @@ Read the `Class` value (`[auto]` or `[manual]`) from the plan's `[CE GATE]` step
 | S1  | Functional | [auto]   | ✅ Passed | {brief description} | Runner |
 | S2  | Intent     | [manual] | ✅ Passed | {brief description} | EO     |
 
+### PR Body Review Mode
+
+Always include a visible `## Review Mode` section in the PR body.
+
+Use this text for the standard path:
+
+```markdown
+## Review Mode
+
+Full review pipeline completed: 3 prosecution passes, 1 defense pass, 1 judge pass.
+```
+
+Use this text for the abbreviated path:
+
+```markdown
+## Review Mode
+
+Lite review pipeline completed via `/orchestra:review-lite`: 1 compact prosecution pass, 1 defense pass, 1 judge pass.
+```
+
 ### PR Body Adversarial Review Scores
 
 Always include the adversarial review score summary table from the judge's score summary output:
@@ -91,6 +111,8 @@ Always include the adversarial review score summary table from the judge's score
 | CE Review       | {pts} pts ({N} sustained) | {pts} pts ({N} disproved, {N} rejected) | {N} ruling(s) |
 | Post-fix Review | {pts} pts ({N} sustained) | {pts} pts ({N} disproved, {N} rejected) | {N} ruling(s) |
 ```
+
+For lite review mode, replace the `Code Review` row label with `Code Review (lite)`. The CE Review and Post-fix Review row labels stay unchanged.
 
 If a stage did not run (e.g., CE Gate not applicable, post-fix review not triggered), note it as `⏭️ N/A`.
 

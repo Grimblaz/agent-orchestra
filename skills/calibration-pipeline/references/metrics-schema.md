@@ -12,7 +12,12 @@ Always include a `## Pipeline Metrics` section in the PR body with a hidden HTML
 ## Pipeline Metrics
 
 <!-- pipeline-metrics
-metrics_version: 2
+metrics_version: 3
+review_mode: {full|lite}
+stages_run:
+  prosecution: {true|false}
+  defense: {true|false}
+  judgment: {true|false}
 prosecution_findings: {N}
 pass_1_findings: {N}
 pass_2_findings: {N}
@@ -76,7 +81,7 @@ findings:
 
 ## Top-Level Field Reference
 
-`0` for numeric fields when the stage ran but found nothing. `n/a` for categorical fields when the stage was skipped entirely (e.g., `ce_gate_result: not-applicable`, `ce_gate_intent: n/a` when `ce_gate: false`). `ce_gate_defects_found: n/a` when the CE Gate did not run (`ce_gate: false` or `⏭️ CE Gate not applicable`). For proxy prosecution (GitHub review intake): `pass_1_findings`, `pass_2_findings`, `pass_3_findings` → `n/a` (3-pass structure replaced by proxy pass); route total findings count to `prosecution_findings` only. `postfix_*` numeric fields default to `0` when post-fix review was triggered but found nothing; `n/a` when not triggered (`postfix_triggered: false`). Set `postfix_triggered: true` when trigger conditions are met and post-fix prosecution executes (regardless of whether any findings were accepted). New optimization fields: `express_lane_count`, `batch_dispatch_calls`, `batch_dispatch_findings`, `rate_limit_retries` default to `0` when the stage ran; `n/a` when the relevant phase was not active for the current review mode (e.g., `express_lane_count: n/a` for proxy, CE, or design review; `batch_dispatch_calls`/`batch_dispatch_findings: n/a` only for review modes where specialist dispatch is not active — such as standalone design-review flows that stop after prosecution). `postfix_passes` defaults to `n/a` when post-fix review was not triggered; `1` or `2` to reflect actual passes run. `rate_limit_deferred` defaults to `false`. `prosecution_depth_light` and `prosecution_depth_skip` default to empty lists `[]` when no categories are at those depths. `prosecution_depth_override` defaults to `false`. `prosecution_depth_reactivations` defaults to `0` (no re-activation events written via `write-calibration-entry.ps1 -ReactivationEventJson` during this PR; incremented by the Post-Judgment and CE/Proxy re-activation detection steps).
+`0` for numeric fields when the stage ran but found nothing. `n/a` for categorical fields when the stage was skipped entirely (e.g., `ce_gate_result: not-applicable`, `ce_gate_intent: n/a` when `ce_gate: false`). `review_mode` defaults to `full` for older metrics blocks that predate `metrics_version: 3`. `stages_run` defaults to all `true` for pre-v3 metrics because older PR-body metrics only represented completed review pipelines. `ce_gate_defects_found: n/a` when the CE Gate did not run (`ce_gate: false` or `⏭️ CE Gate not applicable`). For proxy prosecution (GitHub review intake): `pass_1_findings`, `pass_2_findings`, `pass_3_findings` → `n/a` (3-pass structure replaced by proxy pass); route total findings count to `prosecution_findings` only. `postfix_*` numeric fields default to `0` when post-fix review was triggered but found nothing; `n/a` when not triggered (`postfix_triggered: false`). Set `postfix_triggered: true` when trigger conditions are met and post-fix prosecution executes (regardless of whether any findings were accepted). New optimization fields: `express_lane_count`, `batch_dispatch_calls`, `batch_dispatch_findings`, `rate_limit_retries` default to `0` when the stage ran; `n/a` when the relevant phase was not active for the current review mode (e.g., `express_lane_count: n/a` for proxy, CE, or design review; `batch_dispatch_calls`/`batch_dispatch_findings: n/a` only for review modes where specialist dispatch is not active — such as standalone design-review flows that stop after prosecution). `postfix_passes` defaults to `n/a` when post-fix review was not triggered; `1` or `2` to reflect actual passes run. `rate_limit_deferred` defaults to `false`. `prosecution_depth_light` and `prosecution_depth_skip` default to empty lists `[]` when no categories are at those depths. `prosecution_depth_override` defaults to `false`. `prosecution_depth_reactivations` defaults to `0` (no re-activation events written via `write-calibration-entry.ps1 -ReactivationEventJson` during this PR; incremented by the Post-Judgment and CE/Proxy re-activation detection steps).
 
 ### Calibration Data Write (VS Code Copilot only)
 
