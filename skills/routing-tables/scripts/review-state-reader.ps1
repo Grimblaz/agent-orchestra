@@ -82,8 +82,18 @@ function Read-ReviewStateFile {
         return $null
     }
 
-    $lastUpdated = [datetime]::MinValue
-    if (-not [datetime]::TryParse([string]$state.last_updated, [ref]$lastUpdated)) {
+    $lastUpdated = [datetimeoffset]::MinValue
+    $timestampStyles = [System.Globalization.DateTimeStyles]::AssumeUniversal -bor [System.Globalization.DateTimeStyles]::AdjustToUniversal
+    $lastUpdatedText = [string]$state.last_updated
+    if ($lastUpdatedText -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|\+00:00)$') {
+        return $null
+    }
+
+    if (-not [datetimeoffset]::TryParse($lastUpdatedText, [System.Globalization.CultureInfo]::InvariantCulture, $timestampStyles, [ref]$lastUpdated)) {
+        return $null
+    }
+
+    if ($lastUpdated.Offset -ne [timespan]::Zero) {
         return $null
     }
 
@@ -110,5 +120,10 @@ function Read-ReviewStateByIssueId {
         return $null
     }
 
-    return Read-ReviewStateFile -Path $path
+    $state = Read-ReviewStateFile -Path $path
+    if ($null -eq $state -or $state.issue_id -ne $IssueId) {
+        return $null
+    }
+
+    return $state
 }

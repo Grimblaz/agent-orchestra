@@ -148,6 +148,19 @@ last_updated: 2026-04-24T14:00:00Z
 ---
 "@
             }
+            @{
+                Name    = 'non-utc iso timestamp'
+                Content = @"
+---
+issue_id: 417
+review_mode: full
+prosecution_complete: true
+defense_complete: false
+judgment_complete: false
+last_updated: 2026-04-24 14:00:00
+---
+"@
+            }
         )
 
         foreach ($case in $cases) {
@@ -156,6 +169,25 @@ last_updated: 2026-04-24T14:00:00Z
 
             Read-ReviewStateFile -Path $path | Should -BeNullOrEmpty -Because "$($case.Name) must fail closed"
         }
+    }
+
+    It 'fails closed when the review-state file issue_id does not match the requested issue' {
+        $sessionMemoryPath = Join-Path $script:TempRoot 'session-memory-mismatch'
+        New-Item -ItemType Directory -Path $sessionMemoryPath -Force | Out-Null
+        $statePath = Join-Path $sessionMemoryPath 'review-state-417.md'
+
+        @"
+---
+issue_id: 999
+review_mode: full
+prosecution_complete: true
+defense_complete: true
+judgment_complete: true
+last_updated: 2026-04-24T14:00:00Z
+---
+"@ | Set-Content -Path $statePath -Encoding UTF8
+
+        Read-ReviewStateByIssueId -IssueId 417 -SessionMemoryPath $sessionMemoryPath | Should -BeNullOrEmpty
     }
 
     It 'derives missing resume stages in order from a seeded review-state-417 file' {
