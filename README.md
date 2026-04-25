@@ -1,6 +1,6 @@
 # Agent Orchestra
 
-[![Version](https://img.shields.io/badge/version-v2.3.6-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v2.4.0-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system that orchestrates AI-assisted software development across specialized agents in GitHub Copilot and Claude Code.
@@ -25,7 +25,7 @@ A multi-agent workflow system that orchestrates AI-assisted software development
 2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins agent-orchestra` and install.
 3. **Use** — All 14 agents and the shared skill library are immediately available in VS Code Chat.
 
-**What's included in the repo plugin payload**: 14 agents, the shared skill library, and 9 command files under `commands/` (`/design`, `/experience`, `/plan`, `/orchestrate`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`). VS Code currently ignores the plugin `commands` field; Claude Code and CLI consumers use it.
+**What's included in the repo plugin payload**: 14 agents, the shared skill library, and 10 command files under `commands/` (`/design`, `/experience`, `/plan`, `/orchestrate`, `/polish`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`). VS Code currently ignores the plugin `commands` field; Claude Code and CLI consumers use it.
 
 **What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo. Plugin-distributed hooks are also not active when you only point VS Code at a clone via `chat.agentFilesLocations`; deterministic `SessionStart` cleanup and Claude `PostToolUse` release-hygiene prompts require an actual plugin install.
 
@@ -76,14 +76,18 @@ The durable handoff set for Claude orchestration is the same GitHub-marker contr
 
 #### Specialist agents
 
-Claude Code now includes the first implementation specialists for Code-Conductor dispatch:
+Claude Code now includes the implementation specialists for Code-Conductor dispatch:
 
 - `Code-Smith` — implementation-focused code changes against an approved plan
 - `Test-Writer` — test authoring and test-surface correction
 - `Refactor-Specialist` — structure and maintainability cleanup without changing intended behavior
 - `Doc-Keeper` — documentation finalization and stale-doc cleanup
+- `Process-Review` — retrospective and execution-quality analysis during the orchestration workflow
+- `UI-Iterator` — screenshot-driven UI polish and visual refinement
+- `Research-Agent` — evidence-driven technical research and recommendation building
+- `Specification` — formal specification drafting and refinement
 
-The remaining Claude-side specialist gaps are `Process-Review`, `Specification`, and `UI-Iterator`. When a plan requires one of those still-missing specialists, Code-Conductor follows the documented fallback paths instead of treating Claude orchestration itself as unavailable.
+Claude Phase 5 also ships `/polish` as the direct slash-command entry point for UI-Iterator work.
 
 **What requires clone/fork**: same as the VS Code plugin — `.github/instructions/` and project templates are not distributed through the plugin surface. If you only load agents from a clone, Claude will not pick up the plugin-distributed `SessionStart` or `PostToolUse` hooks; those automation paths require `/plugin install`.
 

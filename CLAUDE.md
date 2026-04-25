@@ -95,13 +95,9 @@ claude plugin uninstall <plugin@marketplace>
 
 - `agents/*.agent.md` — shared, tool-agnostic agent bodies used by both Copilot and Claude Code (capitalized filename, `.agent.md` extension)
 - `agents/{name}.md` — Claude-native subagent shells that point at the shared bodies (lowercase filename, plain `.md`)
-- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
+- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/polish`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
 - `skills/` — reusable methodology loaded by both platforms; each skill has `platforms/claude.md` for Claude-specific invocation details
 - `platforms/` (at skill root) — platform-specific routing notes
-
-## Not yet ported
-
-Claude now ships the upstream pipeline, the review surfaces, Code-Conductor orchestration, and the first implementation specialists: **Code-Smith**, **Test-Writer**, **Refactor-Specialist**, and **Doc-Keeper**. The remaining implementation-side agents — **Process-Review**, **Specification**, and **UI-Iterator** — are still tracked in later phases. Until they ship, use Code-Conductor's documented fallback paths or fall back to Copilot for those specific roles once the plan has been approved.
 
 ## Issue #369 traces the full history
 

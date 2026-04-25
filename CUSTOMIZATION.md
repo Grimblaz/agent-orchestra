@@ -8,7 +8,7 @@ This template supports two distribution models:
 
 | Model | How to Install | What You Get |
 |-------|---------------|--------------|
-| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 14 agents, 39 skills, 9 slash commands (`/setup`, `/start-issue`, `/design`, `/plan`, `/implement`, `/review`, `/polish`, `/experience`, `/orchestrate`) — instantly available |
+| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 14 agents, 39 skills, and 10 shipped command files (`/design`, `/experience`, `/plan`, `/orchestrate`, `/polish`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`) — instantly available |
 | **Clone/Fork** | `git clone` or use as template | Everything above PLUS editable prompts, project templates, examples, and any repo-local instruction files you choose to keep under `.github/instructions/` |
 
 ### Plugin Installation
@@ -24,7 +24,7 @@ This template supports two distribution models:
 
 2. Open Extensions view (`Ctrl+Shift+X`), search `@agentPlugins agent-orchestra`, install.
 
-> **Note**: If you use the plugin, you still receive the shared workflow guidance that now ships through skills, including `safe-operations`, `step-commit`, `pre-commit-formatting`, and `tracking-format`. `chat.instructionsFilesLocations` is only needed for repo-local instruction files that are intentionally still instructions, such as generated consumer files under `.github/instructions/`. The session-startup check now self-resolves its repo root via `$PSScriptRoot` — no environment variable is required. No extra startup or provenance trigger section is required in your project's `copilot-instructions.md`; the portable trigger wiring now lives in the shipped agent files.
+**Note**: If you use the plugin, you still receive the shared workflow guidance that now ships through skills, including `safe-operations`, `step-commit`, `pre-commit-formatting`, and `tracking-format`. `chat.instructionsFilesLocations` is only needed for repo-local instruction files that are intentionally still instructions, such as generated consumer files under `.github/instructions/`. The session-startup check now self-resolves its repo root via `$PSScriptRoot` — no environment variable is required. No extra startup or provenance trigger section is required in your project's `copilot-instructions.md`; the portable trigger wiring now lives in the shipped agent files. Claude Code's native plugin surface now includes shells for all specialist agents, including `Process-Review`, `UI-Iterator`, `Research-Agent`, and `Specification`, so no Claude-side specialist fallback setup is required.
 
 <!-- blockquote separator: prevents Note and Warning from merging in GitHub Markdown -->
 
@@ -45,7 +45,7 @@ This template supports two distribution models:
 |---------|--------|---------------|
 | All 14 agents in chat picker | ✅ Works | Nothing |
 | All 39 skills in Configure Skills menu | ✅ Works | Nothing |
-| 9 slash commands (`/setup`, `/design`, etc.) | ✅ Works | Nothing |
+| 10 shipped command files (`/design`, `/experience`, `/plan`, `/orchestrate`, `/polish`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`) | ✅ Works | Nothing |
 | Shared workflow skills (`safe-operations`, `step-commit`, etc.) | ✅ Works | Nothing |
 | Session startup check | ✅ Works | Nothing (self-resolves via `$PSScriptRoot` — no env var required in v2.0.0+) |
 | Project-aware agent guidance | ⚠️ Generic only | Copy `copilot-instructions.md` and `architecture-rules.md` to your project's `.github/` directory |
@@ -182,7 +182,7 @@ Add to your user VS Code settings (`settings.json`):
 > **Windows path**: Use forward slashes or escaped backslashes in the JSON value, e.g. `"C:/Users/you/agent-orchestra/.github/prompts"`. Apply the same format to every path-based setting above.
 >
 > **Migration note**: If you previously configured `chat.hookFilesLocations`, you can safely remove it. Hooks are no longer configured through a VS Code user setting; plugin installs now load them from the shipped manifests (`plugin.json` for Copilot, `.claude-plugin/plugin.json` for Claude Code). Clone/path-based `chat.*Locations` settings continue to load agents, skills, prompts, and optional instructions, but they do not activate plugin hooks.
-
+>
 > **v2.0.0 env var removal**: Earlier versions required `COPILOT_ORCHESTRA_ROOT` (or `WORKFLOW_TEMPLATE_ROOT`) for the session startup check to locate its scripts. v2.0.0 makes the script self-resolve via `$PSScriptRoot`, so no env var configuration is needed. You can safely unset any old `COPILOT_ORCHESTRA_ROOT` / `WORKFLOW_TEMPLATE_ROOT` values — the detector ignores them now.
 
 **What it does**: At the start of each conversation, the first automatic startup check uses the session-memory marker `/memories/session/session-startup-check-complete.md` to ensure the detector runs only once automatically per conversation. That automatic check looks for a deleted upstream branch (indicating a merged PR) or stale issue-scoped `.copilot-tracking/` files for merged issues. Persistent calibration data is excluded from cleanup detection. If cleanup is needed, it prompts you to confirm before running `post-merge-cleanup.ps1`. If `pwsh` is unavailable, the detector script is missing, or the detector returns non-JSON output, the automatic check skips silently. If session-memory access fails, the detector still runs; explicit manual detector runs remain available after the automatic guard fires. For the full protocol, load the `session-startup` skill from `skills/session-startup/SKILL.md`.
