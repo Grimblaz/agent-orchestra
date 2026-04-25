@@ -11,7 +11,7 @@
     {
       "name": "agent-orchestra",
       "source": ".",
-    "description": "Multi-agent workflow system for GitHub Copilot with 14 specialized agents, a shared skill library, and pipeline orchestration.",
+      "description": "Multi-agent workflow system for GitHub Copilot with 14 specialized agents, a shared skill library, and pipeline orchestration.",
       "version": "2.4.0"
     }
   ]

@@ -38,6 +38,9 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
             Push-Location $root
             try {
                 git init --initial-branch main --quiet | Out-Null
+                Set-Content -Path (Join-Path $root '.gitkeep') -Value 'fixture' -Encoding UTF8
+                git add .gitkeep .github/scripts/bump-version.ps1 | Out-Null
+                git commit -m 'fixture init' --quiet | Out-Null
                 git checkout -b feature/issue-389-plugin-release-hygiene --quiet | Out-Null
             }
             finally {
@@ -47,6 +50,25 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
             return $root
         }
 
+        function Set-PRHManagedVersionFiles {
+            param(
+                [Parameter(Mandatory)]
+                [string]$Root,
+
+                [Parameter(Mandatory)]
+                [string]$Version
+            )
+
+            New-Item -ItemType Directory -Path (Join-Path $Root '.claude-plugin') -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $Root '.github\plugin') -Force | Out-Null
+
+            Set-Content -Path (Join-Path $Root 'plugin.json') -Value "{`"version`":`"$Version`"}" -Encoding UTF8
+            Set-Content -Path (Join-Path $Root '.claude-plugin\plugin.json') -Value "{`"version`":`"$Version`"}" -Encoding UTF8
+            Set-Content -Path (Join-Path $Root '.claude-plugin\marketplace.json') -Value "{`"metadata`":{`"version`":`"$Version`"},`"plugins`": [{`"version`":`"$Version`"}]}" -Encoding UTF8
+            Set-Content -Path (Join-Path $Root '.github\plugin\marketplace.json') -Value "{`"metadata`":{`"version`":`"$Version`"},`"plugins`": [{`"version`":`"$Version`"}]}" -Encoding UTF8
+            Set-Content -Path (Join-Path $Root 'README.md') -Value "[![Version](https://img.shields.io/badge/version-v$Version-blue.svg)](../../releases)" -Encoding UTF8
+        }
+
         function Invoke-HookInFixture {
             param(
                 [Parameter(Mandatory)]
@@ -54,7 +76,9 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
                 [string]$FilePath,
 
-                [object[]]$Files
+                [object[]]$Files,
+
+                [string]$SessionId
             )
 
             $toolInput = [ordered]@{}
@@ -65,7 +89,14 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
                 $toolInput.files = $Files
             }
 
-            $payload = [PSCustomObject]@{ tool_input = [PSCustomObject]$toolInput } | ConvertTo-Json -Depth 10 -Compress
+            $payloadObject = [ordered]@{
+                tool_input = [PSCustomObject]$toolInput
+            }
+            if (-not [string]::IsNullOrWhiteSpace($SessionId)) {
+                $payloadObject.session_id = $SessionId
+            }
+
+            $payload = [PSCustomObject]$payloadObject | ConvertTo-Json -Depth 10 -Compress
 
             Push-Location $FixtureRoot
             try {
@@ -126,8 +157,104 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
         [string]::IsNullOrWhiteSpace($firstResult) | Should -BeFalse
         [string]::IsNullOrWhiteSpace($secondResult) | Should -BeTrue
         $state.proposed_level | Should -Be 'patch'
+        $state.keying_strategy | Should -Be 'branch_slug'
         @($state.touched_files) | Should -Contain 'agents/First.agent.md'
         @($state.touched_files) | Should -Contain 'commands/design.md'
+    }
+
+    It 'coalesces repeated entry-point edits by session_id and records the strategy' {
+        $fixture = New-PluginReleaseHygieneFixture
+        $first = Join-Path $fixture 'agents\First.agent.md'
+        $second = Join-Path $fixture 'commands\design.md'
+        $sessionId = 'session-422'
+        New-Item -ItemType Directory -Path (Split-Path $second) -Force | Out-Null
+        Set-Content -Path $first -Value '# First' -Encoding UTF8
+        Set-Content -Path $second -Value '# Design' -Encoding UTF8
+
+        $firstResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $first -SessionId $sessionId
+        $secondResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $second -SessionId $sessionId
+        $statePath = Join-Path $fixture '.claude\.state\release-hygiene-session-422.json'
+        $state = Get-Content -Path $statePath -Raw | ConvertFrom-Json
+
+        [string]::IsNullOrWhiteSpace($firstResult) | Should -BeFalse
+        [string]::IsNullOrWhiteSpace($secondResult) | Should -BeTrue
+        $state.keying_strategy | Should -Be 'session_id'
+        @($state.touched_files) | Should -Contain 'agents/First.agent.md'
+        @($state.touched_files) | Should -Contain 'commands/design.md'
+    }
+
+    It 'updates keying_strategy when a later invocation uses a session_id for the same slug' {
+        $fixture = New-PluginReleaseHygieneFixture
+        $first = Join-Path $fixture 'agents\First.agent.md'
+        $second = Join-Path $fixture 'commands\design.md'
+        New-Item -ItemType Directory -Path (Split-Path $second) -Force | Out-Null
+        Set-Content -Path $first -Value '# First' -Encoding UTF8
+        Set-Content -Path $second -Value '# Design' -Encoding UTF8
+
+        Push-Location $fixture
+        try {
+            git checkout -B feature/issue-422-plugin-release-hygiene --quiet | Out-Null
+        }
+        finally {
+            Pop-Location
+        }
+
+        $firstResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $first
+        $secondResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $second -SessionId '422'
+        $statePath = Join-Path $fixture '.claude\.state\release-hygiene-422.json'
+        $state = Get-Content -Path $statePath -Raw | ConvertFrom-Json
+
+        [string]::IsNullOrWhiteSpace($firstResult) | Should -BeFalse
+        [string]::IsNullOrWhiteSpace($secondResult) | Should -BeTrue
+        $state.keying_strategy | Should -Be 'session_id'
+    }
+
+    It 'stays silent when plugin.json is already ahead of main' {
+        $fixture = New-PluginReleaseHygieneFixture
+        $target = Join-Path $fixture 'agents\Example.agent.md'
+        Set-Content -Path $target -Value '# Example' -Encoding UTF8
+
+        Push-Location $fixture
+        try {
+            git checkout main --quiet | Out-Null
+            Set-PRHManagedVersionFiles -Root $fixture -Version '1.0.0'
+            git add plugin.json .claude-plugin/plugin.json .claude-plugin/marketplace.json .github/plugin/marketplace.json README.md | Out-Null
+            git commit -m 'seed main plugin version' --quiet | Out-Null
+            git checkout feature/issue-389-plugin-release-hygiene --quiet | Out-Null
+            Set-PRHManagedVersionFiles -Root $fixture -Version '1.0.1'
+        }
+        finally {
+            Pop-Location
+        }
+
+        $raw = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $target -SessionId 'session-422-bumped'
+
+        [string]::IsNullOrWhiteSpace($raw) | Should -BeTrue
+        Test-Path (Join-Path $fixture '.claude\.state\release-hygiene-session-422-bumped.json') | Should -BeFalse
+    }
+
+    It 'does not stay silent when only part of the version set is bumped' {
+        $fixture = New-PluginReleaseHygieneFixture
+        $target = Join-Path $fixture 'agents\Example.agent.md'
+        Set-Content -Path $target -Value '# Example' -Encoding UTF8
+
+        Push-Location $fixture
+        try {
+            git checkout main --quiet | Out-Null
+            Set-PRHManagedVersionFiles -Root $fixture -Version '1.0.0'
+            git add plugin.json .claude-plugin/plugin.json .claude-plugin/marketplace.json .github/plugin/marketplace.json README.md | Out-Null
+            git commit -m 'seed main plugin version' --quiet | Out-Null
+            git checkout feature/issue-389-plugin-release-hygiene --quiet | Out-Null
+            Set-PRHManagedVersionFiles -Root $fixture -Version '1.0.1'
+            Set-Content -Path (Join-Path $fixture 'plugin.json') -Value '{"version":"1.0.0"}' -Encoding UTF8
+        }
+        finally {
+            Pop-Location
+        }
+
+        $raw = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $target -SessionId 'session-422-partial'
+
+        [string]::IsNullOrWhiteSpace($raw) | Should -BeFalse
     }
 
     It 'detects entry-point edits from MultiEdit payload files' {
@@ -175,6 +302,36 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
         $result.hookSpecificOutput.hookEventName | Should -Be 'PostToolUse'
         Test-Path (Join-Path $fixture '.claude\.state\release-hygiene-389.json') | Should -BeFalse
+    }
+
+    It 'reuses the same state file across linked worktrees for the same session_id' {
+        $fixture = New-PluginReleaseHygieneFixture
+        $first = Join-Path $fixture 'agents\First.agent.md'
+        $worktreeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("prh-worktree-$([guid]::NewGuid().ToString('N'))")
+        $second = Join-Path $worktreeRoot 'commands\design.md'
+        New-Item -ItemType Directory -Path (Split-Path $first) -Force | Out-Null
+        Set-Content -Path $first -Value '# First' -Encoding UTF8
+        $script:FixtureRoots.Add($worktreeRoot)
+
+        Push-Location $fixture
+        try {
+            git worktree add --quiet -b feature/issue-389-plugin-release-hygiene-wt $worktreeRoot HEAD | Out-Null
+        }
+        finally {
+            Pop-Location
+        }
+
+        New-Item -ItemType Directory -Path (Split-Path $second) -Force | Out-Null
+        Set-Content -Path $second -Value '# Design' -Encoding UTF8
+
+        $firstResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $first -SessionId 'shared-worktree-session'
+        $secondResult = Invoke-HookInFixture -FixtureRoot $worktreeRoot -FilePath $second -SessionId 'shared-worktree-session'
+        $state = Get-Content -Path (Join-Path $fixture '.claude\.state\release-hygiene-shared-worktree-session.json') -Raw | ConvertFrom-Json
+
+        [string]::IsNullOrWhiteSpace($firstResult) | Should -BeFalse
+        [string]::IsNullOrWhiteSpace($secondResult) | Should -BeTrue
+        @($state.touched_files) | Should -Contain 'agents/First.agent.md'
+        @($state.touched_files) | Should -Contain 'commands/design.md'
     }
 
     It 'documents the full Claude plugin CLI surface in the three required files' {

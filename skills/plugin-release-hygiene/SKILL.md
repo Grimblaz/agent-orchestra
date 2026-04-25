@@ -8,7 +8,7 @@ description: "Maintainer-side version-bump guardrail and Claude startup drift ba
 
 # Plugin Release Hygiene
 
-Reusable guidance for preventing plugin entry-point changes from shipping without a version bump and for keeping the Claude-side update surface explicit. The maintainer-side trigger now lives in the plugin-distributed `PostToolUse` hook declared in `hooks/hooks.json` and runs `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1`.
+Reusable guidance for preventing plugin entry-point changes from shipping without a version bump and for keeping the Claude-side update surface explicit. The maintainer-side trigger now lives in the plugin-distributed `PostToolUse` hooks declared in `hooks/hooks.json` for Claude and `hooks.json` for Copilot, both of which run `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1`.
 
 ## When to Use
 
@@ -46,6 +46,8 @@ Before proposing a bump, check the conversation-scoped state file at `.claude/.s
 - If the working copy already reflects a version bump relative to `main`, stay silent.
 - If `.github/scripts/bump-version.ps1` is not findable from the repo root, stay silent. Consumer plugin-cache installs must not try to rewrite versions.
 
+For Claude Code, prefer the hook payload's `session_id` as the slug source so branch switches inside one conversation reuse the same state file. Fall back to the existing branch-derived slug when `session_id` is absent. If branch resolution also fails, use the short HEAD SHA when available; use `session` only as the final fallback.
+
 ### 2. Default Classification
 
 Default to `patch` for every entry-point edit. This is deterministic from the diff target, not from content inspection.
@@ -80,11 +82,12 @@ Persist the chosen level in `.claude/.state/release-hygiene-{slug}.json` with th
 {
   "proposed_level": "patch",
   "chosen_level": "patch",
+  "keying_strategy": "session_id",
   "touched_files": ["agents/Experience-Owner.agent.md"]
 }
 ```
 
-The slug should use the issue number when one is known; otherwise fall back to the current branch name.
+Allowed `keying_strategy` values are `session_id`, `branch_slug`, and `session_fallback`.
 
 ### 5. Apply The Bump
 
@@ -119,6 +122,10 @@ When a drift-check or maintainer flow needs one of these commands, attempt the c
 | Trigger                                        | Gotcha                                       | Fix                                                                                    |
 | ---------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Multiple entry-point edits in one conversation | Repeated prompts turn a guardrail into noise | Record the first proposal in `.claude/.state/` and silently append later touched files |
+
+| Trigger                                         | Gotcha                                                                 | Fix                                                                                                 |
+| ----------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `session_id` is missing or payload shape drifts | A branch-scoped fallback can look like a silent regression in reviews | Persist `keying_strategy` so tests and future reviews can observe which keying path actually fired |
 
 | Trigger                                        | Gotcha                                                             | Fix                                                                      |
 | ---------------------------------------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------ |
