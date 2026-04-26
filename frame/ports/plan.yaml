@@ -1,0 +1,4 @@
+name: plan
+description: "Was an implementation plan approved before coding began?"
+applies: always
+status: stable

@@ -1,0 +1,63 @@
+frame_version: 1
+credits:
+  - port: experience
+    status: passed
+    evidence: "Linked issue #403 resolved from closingIssuesReferences for a v3-era PR."
+  - port: design
+    status: inconclusive
+    evidence: "Linked issue #403 was resolved, but issue linkage alone does not confirm design completion because the audit does not read issue-body markers or completion state."
+  - port: plan
+    status: inconclusive
+    evidence: "Linked issue #403 was resolved, but issue linkage alone does not confirm plan completion because the audit does not read issue-body markers or completion state."
+  - port: implement-code
+    status: inconclusive
+    evidence: "The v3 metrics block does not expose which implementation specialist lanes ran."
+  - port: implement-test
+    status: inconclusive
+    evidence: "The v3 metrics block does not expose whether test-writing ran as a distinct lane."
+  - port: implement-refactor
+    status: inconclusive
+    evidence: "No adapter-level refactor evidence is encoded in the fixture body."
+  - port: implement-docs
+    status: inconclusive
+    evidence: "No adapter-level documentation evidence is encoded in the fixture body."
+  - port: review
+    status: passed
+    evidence: "metrics_version 3 block records prosecution, defense, and judgment as completed."
+  - port: ce-gate-cli
+    status: inconclusive
+    evidence: "CE Gate passed, but the historical fixture does not identify the audited surface."
+  - port: ce-gate-browser
+    status: inconclusive
+    evidence: "CE Gate passed, but the historical fixture does not identify the audited surface."
+  - port: ce-gate-canvas
+    status: inconclusive
+    evidence: "CE Gate passed, but the historical fixture does not identify the audited surface."
+  - port: ce-gate-api
+    status: inconclusive
+    evidence: "CE Gate passed, but the historical fixture does not identify the audited surface."
+  - port: release-hygiene
+    status: not-applicable
+    evidence: "No release-hygiene trigger is implied by the fixture summary or metrics block."
+  - port: post-pr
+    status: inconclusive
+    evidence: "The PR is merged, but merge state alone does not confirm post-PR cleanup and archival completion."
+  - port: post-fix-review
+    status: not-applicable
+    evidence: "postfix_triggered is false, so no targeted post-fix review path applied."
+  - port: process-review
+    status: not-applicable
+    evidence: "The fixture encodes no systemic-gap trigger for process-review follow-up."
+  - port: process-retrospective
+    status: inconclusive
+    evidence: "Port pending decision per umbrella sub-issue #11."
+integrity_checks:
+  - name: linked-issue-resolution
+    status: passed
+    evidence: "closingIssuesReferences resolved issue #403 directly."
+  - name: metrics-version-input
+    status: passed
+    evidence: "metrics_version 3 input was parsed and lifted into the v4 audit surface."
+  - name: adapter-selection-evidence
+    status: inconclusive
+    evidence: "Historical pipeline-metrics do not encode enough detail to classify every implementation and CE surface port."

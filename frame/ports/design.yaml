@@ -1,0 +1,4 @@
+name: design
+description: "Was the technical design explored before implementation?"
+applies: always
+status: stable

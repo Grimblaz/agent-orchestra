@@ -1,0 +1,4 @@
+name: review
+description: "Was the change adversarially reviewed and judged?"
+applies: always
+status: stable

@@ -1,0 +1,4 @@
+name: ce-gate-cli
+description: "Was the customer-experience gate evaluated for a CLI-oriented surface?"
+applies: always
+status: stable

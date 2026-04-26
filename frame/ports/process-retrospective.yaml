@@ -1,0 +1,4 @@
+name: process-retrospective
+description: "Should this change contribute to a broader process retrospective signal?"
+applies: always
+status: tbd-decision-pending

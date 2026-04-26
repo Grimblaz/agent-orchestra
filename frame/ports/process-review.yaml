@@ -1,0 +1,7 @@
+name: process-review
+description: "Was a systemic process analysis required for a workflow or guardrail gap?"
+applies: trigger-conditional
+trigger:
+  source-port: review
+  condition-description: "Review or CE evidence identified a systemic process gap that warranted retrospective analysis."
+status: stable

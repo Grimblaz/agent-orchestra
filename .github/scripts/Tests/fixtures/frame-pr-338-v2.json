@@ -1,0 +1,11 @@
+{
+  "number": 338,
+  "mergedAt": "2025-11-03T09:45:00Z",
+  "title": "Frame fixture replay for v2 metrics with findings",
+  "closingIssuesReferences": [
+    {
+      "number": 301
+    }
+  ],
+  "body": "## Summary\n\nFixture covering the v2 findings-era shape.\n\nRefs #301\n\n<!-- pipeline-metrics\nmetrics_version: 2\nprosecution_findings: 3\npass_1_findings: 1\npass_2_findings: 1\npass_3_findings: 1\ndefense_disproved: 1\njudge_accepted: 2\njudge_rejected: 0\njudge_deferred: 1\nce_gate_result: passed\nce_gate_intent: strong\nce_gate_defects_found: 0\nrework_cycles: 0\npostfix_triggered: false\npostfix_prosecution_findings: 0\npostfix_judge_accepted: 0\npostfix_judge_rejected: 0\npostfix_judge_deferred: 0\npostfix_defense_disproved: 0\npostfix_rework_cycles: n/a\nfindings:\n  - id: F1\n    category: architecture\n    severity: high\n    points: 10\n    pass: 1\n    defense_verdict: conceded\n    judge_ruling: sustained\n    judge_confidence: high\n    review_stage: main\n-->\n"
+}

@@ -1,0 +1,11 @@
+{
+  "number": 286,
+  "mergedAt": "2025-08-12T14:20:00Z",
+  "title": "Frame fixture replay for historical v1 metrics",
+  "closingIssuesReferences": [
+    {
+      "number": 214
+    }
+  ],
+  "body": "## Summary\n\nHistorical fixture for frame back-derivation.\n\nCloses #214\n\n<!-- pipeline-metrics\nmetrics_version: 1\nprosecution_findings: 2\njudge_accepted: 1\njudge_rejected: 1\n-->\n"
+}

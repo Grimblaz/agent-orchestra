@@ -1,0 +1,11 @@
+{
+  "number": 415,
+  "mergedAt": "2026-03-18T17:30:00Z",
+  "title": "Frame fixture replay for v3 metrics",
+  "closingIssuesReferences": [
+    {
+      "number": 403
+    }
+  ],
+  "body": "## Summary\n\nFixture covering the v3 schema shape.\n\nRelated to #403\n\n<!-- pipeline-metrics\nmetrics_version: 3\nreview_mode: full\nstages_run:\n  prosecution: true\n  defense: true\n  judgment: true\nprosecution_findings: 2\npass_1_findings: 1\npass_2_findings: 1\npass_3_findings: 0\ndefense_disproved: 1\njudge_accepted: 1\njudge_rejected: 0\njudge_deferred: 1\nce_gate_result: passed\nce_gate_intent: strong\nce_gate_defects_found: 0\nrework_cycles: 1\npostfix_triggered: false\npostfix_prosecution_findings: 0\npostfix_judge_accepted: 0\npostfix_judge_rejected: 0\npostfix_judge_deferred: 0\npostfix_defense_disproved: 0\npostfix_rework_cycles: n/a\nexpress_lane_count: 0\npostfix_passes: n/a\nbatch_dispatch_calls: 0\nbatch_dispatch_findings: 0\nrate_limit_retries: 0\nrate_limit_deferred: false\nprosecution_depth_light: []\nprosecution_depth_skip: []\nprosecution_depth_override: false\nprosecution_depth_reactivations: 0\nfindings:\n  - id: F2\n    category: documentation-audit\n    severity: low\n    points: 1\n    pass: 1\n    defense_verdict: conceded\n    judge_ruling: sustained\n    judge_confidence: medium\n    review_stage: main\n    systemic_fix_type: none\n-->\n"
+}

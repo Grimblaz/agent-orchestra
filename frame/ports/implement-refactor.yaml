@@ -1,0 +1,4 @@
+name: implement-refactor
+description: "Was structural improvement or cleanup work executed for this change?"
+applies: always
+status: stable

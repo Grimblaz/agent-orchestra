@@ -1,0 +1,7 @@
+name: post-fix-review
+description: "Was a targeted post-fix review cycle required after accepted findings?"
+applies: trigger-conditional
+trigger:
+  source-port: review
+  condition-description: "Main review accepted findings that required a follow-up fix and targeted re-review."
+status: stable

@@ -1,0 +1,7 @@
+name: release-hygiene
+description: "Was the release-hygiene path relevant for the files touched by this change?"
+applies: trigger-conditional
+trigger:
+  source-port: implement-code
+  condition-description: "Entry-point or distributed plugin files changed in a way that would require release-hygiene review."
+status: stable

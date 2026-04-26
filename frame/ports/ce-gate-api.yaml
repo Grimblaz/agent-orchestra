@@ -1,0 +1,4 @@
+name: ce-gate-api
+description: "Was the customer-experience gate evaluated for an API surface?"
+applies: always
+status: stable
