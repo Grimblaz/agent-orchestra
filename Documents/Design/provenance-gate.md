@@ -2,72 +2,78 @@
 
 ## Purpose
 
-Prevent pipeline agents from blindly executing existing GitHub issues that may contain misdiagnosed root causes, inappropriate solution mechanisms, or inaccurate scope. When a user-invocable agent picks up an issue without an upstream handoff in the current session (cold pickup), the gate forces a structured assessment before the pipeline commits resources.
+Prevent user-invocable pipeline agents from acting on an existing GitHub issue before the session has established whether the issue framing is trustworthy. On cold pickups, the gate forces a brief provenance check before work continues.
 
 ## Scope
 
-The gate applies to all user-invocable agents (`user-invocable: true`) when they receive a request referencing an existing GitHub issue and no warm-handoff markers exist for that issue in the current session. Internal subagents dispatched by Code-Conductor are excluded — they already operate within an assessed session context.
+The gate applies once per unique issue ID when a user-invocable agent receives an existing issue and no warm-handoff markers exist for that issue. Internal subagents skip the gate because they already run inside an assessed session.
 
----
+## Current Flow
 
-## Design Decisions
+The shipped contract is a two-stage flow.
 
-| # | Decision | Choice | Rationale |
-|---|----------|--------|-----------|
-| D1 | Persistence mechanism | Session memory + HTML marker fallback | Zero new infrastructure. Primary marker `<!-- first-contact-assessed-{ID} -->` is posted as a GitHub issue comment via `mcp_github_add_issue_comment`. If the API call fails, session memory records the assessment instead. Warm-handoff detection checks both session memory (`plan-issue-{ID}`, `design-issue-{ID}`) and GitHub comments (`<!-- experience-owner-complete-{ID} -->`, `<!-- design-phase-complete-{ID} -->`) |
-| D2 | Assessment protocol | Three-question structured evaluation | (1) Root cause vs. symptom — does the issue identify an actual mechanism failure or describe a behavioral observation? (2) Mechanism fitness — does the proposed solution align with project conventions per `copilot-instructions.md` and `architecture-rules.md`? (3) Scope accuracy — do the listed files, systems, and acceptance criteria match the identified root cause? All three are project-aware, not just issue-text analysis |
-| D3 | Developer interaction | Inline conversation + `askQuestions` gate | Three options: "I wrote this / I'm fully briefed" (fast-path dismiss), "Assessment looks right — proceed with caution" (acknowledged proceed), "Needs rework — stop here" (abort). The marker is posted for all responses except "Needs rework". This keeps the gate zero-friction for warm pickups that escaped marker detection |
-| D4 | Delivery pattern | `copilot-instructions.md` compact trigger + `provenance-gate` skill detailed protocol | The trigger still lives in the always-loaded `copilot-instructions.md`, but the detailed protocol now ships as a plugin-distributable skill instead of a shared instruction file. The compact trigger handles Steps 1–4 (extract ID, check markers, check dedup, self-filter) inline; Step 5 loads the full protocol from the skill |
+1. Stage 1 always runs first, before any assessment text appears.
+2. If stage 1 returns `I wrote this / I'm fully briefed`, the agent takes the fast path and proceeds without showing the assessment summary.
+3. If stage 1 returns `I'm picking this up cold`, the agent reads the issue, runs the three-question assessment, then asks the cold-only stage 2 decision.
+4. If either stage returns a stop outcome, the agent stops and posts no provenance marker.
 
----
+### Canonical Stage-1 Labels
 
-## Delivery Pattern
+- `I wrote this / I'm fully briefed`
+- `I'm picking this up cold`
+- `Stop — needs rework first`
 
-The gate reuses the same two-tier delivery pattern as session-startup, with a later shift from instruction-file delivery to skill delivery:
+### Canonical Stage-2 Labels
 
-1. **Compact trigger** — embedded in `.github/copilot-instructions.md` under "First-Contact Provenance Gate". Contains the 6-step decision tree (extract issue ID → check warm-handoff → check prior assessment → self-filter → run assessment → record marker). This file is always loaded by VS Code regardless of which agent is active.
-2. **Detailed protocol** — originally `.github/instructions/provenance-gate.instructions.md`, now `.github/skills/provenance-gate/SKILL.md`. Contains the full three-question assessment procedure, developer gate presentation format, edge cases, and rationale. Loaded on demand at Step 5.
+- `Assessment looks right — proceed`
+- `Proceed but carry concerns forward`
+- `Needs rework — stop here`
 
-This pattern exists because of a VS Code platform constraint: instruction files use `applyTo` glob patterns that match files being edited, not agent invocations. The only file guaranteed to be in context for every agent interaction is `copilot-instructions.md`.
+## Assessment Protocol
 
----
+The cold path uses the shared three-question assessment from [skills/provenance-gate/SKILL.md](../../skills/provenance-gate/SKILL.md):
 
-## Marker Lifecycle
+- Root cause vs. symptom
+- Mechanism fitness
+- Scope accuracy
 
-The provenance gate introduces one new marker into the existing marker ecosystem:
+The stage-2 `Proceed but carry concerns forward` outcome is a proceed path, not a stop path. The carried concerns remain visible in the conversation, but the durable marker semantics do not change.
 
-| Marker | Written by | Written to | Purpose |
-|--------|-----------|------------|---------|
-| `<!-- first-contact-assessed-{ID} -->` | Any user-invocable agent (after gate passes) | GitHub issue comment (primary) or session memory (fallback) | Skip-on-re-invocation dedup — prevents the gate from re-firing |
+## Durable Marker
 
-Existing markers that the gate **reads** (but does not write):
+Successful non-stop outcomes write a two-line durable marker:
 
-| Marker | Meaning for gate |
-|--------|-----------------|
-| `plan-issue-{ID}` (session memory) | Warm handoff — skip gate |
-| `design-issue-{ID}` (session memory) | Warm handoff — skip gate |
-| `<!-- experience-owner-complete-{ID} -->` (GitHub comment) | Warm handoff — skip gate |
-| `<!-- design-phase-complete-{ID} -->` (GitHub comment) | Warm handoff — skip gate |
+```text
+<!-- first-contact-assessed-{ID} -->
+Provenance gate: fast-path or cold-path assessment completed; human-readable summary only.
+```
 
----
+Line 1 is the only skip-check anchor and the only parser anchor. Line 2 is human-readable and decorative only.
 
-## Known Limitations
+No stop outcome posts the marker token. That includes both `Stop — needs rework first` and `Needs rework — stop here`.
 
-1. **No behavioral enforcement** — The gate is prose-enforced by LLM agents, not programmatically enforced. An agent may skip or abbreviate the assessment. The contract test in `handoff-persistence-contract.Tests.ps1` validates structural presence of the trigger wording in `copilot-instructions.md`, but cannot enforce runtime behavior. Consistent with all other pipeline gates.
+## Persistence And Offline Recovery
 
-2. **Model-dependent assessment quality** — The three-question assessment relies on LLM judgment. Different models and context states produce varying depth. The gate mitigates this by surfacing findings to the developer via `askQuestions` rather than auto-gating — developer judgment is the ultimate authority.
+Primary persistence is the GitHub issue comment marker, and that GitHub marker is the durable source of truth. The session-memory fallback payload is a best-effort local recovery aid, not a durable substitute. If GitHub lookup or posting is unavailable, the gate fails open visibly:
 
-3. **Template trigger still required in consumer repos** — Skill distribution solves the old instruction-file/plugin gap for the full protocol, but consumer repos still need the `## First-Contact Provenance Gate` trigger section in their local `.github/copilot-instructions.md` for the gate to fire. The example templates retain that inline trigger deliberately.
+- the developer is told offline mode is active
+- a structured payload is written to `/memories/session/first-contact-assessed-{ID}.md`
+- if the next online invocation finds the GitHub marker still missing and the local fallback payload is still available, it reconstructs the two-line GitHub marker, posts it, and clears the local fallback state
 
----
+If that local fallback payload is no longer available, there is no local state left to replay; recovery then depends on the GitHub marker already existing.
 
-## Implementation
+The local fallback payload keeps the current outcome contract: `fast-path`, `proceeded`, or `proceeded with concerns`.
 
-| File | Role |
-|------|------|
-| `.github/copilot-instructions.md` | Compact trigger (Steps 1–6 decision tree) |
-| `.github/instructions/provenance-gate.instructions.md` | Historical intermediate delivery vehicle before skill extraction |
-| `.github/skills/provenance-gate/SKILL.md` | Current full three-question assessment protocol and edge cases |
-| `.github/scripts/Tests/handoff-persistence-contract.Tests.ps1` | Contract tests: marker format consistency, trigger wording presence, behavioral assertions |
-| `examples/*/copilot-instructions.md` | Consumer template distribution — verbatim copy of the compact trigger for template-based adoption |
-| `CUSTOMIZATION.md` | Plugin-user awareness — documents gate requirements and degradation behavior |
+## Warm-Handoff And Multi-Issue Behavior
+
+The gate skips entirely when any warm-handoff marker already exists for the issue, including `plan-issue-{ID}`, `design-issue-{ID}`, `<!-- experience-owner-complete-{ID} -->`, or `<!-- design-phase-complete-{ID} -->`.
+
+In multi-issue bundles, the gate runs once per unique issue ID rather than once per user message.
+
+## Current Sources Of Truth
+
+- [skills/provenance-gate/SKILL.md](../../skills/provenance-gate/SKILL.md) - shared provenance-gate contract
+- [skills/provenance-gate/platforms/copilot.md](../../skills/provenance-gate/platforms/copilot.md) - Copilot presentation details
+- [skills/provenance-gate/platforms/claude.md](../../skills/provenance-gate/platforms/claude.md) - Claude presentation details
+- [.github/scripts/Tests/provenance-gate.Tests.ps1](../../.github/scripts/Tests/provenance-gate.Tests.ps1) - contract coverage for labels, marker shape, and offline fallback behavior
+- [.github/scripts/Tests/handoff-persistence-contract.Tests.ps1](../../.github/scripts/Tests/handoff-persistence-contract.Tests.ps1) - persistence and marker consistency checks

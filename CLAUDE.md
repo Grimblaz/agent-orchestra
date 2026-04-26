@@ -60,7 +60,7 @@ Handoffs between phases use durable GitHub issue comments rather than session-lo
 - `<!-- design-phase-complete-{ID} -->` — technical design complete
 - `<!-- design-issue-{ID} -->` — durable design snapshot handoff used for D9 pause/resume and full-pipeline smart resume
 - `<!-- plan-issue-{ID} -->` — approved plan persisted
-- `<!-- first-contact-assessed-{ID} -->` — provenance gate completed for a cold pickup
+- `<!-- first-contact-assessed-{ID} -->` — provenance-gate marker token for a completed fast-path or cold-path assessment; the optional human-readable second line in that issue comment is decorative only and is not part of skip-check or parser logic
 
 Because the markers live on the issue, you can start a feature in Copilot, pick it up in Claude Code, and vice versa without losing context.
 

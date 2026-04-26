@@ -44,13 +44,30 @@ Read `agents/Solution-Designer.agent.md` before adopting the role. If that load 
 
 For existing GitHub issues, load `skills/provenance-gate/SKILL.md` and evaluate the cold-pickup trigger conditions exactly as written there. Warm handoffs are limited to the documented markers `<!-- experience-owner-complete-{ID} -->`, `<!-- design-phase-complete-{ID} -->`, `plan-issue-{ID}`, `design-issue-{ID}`, and `<!-- first-contact-assessed-{ID} -->`.
 
-When the gate applies, run the three-question assessment, then present the developer gate via `AskUserQuestion` with these exact option labels:
+When the gate applies, run it in two stages. Stage 1 self-classification happens before any assessment text and uses these exact option labels:
 
 1. `I wrote this / I'm fully briefed`
-2. `Assessment looks right - proceed with caution`
-3. `Needs rework - stop here`
+2. `I'm picking this up cold`
+3. `Stop — needs rework first`
 
-After any response except `Needs rework - stop here`, record the marker `<!-- first-contact-assessed-{ID} -->` via `gh issue comment`.
+Only if the stage-1 answer is `I'm picking this up cold`, run the assessment summary and ask the cold-only stage-2 question with these exact option labels:
+
+1. `Assessment looks right — proceed`
+2. `Proceed but carry concerns forward`
+3. `Needs rework — stop here`
+
+Both stop outcomes (`Stop — needs rework first` and `Needs rework — stop here`) halt and post no marker token.
+
+For non-stop outcomes, record the two-line marker via `gh issue comment`:
+
+```text
+<!-- first-contact-assessed-{ID} -->
+Provenance gate: fast-path or cold-path assessment completed; human-readable summary only.
+```
+
+The HTML token on line 1 remains the only skip-check anchor and the only parser anchor. The second line is decorative and human-readable only.
+
+If GitHub lookup or posting is unavailable, say offline mode is active, write the structured local fallback payload to `/memories/session/first-contact-assessed-{ID}.md`, and continue. That local payload is not itself a skip marker; on the next online invocation, if the GitHub marker is still missing and the payload is still available, reconstruct and post the GitHub marker before continuing.
 
 <!-- D6 (issue #412): Copilot's .github/prompts/*.prompt.md files are thin one-line dispatchers without a parent-side prose surface. Inline-dispatch enforcement on Copilot is owned by the agent body and tracked in #414. -->
 

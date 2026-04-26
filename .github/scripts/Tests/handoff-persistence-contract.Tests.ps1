@@ -74,6 +74,11 @@ Describe 'execution handoff persistence contract' {
         $script:D9SuppressionRequiresTierDurabilityPattern = '(?is)Smart resume found ALL prior-session artifacts required by the current pipeline tier.{0,400}abbreviated pipeline:.*plan-issue-\{ID\}.*required durable handoff artifact.{0,400}full pipeline:.*experience-owner-complete-\{ID\}.*design-phase-complete-\{ID\}.*plan-issue-\{ID\}.*design-issue-\{ID\}.*durable handoff comments.{0,300}D9 suppression requires those prior-session durable handoff artifacts when the selected tier needs them, not just phase markers'
         $script:BundleD9SuppressionPattern = '(?is)For multi-issue bundles, ALL required prior-session markers and durable handoff comments for ALL bundled issues \(not just the primary issue\) must already exist before D9 may be suppressed'
         $script:ProvenanceGateMarkerPattern = '(?i)first-contact-assessed-\{ID\}'
+        $script:ProvenanceGateStage1Pattern = '(?is)(stage 1|self-classification).{0,220}I wrote this / I''m fully briefed.{0,180}I''m picking this up cold.{0,180}Stop — needs rework first'
+        $script:ProvenanceGateStage2Pattern = '(?is)(stage 2|cold-only|cold path).{0,240}Assessment looks right — proceed.{0,180}Proceed but carry concerns forward.{0,180}Needs rework — stop here'
+        $script:ProvenanceGateNoMarkerOnStopPattern = '(?is)(Stop — needs rework first|Needs rework — stop here).{0,220}(do not post|without posting|no marker).{0,160}first-contact-assessed'
+        $script:ProvenanceGateDecorativeMarkerPattern = '(?is)(human-readable|decorative).{0,140}(second line|second-line).{0,200}(HTML token|first-contact-assessed).{0,180}(only skip-check anchor|only parser anchor|only anchor)'
+        $script:ProvenanceGateOfflineSyncPattern = '(?is)(offline|MCP tools are unavailable|API call fails).{0,220}(local payload|fallback payload|session memory payload).{0,280}(next online invocation|next online run|cross-session).{0,220}(sync|reconstruct|rebuild).{0,180}(GitHub marker|first-contact-assessed)'
         $script:AssertSharedDocContract = {
             param(
                 [string]$Content,
@@ -160,7 +165,7 @@ Describe 'execution handoff persistence contract' {
         $codeConductor | Should -Match $script:LatestCommentWinsPattern -Because 'the lookup contract must keep latest-comment-wins semantics'
     }
 
-    It 'requires the four pipeline-entry agents to describe the first-contact provenance gate trigger' {
+    It 'requires the four pipeline-entry agents to describe the first-contact provenance gate trigger and redesigned UX' {
         $script:PipelineEntryAgents.Count | Should -Be 4 -Because 'the provenance trigger contract is owned by exactly the four pipeline-entry agents'
 
         foreach ($agent in $script:PipelineEntryAgents) {
@@ -173,7 +178,11 @@ Describe 'execution handoff persistence contract' {
 
             $processSection | Should -Match ([regex]::Escape('When this user-invocable agent receives a request referencing an existing GitHub issue, load the `provenance-gate` skill and follow its protocol.')) -Because "$($agent.Name) must reference the provenance-gate skill from its Process section"
             $processSection | Should -Match $script:ProvenanceGateMarkerPattern -Because "$($agent.Name) must reference the first-contact-assessed marker for the provenance gate trigger"
-            $processSection | Should -Match '(?is)(any option except|except).{0,60}Needs rework' -Because "$($agent.Name) must describe conditional marker posting (skip on Needs rework)"
+            $processSection | Should -Match $script:ProvenanceGateStage1Pattern -Because "$($agent.Name) must describe the stage-1 self-classification options"
+            $processSection | Should -Match $script:ProvenanceGateStage2Pattern -Because "$($agent.Name) must describe the cold-only stage-2 outcomes"
+            $processSection | Should -Match $script:ProvenanceGateNoMarkerOnStopPattern -Because "$($agent.Name) must keep both stop paths marker-free"
+            $processSection | Should -Match $script:ProvenanceGateDecorativeMarkerPattern -Because "$($agent.Name) must preserve the HTML token as the sole skip-check anchor while documenting the decorative second line"
+            $processSection | Should -Match $script:ProvenanceGateOfflineSyncPattern -Because "$($agent.Name) must describe the offline fallback payload and next-online sync behavior"
             $processSection | Should -Match '(?is)(MCP tools are unavailable|API call fails).{0,80}fail open' -Because "$($agent.Name) must describe fail-open semantics when MCP tools are unavailable"
         }
     }
