@@ -2,6 +2,8 @@
 
 This reference owns the CE Gate remediation and degradation rules extracted for the customer-experience composite.
 
+> **Survival**: `SMC-03` covers design intent lookup through the durable design marker or issue body, with platform-local caches optional. `SMC-08` covers durable phase-completion markers; CE defect evidence and PR-body notes are artifacts, not a separate resume store.
+
 See [orchestration-protocol.md](orchestration-protocol.md) for surface routing, scenario execution, intent scoring, and PR-body output requirements.
 
 ## Two-Track Defect Response

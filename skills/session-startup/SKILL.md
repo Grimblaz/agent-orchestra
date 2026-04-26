@@ -23,6 +23,8 @@ The trigger mechanism is now a plugin-distributed `hooks/hooks.json` SessionStar
 
 Follow these steps exactly.
 
+> **Survival**: `SMC-07` owns the startup run-once marker. Hook-driven marker writes are `within-conversation:hooks`; the honest gaps are the inline run-once marker write, the inline-vs-subagent enforcement split, and the headless-Claude prompt skip. Do not add a second marker or new persistence mechanic.
+
 ### Canonical Automatic Startup Guard Contract
 
 ```json

@@ -80,6 +80,8 @@ The HTML token on line 1 remains the only skip-check anchor and the only parser 
 
 Use `mcp_github_add_issue_comment` to post the two-line marker. If the MCP tool is unavailable or the API call fails, fail open visibly: tell the developer that offline mode is active, write a structured local payload to `/memories/session/first-contact-assessed-{ID}.md`, and proceed. On the next online invocation, if the GitHub marker is still missing but the local payload exists, reconstruct the GitHub marker from the local payload and post it before continuing. In multi-issue bundles, the gate fires per unique issue ID.
 
+> **Survival**: `SMC-04` governs `first-contact-assessed-{ID}`. The GitHub issue-comment marker is `durable`; the fail-open local payload is `within-conversation` recovery input only. Read precedence remains GitHub marker OR local payload: the marker completes the gate, while a local-only payload must be posted back to GitHub on the next online run before normal continuation.
+
 The local payload is not a second durable skip marker. It is a temporary recovery input only while it remains available in session memory.
 
 ## Three-Question Assessment Protocol

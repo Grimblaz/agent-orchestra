@@ -2,6 +2,8 @@
 
 This reference owns the `## Pipeline Metrics` schema and top-level field semantics extracted from Code-Conductor.
 
+> **Survival**: `SMC-09` covers raw aggregate/prosecution-depth snapshots as `per-dispatch` until selected PR-body metrics are durable. `SMC-10` covers the `within-worktree` per-finding cache; `SMC-11` covers `within-worktree` cross-PR state. Script temp files are `per-process` scratch only.
+
 See [verdict-mapping.md](verdict-mapping.md) for judge-to-metric mapping details and [findings-construction.md](findings-construction.md) for findings-array construction, backward compatibility, malformed-entry handling, and related metric-construction rules.
 
 ## PR Body Pipeline Metrics

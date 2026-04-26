@@ -7,6 +7,8 @@ description: "Calibration and review-pipeline tooling guidance. Use when running
 
 Reusable entryway for deterministic tooling, committed assets, and pipeline-metrics reference material for the calibration pipeline introduced by issue #360.
 
+> **Survival**: `SMC-09` covers raw aggregate/prosecution-depth snapshots as `per-dispatch` until selected PR-body metrics are durable. `SMC-10` covers the `within-worktree` per-finding cache; `SMC-11` covers `within-worktree` cross-PR state. Script temp files are `per-process` scratch only.
+
 ## When to Use
 
 - When running or maintaining calibration writers, aggregation scripts, or helper libraries under `scripts/`

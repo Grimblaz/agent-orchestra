@@ -10,6 +10,8 @@ description: "Maintainer-side version-bump guardrail and Claude startup drift ba
 
 Reusable guidance for preventing plugin entry-point changes from shipping without a version bump and for keeping the Claude-side update surface explicit. The maintainer-side trigger now lives in the plugin-distributed `PostToolUse` hooks declared in `hooks/hooks.json` for Claude and `hooks.json` for Copilot, both of which run `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1`.
 
+> **Survival**: `SMC-12` governs `.claude/.state/release-hygiene-{slug}.json`. State is `within-conversation:session_id` when the hook payload supplies `session_id`; otherwise it is `within-worktree:hooks` keyed by branch slug, then short HEAD SHA, then `session` fallback. The SHA and final fallback paths record `keying_strategy: session_fallback`.
+
 ## When to Use
 
 - When an agent conversation edits an entry-point file that ships through the plugin cache

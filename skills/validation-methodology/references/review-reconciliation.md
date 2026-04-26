@@ -87,6 +87,8 @@ If the owning agent supports an express lane for strictly mechanical low-severit
 
 Fire this gate immediately before PR creation and on any post-review resume path that intends to continue toward PR creation.
 
+> **Survival**: `SMC-05` covers the pre-PR `/memories/session/review-state-{ID}.md` lookup as `within-worktree` state. `SMC-06` covers post-PR resume as `durable` review comment or PR-body metrics first, with session memory last.
+
 - Pre-PR lookup reads `/memories/session/review-state-{ID}.md` only.
 - Post-PR resume lookup may read, in order: the durable review comment, `<!-- pipeline-metrics -->`, then session memory.
 - The caller owns criteria construction for `Test-GateCriteria -Gate review_completion`. Build `Criteria` from the three stage booleans only. `review_mode` is label-only metadata and is not part of the criteria.
