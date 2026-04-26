@@ -5,9 +5,9 @@
     Contract tests for the issue #447 provenance-gate UX redesign.
 
 .DESCRIPTION
-    Locks the provenance-gate contract before the prompt surfaces are updated.
-    These tests enforce the committed two-stage UX across the shared skill and
-    platform notes so the suite stays red until the design is implemented.
+    Prevents drift in the implemented provenance-gate two-stage UX contract.
+    These tests enforce the shipped shared-skill and platform-note wording so
+    later edits cannot silently regress the committed design.
 #>
 
 Describe 'provenance-gate UX contract' {

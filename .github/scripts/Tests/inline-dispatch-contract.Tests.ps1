@@ -28,7 +28,8 @@ Describe 'inline dispatch contract' {
         $script:D2FailOpenText = 'Claude Code inline currently lacks a session-memory write surface'
         $script:PlanDeferralNote = 'Step 9 (paired-body halt-on-fail) and the provenance-gate cold-pickup assessment are enforced by the issue-planner subagent shell at agents/issue-planner.md'
         $script:OfflineModeNoticePattern = '(?is)(offline mode is active|If offline mode is active because MCP or API access is unavailable|If MCP or API access is unavailable, say that offline mode is active)'
-        $script:LocalPayloadRecoveryPattern = '(?is)(local payload|/memories/session/first-contact-assessed-\{ID\}\.md).{0,220}(next online invocation|next online run).{0,220}(GitHub marker is still missing|GitHub marker.*missing).{0,220}(reconstruct and post|reconstruct|post).{0,220}(GitHub marker|first-contact-assessed)'
+        $script:ClaudeInlineNoPersistencePattern = '(?is)(offline mode is active).{0,220}(lacks a session-memory write surface|cannot persist).{0,220}(cannot persist|do not claim).{0,220}(local fallback payload).{0,220}(later online run|next online invocation|next online run|recover the GitHub marker|reconstruct the GitHub marker)'
+        $script:ClaudeInlineLocalPayloadPathPattern = '/memories/session/first-contact-assessed-\{ID\}\.md'
         $script:PlanOfflineBoundaryPattern = '(?is)(offline mode is active|local payload|/memories/session/first-contact-assessed-\{ID\}\.md|next online invocation|next online run|reconstruct and post the GitHub marker|reconstruct the GitHub marker)'
 
         $script:GetCanonicalLabelMap = {
@@ -289,12 +290,13 @@ Describe 'inline dispatch contract' {
         }
     }
 
-    It 'requires experience and design to carry the offline fallback notice and local-payload recovery wording' {
+    It 'requires experience and design to carry the offline fallback notice and Claude-inline no-persistence warning' {
         foreach ($commandPath in @('commands\experience.md', 'commands\design.md')) {
             $content = Get-Content -Path (Join-Path $script:RepoRoot $commandPath) -Raw -ErrorAction Stop
 
             $content | Should -Match $script:OfflineModeNoticePattern -Because "$commandPath must visibly tell the developer when offline mode is active"
-            $content | Should -Match $script:LocalPayloadRecoveryPattern -Because "$commandPath must explain that a local fallback payload is synchronized on the next online run before normal skip behavior resumes"
+            $content | Should -Match $script:ClaudeInlineNoPersistencePattern -Because "$commandPath must explain that Claude inline cannot persist the fallback payload or arm next-online recovery on this surface"
+            $content | Should -Not -Match $script:ClaudeInlineLocalPayloadPathPattern -Because "$commandPath must not claim that this inline surface wrote the session-memory fallback payload"
         }
     }
 

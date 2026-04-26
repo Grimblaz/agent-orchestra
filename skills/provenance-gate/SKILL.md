@@ -24,7 +24,7 @@ Apply the gate only on a cold pickup.
 
 - An issue ID is present in the user's request
 - The agent is user-invocable, not a subagent
-- No warm-handoff markers exist for the issue: no current-session `plan-issue-{ID}` or `design-issue-{ID}` handoff artifacts, and no `<!-- experience-owner-complete-{ID} -->` or `<!-- design-phase-complete-{ID} -->` in GitHub issue comments
+- No warm-handoff markers exist for the issue: no current-session `plan-issue-{ID}` or `design-issue-{ID}` handoff artifacts, and no durable GitHub handoff comments `<!-- plan-issue-{ID} -->`, `<!-- design-issue-{ID} -->`, `<!-- experience-owner-complete-{ID} -->`, or `<!-- design-phase-complete-{ID} -->`
 - No prior assessment state already resolves the gate through a durable GitHub marker or a pending recovery path
 
 ## Trigger Flow
@@ -35,7 +35,7 @@ Parse the user's request for a GitHub issue reference such as `#N` or `issue N`.
 
 ### Step 2 — Check warm-handoff markers
 
-Check the current session for `plan-issue-{ID}` or `design-issue-{ID}` handoff artifacts. Also check GitHub issue comments for `<!-- experience-owner-complete-{ID} -->` or `<!-- design-phase-complete-{ID} -->`. If any are present, skip the gate silently because the issue framing was already validated.
+Check the current session for `plan-issue-{ID}` or `design-issue-{ID}` handoff artifacts. Also check GitHub issue comments for the durable warm-handoff markers `<!-- plan-issue-{ID} -->`, `<!-- design-issue-{ID} -->`, `<!-- experience-owner-complete-{ID} -->`, or `<!-- design-phase-complete-{ID} -->`. If any are present, skip the gate silently because the issue framing was already validated.
 
 ### Step 3 — Check prior assessment marker or pending recovery
 
@@ -180,9 +180,9 @@ The gate still fires. This is intentional because a freshly written issue can st
 
 If the line-1 HTML token `<!-- first-contact-assessed-{ID} -->` is already present during marker checks, skip the gate entirely. Do not parse the second line; it is decorative only.
 
-### Warm handoff within current session
+### Warm handoff already recorded
 
-If warm-handoff markers exist, skip the gate. Upstream phases already validated the issue framing.
+If current-session handoff artifacts or durable GitHub warm-handoff markers already exist, skip the gate. Upstream phases already validated the issue framing.
 
 ### Fail-open on errors
 

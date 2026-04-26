@@ -20,6 +20,6 @@ Both stop outcomes halt without posting `<!-- first-contact-assessed-{ID} -->`.
 
 For non-stop outcomes, post the two-line marker from the shared skill. The HTML token on line 1 remains the only skip-check anchor and the only parser anchor; the second line is decorative and human-readable only.
 
-If offline mode is active because MCP or API access is unavailable, say so, write the structured local payload with at least `issue_id`, `outcome`, `concerns`, and `sync_to_github_on_next_online_run`, then proceed. On the next online invocation, if the GitHub marker is still missing but the local payload exists, reconstruct and post the GitHub marker from that local payload before continuing.
+If offline mode is active because MCP or API access is unavailable, say so and continue. Claude Code inline currently lacks a session-memory write surface, so this surface cannot persist the shared skill's local fallback payload or recover the GitHub marker on a later online run. Do not claim that either happened here.
 
 Claude Code returns the selected label string.
