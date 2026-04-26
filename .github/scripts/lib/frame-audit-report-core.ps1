@@ -175,7 +175,7 @@ function Get-FARSelectedPrNumbers {
                 }
 
                 return [datetime]$mergedAt
-            }; Descending = $true 
+            }; Descending = $true
         },
         @{ Expression = { [int]$_['number'] }; Descending = $true }
     )
