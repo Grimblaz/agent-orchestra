@@ -52,7 +52,7 @@ The three upstream agents are first-class Claude Code citizens:
 - `/design` — invoke Solution-Designer for technical design exploration with the 3-pass non-blocking challenge
 - `/plan` — invoke Issue-Planner for implementation planning with the full adversarial review pipeline
 
-Each agent reads its shared, tool-agnostic body from `agents/*.agent.md` and follows the named skills. Claude-native tool bindings (`AskUserQuestion`, `Agent`, `gh` CLI via `Bash`) are mapped from the shared body inside each shell at `agents/{name}.md` (lowercase filename for Claude; capitalized `*.agent.md` for Copilot). Plan persistence uses the GitHub comment marker `<!-- plan-issue-{ID} -->` (there is no session-memory equivalent in Claude Code — the marker is the durable record, compatible with Copilot's latest-comment-wins contract).
+Each agent reads its shared, tool-agnostic body from `agents/*.agent.md` and follows the named skills. Claude-native tool bindings (`AskUserQuestion`, `Agent`, `gh` CLI via `Bash`) are mapped from the shared body inside each shell at `agents/{name}.md` (lowercase filename for Claude; capitalized `*.agent.md` for Copilot). Plan persistence uses the GitHub comment marker `<!-- plan-issue-{ID} -->` (there is no session-memory equivalent in Claude Code — the marker is the durable record, compatible with Copilot's latest-comment-wins contract). The row-level survival and fallback rules live in [skills/session-memory-contract/SKILL.md](skills/session-memory-contract/SKILL.md).
 
 See [`CLAUDE.md`](CLAUDE.md) for the Claude Code user guide and [issue #369](https://github.com/Grimblaz/agent-orchestra/issues/369) for the design history.
 
@@ -72,7 +72,7 @@ For paused Claude orchestration work, `/orchestrate` is also the resume entry po
 
 Claude's `code-conductor` shell now ships as a thin shell over the shared `agents/Code-Conductor.agent.md` body plus the extracted composite skills, keeping Copilot and Claude behavior aligned without duplicating the orchestration contract.
 
-The durable handoff set for Claude orchestration is the same GitHub-marker contract used cross-tool: `<!-- experience-owner-complete-{ID} -->`, `<!-- design-phase-complete-{ID} -->`, `<!-- design-issue-{ID} -->`, and `<!-- plan-issue-{ID} -->` as applicable to the current resume tier.
+The durable handoff set for Claude orchestration is the same GitHub-marker contract used cross-tool: `<!-- experience-owner-complete-{ID} -->`, `<!-- design-phase-complete-{ID} -->`, `<!-- design-issue-{ID} -->`, and `<!-- plan-issue-{ID} -->` as applicable to the current resume tier. See [Documents/Design/session-memory-contract.md](Documents/Design/session-memory-contract.md) for the design rationale behind that no-new-mechanism choice.
 
 #### Specialist agents
 
@@ -235,6 +235,7 @@ Skills are domain-specific knowledge packages in `skills/` (repo root) that agen
 | **process-troubleshooting** | Diagnosing premature implementation, agent confusion, validation gaps, or terminal stalls |
 | **bdd-scenarios** | Structured Given/When/Then scenario authoring and CE Gate coverage checks |
 | **provenance-gate** | First-contact issue-framing assessment for cold pickups |
+| **session-memory-contract** | Session-state survival labels, canonical mechanisms, and cross-tool handoff rules |
 | **session-startup** | Automatic startup cleanup guard for new conversations |
 | **terminal-hygiene** | Terminal and test execution guardrails for Agent Orchestra workflows |
 

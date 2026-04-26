@@ -2,6 +2,8 @@
 
 > **Current state — Issue #409**: hook-based delivery returned, but now through plugin-distributed hook files rather than workspace-discovered `.github/hooks/session-cleanup.json`. Claude-format installs use `hooks/hooks.json`; Copilot-format installs use root `hooks.json` because Copilot does not define `${CLAUDE_PLUGIN_ROOT}`. The `session-startup` skill remains the agent-side contract for consuming injected `additionalContext`, preserving the run-once marker `/memories/session/session-startup-check-complete.md`, and keeping manual detector runs available. The plugin-release-hygiene `PostToolUse` hook now ships through the same plugin-distributed architecture. Historical context below is preserved so the earlier hook → instruction → skill eras remain traceable.
 >
+> Session-state survival for the run-once startup marker is governed by [skills/session-memory-contract/SKILL.md](../../skills/session-memory-contract/SKILL.md) (`SMC-07`); release-hygiene hook state is governed by `SMC-12`.
+>
 > **v2.0.0 update (agent-orchestra rename)**: The `COPILOT_ORCHESTRA_ROOT` / `WORKFLOW_TEMPLATE_ROOT` env-var surface described in D7, D9, and the setup-requirement text below was removed in v2.0.0. The detector wrapper at `skills/session-startup/scripts/session-cleanup-detector.ps1` now self-resolves its repo root via `$PSScriptRoot`, so no environment variables are required for either plugin-cache or direct-clone installs. Silent-skip still applies when `pwsh` is unavailable or the detector returns non-JSON output.
 
 ## Summary

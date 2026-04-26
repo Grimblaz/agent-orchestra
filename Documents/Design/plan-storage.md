@@ -10,6 +10,8 @@
 
 Plans are stored in VS Code session memory at `/memories/session/plan-issue-{ID}.md` using the `memory` tool's `create` command. This replaces the previous approach of storing plans as local files in `.copilot-tracking/plans/`.
 
+The row-level survival, fungibility, and read/write precedence for plan and design state live in the canonical operational contract at [skills/session-memory-contract/SKILL.md](../../skills/session-memory-contract/SKILL.md) (`SMC-01`, `SMC-02`, `SMC-03`, `SMC-08`). The rationale for centralizing those rules is documented in [Documents/Design/session-memory-contract.md](session-memory-contract.md).
+
 ---
 
 ## Storage Architecture
@@ -55,6 +57,8 @@ Session memory is immediately available, requires no file system operations, and
 ### D2 — GitHub issue comment as explicit D9 durable handoff
 
 Continue implementation uses session memory only as the same-session source of truth. Cross-session and cloud-agent handoff rely on Code-Conductor writing the current plan to a GitHub issue comment only when the user explicitly chooses Stop / Pause at D9. The `<!-- plan-issue-{ID} -->` HTML comment on the first line remains the canonical detection marker, and readers continue to use the latest matching comment.
+
+This cache-vs-durable split is governed by `SMC-01`, `SMC-02`, and the D7 conflict rule in the session-memory contract rationale.
 
 ### D3 — Removal of `.copilot-tracking/plans/`
 
@@ -119,6 +123,8 @@ Summarizing introduces the same context-loss risk the cache is intended to solve
 #### DC2 — Session memory as primary, issue body as source of truth
 
 The session memory file is a cache, not the source of truth. Solution-Designer still writes the authoritative design to the GitHub issue body unconditionally during design. On session reset, Code-Conductor first checks the latest matching `<!-- design-issue-{ID} -->` handoff comment if one was written at D9 Stop / Pause, then falls back to recreating the cache from the issue body.
+
+`SMC-03` owns the operational design-cache precedence. The design cache stays an optimization; the issue body and explicit durable marker remain the cross-tool sources.
 
 #### DC3 — No staleness detection
 

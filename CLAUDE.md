@@ -18,7 +18,7 @@ Three agents cover the journey from an issue on the board to an implementation-r
 
 1. **Experience-Owner** — frames the work in customer language. Writes the problem statement, user journeys, scenarios, and surface/readiness assessment into the issue body. Activated with `/experience` or via the subagent name.
 2. **Solution-Designer** — runs technical design exploration and the 3-pass non-blocking design challenge. Updates the issue body with decisions, acceptance criteria, and rejected alternatives. Activated with `/design` or via the subagent name.
-3. **Issue-Planner** — produces the implementation plan with CE Gate coverage and the full adversarial review pipeline (prosecution × 3 → defense → judge). Persists the approved plan as a GitHub issue comment with a `<!-- plan-issue-{ID} -->` marker. Activated with `/plan` or via the subagent name.
+3. **Issue-Planner** — produces the implementation plan with CE Gate coverage and the full adversarial review pipeline (prosecution × 3 → defense → judge). Persists the approved plan as a GitHub issue comment with a `<!-- plan-issue-{ID} -->` marker per `SMC-01`. Activated with `/plan` or via the subagent name.
 
 Each agent reads a shared tool-agnostic body from `agents/*.agent.md` and follows the named skills for methodology. Claude-specific tool bindings (structured questions, subagent dispatch, `gh` CLI for GitHub work) are documented in each skill's `platforms/claude.md`.
 
@@ -63,6 +63,8 @@ Handoffs between phases use durable GitHub issue comments rather than session-lo
 - `<!-- first-contact-assessed-{ID} -->` — provenance-gate marker token for a completed fast-path or cold-path assessment; the optional human-readable second line in that issue comment is decorative only and is not part of skip-check or parser logic
 
 Because the markers live on the issue, you can start a feature in Copilot, pick it up in Claude Code, and vice versa without losing context.
+
+The row-level survival and fallback semantics are governed by [skills/session-memory-contract/SKILL.md](skills/session-memory-contract/SKILL.md). [Documents/Design/session-memory-contract.md](Documents/Design/session-memory-contract.md) explains why Claude keeps durable GitHub markers instead of adding a Claude-only session-memory store.
 
 ## Session startup
 

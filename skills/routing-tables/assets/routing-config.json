@@ -38,6 +38,7 @@
       },
       {
         "file_type_or_task": "Session memory /memories/session/plan-issue-{ID}.md or GitHub issue comment with <!-- plan-issue-{ID} --> marker",
+        "contract_source": "skills/session-memory-contract/SKILL.md#SMC-01",
         "keywords": ["plan", "acceptance criteria", "sequencing"],
         "agent": "Issue-Planner"
       },
