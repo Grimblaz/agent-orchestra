@@ -215,7 +215,7 @@ function Get-FVProvidesDeclarationValues {
     param(
         [Parameter(Mandatory)][string[]]$Lines,
         [Parameter(Mandatory)][int]$LineIndex,
-        [Parameter(Mandatory)][string]$Value
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
     )
 
     if ($Value.Length -gt 0) {
