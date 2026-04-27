@@ -4,6 +4,9 @@
     Library for quick-validate logic. Dot-source this file and call Invoke-QuickValidate.
 #>
 
+$script:QVLibDir = Split-Path -Parent $PSCommandPath
+. (Join-Path -Path $script:QVLibDir -ChildPath 'frame-validate-core.ps1')
+
 function Resolve-QVContentPath {
     # Issue #367: resolve agents/ or skills/ at either the new repo-root location
     # or the legacy .github/ location, so validators run green mid-migration.
@@ -367,6 +370,23 @@ function Invoke-QuickValidate {
         # 11. SkillNameMatch
         try { $results.Add((Test-QVSkillNameMatch -RootPath $RootPath)) }
         catch { $results.Add([PSCustomObject]@{ Name = 'SkillNameMatch'; Passed = $false; Detail = "Error: $_" }) }
+        # 12. FrameValidator
+        try {
+            $fvResult = Invoke-FrameValidate -RootPath $RootPath
+            $fvDetails = @(
+                $fvResult.Results |
+                    Where-Object { -not [string]::IsNullOrWhiteSpace($_.Detail) } |
+                    ForEach-Object { "$($_.Name): $($_.Detail)" }
+            )
+            $fvDetail = if ($fvDetails.Count -gt 0) { $fvDetails -join '; ' } elseif ($fvResult.FailCount -gt 0) { "$($fvResult.FailCount) frame validation check(s) failed" } else { '' }
+
+            $results.Add([PSCustomObject]@{
+                    Name   = 'FrameValidator'
+                    Passed = ($fvResult.FailCount -eq 0)
+                    Detail = $fvDetail
+                })
+        }
+        catch { $results.Add([PSCustomObject]@{ Name = 'FrameValidator'; Passed = $false; Detail = "Error: $_" }) }
 
         $passCount = @($results | Where-Object { $_.Passed -eq $true }).Count
         $failCount = @($results | Where-Object { $_.Passed -eq $false }).Count
