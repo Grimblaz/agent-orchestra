@@ -37,6 +37,85 @@ function Test-SCDPersistentTrackingFile {
 
     return $false
 }
+
+function Get-SCDRemoteDefaultRef {
+    param(
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch
+    )
+
+    $configuredRemote = (git config --get "branch.$DefaultBranch.remote" 2>$null)
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($configuredRemote)) {
+        $remoteName = $configuredRemote.Trim()
+        return @{
+            RemoteName = $remoteName
+            BranchName = $DefaultBranch
+            RefName    = "refs/remotes/$remoteName/$DefaultBranch"
+        }
+    }
+
+    $remoteName = 'origin'
+    $branchName = $DefaultBranch
+
+    $symbolicRef = (git symbolic-ref refs/remotes/origin/HEAD 2>$null)
+    if ($LASTEXITCODE -eq 0 -and $symbolicRef -match '^refs/remotes/([^/]+)/(.+)$') {
+        $remoteName = $Matches[1]
+        $branchName = $Matches[2]
+    }
+
+    return @{
+        RemoteName = $remoteName
+        BranchName = $branchName
+        RefName    = "refs/remotes/$remoteName/$branchName"
+    }
+}
+
+function Invoke-SCDNonInteractiveFetch {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RemoteName,
+
+        [int]$TimeoutSeconds = 5
+    )
+
+    if ([string]::IsNullOrWhiteSpace($RemoteName)) {
+        return
+    }
+
+    try {
+        $processStartInfo = [System.Diagnostics.ProcessStartInfo]::new()
+        $processStartInfo.FileName = 'git'
+        $processStartInfo.UseShellExecute = $false
+        $processStartInfo.CreateNoWindow = $true
+        $processStartInfo.RedirectStandardOutput = $true
+        $processStartInfo.RedirectStandardError = $true
+        $processStartInfo.WorkingDirectory = (Get-Location).Path
+        $processStartInfo.ArgumentList.Add('fetch') | Out-Null
+        $processStartInfo.ArgumentList.Add('--quiet') | Out-Null
+        $processStartInfo.ArgumentList.Add('--prune') | Out-Null
+        $processStartInfo.ArgumentList.Add($RemoteName) | Out-Null
+        $processStartInfo.Environment['GIT_TERMINAL_PROMPT'] = '0'
+        $processStartInfo.Environment['GCM_INTERACTIVE'] = 'Never'
+        $processStartInfo.Environment['GIT_ASKPASS'] = 'echo'
+
+        $process = [System.Diagnostics.Process]::Start($processStartInfo)
+        if ($null -eq $process) {
+            return
+        }
+
+        try {
+            $timeoutMilliseconds = [System.Math]::Max(1, $TimeoutSeconds) * 1000
+            if (-not $process.WaitForExit($timeoutMilliseconds)) {
+                try { $process.Kill($true) } catch {}
+            }
+        }
+        finally {
+            $process.Dispose()
+        }
+    }
+    catch {}
+}
+
 function Invoke-SessionCleanupDetector {
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -59,11 +138,13 @@ function Invoke-SessionCleanupDetector {
     $persistentTrackingSubtrees = @(
         'calibration'
     )
+    $noUpstreamBranchPrefixes = @('claude/')
 
     # ============================================================
     # STEP 1: BRANCH CHECK (runs before tracking-file gate)
     # ============================================================
     $staleBranch = $null
+    $currentNoUpstreamWorktree = $null
     $defaultBranch = 'main'   # initialise; resolved below only if needed
 
     $currentBranch = (git branch --show-current 2>$null)
@@ -75,7 +156,8 @@ function Invoke-SessionCleanupDetector {
         if ($currentBranch -ne $defaultBranch) {
             # Check if an upstream tracking ref is configured (never-pushed branches have none)
             $upstreamRef = (git rev-parse --abbrev-ref '@{u}' 2>$null)
-            if ($LASTEXITCODE -eq 0) {
+            $upstreamExitCode = $LASTEXITCODE
+            if ($upstreamExitCode -eq 0) {
                 # Has upstream — check whether the remote branch still exists
                 $remoteName = ($upstreamRef -split '/', 2)[0]
                 $remoteBranchName = ($upstreamRef -split '/', 2)[1]
@@ -91,6 +173,33 @@ function Invoke-SessionCleanupDetector {
                         $staleBranch = @{
                             BranchName = $currentBranch
                             IssueId    = $branchIssueId
+                        }
+                    }
+                }
+            }
+            else {
+                $isNoUpstreamCandidate = $false
+                foreach ($branchPrefix in $noUpstreamBranchPrefixes) {
+                    if ($currentBranch.StartsWith($branchPrefix, [System.StringComparison]::Ordinal)) {
+                        $isNoUpstreamCandidate = $true
+                        break
+                    }
+                }
+
+                if ($isNoUpstreamCandidate) {
+                    $remoteDefault = Get-SCDRemoteDefaultRef -DefaultBranch $defaultBranch
+                    Invoke-SCDNonInteractiveFetch -RemoteName $remoteDefault.RemoteName
+
+                    git show-ref --verify --quiet $remoteDefault.RefName 2>$null
+                    if ($LASTEXITCODE -eq 0) {
+                        git merge-base --is-ancestor $currentBranch $remoteDefault.RefName 2>$null
+                        $ancestorExitCode = $LASTEXITCODE
+                        if ($ancestorExitCode -eq 0) {
+                            $currentNoUpstreamWorktree = @{
+                                BranchName       = $currentBranch
+                                RemoteDefaultRef = $remoteDefault.RefName
+                                WorktreePath     = (Get-Location).Path
+                            }
                         }
                     }
                 }
@@ -163,7 +272,7 @@ function Invoke-SessionCleanupDetector {
     # ============================================================
     # STEP 3: MERGE & OUTPUT
     # ============================================================
-    if ($null -eq $staleBranch -and $cleanupNeeded.Count -eq 0) {
+    if ($null -eq $staleBranch -and $cleanupNeeded.Count -eq 0 -and $null -eq $currentNoUpstreamWorktree) {
         return @{ ExitCode = 0; Output = '{}'; Error = '' }
     }
 
@@ -186,6 +295,18 @@ function Invoke-SessionCleanupDetector {
                 $out += "- Issue #$($item.IssueId)$branchInfo — remote branch merged/deleted"
             }
         }
+        return $out
+    }
+
+    function Get-CurrentNoUpstreamWorktreeLines {
+        param([hashtable]$Item)
+
+        $safeWorktreePath = $Item.WorktreePath -replace "'", "''"
+        $safeBranch = $Item.BranchName -replace "'", "''"
+        $out = @()
+        $out += "- Current Claude worktree branch ``$($Item.BranchName)`` is reachable from ``$($Item.RemoteDefaultRef)``."
+        $out += ''
+        $out += "Current-worktree cleanup must be run from another checkout: `git worktree remove '$safeWorktreePath'` followed by `git branch -D '$safeBranch'`."
         return $out
     }
 
@@ -219,7 +340,13 @@ function Invoke-SessionCleanupDetector {
     $escaped = if ($null -ne $staleBranch) { $staleBranch.BranchName -replace "'", "''" } else { $null }
     $escapedDefault = $defaultBranch -replace "'", "''"
 
-    if ($null -ne $staleBranch -and $cleanupNeeded.Count -eq 0) {
+    if ($null -ne $currentNoUpstreamWorktree -and $null -eq $staleBranch -and $cleanupNeeded.Count -eq 0) {
+        $lines += '**Post-merge cleanup detected** — current Claude worktree branch is merged:'
+        $lines += ''
+        $lines += (Get-CurrentNoUpstreamWorktreeLines -Item $currentNoUpstreamWorktree)
+        $lines += ''
+    }
+    elseif ($null -ne $staleBranch -and $cleanupNeeded.Count -eq 0) {
         # ── Branch-only signal ─────────────────────────────────────────────────────
         $lines += '**Post-merge cleanup detected** — you''re on a stale branch:'
         $lines += ''
@@ -270,8 +397,17 @@ function Invoke-SessionCleanupDetector {
     }
     else {
         # ── Tracking-files-only signal (existing behaviour) ───────────────────────
-        $lines += '**Post-merge cleanup detected** — stale tracking artifacts found:'
+        if ($null -ne $currentNoUpstreamWorktree) {
+            $lines += '**Post-merge cleanup detected** — stale tracking artifacts and current Claude worktree branch found:'
+        }
+        else {
+            $lines += '**Post-merge cleanup detected** — stale tracking artifacts found:'
+        }
         $lines += ''
+        if ($null -ne $currentNoUpstreamWorktree) {
+            $lines += (Get-CurrentNoUpstreamWorktreeLines -Item $currentNoUpstreamWorktree)
+            $lines += ''
+        }
         $lines += (Get-TrackingLines -Items $cleanupNeeded)
         $lines += ''
         $lines += 'To clean up, run:'

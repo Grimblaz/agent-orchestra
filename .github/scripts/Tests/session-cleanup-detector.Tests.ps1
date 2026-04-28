@@ -12,6 +12,7 @@
       Test E – ONLY calibration cache present                → exit 0 with '{}'
       Test F – Calibration + stale issue tracking artifact   → reports only the stale issue artifact
       Test G – Calibration + stale branch                    → still reports the stale branch
+    T2/T3/T4/T11 – Current no-upstream claude/* worktree detection and fail-open behavior
 
     Tests A-C cover the repo-root resolution contract after env var removal
     (v2.0.0 — the wrapper now resolves repo root via $PSScriptRoot). Tests
@@ -88,6 +89,17 @@ $configPath = Join-Path $PSScriptRoot 'git-mock-config.json'
 $config = Get-Content $configPath -Raw | ConvertFrom-Json
 $a = $args
 
+function Get-MockConfigValue {
+    param([string]$Name)
+
+    $property = $config.PSObject.Properties[$Name]
+    if ($null -ne $property) { return $property.Value }
+    return $null
+}
+
+$callLogPath = Join-Path $PSScriptRoot 'git-mock-calls.log'
+($a -join "`t") | Add-Content -Path $callLogPath -Encoding UTF8
+
 if ($a.Count -ge 2 -and $a[0] -eq 'branch' -and $a[1] -eq '--show-current') {
     $val = $config.'branch--show-current'
     if ($null -ne $val) { Write-Output $val }
@@ -98,6 +110,26 @@ if ($a.Count -ge 2 -and $a[0] -eq 'symbolic-ref' -and $a[1] -eq 'refs/remotes/or
     $val = $config.'symbolic-ref-origin-HEAD'
     if ($null -ne $val) { Write-Output $val; exit 0 }
     exit 128
+}
+
+if ($a.Count -ge 2 -and $a[0] -eq 'symbolic-ref' -and $a[1] -eq 'HEAD') {
+    $val = Get-MockConfigValue 'symbolic-ref-HEAD'
+    if ($null -ne $val) { Write-Output $val; exit 0 }
+    exit 128
+}
+
+if ($a.Count -ge 3 -and $a[0] -eq 'config' -and $a[1] -eq '--get' -and $a[2] -match '^branch\..+\.remote$') {
+    $val = Get-MockConfigValue "config-$($a[2])"
+    if ($null -ne $val) { Write-Output $val; exit 0 }
+    exit 1
+}
+
+if ($a.Count -ge 4 -and $a[0] -eq 'show-ref' -and $a[1] -eq '--verify' -and $a[2] -eq '--quiet') {
+    $ref = $a[3]
+    $exitValue = Get-MockConfigValue "show-ref-$ref"
+    if ($null -eq $exitValue) { $exitValue = Get-MockConfigValue 'show-ref-default-exit' }
+    if ($null -eq $exitValue) { $exitValue = 1 }
+    exit ([int]$exitValue)
 }
 
 if ($a.Count -ge 3 -and $a[0] -eq 'rev-parse' -and $a[1] -eq '--abbrev-ref' -and $a[2] -eq '@{u}') {
@@ -125,6 +157,26 @@ if ($a.Count -ge 4 -and $a[0] -eq 'ls-remote' -and $a[1] -eq '--heads' -and $a[2
     }
     if ($null -ne $config.'ls-remote-default') { Write-Output $config.'ls-remote-default' }
     exit 0
+}
+
+if ($a.Count -ge 1 -and $a[0] -eq 'fetch') {
+    if ((Get-MockConfigValue 'fetch-mode') -eq 'timeout') {
+        exit 124
+    }
+
+    $fetchExit = Get-MockConfigValue 'fetch-exit'
+    if ($null -eq $fetchExit) { $fetchExit = 0 }
+    exit ([int]$fetchExit)
+}
+
+if ($a.Count -ge 4 -and $a[0] -eq 'merge-base' -and $a[1] -eq '--is-ancestor') {
+    $candidateRef = $a[2]
+    $targetRef = $a[3]
+    $exitValue = Get-MockConfigValue "merge-base-$candidateRef-$targetRef"
+    if ($null -eq $exitValue) { $exitValue = Get-MockConfigValue "merge-base-$candidateRef" }
+    if ($null -eq $exitValue) { $exitValue = Get-MockConfigValue 'merge-base-exit' }
+    if ($null -eq $exitValue) { $exitValue = 1 }
+    exit ([int]$exitValue)
 }
 
 if ($a.Count -ge 3 -and $a[0] -eq 'branch' -and $a[1] -eq '--list') {
@@ -167,7 +219,8 @@ exit $LASTEXITCODE
             param(
                 [string]$WorkDir,
                 [hashtable]$GitConfig,
-                [string]$RepoRoot = $script:RepoRoot
+                [string]$RepoRoot = $script:RepoRoot,
+                [switch]$IncludeGitCalls
             )
 
             $mockDir = & $script:NewMockGitDir -ParentDir $WorkDir -Config $GitConfig
@@ -175,7 +228,17 @@ exit $LASTEXITCODE
                 $env:PATH = "$mockDir$([System.IO.Path]::PathSeparator)$script:SavedPath"
                 Push-Location $WorkDir
                 try {
-                    return Invoke-SessionCleanupDetector -RepoRoot $RepoRoot
+                    $result = Invoke-SessionCleanupDetector -RepoRoot $RepoRoot
+                    if ($IncludeGitCalls) {
+                        $callLogPath = Join-Path $mockDir 'git-mock-calls.log'
+                        $result['GitCalls'] = if (Test-Path $callLogPath) {
+                            @(Get-Content -Path $callLogPath -ErrorAction SilentlyContinue)
+                        }
+                        else {
+                            @()
+                        }
+                    }
+                    return $result
                 }
                 finally {
                     Pop-Location
@@ -205,6 +268,20 @@ exit $LASTEXITCODE
 
             $json = $Output | ConvertFrom-Json -ErrorAction Stop
             return $json.hookSpecificOutput.additionalContext
+        }
+
+        $script:GetFencedPowerShellBlocks = {
+            param([string]$Context)
+
+            if ([string]::IsNullOrEmpty($Context)) { return @() }
+            return @([regex]::Matches($Context, '(?ms)```powershell\s*(.*?)```') | ForEach-Object { $_.Groups[1].Value })
+        }
+
+        $script:RemoveFencedPowerShellBlocks = {
+            param([string]$Context)
+
+            if ([string]::IsNullOrEmpty($Context)) { return '' }
+            return [regex]::Replace($Context, '(?ms)```powershell\s*.*?```', '')
         }
 
         $script:AssertCalibrationNoiseExcluded = {
@@ -271,6 +348,175 @@ exit $LASTEXITCODE
         $result.ExitCode | Should -Be 0
         $actualHex | Should -BeExactly $expectedHex `
             -Because 'the current-branch Copilot cleanup message is a compatibility contract for SessionStart additionalContext'
+    }
+
+    Context 'current no-upstream Claude worktree detection' {
+        It 'T2 AC1 AC8 surfaces a merged current claude worktree with inline cleanup outside the fenced block' {
+            $workDir = Join-Path $TestDrive 'current-claude-merged'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'claude/widget-fixer-abcde'
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -RepoRoot 'C:/agent-orchestra' -GitConfig @{
+                'branch--show-current'             = $branch
+                'symbolic-ref-origin-HEAD'         = 'refs/remotes/origin/main'
+                'rev-parse-exit'                   = 128
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                       = 0
+                'merge-base-exit'                  = 0
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $outsideFence = & $script:RemoveFencedPowerShellBlocks -Context $context
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match 'Post-merge cleanup detected'
+            $context | Should -Match ([regex]::Escape($branch))
+            $outsideFence | Should -Match '(?s)git worktree remove.*git branch -D'
+            $outsideFence | Should -Match ([regex]::Escape($branch))
+            $insideFence | Should -Not -Match 'git worktree remove'
+            $insideFence | Should -Not -Match "git branch -D\s+'?$([regex]::Escape($branch))'?"
+        }
+
+        It 'T2 D1 AC1 derives the current claude merge-base target from the default branch remote' {
+            $workDir = Join-Path $TestDrive 'current-claude-upstream-default-remote'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'claude/upstream-default-abcde'
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -RepoRoot 'C:/agent-orchestra' -IncludeGitCalls -GitConfig @{
+                'branch--show-current'                 = $branch
+                'symbolic-ref-HEAD'                    = 'refs/heads/main'
+                'rev-parse-exit'                       = 128
+                'config-branch.main.remote'            = 'upstream'
+                'show-ref-refs/remotes/origin/main'    = 1
+                'show-ref-refs/remotes/origin/master'  = 1
+                'show-ref-refs/remotes/upstream/main'  = 0
+                'fetch-exit'                           = 0
+                "merge-base-$branch-refs/remotes/upstream/main" = 0
+                "merge-base-$branch-refs/remotes/origin/main"   = 1
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $mergeBaseCalls = @($result['GitCalls'] | Where-Object { $_ -match '^merge-base\t--is-ancestor\t' })
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match 'Post-merge cleanup detected'
+            $context | Should -Match ([regex]::Escape($branch))
+            $context | Should -Match 'refs/remotes/upstream/main'
+            $result['GitCalls'] | Should -Contain "config`t--get`tbranch.main.remote"
+            $result['GitCalls'] | Should -Contain "show-ref`t--verify`t--quiet`trefs/remotes/upstream/main"
+            $mergeBaseCalls | Should -Contain "merge-base`t--is-ancestor`t$branch`trefs/remotes/upstream/main"
+            $mergeBaseCalls | Should -Not -Contain "merge-base`t--is-ancestor`t$branch`trefs/remotes/origin/main"
+        }
+
+        It 'T3 AC3 leaves an unmerged current no-upstream claude worktree unflagged' {
+            $workDir = Join-Path $TestDrive 'current-claude-unmerged'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'             = 'claude/in-flight-zyxwv'
+                'symbolic-ref-origin-HEAD'         = 'refs/remotes/origin/main'
+                'rev-parse-exit'                   = 128
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                       = 0
+                'merge-base-exit'                  = 1
+            }
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '^\{\s*\}$'
+        }
+
+        It 'T4 AC4 fails open when the remote default ref is missing for a no-upstream claude branch' {
+            $workDir = Join-Path $TestDrive 'current-claude-missing-default'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                = 'claude/missing-default-abcde'
+                'rev-parse-exit'                      = 128
+                'show-ref-refs/remotes/origin/main'   = 1
+                'show-ref-refs/remotes/origin/master' = 1
+                'fetch-exit'                          = 0
+                'merge-base-exit'                     = 0
+            }
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '^\{\s*\}$'
+        }
+
+        It 'T4 AC4 fails open when merge-base returns an unexpected exit code for the current candidate' {
+            $workDir = Join-Path $TestDrive 'current-claude-merge-base-error'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'             = 'claude/merge-base-error-abcde'
+                'symbolic-ref-origin-HEAD'         = 'refs/remotes/origin/main'
+                'rev-parse-exit'                   = 128
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                       = 0
+                'merge-base-exit'                  = 2
+            }
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '^\{\s*\}$'
+        }
+
+        It 'T4 AC4 uses local refs and does not throw when fetch fails for a merged current claude candidate' {
+            $workDir = Join-Path $TestDrive 'current-claude-fetch-failure'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'claude/fetch-failure-abcde'
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'             = $branch
+                'symbolic-ref-origin-HEAD'         = 'refs/remotes/origin/main'
+                'rev-parse-exit'                   = 128
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                       = 128
+                'merge-base-exit'                  = 0
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($branch))
+            $context | Should -Match 'git worktree remove'
+            $context | Should -Match 'git branch -D'
+        }
+
+        It 'T11 AC4 treats a fetch timeout sentinel as fail-open and continues with local refs' {
+            $workDir = Join-Path $TestDrive 'current-claude-fetch-timeout'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'claude/fetch-timeout-abcde'
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'             = $branch
+                'symbolic-ref-origin-HEAD'         = 'refs/remotes/origin/main'
+                'rev-parse-exit'                   = 128
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-mode'                       = 'timeout'
+                'merge-base-exit'                  = 0
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($branch))
+            $context | Should -Match 'git worktree remove'
+            $context | Should -Match 'git branch -D'
+        }
+
+        It 'AC6 does not fetch when a no-upstream current branch is outside the claude namespace' {
+            $workDir = Join-Path $TestDrive 'current-non-claude-no-candidate'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -IncludeGitCalls -GitConfig @{
+                'branch--show-current'             = 'scratch/local-only'
+                'symbolic-ref-origin-HEAD'         = 'refs/remotes/origin/main'
+                'rev-parse-exit'                   = 128
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                       = 99
+            }
+            $fetchCalls = @($result['GitCalls'] | Where-Object { $_ -match '^fetch(\t|$)' })
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '^\{\s*\}$'
+            $fetchCalls.Count | Should -Be 0
+        }
     }
 
     It 'reports only the stale issue artifact when calibration data coexists with stale tracking state' {
