@@ -106,14 +106,16 @@ function Invoke-SCDNonInteractiveFetch {
         try {
             $timeoutMilliseconds = [System.Math]::Max(1, $TimeoutSeconds) * 1000
             if (-not $process.WaitForExit($timeoutMilliseconds)) {
-                try { $process.Kill($true) } catch {}
+                try { $process.Kill($true) } catch { $null = $_ }
             }
         }
         finally {
             $process.Dispose()
         }
     }
-    catch {}
+    catch {
+        $null = $_
+    }
 }
 
 function ConvertTo-SCDNormalizedPath {
@@ -310,7 +312,9 @@ function Get-SCDWorktreeRecords {
                 IsPrunable   = -not [string]::IsNullOrWhiteSpace($prunableLine)
             }
         }
-        catch {}
+        catch {
+            $null = $_
+        }
     }
 
     return $records
@@ -403,22 +407,26 @@ function Get-SCDSiblingWorktreeCleanups {
                     }
                 }
             }
-            catch {}
+            catch {
+                $null = $_
+            }
         }
     }
-    catch {}
+    catch {
+        $null = $_
+    }
 
     return $cleanups
 }
 
 function New-SCDStringLookup {
-    return [System.Collections.Hashtable]::new([System.StringComparer]::Ordinal)
+    return [System.Collections.Generic.Dictionary[string, bool]]::new([System.StringComparer]::Ordinal)
 }
 
 function Add-SCDLookupValue {
     param(
         [Parameter(Mandatory)]
-        [hashtable]$Lookup,
+        [System.Collections.Generic.IDictionary[string, bool]]$Lookup,
 
         [string]$Value
     )
@@ -454,7 +462,9 @@ function Get-SCDBranchConfigValue {
             }
         }
     }
-    catch {}
+    catch {
+        $null = $_
+    }
 
     return ''
 }
