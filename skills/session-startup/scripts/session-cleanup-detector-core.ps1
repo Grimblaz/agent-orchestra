@@ -315,6 +315,197 @@ function Get-SCDSiblingWorktreeCleanups {
     return $cleanups
 }
 
+function New-SCDStringLookup {
+    return [System.Collections.Hashtable]::new([System.StringComparer]::Ordinal)
+}
+
+function Add-SCDLookupValue {
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$Lookup,
+
+        [string]$Value
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return
+    }
+
+    if (-not $Lookup.ContainsKey($Value)) {
+        $Lookup[$Value] = $true
+    }
+}
+
+function Get-SCDBranchConfigValue {
+    param(
+        [Parameter(Mandatory)]
+        [string]$BranchName,
+
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    if ([string]::IsNullOrWhiteSpace($BranchName) -or [string]::IsNullOrWhiteSpace($Name)) {
+        return ''
+    }
+
+    try {
+        $value = (git config --get "branch.$BranchName.$Name" 2>$null)
+        if ($LASTEXITCODE -eq 0) {
+            $text = (($value | Select-Object -First 1) -as [string])
+            if (-not [string]::IsNullOrWhiteSpace($text)) {
+                return $text.Trim()
+            }
+        }
+    }
+    catch {}
+
+    return ''
+}
+
+function Get-SCDAttachedBranchLookup {
+    param([string]$CurrentBranch)
+
+    $attachedBranches = New-SCDStringLookup
+    Add-SCDLookupValue -Lookup $attachedBranches -Value $CurrentBranch
+
+    try {
+        $worktreePorcelain = @(git worktree list --porcelain 2>$null)
+        if ($LASTEXITCODE -ne 0) {
+            return $null
+        }
+
+        $records = @(Get-SCDWorktreeRecords -PorcelainLines $worktreePorcelain)
+        foreach ($record in $records) {
+            Add-SCDLookupValue -Lookup $attachedBranches -Value $record.BranchName
+        }
+    }
+    catch {
+        return $null
+    }
+
+    return $attachedBranches
+}
+
+function Get-SCDLocalBranchNames {
+    param(
+        [Parameter(Mandatory)]
+        [string]$RefPrefix
+    )
+
+    try {
+        $branchNames = @(git for-each-ref --format='%(refname:short)' $RefPrefix 2>$null)
+        if ($LASTEXITCODE -ne 0) {
+            return @()
+        }
+
+        return @($branchNames |
+                ForEach-Object { ($_ -as [string]).Trim() } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+    catch {
+        return @()
+    }
+}
+
+function Get-SCDOrphanBranchCleanups {
+    param(
+        [string]$CurrentBranch,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch,
+
+        [Parameter(Mandatory)]
+        [string[]]$NoUpstreamBranchPrefixes
+    )
+
+    $cleanups = @()
+    $attachedBranchLookup = Get-SCDAttachedBranchLookup -CurrentBranch $CurrentBranch
+    if ($null -eq $attachedBranchLookup) {
+        return @()
+    }
+
+    $evaluatedNoUpstreamBranches = New-SCDStringLookup
+    $noUpstreamCandidates = @()
+
+    foreach ($branchPrefix in $NoUpstreamBranchPrefixes) {
+        if ([string]::IsNullOrWhiteSpace($branchPrefix)) {
+            continue
+        }
+
+        $refPrefix = "refs/heads/$($branchPrefix.TrimStart('/'))"
+        foreach ($branchName in @(Get-SCDLocalBranchNames -RefPrefix $refPrefix)) {
+            if ($branchName -eq $DefaultBranch -or $attachedBranchLookup.ContainsKey($branchName)) {
+                continue
+            }
+
+            $remoteConfig = Get-SCDBranchConfigValue -BranchName $branchName -Name 'remote'
+            $mergeConfig = Get-SCDBranchConfigValue -BranchName $branchName -Name 'merge'
+            if (-not [string]::IsNullOrWhiteSpace($remoteConfig) -or -not [string]::IsNullOrWhiteSpace($mergeConfig)) {
+                continue
+            }
+
+            Add-SCDLookupValue -Lookup $evaluatedNoUpstreamBranches -Value $branchName
+            $noUpstreamCandidates += $branchName
+        }
+    }
+
+    if ($noUpstreamCandidates.Count -gt 0) {
+        $remoteDefault = Get-SCDRemoteDefaultRef -DefaultBranch $DefaultBranch
+        Invoke-SCDNonInteractiveFetch -RemoteName $remoteDefault.RemoteName
+
+        git show-ref --verify --quiet $remoteDefault.RefName 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            foreach ($branchName in $noUpstreamCandidates) {
+                git merge-base --is-ancestor $branchName $remoteDefault.RefName 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    $cleanups += @{
+                        BranchName       = $branchName
+                        Reason           = "reachable from ``$($remoteDefault.RefName)``"
+                        RemoteDefaultRef = $remoteDefault.RefName
+                        Kind             = 'orphan-no-upstream'
+                    }
+                }
+            }
+        }
+    }
+
+    foreach ($branchName in @(Get-SCDLocalBranchNames -RefPrefix 'refs/heads/')) {
+        if (
+            $branchName -eq $DefaultBranch -or
+            $attachedBranchLookup.ContainsKey($branchName) -or
+            $evaluatedNoUpstreamBranches.ContainsKey($branchName)
+        ) {
+            continue
+        }
+
+        $remoteName = Get-SCDBranchConfigValue -BranchName $branchName -Name 'remote'
+        $mergeRef = Get-SCDBranchConfigValue -BranchName $branchName -Name 'merge'
+        if ([string]::IsNullOrWhiteSpace($remoteName) -or [string]::IsNullOrWhiteSpace($mergeRef)) {
+            continue
+        }
+
+        $remoteBranchName = $mergeRef
+        if ($mergeRef -match '^refs/heads/(.+)$') {
+            $remoteBranchName = $Matches[1]
+        }
+        if ([string]::IsNullOrWhiteSpace($remoteBranchName)) {
+            continue
+        }
+
+        $remoteHeads = (git ls-remote --heads $remoteName $remoteBranchName 2>$null)
+        if ($LASTEXITCODE -eq 0 -and [string]::IsNullOrWhiteSpace($remoteHeads)) {
+            $cleanups += @{
+                BranchName = $branchName
+                Reason     = 'remote branch merged/deleted'
+                Kind       = 'orphan-upstream'
+            }
+        }
+    }
+
+    return $cleanups
+}
+
 function Invoke-SessionCleanupDetector {
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -345,6 +536,7 @@ function Invoke-SessionCleanupDetector {
     $staleBranch = $null
     $currentNoUpstreamWorktree = $null
     $siblingWorktreeCleanups = @()
+    $orphanBranchCleanups = @()
     $defaultBranch = 'main'   # initialise; resolved below only if needed
 
     $currentBranch = (git branch --show-current 2>$null)
@@ -402,6 +594,7 @@ function Invoke-SessionCleanupDetector {
     }
 
     $siblingWorktreeCleanups = @(Get-SCDSiblingWorktreeCleanups -CurrentWorktreePath (Get-Location).Path -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes)
+    $orphanBranchCleanups = @(Get-SCDOrphanBranchCleanups -CurrentBranch $currentBranch -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes)
 
     # ============================================================
     # STEP 2: TRACKING FILE CHECK (existing logic, intact)
@@ -468,7 +661,7 @@ function Invoke-SessionCleanupDetector {
     # ============================================================
     # STEP 3: MERGE & OUTPUT
     # ============================================================
-    if ($null -eq $staleBranch -and $cleanupNeeded.Count -eq 0 -and $null -eq $currentNoUpstreamWorktree -and $siblingWorktreeCleanups.Count -eq 0) {
+    if ($null -eq $staleBranch -and $cleanupNeeded.Count -eq 0 -and $null -eq $currentNoUpstreamWorktree -and $siblingWorktreeCleanups.Count -eq 0 -and $orphanBranchCleanups.Count -eq 0) {
         return @{ ExitCode = 0; Output = '{}'; Error = '' }
     }
 
@@ -569,15 +762,92 @@ function Invoke-SessionCleanupDetector {
         return $out
     }
 
+    function Get-OrphanBranchLines {
+        param([array]$Items)
+
+        $out = @()
+        foreach ($item in $Items) {
+            $out += "- Orphan branch ``$($item.BranchName)`` — $($item.Reason)"
+        }
+        return $out
+    }
+
+    function Get-OrphanBranchCommands {
+        param([array]$Items)
+
+        $out = @()
+        foreach ($item in $Items) {
+            $safeBranch = $item.BranchName -replace "'", "''"
+            $out += "git branch -D '$safeBranch'"
+        }
+        return $out
+    }
+
+    function Get-ClaudeCleanupKey {
+        param(
+            [Parameter(Mandatory)]
+            [string]$Kind,
+
+            [Parameter(Mandatory)]
+            [hashtable]$Item
+        )
+
+        if ($Kind -eq 'sibling') {
+            return "sibling|$($Item.BranchName)|$($Item.WorktreePath)"
+        }
+
+        return "orphan|$($Item.BranchName)"
+    }
+
     $escaped = if ($null -ne $staleBranch) { $staleBranch.BranchName -replace "'", "''" } else { $null }
     $escapedDefault = $defaultBranch -replace "'", "''"
 
-    if ($siblingWorktreeCleanups.Count -gt 0) {
+    $claudeCleanupLimit = 10
+    $claudeCleanupKeys = @()
+    if (
+        $null -ne $currentNoUpstreamWorktree -and
+        (Test-SCDNoUpstreamBranchCandidate -BranchName $currentNoUpstreamWorktree.BranchName -Prefixes $noUpstreamBranchPrefixes)
+    ) {
+        $claudeCleanupKeys += "current|$($currentNoUpstreamWorktree.BranchName)"
+    }
+    foreach ($item in $siblingWorktreeCleanups) {
+        if (Test-SCDNoUpstreamBranchCandidate -BranchName $item.BranchName -Prefixes $noUpstreamBranchPrefixes) {
+            $claudeCleanupKeys += (Get-ClaudeCleanupKey -Kind 'sibling' -Item $item)
+        }
+    }
+    foreach ($item in $orphanBranchCleanups) {
+        if (Test-SCDNoUpstreamBranchCandidate -BranchName $item.BranchName -Prefixes $noUpstreamBranchPrefixes) {
+            $claudeCleanupKeys += (Get-ClaudeCleanupKey -Kind 'orphan' -Item $item)
+        }
+    }
+
+    $hiddenClaudeCleanupCount = 0
+    $visibleSiblingWorktreeCleanups = @($siblingWorktreeCleanups)
+    $visibleOrphanBranchCleanups = @($orphanBranchCleanups)
+    if ($claudeCleanupKeys.Count -gt $claudeCleanupLimit) {
+        $hiddenClaudeCleanupCount = $claudeCleanupKeys.Count - $claudeCleanupLimit
+        $visibleClaudeCleanupLookup = New-SCDStringLookup
+        foreach ($key in @($claudeCleanupKeys | Select-Object -First $claudeCleanupLimit)) {
+            Add-SCDLookupValue -Lookup $visibleClaudeCleanupLookup -Value $key
+        }
+
+        $visibleSiblingWorktreeCleanups = @($siblingWorktreeCleanups | Where-Object {
+                -not (Test-SCDNoUpstreamBranchCandidate -BranchName $_.BranchName -Prefixes $noUpstreamBranchPrefixes) -or
+                $visibleClaudeCleanupLookup.ContainsKey((Get-ClaudeCleanupKey -Kind 'sibling' -Item $_))
+            })
+        $visibleOrphanBranchCleanups = @($orphanBranchCleanups | Where-Object {
+                -not (Test-SCDNoUpstreamBranchCandidate -BranchName $_.BranchName -Prefixes $noUpstreamBranchPrefixes) -or
+                $visibleClaudeCleanupLookup.ContainsKey((Get-ClaudeCleanupKey -Kind 'orphan' -Item $_))
+            })
+    }
+
+    if ($siblingWorktreeCleanups.Count -gt 0 -or $orphanBranchCleanups.Count -gt 0) {
         $signalNames = @()
         if ($null -ne $staleBranch) { $signalNames += 'stale branch' }
         if ($cleanupNeeded.Count -gt 0) { $signalNames += 'tracking artifacts' }
         if ($null -ne $currentNoUpstreamWorktree) { $signalNames += 'current Claude worktree branch' }
-        $signalNames += 'sibling worktrees'
+        if ($siblingWorktreeCleanups.Count -gt 0) { $signalNames += 'sibling worktrees' }
+        if ($orphanBranchCleanups.Count -gt 0) { $signalNames += 'orphan branches' }
 
         $lines += "**Post-merge cleanup detected** — $($signalNames -join ', ') found:"
         $lines += ''
@@ -593,7 +863,15 @@ function Invoke-SessionCleanupDetector {
             $lines += (Get-TrackingLines -Items $cleanupNeeded)
             $lines += ''
         }
-        $lines += (Get-SiblingWorktreeLines -Items $siblingWorktreeCleanups)
+        if ($visibleSiblingWorktreeCleanups.Count -gt 0) {
+            $lines += (Get-SiblingWorktreeLines -Items $visibleSiblingWorktreeCleanups)
+        }
+        if ($visibleOrphanBranchCleanups.Count -gt 0) {
+            $lines += (Get-OrphanBranchLines -Items $visibleOrphanBranchCleanups)
+        }
+        if ($hiddenClaudeCleanupCount -gt 0) {
+            $lines += "- +$hiddenClaudeCleanupCount more — run ``git for-each-ref --format='%(refname:short)' refs/heads/claude/`` to see the full list."
+        }
         $lines += ''
         $lines += 'To clean up, run:'
         $lines += '```powershell'
@@ -610,7 +888,12 @@ function Invoke-SessionCleanupDetector {
             $trackingCommands = @(Get-TrackingCommands -Items $cleanupNeeded | Where-Object { $_ -ne '# Run in a PowerShell (pwsh) terminal:' })
             $lines += $trackingCommands
         }
-        $lines += (Get-SiblingWorktreeCommands -Items $siblingWorktreeCleanups)
+        if ($visibleSiblingWorktreeCleanups.Count -gt 0) {
+            $lines += (Get-SiblingWorktreeCommands -Items $visibleSiblingWorktreeCleanups)
+        }
+        if ($visibleOrphanBranchCleanups.Count -gt 0) {
+            $lines += (Get-OrphanBranchCommands -Items $visibleOrphanBranchCleanups)
+        }
         $lines += '```'
         $lines += ''
     }

@@ -190,6 +190,32 @@ if ($a.Count -ge 4 -and $a[0] -eq 'show-ref' -and $a[1] -eq '--verify' -and $a[2
     exit ([int]$exitValue)
 }
 
+if ($a.Count -ge 2 -and $a[0] -eq 'for-each-ref') {
+    $refPrefix = $a[-1]
+    $exitValue = Get-MockConfigValue "for-each-ref-exit-$refPrefix"
+    if ($null -eq $exitValue) { $exitValue = Get-MockConfigValue 'for-each-ref-exit' }
+    if ($null -eq $exitValue) { $exitValue = 0 }
+
+    $exactKey = "for-each-ref-$refPrefix"
+    $exactValue = Get-MockConfigValue $exactKey
+    if ($null -ne $exactValue) {
+        Write-Output $exactValue
+        exit ([int]$exitValue)
+    }
+
+    foreach ($prop in $config.PSObject.Properties) {
+        if ($prop.Name -like 'for-each-ref-*' -and $prop.Name -notlike 'for-each-ref-exit*') {
+            $keyPattern = $prop.Name.Substring('for-each-ref-'.Length)
+            if ($refPrefix -like $keyPattern) {
+                Write-Output $prop.Value
+                exit ([int]$exitValue)
+            }
+        }
+    }
+
+    exit ([int]$exitValue)
+}
+
 if ($a.Count -ge 3 -and $a[0] -eq 'rev-parse' -and $a[1] -eq '--abbrev-ref' -and $a[2] -eq '@{u}') {
     $configuredExit = Get-MockConfigValueForPath -Name 'rev-parse-exit' -Path $gitWorkDir
     $upstreamExit = if ($null -ne $configuredExit) { [int]$configuredExit } else { 128 }
@@ -401,17 +427,20 @@ exit $LASTEXITCODE
         $result.Output | Should -Match '^\{\s*\}$'
     }
 
-    It 'T8 AC9 returns a no-op on the default branch when no tracking files are present' {
+    It 'T8 AC6 AC9 returns a no-op on the default branch with no candidates and does not fetch' {
         $workDir = Join-Path $TestDrive 'default-branch-clean'
         New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 
-        $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+        $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -IncludeGitCalls -GitConfig @{
             'branch--show-current'     = 'main'
             'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+            'fetch-exit'               = 99
         }
+        $fetchCalls = @($result['GitCalls'] | Where-Object { $_ -match '^fetch(\t|$)' })
 
         $result.ExitCode | Should -Be 0
         $result.Output | Should -Match '^\{\s*\}$'
+        $fetchCalls.Count | Should -Be 0 -Because 'Phase B fetch should be skipped when there are no current, sibling, orphan, or tracking candidates'
     }
 
     It 'T6 AC7 preserves the current-branch Copilot stale cleanup output byte for byte' {
@@ -906,6 +935,189 @@ exit $LASTEXITCODE
             $context | Should -Not -Match ([regex]::Escape($currentBranch))
             $insideFence | Should -Match ([regex]::Escape("git worktree remove '$siblingPath'"))
             $insideFence | Should -Match ([regex]::Escape("git branch -D '$siblingBranch'"))
+        }
+    }
+
+    Context 'orphan branch cleanup detection' {
+        It 'T7 AC5 flags a merged orphan claude branch, skips an unmerged orphan, and subtracts attached branches' {
+            $workDir = Join-Path $TestDrive 'orphan-claude-sweep-current'
+            $siblingDir = Join-Path $TestDrive 'orphan-claude-sweep-sibling'
+            New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+            $currentBranch = 'claude/current-attached-abcde'
+            $attachedBranch = 'claude/sibling-attached-abcde'
+            $mergedOrphan = 'claude/orphan-merged-abcde'
+            $unmergedOrphan = 'claude/orphan-unmerged-abcde'
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch $currentBranch),
+                (& $script:NewWorktreeRecord -Path $siblingPath -Branch $attachedBranch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                 = $currentBranch
+                'symbolic-ref-origin-HEAD'             = 'refs/remotes/origin/main'
+                'rev-parse-exit'                       = 0
+                'rev-parse-upstream'                   = "origin/$currentBranch"
+                "ls-remote-$currentBranch"             = 'abc refs/heads/claude/current-attached-abcde'
+                'worktree-list-porcelain'              = $worktreeList
+                'show-ref-refs/remotes/origin/main'    = 0
+                'fetch-exit'                           = 0
+                'for-each-ref-refs/heads/claude/'      = @($currentBranch, $attachedBranch, $mergedOrphan, $unmergedOrphan)
+                "merge-base-$mergedOrphan-refs/remotes/origin/main" = 0
+                "merge-base-$unmergedOrphan-refs/remotes/origin/main" = 1
+                'path-configs'                         = @{
+                    "$siblingPath" = @{
+                        'branch--show-current' = $attachedBranch
+                        'rev-parse-exit'       = 128
+                    }
+                }
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match 'Post-merge cleanup detected'
+            $context | Should -Match ([regex]::Escape($mergedOrphan))
+            $insideFence | Should -Match ([regex]::Escape("git branch -D '$mergedOrphan'"))
+            $context | Should -Not -Match ([regex]::Escape($unmergedOrphan))
+            $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$unmergedOrphan'"))
+            $context | Should -Not -Match ([regex]::Escape($attachedBranch))
+            $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$attachedBranch'"))
+            $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$currentBranch'"))
+        }
+
+        It 'T6b AC7b preserves the Copilot stale branch bullet and appends claude orphan cleanup under one post-merge heading' {
+            $workDir = Join-Path $TestDrive 'mixed-copilot-claude-orphan'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $copilotBranch = 'feature/issue-452-cleanup-detector-worktrees'
+            $orphanBranch = 'claude/orphan-mixed-abcde'
+            $baselineText = [System.IO.File]::ReadAllText($script:CopilotBaselineFixturePath)
+            $expectedCopilotBullet = @($baselineText -split "`r?`n" | Where-Object { $_ -like '- Current branch *' } | Select-Object -First 1)[0]
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -RepoRoot 'C:/agent-orchestra' -GitConfig @{
+                'branch--show-current'                 = $copilotBranch
+                'symbolic-ref-origin-HEAD'             = 'refs/remotes/origin/main'
+                'rev-parse-exit'                       = 0
+                'rev-parse-upstream'                   = "origin/$copilotBranch"
+                "ls-remote-$copilotBranch"             = ''
+                'worktree-list-porcelain'              = (& $script:NewWorktreeRecord -Path (& $script:ToPorcelainPath -Path $workDir) -Branch $copilotBranch)
+                'show-ref-refs/remotes/origin/main'    = 0
+                'fetch-exit'                           = 0
+                'for-each-ref-refs/heads/claude/'      = @($orphanBranch)
+                "merge-base-$orphanBranch-refs/remotes/origin/main" = 0
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+            $actualCopilotBullet = @($context -split "`r?`n" | Where-Object { $_ -like '- Current branch *' } | Select-Object -First 1)[0]
+            $postMergeHeadingCount = ([regex]::Matches($context, '\*\*Post-merge cleanup detected\*\*')).Count
+
+            $result.ExitCode | Should -Be 0
+            (& $script:GetUtf8Hex -Text $actualCopilotBullet) | Should -BeExactly (& $script:GetUtf8Hex -Text $expectedCopilotBullet) `
+                -Because 'the current-branch Copilot bullet text is byte-locked by the baseline fixture even in mixed output'
+            $postMergeHeadingCount | Should -Be 1
+            $context | Should -Match '^\*\*Post-merge cleanup detected\*\*'
+            $context | Should -Not -Match '(?im)^\*\*Claude'
+            $context | Should -Match ([regex]::Escape($orphanBranch))
+            $insideFence | Should -Match ([regex]::Escape("git branch -D '$orphanBranch'"))
+        }
+
+        It 'T12 D9 caps claude orphan output at 10 cleanup bullets and commands with a deterministic overflow hint' {
+            $workDir = Join-Path $TestDrive 'orphan-claude-bounded'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branches = 1..12 | ForEach-Object { 'claude/reclaimable-{0:d2}-abcde' -f $_ }
+            $gitConfig = @{
+                'branch--show-current'                 = 'main'
+                'symbolic-ref-origin-HEAD'             = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'              = (& $script:NewWorktreeRecord -Path (& $script:ToPorcelainPath -Path $workDir) -Branch 'main')
+                'show-ref-refs/remotes/origin/main'    = 0
+                'fetch-exit'                           = 0
+                'for-each-ref-refs/heads/claude/'      = $branches
+            }
+            foreach ($branch in $branches) {
+                $gitConfig["merge-base-$branch-refs/remotes/origin/main"] = 0
+            }
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig $gitConfig
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+            $concreteBulletCount = ([regex]::Matches($context, '(?m)^- .*claude/reclaimable-')).Count
+            $concreteCommandCount = ([regex]::Matches($insideFence, "(?m)^git branch -D 'claude/reclaimable-")).Count
+            $overflowCommandPattern = [regex]::Escape("git for-each-ref --format='%(refname:short)' refs/heads/claude/")
+
+            $result.ExitCode | Should -Be 0
+            $concreteBulletCount | Should -Be 10
+            $concreteCommandCount | Should -Be 10
+            $context | Should -Match "\+2 more.*$overflowCommandPattern"
+            $context | Should -Not -Match ([regex]::Escape($branches[10]))
+            $context | Should -Not -Match ([regex]::Escape($branches[11]))
+            $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$($branches[10])'"))
+            $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$($branches[11])'"))
+        }
+
+        It 'T12 D9 counts a merged current claude worktree against the 10-item output cap before orphan deletes' {
+            $workDir = Join-Path $TestDrive 'current-plus-orphan-claude-bounded'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $currentBranch = 'claude/current-overflow-abcde'
+            $orphanBranches = 1..10 | ForEach-Object { 'claude/reclaimable-{0:d2}-abcde' -f $_ }
+            $gitConfig = @{
+                'branch--show-current'              = $currentBranch
+                'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+                'rev-parse-exit'                    = 128
+                'worktree-list-porcelain'           = (& $script:NewWorktreeRecord -Path (& $script:ToPorcelainPath -Path $workDir) -Branch $currentBranch)
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                        = 0
+                'for-each-ref-refs/heads/claude/'   = @($currentBranch) + $orphanBranches
+            }
+            $gitConfig["merge-base-$currentBranch-refs/remotes/origin/main"] = 0
+            foreach ($branch in $orphanBranches) {
+                $gitConfig["merge-base-$branch-refs/remotes/origin/main"] = 0
+            }
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig $gitConfig
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $outsideFence = & $script:RemoveFencedPowerShellBlocks -Context $context
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+            $concreteClaudeBulletCount = ([regex]::Matches($context, '(?m)^- .*(?:claude/current-overflow-abcde|claude/reclaimable-)')).Count
+            $visibleOrphanBulletCount = ([regex]::Matches($context, '(?m)^- .*claude/reclaimable-')).Count
+            $visibleOrphanCommandCount = ([regex]::Matches($insideFence, "(?m)^git branch -D 'claude/reclaimable-")).Count
+            $overflowCommandPattern = [regex]::Escape("git for-each-ref --format='%(refname:short)' refs/heads/claude/")
+
+            $result.ExitCode | Should -Be 0
+            $outsideFence | Should -Match ([regex]::Escape($currentBranch))
+            $outsideFence | Should -Match '(?s)Current-worktree cleanup must be run from another checkout:.*git worktree remove.*git branch -D'
+            $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$currentBranch'"))
+            $concreteClaudeBulletCount | Should -Be 10
+            $visibleOrphanBulletCount | Should -Be 9
+            $visibleOrphanCommandCount | Should -Be 9
+            $context | Should -Match "\+1 more.*$overflowCommandPattern"
+            $context | Should -Not -Match ([regex]::Escape($orphanBranches[9]))
+            $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$($orphanBranches[9])'"))
+        }
+
+        It 'T14 AC12 emits branch deletion for an orphan feature issue branch whose upstream branch is gone' {
+            $workDir = Join-Path $TestDrive 'orphan-feature-upstream-deleted'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'feature/issue-452-orphan-upstream-deleted'
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                     = 'main'
+                'symbolic-ref-origin-HEAD'                 = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'                  = (& $script:NewWorktreeRecord -Path (& $script:ToPorcelainPath -Path $workDir) -Branch 'main')
+                'fetch-exit'                               = 0
+                'for-each-ref-refs/heads/feature/issue-*'  = @($branch)
+                'for-each-ref-refs/heads/feature/'         = @($branch)
+                'for-each-ref-refs/heads/'                 = @($branch)
+                "config-branch.$branch.remote"             = 'origin'
+                "config-branch.$branch.merge"              = "refs/heads/$branch"
+                "ls-remote-$branch"                        = ''
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($branch))
+            $insideFence | Should -Match ([regex]::Escape("git branch -D '$branch'"))
         }
     }
 
