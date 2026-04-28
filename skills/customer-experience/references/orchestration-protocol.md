@@ -73,7 +73,7 @@ Always include in the PR body:
 - Scenarios exercised: when BDD is enabled, use the per-scenario coverage table format below; otherwise, use the current brief list format
 - Track 2 outcome: `Process-Review: no systemic gap found` or link to created follow-up issue
 
-Read the `Class` value (`[auto]` or `[manual]`) from the plan's `[CE GATE]` step scenario entries (e.g., `S1: {description} [auto]`). Read the `Type` value (`Functional` or `Intent`) from the scenario heading `### SN - {title} (Type)` in the issue body's `## Scenarios` section. When BDD is enabled, replace the "Scenarios exercised (brief list)" with the per-scenario coverage table below:
+Read the `Class` value (`[auto]` or `[manual]`) from the plan's `[CE GATE]` step scenario entries (e.g., `S1: {description} [auto]`). Read the `Type` value (`Functional` or `Intent`) from the scenario heading `### S{N} - {title} (Type)` in the issue body's `## Scenarios` section. When BDD is enabled, replace the "Scenarios exercised (brief list)" with the per-scenario coverage table below:
 
 | ID  | Type       | Class    | Result    | Evidence            | Source |
 | --- | ---------- | -------- | --------- | ------------------- | ------ |

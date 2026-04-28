@@ -2,6 +2,8 @@
 
 Copilot loads `plugin-release-hygiene` from the plugin-distributed `PostToolUse` hook in root `hooks.json`. That hook resolves the installed plugin cache path explicitly, then runs `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1` for relevant entry-point edits.
 
+> **Survival**: `SMC-12` governs `.claude/.state/release-hygiene-{slug}.json`. Copilot state is normally `within-worktree:hooks` keyed by branch slug; it shares release-hygiene silence with Claude only when Claude also resolves the same state key.
+
 Copilot does not expose a Claude-style stable `session_id` to this hook payload, so state keying remains branch-based here. That divergence is intentional: Claude prefers `session_id` when available, while Copilot continues to use the branch-derived slug and falls back to `session` only when branch resolution fails.
 
 When the skill needs a user-facing override, Copilot agents invoke:
@@ -17,7 +19,7 @@ Use these option labels:
 3. `Major`
 4. `Skip`
 
-Persist the result in `.claude/.state/release-hygiene-{slug}.json` so later entry-point touches in the same conversation can reuse the same choice silently.
+Persist the result in `.claude/.state/release-hygiene-{slug}.json` so later entry-point touches on the same state key can reuse the same choice silently.
 
 Persist `keying_strategy` in the same state file so the active keying path is observable during tests and review. In normal Copilot flows this should be `branch_slug`; `session_fallback` is reserved for branch-resolution failure.
 

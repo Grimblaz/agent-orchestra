@@ -18,7 +18,7 @@ Structured Given/When/Then scenario authoring with ID traceability and CE Gate c
 ## G/W/T Authoring Patterns
 
 - Scenarios use numbered IDs: S1, S2, S3…
-- Heading convention: `### SN — {title} (Type)` where Type is Functional or Intent
+- Heading convention: `### S{N} — {title} (Type)` where Type is Functional or Intent; emit concrete numbered IDs such as `### S1` and `### S2`, never literal `SN`
 - G/W/T clauses in customer language — see **Declarative-over-Imperative** below for details
 - Example template:
 
@@ -92,7 +92,7 @@ Scenarios that require external services (auth emulators, backend APIs, database
 
 - IDs are **immutable after plan approval** — once S1, S2, S3 are assigned in the issue body and the plan is approved, those IDs do not change.
 - If a scenario is split during implementation, the original ID remains; new sub-scenarios get the next sequential IDs (e.g., S1 stays S1; new scenario becomes S5).
-- IDs are **never reused** — when a scenario is **removed**, its ID is retired, not reassigned (the `### SN` heading is preserved with `[REMOVED]` as the title — see ID Extraction Format below).
+- IDs are **never reused** — when a scenario is **removed**, its ID is retired, not reassigned (the numbered `### S{N}` heading is preserved with `[REMOVED]` as the title — see ID Extraction Format below).
 - **Authority: the issue body is the authoritative source for scenario IDs**. The plan cites them; it does not define them. Post-approval additions to the issue body require a plan amendment.
 
 ## ID Extraction Format
@@ -100,9 +100,9 @@ Scenarios that require external services (auth emulators, backend APIs, database
 When reading scenario IDs from an issue body:
 
 - Match the pattern `### S\d+` headings within the `## Scenarios` section. Scope the extraction to content between the `## Scenarios` heading and the next H2 heading (`##`) — do not match `### S\d+` patterns outside this boundary.
-- Extract the full heading: `### SN — {title} (Type)`
+- Extract the full heading: `### S{N} — {title} (Type)` where `S{N}` is a concrete numbered ID such as `S1`
 - IDs are ordinal integers starting at 1; there must be **no gaps** in the sequence.
-- When a scenario is retired, keep its `### SN` heading and replace the title with `[REMOVED]` (e.g., `### S2 — [REMOVED] (manual)`) instead of deleting the heading; this preserves the immutable ID space and allows extraction regex to still match retired-but-preserved headings.
+- When a scenario is retired, keep its numbered `### S{N}` heading and replace the title with `[REMOVED]` (e.g., `### S2 — [REMOVED] (manual)`) instead of deleting the heading; this preserves the immutable ID space and allows extraction regex to still match retired-but-preserved headings.
 - For CE Gate pre-flight, extract all IDs present at plan-approval time and verify each appears in Experience-Owner's evidence summary
 
 ## BDD Detection Mechanism
@@ -165,7 +165,7 @@ For each `[auto]` scenario in the issue's `## Scenarios` section:
 
 - Include a `Feature: Issue #{N} — {issue-title}` declaration at the top of every `.feature` file (required by all four supported parsers).
 - Add `@S{N}` tag directly above the `Scenario:` line
-- Map the scenario heading to `Scenario: {title}` (strip the `### SN —` prefix and type tag)
+- Map the scenario heading to `Scenario: {title}` (strip the `### S{N} —` prefix and type tag)
 - Map G/W/T clauses to Gherkin `Given`/`When`/`Then` keywords (1:1 mapping)
 - `And`/`But` connectors preserved as-is
 

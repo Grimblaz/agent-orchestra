@@ -451,11 +451,14 @@ function Invoke-PRHHook {
     return ($result | ConvertTo-Json -Depth 10 -Compress)
 }
 
-if ($MyInvocation.InvocationName -ne '.') {
+function Invoke-PRHHookEntrypoint {
     $output = Invoke-PRHHook -Payload (Get-PRHEventPayload)
     if (-not [string]::IsNullOrWhiteSpace($output)) {
         $output | Write-Output
     }
+}
 
+if ($MyInvocation.InvocationName -ne '.') {
+    Invoke-PRHHookEntrypoint
     exit 0
 }

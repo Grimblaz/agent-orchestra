@@ -38,7 +38,7 @@ Describe 'Experience-Owner BDD scenario contract' {
         $script:Content = Get-Content -Path $script:ExperienceOwner -Raw
 
         $script:GwtConditionalPattern = '(?is)(## BDD Framework).{0,300}(G/W/T|Given.{0,10}When.{0,10}Then|structured scenario).{0,300}(natural.{0,30}language|fallback)'
-        $script:ScenarioIdHeadingPattern = '(?is)(###\s+S\d+|###\s+SN|### S1|S\d+\s+—\s+\{title\}|SN\s+—\s+\{title\}).{0,200}(Type|Functional|Intent)'
+        $script:ScenarioIdHeadingPattern = '(?is)(###\s+S\{N\}|###\s+S\d+|S\{N\}\s+—\s+\{title\}|S\d+\s+—\s+\{title\}).{0,200}(Type|Functional|Intent)'
         $script:BddSkillReferencePattern = 'bdd-scenarios'
         $script:CustomerLanguagePattern = '(?is)(customer.{0,30}(language|terms|vocabulary)|no (technical|jargon|implementation detail|code term)).{0,300}(G/W/T|Given|When|Then|scenario clause)'
     }
@@ -47,8 +47,18 @@ Describe 'Experience-Owner BDD scenario contract' {
         $script:Content | Should -Match $script:GwtConditionalPattern -Because 'issue #223 requires Experience-Owner to detect ## BDD Framework and author structured G/W/T scenarios with a natural-language fallback when not enabled'
     }
 
-    It 'Experience-Owner uses SN heading convention with Type tag' {
-        $script:Content | Should -Match $script:ScenarioIdHeadingPattern -Because 'issue #223 requires Experience-Owner to use ### SN heading convention and include a Type tag in scenarios'
+    It 'Experience-Owner uses numbered S{N} or concrete scenario headings with Type tag' {
+        $script:Content | Should -Match $script:ScenarioIdHeadingPattern -Because 'issue #223 requires Experience-Owner to use numbered S{N}/S1 scenario headings and include a Type tag in scenarios'
+    }
+
+    It 'Experience-Owner does not present literal ### SN as the emitted heading convention' {
+        $positiveLiteralHeadingLines = @(
+            $script:Content -split "`r?`n" |
+                Where-Object { $_ -match '###\s+SN\b' } |
+                Where-Object { $_ -notmatch '(?i)(do not|never|avoid|not\s+emit|not\s+use|literal)' }
+        )
+
+        $positiveLiteralHeadingLines | Should -HaveCount 0 -Because 'literal ### SN must not be accepted as the emitted heading convention; use S{N} placeholders or concrete numbered examples instead'
     }
 
     It 'Experience-Owner references bdd-scenarios skill' {
@@ -115,6 +125,10 @@ Describe 'Code-Conductor BDD CE Gate pre-flight contract' {
 
     It 'Code-Conductor CE Gate pre-flight scopes S\d+ extraction between ## Scenarios and next H2' {
         $script:CCContent | Should -Match '(?is)Scope.{0,100}extraction.{0,100}(## Scenarios|Scenarios heading).{0,100}next H2' -Because 'issue #223 requires Code-Conductor to scope ### S\d+ extraction to content between ## Scenarios and the next H2 heading, preventing false-positive matches outside this boundary'
+    }
+
+    It 'Code-Conductor CE Gate pre-flight excludes [REMOVED] tombstone scenarios from local coverage checks' {
+        $script:CCContent | Should -Match '(?is)(pre-flight|preflight|BDD).{0,500}\[REMOVED\].{0,200}(exclud|ignor|tombstone|retired|not exercised)' -Because 'removed BDD scenario tombstones preserve immutable IDs but must not be treated as scenarios requiring CE Gate evidence'
     }
 }
 

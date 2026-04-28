@@ -36,7 +36,7 @@ When the shared body refers to a Copilot tool, use the Claude Code equivalent:
 
 Upstream framing persistence is identical across both tools: the GitHub issue body + `<!-- experience-owner-complete-{ID} -->` comment marker (`SMC-08`). There is no Claude-specific session-memory step for Experience-Owner.
 
-Cold-pickup first-contact assessment follows `SMC-04`: the durable marker is `<!-- first-contact-assessed-{ID} -->`; if offline posting fails, the local fallback payload is recovery input only and the next online provenance-gate run reconstructs the GitHub marker.
+Cold-pickup first-contact assessment follows `SMC-04`: the durable marker is `<!-- first-contact-assessed-{ID} -->`; any offline local fallback is recovery input only on surfaces that can write/read `/memories/session`, while inline Claude has no such payload to recover later.
 
 ## Invocation
 

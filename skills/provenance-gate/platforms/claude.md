@@ -2,6 +2,8 @@
 
 The `provenance-gate` developer gate invokes Claude Code's `AskUserQuestion` tool.
 
+> **Survival**: `SMC-04` governs this marker. The GitHub issue-comment token is durable; inline Claude's offline path is a visible fail-open with no `/memories/session` payload to recover.
+
 Run the gate in two stages.
 
 Stage 1 comes first and happens before any assessment text. Pass these option labels verbatim:

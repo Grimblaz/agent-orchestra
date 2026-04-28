@@ -8,9 +8,9 @@
 
 ## Overview
 
-Plans are stored in VS Code session memory at `/memories/session/plan-issue-{ID}.md` using the `memory` tool's `create` command. This replaces the previous approach of storing plans as local files in `.copilot-tracking/plans/`.
+This design describes the VS Code/Copilot plan cache: plans are stored in VS Code session memory at `/memories/session/plan-issue-{ID}.md` using the `memory` tool's `create` command. This replaces the previous approach of storing plans as local files in `.copilot-tracking/plans/`.
 
-The row-level survival, fungibility, and read/write precedence for plan and design state live in the canonical operational contract at [skills/session-memory-contract/SKILL.md](../../skills/session-memory-contract/SKILL.md) (`SMC-01`, `SMC-02`, `SMC-03`, `SMC-08`). The rationale for centralizing those rules is documented in [Documents/Design/session-memory-contract.md](session-memory-contract.md).
+The `Primary` `/memories/session` layer below is scoped to the VS Code/Copilot session-memory implementation. Cross-tool Claude/GitHub survival, fungibility, and read/write precedence for plan and design state live in the canonical operational contract at [skills/session-memory-contract/SKILL.md](../../skills/session-memory-contract/SKILL.md) (`SMC-01`, `SMC-02`, `SMC-03`, `SMC-08`). The rationale for centralizing those rules is documented in [Documents/Design/session-memory-contract.md](session-memory-contract.md).
 
 ---
 

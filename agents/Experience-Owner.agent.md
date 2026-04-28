@@ -68,7 +68,7 @@ Run stage 1 self-classification before any assessment text with `I wrote this / 
 
 Record `<!-- first-contact-assessed-{ID} -->` only after non-stop outcomes. `Stop — needs rework first` and `Needs rework — stop here` do not post the `<!-- first-contact-assessed-{ID} -->` marker. The human-readable second line is decorative only; the HTML token remains the only skip-check anchor and parser anchor.
 
-Skip silently when no issue ID can be determined, warm handoff markers or a prior GitHub `<!-- first-contact-assessed-{ID} -->` marker already exist. If only `/memories/session/first-contact-assessed-{ID}.md` exists, treat that as pending recovery rather than a silent skip. If MCP tools are unavailable or the API call fails, fail open visibly: tell the developer offline mode is active, write the structured local payload in session memory, continue, and on the next online invocation reconstruct the GitHub marker from that payload before continuing if the payload is still available.
+Skip silently when no issue ID can be determined, warm handoff markers or a prior GitHub `<!-- first-contact-assessed-{ID} -->` marker already exist. If only `/memories/session/first-contact-assessed-{ID}.md` exists, treat that as pending recovery rather than a silent skip. If MCP tools are unavailable or the API call fails, fail open visibly: tell the developer offline mode is active, write the structured local payload only when the active surface can write/read `/memories/session`, continue, and on the next online invocation reconstruct the GitHub marker from that payload only if the payload is still available.
 
 ## Questioning Policy (Mandatory)
 
@@ -86,7 +86,7 @@ Load `skills/safe-operations/SKILL.md` §2 when creating a GitHub issue (dedup, 
 
 Load `skills/customer-experience/SKILL.md`. If `## BDD Framework` is enabled in `copilot-instructions.md`, also load `skills/bdd-scenarios/SKILL.md`.
 
-When `## BDD Framework` is present, author structured G/W/T / Given-When-Then scenarios; when absent, use the natural-language fallback. Use the heading convention `### SN — {title} (Type)` or `### S1 — {title} (Functional|Intent)`. Customer language and customer terms are required for every G/W/T scenario clause; avoid technical jargon and implementation details.
+When `## BDD Framework` is present, author structured G/W/T / Given-When-Then scenarios; when absent, use the natural-language fallback. Use numbered headings in the form `### S{N} — {title} (Type)`, emitted as concrete IDs such as `### S1 — {title} (Functional)` and `### S2 — {title} (Intent)`. Do not emit literal `SN`. Customer language and customer terms are required for every G/W/T scenario clause; avoid technical jargon and implementation details.
 
 ## Update Issue with Customer Framing
 

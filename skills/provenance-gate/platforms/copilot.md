@@ -2,6 +2,8 @@
 
 The `provenance-gate` developer gate invokes Copilot's built-in structured-question tool:
 
+> **Survival**: `SMC-04` governs this marker. The GitHub issue-comment token is durable; Copilot can use `/memories/session/first-contact-assessed-{ID}.md` only as within-conversation recovery input when GitHub posting fails.
+
 ```text
 #tool:vscode/askQuestions
 ```

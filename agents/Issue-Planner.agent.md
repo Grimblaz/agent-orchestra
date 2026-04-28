@@ -50,7 +50,7 @@ Run stage 1 self-classification before any assessment text with `I wrote this / 
 
 Record `<!-- first-contact-assessed-{ID} -->` only after non-stop outcomes. `Stop — needs rework first` and `Needs rework — stop here` do not post the `<!-- first-contact-assessed-{ID} -->` marker. The human-readable second line is decorative only; the HTML token remains the only skip-check anchor and parser anchor.
 
-Skip silently when no issue ID can be determined, warm handoff markers or a prior GitHub `<!-- first-contact-assessed-{ID} -->` marker already exist. If only `/memories/session/first-contact-assessed-{ID}.md` exists, treat that as pending recovery rather than a silent skip. If MCP tools are unavailable or the API call fails, fail open visibly: tell the developer offline mode is active, write the structured local payload in session memory, continue, and on the next online invocation reconstruct the GitHub marker from that payload before continuing if the payload is still available.
+Skip silently when no issue ID can be determined, warm handoff markers or a prior GitHub `<!-- first-contact-assessed-{ID} -->` marker already exist. If only `/memories/session/first-contact-assessed-{ID}.md` exists, treat that as pending recovery rather than a silent skip. If MCP tools are unavailable or the API call fails, fail open visibly: tell the developer offline mode is active, write the structured local payload only when the active surface can write/read `/memories/session`, continue, and on the next online invocation reconstruct the GitHub marker from that payload only if the payload is still available.
 
 Cycle through the phases below iteratively based on user input.
 
@@ -90,7 +90,7 @@ Override rule: when in doubt, classify as `[manual]`. Test-Writer may reclassify
 
 _(Rubric duplicated from `bdd-scenarios/SKILL.md` for quick reference. If you update one, update the other.)_
 
-When BDD is enabled, write the full `## Scenarios` section back into the GitHub issue body (with `### SN — {title} (Type)` headings) before plan approval. List each scenario in the `[CE GATE]` step by scenario ID (`SN`/`S1`) with classification tags: `SN: {description} [auto]` or `SN: {description} [manual]`.
+When BDD is enabled, write the full `## Scenarios` section back into the GitHub issue body with numbered `### S{N} — {title} (Type)` headings before plan approval, emitted as concrete IDs such as `### S1` and `### S2`. List each scenario in the `[CE GATE]` step by scenario ID (`S{N}`/`S1`) with classification tags: `S{N}: {description} [auto]` or `S{N}: {description} [manual]`.
 
 Before presenting the plan, run the three-pass adversarial stress test from `skills/plan-authoring/SKILL.md`. Apply Post-Judge Reconciliation before surfacing the final draft.
 
@@ -118,6 +118,8 @@ ce_gate: { true|false }
 Add `escalation_recommended: true` and `escalation_reason` when scope exceeds the issue's stated scope. After saving, stop — do not take any further action in this turn (no additional comments, no structured-question calls, no follow-up prompts).
 
 The canonical session-memory handoff artifacts remain `/memories/session/plan-issue-{id}.md` for the plan and `/memories/session/design-issue-{id}.md` for the design snapshot.
+
+> **Survival**: Copilot plan and design caches are same-conversation state under `SMC-01` and `SMC-03`. Durable cross-tool handoff stays on the existing GitHub markers governed by `SMC-08`; Claude `/plan` uses the `SMC-01` GitHub marker instead of a Claude-local cache.
 
 ## Context Management
 

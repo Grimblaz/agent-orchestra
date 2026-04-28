@@ -99,8 +99,12 @@ Describe 'session-memory contract structural surface' {
 
         $script:StateOwningSurfaces = @(
             [pscustomobject]@{ Path = 'skills\provenance-gate\SKILL.md'; Rows = @('SMC-04') },
+            [pscustomobject]@{ Path = 'skills\provenance-gate\platforms\copilot.md'; Rows = @('SMC-04') },
+            [pscustomobject]@{ Path = 'skills\provenance-gate\platforms\claude.md'; Rows = @('SMC-04') },
             [pscustomobject]@{ Path = 'skills\session-startup\SKILL.md'; Rows = @('SMC-07') },
             [pscustomobject]@{ Path = 'skills\plugin-release-hygiene\SKILL.md'; Rows = @('SMC-12') },
+            [pscustomobject]@{ Path = 'skills\plugin-release-hygiene\platforms\copilot.md'; Rows = @('SMC-12') },
+            [pscustomobject]@{ Path = 'skills\plugin-release-hygiene\platforms\claude.md'; Rows = @('SMC-12') },
             [pscustomobject]@{ Path = 'skills\validation-methodology\references\review-state-persistence.md'; Rows = @('SMC-05', 'SMC-06') },
             [pscustomobject]@{ Path = 'skills\validation-methodology\references\review-reconciliation.md'; Rows = @('SMC-05', 'SMC-06') },
             [pscustomobject]@{ Path = 'skills\calibration-pipeline\SKILL.md'; Rows = @('SMC-09', 'SMC-10', 'SMC-11') },
@@ -109,6 +113,11 @@ Describe 'session-memory contract structural surface' {
             [pscustomobject]@{ Path = 'skills\customer-experience\references\defect-response.md'; Rows = @('SMC-03', 'SMC-08') },
             [pscustomobject]@{ Path = 'skills\tracking-format\SKILL.md'; Rows = @('SMC-13') },
             [pscustomobject]@{ Path = 'skills\subagent-env-handshake\SKILL.md'; Rows = @('SMC-14') }
+        )
+
+        $script:SharedAgentStateSurfaces = @(
+            [pscustomobject]@{ Path = 'agents\Issue-Planner.agent.md'; Rows = @('SMC-01', 'SMC-03') },
+            [pscustomobject]@{ Path = 'agents\Code-Conductor.agent.md'; Rows = @('SMC-01', 'SMC-02', 'SMC-03', 'SMC-08') }
         )
 
         $script:CommandAndShellSurfaces = @(
@@ -124,7 +133,9 @@ Describe 'session-memory contract structural surface' {
             [pscustomobject]@{ Path = 'agents\doc-keeper.md'; Rows = @('SMC-01', 'SMC-03') },
             [pscustomobject]@{ Path = 'agents\process-review.md'; Rows = @('SMC-01', 'SMC-03', 'SMC-09') },
             [pscustomobject]@{ Path = 'agents\issue-planner.md'; Rows = @('SMC-01', 'SMC-03') },
-            [pscustomobject]@{ Path = 'agents\experience-owner.md'; Rows = @('SMC-04', 'SMC-08') }
+            [pscustomobject]@{ Path = 'agents\experience-owner.md'; Rows = @('SMC-04', 'SMC-08') },
+            [pscustomobject]@{ Path = 'agents\research-agent.md'; Rows = @('SMC-13') },
+            [pscustomobject]@{ Path = 'agents\specification.md'; Rows = @('SMC-13') }
         )
     }
 
@@ -190,6 +201,26 @@ Describe 'session-memory contract structural surface' {
         $segment | Should -Not -Match '`within-worktree`' -Because 'the SMC-05 storage path is not a worktree-backed .copilot-tracking artifact'
     }
 
+    It 'documents SMC-04 as a durable GitHub parser anchor with an honest Claude inline fallback gap' {
+        $segment = & $script:GetContractRowSegment -RowId 'SMC-04'
+
+        $segment | Should -Match '(?is)GitHub marker.{0,120}durable parser anchor|durable parser anchor.{0,120}GitHub marker' -Because 'SMC-04 must preserve the GitHub issue-comment marker as the durable parser anchor'
+        $segment | Should -Match '(?is)local fallback.{0,160}(surface-bound|within-conversation:\{surface\}|write/read `/memories/session`|recovery input)' -Because 'SMC-04 must keep the local payload as bounded recovery input rather than a durable skip marker'
+        $segment | Should -Match '(?is)inline/no-write Claude.{0,160}cannot persist.{0,80}recover|Claude.{0,160}cannot persist.{0,80}recover|cannot persist.{0,80}recover.{0,160}Claude' -Because 'SMC-04 must be honest that inline/no-write Claude cannot persist or recover the local fallback payload'
+    }
+
+    It 'marks bounded worktree and hook state as partial cross-tool fungibility' {
+        foreach ($rowId in @('SMC-10', 'SMC-11', 'SMC-12', 'SMC-13')) {
+            $segment = & $script:GetContractRowSegment -RowId $rowId
+
+            $segment | Should -Match '\|\s*`partial - ' -Because "$rowId must use the leading 'partial -' fungibility label for bounded cross-tool reuse"
+        }
+
+        $smc12Segment = & $script:GetContractRowSegment -RowId 'SMC-12'
+        $smc12Segment | Should -Match 'session_id' -Because 'SMC-12 must name Claude session_id keying explicitly'
+        $smc12Segment | Should -Match '(?is)(keying.{0,80}diverg|diverg.{0,80}keying|session_id.{0,160}branch slug|branch slug.{0,160}session_id|same key)' -Because 'SMC-12 must document session_id-versus-branch key divergence and the same-key sharing condition'
+    }
+
     It 'requires every SMC row to carry a citation or explicit delegated/informational note' {
         foreach ($row in $script:ContractRows) {
             $segment = & $script:GetContractRowSegment -RowId $row.Id
@@ -205,6 +236,18 @@ Describe 'session-memory contract structural surface' {
 
             foreach ($rowId in $surface.Rows) {
                 & $script:AssertSurvivalCallout -Content $content -RowId $rowId -Path $surface.Path
+            }
+        }
+    }
+
+    It 'requires shared agent bodies that own plan, design, and handoff state to cite their SMC rows' {
+        foreach ($surface in $script:SharedAgentStateSurfaces) {
+            $path = Join-Path $script:RepoRoot $surface.Path
+            Test-Path -LiteralPath $path -PathType Leaf | Should -BeTrue -Because "$($surface.Path) is a state-owning shared agent body"
+            $content = & $script:ReadContent -Path $path
+
+            foreach ($rowId in $surface.Rows) {
+                $content | Should -Match ('\b' + [regex]::Escape($rowId) + '\b') -Because "$($surface.Path) must cite $rowId where it owns plan, design, progress, or durable handoff state"
             }
         }
     }
@@ -244,9 +287,9 @@ Describe 'session-memory contract structural surface' {
         $config = (& $script:ReadContent -Path $script:RoutingConfigPath) | ConvertFrom-Json -AsHashtable
         $planEntries = @(
             $config.specialist_dispatch.entries |
-            Where-Object {
-                ([string]($_.file_type_or_task)) -match '/memories/session/plan-issue-\{ID\}\.md|plan-issue-\{ID\}'
-            }
+                Where-Object {
+                    ([string]($_.file_type_or_task)) -match '/memories/session/plan-issue-\{ID\}\.md|plan-issue-\{ID\}'
+                }
         )
 
         $planEntries | Should -HaveCount 1 -Because 'the specialist dispatch table should have exactly one plan-path routing entry'
