@@ -16,7 +16,7 @@ The operational source of truth is
 [skills/session-memory-contract/SKILL.md](../../skills/session-memory-contract/SKILL.md).
 That skill owns the survival vocabulary, read/write precedence, row IDs,
 fungibility labels, and concrete mechanisms for plan, design, review, startup,
-calibration, tracking, plugin, and subagent state.
+calibration, tracking, plugin, rate-limit deferral, and subagent state.
 
 ## Problem
 
@@ -93,7 +93,7 @@ meant to expose.
 ### D5 - Row IDs Carry Discoverability Without Copying The Table
 
 Stable IDs such as `SMC-01` let shell, command, skill, and public docs cite the
-owning row without duplicating the 14-row table. This keeps the operational
+owning row without duplicating the 15-row table. This keeps the operational
 contract centralized while still making a local paragraph understandable.
 
 ### D6 - Known Gaps Stay Visible

@@ -50,7 +50,8 @@ Describe 'session-memory contract structural surface' {
             [pscustomobject]@{ Id = 'SMC-11'; Label = 'cross-PR calibration state'; Pending384 = $false; FollowUp379 = $false },
             [pscustomobject]@{ Id = 'SMC-12'; Label = 'plugin release-hygiene decision'; Pending384 = $false; FollowUp379 = $false },
             [pscustomobject]@{ Id = 'SMC-13'; Label = '.copilot-tracking/ artifacts'; Pending384 = $false; FollowUp379 = $false },
-            [pscustomobject]@{ Id = 'SMC-14'; Label = 'subagent-env-handshake state'; Pending384 = $false; FollowUp379 = $false }
+            [pscustomobject]@{ Id = 'SMC-14'; Label = 'subagent-env-handshake state'; Pending384 = $false; FollowUp379 = $false },
+            [pscustomobject]@{ Id = 'SMC-15'; Label = 'rate-limit deferred work state'; Pending384 = $false; FollowUp379 = $false }
         )
 
         $script:GetRelativePath = {
@@ -111,6 +112,7 @@ Describe 'session-memory contract structural surface' {
             [pscustomobject]@{ Path = 'skills\calibration-pipeline\references\metrics-schema.md'; Rows = @('SMC-09', 'SMC-10', 'SMC-11') },
             [pscustomobject]@{ Path = 'skills\customer-experience\references\orchestration-protocol.md'; Rows = @('SMC-03', 'SMC-08') },
             [pscustomobject]@{ Path = 'skills\customer-experience\references\defect-response.md'; Rows = @('SMC-03', 'SMC-08') },
+            [pscustomobject]@{ Path = 'skills\parallel-execution\references\error-handling.md'; Rows = @('SMC-15') },
             [pscustomobject]@{ Path = 'skills\tracking-format\SKILL.md'; Rows = @('SMC-13') },
             [pscustomobject]@{ Path = 'skills\subagent-env-handshake\SKILL.md'; Rows = @('SMC-14') }
         )
@@ -151,7 +153,7 @@ Describe 'session-memory contract structural surface' {
         $script:ContractContent | Should -Match '(?is)(\{base\}:\{surface\}|base:\s*surface|surface-naming|surface naming|surface-specific label)' -Because 'the contract must require surface-specific labels when survival changes by surface'
     }
 
-    It 'lists SMC-01 through SMC-14 in order with the required row labels' {
+    It 'lists SMC-01 through SMC-15 in order with the required row labels' {
         $lastIndex = -1
 
         foreach ($row in $script:ContractRows) {
@@ -219,6 +221,19 @@ Describe 'session-memory contract structural surface' {
         $smc12Segment = & $script:GetContractRowSegment -RowId 'SMC-12'
         $smc12Segment | Should -Match 'session_id' -Because 'SMC-12 must name Claude session_id keying explicitly'
         $smc12Segment | Should -Match '(?is)(keying.{0,80}diverg|diverg.{0,80}keying|session_id.{0,160}branch slug|branch slug.{0,160}session_id|same key)' -Because 'SMC-12 must document session_id-versus-branch key divergence and the same-key sharing condition'
+    }
+
+    It 'documents rate-limit deferred work as bounded same-conversation state' {
+        $segment = & $script:GetContractRowSegment -RowId 'SMC-15'
+        $errorHandlingContent = & $script:ReadContent -Path (Join-Path $script:RepoRoot 'skills\parallel-execution\references\error-handling.md')
+        $rateLimitSection = ([regex]::Match($errorHandlingContent, '(?is)## Subagent Call Resilience \(R5\).*?(?=## Error Handling)')).Value
+
+        $segment | Should -Match '^\s*SMC-15\s*\|[^|]*\|\s*`within-conversation`\s*\|' -Because 'SMC-15 must be bounded to the current conversation rather than durable resume'
+        $segment | Should -Match '/memories/session/rate-limit-deferred-\{scope\}\.md' -Because 'SMC-15 must name the bounded session-memory payload path'
+        $segment | Should -Match 'not cross-tool or cross-session' -Because 'SMC-15 must be explicit that the payload is not cross-tool or cross-session state'
+        $segment | Should -Match 'durable plan/PR/issue context can restart the phase but does not preserve the pending payload' -Because 'SMC-15 must distinguish durable re-entry from preserving the deferred payload'
+        $rateLimitSection.Length | Should -BeGreaterThan 0 -Because 'the error-handling reference must keep a rate-limit deferral section for SMC-15'
+        $rateLimitSection | Should -Not -Match '(?i)\bnext session\b' -Because 'rate-limit deferral is same-conversation only; the reference must not promise next-session payload survival'
     }
 
     It 'requires every SMC row to carry a citation or explicit delegated/informational note' {

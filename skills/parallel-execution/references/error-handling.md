@@ -4,6 +4,8 @@ This reference owns the reusable error-handling and terminal guardrails extracte
 
 See [../SKILL.md](../SKILL.md) for the execution-mode contract, Requirement Contract, convergence gate, and triage-routing flow this reference supports.
 
+**Survival**: `SMC-15` governs rate-limit deferred work state as `within-conversation` only. Use `/memories/session/rate-limit-deferred-{scope}.md` only when the session-memory surface is available; this payload is not a durable or cross-tool resume source.
+
 ## Subagent Call Resilience (R5)
 
 When a subagent call fails or returns no output, classify the failure before routing:
@@ -17,16 +19,16 @@ When a subagent call fails or returns no output, classify the failure before rou
 1. Wait `2^attempt × 30s` before retrying (attempt 1 = 60s, attempt 2 = 120s).
 2. On Sonnet-class model failure: before entering backoff, consider switching to an Opus-class model - Sonnet and Opus have separate per-model TPM limits, so Opus may still be available when Sonnet is throttled.
 3. After **2 consecutive retry failures** for the same call (3 total attempts in the timeout-failure path; the rate-limit-heuristic detection path described above may trigger a prompt after 2 attempts when the initial call + 1 retry both return empty output): prompt via the platform's structured-question tool with:
-   - Option A: "Defer remaining work - {N} findings pending (resume next session from current phase)" _(recommended)_
+   - Option A: "Defer remaining work - {N} findings pending (current conversation only)" _(recommended)_
    - Option B: "Skip remaining low-severity findings and continue" - only available when all pending findings are `low` severity; Critical/High/Medium findings cannot be skipped.
 
    If the user selects Option A (or only Option A is presented because Option B's condition is not met):
-   - Save pending work state to session memory - record the deferred findings, the interrupted step, and the resume point.
-   - Emit: `⚠️ Rate limit: deferring remaining work - {N} findings pending. Resume from the current phase using session memory as ground truth for deferred state.`
-   - Do NOT silently drop deferred findings. They must be re-processed in the next session.
+   - When the platform memory surface is available, write the SMC-15 same-conversation payload to `/memories/session/rate-limit-deferred-{scope}.md`; record the deferred findings/work items, interrupted phase/step, and resume point.
+   - Emit: `⚠️ Rate limit: deferring remaining work - {N} findings pending. Resume from the current phase using the SMC-15 deferred state only in the current conversation; if the conversation ends or the payload is unavailable, re-enter the phase from durable plan/PR/issue context and re-process pending work.`
+   - Do NOT silently drop deferred findings. They must be re-processed from the SMC-15 payload in the current conversation, or from durable plan/PR/issue context if no payload exists.
 
    If the user selects Option B:
-   - Skip remaining low-severity findings, log them to session memory as intentionally skipped, and continue.
+   - Skip remaining low-severity findings, log them to the SMC-15 same-conversation payload as intentionally skipped when the memory surface is available, and continue.
 
 **Applies to**: ALL subagent calls (Code-Smith, Test-Writer, Code-Critic, Code-Review-Response, Refactor-Specialist, Doc-Keeper, Experience-Owner, and any other specialist).
 
