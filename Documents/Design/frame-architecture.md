@@ -1,8 +1,8 @@
 # Design: Frame Architecture for Pipeline Enforcement
 
-> **Status**: Draft V2 — revised after walking the model against four historical PRs (#411, #415 post-thin/fat; #286, #338 pre-thin/fat). Audit findings folded into vocabulary, port list, and decision log. Ready to shape umbrella + sub-issues.
+> **Status**: Living V2 design — revised after walking the model against four historical PRs (#411, #415 post-thin/fat; #286, #338 pre-thin/fat). Audit findings remain the target architecture; current shipped behavior now includes the first frame validator slice.
 >
-> **Author context**: Drafted in the Experience-Owner role during exploratory framing. No GitHub issue exists yet.
+> **Author context**: Originally drafted in the Experience-Owner role during exploratory framing. Subsequent sub-issue work updates current-state sections as behavior ships.
 
 ---
 
@@ -163,11 +163,15 @@ produces-credit: review.{adapter}.{timestamp}
 ---
 ```
 
-Frame validator runs at session startup (or as a lint step):
+The current frame validator ships as `.github/scripts/frame-validate.ps1`, backed by `.github/scripts/lib/frame-validate-core.ps1` and `.github/scripts/lib/frame-predicate-core.ps1`. `quick-validate.ps1` aggregates it as `FrameValidator`, so the validator passes or fails with the existing structural validation suite rather than adding a separate CI lane.
 
-- Every adapter's `provides` value must match a port file in `frame/ports/`.
-- Every port must have ≥1 work-adapter, exactly one auto-N/A adapter (where applicable), and exactly one explicit-skip adapter.
-- Asymmetry is a hard error.
+The first shipped validator slice is intentionally symmetry-only plus predicate parse-only:
+
+- Port names come from `frame/ports/*.yaml` filename stems. The YAML body is opaque to the validator.
+- Adapter discovery scans `agents/*.agent.md`, `agents/*.md` excluding `.agent.md`, `commands/*.md`, `skills/*/SKILL.md`, and direct `skills/*/adapters/*.md` files.
+- Every discovered adapter `provides:` value must match a `frame/ports/*.yaml` stem. A port with no adapter declaration is allowed in this slice; coverage strictness waits until adapter declarations and enforcement semantics are in place.
+- If `frame/ports/` is missing, adapter symmetry passes with informational detail and predicate parsing still runs.
+- Frontmatter handling is deliberately lightweight. It accepts the scalar, inline-list, indented-list, comment, and block-scalar forms used by adapter declarations, but it is not a full YAML parser.
 
 ### Three adapter types per port
 
@@ -190,7 +194,7 @@ The pre-PR hook independently verifies via the credit. Selection logic is never 
 
 ### `applies-when` predicate language
 
-Declarative DSL evaluated by the hook against:
+Target enforcement evaluates the declarative DSL against:
 
 - `git diff` against the merge target (file list, line counts, paths)
 - Repo signals (file patterns, surface markers)
@@ -205,7 +209,7 @@ applies-when: not changeset.touchesSource()
 applies-when: changeset.touches('docs/**') and changeset.behaviorChanged()
 ```
 
-The grammar is small and deterministic. The hook evaluates it; the agent does not.
+The grammar is small and deterministic. Current validation is parse-only: it accepts comparisons, logical `AND`/`OR`/`NOT`, grouped expressions, dotted identifiers, bare boolean identifiers such as `scope.isReReview`, and function-call predicates with literal arguments such as `changeset.touches('docs/**')`. It rejects malformed syntax but does not validate field existence, function existence, or type consistency; those semantic checks are deferred to the evaluator work. The target hook evaluates valid predicates; the agent does not.
 
 ---
 
@@ -447,7 +451,7 @@ Order is intentional but flexible — actual priority will shift based on audit-
 | # | Sub-issue | Deliverable | Depends on |
 |---|---|---|---|
 | 1 | **Audit-only credit ledger from existing markers + pipeline-metrics v3 schema** | Schema doc, port files (17), back-deriver script, audit report. No enforcement. | — |
-| 2 | Frame validator (lint/CI step) | Walks `frame/ports/*.yaml` and adapter frontmatter; fails CI on asymmetry (port has no adapter, adapter declares non-existent port). | #1 |
+| 2 | Frame validator (lint/CI step) | Walks `frame/ports/*.yaml` and adapter frontmatter; fails CI when an adapter declares a non-existent port and when `applies-when` cannot parse. Missing adapters for existing ports are allowed until coverage enforcement ships. | #1 |
 | 3 | Adapter declarations in skill/agent frontmatter | All current skills/agents declare `provides: <port>` and `applies-when` predicates. Validator (#2) passes. | #1, #2 |
 | 4 | Pre-PR hook (warn-only mode) | Hook exists, reads PR body's pipeline-metrics v3 block, posts a comment listing missing/failed/inconclusive credits. **Does not block.** | #1, #3 |
 | 5 | Reify `review` port end-to-end with input-integrity check | Code-Review-Response writes the v3 credit on judge completion; integrity check verifies pass-block durability (closes #411-style gap). | #4 |
