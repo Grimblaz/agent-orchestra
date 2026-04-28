@@ -30,17 +30,17 @@ The verifier decision tree is locked in lockstep with the test-time verifier stu
 
 ### Execution directive
 
-1. **Locate the handshake block.** Scan the dispatch prompt for the `<!-- subagent-env-handshake v1 -->` ... `<!-- /subagent-env-handshake -->` block. If absent or unparseable → **missing-handshake** branch.
+1. **Locate the handshake block.** Scan the dispatch prompt for the `<!-- subagent-env-handshake v1 -->` ... `<!-- /subagent-env-handshake -->` block. If absent or unparseable -> **missing-handshake** branch.
 2. **Live-verify via `Bash`.** Run (in order, capturing both output and exit code):
    - `git rev-parse HEAD`
    - `git rev-parse --abbrev-ref HEAD`
    - `pwd`
    - LF-normalized SHA-256 :12 of `git status --porcelain`
-   If **any** of these commands exits non-zero (covers git-binary-missing, outside-repo, permission errors uniformly), → **error** branch.
-3. **Check reserved values.** If `workspace_mode` in the handshake is `worktree`, → **error** branch (reserved in v1; v2 will define worktree verification).
+   If **any** of these commands exits non-zero (covers git-binary-missing, outside-repo, permission errors uniformly), -> **error** branch.
+3. **Check reserved values.** If `workspace_mode` in the handshake is `worktree`, -> **error** branch (reserved in v1; v2 will define worktree verification).
 4. **Compare.** Compare observed values to handshake values field-by-field for `parent_head`, `parent_branch`, `parent_cwd`, `parent_dirty_fingerprint`.
-   - All four equal → **match** branch.
-   - One or more diverge → **mismatch** branch.
+   - All four equal -> **match** branch.
+   - One or more diverge -> **mismatch** branch.
 
 ### Branch handlers
 
@@ -97,7 +97,7 @@ The Copilot-specific tool names in the shared body map to Claude Code equivalent
 | `#tool:vscode/askQuestions`                 | `AskUserQuestion`              |
 | `github/*` MCP operations                   | `gh` CLI via `Bash`            |
 | Subagent dispatch (`#tool:agent/runSubagent`) | `Agent` tool                   |
-| Code-Critic subagent dispatch               | `Agent` tool with `subagent_type: agent-orchestra:Code-Critic` |
+| Code-Critic subagent dispatch               | `Agent` tool with `subagent_type: code-critic` |
 | Session memory (`vscode/memory` at `/memories/session/plan-issue-{id}.md`) | Per `SMC-01`, Claude Code uses the durable GitHub issue comment with `<!-- plan-issue-{ID} -->` instead of a Claude-local plan cache |
 
 ## Plan persistence (Claude Code)
