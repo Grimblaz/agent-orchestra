@@ -106,6 +106,13 @@ function Get-FVAdapterFiles {
             if (Test-Path -LiteralPath $skillFile) {
                 $files.Add((Get-Item -LiteralPath $skillFile))
             }
+
+            $adaptersPath = Join-Path -Path $directory.FullName -ChildPath 'adapters'
+            if (Test-Path -LiteralPath $adaptersPath) {
+                foreach ($file in @(Get-ChildItem -LiteralPath $adaptersPath -Filter '*.md' -File)) {
+                    $files.Add($file)
+                }
+            }
         }
     }
 
@@ -119,12 +126,88 @@ function Get-FVAdapterFiles {
     return @($files.ToArray() | Sort-Object -Property FullName)
 }
 
+function Remove-FVYamlTrailingComment {
+    param([AllowNull()][string]$Value)
+
+    if ($null -eq $Value) { return '' }
+
+    $quote = [char]0
+    for ($index = 0; $index -lt $Value.Length; $index++) {
+        $character = $Value[$index]
+
+        if ($quote -ne [char]0) {
+            if ($quote -eq [char]34 -and $character -eq [char]92) {
+                $index++
+                continue
+            }
+
+            if ($character -eq $quote) {
+                if ($quote -eq [char]39 -and $index + 1 -lt $Value.Length -and $Value[$index + 1] -eq [char]39) {
+                    $index++
+                    continue
+                }
+
+                $quote = [char]0
+            }
+
+            continue
+        }
+
+        if ($character -eq [char]34 -or $character -eq [char]39) {
+            $quote = $character
+            continue
+        }
+
+        if ($character -eq [char]'#' -and ($index -eq 0 -or [char]::IsWhiteSpace($Value[$index - 1]))) {
+            return $Value.Substring(0, $index).TrimEnd()
+        }
+    }
+
+    return $Value.TrimEnd()
+}
+
+function ConvertFrom-FVYamlDoubleQuotedScalar {
+    param([Parameter(Mandatory)][string]$Value)
+
+    $builder = [System.Text.StringBuilder]::new()
+    $index = 0
+    while ($index -lt $Value.Length) {
+        $character = $Value[$index]
+        if ($character -eq [char]92 -and $index + 1 -lt $Value.Length) {
+            $next = $Value[$index + 1]
+            switch ([string]$next) {
+                '"' { [void]$builder.Append([char]34) }
+                '\' { [void]$builder.Append([char]92) }
+                '/' { [void]$builder.Append('/') }
+                'n' { [void]$builder.Append("`n") }
+                'r' { [void]$builder.Append("`r") }
+                't' { [void]$builder.Append("`t") }
+                default { [void]$builder.Append($next) }
+            }
+
+            $index += 2
+            continue
+        }
+
+        [void]$builder.Append($character)
+        $index++
+    }
+
+    return $builder.ToString()
+}
+
+function Test-FVYamlBlockScalarIndicator {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+
+    return [regex]::IsMatch($Value, '^[|>][+-]?$')
+}
+
 function ConvertFrom-FVYamlScalar {
     param([AllowNull()][string]$Value)
 
     if ($null -eq $Value) { return '' }
 
-    $trimmed = $Value.Trim()
+    $trimmed = (Remove-FVYamlTrailingComment -Value $Value).Trim()
     if ($trimmed.Length -lt 2) { return $trimmed }
 
     if ($trimmed.StartsWith("'") -and $trimmed.EndsWith("'")) {
@@ -132,7 +215,7 @@ function ConvertFrom-FVYamlScalar {
     }
 
     if ($trimmed.StartsWith('"') -and $trimmed.EndsWith('"')) {
-        return $trimmed.Substring(1, $trimmed.Length - 2).Replace('\\"', '"')
+        return (ConvertFrom-FVYamlDoubleQuotedScalar -Value $trimmed.Substring(1, $trimmed.Length - 2))
     }
 
     return $trimmed
@@ -141,7 +224,7 @@ function ConvertFrom-FVYamlScalar {
 function Split-FVInlineValues {
     param([Parameter(Mandatory)][string]$Value)
 
-    $trimmed = $Value.Trim()
+    $trimmed = (Remove-FVYamlTrailingComment -Value $Value).Trim()
     if ($trimmed -eq '[]') { return [string[]]@() }
 
     if (-not ($trimmed.StartsWith('[') -and $trimmed.EndsWith(']'))) {
@@ -236,8 +319,9 @@ function Get-FVProvidesDeclarationValues {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Value
     )
 
-    if ($Value.Length -gt 0) {
-        return [string[]]@(Split-FVInlineValues -Value $Value)
+    $normalizedValue = (Remove-FVYamlTrailingComment -Value $Value).Trim()
+    if ($normalizedValue.Length -gt 0) {
+        return [string[]]@(Split-FVInlineValues -Value $normalizedValue)
     }
 
     return [string[]]@(Get-FVIndentedListValues -Lines $Lines -StartIndex ($LineIndex + 1))
@@ -247,14 +331,15 @@ function Get-FVAppliesWhenDeclarationValue {
     param(
         [Parameter(Mandatory)][string[]]$Lines,
         [Parameter(Mandatory)][int]$LineIndex,
-        [Parameter(Mandatory)][string]$Value
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
     )
 
-    if ($Value -in @('|', '>')) {
+    $normalizedValue = (Remove-FVYamlTrailingComment -Value $Value).Trim()
+    if (Test-FVYamlBlockScalarIndicator -Value $normalizedValue) {
         return (Get-FVIndentedScalarValue -Lines $Lines -StartIndex ($LineIndex + 1))
     }
 
-    return (ConvertFrom-FVYamlScalar -Value $Value)
+    return (ConvertFrom-FVYamlScalar -Value $normalizedValue)
 }
 
 function Get-FVAdapterFrontmatter {

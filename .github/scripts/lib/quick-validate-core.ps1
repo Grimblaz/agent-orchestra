@@ -396,7 +396,8 @@ function Invoke-QuickValidate {
 
         foreach ($r in $results) {
             if ($r.Passed -eq $true) {
-                Write-Host "[PASS] $($r.Name)"
+                $detail = if (-not [string]::IsNullOrWhiteSpace($r.Detail)) { " — $($r.Detail)" } else { '' }
+                Write-Host "[PASS] $($r.Name)$detail"
             }
             elseif ($r.Passed -eq 'SKIP') {
                 Write-Host "[SKIP] $($r.Name) — $($r.Detail)"

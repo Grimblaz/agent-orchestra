@@ -356,6 +356,20 @@ function New-FVIdentifierNode {
     }
 }
 
+function New-FVCallNode {
+    param(
+        [Parameter(Mandatory)]$NameToken,
+        [AllowEmptyCollection()][object[]]$Arguments
+    )
+
+    return [PSCustomObject]@{
+        Kind      = 'Call'
+        Name      = $NameToken.Value
+        Arguments = [object[]]$Arguments
+        Position  = $NameToken.Position
+    }
+}
+
 function New-FVScalarLiteralNode {
     param(
         [Parameter(Mandatory)][string]$LiteralType,
@@ -544,7 +558,7 @@ function ConvertTo-FVPrimaryExpression {
             return $expression
         }
         'Identifier' {
-            return (ConvertTo-FVComparison -State $State)
+            return (ConvertTo-FVIdentifierExpression -State $State)
         }
         'LogicalOperator' {
             return (New-FVParseError -Position $current.Position -Message "Unexpected operator '$($current.Value)'.")
@@ -561,13 +575,96 @@ function ConvertTo-FVPrimaryExpression {
     }
 }
 
-function ConvertTo-FVComparison {
+function ConvertTo-FVIdentifierExpression {
     param([Parameter(Mandatory)]$State)
 
-    $leftToken = Move-FVToken -State $State
+    $identifierToken = Move-FVToken -State $State
+    $left = New-FVIdentifierNode -Token $identifierToken
+    $current = Get-FVCurrentToken -State $State
+
+    if ($current.Kind -eq 'LParen') {
+        $left = ConvertTo-FVCallExpression -State $State -NameToken $identifierToken
+        if (Test-FVParseError -Value $left) { return $left }
+
+        $current = Get-FVCurrentToken -State $State
+        if ($current.Kind -eq 'Comparator') {
+            return (New-FVParseError -Position $current.Position -Message 'Expected logical operator or end of predicate after function call.')
+        }
+    }
+
+    if ($current.Kind -eq 'Comparator') {
+        return (ConvertTo-FVComparison -State $State -Left $left)
+    }
+
+    return $left
+}
+
+function ConvertTo-FVCallExpression {
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)]$NameToken
+    )
+
+    $openToken = Move-FVToken -State $State
+    $arguments = [System.Collections.Generic.List[object]]::new()
+    $current = Get-FVCurrentToken -State $State
+
+    if ($current.Kind -eq 'RParen') {
+        $null = Move-FVToken -State $State
+        return (New-FVCallNode -NameToken $NameToken -Arguments $arguments.ToArray())
+    }
+
+    while ($true) {
+        $current = Get-FVCurrentToken -State $State
+        if ($current.Kind -eq 'EOF') {
+            return (New-FVParseError -Position $openToken.Position -Message "Unclosed '('.")
+        }
+
+        if ($current.Kind -in @('Comma', 'RParen')) {
+            return (New-FVParseError -Position $current.Position -Message 'Expected literal in function call.')
+        }
+
+        $argument = ConvertTo-FVLiteral -State $State -Context 'Expected literal in function call.'
+        if (Test-FVParseError -Value $argument) { return $argument }
+        $arguments.Add($argument)
+
+        $current = Get-FVCurrentToken -State $State
+        if ($current.Kind -eq 'Comma') {
+            $commaToken = Move-FVToken -State $State
+            $next = Get-FVCurrentToken -State $State
+            if ($next.Kind -eq 'EOF') {
+                return (New-FVParseError -Position $openToken.Position -Message "Unclosed '('.")
+            }
+
+            if ($next.Kind -eq 'RParen') {
+                return (New-FVParseError -Position $commaToken.Position -Message "Expected literal after ','.")
+            }
+
+            continue
+        }
+
+        if ($current.Kind -eq 'RParen') {
+            $null = Move-FVToken -State $State
+            return (New-FVCallNode -NameToken $NameToken -Arguments $arguments.ToArray())
+        }
+
+        if ($current.Kind -eq 'EOF') {
+            return (New-FVParseError -Position $openToken.Position -Message "Unclosed '('.")
+        }
+
+        return (New-FVParseError -Position $current.Position -Message "Expected ',' or ')' in function call.")
+    }
+}
+
+function ConvertTo-FVComparison {
+    param(
+        [Parameter(Mandatory)]$State,
+        [Parameter(Mandatory)]$Left
+    )
+
     $current = Get-FVCurrentToken -State $State
     if ($current.Kind -ne 'Comparator') {
-        return (New-FVParseError -Position $current.Position -Message "Expected comparator after identifier '$($leftToken.Value)'.")
+        return (New-FVParseError -Position $current.Position -Message "Expected comparator after identifier '$($Left.Name)'.")
     }
 
     $operatorToken = Move-FVToken -State $State
@@ -580,7 +677,7 @@ function ConvertTo-FVComparison {
         return $literal
     }
 
-    return (New-FVComparisonNode -Left (New-FVIdentifierNode -Token $leftToken) -Operator $operatorToken.Value -Right $literal -Position $operatorToken.Position)
+    return (New-FVComparisonNode -Left $Left -Operator $operatorToken.Value -Right $literal -Position $operatorToken.Position)
 }
 
 function ConvertTo-FVLiteral {
@@ -706,6 +803,26 @@ function Test-FVExpressionStructure {
         'Not' {
             $operandResult = Test-FVExpressionStructure -Node $Node.Operand
             if (Test-FVParseError -Value $operandResult) { return $operandResult }
+            return $true
+        }
+        'Identifier' {
+            if ([string]::IsNullOrWhiteSpace($Node.Name)) {
+                return (New-FVParseError -Position $Node.Position -Message 'Internal parser error: identifier name is required.')
+            }
+
+            return $true
+        }
+        'Call' {
+            if ([string]::IsNullOrWhiteSpace($Node.Name)) {
+                return (New-FVParseError -Position $Node.Position -Message 'Internal parser error: function name is required.')
+            }
+
+            foreach ($argument in @($Node.Arguments)) {
+                if ($null -eq $argument -or $argument.Kind -ne 'Literal') {
+                    return (New-FVParseError -Position $Node.Position -Message 'Internal parser error: function arguments must be literals.')
+                }
+            }
+
             return $true
         }
         default {

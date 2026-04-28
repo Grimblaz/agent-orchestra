@@ -146,6 +146,19 @@ None.
             return $path
         }
 
+        $script:AddFrameAdapterRaw = {
+            param(
+                [Parameter(Mandatory)][string]$Root,
+                [Parameter(Mandatory)][string]$RelativePath,
+                [Parameter(Mandatory)][string]$Content
+            )
+
+            $path = & $script:JoinFrameValidateTestPath -Root $Root -RelativePath $RelativePath
+            New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+            Set-Content -Path $path -Value $Content -Encoding utf8NoBOM
+            return $path
+        }
+
         $script:NewQuickValidateSupportFixture = {
             param([Parameter(Mandatory)][string]$Root)
 
@@ -269,6 +282,67 @@ None.
             $result.Detail | Should -Be ''
         }
 
+        It 'accepts valid YAML scalar comments, inline arrays, indented lists, block scalars, and escaped double quotes' {
+            $root = & $script:NewFrameValidateFixture -Ports @('experience', 'review')
+
+            & $script:AddFrameAdapterRaw -Root $root -RelativePath 'agents\commented-scalar.agent.md' -Content @'
+---
+name: commented-scalar
+provides: review # comment
+applies-when: changeset.totalLines < 200 # comment
+---
+
+# Commented Scalar
+'@ | Out-Null
+
+            & $script:AddFrameAdapterRaw -Root $root -RelativePath 'commands\inline-array.md' -Content @'
+---
+name: inline-array
+provides: [experience, review] # comment
+applies-when: "port == \"experience\""
+---
+
+# Inline Array
+'@ | Out-Null
+
+            & $script:AddFrameAdapterRaw -Root $root -RelativePath 'skills\test-skill\SKILL.md' -Content @'
+---
+name: test-skill
+description: Test skill. Use when validating frame fixtures. DO NOT USE FOR: production.
+provides: # comment
+  - experience
+  - review # comment
+applies-when: >-
+  changeset.touches('docs/**') and changeset.behaviorChanged()
+---
+
+# Test Skill
+
+## Gotchas
+
+None.
+'@ | Out-Null
+
+            & $script:AddFrameAdapterRaw -Root $root -RelativePath 'skills\test-skill\adapters\literal-block.md' -Content @'
+---
+name: literal-block
+provides: experience
+applies-when: |+
+  not changeset.touchesSource()
+---
+
+# Literal Block
+'@ | Out-Null
+
+            $result = Invoke-FrameValidate -RootPath $root
+
+            & $script:AssertAggregateResult -Result $result -ExpectedPassCount 2 -ExpectedFailCount 0 -ExpectedExitCode 0
+            foreach ($check in @($result.Results)) {
+                $check.Passed | Should -BeTrue
+                $check.Detail | Should -Be ''
+            }
+        }
+
         It 'fails a malformed predicate for <Case>' -ForEach @(
             @{
                 Case      = 'trailing operator'
@@ -371,6 +445,60 @@ None.
             $predicate.Detail | Should -Match 'agents/missing-catalog\.agent\.md'
             $predicate.Detail | Should -Match ([regex]::Escape("port == 'experience' AND"))
         }
+
+        It 'reports a comment-only applies-when as a file-specific predicate parse error' {
+            $root = & $script:NewFrameValidateFixture -Ports @('experience')
+            & $script:AddFrameAdapterRaw -Root $root -RelativePath 'agents\comment-only.agent.md' -Content @'
+---
+name: comment-only
+provides: experience
+applies-when: # TODO
+---
+
+# Comment Only
+'@ | Out-Null
+
+            $result = Invoke-FrameValidate -RootPath $root
+
+            & $script:AssertAggregateResult -Result $result -ExpectedPassCount 1 -ExpectedFailCount 1 -ExpectedExitCode 1
+            $symmetry = $result.Results | Where-Object { $_.Name -eq 'AdapterSymmetry' }
+            $predicate = $result.Results | Where-Object { $_.Name -eq 'PredicateParse' }
+
+            & $script:AssertCheckResult -Result $symmetry -ExpectedName 'AdapterSymmetry'
+            $symmetry.Passed | Should -BeTrue
+            $symmetry.Detail | Should -Be ''
+
+            & $script:AssertCheckResult -Result $predicate -ExpectedName 'PredicateParse'
+            $predicate.Passed | Should -BeFalse
+            $predicate.Detail | Should -Match '1 applies-when parse error'
+            $predicate.Detail | Should -Match 'agents/comment-only\.agent\.md'
+            $predicate.Detail | Should -Match ([regex]::Escape("applies-when ''; parse error at position 0: Predicate is required."))
+            $predicate.Detail | Should -Not -Match 'Cannot bind argument to parameter'
+        }
+
+        It 'scans skill adapter variant files for malformed declarations' {
+            $root = & $script:NewFrameValidateFixture -Ports @('experience')
+            & $script:AddFrameAdapterRaw -Root $root -RelativePath 'skills\test-skill\adapters\broken-variant.md' -Content @'
+---
+name: broken-variant
+provides: missing-port
+applies-when: port ==
+---
+
+# Broken Variant
+'@ | Out-Null
+
+            $result = Invoke-FrameValidate -RootPath $root
+
+            & $script:AssertAggregateResult -Result $result -ExpectedPassCount 0 -ExpectedFailCount 2 -ExpectedExitCode 1
+            $symmetry = $result.Results | Where-Object { $_.Name -eq 'AdapterSymmetry' }
+            $predicate = $result.Results | Where-Object { $_.Name -eq 'PredicateParse' }
+
+            $symmetry.Detail | Should -Match 'skills/test-skill/adapters/broken-variant\.md'
+            $symmetry.Detail | Should -Match "provides 'missing-port'"
+            $predicate.Detail | Should -Match 'skills/test-skill/adapters/broken-variant\.md'
+            $predicate.Detail | Should -Match ([regex]::Escape('port =='))
+        }
     }
 
     Context 'Invoke-QuickValidate integration' {
@@ -404,6 +532,28 @@ None.
             $result.SkipCount | Should -Be 0
             $result.TotalCount | Should -Be @($result.Results).Count
             $result.PassCount | Should -Be ($result.TotalCount - 1)
+        }
+
+        It 'prints detail for a passing frame validator check when adapter symmetry is skipped' {
+            Mock Get-Module { return @{ Name = 'PSScriptAnalyzer'; Version = '1.22.0' } } -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
+
+            $root = & $script:NewFrameValidateFixture -WithoutPortCatalog
+            $support = & $script:NewQuickValidateSupportFixture -Root $root
+
+            $result = Invoke-QuickValidate `
+                -RootPath $root `
+                -GuidanceComplexityScriptPath $support.GuidanceComplexityScriptPath `
+                -PSScriptAnalyzerSettingsPath $support.PSScriptAnalyzerSettingsPath `
+                -ScriptsPath $support.ScriptsPath `
+                -InformationVariable infoOutput
+
+            $frameValidator = @($result.Results | Where-Object { $_.Name -eq 'FrameValidator' })
+            $frameValidator | Should -HaveCount 1
+            $frameValidator[0].Passed | Should -BeTrue
+            $frameValidator[0].Detail | Should -Match 'AdapterSymmetry: frame/ports missing; adapter symmetry skipped'
+
+            $output = ($infoOutput | ForEach-Object { [string]$_.MessageData }) -join "`n"
+            $output | Should -Match '\[PASS\] FrameValidator.*adapter symmetry skipped'
         }
     }
 }

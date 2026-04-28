@@ -188,6 +188,29 @@ Describe 'ConvertTo-FVPredicate' -Tag 'unit' {
             $values | Should -Contain 'metadata.priority'
         }
 
+        It 'accepts documented parse-only frame DSL predicate <Predicate>' -ForEach @(
+            @{ Predicate = 'scope.isReReview'; ExpectedKinds = @('Identifier'); ExpectedValues = @('scope.isReReview') }
+            @{ Predicate = "changeset.touches('src/ui/**')"; ExpectedKinds = @('Call', 'Literal'); ExpectedValues = @('changeset.touches', 'src/ui/**') }
+            @{ Predicate = 'not changeset.touchesSource()'; ExpectedKinds = @('Not', 'Call'); ExpectedValues = @('changeset.touchesSource') }
+            @{ Predicate = "changeset.touches('docs/**') and changeset.behaviorChanged()"; ExpectedKinds = @('Logical', 'Call'); ExpectedValues = @('AND', 'changeset.touches', 'docs/**', 'changeset.behaviorChanged') }
+        ) {
+            param($Predicate, $ExpectedKinds, $ExpectedValues)
+
+            $ast = ConvertTo-FVPredicate -Predicate $Predicate
+
+            & $script:AssertAst -Result $ast
+            $kinds = & $script:GetAstKinds -Node $ast
+            $values = & $script:GetAstScalarValues -Node $ast
+
+            foreach ($expectedKind in $ExpectedKinds) {
+                $kinds | Should -Contain $expectedKind
+            }
+
+            foreach ($expectedValue in $ExpectedValues) {
+                $values | Should -Contain $expectedValue
+            }
+        }
+
         It 'does not perform semantic field validation in parse-only mode' {
             $ast = ConvertTo-FVPredicate -Predicate "unknown.future_field == 'anything'"
 
@@ -197,6 +220,17 @@ Describe 'ConvertTo-FVPredicate' -Tag 'unit' {
 
             $kinds | Should -Contain 'Comparison'
             $values | Should -Contain 'unknown.future_field'
+        }
+
+        It 'does not perform semantic function validation in parse-only mode' {
+            $ast = ConvertTo-FVPredicate -Predicate "unknown.futureFunction('anything')"
+
+            & $script:AssertAst -Result $ast
+            $kinds = & $script:GetAstKinds -Node $ast
+            $values = & $script:GetAstScalarValues -Node $ast
+
+            $kinds | Should -Contain 'Call'
+            $values | Should -Contain 'unknown.futureFunction'
         }
 
         It 'accepts <LiteralType> literals' -ForEach @(
