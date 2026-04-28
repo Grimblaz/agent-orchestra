@@ -13,6 +13,7 @@
       Test F – Calibration + stale issue tracking artifact   → reports only the stale issue artifact
       Test G – Calibration + stale branch                    → still reports the stale branch
     T2/T3/T4/T11 – Current no-upstream claude/* worktree detection and fail-open behavior
+    T1/T3/T4b/T5/T9/T10/T13 – Sibling worktree detection, fail-open behavior, and command placement
 
     Tests A-C cover the repo-root resolution contract after env var removal
     (v2.0.0 — the wrapper now resolves repo root via $PSScriptRoot). Tests
@@ -97,11 +98,68 @@ function Get-MockConfigValue {
     return $null
 }
 
+function Normalize-MockPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return '' }
+    return ($Path -replace '\\', '/').TrimEnd('/').ToLowerInvariant()
+}
+
+function Get-MockPathConfigValue {
+    param(
+        [string]$Name,
+        [string]$Path
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $null }
+
+    $pathConfigs = Get-MockConfigValue 'path-configs'
+    if ($null -eq $pathConfigs) { return $null }
+
+    $normalizedPath = Normalize-MockPath $Path
+    foreach ($entry in $pathConfigs.PSObject.Properties) {
+        if ((Normalize-MockPath $entry.Name) -eq $normalizedPath) {
+            $property = $entry.Value.PSObject.Properties[$Name]
+            if ($null -ne $property) { return $property.Value }
+            return $null
+        }
+    }
+
+    return $null
+}
+
+function Get-MockConfigValueForPath {
+    param(
+        [string]$Name,
+        [string]$Path
+    )
+
+    $pathValue = Get-MockPathConfigValue -Name $Name -Path $Path
+    if ($null -ne $pathValue) { return $pathValue }
+
+    return Get-MockConfigValue $Name
+}
+
+$originalArgs = @($a)
+$gitWorkDir = $null
+if ($a.Count -ge 3 -and $a[0] -eq '-C') {
+    $gitWorkDir = $a[1]
+    $a = @($a[2..($a.Count - 1)])
+}
+
 $callLogPath = Join-Path $PSScriptRoot 'git-mock-calls.log'
-($a -join "`t") | Add-Content -Path $callLogPath -Encoding UTF8
+($originalArgs -join "`t") | Add-Content -Path $callLogPath -Encoding UTF8
+
+if ($a.Count -ge 3 -and $a[0] -eq 'worktree' -and $a[1] -eq 'list' -and $a[2] -eq '--porcelain') {
+    $exitValue = Get-MockConfigValue 'worktree-list-exit'
+    if ($null -eq $exitValue) { $exitValue = 0 }
+    $val = Get-MockConfigValue 'worktree-list-porcelain'
+    if ($null -ne $val) { Write-Output $val }
+    exit ([int]$exitValue)
+}
 
 if ($a.Count -ge 2 -and $a[0] -eq 'branch' -and $a[1] -eq '--show-current') {
-    $val = $config.'branch--show-current'
+    $val = Get-MockConfigValueForPath -Name 'branch--show-current' -Path $gitWorkDir
     if ($null -ne $val) { Write-Output $val }
     exit 0
 }
@@ -113,13 +171,13 @@ if ($a.Count -ge 2 -and $a[0] -eq 'symbolic-ref' -and $a[1] -eq 'refs/remotes/or
 }
 
 if ($a.Count -ge 2 -and $a[0] -eq 'symbolic-ref' -and $a[1] -eq 'HEAD') {
-    $val = Get-MockConfigValue 'symbolic-ref-HEAD'
+    $val = Get-MockConfigValueForPath -Name 'symbolic-ref-HEAD' -Path $gitWorkDir
     if ($null -ne $val) { Write-Output $val; exit 0 }
     exit 128
 }
 
-if ($a.Count -ge 3 -and $a[0] -eq 'config' -and $a[1] -eq '--get' -and $a[2] -match '^branch\..+\.remote$') {
-    $val = Get-MockConfigValue "config-$($a[2])"
+if ($a.Count -ge 3 -and $a[0] -eq 'config' -and $a[1] -eq '--get' -and $a[2] -match '^branch\..+\.(remote|merge)$') {
+    $val = Get-MockConfigValueForPath -Name "config-$($a[2])" -Path $gitWorkDir
     if ($null -ne $val) { Write-Output $val; exit 0 }
     exit 1
 }
@@ -133,9 +191,10 @@ if ($a.Count -ge 4 -and $a[0] -eq 'show-ref' -and $a[1] -eq '--verify' -and $a[2
 }
 
 if ($a.Count -ge 3 -and $a[0] -eq 'rev-parse' -and $a[1] -eq '--abbrev-ref' -and $a[2] -eq '@{u}') {
-    $upstreamExit = if ($null -ne $config.'rev-parse-exit') { [int]$config.'rev-parse-exit' } else { 128 }
+    $configuredExit = Get-MockConfigValueForPath -Name 'rev-parse-exit' -Path $gitWorkDir
+    $upstreamExit = if ($null -ne $configuredExit) { [int]$configuredExit } else { 128 }
     if ($upstreamExit -eq 0) {
-        $val = $config.'rev-parse-upstream'
+        $val = Get-MockConfigValueForPath -Name 'rev-parse-upstream' -Path $gitWorkDir
         if ($null -ne $val) { Write-Output $val }
         exit 0
     }
@@ -145,7 +204,8 @@ if ($a.Count -ge 3 -and $a[0] -eq 'rev-parse' -and $a[1] -eq '--abbrev-ref' -and
 if ($a.Count -ge 4 -and $a[0] -eq 'ls-remote' -and $a[1] -eq '--heads' -and $a[2] -eq 'origin') {
     $pattern = $a[3]
     $exactKey = "ls-remote-$pattern"
-    if ($null -ne $config.$exactKey) { Write-Output $config.$exactKey; exit 0 }
+    $exactValue = Get-MockConfigValue $exactKey
+    if ($null -ne $exactValue) { Write-Output $exactValue; exit 0 }
     foreach ($prop in $config.PSObject.Properties) {
         if ($prop.Name -like 'ls-remote-*') {
             $keyPattern = $prop.Name.Substring('ls-remote-'.Length)
@@ -172,8 +232,8 @@ if ($a.Count -ge 1 -and $a[0] -eq 'fetch') {
 if ($a.Count -ge 4 -and $a[0] -eq 'merge-base' -and $a[1] -eq '--is-ancestor') {
     $candidateRef = $a[2]
     $targetRef = $a[3]
-    $exitValue = Get-MockConfigValue "merge-base-$candidateRef-$targetRef"
-    if ($null -eq $exitValue) { $exitValue = Get-MockConfigValue "merge-base-$candidateRef" }
+    $exitValue = Get-MockConfigValueForPath -Name "merge-base-$candidateRef-$targetRef" -Path $gitWorkDir
+    if ($null -eq $exitValue) { $exitValue = Get-MockConfigValueForPath -Name "merge-base-$candidateRef" -Path $gitWorkDir }
     if ($null -eq $exitValue) { $exitValue = Get-MockConfigValue 'merge-base-exit' }
     if ($null -eq $exitValue) { $exitValue = 1 }
     exit ([int]$exitValue)
@@ -295,6 +355,31 @@ exit $LASTEXITCODE
             param([Parameter(Mandatory)][string]$Text)
 
             return [System.Convert]::ToHexString([System.Text.Encoding]::UTF8.GetBytes($Text))
+        }
+
+        $script:ToPorcelainPath = {
+            param([Parameter(Mandatory)][string]$Path)
+
+            return ([System.IO.Path]::GetFullPath($Path)).Replace('\', '/')
+        }
+
+        $script:NewWorktreeRecord = {
+            param(
+                [Parameter(Mandatory)][string]$Path,
+                [string]$Branch,
+                [string[]]$States = @()
+            )
+
+            $lines = @(
+                "worktree $Path",
+                'HEAD 0000000000000000000000000000000000000000'
+            )
+            if (-not [string]::IsNullOrWhiteSpace($Branch)) {
+                $lines += "branch refs/heads/$Branch"
+            }
+            $lines += $States
+
+            return $lines -join "`n"
         }
     }
 
@@ -516,6 +601,311 @@ exit $LASTEXITCODE
             $result.ExitCode | Should -Be 0
             $result.Output | Should -Match '^\{\s*\}$'
             $fetchCalls.Count | Should -Be 0
+        }
+    }
+
+    Context 'sibling worktree cleanup detection' {
+        It 'T1 AC2 surfaces a merged sibling claude worktree inside the fenced cleanup block' {
+            $workDir = Join-Path $TestDrive 'sibling-claude-merged-current'
+            $siblingDir = Join-Path $TestDrive 'sibling-claude-merged-other'
+            New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+            $branch = 'claude/foo-bar-12345'
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $siblingPath -Branch $branch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                 = 'main'
+                'symbolic-ref-origin-HEAD'             = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'              = $worktreeList
+                'show-ref-refs/remotes/origin/main'    = 0
+                'fetch-exit'                           = 0
+                "merge-base-$branch-refs/remotes/origin/main" = 0
+                'path-configs'                         = @{
+                    "$siblingPath" = @{
+                        'branch--show-current' = $branch
+                        'rev-parse-exit'       = 128
+                    }
+                }
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match 'Post-merge cleanup detected'
+            $context | Should -Match ([regex]::Escape($branch))
+            $context | Should -Match ([regex]::Escape($siblingPath))
+            $insideFence | Should -Match ([regex]::Escape("git worktree remove '$siblingPath'"))
+            $insideFence | Should -Match ([regex]::Escape("git branch -D '$branch'"))
+        }
+
+        It 'T3 AC3 leaves an unmerged sibling claude worktree unflagged' {
+            $workDir = Join-Path $TestDrive 'sibling-claude-unmerged-current'
+            $siblingDir = Join-Path $TestDrive 'sibling-claude-unmerged-other'
+            New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+            $branch = 'claude/in-flight-zyxwv'
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $siblingPath -Branch $branch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                 = 'main'
+                'symbolic-ref-origin-HEAD'             = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'              = $worktreeList
+                'show-ref-refs/remotes/origin/main'    = 0
+                'fetch-exit'                           = 0
+                "merge-base-$branch-refs/remotes/origin/main" = 1
+                'path-configs'                         = @{
+                    "$siblingPath" = @{
+                        'branch--show-current' = $branch
+                        'rev-parse-exit'       = 128
+                    }
+                }
+            }
+
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '^\{\s*\}$'
+        }
+
+        It 'T4b AC4 fails open for <CaseName> and preserves no-op output' -TestCases @(
+            @{ CaseName = 'worktree-list failure'; CaseKind = 'list-failure' }
+            @{ CaseName = 'missing branch line'; CaseKind = 'missing-branch' }
+        ) {
+            param(
+                [string]$CaseName,
+                [string]$CaseKind
+            )
+
+            $workDir = Join-Path $TestDrive ("sibling-fail-open-$($CaseKind)")
+            $siblingDir = Join-Path $TestDrive ("sibling-fail-open-$($CaseKind)-other")
+            New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+
+            $gitConfig = @{
+                'branch--show-current'     = 'main'
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+            }
+            if ($CaseKind -eq 'list-failure') {
+                $gitConfig['worktree-list-exit'] = 128
+            }
+            else {
+                $gitConfig['worktree-list-porcelain'] = @(
+                    (& $script:NewWorktreeRecord -Path $currentPath -Branch 'main'),
+                    (& $script:NewWorktreeRecord -Path $siblingPath -Branch '')
+                ) -join "`n`n"
+            }
+
+            $result = $null
+            $exception = $null
+            try {
+                $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig $gitConfig
+            }
+            catch {
+                $exception = $_
+            }
+
+            $exception | Should -BeNullOrEmpty
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match '^\{\s*\}$'
+        }
+
+        It 'T5 AC8 keeps sibling cleanup commands in the fenced block while current-worktree commands stay outside' {
+            $workDir = Join-Path $TestDrive 'sibling-placement-current'
+            $siblingDir = Join-Path $TestDrive 'sibling-placement-other'
+            New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+            $currentBranch = 'claude/current-merged-abcde'
+            $siblingBranch = 'claude/sibling-merged-abcde'
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch $currentBranch),
+                (& $script:NewWorktreeRecord -Path $siblingPath -Branch $siblingBranch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                 = $currentBranch
+                'symbolic-ref-origin-HEAD'             = 'refs/remotes/origin/main'
+                'rev-parse-exit'                       = 128
+                'worktree-list-porcelain'              = $worktreeList
+                'show-ref-refs/remotes/origin/main'    = 0
+                'fetch-exit'                           = 0
+                "merge-base-$currentBranch-refs/remotes/origin/main" = 0
+                "merge-base-$siblingBranch-refs/remotes/origin/main" = 0
+                'path-configs'                         = @{
+                    "$siblingPath" = @{
+                        'branch--show-current' = $siblingBranch
+                        'rev-parse-exit'       = 128
+                    }
+                }
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $outsideFence = & $script:RemoveFencedPowerShellBlocks -Context $context
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $outsideFence | Should -Match ([regex]::Escape($currentBranch))
+            $outsideFence | Should -Match '(?s)git worktree remove.*git branch -D'
+            $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$currentBranch'"))
+            $insideFence | Should -Match ([regex]::Escape("git worktree remove '$siblingPath'"))
+            $insideFence | Should -Match ([regex]::Escape("git branch -D '$siblingBranch'"))
+            $outsideFence | Should -Not -Match ([regex]::Escape("git worktree remove '$siblingPath'"))
+            $outsideFence | Should -Not -Match ([regex]::Escape("git branch -D '$siblingBranch'"))
+        }
+
+        It 'T9 D3 handles locked and prunable records while skipping bare and detached records' {
+            $workDir = Join-Path $TestDrive 'sibling-porcelain-edge-current'
+            $lockedDir = Join-Path $TestDrive 'sibling-porcelain-edge-locked'
+            $prunableDir = Join-Path $TestDrive 'sibling-porcelain-edge-prunable'
+            $bareDir = Join-Path $TestDrive 'sibling-porcelain-edge-bare'
+            $detachedDir = Join-Path $TestDrive 'sibling-porcelain-edge-detached'
+            New-Item -ItemType Directory -Path $workDir, $lockedDir, $prunableDir, $bareDir, $detachedDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $lockedPath = & $script:ToPorcelainPath -Path $lockedDir
+            $prunablePath = & $script:ToPorcelainPath -Path $prunableDir
+            $barePath = & $script:ToPorcelainPath -Path $bareDir
+            $detachedPath = & $script:ToPorcelainPath -Path $detachedDir
+            $lockedBranch = 'claude/locked-record-abcde'
+            $prunableBranch = 'claude/prunable-record-abcde'
+            $bareBranch = 'claude/bare-record-abcde'
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch 'main'),
+                (& $script:NewWorktreeRecord -Path $lockedPath -Branch $lockedBranch -States @('locked checked out by maintainer')),
+                (& $script:NewWorktreeRecord -Path $prunablePath -Branch $prunableBranch -States @('prunable gitdir file points to missing checkout')),
+                (& $script:NewWorktreeRecord -Path $barePath -Branch $bareBranch -States @('bare')),
+                (& $script:NewWorktreeRecord -Path $detachedPath -Branch '' -States @('detached'))
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                 = 'main'
+                'symbolic-ref-origin-HEAD'             = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'              = $worktreeList
+                'show-ref-refs/remotes/origin/main'    = 0
+                'fetch-exit'                           = 0
+                'merge-base-exit'                      = 0
+                'path-configs'                         = @{
+                    "$lockedPath" = @{
+                        'branch--show-current' = $lockedBranch
+                        'rev-parse-exit'       = 128
+                    }
+                    "$prunablePath" = @{
+                        'branch--show-current' = $prunableBranch
+                        'rev-parse-exit'       = 128
+                    }
+                    "$barePath" = @{
+                        'branch--show-current' = $bareBranch
+                        'rev-parse-exit'       = 128
+                    }
+                }
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($lockedBranch))
+            $context | Should -Match ([regex]::Escape($prunableBranch))
+            $context | Should -Match 'locked'
+            $context | Should -Match 'checked out by maintainer'
+            $insideFence | Should -Match ([regex]::Escape("git worktree remove --force '$lockedPath'"))
+            $insideFence | Should -Match ([regex]::Escape("git branch -D '$lockedBranch'"))
+            $insideFence | Should -Match ([regex]::Escape("git worktree remove '$prunablePath'"))
+            $insideFence | Should -Not -Match ([regex]::Escape("git worktree remove --force '$prunablePath'"))
+            $insideFence | Should -Match ([regex]::Escape("git branch -D '$prunableBranch'"))
+            $context | Should -Not -Match ([regex]::Escape($bareBranch))
+            $context | Should -Not -Match ([regex]::Escape($detachedPath))
+        }
+
+        It 'T10 D8 normalizes slash direction and drive-letter case so the current worktree record is not duplicated as a sibling' {
+            $workDir = Join-Path $TestDrive 'sibling-normalized-current'
+            $siblingDir = Join-Path $TestDrive 'sibling-normalized-other'
+            New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+            if ($currentPath -match '^([A-Za-z]):/(.*)$') {
+                $drive = if ($Matches[1] -ceq $Matches[1].ToUpperInvariant()) { $Matches[1].ToLowerInvariant() } else { $Matches[1].ToUpperInvariant() }
+                $currentRecordPath = '{0}:\{1}' -f $drive, ($Matches[2] -replace '/', '\')
+            }
+            else {
+                $currentRecordPath = $currentPath -replace '/', '\'
+            }
+            $currentBranch = 'claude/current-normalized-abcde'
+            $siblingBranch = 'claude/sibling-normalized-abcde'
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $currentRecordPath -Branch $currentBranch),
+                (& $script:NewWorktreeRecord -Path $siblingPath -Branch $siblingBranch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                 = $currentBranch
+                'symbolic-ref-origin-HEAD'             = 'refs/remotes/origin/main'
+                'rev-parse-exit'                       = 128
+                'worktree-list-porcelain'              = $worktreeList
+                'show-ref-refs/remotes/origin/main'    = 0
+                'fetch-exit'                           = 0
+                "merge-base-$currentBranch-refs/remotes/origin/main" = 0
+                "merge-base-$siblingBranch-refs/remotes/origin/main" = 0
+                'path-configs'                         = @{
+                    "$siblingPath" = @{
+                        'branch--show-current' = $siblingBranch
+                        'rev-parse-exit'       = 128
+                    }
+                }
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $insideFence | Should -Match ([regex]::Escape("git worktree remove '$siblingPath'"))
+            $insideFence | Should -Match ([regex]::Escape("git branch -D '$siblingBranch'"))
+            $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$currentBranch'"))
+        }
+
+        It 'T13 AC11 surfaces a sibling feature issue branch whose upstream remote branch is gone while the current worktree remains active' {
+            $workDir = Join-Path $TestDrive 'sibling-upstream-deleted-current'
+            $siblingDir = Join-Path $TestDrive 'sibling-upstream-deleted-other'
+            New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
+            $currentPath = & $script:ToPorcelainPath -Path $workDir
+            $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+            $currentBranch = 'claude/current-active-abcde'
+            $siblingBranch = 'feature/issue-333-remote-deleted'
+            $worktreeList = @(
+                (& $script:NewWorktreeRecord -Path $currentPath -Branch $currentBranch),
+                (& $script:NewWorktreeRecord -Path $siblingPath -Branch $siblingBranch)
+            ) -join "`n`n"
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                 = $currentBranch
+                'symbolic-ref-origin-HEAD'             = 'refs/remotes/origin/main'
+                'rev-parse-exit'                       = 128
+                'worktree-list-porcelain'              = $worktreeList
+                'show-ref-refs/remotes/origin/main'    = 0
+                'fetch-exit'                           = 0
+                "merge-base-$currentBranch-refs/remotes/origin/main" = 1
+                "ls-remote-$siblingBranch"             = ''
+                'path-configs'                         = @{
+                    "$siblingPath" = @{
+                        'branch--show-current'                 = $siblingBranch
+                        'rev-parse-exit'                       = 0
+                        'rev-parse-upstream'                   = "origin/$siblingBranch"
+                        "config-branch.$siblingBranch.remote" = 'origin'
+                        "config-branch.$siblingBranch.merge"  = "refs/heads/$siblingBranch"
+                    }
+                }
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $context | Should -Match ([regex]::Escape($siblingBranch))
+            $context | Should -Not -Match ([regex]::Escape($currentBranch))
+            $insideFence | Should -Match ([regex]::Escape("git worktree remove '$siblingPath'"))
+            $insideFence | Should -Match ([regex]::Escape("git branch -D '$siblingBranch'"))
         }
     }
 

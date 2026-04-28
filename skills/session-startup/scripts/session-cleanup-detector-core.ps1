@@ -116,6 +116,205 @@ function Invoke-SCDNonInteractiveFetch {
     catch {}
 }
 
+function ConvertTo-SCDNormalizedPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return ''
+    }
+
+    try {
+        return [System.IO.Path]::GetFullPath($Path).Replace('\', '/').TrimEnd('/')
+    }
+    catch {
+        return ''
+    }
+}
+
+function Test-SCDNoUpstreamBranchCandidate {
+    param(
+        [Parameter(Mandatory)]
+        [string]$BranchName,
+
+        [Parameter(Mandatory)]
+        [string[]]$Prefixes
+    )
+
+    foreach ($branchPrefix in $Prefixes) {
+        if ($BranchName.StartsWith($branchPrefix, [System.StringComparison]::Ordinal)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-SCDWorktreeRecords {
+    param([string[]]$PorcelainLines)
+
+    $porcelainText = ($PorcelainLines | Where-Object { $null -ne $_ }) -join "`n"
+    $porcelainText = $porcelainText -replace "`r`n", "`n" -replace "`r", "`n"
+    if ([string]::IsNullOrWhiteSpace($porcelainText)) {
+        return @()
+    }
+
+    $records = @()
+    foreach ($recordText in [regex]::Split($porcelainText.Trim(), "`n\s*`n")) {
+        try {
+            $recordLines = @($recordText -split "`n" | ForEach-Object { $_.TrimEnd() })
+            $worktreeLine = $recordLines | Where-Object { $_ -like 'worktree *' } | Select-Object -First 1
+            if ([string]::IsNullOrWhiteSpace($worktreeLine)) {
+                continue
+            }
+
+            $worktreePath = $worktreeLine.Substring('worktree '.Length)
+            if ([string]::IsNullOrWhiteSpace($worktreePath)) {
+                continue
+            }
+
+            $branchLine = $recordLines | Where-Object { $_ -like 'branch *' } | Select-Object -First 1
+            $branchName = ''
+            if (-not [string]::IsNullOrWhiteSpace($branchLine)) {
+                $branchName = $branchLine.Substring('branch '.Length)
+                if ($branchName.StartsWith('refs/heads/', [System.StringComparison]::Ordinal)) {
+                    $branchName = $branchName.Substring('refs/heads/'.Length)
+                }
+            }
+
+            $lockedLine = $recordLines | Where-Object { $_ -eq 'locked' -or $_ -like 'locked *' } | Select-Object -First 1
+            $prunableLine = $recordLines | Where-Object { $_ -eq 'prunable' -or $_ -like 'prunable *' } | Select-Object -First 1
+
+            $lockReason = ''
+            if (-not [string]::IsNullOrWhiteSpace($lockedLine) -and $lockedLine.Length -gt 'locked'.Length) {
+                $lockReason = $lockedLine.Substring('locked '.Length)
+            }
+
+            $records += @{
+                WorktreePath = $worktreePath
+                BranchName   = $branchName
+                IsBare       = [bool]($recordLines | Where-Object { $_ -eq 'bare' -or $_ -like 'bare *' } | Select-Object -First 1)
+                IsDetached   = [bool]($recordLines | Where-Object { $_ -eq 'detached' -or $_ -like 'detached *' } | Select-Object -First 1)
+                IsLocked     = -not [string]::IsNullOrWhiteSpace($lockedLine)
+                LockReason   = $lockReason
+                IsPrunable   = -not [string]::IsNullOrWhiteSpace($prunableLine)
+            }
+        }
+        catch {}
+    }
+
+    return $records
+}
+
+function Get-SCDSiblingWorktreeCleanups {
+    param(
+        [Parameter(Mandatory)]
+        [string]$CurrentWorktreePath,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch,
+
+        [Parameter(Mandatory)]
+        [string[]]$NoUpstreamBranchPrefixes
+    )
+
+    $cleanups = @()
+    $currentNormalizedPath = ConvertTo-SCDNormalizedPath -Path $CurrentWorktreePath
+    if (-not $currentNormalizedPath) {
+        return @()
+    }
+
+    try {
+        $worktreePorcelain = @(git worktree list --porcelain 2>$null)
+        if ($LASTEXITCODE -ne 0) {
+            return @()
+        }
+
+        $records = @(Get-SCDWorktreeRecords -PorcelainLines $worktreePorcelain)
+        foreach ($record in $records) {
+            try {
+                if ($record.IsBare -or $record.IsDetached -or [string]::IsNullOrWhiteSpace($record.BranchName)) {
+                    continue
+                }
+
+                $normalizedPath = ConvertTo-SCDNormalizedPath -Path $record.WorktreePath
+                if (-not $normalizedPath) {
+                    continue
+                }
+
+                if ($normalizedPath.Equals($currentNormalizedPath, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    continue
+                }
+
+                $branchName = $record.BranchName
+                if ($branchName -eq $DefaultBranch) {
+                    continue
+                }
+
+                $upstreamRef = (git -C $record.WorktreePath rev-parse --abbrev-ref '@{u}' 2>$null)
+                $upstreamExitCode = $LASTEXITCODE
+                if ($upstreamExitCode -eq 0) {
+                    $upstreamText = (($upstreamRef | Select-Object -First 1) -as [string]).Trim()
+                    if ([string]::IsNullOrWhiteSpace($upstreamText)) {
+                        continue
+                    }
+
+                    $upstreamParts = $upstreamText -split '/', 2
+                    $remoteName = $upstreamParts[0]
+                    $remoteBranchName = if ($upstreamParts.Count -gt 1) { $upstreamParts[1] } else { $branchName }
+                    if ([string]::IsNullOrWhiteSpace($remoteName)) {
+                        continue
+                    }
+                    if ([string]::IsNullOrWhiteSpace($remoteBranchName)) {
+                        $remoteBranchName = $branchName
+                    }
+
+                    $remoteHeads = (git ls-remote --heads $remoteName $remoteBranchName 2>$null)
+                    if ($LASTEXITCODE -eq 0 -and [string]::IsNullOrWhiteSpace($remoteHeads)) {
+                        $cleanups += @{
+                            BranchName   = $branchName
+                            WorktreePath = $normalizedPath
+                            Reason       = 'remote branch merged/deleted'
+                            IsLocked     = $record.IsLocked
+                            LockReason   = $record.LockReason
+                            IsPrunable   = $record.IsPrunable
+                        }
+                    }
+                    continue
+                }
+
+                if (-not (Test-SCDNoUpstreamBranchCandidate -BranchName $branchName -Prefixes $NoUpstreamBranchPrefixes)) {
+                    continue
+                }
+
+                $remoteDefault = Get-SCDRemoteDefaultRef -DefaultBranch $DefaultBranch
+                Invoke-SCDNonInteractiveFetch -RemoteName $remoteDefault.RemoteName
+
+                git show-ref --verify --quiet $remoteDefault.RefName 2>$null
+                if ($LASTEXITCODE -ne 0) {
+                    continue
+                }
+
+                git -C $record.WorktreePath merge-base --is-ancestor $branchName $remoteDefault.RefName 2>$null
+                if ($LASTEXITCODE -eq 0) {
+                    $cleanups += @{
+                        BranchName       = $branchName
+                        WorktreePath     = $normalizedPath
+                        Reason           = "reachable from ``$($remoteDefault.RefName)``"
+                        RemoteDefaultRef = $remoteDefault.RefName
+                        IsLocked         = $record.IsLocked
+                        LockReason       = $record.LockReason
+                        IsPrunable       = $record.IsPrunable
+                    }
+                }
+            }
+            catch {}
+        }
+    }
+    catch {}
+
+    return $cleanups
+}
+
 function Invoke-SessionCleanupDetector {
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -145,6 +344,7 @@ function Invoke-SessionCleanupDetector {
     # ============================================================
     $staleBranch = $null
     $currentNoUpstreamWorktree = $null
+    $siblingWorktreeCleanups = @()
     $defaultBranch = 'main'   # initialise; resolved below only if needed
 
     $currentBranch = (git branch --show-current 2>$null)
@@ -178,13 +378,7 @@ function Invoke-SessionCleanupDetector {
                 }
             }
             else {
-                $isNoUpstreamCandidate = $false
-                foreach ($branchPrefix in $noUpstreamBranchPrefixes) {
-                    if ($currentBranch.StartsWith($branchPrefix, [System.StringComparison]::Ordinal)) {
-                        $isNoUpstreamCandidate = $true
-                        break
-                    }
-                }
+                $isNoUpstreamCandidate = Test-SCDNoUpstreamBranchCandidate -BranchName $currentBranch -Prefixes $noUpstreamBranchPrefixes
 
                 if ($isNoUpstreamCandidate) {
                     $remoteDefault = Get-SCDRemoteDefaultRef -DefaultBranch $defaultBranch
@@ -206,6 +400,8 @@ function Invoke-SessionCleanupDetector {
             }
         }
     }
+
+    $siblingWorktreeCleanups = @(Get-SCDSiblingWorktreeCleanups -CurrentWorktreePath (Get-Location).Path -DefaultBranch $defaultBranch -NoUpstreamBranchPrefixes $noUpstreamBranchPrefixes)
 
     # ============================================================
     # STEP 2: TRACKING FILE CHECK (existing logic, intact)
@@ -272,7 +468,7 @@ function Invoke-SessionCleanupDetector {
     # ============================================================
     # STEP 3: MERGE & OUTPUT
     # ============================================================
-    if ($null -eq $staleBranch -and $cleanupNeeded.Count -eq 0 -and $null -eq $currentNoUpstreamWorktree) {
+    if ($null -eq $staleBranch -and $cleanupNeeded.Count -eq 0 -and $null -eq $currentNoUpstreamWorktree -and $siblingWorktreeCleanups.Count -eq 0) {
         return @{ ExitCode = 0; Output = '{}'; Error = '' }
     }
 
@@ -310,6 +506,24 @@ function Invoke-SessionCleanupDetector {
         return $out
     }
 
+    function Get-SiblingWorktreeLines {
+        param([array]$Items)
+
+        $out = @()
+        foreach ($item in $Items) {
+            $lockInfo = ''
+            if ($item.IsLocked) {
+                $lockInfo = if ([string]::IsNullOrWhiteSpace($item.LockReason)) { ' (locked)' } else { " (locked: $($item.LockReason))" }
+            }
+            elseif ($item.IsPrunable) {
+                $lockInfo = ' (prunable)'
+            }
+
+            $out += "- Sibling worktree branch ``$($item.BranchName)`` at ``$($item.WorktreePath)`` — $($item.Reason)$lockInfo"
+        }
+        return $out
+    }
+
     # Safe root: single-quoted in emitted commands handles $ and " characters in the path
     $safeRoot = $RepoRoot -replace "'", "''"
 
@@ -337,10 +551,70 @@ function Invoke-SessionCleanupDetector {
         return $out
     }
 
+    function Get-SiblingWorktreeCommands {
+        param([array]$Items)
+
+        $out = @()
+        foreach ($item in $Items) {
+            $safeWorktreePath = $item.WorktreePath -replace "'", "''"
+            $safeBranch = $item.BranchName -replace "'", "''"
+            if ($item.IsLocked) {
+                $out += "git worktree remove --force '$safeWorktreePath'"
+            }
+            else {
+                $out += "git worktree remove '$safeWorktreePath'"
+            }
+            $out += "git branch -D '$safeBranch'"
+        }
+        return $out
+    }
+
     $escaped = if ($null -ne $staleBranch) { $staleBranch.BranchName -replace "'", "''" } else { $null }
     $escapedDefault = $defaultBranch -replace "'", "''"
 
-    if ($null -ne $currentNoUpstreamWorktree -and $null -eq $staleBranch -and $cleanupNeeded.Count -eq 0) {
+    if ($siblingWorktreeCleanups.Count -gt 0) {
+        $signalNames = @()
+        if ($null -ne $staleBranch) { $signalNames += 'stale branch' }
+        if ($cleanupNeeded.Count -gt 0) { $signalNames += 'tracking artifacts' }
+        if ($null -ne $currentNoUpstreamWorktree) { $signalNames += 'current Claude worktree branch' }
+        $signalNames += 'sibling worktrees'
+
+        $lines += "**Post-merge cleanup detected** — $($signalNames -join ', ') found:"
+        $lines += ''
+        if ($null -ne $staleBranch) {
+            $lines += "- Current branch ``$($staleBranch.BranchName)`` — remote branch merged/deleted"
+            $lines += ''
+        }
+        if ($null -ne $currentNoUpstreamWorktree) {
+            $lines += (Get-CurrentNoUpstreamWorktreeLines -Item $currentNoUpstreamWorktree)
+            $lines += ''
+        }
+        if ($cleanupNeeded.Count -gt 0) {
+            $lines += (Get-TrackingLines -Items $cleanupNeeded)
+            $lines += ''
+        }
+        $lines += (Get-SiblingWorktreeLines -Items $siblingWorktreeCleanups)
+        $lines += ''
+        $lines += 'To clean up, run:'
+        $lines += '```powershell'
+        $lines += '# Run in a PowerShell (pwsh) terminal:'
+        if ($null -ne $staleBranch) {
+            if ($staleBranch.IssueId) {
+                $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
+            }
+            else {
+                $lines += "git checkout '$escapedDefault' && git pull && git branch -d '$escaped'  # use -D to force if already confirmed merged"
+            }
+        }
+        if ($cleanupNeeded.Count -gt 0) {
+            $trackingCommands = @(Get-TrackingCommands -Items $cleanupNeeded | Where-Object { $_ -ne '# Run in a PowerShell (pwsh) terminal:' })
+            $lines += $trackingCommands
+        }
+        $lines += (Get-SiblingWorktreeCommands -Items $siblingWorktreeCleanups)
+        $lines += '```'
+        $lines += ''
+    }
+    elseif ($null -ne $currentNoUpstreamWorktree -and $null -eq $staleBranch -and $cleanupNeeded.Count -eq 0) {
         $lines += '**Post-merge cleanup detected** — current Claude worktree branch is merged:'
         $lines += ''
         $lines += (Get-CurrentNoUpstreamWorktreeLines -Item $currentNoUpstreamWorktree)
