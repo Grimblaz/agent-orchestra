@@ -68,6 +68,7 @@ Describe 'session-cleanup-detector.ps1 — calibration tracking exclusion' {
         $script:ScriptFile = Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector.ps1'
         . (Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector-core.ps1')
 
+        $script:CopilotBaselineFixturePath = Join-Path $PSScriptRoot 'fixtures\copilot-baseline-additional-context.txt'
         $script:SavedPath = $env:PATH
 
         $script:NewMockGitDir = {
@@ -153,7 +154,7 @@ exit $LASTEXITCODE
 '@
             Set-Content -Path (Join-Path $mockDir 'git.ps1') -Value $ps1Shim -Encoding UTF8
 
-            $cmdContent = "@echo off`r`npwsh -NoProfile -NonInteractive -File `"%~dp0git-mock.ps1`" %*"
+            $cmdContent = "@echo off`r`npwsh -NoProfile -NonInteractive -File `"%~dp0git-mock.ps1`" %*`r`nexit %ERRORLEVEL%"
             Set-Content -Path (Join-Path $mockDir 'git.cmd') -Value $cmdContent -Encoding ASCII
 
             return $mockDir
@@ -165,7 +166,8 @@ exit $LASTEXITCODE
         $script:InvokeDetectorInWorkDir = {
             param(
                 [string]$WorkDir,
-                [hashtable]$GitConfig
+                [hashtable]$GitConfig,
+                [string]$RepoRoot = $script:RepoRoot
             )
 
             $mockDir = & $script:NewMockGitDir -ParentDir $WorkDir -Config $GitConfig
@@ -173,7 +175,7 @@ exit $LASTEXITCODE
                 $env:PATH = "$mockDir$([System.IO.Path]::PathSeparator)$script:SavedPath"
                 Push-Location $WorkDir
                 try {
-                    return Invoke-SessionCleanupDetector -RepoRoot $script:RepoRoot
+                    return Invoke-SessionCleanupDetector -RepoRoot $RepoRoot
                 }
                 finally {
                     Pop-Location
@@ -211,6 +213,12 @@ exit $LASTEXITCODE
             $Context | Should -Not -Match 'calibration|review-data\.json'
             $Context | Should -Not -Match 'tracking file\(s\) with no issue ID'
         }
+
+        $script:GetUtf8Hex = {
+            param([Parameter(Mandatory)][string]$Text)
+
+            return [System.Convert]::ToHexString([System.Text.Encoding]::UTF8.GetBytes($Text))
+        }
     }
 
     AfterAll {
@@ -229,6 +237,40 @@ exit $LASTEXITCODE
 
         $result.ExitCode | Should -Be 0
         $result.Output | Should -Match '^\{\s*\}$'
+    }
+
+    It 'T8 AC9 returns a no-op on the default branch when no tracking files are present' {
+        $workDir = Join-Path $TestDrive 'default-branch-clean'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+            'branch--show-current'     = 'main'
+            'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+        }
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match '^\{\s*\}$'
+    }
+
+    It 'T6 AC7 preserves the current-branch Copilot stale cleanup output byte for byte' {
+        $workDir = Join-Path $TestDrive 'copilot-current-branch-baseline'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -RepoRoot 'C:/agent-orchestra' -GitConfig @{
+            'branch--show-current'                                       = 'feature/issue-452-cleanup-detector-worktrees'
+            'symbolic-ref-origin-HEAD'                                   = 'refs/remotes/origin/main'
+            'rev-parse-exit'                                             = 0
+            'rev-parse-upstream'                                         = 'origin/feature/issue-452-cleanup-detector-worktrees'
+            'ls-remote-feature/issue-452-cleanup-detector-worktrees'     = ''
+        }
+        $context = & $script:GetAdditionalContext -Output $result.Output
+        $expectedBytes = [System.IO.File]::ReadAllBytes($script:CopilotBaselineFixturePath)
+        $expectedHex = [System.Convert]::ToHexString($expectedBytes)
+        $actualHex = & $script:GetUtf8Hex -Text $context
+
+        $result.ExitCode | Should -Be 0
+        $actualHex | Should -BeExactly $expectedHex `
+            -Because 'the current-branch Copilot cleanup message is a compatibility contract for SessionStart additionalContext'
     }
 
     It 'reports only the stale issue artifact when calibration data coexists with stale tracking state' {
