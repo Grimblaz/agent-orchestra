@@ -206,8 +206,8 @@ Run the gate once per unique issue ID.
 | ------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | A well-written issue looks persuasive | Clean prose can still hide a symptom-only diagnosis | Evaluate root cause, mechanism, and scope separately before asking the developer to proceed |
 
-| Trigger                   | Gotcha                                                                   | Fix                                                                               |
-| ------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Trigger                   | Gotcha                                                                   | Fix                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | MCP comment posting fails | Treating marker persistence as mandatory would block the assessment path | Fail open, write `/memories/session/first-contact-assessed-{ID}.md` only when the surface supports it, and continue |
 
 ---
