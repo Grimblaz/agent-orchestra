@@ -25,6 +25,7 @@ This document defines the standard YAML frontmatter format for tracking files st
   - `review-data.json` — JSON calibration data (schema: `{ calibration_version: 1, entries: [{ pr_number, created_at, findings[], summary }] }`)
 
 > **Note**: `.copilot-tracking/` stores research notes, archived tracking files, and persistent calibration data. Plans are now stored in session memory at `/memories/session/plan-issue-{ID}.md`, not as local files.
+> **Survival**: `.copilot-tracking/` artifacts are `within-worktree` state under `SMC-13`; they survive in the current checkout and machine, but are not durable cross-agent handoffs unless copied to GitHub issues or committed docs.
 
 ## YAML Frontmatter Format
 
@@ -172,27 +173,11 @@ Plans saved to session memory (`/memories/session/plan-issue-{ID}.md`) do not ne
 
 ## Cloud Agent Handoff Protocol
 
-When using a cloud agent (e.g., Codex) for implementation, it creates its own branch from `main` and cannot read local files or VS Code session memory. Session memory remains the same-session source of truth; durable GitHub handoff comments are written only if the user explicitly stops or pauses at Code-Conductor's D9 checkpoint:
+This section is retired as a plan/design/session-memory handoff source of truth and delegated to the canonical contract at `skills/session-memory-contract/SKILL.md` (`SMC-01`, `SMC-03`, `SMC-08`, `SMC-13`); that delegation retires the old cloud handoff table here. Tracking-format only governs `.copilot-tracking/` file frontmatter and local tracking-file structure.
 
-| Phase          | Agent             | Output Location                                                                                                                                                                                                                                                                             |
-| -------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Design         | Solution-Designer | Updates **issue body** with full design details                                                                                                                                                                                                                                             |
-| Planning       | Issue-Planner     | Saves plan to session memory (`/memories/session/plan-issue-{ID}.md`) and caches design context at `/memories/session/design-issue-{ID}.md`                                                                                                                                                 |
-| D9 handoff     | Code-Conductor    | Continue: reads session memory only. Stop / Pause: writes durable GitHub issue comments with `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` markers when the latest persisted handoff is missing or changed                                                                    |
-| Implementation | Code-Conductor    | Reads plan from session memory first, then the latest matching GitHub issue comment; reads design cache from session memory first, then the latest matching GitHub issue comment, then the issue body. Commits design doc to `Documents/Design/{domain-slug}.md` with the implementation PR |
+Code-Conductor/D9 owns durable handoff persistence. Continue implementation stays same-session and session-memory-only, with no redundant GitHub issue comments. Stop, Pause, resume later, or switch models paths persist or append durable GitHub issue comments for `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` when those artifacts are needed.
 
-### Rules
-
-- **Design doc file** under `Documents/Design/` (e.g., `Documents/Design/{domain-slug}.md`) is committed during implementation, not during design
-- **Plan** lives in session memory (`/memories/session/plan-issue-{ID}.md`) as the same-session source of truth; cross-session or cloud-agent handoff depends on an explicit D9 Stop / Pause path that persists `<!-- plan-issue-{ID} -->` only when needed
-- **Design cache** lives in session memory (`/memories/session/design-issue-{ID}.md`) for same-session use, while Solution-Designer continues to persist the authoritative design to the issue body unconditionally
-- **Durable handoff comments** use latest-comment-wins semantics; Code-Conductor reads the latest matching `plan-issue` / `design-issue` marker comments when resuming after an explicit Stop / Pause
-- One branch, one PR — no prerequisite branch needed for context sharing
-- For local-only workflows (no cloud agent), agents may still commit design doc files under `Documents/Design/` to the feature branch first — the issue-based flow works for both
-
-### Tracking Files vs. Issue Coordination
-
-`.copilot-tracking/` files are local scaffolding for tracking agent state (research notes, prompt output) across sessions on the **same machine**. They are gitignored and not suitable for cross-agent handoffs where a new branch is created (e.g., cloud agent workflows). Use GitHub issues for durable, cross-agent coordination. Plans use session memory, not `.copilot-tracking/`.
+`.copilot-tracking/` files are local scaffolding for research notes, prompt output, archived tracking, and calibration artifacts in the same worktree. They are not suitable for durable cross-agent or cloud-agent handoffs where a new branch or fresh checkout is created. Use the session-memory contract for plan/design/session-memory handoff rules, and use GitHub issues, GitHub comments, or committed docs when a handoff must be durable.
 
 ## Customization
 

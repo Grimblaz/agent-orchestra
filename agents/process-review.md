@@ -96,16 +96,17 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 | `edit` | `Edit`, `Write` confined to `agents/*.agent.md`, `.github/instructions/*.instructions.md`, `.copilot-tracking/templates/`, and `.copilot-tracking/reviews/`; create the tracking directories first with `mkdir -p` when they do not already exist |
 | `search` | `Grep`, `Glob` |
 | `web` | `WebFetch` for known URLs |
-| `vscode/memory` | Read the parent Code-Conductor dispatch first, then fall back to the latest `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` issue comments when needed |
-| calibration scripts | `pwsh` via `Bash` |
+| `vscode/memory` | Per `SMC-01` and `SMC-03`, read the parent Code-Conductor dispatch first, then fall back to the latest-comment-wins `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` issue comments when needed |
+| calibration scripts | `pwsh` via `Bash`; raw calibration snapshots are per-dispatch under `SMC-09` and become durable only through PR-body pipeline metrics |
 
 ## Persistence differences
 
-Claude Code does not use `vscode/memory` as a Claude-only persistence layer for this specialist.
+Per `SMC-01` and `SMC-03`, Claude Code does not use `vscode/memory` as a Claude-only persistence layer for this specialist.
 
 - Treat the parent Code-Conductor dispatch as the first source of retrospective scope, plan context, and design context.
 - Track 2 CE Gate dispatch still comes from Code-Conductor; when invoked that way, honor the structured input and output contracts defined in the shared body instead of running a broader retrospective.
-- If parent context is incomplete, read the latest `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` issue comments before falling back to the current issue body or other durable artifacts.
+- If parent context is incomplete, read the latest-comment-wins `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` issue comments before falling back to the current issue body or other durable artifacts.
+- Treat calibration and prosecution-depth snapshots as per-dispatch under `SMC-09`; durable metrics persistence remains Code-Conductor/PR-body-owned.
 - Durable marker writes remain Code-Conductor-owned; Process-Review consumes those artifacts but does not create new handoff markers on its own.
 
 ## Invocation

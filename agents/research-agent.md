@@ -98,10 +98,10 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 
 ## Persistence differences
 
-Claude Code does not use `vscode/memory` as a persistence layer for this specialist, and research dispatches typically fit within roughly 50-200K input tokens before a durable artifact is needed.
+Survival: `within-worktree`; contract: `SMC-13` (`.copilot-tracking/` artifacts). Claude Code does not use `vscode/memory` as a persistence layer for this specialist, and research dispatches typically fit within roughly 50-200K input tokens before a worktree-backed artifact is needed; the existing write path remains `.copilot-tracking/research/{YYYYMMDD-name}-research.md`, available to tools sharing this checkout and not a separate durable cross-tool store.
 
 - Treat the parent Issue-Planner or Solution-Designer dispatch as the first source of research scope and constraints.
-- Persist durable research output at `.copilot-tracking/research/{YYYYMMDD-name}-research.md` when the investigation needs to survive conversation boundaries or support handoff.
+- Persist worktree-backed research output at `.copilot-tracking/research/{YYYYMMDD-name}-research.md` when the investigation needs to survive conversation boundaries or support same-checkout handoff.
 - On first use, create `.copilot-tracking/research/` before writing the artifact.
 
 ## Invocation

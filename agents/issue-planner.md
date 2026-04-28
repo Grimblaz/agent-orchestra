@@ -98,11 +98,13 @@ The Copilot-specific tool names in the shared body map to Claude Code equivalent
 | `github/*` MCP operations                   | `gh` CLI via `Bash`            |
 | Subagent dispatch (`#tool:agent/runSubagent`) | `Agent` tool                   |
 | Code-Critic subagent dispatch               | `Agent` tool with `subagent_type: agent-orchestra:Code-Critic` |
-| Session memory (`vscode/memory` at `/memories/session/plan-issue-{id}.md`) | **Not used in Claude Code** — plan persistence uses GitHub issue comment with `<!-- plan-issue-{ID} -->` marker instead |
+| Session memory (`vscode/memory` at `/memories/session/plan-issue-{id}.md`) | Per `SMC-01`, Claude Code uses the durable GitHub issue comment with `<!-- plan-issue-{ID} -->` instead of a Claude-local plan cache |
 
 ## Plan persistence (Claude Code)
 
-The shared body's Section 6 references `/memories/session/plan-issue-{id}.md` as the Copilot persistence path. In Claude Code, there is no equivalent session-memory tool, so persistence uses **only** the GitHub comment marker.
+The shared body's Section 6 references `/memories/session/plan-issue-{id}.md` as the Copilot persistence path. In Claude Code, `SMC-01` assigns the durable plan record to the GitHub comment marker rather than a Claude session-memory tool.
+
+When plan drafting needs design context, follow `SMC-03`: prefer parent dispatch context, then the latest-comment-wins `<!-- design-issue-{ID} -->` issue comment, then the current issue body.
 
 After approval, post the full plan (with YAML frontmatter) as a GitHub issue comment wrapped with:
 

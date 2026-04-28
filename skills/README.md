@@ -20,7 +20,7 @@ Each skill should use this flow:
 
 This keeps prompts concise while preserving depth when needed.
 
-## Available Skills (32)
+## Available Skills (42)
 
 | Skill | Purpose | Status |
 | ----- | ------- | ------ |
@@ -28,15 +28,19 @@ This keeps prompts concise while preserving depth when needed.
 | `bdd-scenarios` | Structured Given/When/Then scenario authoring with ID traceability and CE Gate coverage gap detection | ✅ Included |
 | `brainstorming` | Structured Socratic questioning for exploring ideas and solutions | ✅ Included |
 | `browser-canvas-testing` | VS Code native browser tool behavior for canvas-based games | ✅ Included |
+| `calibration-pipeline` | Calibration and review-pipeline tooling guidance | ✅ Included |
 | `code-review-intake` | Deterministic GitHub review intake workflow with ledger-based judgment | ✅ Included |
 | `customer-experience` | Reusable customer framing and CE evidence methodology | ✅ Included |
 | `design-exploration` | Technical design option comparison and decision-framing workflow | ✅ Included |
 | `documentation-finalization` | Documentation cleanup and design-doc maintenance workflow | ✅ Included |
 | `frontend-design` | Guide for creating distinctive UI designs that avoid generic templates | ✅ Included |
+| `guidance-measurement` | Guidance-complexity measurement tooling and deterministic analysis guidance | ✅ Included |
 | `implementation-discipline` | Minimal implementation workflow for plan-driven coding | ✅ Included |
 | `parallel-execution` | Build-test orchestration protocol for parallel or serial implementation lanes | ✅ Included |
 | `plan-authoring` | Implementation-plan authoring methodology | ✅ Included |
+| `plugin-release-hygiene` | Version-bump guardrail and Claude startup drift backstop guidance | ✅ Included |
 | `post-pr-review` | Post-merge checklist for archiving, documentation, versioning, and release tagging | ✅ Included |
+| `pre-commit-formatting` | Final markdown and whitespace formatting backstop before validation | ✅ Included |
 | `process-analysis` | Retrospective and process-analysis methodology for workflow review | ✅ Included |
 | `process-troubleshooting` | Five-scenario guide for diagnosing common orchestration failure patterns | ✅ Included |
 | `property-based-testing` | Incremental rollout policy for property-based testing | ✅ Included |
@@ -44,13 +48,19 @@ This keeps prompts concise while preserving depth when needed.
 | `refactoring-methodology` | Proportionate refactoring workflow for touched files and nearby debt | ✅ Included |
 | `research-methodology` | Evidence-driven technical research and recommendation workflow | ✅ Included |
 | `review-judgment` | Single-shot review judgment and scoring methodology | ✅ Included |
+| `routing-tables` | Deterministic routing data for specialist dispatch and gate criteria | ✅ Included |
+| `safe-operations` | Safe file-operation and issue-creation protocol | ✅ Included |
+| `session-memory-contract` | Canonical session-state survival and handoff contract | ✅ Included |
 | `session-startup` | Automatic startup cleanup guard for new conversations | ✅ Included |
-| `terminal-hygiene` | Terminal and test execution guardrails for Agent Orchestra workflows | ✅ Included |
 | `skill-creator` | Guide for creating new skills with proper frontmatter format | ✅ Included |
 | `software-architecture` | Clean Architecture, SOLID principles, and architectural decision guidance | ✅ Included |
 | `specification-authoring` | Structured authoring guidance for formal specifications | ✅ Included |
+| `step-commit` | Discrete validated-step commit workflow for Code-Conductor | ✅ Included |
+| `subagent-env-handshake` | Claude subagent environment-handshake contract for tree-grounded claims | ✅ Included |
 | `systematic-debugging` | 4-phase debugging process (Observe, Hypothesize, Test, Fix) | ✅ Included |
+| `terminal-hygiene` | Terminal and test execution guardrails for Agent Orchestra workflows | ✅ Included |
 | `test-driven-development` | TDD workflow guidance, quality standards, and practical patterns | ✅ Included |
+| `tracking-format` | Tracking-file frontmatter and local coordination format guidance | ✅ Included |
 | `ui-iteration` | Screenshot-driven UI polish workflow | ✅ Included |
 | `ui-testing` | Resilient React component testing strategies focusing on user behavior | ✅ Included |
 | `validation-methodology` | Staged validation and review methodology for implementation workflows | ✅ Included |

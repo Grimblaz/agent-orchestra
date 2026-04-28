@@ -2634,7 +2634,7 @@ exit 0
 
             $workDir = & $script:NewWorkDir
             $configPath = Join-Path $script:RepoRoot 'skills/calibration-pipeline/assets/guidance-complexity.json'
-            $configBackup = Get-Content -Path $configPath -Raw
+            $configBackup = Get-Content -Path $configPath -AsByteStream -Raw
             try {
                 # Write custom config with persistent_threshold=2
                 $customConfig = [ordered]@{
@@ -2676,7 +2676,7 @@ exit 0
             }
             finally {
                 # Restore the real config regardless of test outcome
-                $configBackup | Set-Content -Path $configPath -Encoding UTF8
+                Set-Content -Path $configPath -AsByteStream -Value $configBackup
             }
         }
 

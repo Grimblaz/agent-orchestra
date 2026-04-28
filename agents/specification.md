@@ -98,15 +98,15 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 | `web/fetch` | `WebFetch` |
 | `edit` | `Edit`, `Write` only for `.copilot-tracking/specs/spec-[a-z0-9-]+.md`; create the directory first with `Bash` using `mkdir -p .copilot-tracking/specs` on first use |
 
-The shared-body file-creation convention forbids Copilot terminal-based `Set-Content` or `Out-File` patterns. In Claude Code, the correct path is to use the first-class `Edit` or `Write` tools for the durable spec file, with those writes confined to `.copilot-tracking/specs/spec-[a-z0-9-]+.md` after first ensuring the directory exists.
+The shared-body file-creation convention forbids Copilot terminal-based `Set-Content` or `Out-File` patterns. In Claude Code, the correct path is to use the first-class `Edit` or `Write` tools for the worktree-backed spec file, with those writes confined to `.copilot-tracking/specs/spec-[a-z0-9-]+.md` after first ensuring the directory exists.
 
 ## Persistence differences
 
-Claude Code does not use `vscode/memory` as a persistence layer for this specialist.
+Survival: `within-worktree`; contract: `SMC-13` (`.copilot-tracking/` artifacts). Claude Code does not use `vscode/memory` as a persistence layer for this specialist; the existing write path remains `.copilot-tracking/specs/spec-[a-z0-9-]+.md`, available to tools sharing this checkout and not a separate durable cross-tool store.
 
-- Durable specifications live at `.copilot-tracking/specs/spec-[a-z0-9-]+.md`.
-- On first use, create `.copilot-tracking/specs` before writing the durable spec file.
-- Parent-agent context remains the source of requirements, but the specification artifact itself is persisted in the repository working tree at the durable spec path.
+- Worktree-backed specifications live at `.copilot-tracking/specs/spec-[a-z0-9-]+.md`.
+- On first use, create `.copilot-tracking/specs` before writing the spec file.
+- Parent-agent context remains the source of requirements, but the specification artifact itself is persisted in the repository working tree at the existing spec path.
 
 ## Invocation
 

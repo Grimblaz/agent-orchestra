@@ -46,6 +46,7 @@ Always include the failure evidence, attempted diagnosis, and the next action in
 ## Composite References
 
 - [references/review-reconciliation.md](references/review-reconciliation.md): pre-review gate, prosecution-depth setup and use, fixed 3-pass review mechanics, non-GitHub review mode, improvement-first rule, AC cross-check, R4 batch dispatch, and the R2 post-fix review loop
+- [references/review-state-persistence.md](references/review-state-persistence.md): review-state persistence shape, lookup precedence, completion gate, and resume evidence rules
 - [references/post-judgment-routing.md](references/post-judgment-routing.md): post-judgment prosecution-depth re-activation detection and the paired routing index
 - [../code-review-intake/references/express-lane.md](../code-review-intake/references/express-lane.md): canonical R6 express-lane gate, scope restriction, and Tier 1 re-validation requirement
 

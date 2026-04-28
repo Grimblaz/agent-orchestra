@@ -78,7 +78,9 @@ Provenance gate: fast-path or cold-path assessment completed; human-readable sum
 
 The HTML token on line 1 remains the only skip-check anchor and the only parser anchor. The second line is human-readable and decorative only.
 
-Use `mcp_github_add_issue_comment` to post the two-line marker. If the MCP tool is unavailable or the API call fails, fail open visibly: tell the developer that offline mode is active, write a structured local payload to `/memories/session/first-contact-assessed-{ID}.md`, and proceed. On the next online invocation, if the GitHub marker is still missing but the local payload exists, reconstruct the GitHub marker from the local payload and post it before continuing. In multi-issue bundles, the gate fires per unique issue ID.
+Use `mcp_github_add_issue_comment` to post the two-line marker. If the MCP tool is unavailable or the API call fails, fail open visibly: tell the developer that offline mode is active and proceed. When the current surface can write/read `/memories/session`, write a structured local payload to `/memories/session/first-contact-assessed-{ID}.md`; on the next online invocation with that payload available, reconstruct the GitHub marker and post it before continuing. Inline/no-write Claude surfaces cannot persist or recover that payload and must not claim they did. In multi-issue bundles, the gate fires per unique issue ID.
+
+> **Survival**: `SMC-04` governs `first-contact-assessed-{ID}`. The GitHub issue-comment marker is `durable`; the fail-open local payload is `within-conversation` recovery input only on surfaces that can write/read `/memories/session`. Read precedence remains GitHub marker OR local payload where that payload exists: the marker completes the gate, while a local-only payload must be posted back to GitHub on the next online run before normal continuation. Inline/no-write Claude has no local payload to recover.
 
 The local payload is not a second durable skip marker. It is a temporary recovery input only while it remains available in session memory.
 
@@ -187,8 +189,8 @@ If current-session handoff artifacts or durable GitHub warm-handoff markers alre
 ### Fail-open on errors
 
 - MCP tool unavailable: skip the GitHub marker lookup, tell the developer offline mode is active, and continue with the assessment
-- API errors: tell the developer offline mode is active, continue with the assessment, write the structured local payload, and set `sync_to_github_on_next_online_run: true`
-- Next online run: if the GitHub marker is missing but the local payload still exists, tell the developer recovery is active, reconstruct and post the two-line GitHub marker before continuing
+- API errors: tell the developer offline mode is active and continue with the assessment. On surfaces that can write/read `/memories/session`, write the structured local payload and set `sync_to_github_on_next_online_run: true`; inline/no-write Claude surfaces cannot persist this payload.
+- Next online run: if the GitHub marker is missing but the local payload still exists, tell the developer recovery is active, reconstruct and post the two-line GitHub marker before continuing. If no payload could be written or read, recovery is unavailable.
 - Local payload missing on a later online run: recovery is unavailable, so run the gate again instead of silently skipping
 - Session memory inaccessible: proceed with the assessment rather than skipping the gate
 
@@ -204,9 +206,9 @@ Run the gate once per unique issue ID.
 | ------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | A well-written issue looks persuasive | Clean prose can still hide a symptom-only diagnosis | Evaluate root cause, mechanism, and scope separately before asking the developer to proceed |
 
-| Trigger                   | Gotcha                                                                   | Fix                                                                               |
-| ------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| MCP comment posting fails | Treating marker persistence as mandatory would block the assessment path | Fail open, write `/memories/session/first-contact-assessed-{ID}.md`, and continue |
+| Trigger                   | Gotcha                                                                   | Fix                                                                                                                 |
+| ------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| MCP comment posting fails | Treating marker persistence as mandatory would block the assessment path | Fail open, write `/memories/session/first-contact-assessed-{ID}.md` only when the surface supports it, and continue |
 
 ---
 

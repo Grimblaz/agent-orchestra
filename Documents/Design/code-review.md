@@ -655,9 +655,9 @@ Three targeted additions to close the process gaps that allowed these defects th
 
 ### D38 — Rate Limit Backoff (R5)
 
-**Decision**: Implement exponential backoff (2^attempt × 30s: attempt 1 = 60s, attempt 2 = 120s) before retrying rate-limited subagent calls. After 2 consecutive failures for the same call, defer remaining work to the next session — save state to session memory, never silently drop findings.
+**Decision**: Implement exponential backoff (2^attempt × 30s: attempt 1 = 60s, attempt 2 = 120s) before retrying rate-limited subagent calls. After 2 consecutive failures for the same call, defer remaining work only within the current conversation by writing the SMC-15 deferred work state when session memory is available; if the conversation ends or the payload is unavailable, re-enter the interrupted phase from durable plan/PR/issue context and re-process pending work. Never silently drop findings.
 
-**Rationale**: In the PR #111 session, 2 rate-limited retries consumed prompt tokens with zero output (pure waste). Exponential backoff gives the rate-limit window time to reset without hammering the API. Sonnet→Opus fallback is considered before entering backoff because Anthropic models have separate per-model TPM limits. Deferred-not-dropped ensures quality — no findings are silently lost to rate limiting.
+**Rationale**: In the PR #111 session, 2 rate-limited retries consumed prompt tokens with zero output (pure waste). Exponential backoff gives the rate-limit window time to reset without hammering the API. Sonnet→Opus fallback is considered before entering backoff because Anthropic models have separate per-model TPM limits. Deferred-not-dropped ensures quality while keeping session memory honest: the bounded payload can help continue the same conversation, but durable plan/PR/issue context is the restart point once that payload is gone.
 
 ---
 

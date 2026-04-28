@@ -8,7 +8,9 @@
 
 ## Overview
 
-Plans are stored in VS Code session memory at `/memories/session/plan-issue-{ID}.md` using the `memory` tool's `create` command. This replaces the previous approach of storing plans as local files in `.copilot-tracking/plans/`.
+This design describes the VS Code/Copilot plan cache: plans are stored in VS Code session memory at `/memories/session/plan-issue-{ID}.md` using the `memory` tool's `create` command. This replaces the previous approach of storing plans as local files in `.copilot-tracking/plans/`.
+
+The `Primary` `/memories/session` layer below is scoped to the VS Code/Copilot session-memory implementation. Cross-tool Claude/GitHub survival, fungibility, and read/write precedence for plan and design state live in the canonical operational contract at [skills/session-memory-contract/SKILL.md](../../skills/session-memory-contract/SKILL.md) (`SMC-01`, `SMC-02`, `SMC-03`, `SMC-08`). The rationale for centralizing those rules is documented in [Documents/Design/session-memory-contract.md](session-memory-contract.md).
 
 ---
 
@@ -56,6 +58,8 @@ Session memory is immediately available, requires no file system operations, and
 
 Continue implementation uses session memory only as the same-session source of truth. Cross-session and cloud-agent handoff rely on Code-Conductor writing the current plan to a GitHub issue comment only when the user explicitly chooses Stop / Pause at D9. The `<!-- plan-issue-{ID} -->` HTML comment on the first line remains the canonical detection marker, and readers continue to use the latest matching comment.
 
+This cache-vs-durable split is governed by `SMC-01`, `SMC-02`, and the D7 conflict rule in the session-memory contract rationale.
+
 ### D3 — Removal of `.copilot-tracking/plans/`
 
 Only the `plans/` subdirectory was removed. The `research/` subdirectory and any archived files remain under `.copilot-tracking/`. Session-cleanup detector test fixtures were updated to reference `research/` paths.
@@ -75,9 +79,9 @@ Only the `plans/` subdirectory was removed. The `research/` subdirectory and any
 
 ## Related Files
 
-- `.github/agents/Issue-Planner.agent.md` — Section 6: plan persistence
-- `.github/agents/Code-Conductor.agent.md` — Step 1: plan retrieval
-- `.github/skills/tracking-format/SKILL.md` — YAML frontmatter spec for `.copilot-tracking/` research files (does not cover session-memory plan YAML; see Issue-Planner Section 6 above)
+- `agents/Issue-Planner.agent.md` — Section 6: plan persistence
+- `agents/Code-Conductor.agent.md` — Step 1: plan retrieval
+- `skills/tracking-format/SKILL.md` — YAML frontmatter spec for `.copilot-tracking/` research files (does not cover session-memory plan YAML; see Issue-Planner Section 6 above)
 
 ---
 
@@ -120,6 +124,8 @@ Summarizing introduces the same context-loss risk the cache is intended to solve
 
 The session memory file is a cache, not the source of truth. Solution-Designer still writes the authoritative design to the GitHub issue body unconditionally during design. On session reset, Code-Conductor first checks the latest matching `<!-- design-issue-{ID} -->` handoff comment if one was written at D9 Stop / Pause, then falls back to recreating the cache from the issue body.
 
+`SMC-03` owns the operational design-cache precedence. The design cache stays an optimization; the issue body and explicit durable marker remain the cross-tool sources.
+
 #### DC3 — No staleness detection
 
 Design should be settled before implementation begins. Mid-implementation design changes are exceptional — if they occur, the user should restart the affected plan steps. Adding issue-body re-reads at every phase boundary would reintroduce the API-call dependency the cache is meant to eliminate.
@@ -141,13 +147,13 @@ Issue-Planner should check for `/memories/session/design-issue-{ID}.md` before c
 
 ### Design Cache Related Files
 
-- `.github/agents/Issue-Planner.agent.md` — Section 6: design cache creation
-- `.github/agents/Code-Conductor.agent.md` — Step 1: lookup chain; Step 3: alignment check; CE Gate: design intent reads
-- `.github/agents/Code-Smith.agent.md` — Plan Tracking: design cache read
-- `.github/agents/Test-Writer.agent.md` — Plan Tracking: design cache read
-- `.github/agents/Refactor-Specialist.agent.md` — Plan Tracking: design cache read
-- `.github/agents/Doc-Keeper.agent.md` — Plan Tracking: design cache read
-- `.github/agents/Code-Critic.agent.md` — Plan Tracking: design cache read
+- `agents/Issue-Planner.agent.md` — Section 6: design cache creation
+- `agents/Code-Conductor.agent.md` — Step 1: lookup chain; Step 3: alignment check; CE Gate: design intent reads
+- `agents/Code-Smith.agent.md` — Plan Tracking: design cache read
+- `agents/Test-Writer.agent.md` — Plan Tracking: design cache read
+- `agents/Refactor-Specialist.agent.md` — Plan Tracking: design cache read
+- `agents/Doc-Keeper.agent.md` — Plan Tracking: design cache read
+- `agents/Code-Critic.agent.md` — Plan Tracking: design cache read
 
 ---
 
@@ -179,8 +185,8 @@ Code-Conductor now maintains progress annotations in the session memory plan fil
 
 VS Code 1.110 allows agents to supply custom instructions to the compaction summarizer via `/compact focus on: ...`. This feature complements session memory by ensuring the auto-generated summary retains orchestration-critical context (issue ID, step progress, design intent, open decisions) alongside the durable plan file.
 
-- **Code-Conductor** template: preserves issue number, step progress, branch name, design intent summary, and open blockers (see `.github/agents/Code-Conductor.agent.md`)
-- **Issue-Planner** template: preserves design decisions, rejected alternatives with rationale, acceptance criteria, open questions, CE Gate assessment (see `.github/agents/Issue-Planner.agent.md`)
+- **Code-Conductor** template: preserves issue number, step progress, branch name, design intent summary, and open blockers (see `agents/Code-Conductor.agent.md`)
+- **Issue-Planner** template: preserves design decisions, rejected alternatives with rationale, acceptance criteria, open questions, CE Gate assessment (see `agents/Issue-Planner.agent.md`)
 
 These templates use bracket-token substitution so each invocation carries session-specific values, not static categories.
 

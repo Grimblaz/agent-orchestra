@@ -83,15 +83,31 @@ Describe 'Claude shell/shared-body parity contract' {
         $script:GetBodyH2Headings = {
             param([string]$Content)
 
-            return @(
-                [regex]::Matches($Content, '(?m)^## (?<title>[^\r\n]+)\s*$') |
-                    ForEach-Object {
-                        $title = $_.Groups['title'].Value.Trim()
-                        if ($title -ne 'Platform-specific invocation') {
-                            '## ' + $title
-                        }
-                    }
-            )
+            $headings = [System.Collections.Generic.List[string]]::new()
+            $inFence = $false
+
+            foreach ($line in ($Content -split "\r?\n")) {
+                if ($line.StartsWith('```') -or $line.StartsWith('~~~')) {
+                    $inFence = -not $inFence
+                    continue
+                }
+
+                if ($inFence) {
+                    continue
+                }
+
+                $match = [regex]::Match($line, '^## (?<title>[^\r\n]+)\s*$')
+                if (-not $match.Success) {
+                    continue
+                }
+
+                $title = $match.Groups['title'].Value.Trim()
+                if ($title -ne 'Platform-specific invocation') {
+                    $null = $headings.Add('## ' + $title)
+                }
+            }
+
+            return @($headings)
         }
 
         $script:GetHeadingMatchesForToken = {

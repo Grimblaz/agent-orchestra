@@ -30,11 +30,13 @@ When the shared body refers to a Copilot tool, use the Claude Code equivalent:
 | `github/*` MCP operations                   | `gh` CLI via `Bash`            |
 | Browser tools (`browser/*`)                 | **Upstream framing**: not required; use `WebFetch` only if an external page is needed. **Downstream CE Gate** may need interactive UI exercise (clicks, form fills, canvas, multi-step journeys) that `WebFetch` cannot cover — fall back to the Claude-in-Chrome tools (`mcp__Claude_in_Chrome__*`) or the computer-use tools (`mcp__computer-use__*`) for those flows; the evidence captured (screenshots, DOM reads, network logs) is what matters, not the automation surface |
 | Subagent dispatch (`#tool:agent/runSubagent`) | `Agent` tool                   |
-| Session memory (`vscode/memory`)            | Not used in Claude Code — persistence is via GitHub issue comment markers only |
+| Session memory (`vscode/memory`)            | Per `SMC-04` and `SMC-08`, Claude Code uses GitHub issue body/comment markers for durable state; provenance-gate local fallback is recovery input only when GitHub posting fails |
 
 ## Persistence differences
 
-Upstream framing persistence is identical across both tools: the GitHub issue body + `<!-- experience-owner-complete-{ID} -->` comment marker. There is no Claude-specific session-memory step for Experience-Owner.
+Upstream framing persistence is identical across both tools: the GitHub issue body + `<!-- experience-owner-complete-{ID} -->` comment marker (`SMC-08`). There is no Claude-specific session-memory step for Experience-Owner.
+
+Cold-pickup first-contact assessment follows `SMC-04`: the durable marker is `<!-- first-contact-assessed-{ID} -->`; any offline local fallback is recovery input only on surfaces that can write/read `/memories/session`, while inline Claude has no such payload to recover later.
 
 ## Invocation
 

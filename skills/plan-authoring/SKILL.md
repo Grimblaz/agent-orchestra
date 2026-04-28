@@ -1,5 +1,4 @@
 ---
-
 name: plan-authoring
 description: "Reusable implementation-plan authoring methodology. Use when running read-only discovery, drafting execution steps with CE Gate coverage, or preparing a plan for adversarial stress-testing and approval. DO NOT USE FOR: plan persistence, approval-policy enforcement, or direct implementation work (keep those in Issue-Planner.agent.md or use implementation-discipline)"
 ---
@@ -142,7 +141,7 @@ Update the `Plan Stress-Test` summary block by replacing the `Judge: pending` pl
 - No questions at the end — ask via the platform's structured-question tool during the workflow.
 - Include execution metadata (mode + requirement contract expectations) so implementers can execute without re-deriving process rules.
 - When a step crosses a layer boundary (as defined in `.github/architecture-rules.md`), note the dependency direction and verify it aligns with documented architecture rules. Scope steps to a single layer where feasible.
-- Insert a dedicated **`[CE GATE]`** numbered step as the final implementation step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Format: `N. [CE GATE] — Surface: {type} — Design Intent: {link or one-line summary} — Scenarios: {functional + intent} — Method: {how each scenario is exercised}`. When BDD is enabled, list each scenario by ID with classification: `SN: {description} [auto/manual]`. The `[CE GATE]` step is blocking — advancement past it requires either completion or the documented skip marker. Omit only when `ce_gate: false`.
+- Insert a dedicated **`[CE GATE]`** numbered step as the final implementation step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Format: `N. [CE GATE] — Surface: {type} — Design Intent: {link or one-line summary} — Scenarios: {functional + intent} — Method: {how each scenario is exercised}`. When BDD is enabled, list each scenario by concrete ID with classification, e.g., `S1: {description} [auto/manual]` or placeholder `S{N}: {description} [auto/manual]`. The `[CE GATE]` step is blocking — advancement past it requires either completion or the documented skip marker. Omit only when `ce_gate: false`.
 - For backend/non-UI/CLI projects, the CE Gate surface is the API or CLI — identify appropriate scenarios for customer-perspective verification.
 - Keep the plan scannable.
 

@@ -336,93 +336,129 @@ function Save-PRHState {
     }
 }
 
-$repoRoot = Get-PRHRepoRoot
-if (-not $repoRoot) {
-    exit 0
-}
+function Invoke-PRHHook {
+    [CmdletBinding(DefaultParameterSetName = 'PayloadObject')]
+    param(
+        [Parameter(ParameterSetName = 'PayloadObject')]
+        [AllowNull()]
+        [object]$Payload,
 
-if (-not (Test-Path (Join-Path $repoRoot '.github/scripts/bump-version.ps1'))) {
-    exit 0
-}
+        [Parameter(ParameterSetName = 'PayloadJson')]
+        [AllowNull()]
+        [string]$PayloadJson
+    )
 
-$payload = Get-PRHEventPayload
-if (-not $payload) {
-    exit 0
-}
+    if ($PSCmdlet.ParameterSetName -eq 'PayloadJson') {
+        if ([string]::IsNullOrWhiteSpace($PayloadJson)) {
+            return
+        }
 
-$targetPaths = @()
-if (-not [string]::IsNullOrWhiteSpace($payload.tool_input.file_path)) {
-    $targetPaths += [string]$payload.tool_input.file_path
-}
-if ($null -ne $payload.tool_input.files) {
-    foreach ($file in @($payload.tool_input.files)) {
-        if (-not [string]::IsNullOrWhiteSpace($file.filePath)) {
-            $targetPaths += [string]$file.filePath
+        try {
+            $Payload = $PayloadJson | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            return
         }
     }
-}
-if ($targetPaths.Count -eq 0) {
-    exit 0
-}
 
-$entryPaths = @()
-foreach ($targetPath in $targetPaths) {
-    $relativePath = Get-PRHRelativePath -RepoRoot $repoRoot -FilePath $targetPath
-    if (Test-PRHEntryPointPath -RelativePath $relativePath) {
-        $entryPaths += $relativePath
-    }
-}
-if ($entryPaths.Count -eq 0) {
-    exit 0
-}
-
-$relativePath = $entryPaths[0]
-
-if (Test-PRHVersionAlreadyBumped -RepoRoot $repoRoot) {
-    exit 0
-}
-
-$keyingInfo = Get-PRHKeyingInfo -Payload $payload
-$statePath = Get-PRHStatePath -RepoRoot $repoRoot -Slug $keyingInfo.slug
-$canPersistState = -not [string]::IsNullOrWhiteSpace($statePath)
-$state = Get-PRHState -StatePath $statePath
-
-if ($canPersistState -and $null -ne $state) {
-    $touched = @()
-    if ($null -ne $state.touched_files) {
-        $touched = @($state.touched_files)
-    }
-    if ($touched -notcontains $relativePath) {
-        $touched += $relativePath
+    $repoRoot = Get-PRHRepoRoot
+    if (-not $repoRoot) {
+        return
     }
 
-    $updatedState = [PSCustomObject]@{
-        proposed_level  = if ($state.proposed_level) { [string]$state.proposed_level } else { 'patch' }
-        chosen_level    = if ($state.chosen_level) { [string]$state.chosen_level } else { $null }
+    if (-not (Test-Path (Join-Path $repoRoot '.github/scripts/bump-version.ps1'))) {
+        return
+    }
+
+    if (-not $Payload) {
+        return
+    }
+
+    $targetPaths = @()
+    if (-not [string]::IsNullOrWhiteSpace($Payload.tool_input.file_path)) {
+        $targetPaths += [string]$Payload.tool_input.file_path
+    }
+    if ($null -ne $Payload.tool_input.files) {
+        foreach ($file in @($Payload.tool_input.files)) {
+            if (-not [string]::IsNullOrWhiteSpace($file.filePath)) {
+                $targetPaths += [string]$file.filePath
+            }
+        }
+    }
+    if ($targetPaths.Count -eq 0) {
+        return
+    }
+
+    $entryPaths = @()
+    foreach ($targetPath in $targetPaths) {
+        $relativePath = Get-PRHRelativePath -RepoRoot $repoRoot -FilePath $targetPath
+        if (Test-PRHEntryPointPath -RelativePath $relativePath) {
+            $entryPaths += $relativePath
+        }
+    }
+    if ($entryPaths.Count -eq 0) {
+        return
+    }
+
+    $relativePath = $entryPaths[0]
+
+    if (Test-PRHVersionAlreadyBumped -RepoRoot $repoRoot) {
+        return
+    }
+
+    $keyingInfo = Get-PRHKeyingInfo -Payload $Payload
+    $statePath = Get-PRHStatePath -RepoRoot $repoRoot -Slug $keyingInfo.slug
+    $canPersistState = -not [string]::IsNullOrWhiteSpace($statePath)
+    $state = Get-PRHState -StatePath $statePath
+
+    if ($canPersistState -and $null -ne $state) {
+        $touched = @()
+        if ($null -ne $state.touched_files) {
+            $touched = @($state.touched_files)
+        }
+        if ($touched -notcontains $relativePath) {
+            $touched += $relativePath
+        }
+
+        $updatedState = [PSCustomObject]@{
+            proposed_level  = if ($state.proposed_level) { [string]$state.proposed_level } else { 'patch' }
+            chosen_level    = if ($state.chosen_level) { [string]$state.chosen_level } else { $null }
+            keying_strategy = [string]$keyingInfo.keying_strategy
+            touched_files   = $touched
+        }
+
+        [void](Save-PRHState -StatePath $statePath -State $updatedState)
+        return
+    }
+
+    $newState = [PSCustomObject]@{
+        proposed_level  = 'patch'
+        chosen_level    = $null
         keying_strategy = [string]$keyingInfo.keying_strategy
-        touched_files   = $touched
+        touched_files   = @($relativePath)
+    }
+    if ($canPersistState) {
+        [void](Save-PRHState -StatePath $statePath -State $newState)
     }
 
-    [void](Save-PRHState -StatePath $statePath -State $updatedState)
+    $result = [PSCustomObject]@{
+        hookSpecificOutput = [PSCustomObject]@{
+            hookEventName     = 'PostToolUse'
+            additionalContext = "Entry-point edit detected: $relativePath. Load the plugin-release-hygiene skill to propose a version bump."
+        }
+    }
+
+    return ($result | ConvertTo-Json -Depth 10 -Compress)
+}
+
+function Invoke-PRHHookEntrypoint {
+    $output = Invoke-PRHHook -Payload (Get-PRHEventPayload)
+    if (-not [string]::IsNullOrWhiteSpace($output)) {
+        $output | Write-Output
+    }
+}
+
+if ($MyInvocation.InvocationName -ne '.') {
+    Invoke-PRHHookEntrypoint
     exit 0
 }
-
-$newState = [PSCustomObject]@{
-    proposed_level  = 'patch'
-    chosen_level    = $null
-    keying_strategy = [string]$keyingInfo.keying_strategy
-    touched_files   = @($relativePath)
-}
-if ($canPersistState) {
-    [void](Save-PRHState -StatePath $statePath -State $newState)
-}
-
-$result = [PSCustomObject]@{
-    hookSpecificOutput = [PSCustomObject]@{
-        hookEventName     = 'PostToolUse'
-        additionalContext = "Entry-point edit detected: $relativePath. Load the plugin-release-hygiene skill to propose a version bump."
-    }
-}
-
-$result | ConvertTo-Json -Depth 10 -Compress | Write-Output
-exit 0

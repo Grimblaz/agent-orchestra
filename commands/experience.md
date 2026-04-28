@@ -16,7 +16,7 @@ Run the Experience-Owner role inline in this conversation for the provided issue
 
 ### Step 4 — Run-once marker (D2 fail-open)
 
-The automatic startup guard records `/memories/session/session-startup-check-complete.md` after the first automatic startup check. Claude Code inline currently lacks a session-memory write surface; the run-once marker is a no-op on this surface. The check still proceeds; the user-friction window is bounded to the first inline command of each new session because the SessionStart hook only injects `additionalContext` on session start.
+The automatic startup guard records `/memories/session/session-startup-check-complete.md` after the first automatic startup check. SMC-07 governs this run-once startup-check marker. Claude Code inline currently lacks a session-memory write surface (SMC-07); the run-once marker is a no-op on this surface. The check still proceeds; the user-friction window is bounded to the first inline command of each new session because the SessionStart hook only injects `additionalContext` on session start.
 
 ### Step 6 — Cleanup confirmation
 
@@ -58,7 +58,7 @@ Only if the stage-1 answer is `I'm picking this up cold`, run the assessment sum
 
 Both stop outcomes (`Stop — needs rework first` and `Needs rework — stop here`) halt and post no marker token.
 
-For non-stop outcomes, record the two-line marker via `gh issue comment`:
+For non-stop outcomes, SMC-04 governs the first-contact-assessed marker; record the two-line marker via `gh issue comment`:
 
 ```text
 <!-- first-contact-assessed-{ID} -->
@@ -67,7 +67,7 @@ Provenance gate: fast-path or cold-path assessment completed; human-readable sum
 
 The HTML token on line 1 remains the only skip-check anchor and the only parser anchor. The second line is decorative and human-readable only.
 
-If GitHub lookup or posting is unavailable, say offline mode is active and continue. Claude Code inline currently lacks a session-memory write surface, so this surface cannot persist the shared skill's local fallback payload or recover the GitHub marker on a later online run. Do not claim that either happened here.
+If GitHub lookup or posting is unavailable, say offline mode is active and continue. Claude Code inline currently lacks a session-memory write surface (SMC-04), so this surface cannot persist the shared skill's local fallback payload or recover the GitHub marker on a later online run. Do not claim that either happened here.
 
 <!-- D6 (issue #412): Copilot's .github/prompts/*.prompt.md files are thin one-line dispatchers without a parent-side prose surface. Inline-dispatch enforcement on Copilot is owned by the agent body and tracked in #414. -->
 

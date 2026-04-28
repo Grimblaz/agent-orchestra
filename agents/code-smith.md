@@ -95,15 +95,15 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 | `read` | `Read` |
 | `edit` | `Edit`, `Write` |
 | `search` | `Grep`, `Glob` |
-| `vscode/memory` plan/design lookups | Read the parent Code-Conductor handoff first; if it is absent, read the latest GitHub issue comments carrying `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` |
+| `vscode/memory` plan/design lookups | Per `SMC-01` and `SMC-03`, read the parent Code-Conductor handoff first; if it is absent or incomplete, use latest-comment-wins issue comments carrying `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->`, with the current issue body as the final design fallback |
 
 ## Persistence differences
 
-Claude Code does not use `vscode/memory` as a Claude-only persistence layer for this specialist.
+Per `SMC-01` and `SMC-03`, Claude Code does not use `vscode/memory` as a Claude-only persistence layer for this specialist.
 
 - Treat the parent Code-Conductor dispatch as the first source of plan and design context.
-- If parent context is incomplete, read the latest `<!-- plan-issue-{ID} -->` issue comment for the approved implementation plan.
-- If design intent is still needed, read the latest `<!-- design-issue-{ID} -->` issue comment before falling back to the current issue body.
+- If parent context is incomplete, read the latest-comment-wins `<!-- plan-issue-{ID} -->` issue comment for the approved implementation plan.
+- If design intent is still needed, read the latest-comment-wins `<!-- design-issue-{ID} -->` issue comment before falling back to the current issue body.
 - Durable marker writes remain Code-Conductor-owned; Code-Smith consumes those artifacts but does not create new handoff markers on its own.
 
 ## Invocation

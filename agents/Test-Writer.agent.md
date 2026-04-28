@@ -88,6 +88,8 @@ For terminal and validation execution guardrails, load `skills/terminal-hygiene/
 
 When the consumer repo has both a `## BDD Framework` heading and a recognized `bdd: {framework}` config line, load `skills/bdd-scenarios/SKILL.md` and follow its Phase 2 generation rules for activation, `[auto]` scope, output location, stub idempotency, and warning behavior.
 
+Generate Gherkin `.feature` files for `[auto]` scenarios only; exclude `[manual]` scenarios. Add an `@S{N}` tag to each generated Gherkin scenario, and use the `bdd-scenarios` framework mapping table to choose the output directory.
+
 ## Skills Reference
 
 - Load `skills/test-driven-development/SKILL.md` for red-green-refactor process

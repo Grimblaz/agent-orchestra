@@ -129,7 +129,7 @@ Run stage 1 self-classification before any assessment text with `I wrote this / 
 
 Record `<!-- first-contact-assessed-{ID} -->` only after non-stop outcomes. `Stop — needs rework first` and `Needs rework — stop here` do not post the `<!-- first-contact-assessed-{ID} -->` marker. The human-readable second line is decorative only; the HTML token remains the only skip-check anchor and parser anchor.
 
-Skip the gate silently when no issue ID can be determined, existing warm handoff markers or a prior GitHub `<!-- first-contact-assessed-{ID} -->` assessment marker are present. If only `/memories/session/first-contact-assessed-{ID}.md` exists, treat that as pending recovery rather than a silent skip. If MCP tools are unavailable or the API call fails, fail open visibly: tell the developer offline mode is active, write the structured local payload in session memory, continue, and on the next online invocation reconstruct the GitHub marker from that payload before continuing if the payload is still available.
+Skip the gate silently when no issue ID can be determined, existing warm handoff markers or a prior GitHub `<!-- first-contact-assessed-{ID} -->` assessment marker are present. If only `/memories/session/first-contact-assessed-{ID}.md` exists, treat that as pending recovery rather than a silent skip. If MCP tools are unavailable or the API call fails, fail open visibly: tell the developer offline mode is active, write the structured local payload only when the active surface can write/read `/memories/session`, continue, and on the next online invocation reconstruct the GitHub marker from that payload only if the payload is still available.
 
 For terminal and validation execution guardrails, load `skills/terminal-hygiene/SKILL.md`.
 
@@ -138,7 +138,6 @@ For terminal and validation execution guardrails, load `skills/terminal-hygiene/
 Any future pre-response trigger step runs **before** the Core Workflow, stays outside the numbered workflow list, and does not renumber, replace, or subsume Step 0. Issue Transition remains Step 0 and the first numbered workflow step after any pre-response trigger handling completes.
 
 <!-- markdownlint-disable-next-line MD029 -->
-
 0. **Issue Transition (Step 0, before implementation)**:
    - Cleanup note: The `session-startup` skill (loaded by pipeline-entry agents) detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `pwsh "skills/session-startup/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly (path is relative to the agent-orchestra plugin or repo clone).
    - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
@@ -190,6 +189,7 @@ Before any editing delegation or file mutation in hub mode, run a pre-edit owner
 - If the needed change is `upstream shared-workflow mutation`, fail closed immediately with `requires upstream issue` instead of starting mixed-repo implementation.
 - Reuse the existing upstream-routing conventions instead of inventing a second escalation path: if an upstream issue already exists, link it and stop; otherwise, when the upstream repo can be resolved and upstream access is available, follow the existing safe-operations rules for dedup search, priority-labeled `gh issue create`, and output capture. If the upstream repo cannot be resolved or upstream access is unavailable, create a local fallback artifact labeled `process-gap-upstream` and stop with an explicit manual upstream handoff path.
 - Safe-operations retains ownership of deduplication, priority-label, and output-capture rules for any upstream issue creation.
+- **Auto-Tracking**: Before creating any DEFERRED-SIGNIFICANT tracking issue that proposes a new rule or directive, apply the prevention-analysis advisory from `skills/safe-operations/SKILL.md` §2d before deduplication and issue creation.
 - The local `process-gap-upstream` fallback is distinct from Process-Review's gotcha-specific `upstream-gotcha` flow.
 
 **Mid-run fail-closed rule**:
@@ -218,7 +218,7 @@ Use `#tool:vscode/askQuestions`:
 ```
 
 > **Note**: D9 fires even if some upstream phases were completed in prior sessions — suppression requires ALL applicable tier-required phase markers to have been completed before this session. If Issue-Planner ran in this session, D9 must fire unless the user already confirmed continuation.
-> **Persistence contract**: D9 owns durable execution-handoff persistence. Continue is the same-session fast path and stays in session memory only. Pause writes durable handoff comments only when needed, using the existing `<!-- plan-issue-{ID} -->` / `<!-- design-issue-{ID} -->` markers, ignoring transport-only formatting drift during comparison, and preserving the same latest-comment-wins lookup semantics already used by smart resume.
+> **Persistence contract**: D9 owns durable execution-handoff persistence under `SMC-01`, `SMC-02`, `SMC-03`, and `SMC-08`. Continue is the same-session fast path and stays in session memory only. Pause writes durable handoff comments only when needed, using the existing `<!-- plan-issue-{ID} -->` / `<!-- design-issue-{ID} -->` markers, ignoring transport-only formatting drift during comparison, and preserving the same latest-comment-wins lookup semantics already used by smart resume.
 
 **Skip D9 when**:
 
@@ -281,7 +281,7 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
    - If specialist does a task outside their responsibility, retry with clearer instructions (max 2 retries)
    - **RC conformance gate** (fires after convergence gate passes per parallel-execution SKILL, before step advance): CC reads the step's Requirement Contract AC items, inspects changed files via `get_changed_files`, filtering results to the step's target files, and evaluates each AC item against current file state. **Output**: pass → `RC conformance: ✅ all {N} AC items satisfied`; fail → `RC conformance: ❌ {N} of {M} AC items divergent` followed by a bullet list of divergent items described in customer-outcome terms (RC expectation vs. actual). **Skip**: when the step's RC has no AC items (detection: absence of "Acceptance Criteria" / "AC" section in the RC block). **On fail**: classify as `rc-divergence` and dispatch Code-Smith with the divergent AC items; after Code-Smith returns, re-run incremental validation (Tier 1), then CC re-evaluates all AC items in the step's RC (not just the previously-divergent ones); if all satisfied → advance; if divergence persists → dispatch Test-Writer with explicit instruction: "Re-derive test assertions from the Requirement Contract, not from the corrected implementation." After Test-Writer returns, CC re-runs incremental validation and re-evaluates all AC items to determine resolution. **Budget**: 1 dedicated correction cycle (the Code-Smith + conditional Test-Writer pair = 1 cycle), outside the main 3-cycle convergence budget. If the single cycle does not resolve the divergence, escalate via `#tool:vscode/askQuestions` with unresolved AC items and recommended options. **Fidelity scope**: targets obvious divergences (missing UI elements, wrong copy text, omitted affordances); subtle logic bugs remain the domain of Tier 4 adversarial review and CE Gate.
    - **Step commit gate**: If `auto_commit_enabled` is `true`, load `skills/step-commit/SKILL.md` and execute the step commit protocol. If the protocol reports commit failure, annotate the progress checkpoint as `— ✅ DONE (uncommitted)` instead of plain `— ✅ DONE`.
-   - **Progress checkpoint**: After all quality checks pass (validation + scope check), update the plan in session memory — use `vscode/memory str_replace` to append the step status to the step's title line in the plan file loaded in Step 1 (either `plan-bundle-{primary}-{secondary1}-{secondaryN}.md` for bundles or `plan-issue-{ID}.md` for single-issue plans): append `— ✅ DONE` when the step commit succeeded or was not attempted, or `— ✅ DONE (uncommitted)` when the step commit gate reported failure. If the session memory plan file doesn't exist (plan was loaded from a GitHub issue comment), first use `vscode/memory create` to write the full plan content, then apply the annotation.
+   - **Progress checkpoint**: After all quality checks pass (validation + scope check), update the plan in session memory under `SMC-01`/`SMC-02` — use `vscode/memory str_replace` to append the step status to the step's title line in the plan file loaded in Step 1 (either `plan-bundle-{primary}-{secondary1}-{secondaryN}.md` for bundles or `plan-issue-{ID}.md` for single-issue plans): append `— ✅ DONE` when the step commit succeeded or was not attempted, or `— ✅ DONE (uncommitted)` when the step commit gate reported failure. If the session memory plan file doesn't exist (plan was loaded from a GitHub issue comment), first use `vscode/memory create` to write the full plan content, then apply the annotation.
 
 4. **Create PR (MANDATORY, review-ready gate)**: After all steps complete (including documentation):
    - **End-to-end check**: Does this PR actually resolve the issue? Not "all steps executed" but "the feature works." Review the full diff against the issue's acceptance criteria.
@@ -377,7 +377,15 @@ Load and follow these references:
 - `skills/customer-experience/references/orchestration-protocol.md`
 - `skills/customer-experience/references/defect-response.md`
 
+BDD pre-flight: read scenario IDs from the issue body using the `### S\d+` scenario ID pattern. Scope extraction to content between `## Scenarios` and the next H2, excluding headings whose title contains `[REMOVED]` because retired tombstones are not exercised. If coverage is missing, recovery labels are `Re-exercise missing scenario`, `Waive with documented reason`, and `Abort CE Gate`; the pre-flight cycle budget is independent from the Track 1 budget.
+
+Phase 2 runner dispatch activates only when `bdd: {framework}` is a recognized framework value. If all `[auto]` runners pass, delegate only `[manual]` scenarios to Experience-Owner. If any `[auto]` runner fails, add failed `[auto]` scenarios to the EO delegation list. If the runner pre-check fails, emit/log a warning and fall back to Phase 1 behavior: all scenarios to EO.
+
+PR-body per-scenario coverage table header: `| ID | Type | Class | Result | Evidence | Source |`.
+
 Code-Conductor keeps only the shell responsibilities here: identify the surface, delegate scenario evidence capture to Experience-Owner, preserve CE sequencing through prosecution/defense/judgment, and emit the documented PR-body outputs.
+
+When CE Gate Track 2 systemic analysis creates a systemic follow-up issue, Code-Conductor applies the prevention-analysis advisory from `skills/safe-operations/SKILL.md` §2d before issue creation.
 
 1. CE Gate result markers (emitted by the judge in conjunction with Code-Conductor's read of the verdict):
    - `✅ CE Gate passed — intent match: strong` — all scenarios passed, no defects found, design intent fully achieved

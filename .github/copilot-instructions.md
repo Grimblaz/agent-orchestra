@@ -31,7 +31,7 @@ Pipeline-based agent orchestration:
 
 - **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
 - **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invocable: false`)
-- **Skills** (39): Loaded on demand by agents from `skills/` (repo root)
+- **Skills** (42): Loaded on demand by agents from `skills/` (repo root)
 - **Instruction files**: Repo-local instruction files remain under `.github/instructions/`, while shared workflow rules load from skills
 
 ## Key Conventions
@@ -41,6 +41,7 @@ Pipeline-based agent orchestration:
 - Instruction files use `.instructions.md` extension in `.github/instructions/`; shared workflow guidance is migrating to skill-owned `SKILL.md` files
 - Design documents go in `Documents/Design/`, decision records in `Documents/Decisions/`
 - Code-Conductor auto-commits after each validated step by default (see `## Commit Policy` opt-out in consumer `copilot-instructions.md`); specialist agents do not commit independently
+- Session-state survival and handoff semantics are governed by [skills/session-memory-contract/SKILL.md](../skills/session-memory-contract/SKILL.md); design rationale lives in [Documents/Design/session-memory-contract.md](../Documents/Design/session-memory-contract.md)
 - Plans are saved to session memory (`/memories/session/plan-issue-{ID}.md`), which is the same-session source of truth for implementation handoff
 - Design context is cached in session memory (`/memories/session/design-issue-{ID}.md`), reused by Issue-Planner when the current snapshot is still valid and refreshed from the issue body when missing or after current-pass issue/design updates; Solution-Designer still persists design details to the issue body unconditionally during design
 - VS Code auto-compacts conversation when context fills; session memory (`/memories/session/`) survives compaction within the same conversation. At D9, if the user explicitly chooses Stop / Pause / resume later, Code-Conductor persists durable GitHub handoff comments with `<!-- plan-issue-{ID} -->` / `<!-- design-issue-{ID} -->`; Continue uses session memory only

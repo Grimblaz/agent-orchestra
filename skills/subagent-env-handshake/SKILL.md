@@ -8,6 +8,8 @@ scope: claude-only
 
 Shared contract for parent → subagent handoff of live working-tree state in Claude Code `Agent`-tool dispatch. Exists to eliminate the failure mode from [#380](https://github.com/Grimblaz/agent-orchestra/issues/380) / [#383](https://github.com/Grimblaz/agent-orchestra/issues/383) where a subagent confidently reported tree-grounded claims (file existence, branch identity) grounded in a stale `<env>` block injected once at dispatch time and never refreshed.
 
+> **Survival**: `SMC-14` governs this handshake as `per-dispatch`: the block is prompt-carried, delegated/informational, and intentionally not persisted.
+
 ## When to use
 
 Use this handshake for any dispatch where the subagent **may claim**:

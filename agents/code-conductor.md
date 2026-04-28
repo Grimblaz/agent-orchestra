@@ -94,7 +94,7 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 | "the platform's structured-question tool" / `#tool:vscode/askQuestions` | `AskUserQuestion` |
 | Subagent dispatch (`#tool:agent/runSubagent`) | `Agent` tool |
 | `github/*` MCP operations | `gh` CLI via `Bash` |
-| Session memory (`vscode/memory`) | Claude does not use a Claude-only session-memory persistence layer. For durable state, use GitHub issue comments, issue bodies, PR comments, and PR bodies; for design intent specifically, prefer the `[CE GATE]` step's `Design Intent` field, then the latest `<!-- design-issue-{ID} -->` handoff comment, then the issue body |
+| Session memory (`vscode/memory`) | Per `SMC-01`, `SMC-03`, and `SMC-08`, Claude does not use a Claude-only session-memory persistence layer. For plan/design state, use parent dispatch or current plan context first; otherwise use latest-comment-wins GitHub issue markers (`<!-- plan-issue-{ID} -->`, `<!-- design-issue-{ID} -->`) and fall back to the issue body for design intent. For CE design intent specifically, prefer the `[CE GATE]` step's `Design Intent` field, then the latest `<!-- design-issue-{ID} -->` handoff comment, then the issue body |
 | Browser tools (`browser/*`) | Claude Code cannot assume the native VS Code browser-tool surface here; use `WebFetch` only for remote pages or published artifacts, and delegate CE Gate scenario capture to `experience-owner` so the evidence step stays on the documented fallback path when interactive browser coverage is required |
 
 When the shared body tells users to pause and resume with `/implement`, Claude Code uses `/orchestrate` as the resume entry point for Phase 3. There is no Claude `/implement` command in the shipped surface yet.
@@ -113,16 +113,16 @@ When a required specialist shell for a planned step does not exist yet, use the 
 
 ## Persistence differences
 
-Claude Code keeps the same durable GitHub handoff model as the shared workflow, but it does not rely on `vscode/memory` as a Claude-only persistence layer.
+Claude Code keeps the same durable GitHub handoff model as the shared workflow, but it does not rely on `vscode/memory` as a Claude-only persistence layer. Contract rows: plan cache `SMC-01`, design cache `SMC-03`, post-PR review-state resume `SMC-06`, and phase-completion markers `SMC-08`.
 
-- `<!-- experience-owner-complete-{ID} -->` remains the durable GitHub issue-comment marker for completed upstream customer framing.
-- `<!-- design-phase-complete-{ID} -->` remains the durable GitHub issue-comment marker for completed technical design.
-- `<!-- design-issue-{ID} -->` remains the durable GitHub issue-comment handoff for the current design snapshot when D9 pause or smart-resume persistence needs design intent outside the live issue body.
-- `<!-- plan-issue-{ID} -->` remains the durable GitHub issue-comment handoff for a persisted implementation plan when the workflow takes the durable D9 pause path.
-- `<!-- code-review-complete-{PR} -->` remains the durable PR-comment marker paired with the judge payload for review completion.
+- `<!-- experience-owner-complete-{ID} -->` remains the durable GitHub issue-comment marker for completed upstream customer framing (`SMC-08`).
+- `<!-- design-phase-complete-{ID} -->` remains the durable GitHub issue-comment marker for completed technical design (`SMC-08`).
+- `<!-- design-issue-{ID} -->` remains the durable GitHub issue-comment handoff for the current design snapshot when D9 pause or smart-resume persistence needs design intent outside the live issue body (`SMC-03`, `SMC-08`).
+- `<!-- plan-issue-{ID} -->` remains the durable GitHub issue-comment handoff for a persisted implementation plan when the workflow takes the durable D9 pause path (`SMC-01`, `SMC-08`).
+- `<!-- code-review-complete-{PR} -->` remains the durable PR-comment marker paired with the judge payload for review completion; post-PR review-state resume reads that durable comment first, then PR-body `<!-- pipeline-metrics -->`, then any available session-memory fallback (`SMC-06`).
 - CE Gate result markers such as `✅ CE Gate passed - intent match: strong`, `⚠️ CE Gate skipped - {reason}`, and `❌ CE Gate aborted - {reason}` remain durable PR artifacts emitted in the PR body alongside the rest of the CE Gate evidence.
 
-For paused Claude orchestration work, resume through `/orchestrate` with the issue number or issue URL. Smart resume reads the durable GitHub markers above; it does not depend on a Claude-only `/implement` surface.
+For paused Claude orchestration work, resume through `/orchestrate` with the issue number or issue URL. Smart resume reads the durable GitHub markers above with latest-comment-wins semantics; it does not depend on a Claude-only `/implement` surface.
 
 ## Invocation
 

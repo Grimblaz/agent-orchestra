@@ -56,8 +56,10 @@ No stop outcome posts the marker token. That includes both `Stop — needs rewor
 
 Primary persistence is the GitHub issue comment marker, and that GitHub marker is the durable source of truth. The session-memory fallback payload is a best-effort local recovery aid, not a durable substitute. If GitHub lookup or posting is unavailable, the gate fails open visibly:
 
+`SMC-04` in [skills/session-memory-contract/SKILL.md](../../skills/session-memory-contract/SKILL.md) owns the survival and fungibility semantics for this marker and its local fallback payload.
+
 - the developer is told offline mode is active
-- a structured payload is written to `/memories/session/first-contact-assessed-{ID}.md`
+- on surfaces that can write/read `/memories/session/`, a structured payload is written to `/memories/session/first-contact-assessed-{ID}.md`; inline/no-write Claude cannot persist that local fallback payload
 - if the next online invocation finds the GitHub marker still missing and the local fallback payload is still available, it reconstructs the two-line GitHub marker, posts it, and clears the local fallback state
 
 If that local fallback payload is no longer available, there is no local state left to replay; recovery then depends on the GitHub marker already existing.

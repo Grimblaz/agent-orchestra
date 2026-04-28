@@ -262,7 +262,7 @@ if ($null -ne $healthReportTempFile -and -not (Test-Path $healthReportTempFile))
 **Step 4 — Output format**:
 
 ```markdown
-## Calibration Analysis ({N} issues, effective n={X:.1f})
+## Calibration Analysis - Actionable Signals ({N} issues, effective n={X:.1f})
 
 ### Signals Found
 
@@ -289,7 +289,7 @@ if ($null -ne $healthReportTempFile -and -not (Test-Path $healthReportTempFile))
 When no actionable signals are found (all categories insufficient data, or all rates within acceptable ranges):
 
 ```markdown
-## Calibration Analysis ({N} issues, effective n={X:.1f})
+## Calibration Analysis - No Actionable Signals ({N} issues, effective n={X:.1f})
 
 No actionable signals found. All metrics within acceptable ranges or below per-category data threshold (15 effective findings required).
 ```

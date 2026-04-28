@@ -2,6 +2,8 @@
 
 Claude Code loads `plugin-release-hygiene` from the plugin-distributed `PostToolUse` hook in `hooks/hooks.json`. The hook runs `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1` via `${CLAUDE_PLUGIN_ROOT}`, filters the edited path against the entry-point list, and emits `hookSpecificOutput.additionalContext` only for the first relevant touch in a conversation.
 
+> **Survival**: `SMC-12` governs `.claude/.state/release-hygiene-{slug}.json`. Claude state is `within-conversation:session_id` when available, otherwise `within-worktree:hooks`; cross-tool silence is partial unless Copilot and Claude resolve the same state key.
+
 State keying behavior:
 
 - Prefer the PostToolUse payload's `session_id` when it is present.
@@ -21,4 +23,4 @@ When the skill needs a user-facing override, invoke `AskUserQuestion` with these
 3. `Major`
 4. `Skip`
 
-Persist the conversation-scoped result in `.claude/.state/release-hygiene-{slug}.json` and reuse it silently for later entry-point touches in the same conversation.
+Persist the scoped result in `.claude/.state/release-hygiene-{slug}.json` and reuse it silently for later entry-point touches that resolve the same state key.

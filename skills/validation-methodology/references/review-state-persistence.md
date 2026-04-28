@@ -8,6 +8,8 @@ When the active branch matches `feature/issue-{N}-...`, persist review state to 
 
 Pre-PR review-state lookup reads session memory only. Post-PR resume lookup may instead use the durable review comment, then `<!-- pipeline-metrics -->`, then session memory.
 
+> **Survival**: `SMC-05` owns pre-PR review-state as `within-conversation` branch-keyed session state. `SMC-06` owns post-PR resume as `durable` review comment or PR-body evidence, with session memory only as fallback.
+
 ## File Shape
 
 Persist the exact YAML front matter fields below in this order:

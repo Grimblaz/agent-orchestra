@@ -10,6 +10,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
         $script:ClaudeGuide = Join-Path $script:RepoRoot 'CLAUDE.md'
         $script:Readme = Join-Path $script:RepoRoot 'README.md'
         $script:FixtureRoots = [System.Collections.Generic.List[string]]::new()
+        . $script:HookScript
         $script:CliCommands = @(
             'claude plugin list',
             'claude plugin marketplace list',
@@ -100,7 +101,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
             Push-Location $FixtureRoot
             try {
-                return ($payload | & pwsh -NoProfile -NonInteractive -File $script:HookScript)
+                return (Invoke-PRHHook -PayloadJson $payload)
             }
             finally {
                 Pop-Location
@@ -127,6 +128,37 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
         $result.hookSpecificOutput.hookEventName | Should -Be 'PostToolUse'
         $result.hookSpecificOutput.additionalContext | Should -Match 'Entry-point edit detected:'
         $result.hookSpecificOutput.additionalContext | Should -Match 'plugin-release-hygiene skill'
+    }
+
+    It 'emits hook JSON through the production entrypoint using stdin payload' {
+        $fixture = New-PluginReleaseHygieneFixture
+        $target = Join-Path $fixture 'agents\Entrypoint.agent.md'
+        Set-Content -Path $target -Value '# Entrypoint' -Encoding UTF8
+        $payload = [PSCustomObject]@{
+            hook_event_name = 'PostToolUse'
+            tool_name       = 'Edit'
+            session_id      = 'entrypoint-session'
+            tool_input      = [PSCustomObject]@{
+                file_path = $target
+            }
+        } | ConvertTo-Json -Depth 10 -Compress
+
+        $originalInput = [Console]::In
+        Push-Location $fixture
+        try {
+            [Console]::SetIn([System.IO.StringReader]::new($payload))
+            $raw = Invoke-PRHHookEntrypoint
+        }
+        finally {
+            [Console]::SetIn($originalInput)
+            Pop-Location
+        }
+
+        $result = $raw | ConvertFrom-Json
+
+        $result.hookSpecificOutput.hookEventName | Should -Be 'PostToolUse'
+        $result.hookSpecificOutput.additionalContext | Should -Match 'Entry-point edit detected:'
+        $result.hookSpecificOutput.additionalContext | Should -Match 'agents/Entrypoint.agent.md'
     }
 
     It 'stays silent for non-entry-point edits' {

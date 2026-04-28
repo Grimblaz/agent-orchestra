@@ -10,11 +10,13 @@ description: "Maintainer-side version-bump guardrail and Claude startup drift ba
 
 Reusable guidance for preventing plugin entry-point changes from shipping without a version bump and for keeping the Claude-side update surface explicit. The maintainer-side trigger now lives in the plugin-distributed `PostToolUse` hooks declared in `hooks/hooks.json` for Claude and `hooks.json` for Copilot, both of which run `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1`.
 
+> **Survival**: `SMC-12` governs `.claude/.state/release-hygiene-{slug}.json`. State is `within-conversation:session_id` when the hook payload supplies `session_id`; otherwise it is `within-worktree:hooks` keyed by branch slug, then short HEAD SHA, then `session` fallback. Cross-tool silence is partial: Claude may key by `session_id` while Copilot keys by branch slug, so both surfaces share a decision only when they resolve the same state file. The SHA and final fallback paths record `keying_strategy: session_fallback`.
+
 ## When to Use
 
 - When an agent conversation edits an entry-point file that ships through the plugin cache
 - When a maintainer needs a default bump proposal plus an override path
-- When the repo must coalesce multiple entry-point edits into one conversation-scoped decision
+- When the repo must coalesce multiple entry-point edits into one scoped decision
 - When documentation or startup logic needs the supported `claude plugin` command surface
 
 ## Entry-Point Scope
@@ -33,13 +35,13 @@ Any edit touching one of those paths requires a release-hygiene check before the
 
 ## Purpose
 
-Make the shipping consequence of an entry-point edit visible at the moment it happens. The default behavior is deterministic: propose a patch bump, offer a structured override for minor or major user-visible changes, or allow an explicit no-bump skip for comment-only edits. Coalesce that decision once per conversation so repeated edits do not spam the maintainer.
+Make the shipping consequence of an entry-point edit visible at the moment it happens. The default behavior is deterministic: propose a patch bump, offer a structured override for minor or major user-visible changes, or allow an explicit no-bump skip for comment-only edits. Coalesce that decision once per active state key so repeated edits do not spam the maintainer.
 
 ## Maintainer Flow
 
 ### 1. Determine Whether To Speak Or Stay Silent
 
-Before proposing a bump, check the conversation-scoped state file at `.claude/.state/release-hygiene-{slug}.json`.
+Before proposing a bump, check the active scoped state file at `.claude/.state/release-hygiene-{slug}.json`.
 
 - If the file is absent, create proposal state and surface the bump prompt.
 - If the file exists and `chosen_level` is already set, append the touched path to `touched_files` and stay silent.
@@ -123,8 +125,8 @@ When a drift-check or maintainer flow needs one of these commands, attempt the c
 | ---------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Multiple entry-point edits in one conversation | Repeated prompts turn a guardrail into noise | Record the first proposal in `.claude/.state/` and silently append later touched files |
 
-| Trigger                                         | Gotcha                                                                 | Fix                                                                                                 |
-| ----------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Trigger                                         | Gotcha                                                                | Fix                                                                                                |
+| ----------------------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | `session_id` is missing or payload shape drifts | A branch-scoped fallback can look like a silent regression in reviews | Persist `keying_strategy` so tests and future reviews can observe which keying path actually fired |
 
 | Trigger                                        | Gotcha                                                             | Fix                                                                      |
