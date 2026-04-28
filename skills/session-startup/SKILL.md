@@ -152,7 +152,7 @@ canonical_option_labels:
   drift_continue: "Continue — run under old code"
 ```
 
-Enforcement paths: subagent dispatch (`/plan` and Agent tool) is enforced by Step 9 — this step fires before the agent acts and halts on failure. Inline dispatch now has command-file contract enforcement for the paired-body read requirement and fail-closed error text on `/experience` and `/design`, plus startup option-label parity across all three Claude command files from issue #412. That path still does not have full Step 9 success-path citation parity, and `/plan` continues to defer paired-body halt-on-failure enforcement to the `issue-planner` subagent shell rather than duplicating it in the parent command file.
+Enforcement paths: Claude inline slash-command dispatch (`/experience`, `/design`, and `/plan`) has command-file contract enforcement for the paired-body read requirement and fail-closed error text. `/plan` now enforces Step 9 inline as the issue #437 rollback of its earlier delegated path, matching `/experience` and `/design`; startup option-label parity still spans all three Claude command files from issue #412. `Agent` tool and other subagent dispatch continue to rely on paired shell Step 9, which fires before the agent acts and halts on failure. Inline dispatch still does not have full Step 9 success-path citation parity.
 
 ## Silent Skip Conditions
 

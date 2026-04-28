@@ -235,6 +235,12 @@ Final fallback — manual screenshot paste:
                 RequiresHeadingBijection    = $true
             }
             [pscustomobject]@{
+                Name                        = 'issue-planner'
+                BodyPointer                 = 'agents/Issue-Planner.agent.md'
+                RequiredLiteralAnnouncement = ''
+                RequiresHeadingBijection    = $true
+            }
+            [pscustomobject]@{
                 Name                        = 'ui-iterator'
                 BodyPointer                 = 'agents/UI-Iterator.agent.md'
                 RequiredLiteralAnnouncement = $script:UiIteratorCe6Literal

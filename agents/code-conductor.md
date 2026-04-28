@@ -101,7 +101,7 @@ When the shared body tells users to pause and resume with `/implement`, Claude C
 
 ## Specialist availability
 
-Phase 3 Claude specialist shells available for Code-Conductor dispatch are `code-critic`, `code-review-response`, and `experience-owner`.
+Phase 3 Claude specialist shells available for Code-Conductor dispatch are `code-critic`, `code-review-response`, `experience-owner`, and `issue-planner`.
 
 Phase 4 Claude specialist shells available for Code-Conductor dispatch are `code-smith`, `test-writer`, `refactor-specialist`, and `doc-keeper`.
 

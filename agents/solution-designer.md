@@ -27,7 +27,7 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 | `#tool:vscode/askQuestions`                 | `AskUserQuestion`              |
 | `github/*` MCP operations                   | `gh` CLI via `Bash`            |
 | Browser tools (`browser/*`)                 | Use `WebFetch` for external pages; full browser automation is optional |
-| Code-Critic subagent dispatch               | `Agent` tool with `subagent_type: agent-orchestra:Code-Critic` |
+| Code-Critic subagent dispatch               | `Agent` tool with `subagent_type: code-critic` |
 
 ## Persistence
 
