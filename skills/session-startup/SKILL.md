@@ -92,13 +92,24 @@ The detector returns one of two JSON shapes.
 
 The `additionalContext` field is a Markdown-formatted description of what was found plus the command block to clean it up.
 
+Detector findings are reported in this order when present:
+
+- **Current branch**: flags the current branch when its upstream was merged/deleted, and flags a current `claude/*` no-upstream branch only when it is reachable from the resolved remote default branch. Current-worktree cleanup commands are narrative inline text only and must be run from another checkout.
+- **Tracking files**: flags issue-scoped `.copilot-tracking/` files whose remote `feature/issue-*` branch is gone; persistent calibration data remains excluded.
+- **Sibling worktrees**: flags sibling worktrees on merged `claude/*` no-upstream branches or upstream-deleted `feature/issue-*` branches. Their `git worktree remove` and `git branch -D` commands appear inside the fenced PowerShell block.
+- **Orphan branches**: flags unattached merged `claude/*` no-upstream branches and unattached upstream-deleted `feature/issue-*` branches. Their `git branch -D` commands appear inside the fenced PowerShell block.
+- **Fail-open behavior**: fetch, worktree-list, for-each-ref, per-candidate merge-base, and ref-lookup failures suppress only the unverifiable candidate and do not fail the startup session.
+- **Opt-in cleanup**: the detector only reports findings. Nothing is removed unless the user confirms, and explicit manual detector runs remain available after the automatic guard fires.
+
+Claude cleanup findings are capped at 10 concrete `claude/*` entries; additional entries are summarized with a `+N more` hint.
+
 ### Step 6 — Prompt the user
 
-If the output contains `hookSpecificOutput`, present the `additionalContext` text to the user and ask for confirmation before running cleanup. Use `#tool:vscode/askQuestions` with two options: "Yes — run cleanup" and "No — skip for now".
+If the output contains `hookSpecificOutput`, present the `additionalContext` text to the user and ask for confirmation before running cleanup. Use `#tool:vscode/askQuestions` with two options: "Yes — run cleanup" and "No — skip for now". The confirmation covers only the fenced cleanup block; inline current-worktree commands are deliberately narrative and require a separate manual run from another checkout.
 
 ### Step 7 — Run cleanup (only if confirmed)
 
-If the user confirms, run all lines from the code block inside `additionalContext` in the terminal. Skip blank lines; `#`-prefixed comment lines are safe to include. Report what was cleaned up when complete.
+If the user confirms, run all lines from the fenced code block inside `additionalContext` in the terminal. Skip blank lines; `#`-prefixed comment lines are safe to include. Do not scrape or execute inline current-worktree cleanup text outside the fenced block. Report what was cleaned up when complete.
 
 ### Step 7b — Run the Claude plugin drift check
 

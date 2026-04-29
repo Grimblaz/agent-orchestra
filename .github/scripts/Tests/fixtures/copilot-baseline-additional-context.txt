@@ -1,0 +1,9 @@
+**Post-merge cleanup detected** — you're on a stale branch:
+
+- Current branch `feature/issue-452-cleanup-detector-worktrees` — remote branch merged/deleted
+
+To clean up, run:
+```powershell
+# Run in a PowerShell (pwsh) terminal:
+pwsh 'C:/agent-orchestra/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber 452 -FeatureBranch 'feature/issue-452-cleanup-detector-worktrees'
+```

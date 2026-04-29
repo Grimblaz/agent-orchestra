@@ -2,7 +2,7 @@
 
 Claude Code receives `session-startup` through the plugin-distributed `SessionStart` hook declared in `hooks/hooks.json`. That hook runs the detector script from the plugin cache and injects any resulting `additionalContext` into the agent's first turn.
 
-When `session-startup` needs user confirmation before running the post-merge cleanup script, Claude Code agents invoke the `AskUserQuestion` tool. Present the detector's `additionalContext` text and offer two options:
+When `session-startup` needs user confirmation before running the detector's fenced cleanup commands, Claude Code agents invoke the `AskUserQuestion` tool. Present the detector's `additionalContext` text and offer two options:
 
 1. `Yes — run cleanup`
 2. `No — skip for now`

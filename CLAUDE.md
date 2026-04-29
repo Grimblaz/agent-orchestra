@@ -68,7 +68,7 @@ The row-level survival and fallback semantics are governed by [skills/session-me
 
 ## Session startup
 
-When a session begins, the plugin's `SessionStart` hook runs the cleanup detector and injects any findings into the agent's first turn. The `session-startup` skill describes how the agent handles that injected context, preserves the run-once marker, and offers to run the post-merge cleanup script when anything is found. Manual detector runs remain available after the automatic check fires.
+When a session begins, the plugin's `SessionStart` hook runs the cleanup detector and injects any findings into the agent's first turn. The `session-startup` skill describes how the agent handles that injected context, preserves the run-once marker, and reports current branch, tracking file, sibling worktree, orphan branch, fail-open, and opt-in cleanup behavior. Current-worktree cleanup commands stay as inline manual guidance outside the fenced block; sibling and orphan cleanup commands are fenced and run only after confirmation. Manual detector runs remain available after the automatic check fires.
 
 ## Releases
 

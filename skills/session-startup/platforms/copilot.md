@@ -2,7 +2,7 @@
 
 Copilot receives `session-startup` through the plugin-distributed root `hooks.json` file referenced by the root `plugin.json` manifest. Because Copilot-format plugins do not define `${CLAUDE_PLUGIN_ROOT}`, the Copilot hook command resolves the installed plugin cache path explicitly before invoking `skills/session-startup/scripts/session-cleanup-detector.ps1`, then injects any resulting `additionalContext` into the agent's first turn.
 
-When `session-startup` needs user confirmation before running the post-merge cleanup script, Copilot agents invoke:
+When `session-startup` needs user confirmation before running the detector's fenced cleanup commands, Copilot agents invoke:
 
 ```text
 #tool:vscode/askQuestions

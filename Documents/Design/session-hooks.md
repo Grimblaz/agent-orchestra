@@ -10,7 +10,7 @@
 
 ## Summary
 
-The current design uses plugin-distributed hooks to restore deterministic startup automation across both Claude Code and Copilot. Claude-format installs use `hooks/hooks.json`; Copilot-format installs use root `hooks.json`. Both carry `SessionStart` for stale-state cleanup context injection and `PostToolUse` for plugin-release-hygiene version-bump prompting. The `session-startup` skill remains responsible for run-once semantics, fail-open behavior, manual fallback invocation, and Claude-only marketplace freshness before plugin drift checks, while the plugin manifests declare the appropriate hook file so installs carry the behavior automatically.
+The current design uses plugin-distributed hooks to restore deterministic startup automation across both Claude Code and Copilot. Claude-format installs use `hooks/hooks.json`; Copilot-format installs use root `hooks.json`. Both carry `SessionStart` for stale-state cleanup context injection and `PostToolUse` for plugin-release-hygiene version-bump prompting. The `session-startup` skill remains responsible for run-once semantics, detector-output handling, fail-open behavior, opt-in cleanup, manual fallback invocation, and Claude-only marketplace freshness before plugin drift checks, while the plugin manifests declare the appropriate hook file so installs carry the behavior automatically.
 
 Code-Critic Perspective 7 (Documentation Script Audit) was added in the same phase to close a gap where shell commands embedded in Markdown documentation went unreviewed for self-consistency. _(Merged into §6 Script & Automation as doc-audit sub-gate in issue #212.)_
 
@@ -62,15 +62,19 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 3. User starts a new agent session (any agent)
 4. The plugin-distributed `SessionStart` hook runs `session-cleanup-detector.ps1` before the agent sees the request and injects any resulting `additionalContext` into the first turn.
 5. The `session-startup` skill first looks for the session-memory run-once marker `/memories/session/session-startup-check-complete.md`. If the marker is absent, the first automatic startup check is honored; later agent hops in the same conversation skip that automatic path.
-6. The detector evaluates two independent detection paths:
-   - **Branch check** (runs first): detects when the current branch has upstream tracking configured but no remote — indicating the branch was merged and remote deleted. Guards against false positives on local-only branches (no upstream = never pushed = skip).
-   - **Tracking file check**: detects stale issue-scoped `.copilot-tracking/` files for issues whose remote branch is gone; persistent calibration data is excluded.
+6. The detector evaluates cleanup signals in this order:
+   - **Current branch**: detects an upstream-deleted current branch, plus a current `claude/*` no-upstream worktree branch only when its HEAD is reachable from the resolved remote default branch. Current-worktree cleanup commands are narrative inline text outside the fenced block so the auto-run path cannot remove its own checkout.
+   - **Tracking files**: detects stale issue-scoped `.copilot-tracking/` files for issues whose remote `feature/issue-*` branch is gone; persistent calibration data is excluded.
+   - **Sibling worktrees**: detects sibling worktrees on merged `claude/*` no-upstream branches and sibling `feature/issue-*` branches whose upstream branch was deleted; cleanup commands are inside the fenced block.
+   - **Orphan branches**: detects unattached merged `claude/*` no-upstream branches and unattached upstream-deleted `feature/issue-*` branches; cleanup commands are inside the fenced block.
+   - **Fail-open behavior**: fetch, worktree-list, for-each-ref, per-candidate merge-base, and ref-lookup failures skip unverifiable candidates without failing the startup flow.
+   - **Opt-in cleanup**: the detector reports findings only; cleanup runs only after user confirmation.
 7. After that first automatic startup check, the `session-startup` skill records `/memories/session/session-startup-check-complete.md` regardless of whether cleanup will later be accepted, declined, or skipped.
 8. The `session-startup` skill surfaces `additionalContext` describing what needs cleanup (branch signal leads when both fire).
-9. Agent asks user via `vscode/askQuestions`: context reflects which signal(s) fired — stale remote branch, stale tracking files, or both; message ends with "Clean up?"
-10. If confirmed → runs `post-merge-cleanup.ps1`
-11. Script archives files, deletes local/remote branch, syncs default branch
-12. Claude Code then runs the Step 7b plugin drift check under the same startup run-once marker. Before reading cached marketplace state, it attempts `claude plugin marketplace update` for up to 5 seconds.
+9. Agent asks user via `vscode/askQuestions`: context reflects which signal(s) fired and asks whether to run the fenced cleanup block.
+10. If confirmed → runs only the fenced commands. These may call `post-merge-cleanup.ps1` for current/tracking-file cleanup or direct `git worktree remove` / `git branch -D` commands for sibling and orphan cleanup.
+11. Cleanup remains opt-in. Current-worktree inline commands are manual instructions that must be run from another checkout.
+12. Claude Code then runs Step 7b under the same startup run-once marker. Before reading cached marketplace state, it attempts `claude plugin marketplace update` for up to 5 seconds.
 13. Freshness failures emit `marketplace freshness check failed — using cached view` and continue from cache without retrying freshness. Local-path non-git and dirty/detached classifications use their existing remediation text instead of the generic freshness emit.
 14. If drift is detected, `claude plugin update agent-orchestra@agent-orchestra --yes` keeps its independent 30-second timeout and retry path. Interactive runs ask whether to restart or continue under old code; headless runs emit the result inline and continue.
 
@@ -110,9 +114,9 @@ Added alongside the portability fix to close a gap found in the post-PR review o
 | `.github/instructions/session-startup.instructions.md` | Historical intermediate delivery vehicle between the retired hook and the current skill; checked the session-memory run-once marker `/memories/session/session-startup-check-complete.md` before the automatic detector run, recorded the marker after the first automatic startup check, and used `$env:COPILOT_ORCHESTRA_ROOT` (fallback: `$env:WORKFLOW_TEMPLATE_ROOT`) for script paths | **Historical** — superseded by `skills/session-startup/SKILL.md` (issue #345) |
 | `hooks/hooks.json` | Claude-format plugin-distributed hook configuration carrying `SessionStart` and `PostToolUse` | **Active** — introduced in issue #409 |
 | `hooks.json` | Copilot-format plugin-distributed hook configuration carrying `SessionStart` and `PostToolUse` via explicit cache-root resolution | **Active** — introduced in issue #409 |
-| `skills/session-startup/SKILL.md` | Current agent-side protocol for consuming hook-injected startup context; preserves run-once, fail-open, manual fallback, and Claude-only Step 7b drift-check semantics | Active |
+| `skills/session-startup/SKILL.md` | Current agent-side protocol for consuming hook-injected startup context; preserves run-once, fail-open, manual fallback, opt-in cleanup, and Claude-only Step 7b drift-check semantics | Active |
 | `skills/session-startup/platforms/claude.md` | Claude-specific startup invocation notes, including AskUserQuestion labels and marketplace freshness behavior | Active |
-| `skills/session-startup/scripts/session-cleanup-detector.ps1` | Dual-path detection: branch check + issue-scoped tracking file check; persistent calibration paths are excluded; emits cleanup command paths without env-var requirements | Active — updated (issue #185, migrated to skill path in issue #360) |
+| `skills/session-startup/scripts/session-cleanup-detector.ps1` | Startup cleanup detector for current branches, issue-scoped tracking files, sibling worktrees, and orphan branches; persistent calibration paths are excluded; emits cleanup commands without env-var requirements | Active — updated (issue #185, migrated to skill path in issue #360, expanded for Claude worktrees in issue #452) |
 | `skills/session-startup/scripts/post-merge-cleanup.ps1` | Archives tracking files, deletes local/remote branch, syncs default branch | Active — migrated to skill path in issue #360 |
 | `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1` | Plugin-distributed `PostToolUse` hook script for entry-point version-bump proposals | **Active** — moved from `.claude/hooks/` in issue #409 |
 | `.claude/settings.json` | Former maintainer-local `PostToolUse` hook configuration for release hygiene | **Deleted** — superseded by `hooks/hooks.json` in issue #409 |
@@ -140,6 +144,7 @@ Cross-tool asymmetry per D6 of #412: Copilot's `.github/prompts/*.prompt.md` fil
 - Plugin manifests must declare their format-appropriate hook file so installs receive the startup and release-hygiene hooks automatically
 - The automatic startup check runs at most once per conversation because the session-memory marker `/memories/session/session-startup-check-complete.md` is checked before the detector run and recorded after the first automatic startup check
 - If session-memory read or write fails, the startup flow fails open and still runs the detector rather than suppressing cleanup detection
+- Detector git failures fail open: fetch, worktree-list, for-each-ref, per-candidate merge-base, and ref-lookup failures suppress unverifiable candidates without aborting the session
 - Explicit manual detector runs remain available after the automatic guard fires
 - Linux/macOS without `pwsh`: the hook or manual fallback detects unavailability and skips silently
 - If the detector script is missing or the detector returns non-JSON output, the automatic startup check skips silently
