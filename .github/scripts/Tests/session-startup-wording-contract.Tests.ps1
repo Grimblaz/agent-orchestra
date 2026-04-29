@@ -74,6 +74,8 @@ Describe 'session startup wording contract' {
                 Path = Join-Path $script:RepoRoot 'commands\polish.md'
             }
         )
+        # Guard counter to ensure command documents are actually detected by the checks below
+        $script:Step7bFreshnessCommandDocsFound = 0
         $script:ExpectedContract = [ordered]@{
             sessionStartupMarkerPath                    = $script:CanonicalMarkerPath
             checkMarkerBeforeAutomaticDetectorRun       = $true
@@ -377,7 +379,10 @@ Describe 'session startup wording contract' {
             $emitNearby | Should -BeTrue -Because "$($document.Name) Step 7b must include an emit instruction near the freshness failure phrase"
 
             # Additional checks for the four command mirrors (commands: experience/design/plan/polish)
-            if ($document.Path -like '*\\commands\\*') {
+            # Use a robust detection that tolerates both backslashes and forward-slashes
+            $docPathNormalized = $document.Path -replace '\\','/'
+            if ($docPathNormalized -match '/commands/') {
+                $script:Step7bFreshnessCommandDocsFound = $script:Step7bFreshnessCommandDocsFound + 1
                 $sec | Should -Match '(?i)non-git' -Because "$($document.Name) must mention non-git local-path carve-out"
                 $sec | Should -Match '(?i)dirty' -Because "$($document.Name) must mention dirty working-tree local-path carve-out"
                 $sec | Should -Match '(?i)detached' -Because "$($document.Name) must mention detached HEAD local-path carve-out"
@@ -393,6 +398,8 @@ Describe 'session startup wording contract' {
                 $sec | Should -Match '(?is)headless.*suppress|suppress.*prompt' -Because 'Claude companion region must include headless prompt-suppression wording'
             }
         }
+        # Structural guard: ensure all four command mirrors were detected.
+        $script:Step7bFreshnessCommandDocsFound | Should -Be 4 -Because 'There must be four command mirrors detected for Step 7b (experience/design/plan/polish) — guards against path-detection regressions'
     }
 
     It 'requires the session-startup skill to preserve the detector command and fail-open/manual semantics' {
