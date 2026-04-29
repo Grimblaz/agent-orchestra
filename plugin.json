@@ -1,7 +1,7 @@
 {
   "name": "agent-orchestra",
   "description": "Multi-agent workflow system for GitHub Copilot. Pipeline-based agent orchestration: Issue → Design → Plan → Implement → Review → PR.",
-  "version": "2.5.2",
+  "version": "2.5.3",
   "author": {
     "name": "Grimblaz"
   },

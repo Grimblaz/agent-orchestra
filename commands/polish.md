@@ -24,6 +24,8 @@ If `additionalContext` is absent, emit a single line saying `no stale state dete
 
 ### Step 7b — Drift check
 
+Before checking drift, run `claude plugin marketplace update` (5-second timeout); if it fails or times out, emit `marketplace freshness check failed — using cached view` and continue with the cached view. When a local-path marketplace registration is classified as a non-git local directory or a dirty/detached tree, suppress that freshness emit because the existing local-path classification surfaces remediation.
+
 On Claude Code, run the plugin drift check after the cleanup path completes. If the installed plugin is behind the marketplace version, emit the update summary and ask via `AskUserQuestion` with these exact option labels:
 
 1. `Stop — I'll restart now`

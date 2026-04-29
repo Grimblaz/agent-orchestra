@@ -2,13 +2,15 @@
 
 > **Current state — Issue #409**: hook-based delivery returned, but now through plugin-distributed hook files rather than workspace-discovered `.github/hooks/session-cleanup.json`. Claude-format installs use `hooks/hooks.json`; Copilot-format installs use root `hooks.json` because Copilot does not define `${CLAUDE_PLUGIN_ROOT}`. The `session-startup` skill remains the agent-side contract for consuming injected `additionalContext`, preserving the run-once marker `/memories/session/session-startup-check-complete.md`, and keeping manual detector runs available. The plugin-release-hygiene `PostToolUse` hook now ships through the same plugin-distributed architecture. Historical context below is preserved so the earlier hook → instruction → skill eras remain traceable.
 >
+> Claude Code startup also includes a Claude-only Step 7b plugin drift backstop. Before reading the cached marketplace version, Step 7b attempts `claude plugin marketplace update` with a 5-second timeout. Timeout, non-zero exit, or unavailable `claude` emits `marketplace freshness check failed — using cached view` and continues from cache without retrying freshness; local-path non-git and dirty/detached classifications suppress that generic emit because their remediation is more specific. Headless runs perform the same freshness attempt and fail-open emission, suppressing only the post-drift stop/continue prompt. The later `claude plugin update agent-orchestra@agent-orchestra --yes` path keeps its separate 30-second timeout and retry behavior. Step 7b shares the existing Step 4 run-once marker; no second marker is introduced. Version 2.5.2 is the cache-invalidation release for this startup surface.
+>
 > Session-state survival for the run-once startup marker is governed by [skills/session-memory-contract/SKILL.md](../../skills/session-memory-contract/SKILL.md) (`SMC-07`); release-hygiene hook state is governed by `SMC-12`.
 >
 > **v2.0.0 update (agent-orchestra rename)**: The `COPILOT_ORCHESTRA_ROOT` / `WORKFLOW_TEMPLATE_ROOT` env-var surface described in D7, D9, and the setup-requirement text below was removed in v2.0.0. The detector wrapper at `skills/session-startup/scripts/session-cleanup-detector.ps1` now self-resolves its repo root via `$PSScriptRoot`, so no environment variables are required for either plugin-cache or direct-clone installs. Silent-skip still applies when `pwsh` is unavailable or the detector returns non-JSON output.
 
 ## Summary
 
-The current design uses plugin-distributed hooks to restore deterministic startup automation across both Claude Code and Copilot. Claude-format installs use `hooks/hooks.json`; Copilot-format installs use root `hooks.json`. Both carry `SessionStart` for stale-state cleanup context injection and `PostToolUse` for plugin-release-hygiene version-bump prompting. The `session-startup` skill remains responsible for run-once semantics, detector-output handling, fail-open behavior, opt-in cleanup, and manual fallback invocation, while the plugin manifests declare the appropriate hook file so installs carry the behavior automatically.
+The current design uses plugin-distributed hooks to restore deterministic startup automation across both Claude Code and Copilot. Claude-format installs use `hooks/hooks.json`; Copilot-format installs use root `hooks.json`. Both carry `SessionStart` for stale-state cleanup context injection and `PostToolUse` for plugin-release-hygiene version-bump prompting. The `session-startup` skill remains responsible for run-once semantics, detector-output handling, fail-open behavior, opt-in cleanup, manual fallback invocation, and Claude-only marketplace freshness before plugin drift checks, while the plugin manifests declare the appropriate hook file so installs carry the behavior automatically.
 
 Code-Critic Perspective 7 (Documentation Script Audit) was added in the same phase to close a gap where shell commands embedded in Markdown documentation went unreviewed for self-consistency. _(Merged into §6 Script & Automation as doc-audit sub-gate in issue #212.)_
 
@@ -34,6 +36,7 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 | D14 | Hook declaration path | Declare format-appropriate hook files in each manifest (`hooks/hooks.json` for Claude, `hooks.json` for Copilot) | Keeps hook delivery explicit for both tool formats while accommodating Copilot's missing plugin-root token | Plugin hook |
 | D15 | Shared hook file scope | Carry both `SessionStart` and `PostToolUse` in the same hook file | Keeps startup hygiene and release hygiene under one plugin-distributed hook surface and reduces drift between tools | Plugin hook |
 | D16 | Release-hygiene hook location | Move `plugin-release-hygiene-hook.ps1` into `skills/plugin-release-hygiene/scripts/` | Co-locates the hook script with its owning skill and removes the old `.claude/settings.json` / `.claude/hooks/` maintainer-only path | Plugin hook |
+| D17 | Claude marketplace freshness | Run `claude plugin marketplace update` before the Step 7b cached version comparison | Prevents stale marketplace clones from creating false-current silence while preserving fail-open startup behavior | Plugin hook |
 
 ---
 
@@ -71,6 +74,9 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 9. Agent asks user via `vscode/askQuestions`: context reflects which signal(s) fired and asks whether to run the fenced cleanup block.
 10. If confirmed → runs only the fenced commands. These may call `post-merge-cleanup.ps1` for current/tracking-file cleanup or direct `git worktree remove` / `git branch -D` commands for sibling and orphan cleanup.
 11. Cleanup remains opt-in. Current-worktree inline commands are manual instructions that must be run from another checkout.
+12. Claude Code then runs Step 7b under the same startup run-once marker. Before reading cached marketplace state, it attempts `claude plugin marketplace update` for up to 5 seconds.
+13. Freshness failures emit `marketplace freshness check failed — using cached view` and continue from cache without retrying freshness. Local-path non-git and dirty/detached classifications use their existing remediation text instead of the generic freshness emit.
+14. If drift is detected, `claude plugin update agent-orchestra@agent-orchestra --yes` keeps its independent 30-second timeout and retry path. Interactive runs ask whether to restart or continue under old code; headless runs emit the result inline and continue.
 
 ---
 
@@ -79,6 +85,8 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 Hook delivery now ships through the plugin manifests rather than workspace-level `chat.hookFilesLocations` configuration. `.claude-plugin/plugin.json` declares `hooks/hooks.json`, while the root `plugin.json` declares `hooks.json`, so downstream installs receive the startup and release-hygiene hooks automatically in both formats.
 
 The detector wrapper at `skills/session-startup/scripts/session-cleanup-detector.ps1` still self-resolves its repo root via `$PSScriptRoot`, which preserves the v2.0.0 removal of `COPILOT_ORCHESTRA_ROOT` / `WORKFLOW_TEMPLATE_ROOT` as runtime requirements. Manual fallback invocation therefore remains path-stable in both repo-clone and plugin-cache contexts.
+
+Claude plugin caches are keyed by manifest version, so startup-surface changes that affect installed plugin behavior require a manifest version bump. Version 2.5.2 invalidates the cache for the marketplace freshness probe.
 
 ---
 
@@ -103,10 +111,11 @@ Added alongside the portability fix to close a gap found in the post-PR review o
 | File | Purpose | Status |
 |------|---------|--------|
 | `.github/hooks/session-cleanup.json` | `SessionStart` hook configuration; resolves scripts via `$WORKFLOW_TEMPLATE_ROOT`; structured JSON error when unset | **Deleted** — retired in issue #109 |
-| `.github/instructions/session-startup.instructions.md` | Historical intermediate delivery vehicle between the retired hook and the current skill; checked the session-memory run-once marker `/memories/session/session-startup-check-complete.md` before the automatic detector run, recorded the marker after the first automatic startup check, and used `$env:COPILOT_ORCHESTRA_ROOT` (fallback: `$env:WORKFLOW_TEMPLATE_ROOT`) for script paths | **Historical** — superseded by `.github/skills/session-startup/SKILL.md` (issue #345) |
+| `.github/instructions/session-startup.instructions.md` | Historical intermediate delivery vehicle between the retired hook and the current skill; checked the session-memory run-once marker `/memories/session/session-startup-check-complete.md` before the automatic detector run, recorded the marker after the first automatic startup check, and used `$env:COPILOT_ORCHESTRA_ROOT` (fallback: `$env:WORKFLOW_TEMPLATE_ROOT`) for script paths | **Historical** — superseded by `skills/session-startup/SKILL.md` (issue #345) |
 | `hooks/hooks.json` | Claude-format plugin-distributed hook configuration carrying `SessionStart` and `PostToolUse` | **Active** — introduced in issue #409 |
 | `hooks.json` | Copilot-format plugin-distributed hook configuration carrying `SessionStart` and `PostToolUse` via explicit cache-root resolution | **Active** — introduced in issue #409 |
-| `skills/session-startup/SKILL.md` | Current agent-side protocol for consuming hook-injected startup context; preserves run-once, fail-open, and manual fallback semantics | Active |
+| `skills/session-startup/SKILL.md` | Current agent-side protocol for consuming hook-injected startup context; preserves run-once, fail-open, manual fallback, opt-in cleanup, and Claude-only Step 7b drift-check semantics | Active |
+| `skills/session-startup/platforms/claude.md` | Claude-specific startup invocation notes, including AskUserQuestion labels and marketplace freshness behavior | Active |
 | `skills/session-startup/scripts/session-cleanup-detector.ps1` | Startup cleanup detector for current branches, issue-scoped tracking files, sibling worktrees, and orphan branches; persistent calibration paths are excluded; emits cleanup commands without env-var requirements | Active — updated (issue #185, migrated to skill path in issue #360, expanded for Claude worktrees in issue #452) |
 | `skills/session-startup/scripts/post-merge-cleanup.ps1` | Archives tracking files, deletes local/remote branch, syncs default branch | Active — migrated to skill path in issue #360 |
 | `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1` | Plugin-distributed `PostToolUse` hook script for entry-point version-bump proposals | **Active** — moved from `.claude/hooks/` in issue #409 |
@@ -139,3 +148,9 @@ Cross-tool asymmetry per D6 of #412: Copilot's `.github/prompts/*.prompt.md` fil
 - Explicit manual detector runs remain available after the automatic guard fires
 - Linux/macOS without `pwsh`: the hook or manual fallback detects unavailability and skips silently
 - If the detector script is missing or the detector returns non-JSON output, the automatic startup check skips silently
+- Claude Code Step 7b attempts `claude plugin marketplace update` with a 5-second timeout before reading cached marketplace state
+- Freshness timeout, non-zero exit, or unavailable `claude` emits `marketplace freshness check failed — using cached view`, continues from cache, and does not retry freshness
+- Local-path non-git and dirty/detached classifications suppress the generic freshness emit because their existing remediation text owns those cases
+- Headless Claude runs perform the same freshness attempt and fail-open emission; only the post-drift stop/continue prompt is suppressed
+- The later `claude plugin update agent-orchestra@agent-orchestra --yes` path keeps its separate 30-second timeout and retry behavior
+- Step 7b shares the existing startup run-once marker and introduces no second marker

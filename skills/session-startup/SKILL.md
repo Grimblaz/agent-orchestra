@@ -23,7 +23,7 @@ The trigger mechanism is now a plugin-distributed `hooks/hooks.json` SessionStar
 
 Follow these steps exactly.
 
-> **Survival**: `SMC-07` owns the startup run-once marker. Hook-driven marker writes are `within-conversation:hooks`; the honest gaps are the inline run-once marker write, the inline-vs-subagent enforcement split, and the headless-Claude prompt skip. Do not add a second marker or new persistence mechanic.
+> **Survival**: `SMC-07` owns the startup run-once marker. Hook-driven marker writes are `within-conversation:hooks`; the honest gaps are the inline run-once marker write, the inline-vs-subagent enforcement split, the headless-Claude prompt skip, and the freshness-step fail-open user-visible surface. Do not add a second marker or new persistence mechanic.
 
 ### Canonical Automatic Startup Guard Contract
 
@@ -114,6 +114,14 @@ If the user confirms, run all lines from the fenced code block inside `additiona
 ### Step 7b — Run the Claude plugin drift check
 
 After the cleanup path completes, run this Claude-only sub-step before continuing with the user's request. Copilot skips this sub-step silently because it has no version-cache analog.
+
+Before reading the marketplace view, run `claude plugin marketplace update` with a 5-second timeout. This freshness budget is scoped only to the marketplace freshness probe; the existing 30-second timeout on `claude plugin update agent-orchestra@agent-orchestra --yes` is independent because that later path performs install/update. Do not retry transient freshness failures; fail open within the 5-second budget, preserve the retry-once contract below for the later `claude plugin update agent-orchestra@agent-orchestra --yes` call, emit `marketplace freshness check failed — using cached view` on timeout or non-zero exit, and continue with the cached marketplace read.
+
+Silent skip remains for environment/setup failures such as `pwsh` missing; fail-open emission applies to execution failures such as the `claude` CLI failed/missing. For marketplace registrations classified in the local-path branch below as a non-git local directory or dirty tree/detached HEAD, suppress the freshness emit because the existing classification surfaces the appropriate remediation.
+
+Headless Claude runs perform the same freshness attempt and same fail-open emission; only the post-drift stop/continue prompt remains suppressed. The verified-current silence guarantee applies only on the freshness-success branch; on freshness failure, cached comparison is a documented accepted limitation.
+
+This freshness step shares the existing Step 4 run-once marker; do not introduce a second marker or persistence mechanism.
 
 1. Resolve the installed plugin state from `~/.claude/plugins/installed_plugins.json`.
 2. Find the `agent-orchestra@agent-orchestra` entry and read its installed `version` plus `marketplace` field.
