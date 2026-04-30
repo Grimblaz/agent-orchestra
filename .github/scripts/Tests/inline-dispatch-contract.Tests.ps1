@@ -6,11 +6,16 @@
 
 .DESCRIPTION
     Verifies the Claude Code command-file prose contract across
-    commands/experience.md, commands/design.md, and commands/plan.md.
+    commands/experience.md, commands/design.md, commands/plan.md, and
+    commands/orchestrate.md.
 
     Issue #437 intentionally rolls back the #412 D5/D6 /plan carve-out so
     /plan carries inline paired-body and provenance-gate prose like
     /experience and /design. The Copilot asymmetry remains tracked by #414.
+
+    Issue #465 extends the same command-side inline contract to /orchestrate:
+    it must adopt Code-Conductor inline, preserve hub-mode smart resume, and
+    reconstruct downstream Agent handshakes live per dispatch.
 
         Cross-tool asymmetry (D6 of #412): Copilot's .github/prompts/*.prompt.md files
         are thin one-line dispatchers without a parent-side prose surface. Copilot
@@ -34,11 +39,10 @@ Describe 'inline dispatch contract' {
         $script:ClaudeInlineNoPersistencePattern = '(?is)(offline mode is active).{0,220}(lacks a session-memory write surface|cannot persist).{0,220}(cannot persist|do not claim).{0,220}(local fallback payload).{0,220}(later online run|next online invocation|next online run|recover the GitHub marker|reconstruct the GitHub marker)'
         $script:ClaudeInlineLocalPayloadPathPattern = '/memories/session/first-contact-assessed-\{ID\}\.md'
 
-        $script:GetCanonicalLabelMap = {
+        $script:GetCanonicalLabelYaml = {
             param(
                 [string]$SkillPath,
-                [string]$Heading,
-                [int]$ExpectedCount
+                [string]$Heading
             )
 
             $content = Get-Content -Path $SkillPath -Raw -ErrorAction Stop
@@ -47,12 +51,43 @@ Describe 'inline dispatch contract' {
 
             $match.Success | Should -BeTrue -Because "$SkillPath must publish the $Heading fenced YAML block"
             if (-not $match.Success) {
+                return $null
+            }
+
+            return $match.Groups['yaml'].Value
+        }
+
+        $script:GetYamlScalarValue = {
+            param(
+                [System.Text.RegularExpressions.Match]$LineMatch
+            )
+
+            if ($LineMatch.Groups['single'].Success) {
+                return $LineMatch.Groups['single'].Value
+            }
+
+            if ($LineMatch.Groups['double'].Success) {
+                return $LineMatch.Groups['double'].Value
+            }
+
+            return $LineMatch.Groups['unquoted'].Value
+        }
+
+        $script:GetCanonicalLabelMap = {
+            param(
+                [string]$SkillPath,
+                [string]$Heading,
+                [int]$ExpectedCount
+            )
+
+            $yaml = & $script:GetCanonicalLabelYaml -SkillPath $SkillPath -Heading $Heading
+            if ($null -eq $yaml) {
                 return [ordered]@{}
             }
 
             $labels = [ordered]@{}
             $linePattern = '^\s+(?<key>\w+):\s*(?:''(?<single>[^'']*)''|"(?<double>[^"]*)"|(?<unquoted>\S.*?))\s*$'
-            foreach ($line in ($match.Groups['yaml'].Value -split "`r?`n")) {
+            foreach ($line in ($yaml -split "`r?`n")) {
                 if ($line -match '^\s*$' -or $line -match '^canonical_option_labels:\s*$') {
                     continue
                 }
@@ -63,17 +98,7 @@ Describe 'inline dispatch contract' {
                     continue
                 }
 
-                $value = if ($lineMatch.Groups['single'].Success) {
-                    $lineMatch.Groups['single'].Value
-                }
-                elseif ($lineMatch.Groups['double'].Success) {
-                    $lineMatch.Groups['double'].Value
-                }
-                else {
-                    $lineMatch.Groups['unquoted'].Value
-                }
-
-                $labels[$lineMatch.Groups['key'].Value] = $value
+                $labels[$lineMatch.Groups['key'].Value] = & $script:GetYamlScalarValue -LineMatch $lineMatch
             }
 
             $labels.Count | Should -Be $ExpectedCount -Because "$SkillPath must expose $ExpectedCount canonical labels under $Heading"
@@ -87,18 +112,14 @@ Describe 'inline dispatch contract' {
                 [int]$ExpectedCount
             )
 
-            $content = Get-Content -Path $SkillPath -Raw -ErrorAction Stop
-            $pattern = '(?ms)^' + [regex]::Escape($Heading) + '\s*\r?\n\r?\n```yaml\r?\n(?<yaml>.*?)\r?\n```'
-            $match = [regex]::Match($content, $pattern)
-
-            $match.Success | Should -BeTrue -Because "$SkillPath must publish the $Heading fenced YAML block"
-            if (-not $match.Success) {
+            $yaml = & $script:GetCanonicalLabelYaml -SkillPath $SkillPath -Heading $Heading
+            if ($null -eq $yaml) {
                 return @()
             }
 
             $labels = [System.Collections.Generic.List[string]]::new()
             $linePattern = '^\s*-\s*(?:''(?<single>[^'']*)''|"(?<double>[^"]*)"|(?<unquoted>\S.*?))\s*$'
-            foreach ($line in ($match.Groups['yaml'].Value -split "`r?`n")) {
+            foreach ($line in ($yaml -split "`r?`n")) {
                 if ($line -match '^\s*$' -or $line -match '^canonical_option_labels:\s*$') {
                     continue
                 }
@@ -109,17 +130,7 @@ Describe 'inline dispatch contract' {
                     continue
                 }
 
-                $value = if ($lineMatch.Groups['single'].Success) {
-                    $lineMatch.Groups['single'].Value
-                }
-                elseif ($lineMatch.Groups['double'].Success) {
-                    $lineMatch.Groups['double'].Value
-                }
-                else {
-                    $lineMatch.Groups['unquoted'].Value
-                }
-
-                $labels.Add($value)
+                $labels.Add((& $script:GetYamlScalarValue -LineMatch $lineMatch))
             }
 
             $labels.Count | Should -Be $ExpectedCount -Because "$SkillPath must expose $ExpectedCount canonical labels under $Heading"
@@ -191,7 +202,7 @@ Describe 'inline dispatch contract' {
                     'cannot continue without the canonical methodology',
                     '<!-- first-contact-assessed-',
                     '<!-- D6 (issue #412):',
-                    'Read agents/Issue-Planner.agent.md',
+                    'agents/Issue-Planner.agent.md',
                     '## Inline adversarial-pipeline dispatch',
                     'subagent_type: code-critic',
                     'Review mode selector: "Use design review perspectives"',
@@ -217,6 +228,78 @@ Describe 'inline dispatch contract' {
                     '### Step 9 — Paired-body halt-on-fail',
                     '### Provenance-gate'
                 )
+            },
+            @{
+                Path                         = 'commands\orchestrate.md'
+                RequiredStatic               = @(
+                    $script:MarkerPath,
+                    $script:D2FailOpenText,
+                    $script:NoStaleStateNote,
+                    '⚠️ Shared-body load failed for agents/Code-Conductor.agent.md',
+                    'cannot continue without the canonical methodology',
+                    '<!-- first-contact-assessed-',
+                    'agents/Code-Conductor.agent.md',
+                    '~/.claude/plugins/installed_plugins.json',
+                    'installPath',
+                    '~/.claude/plugins/cache/agent-orchestra/agent-orchestra/*/agents/Code-Conductor.agent.md',
+                    '.claude-plugin/plugin.json',
+                    'name: agent-orchestra',
+                    'claude plugin install agent-orchestra@agent-orchestra',
+                    '<!-- plan-issue-{ID} -->',
+                    '<!-- design-issue-{ID} -->',
+                    'Issue-Planner itself',
+                    'SMC-01',
+                    'SMC-03',
+                    'SMC-08'
+                )
+                RequiredSessionKeys          = @('cleanup_yes', 'cleanup_no', 'drift_stop', 'drift_continue')
+                RequiredProvenanceStage1Keys = @(0, 1, 2)
+                RequiredProvenanceStage2Keys = @(0, 1, 2)
+                ForbiddenStatic              = @(
+                    'subagent_type: code-conductor',
+                    'Dispatch the `code-conductor` subagent',
+                    'The subagent will read `agents/code-conductor.md`'
+                )
+                OrderedMarkers               = @(
+                    '### Step 4 — Run-once marker',
+                    '### Step 6 — Cleanup confirmation',
+                    '### Step 7b — Drift check',
+                    '### Step 9 — Paired-body halt-on-fail',
+                    '### Provenance-gate'
+                )
+            }
+        )
+
+        $script:BodyResolutionCommandSpecs = @(
+            [pscustomobject]@{
+                Name                     = '/experience'
+                Path                     = 'commands\experience.md'
+                BodyFile                 = 'Experience-Owner.agent.md'
+                ForbiddenDirectReadPaths = @('agents/Experience-Owner.agent.md')
+            },
+            [pscustomobject]@{
+                Name                     = '/design'
+                Path                     = 'commands\design.md'
+                BodyFile                 = 'Solution-Designer.agent.md'
+                ForbiddenDirectReadPaths = @('agents/Solution-Designer.agent.md')
+            },
+            [pscustomobject]@{
+                Name                     = '/plan'
+                Path                     = 'commands\plan.md'
+                BodyFile                 = 'Issue-Planner.agent.md'
+                ForbiddenDirectReadPaths = @('agents/Issue-Planner.agent.md')
+            },
+            [pscustomobject]@{
+                Name                     = '/polish'
+                Path                     = 'commands\polish.md'
+                BodyFile                 = 'UI-Iterator.agent.md'
+                ForbiddenDirectReadPaths = @('agents/UI-Iterator.agent.md', 'agents/ui-iterator.md')
+            },
+            [pscustomobject]@{
+                Name                     = '/orchestrate'
+                Path                     = 'commands\orchestrate.md'
+                BodyFile                 = 'Code-Conductor.agent.md'
+                ForbiddenDirectReadPaths = @('agents/Code-Conductor.agent.md')
             }
         )
     }
@@ -277,6 +360,47 @@ Describe 'inline dispatch contract' {
         }
     }
 
+    It 'requires user-facing command entry points to resolve shared bodies plugin-cache-first' {
+        foreach ($command in $script:BodyResolutionCommandSpecs) {
+            $path = Join-Path $script:RepoRoot $command.Path
+            $content = Get-Content -Path $path -Raw -ErrorAction Stop
+            $bodyPath = 'agents/' + $command.BodyFile
+            $cachePath = '~/.claude/plugins/cache/agent-orchestra/agent-orchestra/*/' + $bodyPath
+            $bodyPathPattern = [regex]::Escape($bodyPath)
+            $cachePathPattern = [regex]::Escape($cachePath)
+
+            $content | Should -Match "(?is)(?:resolve|load|read).{0,220}$bodyPathPattern" -Because "$($command.Name) must name the shared body it will load"
+            $content | Should -Match '(?is)~/.claude/plugins/installed_plugins\.json' -Because "$($command.Name) must consult the installed plugin registry before source-repo CWD"
+            $content | Should -Match '(?is)installPath' -Because "$($command.Name) must use the installed plugin registry installPath when present"
+            $content | Should -Match '(?is)agent-orchestra@agent-orchestra' -Because "$($command.Name) must resolve the installed Agent Orchestra plugin entry"
+            $content | Should -Match "(?is)SemVer-sorted.{0,160}$cachePathPattern" -Because "$($command.Name) must fall back to the newest SemVer-sorted plugin-cache body path"
+            $content | Should -Match '(?is)\.claude-plugin/plugin\.json.{0,180}name: agent-orchestra|name: agent-orchestra.{0,180}\.claude-plugin/plugin\.json' -Because "$($command.Name) must gate any source-repo CWD fallback on the Agent Orchestra plugin manifest"
+            $content | Should -Match '(?is)claude plugin install agent-orchestra@agent-orchestra' -Because "$($command.Name) must preserve the canonical remediation command"
+
+            $installedPluginsIndex = $content.IndexOf('~/.claude/plugins/installed_plugins.json', [System.StringComparison]::Ordinal)
+            $cachePathIndex = $content.IndexOf($cachePath, [System.StringComparison]::Ordinal)
+            $sourceRepoGateIndex = $content.IndexOf('.claude-plugin/plugin.json', [System.StringComparison]::Ordinal)
+
+            $installedPluginsIndex | Should -Not -Be -1 -Because "$($command.Name) must contain the installed plugin registry path"
+            $cachePathIndex | Should -Not -Be -1 -Because "$($command.Name) must contain the plugin-cache fallback path for $bodyPath"
+            $sourceRepoGateIndex | Should -Not -Be -1 -Because "$($command.Name) must contain the source-repo CWD fallback gate"
+            $installedPluginsIndex | Should -BeLessThan $cachePathIndex -Because "$($command.Name) must try installed_plugins.json before the glob fallback"
+            $cachePathIndex | Should -BeLessThan $sourceRepoGateIndex -Because "$($command.Name) must try plugin-cache paths before the gated source-repo CWD fallback"
+        }
+    }
+
+    It 'rejects unqualified direct shared-body Read instructions in user-facing command entry points' {
+        foreach ($command in $script:BodyResolutionCommandSpecs) {
+            $path = Join-Path $script:RepoRoot $command.Path
+            $content = Get-Content -Path $path -Raw -ErrorAction Stop
+
+            foreach ($directReadPath in $command.ForbiddenDirectReadPaths) {
+                $directReadPattern = '(?im)^\s*Read\s+`?' + [regex]::Escape($directReadPath) + '`?\s+(?:and|before|$)'
+                $content | Should -Not -Match $directReadPattern -Because "$($command.Name) must resolve $directReadPath plugin-cache-first instead of using an unqualified CWD-relative Read instruction"
+            }
+        }
+    }
+
     It 'requires the inline-dispatch step blocks to appear in the documented order' {
         foreach ($command in $script:CommandMatrix) {
             $path = Join-Path $script:RepoRoot $command.Path
@@ -290,6 +414,148 @@ Describe 'inline dispatch contract' {
             for ($i = 1; $i -lt $indices.Count; $i++) {
                 $indices[$i] | Should -BeGreaterThan $indices[$i - 1] -Because "$($command.Path) must keep inline-dispatch sections in reading order"
             }
+        }
+    }
+
+    It 'forbids /orchestrate from dispatching Code-Conductor as a parent-side subagent' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\orchestrate.md') -Raw -ErrorAction Stop
+
+        $content | Should -Not -Match '(?is)subagent_type:\s*code-conductor' -Because '/orchestrate must not dispatch Code-Conductor as a parent-side subagent'
+        $content | Should -Not -Match '(?is)dispatch\s+the\s+`?code-conductor`?\s+subagent' -Because '/orchestrate must not keep parent-side Code-Conductor subagent dispatch wording'
+        $content | Should -Not -Match '(?is)The subagent will read `agents/code-conductor\.md`' -Because '/orchestrate must not describe Code-Conductor as a delegated subagent shell'
+    }
+
+    It 'requires /orchestrate to adopt Code-Conductor inline after D1 body resolution' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\orchestrate.md') -Raw -ErrorAction Stop
+
+        $d1ResolutionPatterns = @(
+            '(?is)(Read|load|resolve).{0,160}agents/Code-Conductor\.agent\.md',
+            '(?is)~/.claude/plugins/installed_plugins\.json.{0,160}installPath',
+            '(?is)SemVer-sorted.{0,120}~/.claude/plugins/cache/agent-orchestra/agent-orchestra/\*/agents/Code-Conductor\.agent\.md',
+            '(?is)\.claude-plugin/plugin\.json.{0,120}name: agent-orchestra',
+            '(?is)claude plugin install agent-orchestra@agent-orchestra'
+        )
+
+        foreach ($pattern in $d1ResolutionPatterns) {
+            $content | Should -Match $pattern -Because '/orchestrate must carry D1-equivalent Code-Conductor body-resolution wording inline'
+        }
+
+        $content | Should -Match '(?is)(adopt|run).{0,120}Code-Conductor.{0,120}(inline|role|conversation)|Code-Conductor.{0,120}(inline|role).{0,120}(rest of this conversation|conversation)' -Because '/orchestrate must adopt Code-Conductor in the parent conversation after loading the shared body'
+    }
+
+    It 'requires /orchestrate to reconstruct downstream Agent handshakes live per dispatch' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\orchestrate.md') -Raw -ErrorAction Stop
+
+        $content | Should -Match '(?is)(before each|immediately before each|for each|for every|per-dispatch).{0,180}`?Agent`?.{0,160}dispatch.{0,240}(reconstruct|recapture|capture).{0,220}(HEAD|branch).{0,220}(CWD|dirty)' -Because '/orchestrate must document live handshake reconstruction for each downstream Agent dispatch'
+        $content | Should -Match '(?is)((do not|must not).{0,160}(reuse|carry forward).{0,160}(command-entry|entry-time|single).{0,120}handshake|(command-entry|entry-time|single).{0,120}handshake.{0,160}(must not|do not).{0,120}(reuse|carry forward))' -Because '/orchestrate must explicitly reject a single command-entry-captured handshake for downstream Agent calls'
+        $content | Should -Not -Match '(?is)\*\*Handshake preamble\*\*.{0,900}subagent_type:\s*code-conductor' -Because '/orchestrate must not keep the old one-shot Code-Conductor subagent handshake preamble'
+    }
+
+    It 'requires /plan to document live Code-Critic handshake recapture at dispatch time' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $liveRecapturePatterns = @(
+            '(?is)(?:before each|immediately before each|for each|for every|per-dispatch).{0,180}(?:Code-Critic\s+)?`?Agent`?.{0,120}dispatch.{0,240}(?:reconstruct|recapture|capture|construct).{0,220}(?:HEAD|parent_head|git rev-parse HEAD).{0,220}(?:branch|parent_branch|git rev-parse --abbrev-ref HEAD).{0,220}(?:CWD|parent_cwd|pwd).{0,220}(?:dirty fingerprint|parent_dirty_fingerprint|git status --porcelain)',
+            '(?is)(?:reconstruct|recapture|capture|construct).{0,220}(?:HEAD|parent_head|git rev-parse HEAD).{0,220}(?:branch|parent_branch|git rev-parse --abbrev-ref HEAD).{0,220}(?:CWD|parent_cwd|pwd).{0,220}(?:dirty fingerprint|parent_dirty_fingerprint|git status --porcelain).{0,260}(?:before each|immediately before each|for each|for every|per-dispatch).{0,180}(?:Code-Critic\s+)?`?Agent`?.{0,120}dispatch'
+        )
+
+        $liveRecaptureDocumented = $false
+        foreach ($pattern in $liveRecapturePatterns) {
+            if ($content -match $pattern) {
+                $liveRecaptureDocumented = $true
+                break
+            }
+        }
+        $liveRecaptureDocumented | Should -BeTrue -Because '/plan must document live recapture of HEAD, branch, CWD, and dirty fingerprint immediately before each Code-Critic dispatch'
+    }
+
+    It 'requires /plan to name fresh Code-Critic handshakes for every prosecution and defense dispatch' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $dispatchStages = @(
+            [pscustomobject]@{ Name = 'Pass 1'; Pattern = '(?is)1\.\s+Pass 1:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' },
+            [pscustomobject]@{ Name = 'Pass 2'; Pattern = '(?is)2\.\s+Pass 2:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' },
+            [pscustomobject]@{ Name = 'Pass 3'; Pattern = '(?is)3\.\s+Pass 3:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' },
+            [pscustomobject]@{ Name = 'Defense'; Pattern = '(?is)Defense:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' }
+        )
+
+        $missingStageNames = @()
+        foreach ($stage in $dispatchStages) {
+            if ($content -notmatch $stage.Pattern) {
+                $missingStageNames += $stage.Name
+            }
+        }
+
+        $missingStageNames | Should -BeNullOrEmpty -Because "/plan must make every Code-Critic prosecution and defense dispatch use a freshly recaptured handshake; missing stages: $($missingStageNames -join ', ')"
+    }
+
+    It 'forbids /plan from documenting a single once-per-invocation pipeline handshake' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $content | Should -Not -Match '(?is)construct.{0,100}parent-side\s+environment\s+handshake.{0,100}once.{0,80}`?/plan`?.{0,80}invocation' -Because '/plan must not say or imply that one handshake is constructed once for the whole command invocation'
+    }
+
+    It 'requires /plan to explicitly reject reusing stale handshakes across pipeline dispatches' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $content | Should -Match '(?is)((do not|must not).{0,160}(reuse|carry forward).{0,160}(single|once-per-invocation|command-entry|entry-time|earlier).{0,140}handshake|(single|once-per-invocation|command-entry|entry-time|earlier).{0,140}handshake.{0,160}(must not|do not).{0,120}(reuse|carry forward))' -Because '/plan must explicitly reject reuse of a single stale handshake across prosecution, defense, or judge dispatches'
+    }
+
+    It 'keeps /plan judge handshake context metadata-only until Code-Review-Response has Step 0 verification' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $content | Should -Match '(?is)Code-Review-Response.{0,180}judge.{0,240}(contextual metadata only|context only).{0,260}(unless|until).{0,180}(shell|Code-Review-Response).{0,180}(Step 0|environment handshake verification).{0,220}(separate issue|separate follow-up|future issue)' -Because '/plan must clarify that judge handshake data is contextual metadata only unless the Code-Review-Response shell gains Step 0 verification in a separate issue'
+    }
+
+    It 'scopes /plan pipeline-degraded recovery to redundant prosecution body-load pass failures' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $matchesAnyPattern = {
+            param(
+                [string]$Content,
+                [string[]]$Patterns
+            )
+
+            foreach ($pattern in $Patterns) {
+                if ($Content -match $pattern) {
+                    return $true
+                }
+            }
+
+            return $false
+        }
+
+        $redundantProsecutionBodyLoadRecovery = & $matchesAnyPattern -Content $content -Patterns @(
+            '(?is)(?:redundant|three|3).{0,180}(?:Code-Critic\s+)?prosecution.{0,260}(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load)',
+            '(?is)(?:Code-Critic\s+)?prosecution.{0,180}(?:redundant|three|3).{0,260}(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load)',
+            '(?is)(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:redundant|three|3).{0,180}(?:Code-Critic\s+)?prosecution'
+        )
+        $redundantProsecutionBodyLoadRecovery | Should -BeTrue -Because '/plan must explicitly scope body-load pass failure recovery to the redundant Code-Critic prosecution set'
+
+        $content | Should -Match '(?is)\bretry\b.{0,80}\bonce\b|\bonce\b.{0,80}\bretry\b' -Because '/plan must retry a failed or malformed redundant prosecution body-load pass once before degrading'
+        $content | Should -Match '(?is)\bpipeline-degraded\b' -Because '/plan must preserve the visible degraded-pipeline note for redundant prosecution partial failure'
+        $content | Should -Match '(?is)(?:2-of-3|two-of-three|two of three).{0,200}(?:merged\s+)?prosecution ledger|(?:merged\s+)?prosecution ledger.{0,200}(?:2-of-3|two-of-three|two of three)' -Because '/plan must tie pipeline-degraded continuation to the 2-of-3 merged prosecution ledger'
+
+        foreach ($singletonStage in @(
+                [pscustomobject]@{ Name = 'defense'; Body = 'Code-Critic'; StagePattern = 'defense' },
+                [pscustomobject]@{ Name = 'judge'; Body = 'Code-Review-Response'; StagePattern = 'judge|judgment' }
+            )) {
+            $bodyPattern = [regex]::Escape($singletonStage.Body)
+            $strictSingletonFailure = & $matchesAnyPattern -Content $content -Patterns @(
+                "(?is)(?:singleton|single|one).{0,160}(?:$($singletonStage.StagePattern)|$bodyPattern).{0,260}(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)",
+                "(?is)(?:$($singletonStage.StagePattern)|$bodyPattern).{0,160}(?:singleton|single|one).{0,260}(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)",
+                "(?is)(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:$($singletonStage.StagePattern)|$bodyPattern).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)"
+            )
+            $strictSingletonFailure | Should -BeTrue -Because "/plan must state that singleton $($singletonStage.Name) body-load failure stays halt-strict rather than pipeline-degraded"
+        }
+
+        $singletonRecoveryWindows = [regex]::Matches(
+            $content,
+            '(?is).{0,140}(?:defense|judge|judgment|Code-Review-Response).{0,140}(?:pipeline-degraded|2-of-3|two-of-three|two of three|degradation|degraded).{0,140}|.{0,140}(?:pipeline-degraded|2-of-3|two-of-three|two of three|degradation|degraded).{0,140}(?:defense|judge|judgment|Code-Review-Response).{0,140}'
+        )
+
+        foreach ($window in $singletonRecoveryWindows) {
+            $window.Value | Should -Match '(?is)\b(?:no|not|never|without|does not|must not|only|except|halt-strict|halt strict|halt|stop)\b' -Because '/plan must not imply that singleton defense or judge body-load failures can use pipeline-degraded recovery'
         }
     }
 

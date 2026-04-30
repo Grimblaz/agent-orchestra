@@ -132,8 +132,9 @@ The inline-dispatch contract added for issue #412 and updated by issue #437 enfo
 | `commands/experience.md` | Steps 4, 6, 7b, 9, provenance-gate | None |
 | `commands/design.md` | Steps 4, 6, 7b, 9, provenance-gate | None |
 | `commands/plan.md` | Steps 4, 6, 7b, 9, provenance-gate | None for direct `/plan` |
+| `commands/orchestrate.md` | Steps 4, 6, 7b, 9, provenance-gate | None for direct `/orchestrate` |
 
-Historical note: issue #412 originally treated direct `/plan` as a carve-out for Step 9 and provenance. Issue #437 removed that carve-out for the command file, so direct `/plan` now matches `/experience` and `/design`. `/orchestrate` and direct Issue-Planner subagent dispatch can still enter through the `issue-planner` shell pending #457.
+Historical note: issue #412 originally treated direct `/plan` as a carve-out for Step 9 and provenance. Issue #437 removed that carve-out for the command file, so direct `/plan` now matches `/experience` and `/design`. Issue #465 extended the inline-dispatch contract to `/orchestrate` and supersedes the narrower #457 lift; `/orchestrate` now adopts Code-Conductor inline in the parent conversation, so all four user-invocable inline commands carry the same pre-flight prose. Parent-agent delegation may still dispatch the `issue-planner` subagent shell for non-`/orchestrate` flows.
 
 Cross-tool asymmetry per D6 of #412: Copilot's `.github/prompts/*.prompt.md` files are thin one-line dispatchers without a parent-side prose surface. Copilot inline-dispatch enforcement is owned by the agent body (`agents/{Name}.agent.md`) and is tracked in #414.
 

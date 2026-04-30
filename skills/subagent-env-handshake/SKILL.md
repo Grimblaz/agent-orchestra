@@ -1,6 +1,6 @@
 ---
 name: subagent-env-handshake
-description: "Subagent environment-handshake contract for Claude Code Agent-tool dispatch. Use when a parent session dispatches a subagent that may make tree-grounded claims (file X exists, branch is Y, commit Z landed) — the handshake lets the subagent verify its live working-tree view matches the parent's before it prosecutes tree-grounded findings. DO NOT USE FOR: research subagents that never touch git/tree state; Copilot subagent dispatch (execution model differs)."
+description: "Subagent environment-handshake contract for Claude Code Agent-tool dispatch. Use when a parent session dispatches a subagent that may make tree-grounded claims such as file existence, branch identity, or landed changes - the handshake lets the subagent verify its live working-tree view matches the parent's before it prosecutes tree-grounded findings. DO NOT USE FOR: research subagents that never touch git/tree state; Copilot subagent dispatch (execution model differs)."
 scope: claude-only
 ---
 
@@ -153,19 +153,35 @@ The SKILL exposes two equivalent carriers so both PowerShell and markdown caller
 
 Both forms produce field-identical output for identical inputs. Scenario (f) validates field names and order.
 
+### Per-dispatch recapture policy
+
+Before each downstream `Agent` dispatch that uses this handshake, the parent MUST construct a fresh block by live-recapturing HEAD (`parent_head`), branch (`parent_branch`), CWD (`parent_cwd` via `pwd`), and dirty fingerprint (`parent_dirty_fingerprint`) immediately before that dispatch. Mutable orchestration trees can change between prosecution, defense, judge, and specialist calls, so the parent MUST NOT reuse or carry forward a command-entry, entry-time, single, or earlier handshake for a later `Agent` dispatch.
+
+If a downstream shell does not yet implement Step 0 environment-handshake verification, the parent may pass freshly captured values only as contextual metadata. Do not label that metadata as a verified handshake.
+
+### Parallel-batch dispatch
+
+When a parent emits multiple `Agent` calls in one parallel tool-use block (for example `commands/plan.md` and `commands/orchestra-review.md` prosecution × 3), per-dispatch recapture is satisfied by a **single live recapture immediately before the parallel block**, with one handshake block constructed per dispatch from those captured values. Each dispatch's handshake block carries its own UTC ISO-8601 `handshake_issued_at` timestamp; the four parent-side fields (`parent_head`, `parent_branch`, `parent_cwd`, `parent_dirty_fingerprint`) are field-identical across the batch.
+
+This is consistent with the per-dispatch policy because no tree mutation can occur between members of one parallel tool-use block — the dispatches fire as a single batch with no interleaved `Bash` or `Edit` calls. The "immediately before that dispatch" requirement resolves to "immediately before the parallel emit" since that is the most recent state the parent could have observed before any member of the batch ran.
+
+The single-capture-per-batch rule does NOT extend across pipeline stages. Sequential stages (e.g. parallel prosecution → defense → judge in `/orchestra:review`) MUST recapture between stages because the tree may have mutated. The single-capture-per-batch rule applies only within one parallel tool-use block.
+
 ### Parent-side error handling
 
 If the parent's `git` invocations fail during construction (non-zero exit on `git rev-parse HEAD`, etc.), the parent SHOULD skip handshake construction entirely and dispatch without the block. The subagent's error path takes over at that point — tagging tree-grounded findings `environment-unverified`. The parent is not responsible for emitting the environment-divergence finding; that is the subagent's role on mismatch.
 
 ## Related
 
-**Phase 2 adoption guidance** (tracked in [#379](https://github.com/Grimblaz/agent-orchestra/issues/379)): Phase 2 Claude agent bodies that dispatch tree-dependent subagents — **Code-Conductor**, **Code-Critic**, **Test-Writer**, **Refactor-Specialist**, **Review-Response** — MUST adopt this handshake as follows:
+**Current adoption guidance**: Claude parent surfaces that dispatch tree-dependent subagents MUST adopt this handshake as follows:
 
 1. **Parent-side construction:** construct the handshake via `New-SubagentDispatchPrompt` (or the inline prose template) in the dispatch prose, prepended to the `Agent` tool `prompt` parameter as its first content.
 2. **Subagent-side verification:** include a `## Step 0: Environment Handshake Verification` H2 in the subagent shell (or equivalent first-action section) that executes **before** shared-body load. The Step 0 prose directs parse → live-verify → branch (match/mismatch/error).
 3. **ND-2 finding template:** quote the ND-2 `## Finding: environment-divergence (halting)` template verbatim from the block in this SKILL. Do not paraphrase — the schema-parity test enforces byte parity.
 
 Research or non-tree-dependent dispatches may skip the handshake entirely; opt-in is intentional (ND-3).
+
+Subagent shells that implement Step 0 environment-handshake verification use the same first-action contract. If a downstream shell does not yet implement Step 0 verification, the parent may pass freshly captured values only as contextual metadata per the per-dispatch recapture policy above.
 
 > **CWD capture (Windows)**: Always capture `parent_cwd` using `pwd` in the Bash tool, not `(Get-Location).Path` in PowerShell. On Windows, PowerShell produces `C:\Users\...` while the Bash tool produces `/c/Users/...`; these formats will never compare equal and will trigger a mismatch halt.
 
