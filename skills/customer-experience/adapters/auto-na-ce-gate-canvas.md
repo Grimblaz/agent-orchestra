@@ -1,6 +1,7 @@
 ---
 name: auto-na-ce-gate-canvas
 provides: ce-gate-canvas
+suggested-next-step: none
 applies-when: not changeset.touchesCanvasSurface()
 ---
 

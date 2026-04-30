@@ -1,6 +1,7 @@
 ---
 name: explicit-skip-design
 provides: design
+suggested-next-step: Document the skip rationale; rerun /design {ISSUE} when ready.
 reason-required: true
 ---
 

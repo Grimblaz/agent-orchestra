@@ -1,6 +1,7 @@
 ---
 name: review-judge-only
 provides: review
+suggested-next-step: /orchestra:review-judge
 applies-when: scope.isReReview
 ---
 

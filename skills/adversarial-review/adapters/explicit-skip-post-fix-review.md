@@ -1,6 +1,7 @@
 ---
 name: explicit-skip-post-fix-review
 provides: post-fix-review
+suggested-next-step: Document the skip rationale; rerun post-fix review when ready.
 reason-required: true
 ---
 

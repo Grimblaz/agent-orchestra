@@ -1,6 +1,7 @@
 ---
 name: review-standard
 provides: review
+suggested-next-step: /orchestra:review
 applies-when: changeset.totalLines >= 200 and not scope.isReReview and not scope.isProxyGithub
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: explicit-skip-post-pr
 provides: post-pr
+suggested-next-step: Document the skip rationale; rerun post-PR review when ready.
 reason-required: true
 ---
 

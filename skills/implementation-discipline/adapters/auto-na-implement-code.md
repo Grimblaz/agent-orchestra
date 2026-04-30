@@ -1,6 +1,7 @@
 ---
 name: auto-na-implement-code
 provides: implement-code
+suggested-next-step: none
 applies-when: not changeset.touchesSource()
 ---
 

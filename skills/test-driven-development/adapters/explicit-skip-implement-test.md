@@ -1,6 +1,7 @@
 ---
 name: explicit-skip-implement-test
 provides: implement-test
+suggested-next-step: Document the skip rationale; rerun /orchestrate {ISSUE} when ready.
 reason-required: true
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: ce-gate-api
 provides: ce-gate-api
+suggested-next-step: /orchestrate {ISSUE}
 applies-when: changeset.touchesApiSurface()
 ---
 

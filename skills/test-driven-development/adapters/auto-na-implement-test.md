@@ -1,6 +1,7 @@
 ---
 name: auto-na-implement-test
 provides: implement-test
+suggested-next-step: none
 applies-when: not changeset.touchesTestableCode()
 ---
 
