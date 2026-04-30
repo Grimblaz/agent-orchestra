@@ -492,6 +492,17 @@ function Compose-Comment {
 
     $reports = @($PortReports | Where-Object { $_ -ne $null })
 
+    # Auto-N/A ports are silently filtered from the rendered ledger (Design
+    # Intent #1: "no noise about ports that legitimately do not apply"). They
+    # are surfaced as a footnote count instead so operators know the
+    # filtering happened without seeing per-port rows for non-events.
+    $autoNotApplicable = @($reports | Where-Object {
+            [string]$_.Status -eq 'Covered' -and [string]$_.SubReason -eq 'AutoNotApplicable'
+        })
+    $reports = @($reports | Where-Object {
+            -not ([string]$_.Status -eq 'Covered' -and [string]$_.SubReason -eq 'AutoNotApplicable')
+        })
+
     $covered = @($reports | Where-Object { [string]$_.Status -eq 'Covered' })
     $inconclusive = @($reports | Where-Object { [string]$_.Status -eq 'Inconclusive' })
     $notCovered = @($reports | Where-Object { [string]$_.Status -eq 'NotCovered' })
@@ -508,7 +519,6 @@ function Compose-Comment {
                 'PassedCredit' { 'passed credit' }
                 'NotApplicableCredit' { 'not applicable per credit' }
                 'SkippedCredit' { 'skipped credit' }
-                'AutoNotApplicable' { 'auto not-applicable (no adapter applies)' }
                 default { [string]$r.SubReason }
             }
             [void]$sb.AppendLine(("- {0} — {1}" -f [string]$r.PortName, $reasonLabel))
@@ -545,6 +555,11 @@ function Compose-Comment {
                 [void]$sb.AppendLine(("  - Suggested next step: ``{0}``" -f [string]$step))
             }
         }
+        [void]$sb.AppendLine('')
+    }
+
+    if ($autoNotApplicable.Count -gt 0) {
+        [void]$sb.AppendLine(("({0} ports auto-N/A — predicates evaluated false against this changeset.)" -f $autoNotApplicable.Count))
         [void]$sb.AppendLine('')
     }
 

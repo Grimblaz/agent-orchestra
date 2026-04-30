@@ -35,12 +35,29 @@ if ($Mode -notin @('warn', 'enforce')) {
     exit 2
 }
 
+# Mark warn-mode early so the lib-load try/catch (below) can decide its exit
+# code without re-parsing $Mode if any of the lib files have a parse-time
+# error. Set BEFORE the dot-sources.
+$script:WarnModeOnly = ($Mode -eq 'warn')
+
 # ---------------------------------------------------------------------------
-# Library dot-sources
+# Library dot-sources (wrapped: a parse-time error in any lib file would
+# crash the script before the inner try/catch wrapper engages, so warn-mode
+# fail-open semantics would be bypassed. We wrap here to preserve them.)
 # ---------------------------------------------------------------------------
-. (Join-Path $PSScriptRoot 'lib/frame-predicate-core.ps1')
-. (Join-Path $PSScriptRoot 'lib/find-or-upsert-comment.ps1')
-. (Join-Path $PSScriptRoot 'lib/frame-credit-ledger-core.ps1')
+try {
+    . (Join-Path $PSScriptRoot 'lib/frame-predicate-core.ps1')
+    . (Join-Path $PSScriptRoot 'lib/find-or-upsert-comment.ps1')
+    . (Join-Path $PSScriptRoot 'lib/frame-credit-ledger-core.ps1')
+}
+catch {
+    [Console]::Error.WriteLine("frame-credit-ledger: library load failed: $($_.Exception.Message)")
+    if ($script:WarnModeOnly) {
+        # Warn-mode invariant: never block PR creation on a lib-load error.
+        exit 0
+    }
+    exit 1
+}
 
 # ---------------------------------------------------------------------------
 # Read a single scalar field from an adapter's frontmatter block. Strips a
@@ -208,6 +225,180 @@ function Get-FrameCreditLedgerBaseRefOid {
 }
 
 # ---------------------------------------------------------------------------
+# Build-FrameCreditLedgerChangeset
+#
+# Construct a changeset descriptor from `git diff` against the supplied
+# baseRefOid. Returns a hashtable in the shape Test-FVPredicateAgainstChangeset
+# expects:
+#   ChangedFiles  = string[]    # relative paths from the repo root
+#   TotalLines    = int         # total +/- line count from --shortstat
+#   IsReReview    = bool        # not detectable from diff alone; default false
+#   IsProxyGithub = bool        # default false
+#
+# On any failure we return a benign empty changeset — predicate evaluation
+# then resolves identifiers as 'false' or 'unknown', and the caller falls
+# back to credit-presence-only behavior. Warn-mode invariant preserved.
+# ---------------------------------------------------------------------------
+function Build-FrameCreditLedgerChangeset {
+    [CmdletBinding()]
+    param([AllowNull()][string]$BaseRefOid)
+
+    $empty = @{
+        ChangedFiles  = @()
+        TotalLines    = 0
+        IsReReview    = $false
+        IsProxyGithub = $false
+    }
+
+    if ([string]::IsNullOrWhiteSpace($BaseRefOid)) {
+        return $empty
+    }
+
+    $changedFiles = @()
+    try {
+        $rawNames = & git diff --name-only "$BaseRefOid...HEAD" 2>$null
+        if ($null -ne $rawNames) {
+            $changedFiles = @($rawNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { ($_ -replace '\\', '/').Trim() })
+        }
+    }
+    catch {
+        $changedFiles = @()
+    }
+
+    $totalLines = 0
+    try {
+        $rawShortstat = & git diff --shortstat "$BaseRefOid...HEAD" 2>$null
+        if ($null -ne $rawShortstat) {
+            $shortstatStr = ([string[]]$rawShortstat) -join ' '
+            $insMatch = [regex]::Match($shortstatStr, '(\d+)\s+insertion')
+            $delMatch = [regex]::Match($shortstatStr, '(\d+)\s+deletion')
+            $ins = if ($insMatch.Success) { [int]$insMatch.Groups[1].Value } else { 0 }
+            $del = if ($delMatch.Success) { [int]$delMatch.Groups[1].Value } else { 0 }
+            $totalLines = $ins + $del
+        }
+    }
+    catch {
+        $totalLines = 0
+    }
+
+    return @{
+        ChangedFiles  = $changedFiles
+        TotalLines    = $totalLines
+        IsReReview    = $false
+        IsProxyGithub = $false
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-FrameCreditLedgerApplicableMap
+#
+# Given a port name, its matching adapters, and a changeset descriptor,
+# evaluate each adapter's `applies-when` predicate and return a hashtable
+# of adapter-name -> applicability ('true'|'false'|'unknown').
+#
+# Adapters with NO `applies-when` declaration default to 'true' (always
+# applies). Predicate parse failures and identifiers the evaluator cannot
+# resolve (deferred credit-reference identifiers, heuristic-deferred
+# identifiers) yield 'unknown' — we emit one stderr note per (port, adapter)
+# pair so the operator can see why the ledger fell back to credit-presence-
+# only checks for that pair.
+# ---------------------------------------------------------------------------
+function Resolve-FrameCreditLedgerApplicableMap {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$PortName,
+        [AllowNull()][AllowEmptyCollection()]$Adapters,
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    $map = @{}
+    if ($null -eq $Adapters) { return $map }
+
+    foreach ($adapter in @($Adapters)) {
+        $adapterName = [string]$adapter.Name
+        $appliesWhen = $adapter.AppliesWhen
+
+        # No applies-when declaration -> always applicable.
+        if ($null -eq $appliesWhen -or [string]::IsNullOrWhiteSpace([string]$appliesWhen)) {
+            $map[$adapterName] = 'true'
+            continue
+        }
+
+        $appliesWhenStr = [string]$appliesWhen
+
+        # Special-case: the literal sentinel 'always' (used in some adapter
+        # frontmatter as a non-DSL "always applies" marker). The DSL parser
+        # would treat this as a bare identifier and emit 'unknown'; treat it
+        # as 'true' instead so always-applies adapters behave correctly.
+        if ($appliesWhenStr.Trim() -eq 'always') {
+            $map[$adapterName] = 'true'
+            continue
+        }
+
+        # Normalize zero-arg call form to bare-identifier form for the
+        # `changeset.touchesXxx()` family. Adapters in the wild declare
+        # `applies-when: changeset.touchesPluginEntryPoint()` (call form),
+        # but the predicate evaluator's identifier-boolean resolver only
+        # registers the bare identifier (`changeset.touchesPluginEntryPoint`).
+        # The single-arg form `changeset.touches('glob')` IS handled as a
+        # call by `Resolve-FVCallNode`, so we leave parameterized calls
+        # alone and only strip empty parens.
+        $appliesWhenStr = [regex]::Replace($appliesWhenStr, '(\b[A-Za-z_][\w.]*)\s*\(\s*\)', '$1')
+
+        $ast = $null
+        try {
+            $ast = ConvertTo-FVPredicate -Predicate $appliesWhenStr
+        }
+        catch {
+            $ast = $null
+        }
+
+        if ($null -eq $ast -or (Test-FVParseError -Value $ast)) {
+            # Predicate parse failure -> 'unknown' so caller falls back to
+            # credit-presence-only. Emit one note per (port, adapter) pair.
+            $key = "$PortName::$adapterName"
+            if (-not $script:DeferredNotedPairs.ContainsKey($key)) {
+                $script:DeferredNotedPairs[$key] = $true
+                [Console]::Error.WriteLine("frame-credit-ledger: port '$PortName' adapter '$adapterName' applies-when failed to parse; falling back to credit-presence-only")
+            }
+            $map[$adapterName] = 'unknown'
+            continue
+        }
+
+        $evalResult = $null
+        try {
+            $evalResult = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $Changeset
+        }
+        catch {
+            $evalResult = $null
+        }
+
+        if ($null -eq $evalResult -or [string]::IsNullOrWhiteSpace([string]$evalResult.Result)) {
+            $map[$adapterName] = 'unknown'
+            continue
+        }
+
+        $resultStr = [string]$evalResult.Result
+        if ($resultStr -eq 'unknown') {
+            # Emit a one-shot stderr note: the predicate referenced a
+            # deferred identifier (e.g., review.sustainedCriticalOrHigh,
+            # ceGate.defectsFound, changeset.touchedAreaHasRefactorableDebt)
+            # so the orchestrator falls back to credit-presence-only for
+            # this port-adapter pair.
+            $key = "$PortName::$adapterName"
+            if (-not $script:DeferredNotedPairs.ContainsKey($key)) {
+                $script:DeferredNotedPairs[$key] = $true
+                [Console]::Error.WriteLine("frame-credit-ledger: port '$PortName' adapter '$adapterName' uses deferred predicate identifier; falling back to credit-presence-only")
+            }
+        }
+
+        $map[$adapterName] = $resultStr
+    }
+
+    return $map
+}
+
+# ---------------------------------------------------------------------------
 # Invoke-FrameCreditLedger
 # ---------------------------------------------------------------------------
 function Invoke-FrameCreditLedger {
@@ -287,6 +478,17 @@ function Invoke-FrameCreditLedger {
     $credits = @()
     if ($null -ne $metrics.Credits) { $credits = @($metrics.Credits) }
 
+    # Build a changeset descriptor from the diff between baseRefOid and HEAD.
+    # Used by Test-FVPredicateAgainstChangeset to evaluate each adapter's
+    # `applies-when` predicate. Failure to build the changeset is non-fatal —
+    # we fall back to an empty changeset, which makes every predicate evaluate
+    # to 'false' or 'unknown' (preserving warn-mode invariants).
+    $changeset = Build-FrameCreditLedgerChangeset -BaseRefOid $baseRefOid
+
+    # Track which (port, adapter) pairs have already emitted the deferred-
+    # identifier stderr note so we don't spam the log.
+    $script:DeferredNotedPairs = @{}
+
     # Build per-port reports.
     $portReports = [System.Collections.Generic.List[object]]::new()
 
@@ -294,10 +496,7 @@ function Invoke-FrameCreditLedger {
         foreach ($port in $ports) {
             $portName = [string]$port.Name
             $matchingAdapters = @($adapters | Where-Object { [string]$_.Provides -eq $portName })
-            $applicableMap = @{}
-            foreach ($a in $matchingAdapters) {
-                $applicableMap[[string]$a.Name] = 'unknown'
-            }
+            $applicableMap = Resolve-FrameCreditLedgerApplicableMap -PortName $portName -Adapters $matchingAdapters -Changeset $changeset
             $credit = $credits | Where-Object { [string]$_.Port -eq $portName } | Select-Object -First 1
 
             $report = Resolve-PortStatus -Port $port -WorkAdapters $matchingAdapters -ApplicableMap $applicableMap -Credit $credit
@@ -368,6 +567,14 @@ if (-not $isDotSourced) {
         $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault2()
 
         # Copy parent's functions into the new ISS.
+        # NOTE (C-Risk-2 follow-up, issue #429 Step 12): `$fn.Definition` returns
+        # the function body INCLUDING the leading `[CmdletBinding()] param(...)`
+        # block. When SessionStateFunctionEntry wraps this in `function $Name
+        # { ... }`, the attributes survive intact. We verified that the
+        # cloned `Invoke-FrameCreditLedger` retains its `-Mode` ValidateSet
+        # binding via the existing 'rejects an invalid -Mode value via
+        # ValidateSet' integration test. Investigated, no behavior impact —
+        # do not switch to source-text reconstruction.
         $parentFunctions = Get-ChildItem -Path Function:\ -ErrorAction SilentlyContinue
         foreach ($fn in $parentFunctions) {
             try {

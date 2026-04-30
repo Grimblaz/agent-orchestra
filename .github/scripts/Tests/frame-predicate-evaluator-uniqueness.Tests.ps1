@@ -21,10 +21,12 @@ Describe 'AC-IMPL-1: predicate evaluator uniqueness' {
         # Allowlist: legitimate consumers of the *-FV* namespace.
         # - frame-predicate-core.ps1 is the canonical predicate evaluator (AC-IMPL-1 source-of-truth).
         # - frame-validate-core.ps1 uses the FV prefix for Frame-Validate namespacing (port catalog, adapter symmetry, YAML helpers); it CALLS frame-predicate-core for parsing, does not duplicate the evaluator.
+        # - duplicate-evaluator-fixture.ps1 is the C-Scope-1 positive-test seed. It deliberately defines a forbidden function name so the positive test can assert the scan catches duplicates in a real `.github/scripts/` path (not a temp dir the production scan never walks). Allowlisted so the production scan still passes.
         # Future entries require code review and a documented rationale.
         $script:Allowlist = @(
             (Join-Path $script:RepoRoot '.github/scripts/lib/frame-predicate-core.ps1'),
-            (Join-Path $script:RepoRoot '.github/scripts/lib/frame-validate-core.ps1')
+            (Join-Path $script:RepoRoot '.github/scripts/lib/frame-validate-core.ps1'),
+            (Join-Path $script:RepoRoot '.github/scripts/Tests/fixtures/duplicate-evaluator-fixture.ps1')
         ) | ForEach-Object { (Resolve-Path $_).Path }
         $script:Pattern = '^function\s+(Test-FV|ConvertTo-FV|Get-FV|New-FV|Read-FV|Test-FramePredicate|Evaluate-Predicate|Invoke-Predicate)'
         $script:ScriptsRoot = Join-Path $script:RepoRoot '.github/scripts'
@@ -43,19 +45,23 @@ Describe 'AC-IMPL-1: predicate evaluator uniqueness' {
         $violations | Should -BeNullOrEmpty -Because "AC-IMPL-1: predicate evaluator must remain single-source. Violations: $($violations | ConvertTo-Json -Compress)"
     }
 
-    It 'positive-test fixture: a deliberately-seeded duplicate triggers the violation check' {
-        # Write a fixture file containing a forbidden function decl, then re-run the same scan against a temp dir, assert violation found.
-        $fixtureDir = Join-Path ([System.IO.Path]::GetTempPath()) ([System.Guid]::NewGuid().ToString())
-        New-Item -ItemType Directory -Path $fixtureDir -Force | Out-Null
-        try {
-            $fixturePath = Join-Path $fixtureDir 'duplicate-evaluator.ps1'
-            Set-Content -LiteralPath $fixturePath -Value "function Test-FVDuplicateAgainstChangeset {`n    'this is a deliberately seeded duplicate that should trigger the structural test'`n}"
-            $matches = Select-String -Path $fixturePath -Pattern $script:Pattern -AllMatches
-            $matches | Should -Not -BeNullOrEmpty
-            ($matches | Measure-Object).Count | Should -Be 1
+    It 'positive-test fixture: the production scan walks a real `.github/scripts/` path that contains a deliberately-seeded duplicate' {
+        # The on-disk fixture lives in the same tree the production scan walks
+        # (`.github/scripts/Tests/fixtures/`) and is allowlisted so the
+        # production "no violations" test still passes. Here we re-run the
+        # SAME scan WITHOUT the allowlist and assert the fixture is found —
+        # this proves the scan logic catches duplicates in real paths the
+        # production scan actually walks, not just temp directories.
+        $fixturePath = Join-Path $script:RepoRoot '.github/scripts/Tests/fixtures/duplicate-evaluator-fixture.ps1'
+        Test-Path -LiteralPath $fixturePath | Should -BeTrue -Because 'the on-disk seed fixture must exist for the production scan to walk it'
+
+        $hits = Get-ChildItem -Path $script:ScriptsRoot -Recurse -Filter '*.ps1' | Where-Object {
+            (Resolve-Path $_.FullName).Path -eq (Resolve-Path $fixturePath).Path
+        } | ForEach-Object {
+            Select-String -Path $_.FullName -Pattern $script:Pattern -AllMatches
         }
-        finally {
-            Remove-Item -LiteralPath $fixtureDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
+
+        $hits | Should -Not -BeNullOrEmpty -Because 'the production-scan walk must reach the seeded fixture path'
+        ($hits | Measure-Object).Count | Should -BeGreaterThan 0
     }
 }

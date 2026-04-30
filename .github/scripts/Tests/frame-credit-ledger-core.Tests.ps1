@@ -387,7 +387,7 @@ Describe 'Compose-Comment' {
         $script:Marker = '<!-- frame-credit-ledger-PR-429 -->'
     }
 
-    It 'renders only the Covered section when every port is covered' {
+    It 'filters auto-N/A ports out of the Covered section and surfaces them as a footnote count' {
         $reports = @(
             [pscustomobject]@{
                 PortName          = 'review'
@@ -411,7 +411,13 @@ Describe 'Compose-Comment' {
 
         $out | Should -Match ([regex]::Escape($script:Marker))
         $out | Should -Match '## Frame credit ledger'
-        $out | Should -Match '### ✅ Covered \(2\)'
+        # Only the PassedCredit row is rendered (auto-N/A is filtered).
+        $out | Should -Match '### ✅ Covered \(1\)'
+        # Auto-N/A row is NOT rendered as a per-port row.
+        $out | Should -Not -Match '(?m)^- design'
+        $out | Should -Not -Match 'auto not-applicable'
+        # Auto-N/A count surfaces as a footnote line.
+        $out | Should -Match '\(1 ports auto-N/A'
         $out | Should -Not -Match '### ⚠️ Inconclusive'
         $out | Should -Not -Match '### 🚫 Not covered'
     }

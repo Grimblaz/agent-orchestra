@@ -99,12 +99,12 @@ function Find-OrUpsertComment {
     }
 
     # --- 2. Filter via substring containment. ---
-    $matches = @($comments | Where-Object {
+    $matchedComments = @($comments | Where-Object {
             $_.body -and ($_.body -like "*$Marker*")
         })
 
     # --- 3. Branch on match count. ---
-    if ($matches.Count -eq 0) {
+    if ($matchedComments.Count -eq 0) {
         # POST a new comment via the appropriate verb.
         $verb = if ($Type -eq 'pr') { 'pr' } else { 'issue' }
         $postOutput = & gh $verb comment $Number --body $Body 2>$null
@@ -116,7 +116,7 @@ function Find-OrUpsertComment {
     }
 
     # 1+ matches: pick lowest id, warn on duplicates.
-    $sorted = @($matches | Sort-Object -Property { [int]$_.id })
+    $sorted = @($matchedComments | Sort-Object -Property { [int]$_.id })
     $target = $sorted[0]
     if ($sorted.Count -gt 1) {
         $dupIds = ($sorted | Select-Object -Skip 1 | ForEach-Object { $_.id }) -join ', '

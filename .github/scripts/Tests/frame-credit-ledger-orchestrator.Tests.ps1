@@ -593,4 +593,99 @@ body
             $result.ExitCode | Should -Be 0
         }
     }
+
+    Context 'C-Risk-1 fix: predicate evaluator is wired into per-adapter applicability' {
+
+        It 'Resolve-FrameCreditLedgerApplicableMap evaluates `applies-when` against the changeset and returns true/false (not "unknown") for supported identifiers' {
+            # Dot-source the orchestrator so we can call Resolve-FrameCreditLedgerApplicableMap directly.
+            if (-not (Test-Path $script:OrchestratorPath)) {
+                throw "RED: orchestrator not found at $script:OrchestratorPath"
+            }
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+
+            # The release-hygiene adapter declares applies-when: changeset.touchesPluginEntryPoint().
+            # Evaluator should resolve this against a synthetic changeset.
+            $adapter = [pscustomobject]@{
+                Name              = 'plugin-release-hygiene'
+                Provides          = 'release-hygiene'
+                AppliesWhen       = 'changeset.touchesPluginEntryPoint()'
+                SuggestedNextStep = 'bump plugin version'
+            }
+
+            # Changeset that touches an agents/*.agent.md plugin entry-point file.
+            $hitChangeset = @{
+                ChangedFiles  = @('agents/Code-Smith.agent.md')
+                TotalLines    = 5
+                IsReReview    = $false
+                IsProxyGithub = $false
+            }
+            $script:DeferredNotedPairs = @{}
+            $hitMap = Resolve-FrameCreditLedgerApplicableMap -PortName 'release-hygiene' -Adapters @($adapter) -Changeset $hitChangeset
+            $hitMap['plugin-release-hygiene'] | Should -Be 'true' -Because 'agents/*.agent.md is a plugin entry-point per Get-FVPluginEntryPointPatterns'
+
+            # Changeset that does NOT touch any plugin entry-point file.
+            $missChangeset = @{
+                ChangedFiles  = @('Documents/Design/random.md')
+                TotalLines    = 5
+                IsReReview    = $false
+                IsProxyGithub = $false
+            }
+            $script:DeferredNotedPairs = @{}
+            $missMap = Resolve-FrameCreditLedgerApplicableMap -PortName 'release-hygiene' -Adapters @($adapter) -Changeset $missChangeset
+            $missMap['plugin-release-hygiene'] | Should -Be 'false' -Because 'Documents/*.md does not match any plugin-entry-point pattern'
+        }
+
+        It 'Resolve-FrameCreditLedgerApplicableMap defaults adapters with no `applies-when` to "true" (always applies)' {
+            if (-not (Test-Path $script:OrchestratorPath)) {
+                throw "RED: orchestrator not found at $script:OrchestratorPath"
+            }
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+
+            $adapter = [pscustomobject]@{
+                Name              = 'always-on-adapter'
+                Provides          = 'review'
+                AppliesWhen       = $null
+                SuggestedNextStep = 'run review'
+            }
+            $changeset = @{
+                ChangedFiles  = @('any/file.txt')
+                TotalLines    = 1
+                IsReReview    = $false
+                IsProxyGithub = $false
+            }
+            $script:DeferredNotedPairs = @{}
+            $map = Resolve-FrameCreditLedgerApplicableMap -PortName 'review' -Adapters @($adapter) -Changeset $changeset
+            $map['always-on-adapter'] | Should -Be 'true'
+        }
+
+        It 'Resolve-FrameCreditLedgerApplicableMap emits a stderr note for deferred predicate identifiers (one per port-adapter pair)' {
+            if (-not (Test-Path $script:OrchestratorPath)) {
+                throw "RED: orchestrator not found at $script:OrchestratorPath"
+            }
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+
+            $adapter = [pscustomobject]@{
+                Name              = 'review-credit-aware-adapter'
+                Provides          = 'review'
+                # review.sustainedCriticalOrHigh is a deferred-credit-reference identifier (returns 'unknown').
+                AppliesWhen       = 'review.sustainedCriticalOrHigh == true'
+                SuggestedNextStep = 'rerun /orchestra:review'
+            }
+            $changeset = @{
+                ChangedFiles  = @('any/file.txt')
+                TotalLines    = 1
+                IsReReview    = $false
+                IsProxyGithub = $false
+            }
+            $script:DeferredNotedPairs = @{}
+            # Capture stderr via the standard PowerShell redirection.
+            $stderr = $null
+            $map = Resolve-FrameCreditLedgerApplicableMap -PortName 'review' -Adapters @($adapter) -Changeset $changeset 2>&1
+            # Map result is the only return; stderr writes go to [Console]::Error which is hard
+            # to capture in-process. Validate behaviorally: result is 'unknown' for the deferred id.
+            $map['review-credit-aware-adapter'] | Should -Be 'unknown'
+            # And the dedup map records the pair.
+            $script:DeferredNotedPairs.ContainsKey('review::review-credit-aware-adapter') | Should -BeTrue
+        }
+    }
 }

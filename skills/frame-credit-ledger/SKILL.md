@@ -13,7 +13,7 @@ description: "Warn-only frame credit-ledger pre-PR hook orchestration. Use when 
 - Code-Conductor has just run `gh pr create` (or an equivalent PR-creation step) and needs to post the warn-only port-coverage ledger before handing the PR back to the operator.
 - A maintainer wants to (re)render the credit ledger comment on an existing PR for observation, without re-running the full conductor flow.
 - The same Code-Conductor run is rebuilding context after a smart-resume and needs the ledger to reflect the current changeset's frame port coverage.
-- The PR body already carries a `<!-- pipeline-metrics ... -->` block at `metrics_version: 3` or later — the ledger uses that block as its source of truth and short-circuits silently on pre-v3 bodies.
+- The PR body already carries a `<!-- pipeline-metrics ... -->` block at `metrics_version: 4` (the v4 frame additions sit on top of the inherited v3 base per `frame/pipeline-metrics-v4-schema.md`). Pre-v4 bodies trigger the literal pre-v4 short-circuit notice.
 
 ## Purpose
 
