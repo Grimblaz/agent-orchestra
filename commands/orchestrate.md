@@ -7,7 +7,7 @@ argument-hint: "Single issue (e.g. issue #177) or multiple issues (e.g. issues #
 
 <!-- scope: claude-only -->
 
-Dispatch the `code-conductor` subagent to orchestrate one issue or a coordinated issue bundle.
+Run the Code-Conductor role inline in this conversation to orchestrate one issue or a coordinated issue bundle.
 
 In Claude Code, `/orchestrate` is also the resume entry point for paused Code-Conductor work. When the shared workflow text mentions resuming with `/implement`, use `/orchestrate` here instead.
 
@@ -15,27 +15,75 @@ In Claude Code, `/orchestrate` is also the resume entry point for paused Code-Co
 
 1. Resolve the issue context from the arguments. Accept a single issue number, an issue URL, or a multi-issue bundle. If the arguments do not identify at least one issue, use the `AskUserQuestion` tool.
 2. For each resolved issue, check the issue's comments/timeline for the smart-resume markers `<!-- plan-issue-{ID} -->`, `<!-- design-issue-{ID} -->`, `<!-- design-phase-complete-{ID} -->`, and `<!-- experience-owner-complete-{ID} -->`; SMC-08 governs these durable phase-completion markers.
-3. If any resolved issue is missing its `<!-- plan-issue-{ID} -->` marker, do not block dispatch. Carry the resolved issue list and marker status into the dispatch prompt so Code-Conductor can either resume from the most advanced durable artifact available or continue fresh hub-mode execution and call Issue-Planner itself. SMC-01 governs the plan-marker resume path, and SMC-03 governs the design fallback chain: parent dispatch context when available, latest durable `<!-- design-issue-{ID} -->` issue comment, then issue body. Include whether a durable `<!-- design-issue-{ID} -->` handoff already exists for D9 suppression and full-pipeline resume.
+3. If any resolved issue is missing its `<!-- plan-issue-{ID} -->` marker, do not block dispatch. Carry the resolved issue list and marker status into the inline orchestration context so Code-Conductor can either resume from the most advanced durable artifact available or continue fresh hub-mode execution and call Issue-Planner itself. SMC-01 governs the plan-marker resume path, and SMC-03 governs the design fallback chain: parent dispatch context when available, latest durable `<!-- design-issue-{ID} -->` issue comment, then issue body. Include whether a durable `<!-- design-issue-{ID} -->` handoff already exists for D9 suppression and full-pipeline resume.
 
-**Handshake preamble** (per `skills/subagent-env-handshake/SKILL.md` — the `code-conductor` subagent is tree-dependent and may make tree-grounded claims):
+## Pre-flight (session-startup + provenance-gate)
 
-1. Capture live parent-side working-tree state via the `Bash` tool. Run, in order:
-   - `git rev-parse HEAD`
-   - `git rev-parse --abbrev-ref HEAD`
-   - `pwd`
-   - `git status --porcelain | tr -d '\r' | (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-12` (LF-normalized SHA-256:12)
-2. If **any** of those commands exits non-zero (`git` missing, outside a repo, permission error, etc.), **skip handshake construction entirely** and proceed straight to dispatch without the block. The subagent's Step 0 missing-handshake branch will handle the fallback (tag tree-grounded findings `environment-unverified`). Do not fabricate placeholder values.
-3. Otherwise, construct the handshake block by copying the SKILL.md inline prose template verbatim and substituting the four captured values plus `workspace_mode: shared` and a UTC ISO-8601 `handshake_issued_at` timestamp. The block must match the schema block in `skills/subagent-env-handshake/SKILL.md` field-for-field and in canonical order. Do not rename, reorder, or omit fields.
-4. Prepend the handshake block as the **first content** of the `prompt` parameter passed to the `Agent` tool in the dispatch step below. Issue context / instructions follow the `<!-- /subagent-env-handshake -->` closing comment.
+### Step 4 — Run-once marker (D2 fail-open)
 
-**Dispatch**:
+The automatic startup guard records `/memories/session/session-startup-check-complete.md` after the first automatic startup check. SMC-07 governs this run-once startup-check marker. Claude Code inline currently lacks a session-memory write surface (SMC-07); the run-once marker is a no-op on this surface. The check still proceeds; the user-friction window is bounded to the first inline command of each new session because the SessionStart hook only injects `additionalContext` on session start.
 
-Use the `Agent` tool with:
+### Step 6 — Cleanup confirmation
 
-- `subagent_type: code-conductor`
-- `description`: one short phrase describing the orchestration task
-- `prompt`: the handshake block (when constructed) followed by the resolved issue or bundle context plus the smart-resume marker status
+When the SessionStart hook injects `additionalContext`, present that context and ask via `AskUserQuestion` whether to continue with cleanup using these exact option labels:
 
-The subagent will read `agents/code-conductor.md` for its Claude shell, follow the shared Code-Conductor methodology, and own the orchestration flow for the provided issue set.
+1. `Yes — run cleanup`
+2. `No — skip for now`
+
+If `additionalContext` is absent, emit a single line saying `no stale state detected` and continue.
+
+### Step 7b — Drift check
+
+Before checking drift, run `claude plugin marketplace update` (5-second timeout); if it fails or times out, emit `marketplace freshness check failed — using cached view` and continue with the cached view. When a local-path marketplace registration is classified as a non-git local directory or a dirty/detached tree, suppress that freshness emit because the existing local-path classification surfaces remediation.
+
+On Claude Code, run the plugin drift check after the cleanup path completes. If the installed plugin is behind the marketplace version, emit the update summary and ask via `AskUserQuestion` with these exact option labels:
+
+1. `Stop — I'll restart now`
+2. `Continue — run under old code`
+
+If Claude is running headless and cannot ask a structured question, emit the update result inline and continue.
+
+### Step 9 — Paired-body halt-on-fail
+
+Resolve and read `agents/Code-Conductor.agent.md` before adopting the role. Use the D1 resolution order adapted for this command: first read `~/.claude/plugins/installed_plugins.json` and use the `installPath` for `agent-orchestra@agent-orchestra` to load `agents/Code-Conductor.agent.md`; if that registry entry is missing or unusable, fall back to the newest SemVer-sorted match for `~/.claude/plugins/cache/agent-orchestra/agent-orchestra/*/agents/Code-Conductor.agent.md`; only after those plugin-cache paths fail, allow a source-repo CWD read of `agents/Code-Conductor.agent.md` when `.claude-plugin/plugin.json` exists in the current repo and declares `name: agent-orchestra`. If every candidate load fails, emit exactly: `⚠️ Shared-body load failed for agents/Code-Conductor.agent.md — {error}. This run cannot continue without the canonical methodology; surface this to the user and stop.` The remediation command is `claude plugin install agent-orchestra@agent-orchestra`.
+
+### Provenance-gate
+
+For existing GitHub issues, load `skills/provenance-gate/SKILL.md` and evaluate the cold-pickup trigger conditions exactly as written there. Warm handoffs are limited to the documented markers `<!-- experience-owner-complete-{ID} -->`, `<!-- design-phase-complete-{ID} -->`, `plan-issue-{ID}`, `design-issue-{ID}`, and `<!-- first-contact-assessed-{ID} -->`.
+
+When the gate applies, run it in two stages. Stage 1 self-classification happens before any assessment text and uses these exact option labels:
+
+1. `I wrote this / I'm fully briefed`
+2. `I'm picking this up cold`
+3. `Stop — needs rework first`
+
+Only if the stage-1 answer is `I'm picking this up cold`, run the assessment summary and ask the cold-only stage-2 question with these exact option labels:
+
+1. `Assessment looks right — proceed`
+2. `Proceed but carry concerns forward`
+3. `Needs rework — stop here`
+
+Both stop outcomes (`Stop — needs rework first` and `Needs rework — stop here`) halt and post no marker token.
+
+For non-stop outcomes, SMC-04 governs the first-contact-assessed marker; record the two-line marker via `gh issue comment`:
+
+```text
+<!-- first-contact-assessed-{ID} -->
+Provenance gate: fast-path or cold-path assessment completed; human-readable summary only.
+```
+
+The HTML token on line 1 remains the only skip-check anchor and the only parser anchor. The second line is decorative and human-readable only.
+
+If GitHub lookup or posting is unavailable, say offline mode is active and continue. Claude Code inline currently lacks a session-memory write surface (SMC-04), so this surface cannot persist the shared skill's local fallback payload or recover the GitHub marker on a later online run. Do not claim that either happened here.
+
+**Inline execution**:
+
+Read `agents/Code-Conductor.agent.md` and adopt Code-Conductor inline for the rest of this conversation. Follow the loaded shared methodology, pass through the resolved issue or bundle context, preserve the smart-resume marker status, and carry `$ARGUMENTS` into the orchestration run.
+
+## Downstream Agent handshakes
+
+Before each downstream `Agent` dispatch, reconstruct a fresh `subagent-env-handshake` by capturing live HEAD, branch, CWD, and dirty fingerprint immediately before that dispatch. The working tree mutates during orchestration, so do not reuse or carry forward a command-entry-captured handshake, a single entry-time handshake, or any earlier per-dispatch block for later specialist calls.
+
+Construct each downstream handshake from `skills/subagent-env-handshake/SKILL.md` using the schema and inline prose template there, and prepend it as the first content of the `prompt` parameter for tree-dependent specialist `Agent` calls. If the live capture fails, skip that handshake and let the target specialist's Step 0 missing-handshake branch handle the fallback.
 
 ARGUMENTS: $ARGUMENTS
