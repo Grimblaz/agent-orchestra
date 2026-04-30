@@ -200,6 +200,24 @@ function script:ConvertFrom-FCLListSection {
 
 # endregion ---------------------------------------------------------------------
 
+# region: shared port-report helpers --------------------------------------------
+
+# Normalize an adapter's SuggestedNextStep field. Treat null/whitespace and the
+# literal sentinel 'none' as "no next step"; otherwise return the trimmed
+# string.
+function script:Resolve-FCLNextStep {
+    param($Adapter)
+    if ($null -eq $Adapter) { return $null }
+    $step = $Adapter.SuggestedNextStep
+    if ($null -eq $step) { return $null }
+    $stepStr = [string]$step
+    if ([string]::IsNullOrWhiteSpace($stepStr)) { return $null }
+    if ($stepStr -eq 'none') { return $null }
+    return $stepStr
+}
+
+# endregion ---------------------------------------------------------------------
+
 function Read-PRMetricsBlock {
     [CmdletBinding()]
     param([Parameter(Mandatory)][AllowEmptyString()][string]$PrBody)
@@ -391,17 +409,6 @@ function Resolve-PortStatus {
         }
     }
 
-    function script:Resolve-FCLNextStep {
-        param($Adapter)
-        if ($null -eq $Adapter) { return $null }
-        $step = $Adapter.SuggestedNextStep
-        if ($null -eq $step) { return $null }
-        $stepStr = [string]$step
-        if ([string]::IsNullOrWhiteSpace($stepStr)) { return $null }
-        if ($stepStr -eq 'none') { return $null }
-        return $stepStr
-    }
-
     # 3) Credit branch.
     if ($null -ne $Credit) {
         $creditStatus = [string]$Credit.Status
@@ -409,72 +416,32 @@ function Resolve-PortStatus {
         if ($null -ne $Credit.PSObject.Properties['Evidence']) {
             $evidence = [string]$Credit.Evidence
         }
+        $applicableAdapterName = if ($firstApplicableAdapter) { [string]$firstApplicableAdapter.Name } else { '' }
 
-        switch ($creditStatus) {
-            'passed' {
-                return [pscustomobject]@{
-                    PortName          = $portName
-                    Status            = 'Covered'
-                    SubReason         = 'PassedCredit'
-                    AdapterName       = if ($firstApplicableAdapter) { [string]$firstApplicableAdapter.Name } else { '' }
-                    SuggestedNextStep = $null
-                    Evidence          = $evidence
-                }
-            }
-            'not-applicable' {
-                return [pscustomobject]@{
-                    PortName          = $portName
-                    Status            = 'Covered'
-                    SubReason         = 'NotApplicableCredit'
-                    AdapterName       = if ($firstApplicableAdapter) { [string]$firstApplicableAdapter.Name } else { '' }
-                    SuggestedNextStep = $null
-                    Evidence          = $evidence
-                }
-            }
-            'skipped' {
-                return [pscustomobject]@{
-                    PortName          = $portName
-                    Status            = 'Covered'
-                    SubReason         = 'SkippedCredit'
-                    AdapterName       = if ($firstApplicableAdapter) { [string]$firstApplicableAdapter.Name } else { '' }
-                    SuggestedNextStep = $null
-                    Evidence          = $evidence
-                }
-            }
-            'failed' {
-                $adapterName = if ($firstApplicableAdapter) { [string]$firstApplicableAdapter.Name } else { '' }
-                $nextStep = script:Resolve-FCLNextStep -Adapter $firstApplicableAdapter
-                return [pscustomobject]@{
-                    PortName          = $portName
-                    Status            = 'NotCovered'
-                    SubReason         = 'AdapterFailed'
-                    AdapterName       = $adapterName
-                    SuggestedNextStep = $nextStep
-                    Evidence          = $evidence
-                }
-            }
-            'inconclusive' {
-                $adapterName = if ($firstApplicableAdapter) { [string]$firstApplicableAdapter.Name } else { '' }
-                $nextStep = script:Resolve-FCLNextStep -Adapter $firstApplicableAdapter
-                return [pscustomobject]@{
-                    PortName          = $portName
-                    Status            = 'Inconclusive'
-                    SubReason         = 'InconclusiveCredit'
-                    AdapterName       = $adapterName
-                    SuggestedNextStep = $nextStep
-                    Evidence          = $evidence
-                }
-            }
-            default {
-                return [pscustomobject]@{
-                    PortName          = $portName
-                    Status            = 'Inconclusive'
-                    SubReason         = 'UnknownCreditStatus'
-                    AdapterName       = if ($firstApplicableAdapter) { [string]$firstApplicableAdapter.Name } else { '' }
-                    SuggestedNextStep = $null
-                    Evidence          = $evidence
-                }
-            }
+        # Map credit status -> (PortStatus, SubReason, includeNextStep). When
+        # includeNextStep is true the adapter's SuggestedNextStep flows through;
+        # otherwise it is forced to $null.
+        $creditMap = @{
+            'passed'         = @{ Status = 'Covered'; SubReason = 'PassedCredit'; IncludeNextStep = $false }
+            'not-applicable' = @{ Status = 'Covered'; SubReason = 'NotApplicableCredit'; IncludeNextStep = $false }
+            'skipped'        = @{ Status = 'Covered'; SubReason = 'SkippedCredit'; IncludeNextStep = $false }
+            'failed'         = @{ Status = 'NotCovered'; SubReason = 'AdapterFailed'; IncludeNextStep = $true }
+            'inconclusive'   = @{ Status = 'Inconclusive'; SubReason = 'InconclusiveCredit'; IncludeNextStep = $true }
+        }
+
+        $entry = $creditMap[$creditStatus]
+        if ($null -eq $entry) {
+            $entry = @{ Status = 'Inconclusive'; SubReason = 'UnknownCreditStatus'; IncludeNextStep = $false }
+        }
+        $nextStep = if ($entry.IncludeNextStep) { script:Resolve-FCLNextStep -Adapter $firstApplicableAdapter } else { $null }
+
+        return [pscustomobject]@{
+            PortName          = $portName
+            Status            = $entry.Status
+            SubReason         = $entry.SubReason
+            AdapterName       = $applicableAdapterName
+            SuggestedNextStep = $nextStep
+            Evidence          = $evidence
         }
     }
 

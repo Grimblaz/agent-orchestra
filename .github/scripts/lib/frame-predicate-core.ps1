@@ -881,6 +881,12 @@ function New-FVEvaluationResult {
     }
 }
 
+# TODO: refactor candidate — extract `Format-FVBoolResult` helper for the
+# `[string]([bool]$x).ToString().ToLowerInvariant()` pattern repeated ~10
+# times in this file (sites: Resolve-FVChangesetIdentifierBoolean,
+# Resolve-FVCallNode, Resolve-FVComparisonNode). Cosmetic; defer until a
+# genuine API need arises.
+
 function Get-FVChangesetField {
     param(
         [Parameter(Mandatory)]$Changeset,

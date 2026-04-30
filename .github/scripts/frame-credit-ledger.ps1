@@ -43,6 +43,31 @@ if ($Mode -notin @('warn', 'enforce')) {
 . (Join-Path $PSScriptRoot 'lib/frame-credit-ledger-core.ps1')
 
 # ---------------------------------------------------------------------------
+# Read a single scalar field from an adapter's frontmatter block. Strips a
+# pair of balanced single or double quotes when present. Returns $null when
+# the field is absent.
+# ---------------------------------------------------------------------------
+function script:Get-FCLAdapterFrontmatterScalar {
+    param(
+        [Parameter(Mandatory)][string]$Frontmatter,
+        [Parameter(Mandatory)][string]$Field
+    )
+
+    $pattern = '(?m)^\s*' + [regex]::Escape($Field) + '\s*:\s*(?<v>.+?)\s*$'
+    $m = [regex]::Match($Frontmatter, $pattern)
+    if (-not $m.Success) { return $null }
+
+    $value = $m.Groups['v'].Value.Trim()
+    if ($value.Length -ge 2) {
+        $first = $value[0]; $last = $value[$value.Length - 1]
+        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+    }
+    return $value
+}
+
+# ---------------------------------------------------------------------------
 # Get-FrameCreditLedgerAdapters
 # ---------------------------------------------------------------------------
 function Get-FrameCreditLedgerAdapters {
@@ -112,42 +137,15 @@ function Get-FrameCreditLedgerAdapters {
             $fm = $fmMatch.Groups['fm'].Value
 
             # Require a `provides:` key.
-            $providesMatch = [regex]::Match($fm, '(?m)^\s*provides\s*:\s*(?<v>.+?)\s*$')
-            if (-not $providesMatch.Success) { continue }
-            $providesValue = $providesMatch.Groups['v'].Value.Trim()
-            # Strip wrapping quotes.
-            if ($providesValue.Length -ge 2) {
-                $first = $providesValue[0]; $last = $providesValue[$providesValue.Length - 1]
-                if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
-                    $providesValue = $providesValue.Substring(1, $providesValue.Length - 2)
-                }
-            }
+            $providesValue = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'provides'
+            if ($null -eq $providesValue) { continue }
 
-            $appliesWhenMatch = [regex]::Match($fm, '(?m)^\s*applies-when\s*:\s*(?<v>.+?)\s*$')
-            $appliesWhen = if ($appliesWhenMatch.Success) { $appliesWhenMatch.Groups['v'].Value.Trim() } else { $null }
-            if ($appliesWhen -and $appliesWhen.Length -ge 2) {
-                $first = $appliesWhen[0]; $last = $appliesWhen[$appliesWhen.Length - 1]
-                if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
-                    $appliesWhen = $appliesWhen.Substring(1, $appliesWhen.Length - 2)
-                }
-            }
+            $appliesWhen = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'applies-when'
+            $suggestedNextStep = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'suggested-next-step'
 
-            $nextStepMatch = [regex]::Match($fm, '(?m)^\s*suggested-next-step\s*:\s*(?<v>.+?)\s*$')
-            $suggestedNextStep = if ($nextStepMatch.Success) { $nextStepMatch.Groups['v'].Value.Trim() } else { $null }
-            if ($suggestedNextStep -and $suggestedNextStep.Length -ge 2) {
-                $first = $suggestedNextStep[0]; $last = $suggestedNextStep[$suggestedNextStep.Length - 1]
-                if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
-                    $suggestedNextStep = $suggestedNextStep.Substring(1, $suggestedNextStep.Length - 2)
-                }
-            }
-
-            $nameMatch = [regex]::Match($fm, '(?m)^\s*name\s*:\s*(?<v>.+?)\s*$')
-            $name = if ($nameMatch.Success) { $nameMatch.Groups['v'].Value.Trim() } else { [System.IO.Path]::GetFileNameWithoutExtension($path) }
-            if ($name.Length -ge 2) {
-                $first = $name[0]; $last = $name[$name.Length - 1]
-                if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
-                    $name = $name.Substring(1, $name.Length - 2)
-                }
+            $name = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'name'
+            if ($null -eq $name) {
+                $name = [System.IO.Path]::GetFileNameWithoutExtension($path)
             }
 
             $results.Add([pscustomobject]@{
