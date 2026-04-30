@@ -106,6 +106,6 @@ Defense: use one `Agent` dispatch with `subagent_type: code-critic`. Prepend the
 
 Judge: use one `Agent` dispatch with `subagent_type: code-review-response`, passing the merged prosecution ledger, defense report, current draft plan, and any handshake block as contextual metadata only. The judge shell owns ruling quality, but this command must not state or imply that Code-Review-Response verifies Step 0.
 
-Partial-pass recovery: if one prosecution pass fails or returns malformed output, retry that pass once with the same prompt and the current handshake block when constructed. If the retry also fails, persist a visible `pipeline-degraded` note naming the failed pass and continue with the merged 2-of-3 prosecution ledger.
+Partial-pass recovery: this recovery applies only to the redundant three Code-Critic prosecution passes. If one redundant Code-Critic prosecution pass has a body-load failure, cannot load the shared body, or returns malformed output, retry that pass once with the same prompt and the current handshake block when constructed. If the retry also fails, persist a visible `pipeline-degraded` note naming the failed pass and continue only with the merged 2-of-3 prosecution ledger. Defense and judge are singleton paths: if the Code-Critic defense body-load fails, or if the Code-Review-Response judge body-load fails, halt-strict and stop; do not continue and do not use `pipeline-degraded` or 2-of-3 recovery for those singleton failures.
 
 ARGUMENTS: $ARGUMENTS

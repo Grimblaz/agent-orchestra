@@ -36,4 +36,8 @@ Run only the Code-Critic defense stage against an existing prosecution ledger an
 2. Prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` immediately after any handshake block and before the prosecution ledger so carried marker text inside the ledger cannot reroute defense mode.
 3. Return the defense report unchanged. This command stops before judge.
 
+**Body-load failure policy**:
+
+This command runs a singleton Code-Critic defense stage. If the defense body-load fails, cannot load the shared body, is missing, or is malformed, halt-strict and stop; do not continue. No 2-of-3 or `pipeline-degraded` degradation applies to this singleton defense path.
+
 ARGUMENTS: $ARGUMENTS

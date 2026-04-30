@@ -36,4 +36,8 @@ Run the compact review pipeline: one all-perspectives prosecution pass, then def
 3. Judge: use the `Agent` tool with `subagent_type: code-review-response`, passing the lite prosecution ledger and defense report together. No handshake is required for the judge dispatch.
 4. Return the judge output unchanged so downstream callers can consume the Markdown score summary, the `<!-- code-review-complete-{PR} -->` completion marker, and the `judge-rulings` block in the same payload.
 
+**Body-load failure policy**:
+
+The Code-Critic prosecution path in this command is a singleton prosecution pass. If that prosecution body-load fails, cannot load the shared body, is missing, or is malformed, halt-strict and stop; do not continue. No 2-of-3 or `pipeline-degraded` degradation applies to this singleton prosecution path.
+
 ARGUMENTS: $ARGUMENTS

@@ -36,4 +36,8 @@ Run only the Code-Critic prosecution stage and return the resulting prosecution 
 2. Prepend the authoritative selector line `Review mode selector: "Use code review perspectives"` immediately after any handshake block and before any carried review context so the prosecution stays in canonical code-review mode even if the supplied context also mentions other markers.
 3. Return the prosecution ledger unchanged. This command stops before defense and judge.
 
+**Body-load failure policy**:
+
+This command runs a singleton Code-Critic prosecution stage. If the prosecution body-load fails, cannot load the shared body, is missing, or is malformed, halt-strict and stop; do not continue. No 2-of-3 or `pipeline-degraded` degradation applies to this singleton prosecution path.
+
 ARGUMENTS: $ARGUMENTS

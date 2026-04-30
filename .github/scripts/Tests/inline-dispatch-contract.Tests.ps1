@@ -371,6 +371,58 @@ Describe 'inline dispatch contract' {
         $content | Should -Not -Match '(?is)\*\*Handshake preamble\*\*.{0,900}subagent_type:\s*code-conductor' -Because '/orchestrate must not keep the old one-shot Code-Conductor subagent handshake preamble'
     }
 
+    It 'scopes /plan pipeline-degraded recovery to redundant prosecution body-load pass failures' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $matchesAnyPattern = {
+            param(
+                [string]$Content,
+                [string[]]$Patterns
+            )
+
+            foreach ($pattern in $Patterns) {
+                if ($Content -match $pattern) {
+                    return $true
+                }
+            }
+
+            return $false
+        }
+
+        $redundantProsecutionBodyLoadRecovery = & $matchesAnyPattern -Content $content -Patterns @(
+            '(?is)(?:redundant|three|3).{0,180}(?:Code-Critic\s+)?prosecution.{0,260}(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load)',
+            '(?is)(?:Code-Critic\s+)?prosecution.{0,180}(?:redundant|three|3).{0,260}(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load)',
+            '(?is)(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:redundant|three|3).{0,180}(?:Code-Critic\s+)?prosecution'
+        )
+        $redundantProsecutionBodyLoadRecovery | Should -BeTrue -Because '/plan must explicitly scope body-load pass failure recovery to the redundant Code-Critic prosecution set'
+
+        $content | Should -Match '(?is)\bretry\b.{0,80}\bonce\b|\bonce\b.{0,80}\bretry\b' -Because '/plan must retry a failed or malformed redundant prosecution body-load pass once before degrading'
+        $content | Should -Match '(?is)\bpipeline-degraded\b' -Because '/plan must preserve the visible degraded-pipeline note for redundant prosecution partial failure'
+        $content | Should -Match '(?is)(?:2-of-3|two-of-three|two of three).{0,200}(?:merged\s+)?prosecution ledger|(?:merged\s+)?prosecution ledger.{0,200}(?:2-of-3|two-of-three|two of three)' -Because '/plan must tie pipeline-degraded continuation to the 2-of-3 merged prosecution ledger'
+
+        foreach ($singletonStage in @(
+                [pscustomobject]@{ Name = 'defense'; Body = 'Code-Critic'; StagePattern = 'defense' },
+                [pscustomobject]@{ Name = 'judge'; Body = 'Code-Review-Response'; StagePattern = 'judge|judgment' }
+            )) {
+            $bodyPattern = [regex]::Escape($singletonStage.Body)
+            $strictSingletonFailure = & $matchesAnyPattern -Content $content -Patterns @(
+                "(?is)(?:singleton|single|one).{0,160}(?:$($singletonStage.StagePattern)|$bodyPattern).{0,260}(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)",
+                "(?is)(?:$($singletonStage.StagePattern)|$bodyPattern).{0,160}(?:singleton|single|one).{0,260}(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)",
+                "(?is)(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:$($singletonStage.StagePattern)|$bodyPattern).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)"
+            )
+            $strictSingletonFailure | Should -BeTrue -Because "/plan must state that singleton $($singletonStage.Name) body-load failure stays halt-strict rather than pipeline-degraded"
+        }
+
+        $singletonRecoveryWindows = [regex]::Matches(
+            $content,
+            '(?is).{0,140}(?:defense|judge|judgment|Code-Review-Response).{0,140}(?:pipeline-degraded|2-of-3|two-of-three|two of three|degradation|degraded).{0,140}|.{0,140}(?:pipeline-degraded|2-of-3|two-of-three|two of three|degradation|degraded).{0,140}(?:defense|judge|judgment|Code-Review-Response).{0,140}'
+        )
+
+        foreach ($window in $singletonRecoveryWindows) {
+            $window.Value | Should -Match '(?is)\b(?:no|not|never|without|does not|must not|only|except|halt-strict|halt strict|halt|stop)\b' -Because '/plan must not imply that singleton defense or judge body-load failures can use pipeline-degraded recovery'
+        }
+    }
+
     It 'requires experience and design to carry the offline fallback notice and Claude-inline no-persistence warning' {
         foreach ($commandPath in @('commands\experience.md', 'commands\design.md')) {
             $content = Get-Content -Path (Join-Path $script:RepoRoot $commandPath) -Raw -ErrorAction Stop
