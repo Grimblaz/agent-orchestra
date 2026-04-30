@@ -78,7 +78,7 @@ If GitHub lookup or posting is unavailable, say offline mode is active and conti
 
 **Inline execution**:
 
-Read `agents/Code-Conductor.agent.md` and adopt Code-Conductor inline for the rest of this conversation. Follow the loaded shared methodology, pass through the resolved issue or bundle context, preserve the smart-resume marker status, and carry `$ARGUMENTS` into the orchestration run.
+Use the already resolved `agents/Code-Conductor.agent.md` shared body and adopt Code-Conductor inline for the rest of this conversation. Follow the loaded shared methodology, pass through the resolved issue or bundle context, preserve the smart-resume marker status, and carry `$ARGUMENTS` into the orchestration run.
 
 ## Downstream Agent handshakes
 

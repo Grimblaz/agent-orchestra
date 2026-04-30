@@ -260,6 +260,55 @@ Describe 'orchestra-review command contract' {
         $content | Should -Match '(?is)(?:continue|proceed).{0,220}(?:enough passes remain|2-of-3|two-of-three|two of three|remaining passes)' -Because '/orchestra:review must say the pipeline continues only when enough redundant prosecution passes remain'
     }
 
+    It 'documents halt-strict body-load behavior for composite defense and judge stages' {
+        $compositeSpecs = @(
+            [pscustomobject]@{
+                Name = 'orchestra-review'
+                Path = Join-Path $script:CommandsDirectory 'orchestra-review.md'
+            },
+            [pscustomobject]@{
+                Name = 'orchestra-review-lite'
+                Path = Join-Path $script:CommandsDirectory 'orchestra-review-lite.md'
+            }
+        )
+
+        $stageSpecs = @(
+            [pscustomobject]@{
+                Name         = 'defense'
+                Body         = 'Code-Critic'
+                StagePattern = 'defense'
+            },
+            [pscustomobject]@{
+                Name         = 'judge'
+                Body         = 'Code-Review-Response'
+                StagePattern = 'judge|judgment'
+            }
+        )
+
+        foreach ($command in $compositeSpecs) {
+            $content = & $script:ReadContent -Path $command.Path
+
+            foreach ($stage in $stageSpecs) {
+                $bodyPattern = [regex]::Escape($stage.Body)
+                $strictBodyLoadFailure = & $script:MatchesAnyPattern -Content $content -Patterns @(
+                    "(?is)(?:$($stage.StagePattern)|$bodyPattern).{0,260}(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)",
+                    "(?is)(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:$($stage.StagePattern)|$bodyPattern).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)",
+                    "(?is)(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue).{0,260}(?:$($stage.StagePattern)|$bodyPattern)"
+                )
+                $strictBodyLoadFailure | Should -BeTrue -Because "$($command.Name) must state that composite $($stage.Name) body-load failure halts strict"
+            }
+
+            $singletonRecoveryWindows = [regex]::Matches(
+                $content,
+                '(?is).{0,140}(?:defense|judge|judgment|Code-Review-Response).{0,140}(?:pipeline-degraded|2-of-3|two-of-three|two of three|degradation|degraded).{0,140}|.{0,140}(?:pipeline-degraded|2-of-3|two-of-three|two of three|degradation|degraded).{0,140}(?:defense|judge|judgment|Code-Review-Response).{0,140}'
+            )
+
+            foreach ($window in $singletonRecoveryWindows) {
+                $window.Value | Should -Match '(?is)\b(?:no|not|never|without|does not|must not|only|except|halt-strict|halt strict|halt|stop)\b' -Because "$($command.Name) must not imply that composite defense or judge body-load failures can use degraded prosecution recovery"
+            }
+        }
+    }
+
     It 'documents halt-strict body-load behavior for singleton review command stages' {
         $singletonSpecs = @(
             [pscustomobject]@{

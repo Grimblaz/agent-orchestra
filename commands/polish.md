@@ -35,11 +35,11 @@ If Claude is running headless and cannot ask a structured question, emit the upd
 
 ### Step 9 — Paired-body halt-on-fail
 
-Read `agents/ui-iterator.md` before adopting the role. If that load fails, emit exactly: `⚠️ Shared-body load failed for agents/ui-iterator.md — {error}. This run cannot continue without the canonical methodology; surface this to the user and stop.`
+Resolve and read `agents/UI-Iterator.agent.md` before adopting the role. Use the D1 plugin-cache-first body resolution sequence: first read `~/.claude/plugins/installed_plugins.json` and use the `installPath` for `agent-orchestra@agent-orchestra` to load `agents/UI-Iterator.agent.md`; if that registry entry is missing or unusable, fall back to the newest SemVer-sorted match for `~/.claude/plugins/cache/agent-orchestra/agent-orchestra/*/agents/UI-Iterator.agent.md`; only after those plugin-cache paths fail, allow a source-repo CWD read of `agents/UI-Iterator.agent.md` when `.claude-plugin/plugin.json` exists in the current repo and declares `name: agent-orchestra`. If every candidate load fails, emit exactly: `⚠️ Shared-body load failed for agents/UI-Iterator.agent.md — {error}. This run cannot continue without the canonical methodology; surface this to the user and stop.` The remediation command is `claude plugin install agent-orchestra@agent-orchestra`.
 
 ## Inline execution
 
-Read `agents/ui-iterator.md` and adopt that role for the rest of this conversation. Follow all methodology sections, including `## Browser Tools Reference`. If neither Chrome MCP nor Claude_Preview is available, emit the locked CE6 literal below and then offer manual screenshot paste so the conversation can continue in the final fallback mode.
+Use the resolved `agents/UI-Iterator.agent.md` shared body and adopt that role for the rest of this conversation. Follow all methodology sections, including `## Browser Tools Reference`. If neither Chrome MCP nor Claude_Preview is available, emit the locked CE6 literal below and then offer manual screenshot paste so the conversation can continue in the final fallback mode.
 
 ```text
 ⚠️ UI-Iterator browser tools unavailable.

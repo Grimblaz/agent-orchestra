@@ -202,7 +202,7 @@ Describe 'inline dispatch contract' {
                     'cannot continue without the canonical methodology',
                     '<!-- first-contact-assessed-',
                     '<!-- D6 (issue #412):',
-                    'Read agents/Issue-Planner.agent.md',
+                    'agents/Issue-Planner.agent.md',
                     '## Inline adversarial-pipeline dispatch',
                     'subagent_type: code-critic',
                     'Review mode selector: "Use design review perspectives"',
@@ -269,6 +269,39 @@ Describe 'inline dispatch contract' {
                 )
             }
         )
+
+        $script:BodyResolutionCommandSpecs = @(
+            [pscustomobject]@{
+                Name                     = '/experience'
+                Path                     = 'commands\experience.md'
+                BodyFile                 = 'Experience-Owner.agent.md'
+                ForbiddenDirectReadPaths = @('agents/Experience-Owner.agent.md')
+            },
+            [pscustomobject]@{
+                Name                     = '/design'
+                Path                     = 'commands\design.md'
+                BodyFile                 = 'Solution-Designer.agent.md'
+                ForbiddenDirectReadPaths = @('agents/Solution-Designer.agent.md')
+            },
+            [pscustomobject]@{
+                Name                     = '/plan'
+                Path                     = 'commands\plan.md'
+                BodyFile                 = 'Issue-Planner.agent.md'
+                ForbiddenDirectReadPaths = @('agents/Issue-Planner.agent.md')
+            },
+            [pscustomobject]@{
+                Name                     = '/polish'
+                Path                     = 'commands\polish.md'
+                BodyFile                 = 'UI-Iterator.agent.md'
+                ForbiddenDirectReadPaths = @('agents/UI-Iterator.agent.md', 'agents/ui-iterator.md')
+            },
+            [pscustomobject]@{
+                Name                     = '/orchestrate'
+                Path                     = 'commands\orchestrate.md'
+                BodyFile                 = 'Code-Conductor.agent.md'
+                ForbiddenDirectReadPaths = @('agents/Code-Conductor.agent.md')
+            }
+        )
     }
 
     It 'extracts canonical inline-dispatch labels from the source skills' {
@@ -324,6 +357,47 @@ Describe 'inline dispatch contract' {
             $content | Should -Match '(?is)(only if|only when).{0,120}I''m picking this up cold|cold-only assessment|cold path' -Because "$($command.Path) must make stage 2 conditional on the cold path"
             $content | Should -Match '(?is)(Stop — needs rework first|Needs rework — stop here).{0,220}(do not post|without posting|no marker).{0,140}first-contact-assessed' -Because "$($command.Path) must keep both stop outcomes marker-free"
             $content | Should -Match '(?is)(HTML token).{0,120}(line 1).{0,180}(only skip-check anchor|only anchor|only parser anchor).{0,220}(second line|second-line).{0,120}(human-readable|decorative)' -Because "$($command.Path) must preserve the HTML token as the sole skip-check anchor while documenting the decorative second line"
+        }
+    }
+
+    It 'requires user-facing command entry points to resolve shared bodies plugin-cache-first' {
+        foreach ($command in $script:BodyResolutionCommandSpecs) {
+            $path = Join-Path $script:RepoRoot $command.Path
+            $content = Get-Content -Path $path -Raw -ErrorAction Stop
+            $bodyPath = 'agents/' + $command.BodyFile
+            $cachePath = '~/.claude/plugins/cache/agent-orchestra/agent-orchestra/*/' + $bodyPath
+            $bodyPathPattern = [regex]::Escape($bodyPath)
+            $cachePathPattern = [regex]::Escape($cachePath)
+
+            $content | Should -Match "(?is)(?:resolve|load|read).{0,220}$bodyPathPattern" -Because "$($command.Name) must name the shared body it will load"
+            $content | Should -Match '(?is)~/.claude/plugins/installed_plugins\.json' -Because "$($command.Name) must consult the installed plugin registry before source-repo CWD"
+            $content | Should -Match '(?is)installPath' -Because "$($command.Name) must use the installed plugin registry installPath when present"
+            $content | Should -Match '(?is)agent-orchestra@agent-orchestra' -Because "$($command.Name) must resolve the installed Agent Orchestra plugin entry"
+            $content | Should -Match "(?is)SemVer-sorted.{0,160}$cachePathPattern" -Because "$($command.Name) must fall back to the newest SemVer-sorted plugin-cache body path"
+            $content | Should -Match '(?is)\.claude-plugin/plugin\.json.{0,180}name: agent-orchestra|name: agent-orchestra.{0,180}\.claude-plugin/plugin\.json' -Because "$($command.Name) must gate any source-repo CWD fallback on the Agent Orchestra plugin manifest"
+            $content | Should -Match '(?is)claude plugin install agent-orchestra@agent-orchestra' -Because "$($command.Name) must preserve the canonical remediation command"
+
+            $installedPluginsIndex = $content.IndexOf('~/.claude/plugins/installed_plugins.json', [System.StringComparison]::Ordinal)
+            $cachePathIndex = $content.IndexOf($cachePath, [System.StringComparison]::Ordinal)
+            $sourceRepoGateIndex = $content.IndexOf('.claude-plugin/plugin.json', [System.StringComparison]::Ordinal)
+
+            $installedPluginsIndex | Should -Not -Be -1 -Because "$($command.Name) must contain the installed plugin registry path"
+            $cachePathIndex | Should -Not -Be -1 -Because "$($command.Name) must contain the plugin-cache fallback path for $bodyPath"
+            $sourceRepoGateIndex | Should -Not -Be -1 -Because "$($command.Name) must contain the source-repo CWD fallback gate"
+            $installedPluginsIndex | Should -BeLessThan $cachePathIndex -Because "$($command.Name) must try installed_plugins.json before the glob fallback"
+            $cachePathIndex | Should -BeLessThan $sourceRepoGateIndex -Because "$($command.Name) must try plugin-cache paths before the gated source-repo CWD fallback"
+        }
+    }
+
+    It 'rejects unqualified direct shared-body Read instructions in user-facing command entry points' {
+        foreach ($command in $script:BodyResolutionCommandSpecs) {
+            $path = Join-Path $script:RepoRoot $command.Path
+            $content = Get-Content -Path $path -Raw -ErrorAction Stop
+
+            foreach ($directReadPath in $command.ForbiddenDirectReadPaths) {
+                $directReadPattern = '(?im)^\s*Read\s+`?' + [regex]::Escape($directReadPath) + '`?\s+(?:and|before|$)'
+                $content | Should -Not -Match $directReadPattern -Because "$($command.Name) must resolve $directReadPath plugin-cache-first instead of using an unqualified CWD-relative Read instruction"
+            }
         }
     }
 
