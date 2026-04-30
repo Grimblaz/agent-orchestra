@@ -6,11 +6,16 @@
 
 .DESCRIPTION
     Verifies the Claude Code command-file prose contract across
-    commands/experience.md, commands/design.md, and commands/plan.md.
+    commands/experience.md, commands/design.md, commands/plan.md, and
+    commands/orchestrate.md.
 
     Issue #437 intentionally rolls back the #412 D5/D6 /plan carve-out so
     /plan carries inline paired-body and provenance-gate prose like
     /experience and /design. The Copilot asymmetry remains tracked by #414.
+
+    Issue #465 extends the same command-side inline contract to /orchestrate:
+    it must adopt Code-Conductor inline, preserve hub-mode smart resume, and
+    reconstruct downstream Agent handshakes live per dispatch.
 
         Cross-tool asymmetry (D6 of #412): Copilot's .github/prompts/*.prompt.md files
         are thin one-line dispatchers without a parent-side prose surface. Copilot
@@ -217,6 +222,45 @@ Describe 'inline dispatch contract' {
                     '### Step 9 — Paired-body halt-on-fail',
                     '### Provenance-gate'
                 )
+            },
+            @{
+                Path                         = 'commands\orchestrate.md'
+                RequiredStatic               = @(
+                    $script:MarkerPath,
+                    $script:D2FailOpenText,
+                    $script:NoStaleStateNote,
+                    '⚠️ Shared-body load failed for agents/Code-Conductor.agent.md',
+                    'cannot continue without the canonical methodology',
+                    '<!-- first-contact-assessed-',
+                    'agents/Code-Conductor.agent.md',
+                    '~/.claude/plugins/installed_plugins.json',
+                    'installPath',
+                    '~/.claude/plugins/cache/agent-orchestra/agent-orchestra/*/agents/Code-Conductor.agent.md',
+                    '.claude-plugin/plugin.json',
+                    'name: agent-orchestra',
+                    'claude plugin install agent-orchestra@agent-orchestra',
+                    '<!-- plan-issue-{ID} -->',
+                    '<!-- design-issue-{ID} -->',
+                    'Issue-Planner itself',
+                    'SMC-01',
+                    'SMC-03',
+                    'SMC-08'
+                )
+                RequiredSessionKeys          = @('cleanup_yes', 'cleanup_no', 'drift_stop', 'drift_continue')
+                RequiredProvenanceStage1Keys = @(0, 1, 2)
+                RequiredProvenanceStage2Keys = @(0, 1, 2)
+                ForbiddenStatic              = @(
+                    'subagent_type: code-conductor',
+                    'Dispatch the `code-conductor` subagent',
+                    'The subagent will read `agents/code-conductor.md`'
+                )
+                OrderedMarkers               = @(
+                    '### Step 4 — Run-once marker',
+                    '### Step 6 — Cleanup confirmation',
+                    '### Step 7b — Drift check',
+                    '### Step 9 — Paired-body halt-on-fail',
+                    '### Provenance-gate'
+                )
             }
         )
     }
@@ -291,6 +335,40 @@ Describe 'inline dispatch contract' {
                 $indices[$i] | Should -BeGreaterThan $indices[$i - 1] -Because "$($command.Path) must keep inline-dispatch sections in reading order"
             }
         }
+    }
+
+    It 'forbids /orchestrate from dispatching Code-Conductor as a parent-side subagent' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\orchestrate.md') -Raw -ErrorAction Stop
+
+        $content | Should -Not -Match '(?is)subagent_type:\s*code-conductor' -Because '/orchestrate must not dispatch Code-Conductor as a parent-side subagent'
+        $content | Should -Not -Match '(?is)dispatch\s+the\s+`?code-conductor`?\s+subagent' -Because '/orchestrate must not keep parent-side Code-Conductor subagent dispatch wording'
+        $content | Should -Not -Match '(?is)The subagent will read `agents/code-conductor\.md`' -Because '/orchestrate must not describe Code-Conductor as a delegated subagent shell'
+    }
+
+    It 'requires /orchestrate to adopt Code-Conductor inline after D1 body resolution' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\orchestrate.md') -Raw -ErrorAction Stop
+
+        $d1ResolutionPatterns = @(
+            '(?is)(Read|load|resolve).{0,160}agents/Code-Conductor\.agent\.md',
+            '(?is)~/.claude/plugins/installed_plugins\.json.{0,160}installPath',
+            '(?is)SemVer-sorted.{0,120}~/.claude/plugins/cache/agent-orchestra/agent-orchestra/\*/agents/Code-Conductor\.agent\.md',
+            '(?is)\.claude-plugin/plugin\.json.{0,120}name: agent-orchestra',
+            '(?is)claude plugin install agent-orchestra@agent-orchestra'
+        )
+
+        foreach ($pattern in $d1ResolutionPatterns) {
+            $content | Should -Match $pattern -Because '/orchestrate must carry D1-equivalent Code-Conductor body-resolution wording inline'
+        }
+
+        $content | Should -Match '(?is)(adopt|run).{0,120}Code-Conductor.{0,120}(inline|role|conversation)|Code-Conductor.{0,120}(inline|role).{0,120}(rest of this conversation|conversation)' -Because '/orchestrate must adopt Code-Conductor in the parent conversation after loading the shared body'
+    }
+
+    It 'requires /orchestrate to reconstruct downstream Agent handshakes live per dispatch' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\orchestrate.md') -Raw -ErrorAction Stop
+
+        $content | Should -Match '(?is)(before each|immediately before each|for each|for every|per-dispatch).{0,180}`?Agent`?.{0,160}dispatch.{0,240}(reconstruct|recapture|capture).{0,220}(HEAD|branch).{0,220}(CWD|dirty)' -Because '/orchestrate must document live handshake reconstruction for each downstream Agent dispatch'
+        $content | Should -Match '(?is)((do not|must not).{0,160}(reuse|carry forward).{0,160}(command-entry|entry-time|single).{0,120}handshake|(command-entry|entry-time|single).{0,120}handshake.{0,160}(must not|do not).{0,120}(reuse|carry forward))' -Because '/orchestrate must explicitly reject a single command-entry-captured handshake for downstream Agent calls'
+        $content | Should -Not -Match '(?is)\*\*Handshake preamble\*\*.{0,900}subagent_type:\s*code-conductor' -Because '/orchestrate must not keep the old one-shot Code-Conductor subagent handshake preamble'
     }
 
     It 'requires experience and design to carry the offline fallback notice and Claude-inline no-persistence warning' {

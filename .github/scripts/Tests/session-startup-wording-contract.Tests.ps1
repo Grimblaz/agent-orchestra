@@ -70,6 +70,10 @@ Describe 'session startup wording contract' {
                 Path = Join-Path $script:RepoRoot 'commands\plan.md'
             },
             @{
+                Name = 'orchestrate command'
+                Path = Join-Path $script:RepoRoot 'commands\orchestrate.md'
+            },
+            @{
                 Name = 'polish command'
                 Path = Join-Path $script:RepoRoot 'commands\polish.md'
             }
@@ -349,7 +353,7 @@ Describe 'session startup wording contract' {
         $step7b | Should -Match '(?is)fail open|fail-open' -Because 'Step 7b must distinguish fail-open emission for claude failures'
     }
 
-    It 'verifies Step 7b drift wording exists in the six active command/skill files' {
+    It 'verifies Step 7b drift wording exists in the seven active command/skill files' {
         $freshnessPhraseExact = 'marketplace freshness check failed — using cached view'
         $stopLabel = [regex]::Escape("Stop — I'll restart now")
         $continueLabel = [regex]::Escape('Continue — run under old code')
@@ -378,7 +382,7 @@ Describe 'session startup wording contract' {
             }
             $emitNearby | Should -BeTrue -Because "$($document.Name) Step 7b must include an emit instruction near the freshness failure phrase"
 
-            # Additional checks for the four command mirrors (commands: experience/design/plan/polish)
+            # Additional checks for the five command mirrors (commands: experience/design/plan/orchestrate/polish)
             # Use a robust detection that tolerates both backslashes and forward-slashes
             $docPathNormalized = $document.Path -replace '\\', '/'
             if ($docPathNormalized -match '/commands/') {
@@ -398,8 +402,8 @@ Describe 'session startup wording contract' {
                 $sec | Should -Match '(?is)headless.*suppress|suppress.*prompt' -Because 'Claude companion region must include headless prompt-suppression wording'
             }
         }
-        # Structural guard: ensure all four command mirrors were detected.
-        $script:Step7bFreshnessCommandDocsFound | Should -Be 4 -Because 'There must be four command mirrors detected for Step 7b (experience/design/plan/polish) — guards against path-detection regressions'
+        # Structural guard: ensure all five command mirrors were detected.
+        $script:Step7bFreshnessCommandDocsFound | Should -Be 5 -Because 'There must be five command mirrors detected for Step 7b (experience/design/plan/orchestrate/polish) — guards against path-detection regressions'
     }
 
     It 'requires the session-startup skill to preserve the detector command and fail-open/manual semantics' {
