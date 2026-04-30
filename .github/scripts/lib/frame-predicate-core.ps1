@@ -490,18 +490,18 @@ function ConvertTo-FVOrExpression {
     param([Parameter(Mandatory)]$State)
 
     return (ConvertTo-FVLogicalChainExpression -State $State -Operator 'OR' -OperandParser {
-        param($ParserState)
-        ConvertTo-FVAndExpression -State $ParserState
-    })
+            param($ParserState)
+            ConvertTo-FVAndExpression -State $ParserState
+        })
 }
 
 function ConvertTo-FVAndExpression {
     param([Parameter(Mandatory)]$State)
 
     return (ConvertTo-FVLogicalChainExpression -State $State -Operator 'AND' -OperandParser {
-        param($ParserState)
-        ConvertTo-FVUnaryExpression -State $ParserState
-    })
+            param($ParserState)
+            ConvertTo-FVUnaryExpression -State $ParserState
+        })
 }
 
 function ConvertTo-FVUnaryExpression {
@@ -867,4 +867,525 @@ function ConvertTo-FVPredicate {
     if (Test-FVParseError -Value $structureResult) { return $structureResult }
 
     return $expression
+}
+
+function New-FVEvaluationResult {
+    param(
+        [Parameter(Mandatory)][string]$Result,
+        [string]$Reason = ''
+    )
+
+    return [PSCustomObject]@{
+        Result = $Result
+        Reason = $Reason
+    }
+}
+
+function Get-FVChangesetField {
+    param(
+        [Parameter(Mandatory)]$Changeset,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $Changeset) { return $null }
+    if ($Changeset -is [hashtable] -and $Changeset.ContainsKey($Name)) {
+        return $Changeset[$Name]
+    }
+
+    $property = $Changeset.PSObject.Properties[$Name]
+    if ($null -ne $property) { return $property.Value }
+
+    return $null
+}
+
+function Get-FVChangedFiles {
+    param([Parameter(Mandatory)]$Changeset)
+
+    $value = Get-FVChangesetField -Changeset $Changeset -Name 'ChangedFiles'
+    if ($null -eq $value) { return , @() }
+    if ($value -is [System.Collections.IEnumerable] -and -not ($value -is [string])) {
+        $list = [System.Collections.Generic.List[object]]::new()
+        foreach ($item in $value) { $list.Add($item) }
+        return , $list.ToArray()
+    }
+    return , @($value)
+}
+
+function Test-FVAnyPathLike {
+    param(
+        [Parameter(Mandatory)][AllowNull()][AllowEmptyCollection()][object[]]$Paths,
+        [Parameter(Mandatory)][string]$Pattern
+    )
+
+    if ($null -eq $Paths) { return $false }
+
+    foreach ($path in $Paths) {
+        if ([string]$path -like $Pattern) { return $true }
+    }
+    return $false
+}
+
+function Test-FVAnyPathMatchesPredicate {
+    param(
+        [Parameter(Mandatory)][AllowNull()][AllowEmptyCollection()][object[]]$Paths,
+        [Parameter(Mandatory)][scriptblock]$Predicate
+    )
+
+    if ($null -eq $Paths) { return $false }
+    foreach ($path in $Paths) {
+        if (& $Predicate ([string]$path)) { return $true }
+    }
+    return $false
+}
+
+function Get-FVChangesetComplexity {
+    param([Parameter(Mandatory)]$Changeset)
+
+    $totalLinesRaw = Get-FVChangesetField -Changeset $Changeset -Name 'TotalLines'
+    $totalLines = 0
+    if ($null -ne $totalLinesRaw) {
+        $totalLines = [int]$totalLinesRaw
+    }
+
+    if ($totalLines -lt 10) { return 'trivial' }
+    if ($totalLines -lt 200) { return 'standard' }
+    return 'high'
+}
+
+function Get-FVDeferredCreditReferenceIdentifiers {
+    return @('review.sustainedCriticalOrHigh', 'ceGate.defectsFound')
+}
+
+function Get-FVHeuristicDeferredIdentifiers {
+    return @('changeset.touchedAreaHasRefactorableDebt')
+}
+
+function Get-FVSupportedChangesetIdentifiers {
+    return @(
+        'changeset.touches',
+        'changeset.touchesSource',
+        'changeset.touchesTestableCode',
+        'changeset.changesBehaviorOrInterface',
+        'changeset.touchesCliSurface',
+        'changeset.touchesBrowserSurface',
+        'changeset.touchesCanvasSurface',
+        'changeset.touchesApiSurface',
+        'changeset.touchesPluginEntryPoint',
+        'changeset.totalLines',
+        'changeset.complexity',
+        'scope.isReReview',
+        'scope.isProxyGithub'
+    )
+}
+
+function Get-FVPluginEntryPointPatterns {
+    return @(
+        'agents/*',
+        'agents\*',
+        'skills/*',
+        'skills\*',
+        'commands/*',
+        'commands\*',
+        'hooks/*',
+        'hooks\*',
+        '.claude-plugin/*',
+        '.claude-plugin\*',
+        'plugin.json',
+        'README.md',
+        '.github/copilot-instructions.md',
+        '.github\copilot-instructions.md'
+    )
+}
+
+function Test-FVPathIsDoc {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ($Path -like '*.md') { return $true }
+    if ($Path -like 'Documents/*' -or $Path -like 'Documents\*') { return $true }
+    return $false
+}
+
+function Test-FVPathIsTest {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ($Path -like '*Tests/*' -or $Path -like '*Tests\*') { return $true }
+    return $false
+}
+
+function Test-FVPathIsTempArtifact {
+    param([Parameter(Mandatory)][string]$Path)
+
+    if ($Path -like '.tmp-*' -or $Path -like '*/.tmp-*' -or $Path -like '*\.tmp-*') { return $true }
+    return $false
+}
+
+function Resolve-FVChangesetIdentifierBoolean {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    $paths = Get-FVChangedFiles -Changeset $Changeset
+
+    switch ($Name) {
+        'changeset.touchesSource' {
+            $hit = Test-FVAnyPathMatchesPredicate -Paths $paths -Predicate {
+                param($p)
+                if (Test-FVPathIsDoc -Path $p) { return $false }
+                if (Test-FVPathIsTest -Path $p) { return $false }
+                if (Test-FVPathIsTempArtifact -Path $p) { return $false }
+                return $true
+            }
+            return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+        }
+        'changeset.touchesTestableCode' {
+            $hit = Test-FVAnyPathMatchesPredicate -Paths $paths -Predicate {
+                param($p)
+                if ($p -notlike '*.ps1') { return $false }
+                if (Test-FVPathIsTest -Path $p) { return $false }
+                return $true
+            }
+            return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+        }
+        'changeset.changesBehaviorOrInterface' {
+            if ($paths.Count -eq 0) { return (New-FVEvaluationResult -Result 'false') }
+            $allDocs = $true
+            foreach ($p in $paths) {
+                if (-not ([string]$p -like '*.md')) { $allDocs = $false; break }
+            }
+            $result = if ($allDocs) { 'false' } else { 'true' }
+            return (New-FVEvaluationResult -Result $result)
+        }
+        'changeset.touchesCliSurface' {
+            $hit = Test-FVAnyPathMatchesPredicate -Paths $paths -Predicate {
+                param($p)
+                if ($p -like 'commands/*' -or $p -like 'commands\*') { return $true }
+                if ($p -like '.github/scripts/*.ps1' -or $p -like '.github\scripts\*.ps1') {
+                    if ($p -like '.github/scripts/lib/*' -or $p -like '.github\scripts\lib\*') { return $false }
+                    if ($p -like '.github/scripts/Tests/*' -or $p -like '.github\scripts\Tests\*') { return $false }
+                    return $true
+                }
+                return $false
+            }
+            return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+        }
+        'changeset.touchesBrowserSurface' {
+            $hit = Test-FVAnyPathMatchesPredicate -Paths $paths -Predicate {
+                param($p)
+                return ($p -like '*.html' -or $p -like '*.tsx' -or $p -like '*.css')
+            }
+            return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+        }
+        'changeset.touchesCanvasSurface' {
+            return (New-FVEvaluationResult -Result 'false')
+        }
+        'changeset.touchesApiSurface' {
+            return (New-FVEvaluationResult -Result 'false')
+        }
+        'changeset.touchesPluginEntryPoint' {
+            $patterns = Get-FVPluginEntryPointPatterns
+            $hit = $false
+            foreach ($p in $paths) {
+                foreach ($pattern in $patterns) {
+                    if ([string]$p -like $pattern) { $hit = $true; break }
+                }
+                if ($hit) { break }
+            }
+            return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+        }
+        'scope.isReReview' {
+            $value = Get-FVChangesetField -Changeset $Changeset -Name 'IsReReview'
+            $bool = [bool]$value
+            return (New-FVEvaluationResult -Result ([string]$bool.ToString().ToLowerInvariant()))
+        }
+        'scope.isProxyGithub' {
+            $value = Get-FVChangesetField -Changeset $Changeset -Name 'IsProxyGithub'
+            $bool = [bool]$value
+            return (New-FVEvaluationResult -Result ([string]$bool.ToString().ToLowerInvariant()))
+        }
+        default {
+            return $null
+        }
+    }
+}
+
+function Resolve-FVCallNode {
+    param(
+        [Parameter(Mandatory)]$Node,
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    $name = $Node.Name
+    if ($name -eq 'changeset.touches') {
+        $arguments = @($Node.Arguments)
+        if ($arguments.Count -lt 1 -or $arguments[0].LiteralType -ne 'String') {
+            return (New-FVEvaluationResult -Result 'unknown' -Reason "unsupported-identifier: changeset.touches requires a string glob argument")
+        }
+        $glob = [string]$arguments[0].Value
+        $paths = Get-FVChangedFiles -Changeset $Changeset
+        $hit = Test-FVAnyPathLike -Paths $paths -Pattern $glob
+        return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+    }
+
+    if ($name -in (Get-FVDeferredCreditReferenceIdentifiers)) {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason "deferred-credit-reference-identifier: '$name'")
+    }
+
+    if ($name -in (Get-FVHeuristicDeferredIdentifiers)) {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason "heuristic-deferred: '$name'")
+    }
+
+    return (New-FVEvaluationResult -Result 'unknown' -Reason "unsupported-identifier: '$name'")
+}
+
+function Resolve-FVIdentifierAsBoolean {
+    param(
+        [Parameter(Mandatory)]$Node,
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    $name = $Node.Name
+
+    if ($name -in (Get-FVDeferredCreditReferenceIdentifiers)) {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason "deferred-credit-reference-identifier: '$name'")
+    }
+
+    if ($name -in (Get-FVHeuristicDeferredIdentifiers)) {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason "heuristic-deferred: '$name'")
+    }
+
+    $resolved = Resolve-FVChangesetIdentifierBoolean -Name $name -Changeset $Changeset
+    if ($null -ne $resolved) { return $resolved }
+
+    return (New-FVEvaluationResult -Result 'unknown' -Reason "unsupported-identifier: '$name'")
+}
+
+function Resolve-FVIdentifierForComparison {
+    param(
+        [Parameter(Mandatory)]$Node,
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    $name = $Node.Name
+
+    if ($name -in (Get-FVDeferredCreditReferenceIdentifiers)) {
+        return [PSCustomObject]@{ Status = 'unknown'; Reason = "deferred-credit-reference-identifier: '$name'"; Value = $null }
+    }
+
+    if ($name -in (Get-FVHeuristicDeferredIdentifiers)) {
+        return [PSCustomObject]@{ Status = 'unknown'; Reason = "heuristic-deferred: '$name'"; Value = $null }
+    }
+
+    switch ($name) {
+        'changeset.totalLines' {
+            $raw = Get-FVChangesetField -Changeset $Changeset -Name 'TotalLines'
+            $value = if ($null -eq $raw) { 0 } else { [int]$raw }
+            return [PSCustomObject]@{ Status = 'value'; Reason = ''; Value = $value; ValueType = 'Number' }
+        }
+        'changeset.complexity' {
+            $value = Get-FVChangesetComplexity -Changeset $Changeset
+            return [PSCustomObject]@{ Status = 'value'; Reason = ''; Value = $value; ValueType = 'String' }
+        }
+        'scope.isReReview' {
+            $raw = Get-FVChangesetField -Changeset $Changeset -Name 'IsReReview'
+            return [PSCustomObject]@{ Status = 'value'; Reason = ''; Value = [bool]$raw; ValueType = 'Boolean' }
+        }
+        'scope.isProxyGithub' {
+            $raw = Get-FVChangesetField -Changeset $Changeset -Name 'IsProxyGithub'
+            return [PSCustomObject]@{ Status = 'value'; Reason = ''; Value = [bool]$raw; ValueType = 'Boolean' }
+        }
+        default {
+            $resolved = Resolve-FVChangesetIdentifierBoolean -Name $name -Changeset $Changeset
+            if ($null -ne $resolved) {
+                $b = ($resolved.Result -eq 'true')
+                return [PSCustomObject]@{ Status = 'value'; Reason = ''; Value = $b; ValueType = 'Boolean' }
+            }
+            return [PSCustomObject]@{ Status = 'unknown'; Reason = "unsupported-identifier: '$name'"; Value = $null }
+        }
+    }
+}
+
+function Get-FVLiteralComparisonValue {
+    param([Parameter(Mandatory)]$LiteralNode)
+
+    switch ($LiteralNode.LiteralType) {
+        'Number' { return [PSCustomObject]@{ Value = [double]$LiteralNode.Value; Type = 'Number' } }
+        'String' { return [PSCustomObject]@{ Value = [string]$LiteralNode.Value; Type = 'String' } }
+        'Boolean' { return [PSCustomObject]@{ Value = [bool]$LiteralNode.Value; Type = 'Boolean' } }
+        default { return $null }
+    }
+}
+
+function Invoke-FVComparison {
+    param(
+        [Parameter(Mandatory)][string]$Operator,
+        [Parameter(Mandatory)]$LeftValue,
+        [Parameter(Mandatory)]$LeftType,
+        [Parameter(Mandatory)]$RightValue,
+        [Parameter(Mandatory)]$RightType
+    )
+
+    if ($LeftType -eq 'Number') { $left = [double]$LeftValue } else { $left = $LeftValue }
+    if ($RightType -eq 'Number') { $right = [double]$RightValue } else { $right = $RightValue }
+
+    switch ($Operator) {
+        '==' { return ($left -eq $right) }
+        '!=' { return ($left -ne $right) }
+        '<' { return ($left -lt $right) }
+        '>' { return ($left -gt $right) }
+        '<=' { return ($left -le $right) }
+        '>=' { return ($left -ge $right) }
+        default { return $null }
+    }
+}
+
+function Resolve-FVComparisonNode {
+    param(
+        [Parameter(Mandatory)]$Node,
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    $leftResolved = Resolve-FVIdentifierForComparison -Node $Node.Left -Changeset $Changeset
+    if ($leftResolved.Status -eq 'unknown') {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason $leftResolved.Reason)
+    }
+
+    $right = $Node.Right
+    if ($null -eq $right -or $right.Kind -ne 'Literal') {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason "parse-error: comparison right-hand side must be a literal")
+    }
+
+    if ($right.LiteralType -eq 'Array') {
+        if ($Node.Operator -ne 'in') {
+            return (New-FVEvaluationResult -Result 'unknown' -Reason "unsupported-identifier: array literal only valid with 'in' operator")
+        }
+        $found = $false
+        foreach ($item in @($right.Items)) {
+            $itemValue = Get-FVLiteralComparisonValue -LiteralNode $item
+            if ($null -eq $itemValue) { continue }
+            $cmp = Invoke-FVComparison -Operator '==' -LeftValue $leftResolved.Value -LeftType $leftResolved.ValueType -RightValue $itemValue.Value -RightType $itemValue.Type
+            if ($cmp) { $found = $true; break }
+        }
+        return (New-FVEvaluationResult -Result ([string]([bool]$found).ToString().ToLowerInvariant()))
+    }
+
+    $rightValue = Get-FVLiteralComparisonValue -LiteralNode $right
+    if ($null -eq $rightValue) {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason "parse-error: unsupported literal type")
+    }
+
+    $compared = Invoke-FVComparison -Operator $Node.Operator -LeftValue $leftResolved.Value -LeftType $leftResolved.ValueType -RightValue $rightValue.Value -RightType $rightValue.Type
+    if ($null -eq $compared) {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason "unsupported-identifier: unknown operator '$($Node.Operator)'")
+    }
+
+    return (New-FVEvaluationResult -Result ([string]([bool]$compared).ToString().ToLowerInvariant()))
+}
+
+function Invoke-FVLogicalAnd {
+    param(
+        [Parameter(Mandatory)]$Left,
+        [Parameter(Mandatory)]$Right
+    )
+
+    if ($Left.Result -eq 'false') { return (New-FVEvaluationResult -Result 'false') }
+    if ($Right.Result -eq 'false') { return (New-FVEvaluationResult -Result 'false') }
+    if ($Left.Result -eq 'true' -and $Right.Result -eq 'true') { return (New-FVEvaluationResult -Result 'true') }
+    $reason = if ($Left.Result -eq 'unknown') { $Left.Reason } else { $Right.Reason }
+    return (New-FVEvaluationResult -Result 'unknown' -Reason $reason)
+}
+
+function Invoke-FVLogicalOr {
+    param(
+        [Parameter(Mandatory)]$Left,
+        [Parameter(Mandatory)]$Right
+    )
+
+    if ($Left.Result -eq 'true') { return (New-FVEvaluationResult -Result 'true') }
+    if ($Right.Result -eq 'true') { return (New-FVEvaluationResult -Result 'true') }
+    if ($Left.Result -eq 'false' -and $Right.Result -eq 'false') { return (New-FVEvaluationResult -Result 'false') }
+    $reason = if ($Left.Result -eq 'unknown') { $Left.Reason } else { $Right.Reason }
+    return (New-FVEvaluationResult -Result 'unknown' -Reason $reason)
+}
+
+function Invoke-FVNotResult {
+    param([Parameter(Mandatory)]$Operand)
+
+    switch ($Operand.Result) {
+        'true' { return (New-FVEvaluationResult -Result 'false') }
+        'false' { return (New-FVEvaluationResult -Result 'true') }
+        default { return (New-FVEvaluationResult -Result 'unknown' -Reason $Operand.Reason) }
+    }
+}
+
+function Invoke-FVPredicateEvaluation {
+    param(
+        [Parameter(Mandatory)]$Node,
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    if ($null -eq $Node) {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason 'parse-error: AST node is null')
+    }
+
+    $kindProperty = $Node.PSObject.Properties['Kind']
+    if ($null -eq $kindProperty) {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason 'parse-error: missing Kind on AST node')
+    }
+
+    switch ($Node.Kind) {
+        'Identifier' {
+            return (Resolve-FVIdentifierAsBoolean -Node $Node -Changeset $Changeset)
+        }
+        'Call' {
+            return (Resolve-FVCallNode -Node $Node -Changeset $Changeset)
+        }
+        'Comparison' {
+            return (Resolve-FVComparisonNode -Node $Node -Changeset $Changeset)
+        }
+        'Logical' {
+            $left = Invoke-FVPredicateEvaluation -Node $Node.Left -Changeset $Changeset
+            $right = Invoke-FVPredicateEvaluation -Node $Node.Right -Changeset $Changeset
+            $op = [string]$Node.Operator
+            if ($op.ToUpperInvariant() -eq 'AND') {
+                return (Invoke-FVLogicalAnd -Left $left -Right $right)
+            }
+            if ($op.ToUpperInvariant() -eq 'OR') {
+                return (Invoke-FVLogicalOr -Left $left -Right $right)
+            }
+            return (New-FVEvaluationResult -Result 'unknown' -Reason "parse-error: unknown logical operator '$op'")
+        }
+        'Not' {
+            $operand = Invoke-FVPredicateEvaluation -Node $Node.Operand -Changeset $Changeset
+            return (Invoke-FVNotResult -Operand $operand)
+        }
+        'Literal' {
+            return (New-FVEvaluationResult -Result 'unknown' -Reason 'parse-error: bare literal cannot be evaluated as predicate')
+        }
+        default {
+            return (New-FVEvaluationResult -Result 'unknown' -Reason "parse-error: unknown node kind '$($Node.Kind)'")
+        }
+    }
+}
+
+function Test-FVPredicateAgainstChangeset {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowNull()]$Ast,
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    if ($null -eq $Ast) {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason 'parse-error: AST is null')
+    }
+
+    if (Test-FVParseError -Value $Ast) {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason "parse-error: $($Ast.Message)")
+    }
+
+    if ($null -eq $Ast.PSObject.Properties['Kind']) {
+        return (New-FVEvaluationResult -Result 'unknown' -Reason 'parse-error: AST is not a recognized node')
+    }
+
+    return (Invoke-FVPredicateEvaluation -Node $Ast -Changeset $Changeset)
 }
