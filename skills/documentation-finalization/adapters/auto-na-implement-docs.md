@@ -1,6 +1,7 @@
 ---
 name: auto-na-implement-docs
 provides: implement-docs
+suggested-next-step: none
 applies-when: not changeset.changesBehaviorOrInterface()
 ---
 

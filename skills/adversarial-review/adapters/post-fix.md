@@ -1,6 +1,7 @@
 ---
 name: post-fix-review
 provides: post-fix-review
+suggested-next-step: /orchestra:review
 applies-when: review.sustainedCriticalOrHigh == true
 ---
 

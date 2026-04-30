@@ -1,6 +1,7 @@
 ---
 name: review-lite
 provides: review
+suggested-next-step: /orchestra:review-lite
 applies-when: changeset.totalLines < 200 and not scope.isReReview and not scope.isProxyGithub
 ---
 

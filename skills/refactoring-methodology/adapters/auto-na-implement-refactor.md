@@ -1,6 +1,7 @@
 ---
 name: auto-na-implement-refactor
 provides: implement-refactor
+suggested-next-step: none
 applies-when: not changeset.touchedAreaHasRefactorableDebt()
 ---
 

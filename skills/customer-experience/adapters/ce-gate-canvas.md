@@ -1,6 +1,7 @@
 ---
 name: ce-gate-canvas
 provides: ce-gate-canvas
+suggested-next-step: /orchestrate {ISSUE}
 applies-when: changeset.touchesCanvasSurface()
 ---
 

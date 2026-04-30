@@ -2,6 +2,7 @@
 name: Doc-Keeper
 description: "Documentation finalization, accuracy verification, and obsolete content removal"
 provides: implement-docs
+suggested-next-step: /orchestrate {ISSUE}
 applies-when: changeset.changesBehaviorOrInterface()
 argument-hint: "Update documentation to match implementation"
 user-invocable: false

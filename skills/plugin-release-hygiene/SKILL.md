@@ -2,6 +2,7 @@
 name: plugin-release-hygiene
 description: "Maintainer-side version-bump guardrail and Claude startup drift backstop guidance for plugin entry-point edits. Use when entry-point files change, when choosing patch/minor/major overrides, or when documenting/running the Claude plugin update surface. DO NOT USE FOR: CI release automation, registry publishing, or purely manual non-agent edit flows."
 provides: release-hygiene
+suggested-next-step: pwsh ./skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1
 applies-when: changeset.touchesPluginEntryPoint()
 ---
 

@@ -2,6 +2,7 @@
 name: Test-Writer
 description: "Test writing and validation specialist for high-quality behavior-focused tests"
 provides: implement-test
+suggested-next-step: /orchestrate {ISSUE}
 applies-when: changeset.touchesTestableCode()
 argument-hint: "Write tests, validate coverage, or fix test failures"
 user-invocable: false

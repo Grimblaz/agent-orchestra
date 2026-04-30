@@ -2,6 +2,7 @@
 name: Process-Review
 description: "Meta-analysis of workflow execution to identify deviations and improvement opportunities"
 provides: process-review
+suggested-next-step: /orchestrate {ISSUE}
 applies-when: ceGate.defectsFound > 0
 argument-hint: "Analyze workflow execution and identify process improvements"
 user-invocable: false

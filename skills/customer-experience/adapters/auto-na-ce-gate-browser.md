@@ -1,6 +1,7 @@
 ---
 name: auto-na-ce-gate-browser
 provides: ce-gate-browser
+suggested-next-step: none
 applies-when: not changeset.touchesBrowserSurface()
 ---
 

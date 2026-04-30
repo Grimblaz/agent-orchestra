@@ -1,6 +1,7 @@
 ---
 name: explicit-skip-release-hygiene
 provides: release-hygiene
+suggested-next-step: Document the skip rationale; bump plugin version when ready.
 reason-required: true
 ---
 

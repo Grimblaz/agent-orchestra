@@ -1,6 +1,7 @@
 ---
 name: ce-gate-browser
 provides: ce-gate-browser
+suggested-next-step: /orchestrate {ISSUE}
 applies-when: changeset.touchesBrowserSurface()
 ---
 

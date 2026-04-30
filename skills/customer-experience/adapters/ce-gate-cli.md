@@ -1,6 +1,7 @@
 ---
 name: ce-gate-cli
 provides: ce-gate-cli
+suggested-next-step: /orchestrate {ISSUE}
 applies-when: changeset.touchesCliSurface()
 ---
 

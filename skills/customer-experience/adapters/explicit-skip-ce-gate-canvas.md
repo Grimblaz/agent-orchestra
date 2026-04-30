@@ -1,6 +1,7 @@
 ---
 name: explicit-skip-ce-gate-canvas
 provides: ce-gate-canvas
+suggested-next-step: Document the skip rationale; rerun CE Gate via /orchestrate {ISSUE} when ready.
 reason-required: true
 ---
 

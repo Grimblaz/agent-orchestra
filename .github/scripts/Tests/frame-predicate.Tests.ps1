@@ -300,3 +300,154 @@ Describe 'ConvertTo-FVPredicate' -Tag 'unit' {
         }
     }
 }
+
+Describe 'Test-FVPredicateAgainstChangeset' {
+    BeforeAll {
+        $script:CorePath = Join-Path $PSScriptRoot '..\lib\frame-predicate-core.ps1'
+        . $script:CorePath
+    }
+
+    Context 'Supported identifiers - true case' {
+        It 'changeset.touches glob true when matching ps1 file in changed list' {
+            $ast = ConvertTo-FVPredicate -Predicate "changeset.touches('*.ps1')"
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'true'
+        }
+        It 'changeset.touchesSource true when ps1 source file changes' {
+            $ast = ConvertTo-FVPredicate -Predicate 'changeset.touchesSource'
+            $cs = @{ ChangedFiles = @('lib/foo.ps1'); TotalLines = 50; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'true'
+        }
+        It 'changeset.touchesTestableCode true when production ps1 changes' {
+            $ast = ConvertTo-FVPredicate -Predicate 'changeset.touchesTestableCode'
+            $cs = @{ ChangedFiles = @('lib/foo.ps1'); TotalLines = 50; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'true'
+        }
+        It 'changeset.changesBehaviorOrInterface true when non-doc files change' {
+            $ast = ConvertTo-FVPredicate -Predicate 'changeset.changesBehaviorOrInterface'
+            $cs = @{ ChangedFiles = @('lib/foo.ps1'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'true'
+        }
+        It 'changeset.touchesCliSurface true when scripts directly under github scripts change' {
+            $ast = ConvertTo-FVPredicate -Predicate 'changeset.touchesCliSurface'
+            $cs = @{ ChangedFiles = @('.github/scripts/foo.ps1'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'true'
+        }
+        It 'changeset.touchesPluginEntryPoint true when agents files change' {
+            $ast = ConvertTo-FVPredicate -Predicate 'changeset.touchesPluginEntryPoint'
+            $cs = @{ ChangedFiles = @('agents/Code-Smith.agent.md'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'true'
+        }
+        It 'totalLines greater than or equal to 200 returns true at 250' {
+            $ast = ConvertTo-FVPredicate -Predicate 'changeset.totalLines >= 200'
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 250; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'true'
+        }
+        It 'complexity equals high returns true at 500 lines' {
+            $ast = ConvertTo-FVPredicate -Predicate @'
+changeset.complexity == 'high'
+'@
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 500; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'true'
+        }
+        It 'scope.isReReview true when flag set' {
+            $ast = ConvertTo-FVPredicate -Predicate 'scope.isReReview'
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 10; IsReReview = $true; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'true'
+        }
+        It 'scope.isProxyGithub true when flag set' {
+            $ast = ConvertTo-FVPredicate -Predicate 'scope.isProxyGithub'
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $true }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'true'
+        }
+    }
+
+    Context 'Supported identifiers - false case' {
+        It 'changeset.touches nonexistent glob returns false' {
+            $ast = ConvertTo-FVPredicate -Predicate "changeset.touches('*.nonexistent')"
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'false'
+        }
+        It 'changeset.touchesBrowserSurface false (no browser surface in repo)' {
+            $ast = ConvertTo-FVPredicate -Predicate 'changeset.touchesBrowserSurface'
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'false'
+        }
+        It 'totalLines less than 10 returns false at 50' {
+            $ast = ConvertTo-FVPredicate -Predicate 'changeset.totalLines < 10'
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 50; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'false'
+        }
+    }
+
+    Context 'Deferred credit-reference identifiers' {
+        It 'review.sustainedCriticalOrHigh returns unknown with deferred reason' {
+            $ast = ConvertTo-FVPredicate -Predicate 'review.sustainedCriticalOrHigh == true'
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'unknown'
+            $r.Reason | Should -Match 'deferred-credit-reference-identifier'
+        }
+        It 'ceGate.defectsFound returns unknown with deferred reason' {
+            $ast = ConvertTo-FVPredicate -Predicate 'ceGate.defectsFound > 0'
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'unknown'
+            $r.Reason | Should -Match 'deferred-credit-reference-identifier'
+        }
+    }
+
+    Context 'Heuristic-deferred identifier' {
+        It 'changeset.touchedAreaHasRefactorableDebt returns unknown with heuristic-deferred reason' {
+            $ast = ConvertTo-FVPredicate -Predicate 'changeset.touchedAreaHasRefactorableDebt'
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'unknown'
+            $r.Reason | Should -Match 'heuristic-deferred'
+        }
+    }
+
+    Context 'Unsupported identifier' {
+        It 'foo.bar returns unknown with unsupported-identifier reason' {
+            $ast = ConvertTo-FVPredicate -Predicate @'
+foo.bar == 'baz'
+'@
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'unknown'
+            $r.Reason | Should -Match 'unsupported-identifier'
+        }
+    }
+
+    Context 'Parse error' {
+        It 'malformed predicate returns unknown with parse-error reason' {
+            $parseResult = ConvertTo-FVPredicate -Predicate 'changeset.touches(unclosed'
+            $cs = @{ ChangedFiles = @('foo.ps1'); TotalLines = 10; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $parseResult -Changeset $cs
+            $r.Result | Should -Be 'unknown'
+            $r.Reason | Should -Match 'parse-error'
+        }
+    }
+
+    Context 'Empty changeset' {
+        It 'changeset.touches glob returns false on empty descriptor' {
+            $ast = ConvertTo-FVPredicate -Predicate "changeset.touches('*.ps1')"
+            $cs = @{ ChangedFiles = @(); TotalLines = 0; IsReReview = $false; IsProxyGithub = $false }
+            $r = Test-FVPredicateAgainstChangeset -Ast $ast -Changeset $cs
+            $r.Result | Should -Be 'false'
+        }
+    }
+}

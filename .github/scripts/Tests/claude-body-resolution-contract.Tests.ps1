@@ -153,7 +153,7 @@ Describe 'Claude shell body-resolution contract' {
             $directCwdLoadText = 'load `agents/' + $shell.BodyFile + '` with the `Read` tool'
             $hasOldDirectCwdLoad = $shell.BodyLoadParagraph.Contains($directCwdLoadText)
             $hasD1ResolutionPath = $shell.BodyLoadParagraph.Contains('~/.claude/plugins/installed_plugins.json') -or
-                $shell.BodyLoadParagraph.Contains('~/.claude/plugins/cache/agent-orchestra/agent-orchestra/')
+            $shell.BodyLoadParagraph.Contains('~/.claude/plugins/cache/agent-orchestra/agent-orchestra/')
 
             ($hasOldDirectCwdLoad -and -not $hasD1ResolutionPath) | Should -BeFalse -Because "$($shell.ShellName) must not retain the retired direct-CWD Read instruction as its only body-resolution path"
         }

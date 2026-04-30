@@ -1,6 +1,7 @@
 ---
 name: review-proxy-github
 provides: review
+suggested-next-step: /orchestra:review
 applies-when: scope.isProxyGithub
 ---
 
