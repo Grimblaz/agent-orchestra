@@ -12,6 +12,8 @@ Install the plugin from the marketplace if you have not already. Run this inside
 
 The plugin exposes the upstream pipeline, the review surface, the `/orchestrate` entry point, and a library of shared skills. Claude Code discovers them automatically once the plugin is installed.
 
+Consumer repositories are zero-config after install: Claude Code loads the agent bodies and skills from the installed plugin cache, so the working repository does not need a local `agents/` directory.
+
 ## Upstream pipeline
 
 Three agents cover the journey from an issue on the board to an implementation-ready plan. They call each other through durable GitHub-issue markers so a session can span multiple conversations or switch between Copilot and Claude Code.
@@ -24,17 +26,17 @@ Each agent reads a shared tool-agnostic body from `agents/*.agent.md` and follow
 
 ## Orchestration
 
-Phase 3 adds Code-Conductor to Claude Code.
+Code-Conductor orchestration is available in Claude Code.
 
-- `/orchestrate` dispatches the `code-conductor` shell for the full pipeline from smart resume and plan handoff through implementation, validation, CE Gate, and PR readiness.
+- `/orchestrate` runs Code-Conductor inline in the parent conversation for the full pipeline from smart resume and plan handoff through implementation, validation, CE Gate, and PR readiness.
 
-For paused Code-Conductor work, `/orchestrate` is also the Claude resume entry point. The shared workflow still uses `/implement` language in Copilot-specific paths, but Claude does not ship a `/implement` command in Phase 3.
+For paused Code-Conductor work, `/orchestrate` is also the Claude resume entry point. The shared workflow still uses `/implement` language in Copilot-specific paths, but Claude does not ship a `/implement` command.
 
 The Claude `code-conductor` shell follows the thin-shell convention: it loads the shared `agents/Code-Conductor.agent.md` body and relies on composite skills for the extracted orchestration contracts, so Copilot and Claude stay aligned on one source of truth.
 
 ## Review pipeline
 
-Phase 2 adds the `orchestra-review-*` command namespace for Claude-native adversarial review:
+The `orchestra-review-*` command namespace provides Claude-native adversarial review:
 
 - `/orchestra:review` runs the canonical prosecution → defense → judge pipeline.
 - `/orchestra:review-lite` runs the small-change variant with one compact prosecution pass before defense and judge.

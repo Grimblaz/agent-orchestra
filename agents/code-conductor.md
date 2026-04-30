@@ -97,15 +97,15 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 | Session memory (`vscode/memory`) | Per `SMC-01`, `SMC-03`, and `SMC-08`, Claude does not use a Claude-only session-memory persistence layer. For plan/design state, use parent dispatch or current plan context first; otherwise use latest-comment-wins GitHub issue markers (`<!-- plan-issue-{ID} -->`, `<!-- design-issue-{ID} -->`) and fall back to the issue body for design intent. For CE design intent specifically, prefer the `[CE GATE]` step's `Design Intent` field, then the latest `<!-- design-issue-{ID} -->` handoff comment, then the issue body |
 | Browser tools (`browser/*`) | Claude Code cannot assume the native VS Code browser-tool surface here; use `WebFetch` only for remote pages or published artifacts, and delegate CE Gate scenario capture to `experience-owner` so the evidence step stays on the documented fallback path when interactive browser coverage is required |
 
-When the shared body tells users to pause and resume with `/implement`, Claude Code uses `/orchestrate` as the resume entry point for Phase 3. There is no Claude `/implement` command in the shipped surface yet.
+When the shared body tells users to pause and resume with `/implement`, Claude Code uses `/orchestrate` as the resume entry point. There is no Claude `/implement` command in the shipped surface yet.
 
 ## Specialist availability
 
-Phase 3 Claude specialist shells available for Code-Conductor dispatch are `code-critic`, `code-review-response`, `experience-owner`, and `issue-planner`.
+Code-Conductor can dispatch every currently shipped Claude shell that participates in orchestration: `experience-owner`, `solution-designer`, `issue-planner`, `code-critic`, `code-review-response`, `code-smith`, `test-writer`, `refactor-specialist`, `doc-keeper`, `process-review`, `research-agent`, `specification`, and `ui-iterator`.
 
-Phase 4 Claude specialist shells available for Code-Conductor dispatch are `code-smith`, `test-writer`, `refactor-specialist`, and `doc-keeper`.
+Terminal-oriented implementation specialists do not have direct slash-command entry points; Code-Conductor dispatch is their supported Claude entry point.
 
-When a required specialist shell for a planned step does not exist yet, use the exact D1 fallback labels below:
+When a planned step requires a specialist shell outside the shipped set, use the exact D1 fallback labels below:
 
 1. Hand off this step to Copilot, resume in Claude after
 2. Attempt inline in the main conversation (no specialist dispatch)

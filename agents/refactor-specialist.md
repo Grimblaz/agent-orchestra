@@ -113,4 +113,4 @@ Per `SMC-01` and `SMC-03`, Claude Code does not use `vscode/memory` as a Claude-
 ## Invocation
 
 - Direct subagent call: invoke this agent via the `Agent` tool with `subagent_type: refactor-specialist`
-- No slash-command surface is shipped for this specialist in Phase 4; Code-Conductor dispatch is the supported Claude entry point
+- No direct slash-command surface is shipped for this specialist; Code-Conductor dispatch is the supported Claude entry point

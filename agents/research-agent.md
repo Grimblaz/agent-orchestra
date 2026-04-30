@@ -107,5 +107,5 @@ Survival: `within-worktree`; contract: `SMC-13` (`.copilot-tracking/` artifacts)
 ## Invocation
 
 - Direct subagent call: invoke this agent via the `Agent` tool with `subagent_type: research-agent`
-- No slash-command surface is shipped for this specialist in Phase 5; parent-agent (Issue-Planner / Solution-Designer) dispatch is the supported Claude entry point
+- No direct slash-command surface is shipped for this specialist; parent-agent (Issue-Planner / Solution-Designer) dispatch is the supported Claude entry point
 - `user-invocable: false` prevents direct end-user invocation surfaces, but it does not block parent-agent dispatch through the `Agent` tool

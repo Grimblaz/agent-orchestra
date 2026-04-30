@@ -111,4 +111,4 @@ Survival: `within-worktree`; contract: `SMC-13` (`.copilot-tracking/` artifacts)
 ## Invocation
 
 - Direct subagent call: invoke this agent via the `Agent` tool with `subagent_type: specification`
-- No slash-command surface is shipped for this specialist in Phase 5; parent-agent (Solution-Designer / Issue-Planner) dispatch is the supported Claude entry point
+- No direct slash-command surface is shipped for this specialist; parent-agent (Solution-Designer / Issue-Planner) dispatch is the supported Claude entry point

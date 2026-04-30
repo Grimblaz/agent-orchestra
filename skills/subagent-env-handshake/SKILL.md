@@ -1,6 +1,6 @@
 ---
 name: subagent-env-handshake
-description: "Subagent environment-handshake contract for Claude Code Agent-tool dispatch. Use when a parent session dispatches a subagent that may make tree-grounded claims (file X exists, branch is Y, commit Z landed) — the handshake lets the subagent verify its live working-tree view matches the parent's before it prosecutes tree-grounded findings. DO NOT USE FOR: research subagents that never touch git/tree state; Copilot subagent dispatch (execution model differs)."
+description: "Subagent environment-handshake contract for Claude Code Agent-tool dispatch. Use when a parent session dispatches a subagent that may make tree-grounded claims such as file existence, branch identity, or landed changes - the handshake lets the subagent verify its live working-tree view matches the parent's before it prosecutes tree-grounded findings. DO NOT USE FOR: research subagents that never touch git/tree state; Copilot subagent dispatch (execution model differs)."
 scope: claude-only
 ---
 
@@ -165,13 +165,15 @@ If the parent's `git` invocations fail during construction (non-zero exit on `gi
 
 ## Related
 
-**Phase 2 adoption guidance** (tracked in [#379](https://github.com/Grimblaz/agent-orchestra/issues/379)): Phase 2 Claude agent bodies that dispatch tree-dependent subagents — **Code-Conductor**, **Code-Critic**, **Test-Writer**, **Refactor-Specialist**, **Review-Response** — MUST adopt this handshake as follows:
+**Current adoption guidance**: Claude parent surfaces that dispatch tree-dependent subagents MUST adopt this handshake as follows:
 
 1. **Parent-side construction:** construct the handshake via `New-SubagentDispatchPrompt` (or the inline prose template) in the dispatch prose, prepended to the `Agent` tool `prompt` parameter as its first content.
 2. **Subagent-side verification:** include a `## Step 0: Environment Handshake Verification` H2 in the subagent shell (or equivalent first-action section) that executes **before** shared-body load. The Step 0 prose directs parse → live-verify → branch (match/mismatch/error).
 3. **ND-2 finding template:** quote the ND-2 `## Finding: environment-divergence (halting)` template verbatim from the block in this SKILL. Do not paraphrase — the schema-parity test enforces byte parity.
 
 Research or non-tree-dependent dispatches may skip the handshake entirely; opt-in is intentional (ND-3).
+
+Subagent shells that implement Step 0 environment-handshake verification use the same first-action contract. If a downstream shell does not yet implement Step 0 verification, the parent may pass freshly captured values only as contextual metadata per the per-dispatch recapture policy above.
 
 > **CWD capture (Windows)**: Always capture `parent_cwd` using `pwd` in the Bash tool, not `(Get-Location).Path` in PowerShell. On Windows, PowerShell produces `C:\Users\...` while the Bash tool produces `/c/Users/...`; these formats will never compare equal and will trigger a mismatch halt.
 

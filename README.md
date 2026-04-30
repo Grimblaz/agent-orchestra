@@ -42,9 +42,11 @@ Claude Code auto-discovers `agents/` and `skills/` at the repo root via `.claude
 
 All 14 agents and the shared skill library are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (metadata-only manifest preserves auto-discovery).
 
-The plugin payload includes all 14 shared agent definitions and the shared skill library. The Claude-specific command and specialist surface shipped today is outlined below.
+This is zero-config for consumer repositories: after marketplace registration and plugin install, Claude Code loads the shared agent bodies and skills from its plugin cache. The repository using the plugin does not need a local `agents/` directory.
 
-### Phase 1 — Upstream agents live in Claude Code
+The plugin payload includes all 14 shared agent definitions and the shared skill library. The Claude-specific command and specialist surface is outlined below.
+
+### Upstream Agents In Claude Code
 
 The three upstream agents are first-class Claude Code citizens:
 
@@ -56,7 +58,7 @@ Each agent reads its shared, tool-agnostic body from `agents/*.agent.md` and fol
 
 See [`CLAUDE.md`](CLAUDE.md) for the Claude Code user guide and [issue #369](https://github.com/Grimblaz/agent-orchestra/issues/369) for the design history.
 
-### Phase 2 — Review pipeline live in Claude Code
+### Review Pipeline In Claude Code
 
 The Claude review surface now ships in the `orchestra-review-*` command namespace:
 
@@ -64,19 +66,19 @@ The Claude review surface now ships in the `orchestra-review-*` command namespac
 - `/orchestra:review-lite` — small-change variant with a single compact prosecution pass before defense and judge
 - `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge` — power-user and partial-rerun entry points for individual stages
 
-### Phase 3 — Code-Conductor orchestration live in Claude Code
+### Code-Conductor Orchestration In Claude Code
 
 - `/orchestrate` — Claude entry point for the full pipeline from durable issue state through implementation, validation, CE Gate, and PR readiness via Code-Conductor
 
-For paused Claude orchestration work, `/orchestrate` is also the resume entry point. The shared workflow's `/implement` wording is Copilot-specific; Claude Phase 3 does not ship a `/implement` command.
+For paused Claude orchestration work, `/orchestrate` is also the resume entry point. The shared workflow's `/implement` wording is Copilot-specific; Claude does not ship a `/implement` command.
 
-Claude's `code-conductor` shell now ships as a thin shell over the shared `agents/Code-Conductor.agent.md` body plus the extracted composite skills, keeping Copilot and Claude behavior aligned without duplicating the orchestration contract.
+Claude's `code-conductor` shell ships as a thin shell over the shared `agents/Code-Conductor.agent.md` body plus the extracted composite skills, keeping Copilot and Claude behavior aligned without duplicating the orchestration contract.
 
 The durable handoff set for Claude orchestration is the same GitHub-marker contract used cross-tool: `<!-- experience-owner-complete-{ID} -->`, `<!-- design-phase-complete-{ID} -->`, `<!-- design-issue-{ID} -->`, and `<!-- plan-issue-{ID} -->` as applicable to the current resume tier. See [Documents/Design/session-memory-contract.md](Documents/Design/session-memory-contract.md) for the design rationale behind that no-new-mechanism choice.
 
 #### Specialist agents
 
-Claude Code now includes the implementation specialists for Code-Conductor dispatch:
+Claude Code includes the implementation specialists for Code-Conductor dispatch. Code-Conductor can dispatch every currently shipped specialist shell:
 
 - `Code-Smith` — implementation-focused code changes against an approved plan
 - `Test-Writer` — test authoring and test-surface correction
@@ -87,7 +89,7 @@ Claude Code now includes the implementation specialists for Code-Conductor dispa
 - `Research-Agent` — evidence-driven technical research and recommendation building
 - `Specification` — formal specification drafting and refinement
 
-Claude Phase 5 also ships `/polish` as the direct slash-command entry point for UI-Iterator work.
+`/polish` is the direct slash-command entry point for UI-Iterator work.
 
 **What requires clone/fork**: same as the VS Code plugin — `.github/instructions/` and project templates are not distributed through the plugin surface. If you only load agents from a clone, Claude will not pick up the plugin-distributed `SessionStart` or `PostToolUse` hooks; those automation paths require `/plugin install`.
 
