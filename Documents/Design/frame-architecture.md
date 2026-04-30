@@ -412,6 +412,17 @@ This closes the only failure mode the terminal-step rule alone doesn't address: 
 
 ## Pre-PR Hook Contract
 
+> **Shipped status (sub-issue #429, branch `feature/issue-429-pre-pr-warn-hook`):** the warn-only slice has landed.
+>
+> - **Schema**: `metrics_version: 4` — frame credits sit on top of the inherited v3 base. See `frame/pipeline-metrics-v4-schema.md` for the additive fields.
+> - **Orchestrator**: `.github/scripts/frame-credit-ledger.ps1 -Pr <N> [-Mode warn|enforce]`. Default `-Mode warn`; `enforce` is reserved for sub-issue #13 and is not active in this slice.
+> - **Methodology skill**: `skills/frame-credit-ledger/SKILL.md`, referenced from `agents/Code-Conductor.agent.md` Step 4 as the post-`gh pr create` observation step.
+> - **Status**: warn-only. The hook posts an idempotent `<!-- frame-credit-ledger-{PR} -->` comment listing gaps; it does **not** block PR creation. Blocking-mode activation is deferred to sub-issue #13.
+> - **Three-state taxonomy** for port coverage in the rendered ledger: `Covered | Inconclusive | NotCovered` — bare-string canonical at the data layer, with emoji applied at format-time only.
+> - **Auto-N/A semantics**: D7 logical-AND. A port is N/A iff *every* declared work-adapter for that port has an `applies-when` predicate that evaluates `false` against the changeset. If any work-adapter applies, the port is live and absence of a credit becomes a gap.
+>
+> The pseudocode below remains the design target; some semantics (notably blocking on `missing` / `failed`) describe the eventual enforce-mode behavior tracked in sub-issue #13. The shipped warn-only orchestrator surfaces the same conditions as ledger entries rather than as PR-create blocks.
+
 ```text
 on `gh pr create` (or push to PR branch with auto-PR):
 
@@ -527,7 +538,7 @@ Order is intentional but flexible — actual priority will shift based on audit-
 | 1 | #426 | **Audit-only credit ledger from existing markers + pipeline-metrics v3 schema** | Schema doc, port files (17), back-deriver script, audit report. No enforcement. | — |
 | 2 | #427 | Frame validator (lint/CI step) | Walks `frame/ports/*.yaml` and adapter frontmatter; fails CI when an adapter declares a non-existent port and when `applies-when` cannot parse. Missing adapters for existing ports are allowed until coverage enforcement ships. | row 1 |
 | 3 | #428 | Adapter declarations in skill/agent frontmatter | All current skills/agents declare `provides: <port>` and `applies-when` predicates. Validator (row 2) passes. | rows 1, 2 |
-| 4 | #429 | Pre-PR hook (warn-only mode) | Hook exists, reads PR body's pipeline-metrics v3 block, posts a comment listing missing/failed/inconclusive credits. **Does not block.** | rows 1, 3 |
+| 4 | #429 | Pre-PR hook (warn-only mode) | Hook exists, reads PR body's pipeline-metrics v3 block, posts a comment listing missing/failed/inconclusive credits. **Does not block.** **(SHIPPED on `feature/issue-429-pre-pr-warn-hook`)** — orchestrator at `.github/scripts/frame-credit-ledger.ps1`; methodology at `skills/frame-credit-ledger/SKILL.md`; comment marker `<!-- frame-credit-ledger-{PR} -->`. | rows 1, 3 |
 | 5 | #430 (closed; bundled into #441) | Reify `review` port end-to-end with input-integrity check | Code-Review-Response writes the v3 credit on judge completion; integrity check verifies pass-block durability (closes #411-style gap). | row 4 |
 | 6 | #431 (closed) | Reify `release-hygiene` port | plugin-release-hygiene skill declares `provides: release-hygiene`; predicate detects entry-point and distributed plugin file changes. | row 3 |
 | 7 | #432 (closed) | Reify CE Gate surface ports + `inconclusive` status path | `ce-gate-cli/browser/canvas/api` adapters with surface-touch predicates; CE Gate emits `inconclusive` when environment unable to exercise (not silently `skipped`). | row 3 |

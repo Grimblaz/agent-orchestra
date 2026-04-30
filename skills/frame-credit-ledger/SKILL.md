@@ -30,9 +30,9 @@ This skill operationalizes the umbrella frame-architecture initiative tracked in
 Code-Conductor invokes this skill as the final observation step after `gh pr create` succeeds in its post-creation flow. The skill's responsibilities are:
 
 - Run the orchestrator script `.github/scripts/frame-credit-ledger.ps1` once against the freshly-created PR number.
-- Treat the orchestrator's output as advisory: any non-zero exit or stderr noise must not block the conductor's overall PR-handoff.
-- Default to warn mode. Enforce mode is a future capability and is not engaged by this skill in the warn-only slice.
-- Trust the orchestrator's idempotence: there is no need to check for an existing ledger comment first — the script does that internally and upserts.
+- Treat the orchestrator's output as advisory. A non-zero exit or stderr noise must not block the conductor's PR-handoff.
+- Default to warn mode. Enforce mode is reserved for a later sub-issue and is not engaged here.
+- Trust the orchestrator's idempotence. The script finds-or-upserts its own comment, so callers do not need to check for an existing ledger first.
 
 The canonical invocation is:
 
@@ -40,7 +40,7 @@ The canonical invocation is:
 pwsh ./.github/scripts/frame-credit-ledger.ps1 -Pr <N>
 ```
 
-Per the [#429](https://github.com/Grimblaz/agent-orchestra/issues/429) **D-Ordering-1** judge disposition, this skill deliberately does **not** enumerate the orchestrator's parameter list, the fail-open trigger taxonomy, or any internal helper signatures. Those details live in the script and are the single source of truth. For parameter discovery and behavior under failure, read the orchestrator's comment header (or run it with `-?` for the standard PowerShell help surface) — do not duplicate that surface here.
+Per the [#429](https://github.com/Grimblaz/agent-orchestra/issues/429) **D-Ordering-1** judge disposition, this skill deliberately does **not** enumerate the orchestrator's parameter list, the fail-open trigger taxonomy, or any internal helper signatures. Those details live in the script and are the single source of truth. For parameter discovery and failure behavior, read the orchestrator's comment header or run it with `-?` for PowerShell's standard help surface; do not duplicate that surface here.
 
 The conductor's only contract with this skill is:
 
@@ -50,7 +50,7 @@ The conductor's only contract with this skill is:
 
 ## Related Guidance
 
-- [`customer-experience/SKILL.md`](../customer-experience/SKILL.md) — CE Gate is a sibling concept. The ledger reports CE Gate credit status when the changeset triggers a CE-Gate-bearing port, but the ledger never *runs* CE Gate. CE Gate execution stays with the customer-experience skill and Experience-Owner agent.
+- [`customer-experience/SKILL.md`](../customer-experience/SKILL.md) — CE Gate is a sibling concern. The ledger reports the credit status of any triggered `ce-gate-*` port; it never *runs* CE Gate. Execution stays with the customer-experience skill and the Experience-Owner agent.
 - [`plugin-release-hygiene/SKILL.md`](../plugin-release-hygiene/SKILL.md) — separate concern. Release-hygiene fires on plugin entry-point edits and proposes version bumps; the credit-ledger fires on PR creation regardless of whether entry-point files were touched. The two skills are co-resident, not overlapping.
 - [`post-pr-review/SKILL.md`](../post-pr-review/SKILL.md) — separate concern. Post-PR-review runs after merge for archival, documentation, and tagging; the credit-ledger runs before merge as a pre-PR observation pass.
 - [`Documents/Design/frame-architecture.md`](../../Documents/Design/frame-architecture.md) — the **Pre-PR Hook Contract** section is the design reference for the ledger's behavior shape. The **Adapter Model** section governs why this skill is methodology and not a port-filling adapter.
