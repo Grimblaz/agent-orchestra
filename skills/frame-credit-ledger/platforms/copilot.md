@@ -1,6 +1,6 @@
 # Platform — Copilot (VS Code)
 
-`frame-credit-ledger` is consumed by the Copilot Code-Conductor flow, which inherits the same shared Code-Conductor agent body at [../../../agents/Code-Conductor.agent.md](../../../agents/Code-Conductor.agent.md) that Claude Code uses. Once Step 8 of issue [#429](https://github.com/Grimblaz/agent-orchestra/issues/429) wires the one-line reference into the shared body, both platforms invoke this skill automatically after `gh pr create` succeeds — no Copilot-side wiring is required beyond reusing the shared agent body.
+`frame-credit-ledger` is consumed by the Copilot Code-Conductor flow, which inherits the same shared Code-Conductor agent body at [../../../agents/Code-Conductor.agent.md](../../../agents/Code-Conductor.agent.md) that Claude Code uses. Step 4 of the shared body now references this skill (wired in issue [#429](https://github.com/Grimblaz/agent-orchestra/issues/429)), so both platforms invoke it automatically after `gh pr create` succeeds — no Copilot-side wiring is required beyond reusing the shared agent body.
 
 Copilot bindings:
 

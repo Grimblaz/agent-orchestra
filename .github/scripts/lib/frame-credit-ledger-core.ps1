@@ -585,3 +585,58 @@ function Compose-PreV4ShortCircuitComment {
 
     return ($lines -join [Environment]::NewLine)
 }
+
+# Render the short-circuit comment for the case where the pipeline-metrics
+# marker block exists but its YAML failed sanity validation. Distinct from
+# pre-v4 (block exists, version != 4) and missing-marker (no block at all);
+# emitted when Read-PRMetricsBlock returns MetricsVersion='parse-error'.
+function Compose-ParseErrorShortCircuitComment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$MarkerToken,
+        [string]$Reason = ''
+    )
+
+    $reasonLine = if ([string]::IsNullOrWhiteSpace($Reason)) {
+        'No additional reason was reported by the parser.'
+    }
+    else {
+        "Parser reason: $Reason"
+    }
+
+    $lines = @(
+        $MarkerToken,
+        '⚠️ **Frame credit ledger — pipeline-metrics block could not be parsed**',
+        '',
+        'A `pipeline-metrics` marker block exists in this PR''s body, but its YAML failed sanity validation, so port-by-port credit reporting is unavailable.',
+        '',
+        $reasonLine,
+        '',
+        '**Suggested next step**: Re-run Code-Conductor''s PR-creation flow to regenerate the pipeline-metrics block (the conductor emits v4 by default per `frame/pipeline-metrics-v4-schema.md`). Editing the marker block by hand is risky — close-and-reopen with a fresh `gh pr create` is the safer path.',
+        '',
+        '(Hook ran in `warn` mode; PR creation was not blocked.)'
+    )
+
+    return ($lines -join [Environment]::NewLine)
+}
+
+# Render the short-circuit comment for the case where the PR body has no
+# pipeline-metrics marker block at all (Read-PRMetricsBlock returned $null).
+# Distinct from pre-v4 and parse-error.
+function Compose-MissingMetricsShortCircuitComment {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$MarkerToken)
+
+    $lines = @(
+        $MarkerToken,
+        '⚠️ **Frame credit ledger — no pipeline-metrics block found in the PR body**',
+        '',
+        'The frame credit-ledger hook reads `metrics_version: 4` frame credits emitted inside an HTML-comment marker block (`<!-- pipeline-metrics ... -->`). This PR''s body does not contain that block, so port-by-port credit reporting is unavailable.',
+        '',
+        '**Suggested next step**: Re-run Code-Conductor''s PR-creation flow so it emits a v4 `pipeline-metrics` block into the PR body (per `frame/pipeline-metrics-v4-schema.md`). If the PR was opened by hand or by a non-conductor flow, close-and-reopen with a fresh `gh pr create` will regenerate the body.',
+        '',
+        '(Hook ran in `warn` mode; PR creation was not blocked.)'
+    )
+
+    return ($lines -join [Environment]::NewLine)
+}

@@ -314,6 +314,14 @@ function Resolve-FrameCreditLedgerApplicableMap {
     $map = @{}
     if ($null -eq $Adapters) { return $map }
 
+    # Defensive init: callers may invoke this function directly (e.g., the
+    # Step 12 wiring tests) before Invoke-FrameCreditLedger has had a chance
+    # to seed $script:DeferredNotedPairs. Ensure the dedupe table exists so
+    # the .ContainsKey(...) reads below cannot throw.
+    if (-not $script:DeferredNotedPairs) {
+        $script:DeferredNotedPairs = @{}
+    }
+
     foreach ($adapter in @($Adapters)) {
         $adapterName = [string]$adapter.Name
         $appliesWhen = $adapter.AppliesWhen
@@ -438,8 +446,49 @@ function Invoke-FrameCreditLedger {
     # 3. Parse pipeline-metrics block.
     $metrics = Read-PRMetricsBlock -PrBody $prBody
 
-    # 4. Pre-v4 short-circuit.
-    if ($null -eq $metrics -or $metrics.MetricsVersion -ne 4) {
+    # 4. Non-v4 short-circuit. Read-PRMetricsBlock returns one of three
+    # non-v4 shapes that we must distinguish so the posted comment is
+    # honest about what actually happened:
+    #   - $null                              -> no marker block at all
+    #   - MetricsVersion = 'parse-error'      -> block exists, YAML is malformed
+    #   - MetricsVersion = 'pre-v4'           -> block exists, version != 4
+    # Any other non-4 shape we have not seen before falls through to the
+    # pre-v4 comment as a conservative default.
+    if ($null -eq $metrics) {
+        $comment = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker
+        try {
+            $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $marker -Body $comment
+        }
+        catch {
+            [Console]::Error.WriteLine("frame-credit-ledger: upsert failed: $($_.Exception.Message)")
+        }
+
+        return @{
+            ExitCode      = 0
+            HasNotCovered = $false
+            Comment       = $comment
+        }
+    }
+
+    if ($metrics.MetricsVersion -eq 'parse-error') {
+        $reason = ''
+        if ($null -ne $metrics.PSObject.Properties['Reason']) { $reason = [string]$metrics.Reason }
+        $comment = Compose-ParseErrorShortCircuitComment -MarkerToken $marker -Reason $reason
+        try {
+            $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $marker -Body $comment
+        }
+        catch {
+            [Console]::Error.WriteLine("frame-credit-ledger: upsert failed: $($_.Exception.Message)")
+        }
+
+        return @{
+            ExitCode      = 0
+            HasNotCovered = $false
+            Comment       = $comment
+        }
+    }
+
+    if ($metrics.MetricsVersion -ne 4) {
         $comment = Compose-PreV4ShortCircuitComment -MarkerToken $marker
         try {
             $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $marker -Body $comment
@@ -585,10 +634,24 @@ if (-not $isDotSourced) {
         }
 
         # Copy global variables (e.g. $global:GhCallLog used by the test mock).
+        # We skip PowerShell's automatic variables, which fall into two camps:
+        #   1. Vars flagged with Constant / ReadOnly / AllScope / Private —
+        #      these would error when re-added to the child runspace's ISS
+        #      (e.g. $true, $false, $Host, $PID, $PSVersionTable, $HOME, $?,
+        #      $IsLinux, $IsMacOS, $IsWindows, $IsCoreCLR, $PSCulture, ...).
+        #      The .Options check catches these programmatically.
+        #   2. Vars with Options=None that PowerShell auto-populates per
+        #      runspace ($args, $input, $_, $^, $PWD, $MyInvocation,
+        #      $PSCommandPath, $PSScriptRoot, $StackTrace, $null). These
+        #      have no flag we can use, so we keep a small, named blocklist.
+        $autoNoneOptionsBlocklist = @('args', 'input', '_', '^', 'PWD', 'MyInvocation', 'PSCommandPath', 'PSScriptRoot', 'StackTrace', 'null')
         $parentGlobals = Get-Variable -Scope Global -ErrorAction SilentlyContinue
         foreach ($v in $parentGlobals) {
-            # Skip automatic variables that would conflict.
-            if ($v.Name -in @('null', 'true', 'false', 'PID', 'PSVersionTable', 'PSHOME', 'Host', 'ExecutionContext', 'MyInvocation', 'PSCulture', 'PSUICulture', 'ShellId', 'HOME', 'PWD', 'Error', 'PSCommandPath', 'PSScriptRoot', 'StackTrace', 'IsLinux', 'IsMacOS', 'IsWindows', 'IsCoreCLR', '?', '^', '$', 'args', 'input', '_')) { continue }
+            if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::Constant) { continue }
+            if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::ReadOnly) { continue }
+            if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::AllScope) { continue }
+            if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::Private) { continue }
+            if ($autoNoneOptionsBlocklist -contains $v.Name) { continue }
             try {
                 $entry = New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry($v.Name, $v.Value, '')
                 $iss.Variables.Add($entry)

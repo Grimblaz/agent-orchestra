@@ -1,6 +1,6 @@
 # Platform — Claude Code
 
-`frame-credit-ledger` is consumed by the Claude Code `code-conductor` shell (lowercase) loaded via `/orchestrate`. The shared Code-Conductor agent body at [../../../agents/Code-Conductor.agent.md](../../../agents/Code-Conductor.agent.md) references this skill from its Step 4 post-`gh pr create` flow; the one-line wiring of that reference lands in Step 8 of issue [#429](https://github.com/Grimblaz/agent-orchestra/issues/429).
+`frame-credit-ledger` is consumed by the Claude Code `code-conductor` shell (lowercase) loaded via `/orchestrate`. The shared Code-Conductor agent body at [../../../agents/Code-Conductor.agent.md](../../../agents/Code-Conductor.agent.md) references this skill from its Step 4 post-`gh pr create` flow; that one-line wiring shipped in issue [#429](https://github.com/Grimblaz/agent-orchestra/issues/429).
 
 Claude bindings:
 

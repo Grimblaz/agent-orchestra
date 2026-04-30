@@ -12,9 +12,11 @@
       * PATCHes the earliest-id match (and warns about duplicates) when more
         than one match exists.
 
-    All gh failures are fail-open: a stderr note is emitted via Write-Error and
-    the function returns $null. The caller decides whether the failure is
-    fatal.
+    All gh failures are fail-open: a stderr note is emitted via
+    [Console]::Error.WriteLine(...) and the function returns $null. The caller
+    decides whether the failure is fatal. (We use [Console]::Error.WriteLine
+    rather than Write-Error to avoid Pester's error-handling failure mode in
+    test mocks; see Step 2's report on issue #429.)
 
     Owner/repo are derived from `git config --get remote.origin.url` to avoid
     coupling to `gh repo view`. The mocked test surface for this library
@@ -70,11 +72,14 @@ function Find-OrUpsertComment {
     # Optional: surface the repos/<owner>/<repo> probe so callers (and the
     # test mock) see the resolved coordinates. Result is informational only;
     # we already have $owner/$repo from the git remote.
+    #
+    # We deliberately do NOT mutate $global:LASTEXITCODE here. The probe's
+    # exit code is irrelevant to the caller — only the list/post/patch calls
+    # below need their exit codes inspected, and each one is checked
+    # immediately after invocation (so a stale $LASTEXITCODE from this probe
+    # cannot leak past those checks).
     if ($owner -and $repo) {
         $null = & gh api "repos/$owner/$repo" --jq '.full_name' 2>$null
-        # Reset $LASTEXITCODE so a benign failure here does not poison the
-        # subsequent list call's exit-code check.
-        $global:LASTEXITCODE = 0
     }
 
     # --- 1. List comments on the issue/PR. ---

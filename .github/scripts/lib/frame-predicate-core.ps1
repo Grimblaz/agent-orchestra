@@ -17,6 +17,15 @@ function New-FVParseError {
     }
 }
 
+# Render a boolean as the canonical lowercase string ('true'|'false') used by
+# the predicate evaluator for identifier-boolean / call / comparison results.
+# Centralizes the `[string]([bool]$x).ToString().ToLowerInvariant()` pattern
+# that previously appeared at ~10 evaluator sites.
+function script:Format-FVBoolResult {
+    param([Parameter(Mandatory)][bool]$Value)
+    return ([string]$Value).ToLowerInvariant()
+}
+
 function Test-FVParseError {
     param($Value)
 
@@ -881,12 +890,6 @@ function New-FVEvaluationResult {
     }
 }
 
-# TODO: refactor candidate — extract `Format-FVBoolResult` helper for the
-# `[string]([bool]$x).ToString().ToLowerInvariant()` pattern repeated ~10
-# times in this file (sites: Resolve-FVChangesetIdentifierBoolean,
-# Resolve-FVCallNode, Resolve-FVComparisonNode). Cosmetic; defer until a
-# genuine API need arises.
-
 function Get-FVChangesetField {
     param(
         [Parameter(Mandatory)]$Changeset,
@@ -1042,7 +1045,7 @@ function Resolve-FVChangesetIdentifierBoolean {
                 if (Test-FVPathIsTempArtifact -Path $p) { return $false }
                 return $true
             }
-            return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hit))
         }
         'changeset.touchesTestableCode' {
             $hit = Test-FVAnyPathMatchesPredicate -Paths $paths -Predicate {
@@ -1051,7 +1054,7 @@ function Resolve-FVChangesetIdentifierBoolean {
                 if (Test-FVPathIsTest -Path $p) { return $false }
                 return $true
             }
-            return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hit))
         }
         'changeset.changesBehaviorOrInterface' {
             if ($paths.Count -eq 0) { return (New-FVEvaluationResult -Result 'false') }
@@ -1073,14 +1076,14 @@ function Resolve-FVChangesetIdentifierBoolean {
                 }
                 return $false
             }
-            return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hit))
         }
         'changeset.touchesBrowserSurface' {
             $hit = Test-FVAnyPathMatchesPredicate -Paths $paths -Predicate {
                 param($p)
                 return ($p -like '*.html' -or $p -like '*.tsx' -or $p -like '*.css')
             }
-            return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hit))
         }
         'changeset.touchesCanvasSurface' {
             return (New-FVEvaluationResult -Result 'false')
@@ -1097,7 +1100,7 @@ function Resolve-FVChangesetIdentifierBoolean {
                 }
                 if ($hit) { break }
             }
-            return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hit))
         }
         'scope.isReReview' {
             $value = Get-FVChangesetField -Changeset $Changeset -Name 'IsReReview'
@@ -1130,7 +1133,7 @@ function Resolve-FVCallNode {
         $glob = [string]$arguments[0].Value
         $paths = Get-FVChangedFiles -Changeset $Changeset
         $hit = Test-FVAnyPathLike -Paths $paths -Pattern $glob
-        return (New-FVEvaluationResult -Result ([string]([bool]$hit).ToString().ToLowerInvariant()))
+        return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hit))
     }
 
     if ($name -in (Get-FVDeferredCreditReferenceIdentifiers)) {
@@ -1272,7 +1275,7 @@ function Resolve-FVComparisonNode {
             $cmp = Invoke-FVComparison -Operator '==' -LeftValue $leftResolved.Value -LeftType $leftResolved.ValueType -RightValue $itemValue.Value -RightType $itemValue.Type
             if ($cmp) { $found = $true; break }
         }
-        return (New-FVEvaluationResult -Result ([string]([bool]$found).ToString().ToLowerInvariant()))
+        return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $found))
     }
 
     $rightValue = Get-FVLiteralComparisonValue -LiteralNode $right
@@ -1285,7 +1288,7 @@ function Resolve-FVComparisonNode {
         return (New-FVEvaluationResult -Result 'unknown' -Reason "unsupported-identifier: unknown operator '$($Node.Operator)'")
     }
 
-    return (New-FVEvaluationResult -Result ([string]([bool]$compared).ToString().ToLowerInvariant()))
+    return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $compared))
 }
 
 function Invoke-FVLogicalAnd {

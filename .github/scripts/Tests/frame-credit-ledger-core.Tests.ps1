@@ -549,3 +549,42 @@ Describe 'Compose-PreV4ShortCircuitComment' {
         $out | Should -Match '(?i)warn'
     }
 }
+
+Describe 'Compose-ParseErrorShortCircuitComment (C-Behavior-1: distinct branch from pre-v4)' {
+
+    It 'renders parse-error-specific text (NOT the pre-v4 phrasing) and surfaces the parser reason' {
+        $marker = '<!-- frame-credit-ledger-PR-429 -->'
+        $reason = 'Marker block contains malformed YAML (empty key, missing colon, or unterminated quoted value).'
+        $out = Compose-ParseErrorShortCircuitComment -MarkerToken $marker -Reason $reason
+
+        $out | Should -Not -BeNullOrEmpty
+        $out | Should -Match ([regex]::Escape($marker))
+        # The parse-error branch must NOT misrepresent itself as pre-v4.
+        $out | Should -Not -Match 'pre-v4 metrics detected'
+        # It must clearly say the block could not be parsed.
+        $out | Should -Match 'pipeline-metrics block could not be parsed'
+        # The parser reason is surfaced verbatim so operators can act on it.
+        $out | Should -Match ([regex]::Escape($reason))
+        $out | Should -Match '(?i)warn'
+    }
+}
+
+Describe 'Compose-MissingMetricsShortCircuitComment (C-Behavior-1: distinct branch from pre-v4)' {
+
+    It 'renders missing-marker-specific text (NOT the pre-v4 or parse-error phrasing)' {
+        $marker = '<!-- frame-credit-ledger-PR-429 -->'
+        $out = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker
+
+        $out | Should -Not -BeNullOrEmpty
+        $out | Should -Match ([regex]::Escape($marker))
+        # The missing-marker branch must NOT misrepresent itself as either
+        # of the other two non-v4 shapes.
+        $out | Should -Not -Match 'pre-v4 metrics detected'
+        $out | Should -Not -Match 'could not be parsed'
+        # It must clearly say no marker block was found.
+        $out | Should -Match 'no pipeline-metrics block found'
+        # Suggested next step still points operators at the v4 schema.
+        $out | Should -Match 'frame/pipeline-metrics-v4-schema.md'
+        $out | Should -Match '(?i)warn'
+    }
+}
