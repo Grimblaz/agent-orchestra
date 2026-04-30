@@ -1,155 +1,152 @@
 # Design: Agent Body Architecture
 
-**Status**: Implemented through Phase 0.3, Phase 3, and Phase 4 specialist shells
+**Status**: Implemented
 
 ## Summary
 
-Phase 0.3 established the thin-body pattern for the three Phase 1 upstream agents —
-Experience-Owner, Solution-Designer, and Issue-Planner — by collapsing reusable methodology into
-one-line skill-load pointers while preserving agent-specific identity sections verbatim.
+Agent Orchestra keeps canonical role behavior in shared, tool-agnostic `.agent.md` bodies. Platform
+shells and slash commands adapt those bodies to Copilot or Claude Code without forking the role
+contract. Reusable methodology lives in named skills and reference files; agent bodies keep identity,
+ownership boundaries, durable markers, and explicit load pointers.
 
-Phase 3 extended the same architecture to Code-Conductor. The shared body stayed the canonical,
-tool-agnostic contract, but large reusable methodology blocks were extracted into composite skills
-and named reference files so the body could shrink from 966 lines to <=500 without losing explicit
-load paths or orchestration boundaries. Claude parity now uses the same shared body through both
-`agents/code-conductor.md` and `commands/orchestrate.md`.
+Claude Code consumers get the shared bodies through the installed plugin cache. A consumer repository
+does not need a local `agents/` directory for plugin-installed agents, skills, commands, or hooks to
+load. Source-repo CWD loading exists only as a gated maintainer fallback when the current checkout is
+the Agent Orchestra source repo.
 
-Phase 4 extended the Claude-side thin-shell pattern to the first implementation specialists:
-`agents/code-smith.md`, `agents/test-writer.md`, `agents/refactor-specialist.md`, and
-`agents/doc-keeper.md`. Their shared Copilot bodies remained the canonical contracts, while
-specialist-specific methodology that had started to regrow inline moved into the owning shared
-skills so the Claude wrappers could stay thin and parity-focused.
+`/orchestrate` loads `agents/Code-Conductor.agent.md` through the same body-resolution contract and
+adopts Code-Conductor inline in the parent conversation. Code-Conductor then dispatches the shipped
+Claude shells for upstream framing, planning, review, implementation, documentation, retrospective,
+research, specification, and UI polish work.
 
 ---
 
-## Design
+## Current Architecture
 
-### Two-Tier Body Structure
+### Shared Agent Bodies
 
 Every `.agent.md` body follows two tiers:
 
-1. **Identity sections** — kept verbatim; these are agent-specific and cannot be factored out
-   without losing the agent's behavioral contract:
+1. **Identity sections** - kept in the shared body because moving them would dilute the role's
+    behavioral contract:
 
-   - YAML frontmatter (`tools`, `handoffs`, `user-invocable`)
-   - Core Principles
-   - Role / Overview / When-to-use / Pipeline description
-   - Completion markers and durable-artifact hard stops
-   - Questioning Policy rules (platform syntax only in the footer)
-   - Boundaries
-   - Inline GitHub Setup (3-line branch creation repeated across agents — not worth a skill)
-   - Per-agent `## Platform-specific invocation` footer
+    - YAML frontmatter (`tools`, `handoffs`, `user-invocable`)
+    - Core principles
+    - Role, overview, when-to-use, and pipeline descriptions
+    - Completion markers and durable-artifact hard stops
+    - Questioning policy rules
+    - Boundaries and ownership rules
+    - Agent-specific setup or handoff rules
+    - Per-agent `## Platform-specific invocation` footer where the shared body needs one
 
-2. **Skill pointers** — methodology already covered by a named skill collapses to a single load
-   instruction, e.g.:
+2. **Skill pointers** - reusable methodology already owned by a named skill collapses to a load
+    instruction, for example:
 
-   ```text
-   Load `skills/provenance-gate/SKILL.md` and follow the protocol.
-   ```
+    ```text
+    Load `skills/provenance-gate/SKILL.md` and follow the protocol.
+    ```
 
-   Skill names, file paths, and load directives are the only implementation detail the agent body
-   carries for methodology sections.
+    Skill names, file paths, and load directives are the only implementation detail the agent body
+    carries for extracted methodology.
 
 ### Claude Shells
 
-`agents/experience-owner.md`, `agents/solution-designer.md`, and `agents/issue-planner.md` are
-delegation targets referenced by parent agents and the Claude Code plugin router. They are not
-thinned; they remain byte-identical to their state before Phase 0.3.
+Each `agents/{name}.md` Claude shell provides Claude-specific startup, tool mapping, and persistence
+differences for its paired shared body. The shell resolves and reads its paired `agents/{Name}.agent.md`
+body before role work using this order:
 
-Phase 3 added the same thin-shell wrapping model for Code-Conductor. `agents/code-conductor.md`
-is a Claude-specific shell that performs Claude-only preconditions and tool mapping, then loads the
-shared methodology from `agents/Code-Conductor.agent.md`. `commands/orchestrate.md` is the Claude
-slash-command wrapper that resolves issue context, prepares the handshake preamble, and dispatches
-the `code-conductor` shell rather than duplicating orchestration logic.
+1. `~/.claude/plugins/installed_plugins.json` entry for `agent-orchestra@agent-orchestra`
+2. Newest SemVer-sorted plugin-cache match under `~/.claude/plugins/cache/agent-orchestra/agent-orchestra/*/agents/`
+3. Source-repo CWD fallback only when `.claude-plugin/plugin.json` declares `name: agent-orchestra`
 
-### Phase 3 Extension: Code-Conductor
+If no candidate body loads, the shell halts with the canonical remediation command
+`claude plugin install agent-orchestra@agent-orchestra`.
 
-Issue #403 applied the thin-body architecture to the largest shared agent body in the repo.
-Code-Conductor remained the orchestration owner, but reusable methodology moved out to the owning
-skills and reference files:
+Tree-dependent Claude shells also run `## Step 0: Environment Handshake Verification` before loading
+their shared body. The handshake is per-dispatch and verifies HEAD, branch, CWD, and dirty-tree
+fingerprint against the parent prompt so tree-grounded claims do not rely on stale injected context.
 
-- **Customer Experience Gate** -> `skills/customer-experience/references/`
-- **Pipeline Metrics** -> `skills/calibration-pipeline/references/`
-- **Review Reconciliation Loop** -> `skills/validation-methodology/references/` plus
-   `skills/code-review-intake/references/express-lane.md`
-- **Error-handling process** -> `skills/parallel-execution/references/error-handling.md`
-- **Refactoring integration** -> `skills/refactoring-methodology/SKILL.md` `## Conductor Integration`
+### Slash Commands
 
-The important boundary did not change: Code-Conductor still owns sequencing, delegation, and PR-gate
-responsibilities. The extracted references hold reusable method text, schemas, routing contracts,
-and recovery rules; the agent body keeps only the shell responsibilities and the explicit load
-directives that point to those canonical sources.
+Claude slash commands are command wrappers, not alternate role definitions.
 
-### Phase 4 Extension: Specialist Shells
+- `/experience`, `/design`, and `/plan` resolve issue context, load the paired shared body, and adopt
+   the role inline so live `AskUserQuestion` prompts remain available.
+- `/orchestrate` resolves smart-resume state, loads `agents/Code-Conductor.agent.md`, and adopts
+   Code-Conductor inline. Missing plan markers do not block hub mode because Code-Conductor can call
+   Issue-Planner when planning is still needed.
+- `/orchestra:review*` commands dispatch Code-Critic and Code-Review-Response with the same strict
+   shared-body load contract and the review pipeline's redundant-pass recovery rules.
+- `/polish` is the direct slash-command entry point for UI-Iterator.
 
-Issue #404 applied the same shell-plus-shared-body architecture to the first Claude-side
-implementation specialists.
+Terminal-oriented implementation specialists do not have direct slash-command surfaces. Parent-agent
+dispatch is their supported Claude entry point.
 
-- `code-smith` wraps `agents/Code-Smith.agent.md`
-- `test-writer` wraps `agents/Test-Writer.agent.md`
-- `refactor-specialist` wraps `agents/Refactor-Specialist.agent.md`
-- `doc-keeper` wraps `agents/Doc-Keeper.agent.md`
+### Specialist Dispatch Surface
 
-Each specialist shell follows the same structure used by the Phase 3 conductor shell:
+Code-Conductor can dispatch every currently shipped Claude shell that participates in orchestration:
+`experience-owner`, `solution-designer`, `issue-planner`, `code-critic`, `code-review-response`,
+`code-smith`, `test-writer`, `refactor-specialist`, `doc-keeper`, `process-review`, `research-agent`,
+`specification`, and `ui-iterator`.
 
-- a Claude-only Step 0 environment handshake block
-- a single explicit shared-body pointer
-- an H2 enumeration of the shared-body sections the shell mirrors
+Each specialist shell keeps the same structure:
+
+- Claude-only startup or Step 0 handshake instructions when the role makes tree-grounded claims
+- one explicit shared-body pointer and strict missing-body remediation
+- an H2 enumeration of shared-body sections the shell follows
 - a Claude tool-mapping table for Copilot-specific references
-- a persistence-differences note that keeps durable marker ownership with Code-Conductor
+- persistence differences that keep durable marker ownership with the owning orchestrator or issue body
 
-Phase 4 also tightened the shared-body boundary for specialists. Reusable implementation,
-testing, refactoring, and BDD procedure text moved into the owning shared skills so the
-specialist bodies could stay focused on role identity while both Copilot and Claude continued to
-load one canonical methodology source.
+### Composite Skills And References
 
-### Composite-Skill Convention
-
-Phase 3 also formalized a composite-skill pattern for large reusable methodology areas.
+Large reusable methodology areas use a composite-skill pattern:
 
 - `SKILL.md` stays a compact entryway that defines purpose, boundaries, and when to use the skill.
-- Named `references/*.md` files carry the extracted methodology that agents load directly.
-- The entryway enumerates every reference file so the skill remains discoverable without regrowing
-   the extracted prose inline.
+- Named `references/*.md` files carry extracted methodology that agents load directly.
+- The entryway enumerates every reference file so the skill stays discoverable without regrowing the
+   extracted prose inline.
 
-This keeps the owning skill readable while giving shared agent bodies stable, explicit paths to the
-canonical extracted material.
+Code-Conductor uses this pattern for areas such as Customer Experience Gate, pipeline metrics, review
+reconciliation, error handling, and refactoring integration. The boundary is stable: Code-Conductor
+owns sequencing, delegation, and PR-gate responsibility; skills and references own reusable method
+text, schemas, routing contracts, and recovery rules.
 
 ### Platform-Specific Invocations
 
 Copilot tool names (`#tool:vscode/askQuestions`, `vscode/memory`) and Claude tool names
-(`AskUserQuestion`) live in YAML frontmatter (`tools:`) and the `## Platform-specific invocation`
-footer at the bottom of each agent file — not in body sections.
+(`AskUserQuestion`, `Agent`, `Bash`) live in YAML frontmatter, command wrappers, shell tool-mapping
+tables, or the `## Platform-specific invocation` footer. Shared methodology sections stay
+platform-neutral whenever the behavior itself is not platform-specific.
 
 ---
 
 ## Key Decisions
 
-| # | Decision | Choice | Rationale |
-|---|----------|--------|-----------|
-| D3 | Platform-specific wording location | Per-agent `## Platform-specific invocation` footer | Keeps body sections platform-neutral; a single section per agent is easier to maintain than separate `skills/platforms/` files that would require cross-file synchronization |
-| D4 | BDD classification rubric in Issue-Planner | Keep inline (annotated "keep in sync with `bdd-scenarios` skill") | Tabular reference material consulted repeatedly during plan authoring; a skill-load interruption mid-planning adds latency without reducing duplication meaningfully — the table must stay synchronized with the skill regardless |
-| D6 | Claude shells during body thinning | Untouched (byte-identical) | Shells serve as delegation targets; any structural change risks breaking the cross-tool handoff contract without a corresponding plugin schema update |
-| D7 | Command dispatch strategy | Option F, revised by #437 — `/experience`, `/design`, and direct `/plan` use inline role adoption on Claude (live `AskUserQuestion`); `/orchestrate` still dispatches `code-conductor`, and its planner phase stays on the existing Code-Conductor to Issue-Planner subagent path pending #457 | Issue #437 partially rolls back the #412 D5/D6 decision for direct `/plan` so planning can ask live questions and pace like the upstream commands. The two-tier body rule stays intact: slash commands own Claude dispatch mechanics, shared bodies stay canonical, and `/orchestrate` planner latency remains scoped to #457 |
-| D8 | Specialist-shell rollout model | Thin Claude shells over canonical shared bodies | Specialist shells should add only Claude-only handshake/tool-mapping/persistence wrappers while shared skills absorb reusable methodology, keeping Copilot and Claude aligned on one contract |
+| # | Decision | Current choice | Rationale |
+|---|----------|----------------|-----------|
+| D3 | Platform-specific wording location | Per-agent platform footer, Claude shell mapping table, or command wrapper | Keeps shared role sections tool-neutral while making platform bindings visible at the call site |
+| D4 | BDD classification rubric in Issue-Planner | Keep inline and synchronized with `bdd-scenarios` | The table is consulted repeatedly during plan authoring, and a skill-load interruption would add latency without reducing synchronization work |
+| D7 | Command dispatch strategy | Direct `/experience`, `/design`, `/plan`, and `/orchestrate` use inline role adoption on Claude; downstream specialist work uses `Agent` dispatch | Inline commands preserve live user-question pacing, while specialist dispatch keeps orchestration single-level and preserves the shared-body contract |
+| D8 | Specialist shell model | Thin Claude shells over canonical shared bodies | Claude shells add only startup, body-resolution, handshake, tool-mapping, and persistence wrappers while shared skills absorb reusable methodology |
 
 ---
 
 ## Maintenance Rule
 
-When adding methodology sections to any `.agent.md` file, first check whether the content belongs
-in a skill. If a skill can carry it, add it to the skill and insert a one-line load pointer in the
-agent body. Only embed inline when the content is:
+When adding methodology sections to any `.agent.md` file, first check whether the content belongs in a
+skill. If a skill can carry it, add it to the skill and insert a one-line load pointer in the agent
+body. Only embed inline when the content is:
 
-- **Agent-specific identity** (markers, checklist items, boundaries, pipeline description), or
-- **Frequently-referenced tabular reference material** where a skill-load interruption degrades
-  usability (D4 precedent — annotate with "keep in sync with `{skill}` skill").
+- **Agent-specific identity**: markers, checklist items, boundaries, pipeline description, or durable
+   ownership rules.
+- **Frequently referenced tabular material**: reference tables where a skill-load interruption degrades
+   usability. Annotate these with the skill they must stay synchronized with.
 
-Platform-specific invocations always belong in the per-agent footer, never in body sections.
+Platform-specific invocation details belong in the per-agent footer, Claude shell, or command wrapper,
+not in shared body sections.
 
-For large shared bodies such as Code-Conductor, prefer the Phase 3 composite-skill form over adding
-new long-form methodology back into the agent file: keep `SKILL.md` as the entryway, add or extend
-named `references/*.md` files for extracted method text, and leave the agent body with explicit
-load directives plus the orchestration decisions that only the agent can own. Future shell or
-command wrappers should continue to load the shared body rather than fork it, so Copilot and Claude
-stay aligned on one contract.
+For large shared bodies such as Code-Conductor, keep `SKILL.md` as the entryway, add or extend named
+`references/*.md` files for extracted method text, and leave the agent body with explicit load
+directives plus the orchestration decisions that only the agent can own. Future shell or command
+wrappers should continue to load the shared body rather than fork it, so Copilot and Claude stay
+aligned on one contract.

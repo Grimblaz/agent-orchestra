@@ -289,6 +289,15 @@ Describe 'session-memory contract structural surface' {
         }
     }
 
+    It 'requires /orchestrate command handoff prose to anchor plan, design, and phase markers to SMC rows' {
+        $path = Join-Path $script:RepoRoot 'commands\orchestrate.md'
+        $content = & $script:ReadContent -Path $path
+
+        $content | Should -Match '(?is)<!-- plan-issue-\{ID\} -->.{0,420}SMC-01|SMC-01.{0,420}<!-- plan-issue-\{ID\} -->' -Because '/orchestrate must tie the durable plan handoff marker to SMC-01'
+        $content | Should -Match '(?is)<!-- design-issue-\{ID\} -->.{0,520}SMC-03|SMC-03.{0,520}<!-- design-issue-\{ID\} -->' -Because '/orchestrate must tie the durable design fallback/handoff marker to SMC-03'
+        $content | Should -Match '(?is)(<!-- experience-owner-complete-\{ID\} -->|<!-- design-phase-complete-\{ID\} -->).{0,520}SMC-08|SMC-08.{0,520}(<!-- experience-owner-complete-\{ID\} -->|<!-- design-phase-complete-\{ID\} -->)' -Because '/orchestrate must tie phase-completion markers to SMC-08'
+    }
+
     It 'requires tracking-format to delegate or retire the Cloud Agent Handoff Protocol' {
         $path = Join-Path $script:RepoRoot 'skills\tracking-format\SKILL.md'
         $content = & $script:ReadContent -Path $path

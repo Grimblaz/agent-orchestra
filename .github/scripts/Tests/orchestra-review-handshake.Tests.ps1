@@ -25,6 +25,10 @@ Describe 'orchestra-review handshake contract' {
         )
         $script:JudgeCommandPath = Join-Path $script:CommandsDirectory 'orchestra-review-judge.md'
         $script:CanonicalCapturePattern = '(?s)git rev-parse HEAD.*?git rev-parse --abbrev-ref HEAD.*?pwd.*?git status --porcelain \| tr -d ''\\r'' \| \(sha256sum 2>/dev/null \|\| shasum -a 256\) \| cut -c1-12'
+        $script:CompositeReviewCommands = @(
+            [pscustomobject]@{ Name = 'orchestra-review'; Path = Join-Path $script:CommandsDirectory 'orchestra-review.md' },
+            [pscustomobject]@{ Name = 'orchestra-review-lite'; Path = Join-Path $script:CommandsDirectory 'orchestra-review-lite.md' }
+        )
     }
 
     It 'requires the four code-critic commands to document handshake construction with the canonical live git capture order' {
@@ -46,6 +50,38 @@ Describe 'orchestra-review handshake contract' {
 
             $content | Should -Match 'Prepend the handshake block as the \*\*first content\*\* of the `prompt` parameter' -Because "$($command.Name) must instruct callers to prepend the handshake block to the Agent prompt"
             $content | Should -Match 'subagent_type: code-critic' -Because "$($command.Name) must route the handshake-bearing dispatch to code-critic"
+        }
+    }
+
+    It 'requires composite review commands to freshly recapture handshakes before each Code-Critic dispatch' {
+        foreach ($command in $script:CompositeReviewCommands) {
+            $content = Get-Content -Path $command.Path -Raw
+
+            $content | Should -Match '(?is)(?:immediately\s+before\s+each|before\s+each|for\s+each|for\s+every|per-dispatch).{0,180}Code-Critic.{0,180}(?:prosecution|defense|retry).{0,180}dispatch.{0,220}(?:recapture|reconstruct|capture|construct).{0,220}(?:HEAD|git rev-parse HEAD).{0,220}(?:branch|git rev-parse --abbrev-ref HEAD).{0,220}(?:CWD|pwd).{0,220}(?:dirty fingerprint|git status --porcelain)' -Because "$($command.Name) must require live handshake recapture immediately before each Code-Critic prosecution, defense, or retry dispatch"
+            $content | Should -Match '(?is)(?:fresh|newly recaptured|live|per-dispatch).{0,120}(?:handshake block|handshake|capture)' -Because "$($command.Name) must name the dispatched Code-Critic handshake as fresh rather than reusable"
+        }
+    }
+
+    It 'requires redundant full-review retries to use a newly recaptured handshake' {
+        $content = Get-Content -Path (Join-Path $script:CommandsDirectory 'orchestra-review.md') -Raw
+
+        $content | Should -Match '(?is)retry.{0,240}(?:newly recaptured|fresh|recapture|reconstruct|capture).{0,180}(?:handshake block|handshake|capture)' -Because '/orchestra:review must retry redundant prosecution with a newly recaptured handshake, not the stale first-attempt block'
+    }
+
+    It 'rejects stale handshake reuse wording in composite review commands' {
+        foreach ($command in $script:CompositeReviewCommands) {
+            $content = Get-Content -Path $command.Path -Raw
+
+            $content | Should -Not -Match '(?is)\bsame\s+(?:substantive\s+)?prompt\s+and\s+(?:the\s+)?(?:same\s+)?handshake\s+block' -Because "$($command.Name) must not describe retrying with the same prompt and handshake block"
+            $content | Should -Not -Match '(?is)prepend\s+the\s+handshake\s+block\s+again\s+when\s+constructed' -Because "$($command.Name) must not imply that later Code-Critic dispatches reuse an earlier handshake block"
+        }
+    }
+
+    It 'keeps composite judge dispatches out of required Step 0 handshake scope' {
+        foreach ($command in $script:CompositeReviewCommands) {
+            $content = Get-Content -Path $command.Path -Raw
+
+            $content | Should -Not -Match '(?is)(?:Handshake preamble|Step 0).{0,300}subagent_type:\s*code-review-response|subagent_type:\s*code-review-response.{0,300}(?:Handshake preamble|Step 0)' -Because "$($command.Name) must not require Code-Review-Response judge dispatches to perform Step 0 handshake verification"
         }
     }
 

@@ -81,7 +81,7 @@ This template is the authoritative finding shape. Drift between this quoted copy
 
 The full tool-agnostic methodology for this role lives at `agents/Code-Conductor.agent.md` in the repo root.
 
-**Precondition (load this before shared-body role work):** after the session-startup protocol completes and after the one-time Step 0 environment handshake verification runs, but before producing any substantive user-facing text, making any other role-work tool call, or dispatching a subagent, load `agents/Code-Conductor.agent.md` with the `Read` tool. The only exceptions to this ordering are session-startup's required actions and the Step 0 live-git verification/tooling explicitly required above. The shared body is the contract for this role - acting without it means the shell is diverging from Copilot behavior. If the read fails, stop and surface the failure rather than guessing at the methodology.
+**Precondition (resolve shared body before role work):** after any shell-specific startup or Step 0 protocols above have completed, but before producing substantive user-facing text, making any other role-work tool call, or dispatching a subagent, resolve and load, using the `Read` tool, `agents/Code-Conductor.agent.md` from the installed Agent Orchestra plugin before considering source-repo CWD. D1 resolution order: first read `~/.claude/plugins/installed_plugins.json` and use the `installPath` for `agent-orchestra@agent-orchestra` to load `agents/Code-Conductor.agent.md`; if that registry entry is missing or unusable, fall back to the newest SemVer-sorted match for `~/.claude/plugins/cache/agent-orchestra/agent-orchestra/*/agents/Code-Conductor.agent.md`; only after those plugin-cache paths fail, allow a source-repo CWD read of `agents/Code-Conductor.agent.md` when `.claude-plugin/plugin.json` exists in the current repo and declares `name: agent-orchestra`. The shared body is the contract for this role - acting without it means the shell is diverging from Copilot behavior. If no candidate body loads, halt role work and emit exactly: `agent-orchestra body for Code-Conductor.agent.md not found in plugin cache or source-repo CWD. Run: claude plugin install agent-orchestra@agent-orchestra`.
 
 After loading, follow everything under its `## Ownership Principles`, `## Questioning & Pause Policy (Mandatory)`, `## Overview`, `## Usage Examples`, `## Plan Creation Strategy`, `## Process`, `## Core Workflow`, `## Build-Test Orchestration`, `## Property-Based Testing (PBT) Rollout Policy`, `## Agent Selection`, `## Review Reconciliation Loop (Mandatory)`, `## Validation Ladder (Mandatory)`, `## Customer Experience Gate (CE Gate)`, `## Pipeline Metrics`, `## Refactoring Phase is MANDATORY`, `## Tactical Adaptation`, `## Subagent Call Resilience (R5)`, `## Error Handling`, `## Context Management for Long Sessions`, `## Handoff to User`, and `## Best Practices` sections.
 
@@ -97,15 +97,15 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 | Session memory (`vscode/memory`) | Per `SMC-01`, `SMC-03`, and `SMC-08`, Claude does not use a Claude-only session-memory persistence layer. For plan/design state, use parent dispatch or current plan context first; otherwise use latest-comment-wins GitHub issue markers (`<!-- plan-issue-{ID} -->`, `<!-- design-issue-{ID} -->`) and fall back to the issue body for design intent. For CE design intent specifically, prefer the `[CE GATE]` step's `Design Intent` field, then the latest `<!-- design-issue-{ID} -->` handoff comment, then the issue body |
 | Browser tools (`browser/*`) | Claude Code cannot assume the native VS Code browser-tool surface here; use `WebFetch` only for remote pages or published artifacts, and delegate CE Gate scenario capture to `experience-owner` so the evidence step stays on the documented fallback path when interactive browser coverage is required |
 
-When the shared body tells users to pause and resume with `/implement`, Claude Code uses `/orchestrate` as the resume entry point for Phase 3. There is no Claude `/implement` command in the shipped surface yet.
+When the shared body tells users to pause and resume with `/implement`, Claude Code uses `/orchestrate` as the resume entry point. There is no Claude `/implement` command in the shipped surface yet.
 
 ## Specialist availability
 
-Phase 3 Claude specialist shells available for Code-Conductor dispatch are `code-critic`, `code-review-response`, `experience-owner`, and `issue-planner`.
+Code-Conductor can dispatch every currently shipped Claude shell that participates in orchestration: `experience-owner`, `solution-designer`, `issue-planner`, `code-critic`, `code-review-response`, `code-smith`, `test-writer`, `refactor-specialist`, `doc-keeper`, `process-review`, `research-agent`, `specification`, and `ui-iterator`.
 
-Phase 4 Claude specialist shells available for Code-Conductor dispatch are `code-smith`, `test-writer`, `refactor-specialist`, and `doc-keeper`.
+Terminal-oriented implementation specialists do not have direct slash-command entry points; Code-Conductor dispatch is their supported Claude entry point.
 
-When a required specialist shell for a planned step does not exist yet, use the exact D1 fallback labels below:
+When a planned step requires a specialist shell outside the shipped set, use the exact D1 fallback labels below:
 
 1. Hand off this step to Copilot, resume in Claude after
 2. Attempt inline in the main conversation (no specialist dispatch)

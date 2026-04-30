@@ -27,6 +27,12 @@ Describe 'Code-Conductor hub-mode planning regression contract' {
         $script:OrchestrateCommand | Should -Match '(?is)missing its `<!-- plan-issue-\{ID\} -->` marker.*?do not block dispatch.*?Issue-Planner itself' -Because 'the Claude /orchestrate command must carry missing-plan state into Code-Conductor so hub mode can create the plan in-session'
     }
 
+    It 'keeps /orchestrate smart-resume markers tied to the owning SMC rows' {
+        $script:OrchestrateCommand | Should -Match '(?is)smart-resume markers.{0,360}SMC-08' -Because 'durable phase-completion marker handling must stay tied to SMC-08'
+        $script:OrchestrateCommand | Should -Match '(?is)<!-- plan-issue-\{ID\} -->.{0,420}SMC-01|SMC-01.{0,420}<!-- plan-issue-\{ID\} -->' -Because 'the plan-marker resume path must stay tied to SMC-01'
+        $script:OrchestrateCommand | Should -Match '(?is)<!-- design-issue-\{ID\} -->.{0,520}SMC-03|SMC-03.{0,520}<!-- design-issue-\{ID\} -->' -Because 'the design fallback and D9 suppression path must stay tied to SMC-03'
+    }
+
     It 'keeps the shared Code-Conductor body explicit that hub mode may create the plan in-session' {
         $script:ConductorBody | Should -Match '(?is)If no plan exists.*?In hub mode.*?continue to scope classification.*?call Issue-Planner.*?create the plan in-session' -Because 'fresh hub-mode execution must continue into Issue-Planner when no durable plan exists yet'
         $script:ConductorBody | Should -Match '(?is)Outside hub mode.*?plan-dependent execution path without a plan' -Because 'plan-dependent non-hub flows must still fail closed when the expected approved plan is missing'

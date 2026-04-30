@@ -29,4 +29,8 @@ If the ingested ledgers make tree-grounded claims and you want the judge prompt 
 2. Pass the prosecution ledger and defense report together in one prompt.
 3. Return the Markdown score summary, the `<!-- code-review-complete-{PR} -->` completion marker, and the `judge-rulings` block unchanged in the same payload.
 
+**Body-load failure policy**:
+
+This command runs a singleton Code-Review-Response judge stage. If the judge body-load fails, cannot load the shared body, is missing, or is malformed, halt-strict and stop; do not continue. No 2-of-3 or `pipeline-degraded` degradation applies to this singleton judge path.
+
 ARGUMENTS: $ARGUMENTS

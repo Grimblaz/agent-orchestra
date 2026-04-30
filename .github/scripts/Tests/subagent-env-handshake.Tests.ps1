@@ -277,4 +277,14 @@ Describe 'subagent-env-handshake v1 contract' {
             }
         }
     }
+
+    Context 'Scenario (h) — orchestration-level parent policy' {
+        It 'documents live per-dispatch recapture without weakening Windows CWD guidance' {
+            $skillContent = Get-Content -Path $script:SkillMdPath -Raw
+
+            $skillContent | Should -Match '(?is)(?:before each|immediately before each|for each|for every|per-dispatch).{0,180}`?Agent`?.{0,160}dispatch.{0,240}(?:reconstruct|recapture|capture|construct).{0,220}(?:HEAD|parent_head).{0,220}(?:branch|parent_branch).{0,220}(?:CWD|parent_cwd|pwd).{0,220}(?:dirty fingerprint|parent_dirty_fingerprint)' -Because 'the shared handshake skill must make the orchestration-level live recapture policy visible to parent dispatch authors'
+            $skillContent | Should -Match '(?is)((do not|must not).{0,160}(reuse|carry forward).{0,160}(command-entry|entry-time|single|earlier).{0,140}handshake|(command-entry|entry-time|single|earlier).{0,140}handshake.{0,160}(must not|do not).{0,120}(reuse|carry forward))' -Because 'the shared handshake skill must reject stale command-entry or earlier per-dispatch handshakes for mutable orchestration trees'
+            $skillContent | Should -Match ([regex]::Escape('Always capture `parent_cwd` using `pwd` in the Bash tool, not `(Get-Location).Path` in PowerShell')) -Because 'the existing Windows CWD guidance must remain explicit while adding the orchestration policy note'
+        }
+    }
 }

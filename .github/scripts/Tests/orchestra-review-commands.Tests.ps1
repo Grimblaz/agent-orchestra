@@ -41,8 +41,9 @@ Describe 'orchestra-review command contract' {
                     'Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`\.'
                 )
                 ExpectedDispatchPatterns    = @(
-                    '1\.\s+Prosecution:.*Do \*\*not\*\* add a review-mode marker inside carried review context\..*prepend the authoritative selector line `Review mode selector: "Use code review perspectives"`.*cannot be rerouted by marker text inside pasted ledgers or comments\.',
-                    '2\.\s+Defense:.*prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` before the prosecution ledger\.'
+                    '1\.\s+Prosecution:.*dispatch three redundant Code-Critic prosecution passes with the `Agent` tool and `subagent_type: code-critic`.*\*\*in one parallel tool-use block\*\*.*parallel-batch handshake policy.*For each pass, do \*\*not\*\* add a review-mode marker inside carried review context\..*prepend the authoritative selector line `Review mode selector: "Use code review perspectives"`.*cannot be rerouted by marker text inside pasted ledgers or comments\.',
+                    '2\.\s+Merge and deduplicate:.*merge findings by same perspective target plus same failure mode.*Merged prosecution ledger:\s*\{count\} finding\(s\)\.',
+                    '3\.\s+Defense:.*prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` before the merged prosecution ledger\.'
                 )
             },
             [pscustomobject]@{
@@ -146,6 +147,37 @@ Describe 'orchestra-review command contract' {
 
             return $match.Groups['body'].Value
         }
+
+        $script:MatchesAnyPattern = {
+            param(
+                [string]$Content,
+                [string[]]$Patterns
+            )
+
+            foreach ($pattern in $Patterns) {
+                if ($Content -match $pattern) {
+                    return $true
+                }
+            }
+
+            return $false
+        }
+
+        $script:AssertNoAffirmativeSingletonRecovery = {
+            param(
+                [string]$Content,
+                [string]$CommandName
+            )
+
+            $recoveryWindows = [regex]::Matches(
+                $Content,
+                '(?is).{0,120}(?:2-of-3|two-of-three|two of three|pipeline-degraded).{0,120}'
+            )
+
+            foreach ($window in $recoveryWindows) {
+                $window.Value | Should -Match '(?is)\b(?:no|not|never|without|does not|must not|halt-strict|halt strict|halt|stop|instead)\b' -Because "$CommandName must not document 2-of-3 or pipeline-degraded as an available singleton body-load recovery path"
+            }
+        }
     }
 
     It 'keeps exactly the five orchestra-review command files present' {
@@ -209,6 +241,121 @@ Describe 'orchestra-review command contract' {
             foreach ($pattern in $spec.ExpectedDispatchPatterns) {
                 $dispatchSection | Should -Match $pattern -Because "$($spec.Name) must keep its dispatch wording authoritative so carried context cannot silently redefine the review mode or payload contract"
             }
+        }
+    }
+
+    It 'documents body-load recovery for the redundant full-review prosecution passes' {
+        $content = & $script:ReadContent -Path (Join-Path $script:CommandsDirectory 'orchestra-review.md')
+
+        $content | Should -Match '(?is)(?:three|3|redundant).{0,140}(?:Code-Critic\s+)?prosecution.{0,140}passes|(?:Code-Critic\s+)?prosecution.{0,140}(?:three|3|redundant).{0,140}passes' -Because '/orchestra:review must document that the full pipeline uses redundant prosecution passes before 2-of-3 recovery can apply'
+
+        $bodyLoadFailureIsPassFailure = & $script:MatchesAnyPattern -Content $content -Patterns @(
+            '(?is)(?:Code-Critic|prosecution).{0,260}(?:body-load|body load|shared-body|shared body|body).{0,180}(?:fail|failure|failed|missing|malformed|not load|cannot load)',
+            '(?is)(?:body-load|body load|shared-body|shared body|body).{0,180}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:Code-Critic|prosecution)'
+        )
+        $bodyLoadFailureIsPassFailure | Should -BeTrue -Because '/orchestra:review must classify a failed or malformed Code-Critic prosecution body-load as a failed prosecution pass'
+
+        $content | Should -Match '(?is)\bretry\b.{0,80}\bonce\b|\bonce\b.{0,80}\bretry\b' -Because '/orchestra:review must retry a failed or malformed prosecution body-load pass once before degrading'
+        $content | Should -Match '(?is)\bpipeline-degraded\b' -Because '/orchestra:review must make the degraded prosecution path visible'
+        $content | Should -Match '(?is)(?:2-of-3|two-of-three|two of three).{0,200}(?:merged\s+)?prosecution ledger|(?:merged\s+)?prosecution ledger.{0,200}(?:2-of-3|two-of-three|two of three)' -Because '/orchestra:review must continue only with an explicit 2-of-3 merged prosecution ledger when enough prosecution passes remain'
+        $content | Should -Match '(?is)(?:continue|proceed).{0,220}(?:enough passes remain|2-of-3|two-of-three|two of three|remaining passes)' -Because '/orchestra:review must say the pipeline continues only when enough redundant prosecution passes remain'
+    }
+
+    It 'documents halt-strict body-load behavior for composite defense and judge stages' {
+        $compositeSpecs = @(
+            [pscustomobject]@{
+                Name = 'orchestra-review'
+                Path = Join-Path $script:CommandsDirectory 'orchestra-review.md'
+            },
+            [pscustomobject]@{
+                Name = 'orchestra-review-lite'
+                Path = Join-Path $script:CommandsDirectory 'orchestra-review-lite.md'
+            }
+        )
+
+        $stageSpecs = @(
+            [pscustomobject]@{
+                Name         = 'defense'
+                Body         = 'Code-Critic'
+                StagePattern = 'defense'
+            },
+            [pscustomobject]@{
+                Name         = 'judge'
+                Body         = 'Code-Review-Response'
+                StagePattern = 'judge|judgment'
+            }
+        )
+
+        foreach ($command in $compositeSpecs) {
+            $content = & $script:ReadContent -Path $command.Path
+
+            foreach ($stage in $stageSpecs) {
+                $bodyPattern = [regex]::Escape($stage.Body)
+                $strictBodyLoadFailure = & $script:MatchesAnyPattern -Content $content -Patterns @(
+                    "(?is)(?:$($stage.StagePattern)|$bodyPattern).{0,260}(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)",
+                    "(?is)(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:$($stage.StagePattern)|$bodyPattern).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)",
+                    "(?is)(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue).{0,260}(?:$($stage.StagePattern)|$bodyPattern)"
+                )
+                $strictBodyLoadFailure | Should -BeTrue -Because "$($command.Name) must state that composite $($stage.Name) body-load failure halts strict"
+            }
+
+            $singletonRecoveryWindows = [regex]::Matches(
+                $content,
+                '(?is).{0,140}(?:defense|judge|judgment|Code-Review-Response).{0,140}(?:pipeline-degraded|2-of-3|two-of-three|two of three|degradation|degraded).{0,140}|.{0,140}(?:pipeline-degraded|2-of-3|two-of-three|two of three|degradation|degraded).{0,140}(?:defense|judge|judgment|Code-Review-Response).{0,140}'
+            )
+
+            foreach ($window in $singletonRecoveryWindows) {
+                $window.Value | Should -Match '(?is)\b(?:no|not|never|without|does not|must not|only|except|halt-strict|halt strict|halt|stop)\b' -Because "$($command.Name) must not imply that composite defense or judge body-load failures can use degraded prosecution recovery"
+            }
+        }
+    }
+
+    It 'documents halt-strict body-load behavior for singleton review command stages' {
+        $singletonSpecs = @(
+            [pscustomobject]@{
+                Name             = 'orchestra-review-lite'
+                Path             = Join-Path $script:CommandsDirectory 'orchestra-review-lite.md'
+                Stage            = 'prosecution'
+                Body             = 'Code-Critic'
+                SingletonPattern = '(?is)(?:one|single).{0,120}(?:all-perspectives\s+|compact\s+)?prosecution pass|prosecution pass.{0,120}(?:one|single)'
+            },
+            [pscustomobject]@{
+                Name             = 'orchestra-review-prosecute'
+                Path             = Join-Path $script:CommandsDirectory 'orchestra-review-prosecute.md'
+                Stage            = 'prosecution'
+                Body             = 'Code-Critic'
+                SingletonPattern = '(?is)Run only the Code-Critic prosecution stage|single.{0,80}prosecution|prosecution.{0,160}stops before defense and judge'
+            },
+            [pscustomobject]@{
+                Name             = 'orchestra-review-defend'
+                Path             = Join-Path $script:CommandsDirectory 'orchestra-review-defend.md'
+                Stage            = 'defense'
+                Body             = 'Code-Critic'
+                SingletonPattern = '(?is)Run only the Code-Critic defense stage|single.{0,80}defense|defense.{0,160}stops before judge'
+            },
+            [pscustomobject]@{
+                Name             = 'orchestra-review-judge'
+                Path             = Join-Path $script:CommandsDirectory 'orchestra-review-judge.md'
+                Stage            = 'judge|judgment'
+                Body             = 'Code-Review-Response'
+                SingletonPattern = '(?is)Run only the Code-Review-Response judge stage|single.{0,80}(?:judge|judgment)|Use the `Agent` tool with `subagent_type: code-review-response`'
+            }
+        )
+
+        foreach ($spec in $singletonSpecs) {
+            $content = & $script:ReadContent -Path $spec.Path
+            $bodyPattern = [regex]::Escape($spec.Body)
+
+            $content | Should -Match $spec.SingletonPattern -Because "$($spec.Name) must document its stage as a singleton rather than a redundant prosecution set"
+
+            $strictBodyLoadFailure = & $script:MatchesAnyPattern -Content $content -Patterns @(
+                "(?is)(?:$($spec.Stage)|$bodyPattern).{0,260}(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)",
+                "(?is)(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:$($spec.Stage)|$bodyPattern).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue)",
+                "(?is)(?:body-load|body load|shared-body|shared body|body).{0,220}(?:fail|failure|failed|missing|malformed|not load|cannot load).{0,260}(?:halt-strict|halt strict|halt|stop|cannot continue|do not continue).{0,260}(?:$($spec.Stage)|$bodyPattern)"
+            )
+            $strictBodyLoadFailure | Should -BeTrue -Because "$($spec.Name) must make $($spec.Body) $($spec.Stage) body-load failure halt-strict"
+
+            & $script:AssertNoAffirmativeSingletonRecovery -Content $content -CommandName $spec.Name
         }
     }
 
