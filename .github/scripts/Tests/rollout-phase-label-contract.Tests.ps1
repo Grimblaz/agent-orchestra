@@ -93,14 +93,14 @@ Describe 'AC12 rollout phase label contract' {
         }
 
         $script:GetPhaseMatches = {
-            $matches = [System.Collections.Generic.List[object]]::new()
+            $phaseMatches = [System.Collections.Generic.List[object]]::new()
 
             foreach ($relativePath in $script:TypeATargets) {
                 $lines = & $script:ReadDocumentLines -RelativePath $relativePath
                 for ($index = 0; $index -lt $lines.Count; $index++) {
                     $line = $lines[$index]
                     foreach ($match in [regex]::Matches($line, $script:RolloutPhasePattern)) {
-                        $matches.Add([pscustomobject]@{
+                        $phaseMatches.Add([pscustomobject]@{
                                 RelativePath = $relativePath
                                 LineNumber   = $index + 1
                                 Line         = $line
@@ -110,7 +110,7 @@ Describe 'AC12 rollout phase label contract' {
                 }
             }
 
-            return @($matches)
+            return @($phaseMatches)
         }
 
         $script:GetMatchingRule = {

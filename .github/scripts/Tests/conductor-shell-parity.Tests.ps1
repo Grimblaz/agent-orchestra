@@ -8,7 +8,7 @@
 .DESCRIPTION
     Supplements the generic claude-shell-parity contract with Code-Conductor-specific
     checks for discovery, shared-body bijection, Step 0 handshake ordering, shell size,
-    and Phase 3 specialist fallback wording.
+    and current specialist availability wording.
 #>
 
 Describe 'Code-Conductor Claude shell parity contract' {
@@ -187,9 +187,12 @@ Describe 'Code-Conductor Claude shell parity contract' {
         $script:ShellLineCount | Should -BeLessOrEqual 220 -Because 'issue #403 Step 11 locks the Claude shell size ceiling'
     }
 
-    It 'keeps the Phase 3 specialist sentence exact, adds the Phase 4 specialist sentence, and preserves D1 fallback labels' {
-        $script:SpecialistSection | Should -Match 'Phase 3 Claude specialist shells available for Code-Conductor dispatch are `code-critic`, `code-review-response`, `experience-owner`, and `issue-planner`\.' -Because 'the shell must advertise the Phase 3 specialist shells exactly'
-        $script:SpecialistSection | Should -Match 'Phase 4 Claude specialist shells available for Code-Conductor dispatch are `code-smith`, `test-writer`, `refactor-specialist`, and `doc-keeper`\.' -Because 'the shell must advertise the Phase 4 specialist shells exactly'
+    It 'keeps the current specialist availability wording exact and preserves D1 fallback labels' {
+        $currentAvailabilitySentence = 'Code-Conductor can dispatch every currently shipped Claude shell that participates in orchestration: `experience-owner`, `solution-designer`, `issue-planner`, `code-critic`, `code-review-response`, `code-smith`, `test-writer`, `refactor-specialist`, `doc-keeper`, `process-review`, `research-agent`, `specification`, and `ui-iterator`.'
+        $terminalSpecialistSentence = 'Terminal-oriented implementation specialists do not have direct slash-command entry points; Code-Conductor dispatch is their supported Claude entry point.'
+
+        $script:SpecialistSection | Should -Match ([regex]::Escape($currentAvailabilitySentence)) -Because 'the shell must advertise the currently shipped dispatchable Claude shells exactly'
+        $script:SpecialistSection | Should -Match ([regex]::Escape($terminalSpecialistSentence)) -Because 'the shell must document Code-Conductor dispatch as the supported entry point for terminal-oriented implementation specialists'
         $script:SpecialistSection | Should -Match '(?m)^1\. Hand off this step to Copilot, resume in Claude after\s*$' -Because 'D1 fallback option 1 is locked'
         $script:SpecialistSection | Should -Match '(?m)^2\. Attempt inline in the main conversation \(no specialist dispatch\)\s*$' -Because 'D1 fallback option 2 is locked'
         $script:SpecialistSection | Should -Match '(?m)^3\. Pause here - wait for the missing specialist shell to land\s*$' -Because 'D1 fallback option 3 is locked'
