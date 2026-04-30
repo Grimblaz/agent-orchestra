@@ -293,6 +293,7 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
    - **Validation evidence**: run required validation commands from plan/repo instructions and capture pass results for PR body
    - `git push -u origin {branch-name}`
    - Create PR via `github-pull-request/*` tools or `gh pr create`
+   - **Frame credit-ledger (warn-only)**: After PR creation, load `skills/frame-credit-ledger/SKILL.md` and follow its protocol. The hook is warn-only by default; PR creation is never blocked.
    - PR body MUST include: summary, changed files, validation evidence, migration-scan result (migration-type issues only), Review Mode, CE Gate result, adversarial review score table, prosecution depth summary, pipeline metrics, process gaps found (if any), and `Closes #{issue}`
 
 5. **Report Completion**: Summarize work done, link the PR URL, and hand off to user for review
