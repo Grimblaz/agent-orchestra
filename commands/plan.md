@@ -81,31 +81,32 @@ Read agents/Issue-Planner.agent.md and adopt that role for the rest of this conv
 
 ## Inline adversarial-pipeline dispatch
 
-Construct the parent-side environment handshake once per `/plan` invocation for the Code-Critic dispatches, using the schema and inline prose template from `skills/subagent-env-handshake/SKILL.md`:
+For every Code-Critic `Agent` dispatch in this pipeline, construct a fresh parent-side environment handshake immediately before that dispatch using the schema and inline prose template from `skills/subagent-env-handshake/SKILL.md`:
 
-1. Capture live parent-side working-tree state via the `Bash` tool. Run, in order:
+1. Immediately before each Code-Critic prosecution, defense, or retry dispatch, capture live parent-side working-tree state via the `Bash` tool. Run, in order:
    - `git rev-parse HEAD`
    - `git rev-parse --abbrev-ref HEAD`
    - `pwd`
    - `git status --porcelain | tr -d '\r' | (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-12`
-2. If any command exits non-zero (`git` missing, outside a repo, permission error, etc.), skip handshake construction entirely and dispatch the Code-Critic passes without the block. The subagent's Step 0 missing-handshake branch handles the fallback. Do not fabricate placeholder values.
-3. Otherwise, construct the handshake block by copying the SKILL.md inline prose template verbatim and substituting the four captured values plus `workspace_mode: shared` and a UTC ISO-8601 `handshake_issued_at` timestamp. The block must match the schema field-for-field and in canonical order. Do not rename, reorder, or omit fields.
-4. Prepend the handshake block as the first content of each `prompt` parameter passed to `Agent` dispatches with `subagent_type: code-critic` in this pipeline. For the judge dispatch, pass the handshake context only as contextual metadata; do not claim the Code-Review-Response shell verifies Step 0.
+2. If any command exits non-zero (`git` missing, outside a repo, permission error, etc.), skip handshake construction for that dispatch and send the Code-Critic prompt without the block. The subagent's Step 0 missing-handshake branch handles the fallback. Do not fabricate placeholder values.
+3. Otherwise, construct a fresh handshake block by copying the SKILL.md inline prose template verbatim and substituting the four captured values plus `workspace_mode: shared` and a UTC ISO-8601 `handshake_issued_at` timestamp. The block must match the schema field-for-field and in canonical order. Do not rename, reorder, or omit fields.
+4. Prepend that fresh handshake block as the first content of the `prompt` parameter for the current `Agent` dispatch with `subagent_type: code-critic`. Do not reuse or carry forward a single, once-per-invocation, command-entry, entry-time, or earlier handshake across prosecution, defense, or judge dispatches.
+5. Before the Code-Review-Response judge dispatch, live-recapture the same four parent-side values immediately before dispatch and pass them as contextual metadata only. Do not prepend a Step 0 verification handshake block, and do not claim Code-Review-Response verifies Step 0 unless that shell gains Step 0 environment handshake verification in a separate issue.
 
 Before prosecution, emit this visible progress sentence: `Dispatching prosecution x3 in parallel...`
 
 Then dispatch three Code-Critic prosecution passes in one parallel tool-use block. Use lowercase `code-critic` as the dispatch identifier for every prosecution pass:
 
-1. Pass 1: use the `Agent` tool with `subagent_type: code-critic`. Prepend the handshake block when constructed, then prepend `Review mode selector: "Use design review perspectives"`. Include the issue number, issue body, Experience-Owner framing, Solution-Designer output, current draft plan, and project guidance.
-2. Pass 2: use the `Agent` tool with `subagent_type: code-critic`. Prepend the handshake block when constructed, then prepend `Review mode selector: "Use design review perspectives"`. Ask for an independent pass focused on missed implementation prerequisites, CE Gate coverage, persistence, and cross-tool handoff risks.
-3. Pass 3: use the `Agent` tool with `subagent_type: code-critic`. Prepend the handshake block when constructed, then prepend `Review mode selector: "Use product-alignment perspectives"`. Include the issue body, design comment, decision docs, ROADMAP/NEXT-STEPS absence or presence, and project guidance.
+1. Pass 1: use the `Agent` tool with `subagent_type: code-critic`. Immediately before this dispatch, recapture live state and prepend the fresh handshake block when constructed, then prepend `Review mode selector: "Use design review perspectives"`. Include the issue number, issue body, Experience-Owner framing, Solution-Designer output, current draft plan, and project guidance.
+2. Pass 2: use the `Agent` tool with `subagent_type: code-critic`. Immediately before this dispatch, recapture live state and prepend the fresh handshake block when constructed, then prepend `Review mode selector: "Use design review perspectives"`. Ask for an independent pass focused on missed implementation prerequisites, CE Gate coverage, persistence, and cross-tool handoff risks.
+3. Pass 3: use the `Agent` tool with `subagent_type: code-critic`. Immediately before this dispatch, recapture live state and prepend the fresh handshake block when constructed, then prepend `Review mode selector: "Use product-alignment perspectives"`. Include the issue body, design comment, decision docs, ROADMAP/NEXT-STEPS absence or presence, and project guidance.
 
 After all available prosecution passes return, merge and deduplicate findings by same perspective target plus same failure mode, preserving earliest-pass credit. Emit a visible progress signal naming the merged finding count: `Merged prosecution ledger: {count} finding(s).`
 
-Defense: use one `Agent` dispatch with `subagent_type: code-critic`. Prepend the handshake block when constructed, then prepend `Review mode selector: "Use defense review perspectives"` before the merged prosecution ledger and the current draft plan.
+Defense: use one `Agent` dispatch with `subagent_type: code-critic`. Immediately before this dispatch, recapture live state and prepend the fresh handshake block when constructed, then prepend `Review mode selector: "Use defense review perspectives"` before the merged prosecution ledger and the current draft plan.
 
-Judge: use one `Agent` dispatch with `subagent_type: code-review-response`, passing the merged prosecution ledger, defense report, current draft plan, and any handshake block as contextual metadata only. The judge shell owns ruling quality, but this command must not state or imply that Code-Review-Response verifies Step 0.
+Judge: use one `Agent` dispatch with `subagent_type: code-review-response`, passing the merged prosecution ledger, defense report, current draft plan, and freshly captured handshake context as contextual metadata only. The judge shell owns ruling quality, but this command must not state or imply that Code-Review-Response verifies Step 0 unless that shell gains Step 0 environment handshake verification in a separate issue.
 
-Partial-pass recovery: this recovery applies only to the redundant three Code-Critic prosecution passes. If one redundant Code-Critic prosecution pass has a body-load failure, cannot load the shared body, or returns malformed output, retry that pass once with the same prompt and the current handshake block when constructed. If the retry also fails, persist a visible `pipeline-degraded` note naming the failed pass and continue only with the merged 2-of-3 prosecution ledger. Defense and judge are singleton paths: if the Code-Critic defense body-load fails, or if the Code-Review-Response judge body-load fails, halt-strict and stop; do not continue and do not use `pipeline-degraded` or 2-of-3 recovery for those singleton failures.
+Partial-pass recovery: this recovery applies only to the redundant three Code-Critic prosecution passes. If one redundant Code-Critic prosecution pass has a body-load failure, cannot load the shared body, or returns malformed output, retry that pass once with the same substantive prompt and a newly recaptured fresh handshake block when constructed for the retry dispatch. If the retry also fails, persist a visible `pipeline-degraded` note naming the failed pass and continue only with the merged 2-of-3 prosecution ledger. Defense and judge are singleton paths: if the Code-Critic defense body-load fails, or if the Code-Review-Response judge body-load fails, halt-strict and stop; do not continue and do not use `pipeline-degraded` or 2-of-3 recovery for those singleton failures.
 
 ARGUMENTS: $ARGUMENTS

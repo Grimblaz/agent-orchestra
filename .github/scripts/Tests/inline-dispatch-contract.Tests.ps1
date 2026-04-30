@@ -39,11 +39,10 @@ Describe 'inline dispatch contract' {
         $script:ClaudeInlineNoPersistencePattern = '(?is)(offline mode is active).{0,220}(lacks a session-memory write surface|cannot persist).{0,220}(cannot persist|do not claim).{0,220}(local fallback payload).{0,220}(later online run|next online invocation|next online run|recover the GitHub marker|reconstruct the GitHub marker)'
         $script:ClaudeInlineLocalPayloadPathPattern = '/memories/session/first-contact-assessed-\{ID\}\.md'
 
-        $script:GetCanonicalLabelMap = {
+        $script:GetCanonicalLabelYaml = {
             param(
                 [string]$SkillPath,
-                [string]$Heading,
-                [int]$ExpectedCount
+                [string]$Heading
             )
 
             $content = Get-Content -Path $SkillPath -Raw -ErrorAction Stop
@@ -52,12 +51,43 @@ Describe 'inline dispatch contract' {
 
             $match.Success | Should -BeTrue -Because "$SkillPath must publish the $Heading fenced YAML block"
             if (-not $match.Success) {
+                return $null
+            }
+
+            return $match.Groups['yaml'].Value
+        }
+
+        $script:GetYamlScalarValue = {
+            param(
+                [System.Text.RegularExpressions.Match]$LineMatch
+            )
+
+            if ($LineMatch.Groups['single'].Success) {
+                return $LineMatch.Groups['single'].Value
+            }
+
+            if ($LineMatch.Groups['double'].Success) {
+                return $LineMatch.Groups['double'].Value
+            }
+
+            return $LineMatch.Groups['unquoted'].Value
+        }
+
+        $script:GetCanonicalLabelMap = {
+            param(
+                [string]$SkillPath,
+                [string]$Heading,
+                [int]$ExpectedCount
+            )
+
+            $yaml = & $script:GetCanonicalLabelYaml -SkillPath $SkillPath -Heading $Heading
+            if ($null -eq $yaml) {
                 return [ordered]@{}
             }
 
             $labels = [ordered]@{}
             $linePattern = '^\s+(?<key>\w+):\s*(?:''(?<single>[^'']*)''|"(?<double>[^"]*)"|(?<unquoted>\S.*?))\s*$'
-            foreach ($line in ($match.Groups['yaml'].Value -split "`r?`n")) {
+            foreach ($line in ($yaml -split "`r?`n")) {
                 if ($line -match '^\s*$' -or $line -match '^canonical_option_labels:\s*$') {
                     continue
                 }
@@ -68,17 +98,7 @@ Describe 'inline dispatch contract' {
                     continue
                 }
 
-                $value = if ($lineMatch.Groups['single'].Success) {
-                    $lineMatch.Groups['single'].Value
-                }
-                elseif ($lineMatch.Groups['double'].Success) {
-                    $lineMatch.Groups['double'].Value
-                }
-                else {
-                    $lineMatch.Groups['unquoted'].Value
-                }
-
-                $labels[$lineMatch.Groups['key'].Value] = $value
+                $labels[$lineMatch.Groups['key'].Value] = & $script:GetYamlScalarValue -LineMatch $lineMatch
             }
 
             $labels.Count | Should -Be $ExpectedCount -Because "$SkillPath must expose $ExpectedCount canonical labels under $Heading"
@@ -92,18 +112,14 @@ Describe 'inline dispatch contract' {
                 [int]$ExpectedCount
             )
 
-            $content = Get-Content -Path $SkillPath -Raw -ErrorAction Stop
-            $pattern = '(?ms)^' + [regex]::Escape($Heading) + '\s*\r?\n\r?\n```yaml\r?\n(?<yaml>.*?)\r?\n```'
-            $match = [regex]::Match($content, $pattern)
-
-            $match.Success | Should -BeTrue -Because "$SkillPath must publish the $Heading fenced YAML block"
-            if (-not $match.Success) {
+            $yaml = & $script:GetCanonicalLabelYaml -SkillPath $SkillPath -Heading $Heading
+            if ($null -eq $yaml) {
                 return @()
             }
 
             $labels = [System.Collections.Generic.List[string]]::new()
             $linePattern = '^\s*-\s*(?:''(?<single>[^'']*)''|"(?<double>[^"]*)"|(?<unquoted>\S.*?))\s*$'
-            foreach ($line in ($match.Groups['yaml'].Value -split "`r?`n")) {
+            foreach ($line in ($yaml -split "`r?`n")) {
                 if ($line -match '^\s*$' -or $line -match '^canonical_option_labels:\s*$') {
                     continue
                 }
@@ -114,17 +130,7 @@ Describe 'inline dispatch contract' {
                     continue
                 }
 
-                $value = if ($lineMatch.Groups['single'].Success) {
-                    $lineMatch.Groups['single'].Value
-                }
-                elseif ($lineMatch.Groups['double'].Success) {
-                    $lineMatch.Groups['double'].Value
-                }
-                else {
-                    $lineMatch.Groups['unquoted'].Value
-                }
-
-                $labels.Add($value)
+                $labels.Add((& $script:GetYamlScalarValue -LineMatch $lineMatch))
             }
 
             $labels.Count | Should -Be $ExpectedCount -Because "$SkillPath must expose $ExpectedCount canonical labels under $Heading"
@@ -369,6 +375,62 @@ Describe 'inline dispatch contract' {
         $content | Should -Match '(?is)(before each|immediately before each|for each|for every|per-dispatch).{0,180}`?Agent`?.{0,160}dispatch.{0,240}(reconstruct|recapture|capture).{0,220}(HEAD|branch).{0,220}(CWD|dirty)' -Because '/orchestrate must document live handshake reconstruction for each downstream Agent dispatch'
         $content | Should -Match '(?is)((do not|must not).{0,160}(reuse|carry forward).{0,160}(command-entry|entry-time|single).{0,120}handshake|(command-entry|entry-time|single).{0,120}handshake.{0,160}(must not|do not).{0,120}(reuse|carry forward))' -Because '/orchestrate must explicitly reject a single command-entry-captured handshake for downstream Agent calls'
         $content | Should -Not -Match '(?is)\*\*Handshake preamble\*\*.{0,900}subagent_type:\s*code-conductor' -Because '/orchestrate must not keep the old one-shot Code-Conductor subagent handshake preamble'
+    }
+
+    It 'requires /plan to document live Code-Critic handshake recapture at dispatch time' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $liveRecapturePatterns = @(
+            '(?is)(?:before each|immediately before each|for each|for every|per-dispatch).{0,180}(?:Code-Critic\s+)?`?Agent`?.{0,120}dispatch.{0,240}(?:reconstruct|recapture|capture|construct).{0,220}(?:HEAD|parent_head|git rev-parse HEAD).{0,220}(?:branch|parent_branch|git rev-parse --abbrev-ref HEAD).{0,220}(?:CWD|parent_cwd|pwd).{0,220}(?:dirty fingerprint|parent_dirty_fingerprint|git status --porcelain)',
+            '(?is)(?:reconstruct|recapture|capture|construct).{0,220}(?:HEAD|parent_head|git rev-parse HEAD).{0,220}(?:branch|parent_branch|git rev-parse --abbrev-ref HEAD).{0,220}(?:CWD|parent_cwd|pwd).{0,220}(?:dirty fingerprint|parent_dirty_fingerprint|git status --porcelain).{0,260}(?:before each|immediately before each|for each|for every|per-dispatch).{0,180}(?:Code-Critic\s+)?`?Agent`?.{0,120}dispatch'
+        )
+
+        $liveRecaptureDocumented = $false
+        foreach ($pattern in $liveRecapturePatterns) {
+            if ($content -match $pattern) {
+                $liveRecaptureDocumented = $true
+                break
+            }
+        }
+        $liveRecaptureDocumented | Should -BeTrue -Because '/plan must document live recapture of HEAD, branch, CWD, and dirty fingerprint immediately before each Code-Critic dispatch'
+    }
+
+    It 'requires /plan to name fresh Code-Critic handshakes for every prosecution and defense dispatch' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $dispatchStages = @(
+            [pscustomobject]@{ Name = 'Pass 1'; Pattern = '(?is)1\.\s+Pass 1:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' },
+            [pscustomobject]@{ Name = 'Pass 2'; Pattern = '(?is)2\.\s+Pass 2:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' },
+            [pscustomobject]@{ Name = 'Pass 3'; Pattern = '(?is)3\.\s+Pass 3:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' },
+            [pscustomobject]@{ Name = 'Defense'; Pattern = '(?is)Defense:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' }
+        )
+
+        $missingStageNames = @()
+        foreach ($stage in $dispatchStages) {
+            if ($content -notmatch $stage.Pattern) {
+                $missingStageNames += $stage.Name
+            }
+        }
+
+        $missingStageNames | Should -BeNullOrEmpty -Because "/plan must make every Code-Critic prosecution and defense dispatch use a freshly recaptured handshake; missing stages: $($missingStageNames -join ', ')"
+    }
+
+    It 'forbids /plan from documenting a single once-per-invocation pipeline handshake' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $content | Should -Not -Match '(?is)construct.{0,100}parent-side\s+environment\s+handshake.{0,100}once.{0,80}`?/plan`?.{0,80}invocation' -Because '/plan must not say or imply that one handshake is constructed once for the whole command invocation'
+    }
+
+    It 'requires /plan to explicitly reject reusing stale handshakes across pipeline dispatches' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $content | Should -Match '(?is)((do not|must not).{0,160}(reuse|carry forward).{0,160}(single|once-per-invocation|command-entry|entry-time|earlier).{0,140}handshake|(single|once-per-invocation|command-entry|entry-time|earlier).{0,140}handshake.{0,160}(must not|do not).{0,120}(reuse|carry forward))' -Because '/plan must explicitly reject reuse of a single stale handshake across prosecution, defense, or judge dispatches'
+    }
+
+    It 'keeps /plan judge handshake context metadata-only until Code-Review-Response has Step 0 verification' {
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+
+        $content | Should -Match '(?is)Code-Review-Response.{0,180}judge.{0,240}(contextual metadata only|context only).{0,260}(unless|until).{0,180}(shell|Code-Review-Response).{0,180}(Step 0|environment handshake verification).{0,220}(separate issue|separate follow-up|future issue)' -Because '/plan must clarify that judge handshake data is contextual metadata only unless the Code-Review-Response shell gains Step 0 verification in a separate issue'
     }
 
     It 'scopes /plan pipeline-degraded recovery to redundant prosecution body-load pass failures' {

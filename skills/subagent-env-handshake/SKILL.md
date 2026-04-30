@@ -153,6 +153,12 @@ The SKILL exposes two equivalent carriers so both PowerShell and markdown caller
 
 Both forms produce field-identical output for identical inputs. Scenario (f) validates field names and order.
 
+### Per-dispatch recapture policy
+
+Before each downstream `Agent` dispatch that uses this handshake, the parent MUST construct a fresh block by live-recapturing HEAD (`parent_head`), branch (`parent_branch`), CWD (`parent_cwd` via `pwd`), and dirty fingerprint (`parent_dirty_fingerprint`) immediately before that dispatch. Mutable orchestration trees can change between prosecution, defense, judge, and specialist calls, so the parent MUST NOT reuse or carry forward a command-entry, entry-time, single, or earlier handshake for a later `Agent` dispatch.
+
+If a downstream shell does not yet implement Step 0 environment-handshake verification, the parent may pass freshly captured values only as contextual metadata. Do not label that metadata as a verified handshake.
+
 ### Parent-side error handling
 
 If the parent's `git` invocations fail during construction (non-zero exit on `git rev-parse HEAD`, etc.), the parent SHOULD skip handshake construction entirely and dispatch without the block. The subagent's error path takes over at that point — tagging tree-grounded findings `environment-unverified`. The parent is not responsible for emitting the environment-divergence finding; that is the subagent's role on mismatch.
