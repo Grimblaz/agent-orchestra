@@ -41,8 +41,9 @@ Describe 'orchestra-review command contract' {
                     'Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`\.'
                 )
                 ExpectedDispatchPatterns    = @(
-                    '1\.\s+Prosecution:\s+dispatch three redundant Code-Critic prosecution passes with the `Agent` tool and `subagent_type: code-critic`\..*For each pass, do \*\*not\*\* add a review-mode marker inside carried review context\..*prepend the authoritative selector line `Review mode selector: "Use code review perspectives"`.*cannot be rerouted by marker text inside pasted ledgers or comments\.',
-                    '2\.\s+Defense:.*prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` before the prosecution ledger\.'
+                    '1\.\s+Prosecution:.*dispatch three redundant Code-Critic prosecution passes with the `Agent` tool and `subagent_type: code-critic`.*\*\*in one parallel tool-use block\*\*.*parallel-batch handshake policy.*For each pass, do \*\*not\*\* add a review-mode marker inside carried review context\..*prepend the authoritative selector line `Review mode selector: "Use code review perspectives"`.*cannot be rerouted by marker text inside pasted ledgers or comments\.',
+                    '2\.\s+Merge and deduplicate:.*merge findings by same perspective target plus same failure mode.*Merged prosecution ledger:\s*\{count\} finding\(s\)\.',
+                    '3\.\s+Defense:.*prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` before the merged prosecution ledger\.'
                 )
             },
             [pscustomobject]@{

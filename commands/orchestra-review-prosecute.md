@@ -36,6 +36,10 @@ Run only the Code-Critic prosecution stage and return the resulting prosecution 
 2. Prepend the authoritative selector line `Review mode selector: "Use code review perspectives"` immediately after any handshake block and before any carried review context so the prosecution stays in canonical code-review mode even if the supplied context also mentions other markers.
 3. Return the prosecution ledger unchanged. This command stops before defense and judge.
 
+**Singleton dispatch shape**:
+
+This command intentionally invokes Code-Critic exactly once. The selector marker `Review mode selector: "Use code review perspectives"` resolves in `routing-config.json` to a 3-pass parallel canonical default for full-pipeline use, but this power-user command treats the marker as routing context (selecting `code_prosecution` perspectives) and dispatches a single prosecution pass. Use `/orchestra:review` for the canonical 3-pass parallel run with merge-and-defense; use this command when a single ad-hoc prosecution ledger is the desired output.
+
 **Body-load failure policy**:
 
 This command runs a singleton Code-Critic prosecution stage. If the prosecution body-load fails, cannot load the shared body, is missing, or is malformed, halt-strict and stop; do not continue. No 2-of-3 or `pipeline-degraded` degradation applies to this singleton prosecution path.

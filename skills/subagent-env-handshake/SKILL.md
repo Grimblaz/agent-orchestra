@@ -159,6 +159,14 @@ Before each downstream `Agent` dispatch that uses this handshake, the parent MUS
 
 If a downstream shell does not yet implement Step 0 environment-handshake verification, the parent may pass freshly captured values only as contextual metadata. Do not label that metadata as a verified handshake.
 
+### Parallel-batch dispatch
+
+When a parent emits multiple `Agent` calls in one parallel tool-use block (for example `commands/plan.md` and `commands/orchestra-review.md` prosecution × 3), per-dispatch recapture is satisfied by a **single live recapture immediately before the parallel block**, with one handshake block constructed per dispatch from those captured values. Each dispatch's handshake block carries its own UTC ISO-8601 `handshake_issued_at` timestamp; the four parent-side fields (`parent_head`, `parent_branch`, `parent_cwd`, `parent_dirty_fingerprint`) are field-identical across the batch.
+
+This is consistent with the per-dispatch policy because no tree mutation can occur between members of one parallel tool-use block — the dispatches fire as a single batch with no interleaved `Bash` or `Edit` calls. The "immediately before that dispatch" requirement resolves to "immediately before the parallel emit" since that is the most recent state the parent could have observed before any member of the batch ran.
+
+The single-capture-per-batch rule does NOT extend across pipeline stages. Sequential stages (e.g. parallel prosecution → defense → judge in `/orchestra:review`) MUST recapture between stages because the tree may have mutated. The single-capture-per-batch rule applies only within one parallel tool-use block.
+
 ### Parent-side error handling
 
 If the parent's `git` invocations fail during construction (non-zero exit on `git rev-parse HEAD`, etc.), the parent SHOULD skip handshake construction entirely and dispatch without the block. The subagent's error path takes over at that point — tagging tree-grounded findings `environment-unverified`. The parent is not responsible for emitting the environment-divergence finding; that is the subagent's role on mismatch.
