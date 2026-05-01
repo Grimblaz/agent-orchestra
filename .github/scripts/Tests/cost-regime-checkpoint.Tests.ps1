@@ -254,12 +254,12 @@ Describe 'Add-RegimeCheckpoint' {
 Describe 'cost-regime-checkpoint.ps1 CLI' {
 
     BeforeAll {
-        # Dot-source rolling-history lib so we can override Get-CostRollingHistory
-        $rollingHistoryLib = Join-Path $script:RepoRoot '.github/scripts/lib/cost-rolling-history.ps1'
-        if (Test-Path $rollingHistoryLib) {
-            . $rollingHistoryLib
-        }
-        # Dot-source core lib (already done in outer BeforeAll if exists)
+        # Dot-source ONLY the core lib here — Invoke-CostRegimeCheckpoint
+        # calls Get-CostRollingHistory by name, and we want lookup to resolve
+        # to the BeforeEach global mock (below) rather than the real fetcher.
+        # Dot-sourcing cost-rolling-history.ps1 here would put the real
+        # function in script scope and shadow the global mock, causing the
+        # tests to actually hit GitHub (or its timeout fallback).
         if (Test-Path $script:CoreLib) {
             . $script:CoreLib
         }
@@ -271,10 +271,10 @@ Describe 'cost-regime-checkpoint.ps1 CLI' {
         $script:TmpYaml = Join-Path $script:TmpDir 'cost-regime-checkpoints.yaml'
         $script:TmpCache = Join-Path $script:TmpDir 'cost-rolling-history.json'
 
-        # Install minimal mock for Get-CostRollingHistory.
-        # NOTE: the CLI tests invoke pwsh -File as a subprocess, so this in-process
-        # mock is not used by those tests. It is retained here for any future
-        # in-process test variants.
+        # Install in-process mock for Get-CostRollingHistory. The tests below
+        # call Invoke-CostRegimeCheckpoint directly (dot-source pattern), so
+        # this global override shadows the real fetcher and lets the tests
+        # exercise the CLI flow without network or git-remote dependencies.
         function global:Get-CostRollingHistory {
             param(
                 [int]$Limit = 30,
@@ -323,16 +323,17 @@ Describe 'cost-regime-checkpoint.ps1 CLI' {
     }
 
     It 'produces a correctly-shaped YAML entry (round-trip parse)' {
-        if (-not (Test-Path $script:CliScript)) {
-            Set-ItResult -Skipped -Because 'CLI script not found (RED phase)'
+        if (-not (Get-Command Invoke-CostRegimeCheckpoint -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Invoke-CostRegimeCheckpoint not loaded'
             return
         }
 
-        & pwsh -NoProfile -NonInteractive -File $script:CliScript `
+        Invoke-CostRegimeCheckpoint `
             -Reason 'post-#469 pre-flight reduction' `
             -SubIssue '#469' `
             -CheckpointsPath $script:TmpYaml `
-            -CacheFilePath $script:TmpCache
+            -CacheFilePath $script:TmpCache `
+            -RepoRoot $script:RepoRoot 6> $null
 
         Test-Path $script:TmpYaml | Should -Be $true
 
@@ -341,49 +342,47 @@ Describe 'cost-regime-checkpoint.ps1 CLI' {
         $content | Should -Match 'cp-'
         $content | Should -Match 'post-#469 pre-flight reduction'
         $content | Should -Match '#469'
-        # Should have timestamp field
         $content | Should -Match 'timestamp:'
-        # Should have metrics section
         $content | Should -Match 'metrics:'
-        # Should have exclusions section
         $content | Should -Match 'exclusions:'
     }
 
     It 'cache-bust ordering: cache deleted before capture' {
-        if (-not (Test-Path $script:CliScript)) {
-            Set-ItResult -Skipped -Because 'CLI script not found (RED phase)'
+        if (-not (Get-Command Invoke-CostRegimeCheckpoint -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Invoke-CostRegimeCheckpoint not loaded'
             return
         }
 
-        # Pre-create a fake cache file so we can verify it gets deleted
+        # Pre-create a fake cache file so we can verify the function deletes it
         '{"stale": true}' | Set-Content -Path $script:TmpCache -Encoding UTF8
         Test-Path $script:TmpCache | Should -Be $true
 
-        & pwsh -NoProfile -NonInteractive -File $script:CliScript `
+        Invoke-CostRegimeCheckpoint `
             -Reason 'cache bust test' `
             -SubIssue '#469' `
             -CheckpointsPath $script:TmpYaml `
-            -CacheFilePath $script:TmpCache
+            -CacheFilePath $script:TmpCache `
+            -RepoRoot $script:RepoRoot 6> $null
 
-        # The CLI must delete the cache file before calling Get-CostRollingHistory.
+        # The function must delete the cache file before calling Get-CostRollingHistory.
         # After the run, the cache may or may not exist (the mock doesn't write one),
-        # but the checkpoint YAML should have been written — proving the CLI ran.
-        Test-Path $script:TmpYaml | Should -Be $true -Because 'CLI should have created the checkpoint file'
+        # but the checkpoint YAML should have been written — proving the flow ran.
+        Test-Path $script:TmpYaml | Should -Be $true -Because 'function should have created the checkpoint file'
     }
 
     It '-SubIssue flag filters that sub-issue from rolling history' {
-        if (-not (Test-Path $script:CliScript)) {
-            Set-ItResult -Skipped -Because 'CLI script not found (RED phase)'
+        if (-not (Get-Command Invoke-CostRegimeCheckpoint -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Invoke-CostRegimeCheckpoint not loaded'
             return
         }
 
-        & pwsh -NoProfile -NonInteractive -File $script:CliScript `
+        Invoke-CostRegimeCheckpoint `
             -Reason 'sub-issue filter test' `
             -SubIssue '#469' `
             -CheckpointsPath $script:TmpYaml `
-            -CacheFilePath $script:TmpCache
+            -CacheFilePath $script:TmpCache `
+            -RepoRoot $script:RepoRoot 6> $null
 
-        # The checkpoint YAML should exist and contain metrics
         Test-Path $script:TmpYaml | Should -Be $true
         $content = Get-Content -Path $script:TmpYaml -Raw
         # The exclusions block should reference #469
@@ -392,15 +391,16 @@ Describe 'cost-regime-checkpoint.ps1 CLI' {
     }
 
     It '-ExcludeMostRecent defaults to 1 (skips most recent merged PR)' {
-        if (-not (Test-Path $script:CliScript)) {
-            Set-ItResult -Skipped -Because 'CLI script not found (RED phase)'
+        if (-not (Get-Command Invoke-CostRegimeCheckpoint -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Invoke-CostRegimeCheckpoint not loaded'
             return
         }
 
-        & pwsh -NoProfile -NonInteractive -File $script:CliScript `
+        Invoke-CostRegimeCheckpoint `
             -Reason 'exclude-most-recent default test' `
             -CheckpointsPath $script:TmpYaml `
-            -CacheFilePath $script:TmpCache
+            -CacheFilePath $script:TmpCache `
+            -RepoRoot $script:RepoRoot 6> $null
 
         Test-Path $script:TmpYaml | Should -Be $true
         $content = Get-Content -Path $script:TmpYaml -Raw

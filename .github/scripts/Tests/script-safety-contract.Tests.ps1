@@ -77,7 +77,6 @@ Describe 'script safety contract' {
         It 'script safety: test files must not spawn child pwsh processes (use dot-source + in-process call pattern)' {
             $allowlist = @(
                 'branch-authority-gate.Tests.ps1',
-                'cost-regime-checkpoint.Tests.ps1',   # CLI integration tests verify param block and exit-code behavior of cost-regime-checkpoint.ps1; refactor to dot-source pattern is tracked separately
                 'script-safety-contract.Tests.ps1',   # self-excluded: this file contains the literal '& pwsh' in its own scan pattern, which would cause a false-positive match
                 'session-cleanup-detector.Tests.ps1'
             )
