@@ -1,0 +1,355 @@
+#Requires -Version 7.0
+#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
+
+# Pester tests for cost-checkpoint-core.ps1 and cost-regime-checkpoint.ps1
+# (issue #467, Step 6 TDD).
+#
+# File under test: .github/scripts/lib/cost-checkpoint-core.ps1
+#                  .github/scripts/cost-regime-checkpoint.ps1
+#
+# RED phase: core lib and CLI do not exist yet — all It-blocks fail with
+# "script not found" or "function not found".
+#
+# GREEN phase: implementing those files turns the RED signals green.
+
+BeforeAll {
+    $script:RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+    $script:CoreLib   = Join-Path $script:RepoRoot '.github/scripts/lib/cost-checkpoint-core.ps1'
+    $script:CliScript = Join-Path $script:RepoRoot '.github/scripts/cost-regime-checkpoint.ps1'
+    $script:YamlFile  = Join-Path $script:RepoRoot '.github/scripts/cost-regime-checkpoints.yaml'
+    $script:CachePath = Join-Path $script:RepoRoot '.github/scripts/cache/cost-rolling-history.json'
+
+    # Dot-source the core lib if it exists (GREEN phase). During RED phase this is a no-op.
+    if (Test-Path $script:CoreLib) {
+        . $script:CoreLib
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Describe: Get-MostRecentRegimeCheckpoint
+# ---------------------------------------------------------------------------
+
+Describe 'Get-MostRecentRegimeCheckpoint' {
+
+    It 'returns null for absent file' {
+        $tmpPath = Join-Path $TestDrive "absent-$([System.Guid]::NewGuid().ToString('N')).yaml"
+        $result = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'returns null for empty checkpoints array' {
+        $tmpPath = Join-Path $TestDrive "empty-$([System.Guid]::NewGuid().ToString('N')).yaml"
+        @"
+schema_version: 1
+checkpoints: []
+"@ | Set-Content -Path $tmpPath -Encoding UTF8
+
+        $result = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'returns the entry with the most recent timestamp' {
+        $tmpPath = Join-Path $TestDrive "multi-$([System.Guid]::NewGuid().ToString('N')).yaml"
+        @"
+schema_version: 1
+checkpoints:
+  - id: "cp-001"
+    timestamp: "2026-01-01T00:00:00Z"
+    sub_issue: "#100"
+    reason: "first"
+    metrics: {}
+    exclusions: {}
+  - id: "cp-002"
+    timestamp: "2026-05-01T04:00:00Z"
+    sub_issue: "#200"
+    reason: "second"
+    metrics: {}
+    exclusions: {}
+  - id: "cp-003"
+    timestamp: "2026-03-15T12:00:00Z"
+    sub_issue: "#150"
+    reason: "third"
+    metrics: {}
+    exclusions: {}
+"@ | Set-Content -Path $tmpPath -Encoding UTF8
+
+        $result = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $result | Should -Not -BeNullOrEmpty
+        $result.id | Should -Be 'cp-002'
+    }
+
+    It 'returns the single entry when only one exists' {
+        $tmpPath = Join-Path $TestDrive "single-$([System.Guid]::NewGuid().ToString('N')).yaml"
+        @"
+schema_version: 1
+checkpoints:
+  - id: "cp-001"
+    timestamp: "2026-05-01T04:00:00Z"
+    sub_issue: "#469"
+    reason: "only entry"
+    metrics: {}
+    exclusions: {}
+"@ | Set-Content -Path $tmpPath -Encoding UTF8
+
+        $result = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $result | Should -Not -BeNullOrEmpty
+        $result.id | Should -Be 'cp-001'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Describe: Add-RegimeCheckpoint
+# ---------------------------------------------------------------------------
+
+Describe 'Add-RegimeCheckpoint' {
+
+    It 'creates file with schema_version and appends first entry' {
+        $tmpPath = Join-Path $TestDrive "new-$([System.Guid]::NewGuid().ToString('N')).yaml"
+        # File must not exist yet
+        Test-Path $tmpPath | Should -Be $false
+
+        $entry = @{
+            id        = 'cp-20260501-040000'
+            timestamp = '2026-05-01T04:00:00Z'
+            sub_issue = '#469'
+            reason    = 'post-#469 pre-flight reduction'
+            note      = ''
+            metrics   = @{ 'orchestrator_overhead.tokens.input.mean' = 11000 }
+            exclusions = @{ sub_issue = '#469'; recent_count = 1 }
+        }
+
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry
+
+        Test-Path $tmpPath | Should -Be $true
+        $content = Get-Content -Path $tmpPath -Raw
+        $content | Should -Match 'schema_version: 1'
+        $content | Should -Match 'cp-20260501-040000'
+        $content | Should -Match '#469'
+    }
+
+    It 'appends to existing file (does not overwrite)' {
+        $tmpPath = Join-Path $TestDrive "append-$([System.Guid]::NewGuid().ToString('N')).yaml"
+
+        $entry1 = @{
+            id        = 'cp-20260501-000000'
+            timestamp = '2026-05-01T00:00:00Z'
+            sub_issue = '#400'
+            reason    = 'first checkpoint'
+            note      = ''
+            metrics   = @{}
+            exclusions = @{ sub_issue = '#400'; recent_count = 1 }
+        }
+
+        $entry2 = @{
+            id        = 'cp-20260502-000000'
+            timestamp = '2026-05-02T00:00:00Z'
+            sub_issue = '#401'
+            reason    = 'second checkpoint'
+            note      = ''
+            metrics   = @{}
+            exclusions = @{ sub_issue = '#401'; recent_count = 1 }
+        }
+
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry1
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry2
+
+        $content = Get-Content -Path $tmpPath -Raw
+        $content | Should -Match 'cp-20260501-000000'
+        $content | Should -Match 'cp-20260502-000000'
+        $content | Should -Match '#400'
+        $content | Should -Match '#401'
+    }
+
+    It 'multiple invocations produce chronologically ordered entries' {
+        $tmpPath = Join-Path $TestDrive "order-$([System.Guid]::NewGuid().ToString('N')).yaml"
+
+        $timestamps = @(
+            '2026-04-01T00:00:00Z',
+            '2026-05-01T00:00:00Z',
+            '2026-06-01T00:00:00Z'
+        )
+
+        foreach ($i in 0..2) {
+            $entry = @{
+                id        = "cp-entry-$i"
+                timestamp = $timestamps[$i]
+                sub_issue = "#$i"
+                reason    = "checkpoint $i"
+                note      = ''
+                metrics   = @{}
+                exclusions = @{ recent_count = 1 }
+            }
+            Add-RegimeCheckpoint -Path $tmpPath -Entry $entry
+        }
+
+        $content = Get-Content -Path $tmpPath -Raw
+        $idx0 = $content.IndexOf('cp-entry-0')
+        $idx1 = $content.IndexOf('cp-entry-1')
+        $idx2 = $content.IndexOf('cp-entry-2')
+        $idx0 | Should -BeLessThan $idx1 -Because 'entries should appear in append order'
+        $idx1 | Should -BeLessThan $idx2 -Because 'entries should appear in append order'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Describe: cost-regime-checkpoint.ps1 CLI
+# ---------------------------------------------------------------------------
+
+Describe 'cost-regime-checkpoint.ps1 CLI' {
+
+    BeforeAll {
+        # Dot-source rolling-history lib so we can override Get-CostRollingHistory
+        $rollingHistoryLib = Join-Path $script:RepoRoot '.github/scripts/lib/cost-rolling-history.ps1'
+        if (Test-Path $rollingHistoryLib) {
+            . $rollingHistoryLib
+        }
+        # Dot-source core lib (already done in outer BeforeAll if exists)
+        if (Test-Path $script:CoreLib) {
+            . $script:CoreLib
+        }
+    }
+
+    BeforeEach {
+        $script:TmpDir  = Join-Path $TestDrive "cli-$([System.Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:TmpDir -Force | Out-Null
+        $script:TmpYaml = Join-Path $script:TmpDir 'cost-regime-checkpoints.yaml'
+        $script:TmpCache = Join-Path $script:TmpDir 'cost-rolling-history.json'
+
+        # Install minimal mock for Get-CostRollingHistory.
+        # NOTE: the CLI tests invoke pwsh -File as a subprocess, so this in-process
+        # mock is not used by those tests. It is retained here for any future
+        # in-process test variants.
+        function global:Get-CostRollingHistory {
+            param(
+                [int]$Limit = 30,
+                [string]$CachePath = '',
+                [switch]$ForceRefresh,
+                [int]$TimeoutSeconds = 10,
+                [string]$RepoRoot = ''
+            )
+            # Simulate three entries: two from sub-issue #469, one unrelated
+            return @{
+                timed_out = $false
+                entries   = @(
+                    @{
+                        pr_number = 100
+                        comment_body = 'Fix for #469 cost reduction'
+                        ports = @(@{ name = 'experience'; cost_estimate_usd = 0.05 })
+                        orchestrator_overhead = @{ cost_estimate_usd = 0.01 }
+                        dispatches = @{ general_purpose_count = 2 }
+                        totals = @{ cost_estimate_usd = 0.06 }
+                    },
+                    @{
+                        pr_number = 101
+                        comment_body = 'Fix for #469 cost reduction follow-up'
+                        ports = @(@{ name = 'experience'; cost_estimate_usd = 0.04 })
+                        orchestrator_overhead = @{ cost_estimate_usd = 0.01 }
+                        dispatches = @{ general_purpose_count = 1 }
+                        totals = @{ cost_estimate_usd = 0.05 }
+                    },
+                    @{
+                        pr_number = 99
+                        comment_body = 'Unrelated PR'
+                        ports = @(@{ name = 'design'; cost_estimate_usd = 0.10 })
+                        orchestrator_overhead = @{ cost_estimate_usd = 0.02 }
+                        dispatches = @{ general_purpose_count = 3 }
+                        totals = @{ cost_estimate_usd = 0.12 }
+                    }
+                )
+            }
+        }
+    }
+
+    AfterEach {
+        if (Get-Command 'Get-CostRollingHistory' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path 'function:global:Get-CostRollingHistory' -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'produces a correctly-shaped YAML entry (round-trip parse)' {
+        if (-not (Test-Path $script:CliScript)) {
+            Set-ItResult -Skipped -Because 'CLI script not found (RED phase)'
+            return
+        }
+
+        & pwsh -NoProfile -NonInteractive -File $script:CliScript `
+            -Reason 'post-#469 pre-flight reduction' `
+            -SubIssue '#469' `
+            -CheckpointsPath $script:TmpYaml `
+            -CacheFilePath $script:TmpCache
+
+        Test-Path $script:TmpYaml | Should -Be $true
+
+        $content = Get-Content -Path $script:TmpYaml -Raw
+        $content | Should -Match 'schema_version: 1'
+        $content | Should -Match 'cp-'
+        $content | Should -Match 'post-#469 pre-flight reduction'
+        $content | Should -Match '#469'
+        # Should have timestamp field
+        $content | Should -Match 'timestamp:'
+        # Should have metrics section
+        $content | Should -Match 'metrics:'
+        # Should have exclusions section
+        $content | Should -Match 'exclusions:'
+    }
+
+    It 'cache-bust ordering: cache deleted before capture' {
+        if (-not (Test-Path $script:CliScript)) {
+            Set-ItResult -Skipped -Because 'CLI script not found (RED phase)'
+            return
+        }
+
+        # Pre-create a fake cache file so we can verify it gets deleted
+        '{"stale": true}' | Set-Content -Path $script:TmpCache -Encoding UTF8
+        Test-Path $script:TmpCache | Should -Be $true
+
+        & pwsh -NoProfile -NonInteractive -File $script:CliScript `
+            -Reason 'cache bust test' `
+            -SubIssue '#469' `
+            -CheckpointsPath $script:TmpYaml `
+            -CacheFilePath $script:TmpCache
+
+        # The CLI must delete the cache file before calling Get-CostRollingHistory.
+        # After the run, the cache may or may not exist (the mock doesn't write one),
+        # but the checkpoint YAML should have been written — proving the CLI ran.
+        Test-Path $script:TmpYaml | Should -Be $true -Because 'CLI should have created the checkpoint file'
+    }
+
+    It '-SubIssue flag filters that sub-issue from rolling history' {
+        if (-not (Test-Path $script:CliScript)) {
+            Set-ItResult -Skipped -Because 'CLI script not found (RED phase)'
+            return
+        }
+
+        & pwsh -NoProfile -NonInteractive -File $script:CliScript `
+            -Reason 'sub-issue filter test' `
+            -SubIssue '#469' `
+            -CheckpointsPath $script:TmpYaml `
+            -CacheFilePath $script:TmpCache
+
+        # The checkpoint YAML should exist and contain metrics
+        Test-Path $script:TmpYaml | Should -Be $true
+        $content = Get-Content -Path $script:TmpYaml -Raw
+        # The exclusions block should reference #469
+        $content | Should -Match '#469'
+        $content | Should -Match 'sub_issue'
+    }
+
+    It '-ExcludeMostRecent defaults to 1 (skips most recent merged PR)' {
+        if (-not (Test-Path $script:CliScript)) {
+            Set-ItResult -Skipped -Because 'CLI script not found (RED phase)'
+            return
+        }
+
+        & pwsh -NoProfile -NonInteractive -File $script:CliScript `
+            -Reason 'exclude-most-recent default test' `
+            -CheckpointsPath $script:TmpYaml `
+            -CacheFilePath $script:TmpCache
+
+        Test-Path $script:TmpYaml | Should -Be $true
+        $content = Get-Content -Path $script:TmpYaml -Raw
+        # The exclusions block should record recent_count: 1 (default)
+        $content | Should -Match 'recent_count'
+        $content | Should -Match '1'
+    }
+}

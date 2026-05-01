@@ -3,12 +3,14 @@
 .SYNOPSIS
     Pure-logic library for the frame credit-ledger pre-PR warn hook (issue #429).
 
-    Exposes five functions:
-      - Read-PRMetricsBlock             : parse a pipeline-metrics v4 marker out of a PR body
-      - Get-PortFiles                   : enumerate frame/ports/*.yaml as objects
-      - Resolve-PortStatus              : classify a single port given adapters + credit
-      - Compose-Comment                 : render the warn-mode markdown report
-      - Compose-PreV4ShortCircuitComment: render the literal pre-v4 short-circuit text
+    Exposes six functions:
+      - Read-PRMetricsBlock               : parse a pipeline-metrics v4 marker out of a PR body
+      - Get-PortFiles                     : enumerate frame/ports/*.yaml as objects
+      - Resolve-PortStatus                : classify a single port given adapters + credit
+      - Compose-Comment                   : render the warn-mode markdown report
+      - Compose-CommentWithCostPattern    : wrapper around Compose-Comment that appends the
+                                           cost telemetry section (issue #467) when non-empty
+      - Compose-PreV4ShortCircuitComment  : render the literal pre-v4 short-circuit text
 
     No `gh` calls, no network, no filesystem writes outside reading the ports dir.
 #>
@@ -566,6 +568,22 @@ function Compose-Comment {
     [void]$sb.AppendLine('(Hook ran in `warn` mode; PR creation was not blocked.)')
 
     return $sb.ToString()
+}
+
+function Compose-CommentWithCostPattern {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$MarkerToken,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$PortReports,
+        [AllowEmptyString()][string]$CostSection = ''
+    )
+    # 1. Call Compose-Comment to get the port-coverage section
+    $portCoverageBody = Compose-Comment -MarkerToken $MarkerToken -PortReports $PortReports
+    # 2. Append cost section if non-empty
+    if ([string]::IsNullOrWhiteSpace($CostSection)) {
+        return $portCoverageBody
+    }
+    return $portCoverageBody + "`n`n" + $CostSection
 }
 
 function Compose-PreV4ShortCircuitComment {
