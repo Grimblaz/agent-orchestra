@@ -153,4 +153,55 @@ Describe 'Find-OrUpsertComment' {
             $script:lastPatchArgs | Should -Not -BeNullOrEmpty
         }
     }
+
+    Context 'GraphQL node ID handling' {
+        It 'extracts numeric REST id from comment url when id is a GraphQL node id (IC_kwDO...)' {
+            $script:mockComments = @(
+                @{
+                    id   = 'IC_kwDOQkYn5M8AAAABA91Ixg'
+                    url  = 'https://github.com/Grimblaz/agent-orchestra/issues/484#issuecomment-4359801030'
+                    body = '<!-- frame-credit-ledger-484 --> old body'
+                }
+            )
+            $url = Find-OrUpsertComment -Type pr -Number 484 -Marker '<!-- frame-credit-ledger-484 -->' -Body 'new body'
+            $script:lastPatchArgs | Should -Not -BeNullOrEmpty
+            ($script:lastPatchArgs -join ' ') | Should -Match 'comments/4359801030'
+            $script:lastPostArgs | Should -BeNullOrEmpty
+        }
+
+        It 'falls back to POST when GraphQL node id has no resolvable url' {
+            $script:mockComments = @(
+                @{
+                    id   = 'IC_kwDOQkYn5M8AAAABA91Ixg'
+                    body = '<!-- frame-credit-ledger-484 --> old body'
+                }
+            )
+            $url = Find-OrUpsertComment -Type pr -Number 484 -Marker '<!-- frame-credit-ledger-484 -->' -Body 'new body'
+            $script:lastPostArgs | Should -Not -BeNullOrEmpty
+            $script:lastPatchArgs | Should -BeNullOrEmpty
+        }
+
+        It 'picks the earliest numeric REST id when multiple GraphQL-id comments match' {
+            $script:mockComments = @(
+                @{
+                    id   = 'IC_kwDO111'
+                    url  = 'https://github.com/Grimblaz/agent-orchestra/issues/484#issuecomment-300'
+                    body = '<!-- frame-credit-ledger-484 --> third'
+                },
+                @{
+                    id   = 'IC_kwDO222'
+                    url  = 'https://github.com/Grimblaz/agent-orchestra/issues/484#issuecomment-100'
+                    body = '<!-- frame-credit-ledger-484 --> first'
+                },
+                @{
+                    id   = 'IC_kwDO333'
+                    url  = 'https://github.com/Grimblaz/agent-orchestra/issues/484#issuecomment-200'
+                    body = '<!-- frame-credit-ledger-484 --> second'
+                }
+            )
+            $url = Find-OrUpsertComment -Type pr -Number 484 -Marker '<!-- frame-credit-ledger-484 -->' -Body 'new'
+            $script:lastPatchArgs | Should -Not -BeNullOrEmpty
+            ($script:lastPatchArgs -join ' ') | Should -Match 'comments/100'
+        }
+    }
 }
