@@ -48,6 +48,7 @@ VS Code 1.110 renamed the questioning tool from `ask_questions` to `vscode/askQu
 |------|--------|
 | `.github/agents/Code-Conductor.agent.md` | Added `vscode/askQuestions` as first entry in tools frontmatter; replaced all 24 bare references; added `## Context Management for Long Sessions` section with `/compact` guidance |
 | `.github/agents/Solution-Designer.agent.md` | Added `"vscode/askQuestions"` to tools frontmatter; added `## Questioning Policy (Mandatory)` section with zero-tolerance pattern |
+<!-- Resolved by #481: Questioning Policy removed from agent bodies; judgment guidance now shared via upstream-onboarding skill -->
 | `.github/agents/Code-Review-Response.agent.md` | Added `"vscode/askQuestions"` as first entry in tools frontmatter |
 | `.github/skills/code-review-intake/SKILL.md` | Current home of the GitHub review intake protocol (migrated from the former instruction file) |
 | `.github/skills/parallel-execution/SKILL.md` | 1 reference replaced |

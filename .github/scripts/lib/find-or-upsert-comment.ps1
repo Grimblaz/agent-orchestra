@@ -120,12 +120,35 @@ function Find-OrUpsertComment {
         return ($postOutput | Out-String).Trim()
     }
 
-    # 1+ matches: pick lowest id, warn on duplicates.
-    $sorted = @($matchedComments | Sort-Object -Property { [int]$_.id })
+    # 1+ matches: pick lowest REST (numeric) id, warn on duplicates.
+    # gh issue view --json comments returns GraphQL node IDs (e.g. IC_kwDO...) in
+    # the `id` field, not the numeric REST comment ID that the PATCH endpoint
+    # requires.  Extract the REST ID from the comment's `url` field when present
+    # (the URL always ends in #issuecomment-<numeric-id>), falling back to a
+    # direct [int] cast for callers that supply pre-resolved numeric IDs.
+    function script:Get-RestCommentId([object]$c) {
+        if ($c.url -and ($c.url -match '#issuecomment-(\d+)$')) { return [long]$Matches[1] }
+        try { return [long]$c.id } catch { return $null }
+    }
+
+    $sorted = @($matchedComments |
+            Where-Object { $null -ne (script:Get-RestCommentId $_) } |
+            Sort-Object -Property { script:Get-RestCommentId $_ })
+    if ($sorted.Count -eq 0) {
+        [Console]::Error.WriteLine("Find-OrUpsertComment: matched comment(s) have no resolvable REST id; posting new comment.")
+        $verb = if ($Type -eq 'pr') { 'pr' } else { 'issue' }
+        $postOutput = & gh $verb comment $Number --body $Body 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine("Find-OrUpsertComment: gh $verb comment failed (exit $LASTEXITCODE)")
+            return $null
+        }
+        return ($postOutput | Out-String).Trim()
+    }
     $target = $sorted[0]
+    $targetRestId = script:Get-RestCommentId $target
     if ($sorted.Count -gt 1) {
-        $dupIds = ($sorted | Select-Object -Skip 1 | ForEach-Object { $_.id }) -join ', '
-        [Console]::Error.WriteLine("Find-OrUpsertComment: multiple comments match marker '$Marker' (duplicates: $dupIds); patching earliest id $($target.id)")
+        $dupIds = ($sorted | Select-Object -Skip 1 | ForEach-Object { script:Get-RestCommentId $_ }) -join ', '
+        [Console]::Error.WriteLine("Find-OrUpsertComment: multiple comments match marker '$Marker' (duplicates: $dupIds); patching earliest id $targetRestId")
     }
 
     if (-not ($owner -and $repo)) {
@@ -133,10 +156,28 @@ function Find-OrUpsertComment {
         return $null
     }
 
-    $patchPath = "repos/$owner/$repo/issues/comments/$($target.id)"
-    $patchOutput = & gh api -X PATCH $patchPath -f "body=$Body" 2>$null
+    $patchPath = "repos/$owner/$repo/issues/comments/$targetRestId"
+    # Fix Pass3-F1: pass body via JSON file on stdin instead of `-f "body=$Body"`.
+    # The -f form packs the entire payload into a single argv element, which on
+    # Windows hits the 32K CreateProcess argv limit for large cost-pattern
+    # ledgers (multi-KB markdown table + embedded YAML). The `--input -` form
+    # streams the JSON body via stdin and is unaffected by argv length limits.
+    # Also surface the body length on failure so silent fail-open at large
+    # payloads is observable.
+    $patchTempFile = $null
+    try {
+        $patchTempFile = [System.IO.Path]::GetTempFileName()
+        $patchPayload = @{ body = $Body } | ConvertTo-Json -Depth 4 -Compress
+        Set-Content -LiteralPath $patchTempFile -Value $patchPayload -Encoding UTF8 -NoNewline
+        $patchOutput = & gh api -X PATCH $patchPath --input $patchTempFile 2>$null
+    }
+    finally {
+        if ($null -ne $patchTempFile -and (Test-Path -LiteralPath $patchTempFile)) {
+            Remove-Item -LiteralPath $patchTempFile -Force -ErrorAction SilentlyContinue
+        }
+    }
     if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("Find-OrUpsertComment: gh api PATCH $patchPath failed (exit $LASTEXITCODE)")
+        [Console]::Error.WriteLine("Find-OrUpsertComment: gh api PATCH $patchPath failed (exit $LASTEXITCODE; body_length_chars=$($Body.Length))")
         return $null
     }
 
