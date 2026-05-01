@@ -103,6 +103,17 @@ function script:ConvertFrom-CostPatternYaml {
                         if ($subLine -match '^\s+prompt_size_chars\s*:\s*(.+)$') {
                             $currentPort['prompt_size_chars'] = [int]$Matches[1].Trim()
                         }
+                        # cache_read_hit_ratio (Fix Pass1-F1: per-port cache-hit anomaly metric was
+                        # silently reading 0.0 because the parser never matched this field;
+                        # rendered by cost-pattern-renderer.ps1 line 453, consumed by cost-anomaly).
+                        if ($subLine -match '^\s+cache_read_hit_ratio\s*:\s*(.+)$') {
+                            $currentPort['cache_read_hit_ratio'] = [double]$Matches[1].Trim()
+                        }
+                        # null_cost_events (Fix Pass3-F4: parser must round-trip this field so
+                        # rolling-history entries reflect unknown-model events).
+                        if ($subLine -match '^\s+null_cost_events\s*:\s*(.+)$') {
+                            $currentPort['null_cost_events'] = [int]$Matches[1].Trim()
+                        }
                         # tokens sub-block (Fix Pass1-F10: parse token fields for anomaly baseline)
                         if ($subLine -match '^\s+tokens\s*:\s*$') {
                             if (-not $currentPort.ContainsKey('tokens')) {
@@ -152,6 +163,7 @@ function script:ConvertFrom-CostPatternYaml {
                         if (-not $portEntry.ContainsKey('cost_estimate_usd')) { $portEntry['cost_estimate_usd'] = 0.0 }
                         if (-not $portEntry.ContainsKey('cache_read_hit_ratio')) { $portEntry['cache_read_hit_ratio'] = 0.0 }
                         if (-not $portEntry.ContainsKey('prompt_size_chars')) { $portEntry['prompt_size_chars'] = 0 }
+                        if (-not $portEntry.ContainsKey('null_cost_events')) { $portEntry['null_cost_events'] = 0 }
                         $portsDict[$pName] = $portEntry
                     }
                 }
@@ -288,13 +300,18 @@ function script:ConvertTo-CostRollingEntries {
         $parsed = script:ConvertFrom-CostPatternYaml -Yaml $yamlText
         if ($null -eq $parsed) { continue }
         if (script:Test-CostPatternShouldExclude -Parsed $parsed) { continue }
-        # Stash the raw comment body so downstream callers (e.g.
-        # cost-regime-checkpoint.ps1's -SubIssue filter) can match against
-        # text that lives outside the cost-pattern-data YAML, such as the
-        # PR body or any sub-issue marker line. Without this, a -SubIssue
-        # filter has nothing to match against.
-        if (-not $parsed.ContainsKey('comment_body')) {
-            $parsed['comment_body'] = [string]$body
+        # Fix Pass2-F4: project the body to a small set of structured
+        # sub-issue references rather than stashing the entire (multi-KB)
+        # comment body in every cache entry. We extract `#NNNN` tokens with
+        # a word-boundary regex so the downstream -SubIssue filter does an
+        # exact list-membership test instead of a fuzzy substring/regex
+        # match (the prior `[regex]::Escape('#469')` matched inside `#4690`).
+        if (-not $parsed.ContainsKey('sub_issue_refs')) {
+            $refs = [System.Collections.Generic.HashSet[string]]::new()
+            foreach ($m in [regex]::Matches([string]$body, '(?<![\w])#(\d+)(?![\w])')) {
+                $null = $refs.Add('#' + $m.Groups[1].Value)
+            }
+            $parsed['sub_issue_refs'] = @($refs)
         }
         $entries.Add($parsed)
     }
@@ -526,8 +543,12 @@ function Get-CostRollingHistory {
             $prList = @(($prListOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop)
             foreach ($pr in $prList) {
                 if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
-                    Write-Warning "cost-rolling-history: timed out during REST pr comments fetch"
-                    return @{ timed_out = $true; entries = @() }
+                    # Fix Pass3-F9: return entries fetched so far rather than discarding them.
+                    # A partial baseline is more useful than an empty one for anomaly detection,
+                    # and the partial_fetch flag lets callers decide whether to trust the result.
+                    $partialEntries = script:ConvertTo-CostRollingEntries -Bodies $commentBodies.ToArray()
+                    Write-Warning "cost-rolling-history: timed out during REST pr comments fetch — returning $($partialEntries.Count) partial entries from $($commentBodies.Count) comment bodies fetched so far"
+                    return @{ timed_out = $true; entries = $partialEntries; partial_fetch = $true }
                 }
 
                 $prNum = $pr['number']
@@ -560,20 +581,27 @@ function Get-CostRollingHistory {
     # ---- Extract entries ----
     $entries = script:ConvertTo-CostRollingEntries -Bodies $commentBodies.ToArray()
 
-    # ---- Write cache ----
-    try {
-        $cacheDir = Split-Path -Parent $CachePath
-        if (-not (Test-Path -LiteralPath $cacheDir)) {
-            New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+    # ---- Write cache (Fix Pass1-F4: skip cache write when entries is empty) ----
+    # A transient gh outage (GraphQL throttle, REST timeout, or zero matched
+    # comments after parse-failure) can produce entries=[]. Writing that to
+    # the cache file with a fresh generated_at would mask recovery for up to
+    # the 1-hour TTL — every subsequent call within the hour would return
+    # the empty list rather than retrying. Only persist non-empty results.
+    if ($entries.Count -gt 0) {
+        try {
+            $cacheDir = Split-Path -Parent $CachePath
+            if (-not (Test-Path -LiteralPath $cacheDir)) {
+                New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+            }
+            $cachePayload = @{
+                generated_at = (Get-Date).ToUniversalTime().ToString('o')
+                entries      = $entries
+            }
+            $cachePayload | ConvertTo-Json -Depth 20 | Set-Content -Path $CachePath -Encoding UTF8
         }
-        $cachePayload = @{
-            generated_at = (Get-Date).ToUniversalTime().ToString('o')
-            entries      = $entries
+        catch {
+            Write-Warning "cost-rolling-history: failed to write cache to '$CachePath': $_"
         }
-        $cachePayload | ConvertTo-Json -Depth 20 | Set-Content -Path $CachePath -Encoding UTF8
-    }
-    catch {
-        Write-Warning "cost-rolling-history: failed to write cache to '$CachePath': $_"
     }
 
     return @{ timed_out = $false; entries = $entries }

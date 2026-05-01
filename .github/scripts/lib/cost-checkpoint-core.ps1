@@ -15,6 +15,26 @@
 # Private helpers
 # ---------------------------------------------------------------------------
 
+function script:ConvertFrom-EscapedYamlScalar {
+    <#
+    .SYNOPSIS
+        Strips outer double-quotes and unescapes `\"` and `\\` from a YAML
+        double-quoted scalar value. Pairs with the escape pass in
+        Add-RegimeCheckpoint (Fix Pass3-F7).
+    #>
+    param([string]$Raw)
+    if ($null -eq $Raw) { return '' }
+    $trimmed = $Raw.Trim()
+    if ($trimmed.Length -ge 2 -and $trimmed.StartsWith('"') -and $trimmed.EndsWith('"')) {
+        $trimmed = $trimmed.Substring(1, $trimmed.Length - 2)
+    }
+    # Unescape in reverse order: `\"` first (so the `\\` pass doesn't see them
+    # as already-escaped sequences), then `\\` → `\`.
+    $trimmed = $trimmed -replace '\\"', '"'
+    $trimmed = $trimmed -replace '\\\\', '\'
+    return $trimmed
+}
+
 function script:ConvertFrom-CheckpointYaml {
     <#
     .SYNOPSIS
@@ -58,7 +78,7 @@ function script:ConvertFrom-CheckpointYaml {
             $subBlockKey = $null
             $subBlockIndent = -1
             $key = $Matches[1].Trim()
-            $val = $Matches[2].Trim().Trim('"')
+            $val = script:ConvertFrom-EscapedYamlScalar -Raw $Matches[2]
             $current[$key] = $val
             continue
         }
@@ -69,7 +89,7 @@ function script:ConvertFrom-CheckpointYaml {
         if ($null -ne $subBlockKey -and $null -ne $current) {
             if ($leadingSpaces -gt $subBlockIndent -and $line -match '^\s+([\w.\-]+)\s*:\s*(.*)$') {
                 $sk = $Matches[1].Trim()
-                $sv = $Matches[2].Trim().Trim('"')
+                $sv = script:ConvertFrom-EscapedYamlScalar -Raw $Matches[2]
                 $current[$subBlockKey][$sk] = $sv
                 continue
             }
@@ -81,7 +101,10 @@ function script:ConvertFrom-CheckpointYaml {
         # Continuation key inside an entry (scalar fields OR sub-block opener)
         if ($null -ne $current -and $line -match '^\s+(\w[^:]*)\s*:\s*(.*)$') {
             $key = $Matches[1].Trim()
-            $val = $Matches[2].Trim().Trim('"')
+            $val = $Matches[2].Trim()
+            # Sub-block sentinel checks must use raw (un-unescaped) value
+            # since `{}` and empty-string are structural, not strings.
+            $unescaped = script:ConvertFrom-EscapedYamlScalar -Raw $Matches[2]
             if ($val -eq '' -or $val -eq '{}') {
                 # Sub-block opener — initialize hashtable and start tracking
                 if ($val -eq '{}') {
@@ -94,7 +117,7 @@ function script:ConvertFrom-CheckpointYaml {
                 }
             }
             else {
-                $current[$key] = $val
+                $current[$key] = $unescaped
             }
             continue
         }
@@ -210,16 +233,28 @@ checkpoints: []
         }) -join "`n"
     }
 
+    # Fix Pass3-F7: YAML-escape user-supplied strings before interpolating
+    # into double-quoted scalars. Without this, a -Reason value containing a
+    # `"` or `\` produces invalid YAML that the parser at line 84 cannot read
+    # back correctly (it splits on the first `:` and Trim('"') leaves quotes
+    # mid-value). Backslashes must be escaped first to avoid double-escaping
+    # the replacement we add for quotes.
+    $escId        = ($id        -replace '\\', '\\\\') -replace '"', '\"'
+    $escTimestamp = ($timestamp -replace '\\', '\\\\') -replace '"', '\"'
+    $escSubIssue  = ($subIssue  -replace '\\', '\\\\') -replace '"', '\"'
+    $escReason    = ($reason    -replace '\\', '\\\\') -replace '"', '\"'
+    $escNote      = ($note      -replace '\\', '\\\\') -replace '"', '\"'
+
     # Build YAML entry block
     $entryLines = [System.Collections.Generic.List[string]]::new()
-    $entryLines.Add("  - id: `"$id`"")
-    $entryLines.Add("    timestamp: `"$timestamp`"")
+    $entryLines.Add("  - id: `"$escId`"")
+    $entryLines.Add("    timestamp: `"$escTimestamp`"")
     if (-not [string]::IsNullOrEmpty($subIssue)) {
-        $entryLines.Add("    sub_issue: `"$subIssue`"")
+        $entryLines.Add("    sub_issue: `"$escSubIssue`"")
     }
-    $entryLines.Add("    reason: `"$reason`"")
+    $entryLines.Add("    reason: `"$escReason`"")
     if (-not [string]::IsNullOrEmpty($note)) {
-        $entryLines.Add("    note: `"$note`"")
+        $entryLines.Add("    note: `"$escNote`"")
     }
     if (-not [string]::IsNullOrEmpty($metricsLines)) {
         $entryLines.Add('    metrics:')
@@ -358,11 +393,25 @@ function Invoke-CostRegimeCheckpoint {
     $entries = @($historyResult.entries)
 
     # ---- M5 Step 3: Filter entries mentioning -SubIssue ----
+    # Fix Pass2-F4: filter against the structured sub_issue_refs list
+    # (extracted by ConvertTo-CostRollingEntries with word-boundary regex)
+    # so that -SubIssue '#469' does NOT match inside '#4690' and we don't
+    # carry multi-KB comment bodies through the cache. Falls back to the
+    # legacy comment_body match for any cache entries from before this fix.
     if (-not [string]::IsNullOrEmpty($SubIssue)) {
         $entries = @($entries | Where-Object {
-            $body = ''
-            if ($_.ContainsKey('comment_body')) { $body = [string]$_['comment_body'] }
-            -not ($body -match [regex]::Escape($SubIssue))
+            if ($_.ContainsKey('sub_issue_refs')) {
+                $refs = @($_['sub_issue_refs'])
+                # Exact membership test — exclude when this PR cited the sub-issue.
+                return ($refs -notcontains $SubIssue)
+            }
+            # Legacy fallback for older cache shapes that stashed comment_body.
+            if ($_.ContainsKey('comment_body')) {
+                $body = [string]$_['comment_body']
+                # Word-boundary regex prevents '#469' from matching '#4690'.
+                return -not ($body -match ('(?<![\w])' + [regex]::Escape($SubIssue) + '(?![\w])'))
+            }
+            return $true   # No reference data available → don't exclude.
         })
     }
 

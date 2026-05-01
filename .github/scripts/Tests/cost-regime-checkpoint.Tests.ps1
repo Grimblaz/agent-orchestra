@@ -283,30 +283,35 @@ Describe 'cost-regime-checkpoint.ps1 CLI' {
                 [int]$TimeoutSeconds = 10,
                 [string]$RepoRoot = ''
             )
-            # Simulate three entries: two from sub-issue #469, one unrelated
+            # Simulate three entries: two from sub-issue #469, one unrelated.
+            # Fix Pass1-F7: ports is now emitted as a hashtable keyed by port
+            # name to match what production Get-CostRollingHistory returns
+            # (per Pass1-F10 structural fix). Sub-issue refs use the new
+            # structured `sub_issue_refs` field (Fix Pass2-F4) to prove the
+            # structured-filter path is exercised at the CLI seam.
             return @{
                 timed_out = $false
                 entries   = @(
                     @{
                         pr_number = 100
-                        comment_body = 'Fix for #469 cost reduction'
-                        ports = @(@{ name = 'experience'; cost_estimate_usd = 0.05 })
+                        sub_issue_refs = @('#469')
+                        ports = @{ experience = @{ name = 'experience'; cost_estimate_usd = 0.05; dispatch_count = 1; tokens = @{ input = 100; output = 50; cache_creation = 0; cache_read = 25 } } }
                         orchestrator_overhead = @{ cost_estimate_usd = 0.01 }
                         dispatches = @{ general_purpose_count = 2 }
                         totals = @{ cost_estimate_usd = 0.06 }
                     },
                     @{
                         pr_number = 101
-                        comment_body = 'Fix for #469 cost reduction follow-up'
-                        ports = @(@{ name = 'experience'; cost_estimate_usd = 0.04 })
+                        sub_issue_refs = @('#469')
+                        ports = @{ experience = @{ name = 'experience'; cost_estimate_usd = 0.04; dispatch_count = 1; tokens = @{ input = 90; output = 45; cache_creation = 0; cache_read = 20 } } }
                         orchestrator_overhead = @{ cost_estimate_usd = 0.01 }
                         dispatches = @{ general_purpose_count = 1 }
                         totals = @{ cost_estimate_usd = 0.05 }
                     },
                     @{
                         pr_number = 99
-                        comment_body = 'Unrelated PR'
-                        ports = @(@{ name = 'design'; cost_estimate_usd = 0.10 })
+                        sub_issue_refs = @('#465')
+                        ports = @{ design = @{ name = 'design'; cost_estimate_usd = 0.10; dispatch_count = 1; tokens = @{ input = 200; output = 80; cache_creation = 0; cache_read = 50 } } }
                         orchestrator_overhead = @{ cost_estimate_usd = 0.02 }
                         dispatches = @{ general_purpose_count = 3 }
                         totals = @{ cost_estimate_usd = 0.12 }

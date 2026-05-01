@@ -371,7 +371,29 @@ function Format-CostPatternMarkdown {
     $header = script:Build-CostPatternHeader -Completeness $Completeness -AnomalyFlags $AnomalyFlags -RollingMeta $RollingMeta
     $table  = script:Build-CostPatternTable  -Attribution $Attribution -AnomalyFlags $AnomalyFlags
 
-    return "$header`n`n$table"
+    # Fix Pass3-F4: surface null_cost_events when nonzero so unknown-model
+    # cost undercounting is visible in the rendered markdown, not just buried
+    # in the embedded YAML. Sums across ports and orchestrator overhead.
+    $nullEventTotal = 0
+    $ports = $Attribution['ports']
+    if ($ports -is [hashtable]) {
+        foreach ($pName in $ports.Keys) {
+            $b = $ports[$pName]
+            if ($b -is [hashtable] -and $b.ContainsKey('null_cost_events')) {
+                $nullEventTotal += [int]$b['null_cost_events']
+            }
+        }
+    }
+    $oh = $Attribution['orchestrator_overhead']
+    if ($oh -is [hashtable] -and $oh.ContainsKey('null_cost_events')) {
+        $nullEventTotal += [int]$oh['null_cost_events']
+    }
+
+    $body = "$header`n`n$table"
+    if ($nullEventTotal -gt 0) {
+        $body += "`n`n> **Note**: $nullEventTotal cost event(s) had unknown models not present in ``cost-rate-table.json`` and contributed null to the cost estimate. Update the rate table to include the missing model(s) for accurate attribution."
+    }
+    return $body
 }
 
 function Format-CostPatternYaml {
@@ -451,6 +473,12 @@ function Format-CostPatternYaml {
         $null = $sb.AppendLine("    prompt_size_chars: $($bucket['prompt_size_chars'])")
         $null = $sb.AppendLine("    cost_estimate_usd: $cost")
         $null = $sb.AppendLine("    cache_read_hit_ratio: $ratio")
+        # Fix Pass3-F4: emit null_cost_events so downstream readers see when a
+        # port had unknown-model cost events that produced no rate-table match.
+        # Silent zero would mask cost undercounting whenever a new model variant
+        # is introduced before cost-rate-table.json is updated.
+        $nullEvents = if ($bucket.ContainsKey('null_cost_events')) { [int]$bucket['null_cost_events'] } else { 0 }
+        $null = $sb.AppendLine("    null_cost_events: $nullEvents")
         $null = $sb.AppendLine("    mixed_regime: $mixed")
     }
 
@@ -466,6 +494,9 @@ function Format-CostPatternYaml {
     $null = $sb.AppendLine("    cache_read: $($ohTok['cache_read'])")
     $null = $sb.AppendLine("  cost_estimate_usd: $ohCost")
     $null = $sb.AppendLine("  cache_read_hit_ratio: $ohRatio")
+    # Fix Pass3-F4: same null_cost_events surface for orchestrator overhead.
+    $ohNullEvents = if ($overhead.ContainsKey('null_cost_events')) { [int]$overhead['null_cost_events'] } else { 0 }
+    $null = $sb.AppendLine("  null_cost_events: $ohNullEvents")
 
     # dispatches
     $null = $sb.AppendLine('dispatches:')

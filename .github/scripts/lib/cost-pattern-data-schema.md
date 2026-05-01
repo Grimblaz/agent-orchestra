@@ -20,9 +20,15 @@ This document defines the schema for the `<!-- cost-pattern-data ... -->` YAML b
 | `pr` | integer | GitHub pull request number this payload is attached to. |
 | `branch` | string | Git branch name associated with the PR. |
 
-## `ports[]` — Per-Port Token and Cost Breakdown
+## `ports` — Per-Port Token and Cost Breakdown
 
-Array of objects. Each entry represents one named frame port's contribution.
+**Wire format**: YAML array of objects under the top-level `ports:` key. Each entry has a `name` field.
+
+**In-memory format (after parse by `cost-rolling-history.ps1::ConvertFrom-CostPatternYaml`)**: hashtable keyed by port name, values being the per-port objects below. This shape gives consumers (`Get-MetricValue`, `Invoke-CostRegimeCheckpoint`) O(1) port lookup via `$entry.ports.ContainsKey($portName)`.
+
+When authoring code that consumes `Get-CostRollingHistory`'s `entries[].ports`, treat it as a hashtable. When authoring code that emits or reads the wire YAML directly, treat it as an array.
+
+Each port entry:
 
 | Field | Type | Description |
 | --- | --- | --- |

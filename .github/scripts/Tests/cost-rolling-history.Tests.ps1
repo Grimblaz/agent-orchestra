@@ -554,13 +554,14 @@ Describe 'Get-CostRollingHistory' {
             $port['tokens']['cache_read']     | Should -Be 300
         }
 
-        It 'stashes raw comment_body on each entry so downstream filters can match against it (Copilot review fix)' {
-            # Regression: cost-regime-checkpoint.ps1 -SubIssue filter relied on
-            # entry['comment_body'] but no such field was being populated, so
-            # the filter was a silent no-op.  Each parsed entry must carry the
-            # raw comment body alongside the structured cost-pattern-data.
+        It 'extracts sub-issue refs as structured field with word boundaries (Pass2-F4)' {
+            # Regression: -SubIssue filter previously regex-matched against
+            # raw comment_body, which (a) bloated cache by carrying multi-KB
+            # bodies through, and (b) had no word boundary so '#469' matched
+            # inside '#4690'. The fix projects sub-issue refs into a
+            # structured list at parse time using word-boundary regex.
             $bodyText = @"
-Closes #469.
+Closes #469. See also #4690 (different issue) and #470.
 
 <!-- cost-pattern-data
 version: 1
@@ -588,8 +589,18 @@ totals:
             $result.timed_out | Should -Be $false
             $result.entries.Count | Should -Be 1
             $entry = $result.entries[0]
-            $entry.ContainsKey('comment_body') | Should -Be $true -Because 'each entry must carry the raw comment body for downstream filters'
-            [string]$entry['comment_body'] | Should -Match 'Closes #469'
+            $entry.ContainsKey('sub_issue_refs') | Should -Be $true -Because 'each entry must carry structured sub-issue refs for downstream filters'
+            $refs = @($entry['sub_issue_refs'])
+            # Word-boundary regex: #469, #4690, #470 are three distinct refs.
+            # The filter must see all of them as separate strings, NOT match
+            # '#469' inside '#4690' (which the previous regex.Escape() impl did).
+            $refs | Should -Contain '#469'
+            $refs | Should -Contain '#4690'
+            $refs | Should -Contain '#470'
+            # Critical: '#469' and '#4690' are present as DISTINCT entries —
+            # confirms the boundary regex distinguishes them.
+            ($refs | Where-Object { $_ -eq '#469' }).Count | Should -Be 1
+            ($refs | Where-Object { $_ -eq '#4690' }).Count | Should -Be 1
         }
 
         It 'returns empty entries array when no matching comments found (GraphQL 200 empty)' {

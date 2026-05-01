@@ -157,9 +157,27 @@ function Find-OrUpsertComment {
     }
 
     $patchPath = "repos/$owner/$repo/issues/comments/$targetRestId"
-    $patchOutput = & gh api -X PATCH $patchPath -f "body=$Body" 2>$null
+    # Fix Pass3-F1: pass body via JSON file on stdin instead of `-f "body=$Body"`.
+    # The -f form packs the entire payload into a single argv element, which on
+    # Windows hits the 32K CreateProcess argv limit for large cost-pattern
+    # ledgers (multi-KB markdown table + embedded YAML). The `--input -` form
+    # streams the JSON body via stdin and is unaffected by argv length limits.
+    # Also surface the body length on failure so silent fail-open at large
+    # payloads is observable.
+    $patchTempFile = $null
+    try {
+        $patchTempFile = [System.IO.Path]::GetTempFileName()
+        $patchPayload = @{ body = $Body } | ConvertTo-Json -Depth 4 -Compress
+        Set-Content -LiteralPath $patchTempFile -Value $patchPayload -Encoding UTF8 -NoNewline
+        $patchOutput = & gh api -X PATCH $patchPath --input $patchTempFile 2>$null
+    }
+    finally {
+        if ($null -ne $patchTempFile -and (Test-Path -LiteralPath $patchTempFile)) {
+            Remove-Item -LiteralPath $patchTempFile -Force -ErrorAction SilentlyContinue
+        }
+    }
     if ($LASTEXITCODE -ne 0) {
-        [Console]::Error.WriteLine("Find-OrUpsertComment: gh api PATCH $patchPath failed (exit $LASTEXITCODE)")
+        [Console]::Error.WriteLine("Find-OrUpsertComment: gh api PATCH $patchPath failed (exit $LASTEXITCODE; body_length_chars=$($Body.Length))")
         return $null
     }
 
