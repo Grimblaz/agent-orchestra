@@ -78,6 +78,62 @@ checkpoints:
         $result.id | Should -Be 'cp-002'
     }
 
+    It 'parses nested metrics and exclusions sub-blocks (gemini-code-assist HIGH)' {
+        # Regression: ConvertFrom-CheckpointYaml previously skipped sub-block
+        # openers (metrics:, exclusions:) entirely, so checkpoint comparison
+        # in Get-CostAnomalyFlags received an empty $Checkpoint['metrics'] hash
+        # and never flagged drift against the checkpoint.
+        $tmpPath = Join-Path $TestDrive "nested-$([System.Guid]::NewGuid().ToString('N')).yaml"
+        @"
+schema_version: 1
+checkpoints:
+  - id: "cp-nested"
+    timestamp: "2026-05-01T04:00:00Z"
+    sub_issue: "#469"
+    reason: "post-#469 stabilized"
+    metrics:
+      port.implement-code.cost_estimate_usd.mean: 0.123456
+      port.review.cost_estimate_usd.mean: 0.045678
+      orchestrator_overhead.cost_estimate_usd.mean: 0.012000
+    exclusions:
+      recent_count: 1
+      sub_issue: "#469"
+"@ | Set-Content -Path $tmpPath -Encoding UTF8
+
+        $result = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $result | Should -Not -BeNullOrEmpty
+        $result.id | Should -Be 'cp-nested'
+        $result.metrics | Should -Not -BeNullOrEmpty
+        $result.metrics.Count | Should -Be 3
+        [double]$result.metrics['port.implement-code.cost_estimate_usd.mean'] | Should -Be 0.123456
+        [double]$result.metrics['port.review.cost_estimate_usd.mean'] | Should -Be 0.045678
+        [double]$result.metrics['orchestrator_overhead.cost_estimate_usd.mean'] | Should -Be 0.012000
+        $result.exclusions | Should -Not -BeNullOrEmpty
+        [string]$result.exclusions['recent_count'] | Should -Be '1'
+        [string]$result.exclusions['sub_issue'] | Should -Be '#469'
+    }
+
+    It 'preserves empty metrics/exclusions hashtables ({}) without failing' {
+        $tmpPath = Join-Path $TestDrive "empty-blocks-$([System.Guid]::NewGuid().ToString('N')).yaml"
+        @"
+schema_version: 1
+checkpoints:
+  - id: "cp-empty-blocks"
+    timestamp: "2026-05-01T04:00:00Z"
+    reason: "no metrics yet"
+    metrics: {}
+    exclusions: {}
+"@ | Set-Content -Path $tmpPath -Encoding UTF8
+
+        $result = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $result | Should -Not -BeNullOrEmpty
+        $result.id | Should -Be 'cp-empty-blocks'
+        ($result.metrics -is [hashtable]) | Should -Be $true
+        $result.metrics.Count | Should -Be 0
+        ($result.exclusions -is [hashtable]) | Should -Be $true
+        $result.exclusions.Count | Should -Be 0
+    }
+
     It 'returns the single entry when only one exists' {
         $tmpPath = Join-Path $TestDrive "single-$([System.Guid]::NewGuid().ToString('N')).yaml"
         @"

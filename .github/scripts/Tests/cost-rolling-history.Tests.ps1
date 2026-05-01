@@ -554,6 +554,44 @@ Describe 'Get-CostRollingHistory' {
             $port['tokens']['cache_read']     | Should -Be 300
         }
 
+        It 'stashes raw comment_body on each entry so downstream filters can match against it (Copilot review fix)' {
+            # Regression: cost-regime-checkpoint.ps1 -SubIssue filter relied on
+            # entry['comment_body'] but no such field was being populated, so
+            # the filter was a silent no-op.  Each parsed entry must carry the
+            # raw comment body alongside the structured cost-pattern-data.
+            $bodyText = @"
+Closes #469.
+
+<!-- cost-pattern-data
+version: 1
+session_completeness: complete
+generated_at: 2026-04-15T12:00:00Z
+pr: 999
+branch: feature/issue-469-foo
+ports:
+- name: experience
+    cost_estimate_usd: 0.05
+orchestrator_overhead:
+  cost_estimate_usd: 0.01
+dispatches:
+  general_purpose_count: 1
+  unattributed_count: 0
+totals:
+  cost_estimate_usd: 0.06
+-->
+"@
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($bodyText)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.timed_out | Should -Be $false
+            $result.entries.Count | Should -Be 1
+            $entry = $result.entries[0]
+            $entry.ContainsKey('comment_body') | Should -Be $true -Because 'each entry must carry the raw comment body for downstream filters'
+            [string]$entry['comment_body'] | Should -Match 'Closes #469'
+        }
+
         It 'returns empty entries array when no matching comments found (GraphQL 200 empty)' {
             # M19 regression: zero nodes is a valid zero-PR result
             Install-GhMock -GraphQLResponse (New-GraphQLEmptyNodesResponse) -GraphQLExitCode 0

@@ -20,6 +20,13 @@ function script:ConvertFrom-CheckpointYaml {
     .SYNOPSIS
         Parses the checkpoints array from a cost-regime-checkpoints.yaml file.
         Returns an array of hashtables, one per checkpoint entry.
+    .DESCRIPTION
+        Handles top-level scalar entry fields (id, timestamp, sub_issue,
+        reason, note) and one level of nested key/value blocks for `metrics:`
+        and `exclusions:`. The writer in Add-RegimeCheckpoint emits nested
+        blocks at 6-space indent (entry list items at 2-space; entry fields
+        at 4-space; nested values at 6-space), so this parser tracks indent
+        depth to know when a sub-block ends.
     #>
     param([string]$Content)
 
@@ -28,34 +35,65 @@ function script:ConvertFrom-CheckpointYaml {
 
     $inCheckpoints = $false
     $current       = $null
+    $subBlockKey   = $null   # name of the active nested block (e.g. 'metrics')
+    $subBlockIndent = -1     # indent of the sub-block opener line ('    metrics:')
 
     foreach ($line in $lines) {
         # Detect the start of the checkpoints array
         if ($line -match '^\s*checkpoints\s*:\s*(\[\s*\])?\s*$') {
             $inCheckpoints = $true
-            # If inline empty array "checkpoints: []" — nothing more to parse
             if ($line -match '\[\s*\]') { $inCheckpoints = $false }
             continue
         }
 
         if (-not $inCheckpoints) { continue }
 
+        $leadingSpaces = 0
+        if ($line -match '^(\s*)') { $leadingSpaces = $Matches[1].Length }
+
         # New entry starts with a list item "  - id:" or "  - timestamp:" etc.
         if ($line -match '^\s+-\s+(\w+)\s*:\s*(.*)$') {
             if ($null -ne $current) { $checkpoints.Add($current) }
             $current = @{}
+            $subBlockKey = $null
+            $subBlockIndent = -1
             $key = $Matches[1].Trim()
             $val = $Matches[2].Trim().Trim('"')
             $current[$key] = $val
             continue
         }
 
-        # Continuation key inside an entry (scalar fields)
+        # If we're inside a sub-block, only consume lines at strictly greater
+        # indent than the opener; any line at <= the opener indent ends the
+        # block and we fall through to the normal entry-field handling.
+        if ($null -ne $subBlockKey -and $null -ne $current) {
+            if ($leadingSpaces -gt $subBlockIndent -and $line -match '^\s+([\w.\-]+)\s*:\s*(.*)$') {
+                $sk = $Matches[1].Trim()
+                $sv = $Matches[2].Trim().Trim('"')
+                $current[$subBlockKey][$sk] = $sv
+                continue
+            }
+            # Indent dropped — sub-block closed. Fall through.
+            $subBlockKey = $null
+            $subBlockIndent = -1
+        }
+
+        # Continuation key inside an entry (scalar fields OR sub-block opener)
         if ($null -ne $current -and $line -match '^\s+(\w[^:]*)\s*:\s*(.*)$') {
             $key = $Matches[1].Trim()
             $val = $Matches[2].Trim().Trim('"')
-            # Only store scalar (non-empty) values; skip sub-block openers like "metrics:"
-            if ($val -ne '') {
+            if ($val -eq '' -or $val -eq '{}') {
+                # Sub-block opener — initialize hashtable and start tracking
+                if ($val -eq '{}') {
+                    $current[$key] = @{}
+                }
+                else {
+                    $current[$key] = @{}
+                    $subBlockKey = $key
+                    $subBlockIndent = $leadingSpaces
+                }
+            }
+            else {
                 $current[$key] = $val
             }
             continue

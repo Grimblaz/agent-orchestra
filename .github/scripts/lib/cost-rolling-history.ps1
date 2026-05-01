@@ -288,6 +288,14 @@ function script:ConvertTo-CostRollingEntries {
         $parsed = script:ConvertFrom-CostPatternYaml -Yaml $yamlText
         if ($null -eq $parsed) { continue }
         if (script:Test-CostPatternShouldExclude -Parsed $parsed) { continue }
+        # Stash the raw comment body so downstream callers (e.g.
+        # cost-regime-checkpoint.ps1's -SubIssue filter) can match against
+        # text that lives outside the cost-pattern-data YAML, such as the
+        # PR body or any sub-issue marker line. Without this, a -SubIssue
+        # filter has nothing to match against.
+        if (-not $parsed.ContainsKey('comment_body')) {
+            $parsed['comment_body'] = [string]$body
+        }
         $entries.Add($parsed)
     }
     return , $entries.ToArray()

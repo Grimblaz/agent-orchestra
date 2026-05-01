@@ -111,16 +111,33 @@ if ($entries.Count -gt 0) {
     $ooCount      = 0
 
     foreach ($e in $entries) {
-        # Ports
+        # Ports — Get-CostRollingHistory returns ports as a hashtable keyed by
+        # port name (per Pass1-F10 structural fix). Defensive fallback for
+        # older shapes that may still emit an array of {name, ...} records.
         if ($e.ContainsKey('ports') -and $null -ne $e['ports']) {
-            foreach ($port in @($e['ports'])) {
-                if ($null -eq $port) { continue }
-                $pName = [string]$port['name']
+            $portsObj = $e['ports']
+            $portIter = @()
+            if ($portsObj -is [hashtable]) {
+                foreach ($pName in $portsObj.Keys) {
+                    $portIter += [pscustomobject]@{ Name = [string]$pName; Bucket = $portsObj[$pName] }
+                }
+            }
+            else {
+                foreach ($port in @($portsObj)) {
+                    if ($null -eq $port -or -not ($port -is [hashtable])) { continue }
+                    $portIter += [pscustomobject]@{ Name = [string]$port['name']; Bucket = $port }
+                }
+            }
+            foreach ($p in $portIter) {
+                $pName  = $p.Name
+                $bucket = $p.Bucket
+                if ([string]::IsNullOrEmpty($pName) -or $null -eq $bucket -or -not ($bucket -is [hashtable])) { continue }
+                if (-not $bucket.ContainsKey('cost_estimate_usd')) { continue }
                 if (-not $portAccum.ContainsKey($pName)) {
                     $portAccum[$pName]  = 0.0
                     $portCounts[$pName] = 0
                 }
-                $portAccum[$pName]  += [double]$port['cost_estimate_usd']
+                $portAccum[$pName]  += [double]$bucket['cost_estimate_usd']
                 $portCounts[$pName] += 1
             }
         }
