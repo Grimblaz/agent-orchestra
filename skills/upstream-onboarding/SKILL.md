@@ -92,7 +92,7 @@ When no issue exists yet (the developer is describing a new idea in plain langua
 
 Example greenfield brief:
 
-```
+```text
 **What**: Add dark-mode support to the settings panel (proposed)
 **Scope tier**: standard (proposed)
 **Issue creation**: no issue exists yet — this agent will create one per its GitHub Setup step.
@@ -109,7 +109,7 @@ When a concern is found, the agent **must**:
 1. **Cite the anchor** — name the skill or file path that establishes the standard being violated (e.g., "`skills/customer-experience/SKILL.md` — Customer Language rule").
 2. **Quote the offending text** — reproduce the exact passage from the inherited content that violates the standard. For tabular or structured content (table rows, YAML blocks, list items), copy the cell or block content verbatim; omit surrounding pipe delimiters or indentation markers.
 
-When the required section is entirely absent from the inherited content (not present at all), treat the absence itself as the concern: cite the anchor, note that the required section is missing, and describe what it should contain — omitting the quote step since there is no offending text to quote.
+   When the required section is entirely absent from the inherited content (not present at all), treat the absence itself as the concern: cite the anchor, note that the required section is missing, and describe what it should contain — omitting the quote step since there is no offending text to quote.
 
 3. **Present the better approach** — describe what the corrected version should look like.
 4. **Ask via structured question** — present the concern and the better approach as a structured-question call (see `platforms/claude.md` and `platforms/copilot.md` for tool invocation). Mark the corrective approach as recommended.
