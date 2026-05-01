@@ -37,6 +37,7 @@ Claims made by this audit about skill coverage were verified by reading the name
 | 57–75   | Overview, When to use, Pipeline     | identity                        | Keep.                                                                                          |
 | 77–83   | Process (provenance-gate loading)   | methodology→`provenance-gate`   | Replace 7 lines with a one-line pointer.                                                       |
 | 85–93   | Questioning Policy (Mandatory)      | platform-specific               | `#tool:vscode/askQuestions` is Copilot wording; Claude uses `AskUserQuestion`. Move to platforms. |
+<!-- Resolved by #481: Questioning Policy removed from agent bodies; judgment guidance now shared via upstream-onboarding skill -->
 | 95–101  | GitHub Setup (branch creation)      | methodology (trivial, inline)   | 3 lines, duplicated across all 3 agents. Keep minimal inline — not worth a skill.              |
 | 103–110 | Safe-Operations Compliance          | methodology→`safe-operations`   | `safe-operations` §2 covers dedup, priority labels, creation flow. Collapse to pointer.        |
 | 112–118 | Upstream Phase: Customer Framing    | methodology→`customer-experience` + `bdd-scenarios` | Already loaded via skill pointer; keep the 2-line load statement, drop the in-body expansion. |
@@ -63,6 +64,7 @@ Claims made by this audit about skill coverage were verified by reading the name
 | 52–62   | Overview, When to use, Pipeline     | identity                       | Keep.                                                                                          |
 | 64–70   | Process (provenance-gate)           | methodology→`provenance-gate`  | Collapse to pointer.                                                                           |
 | 72–80   | Questioning Policy (Mandatory)      | platform-specific              | Same as EO. Move to platforms.                                                                 |
+<!-- Resolved by #481: Questioning Policy removed from agent bodies; judgment guidance now shared via upstream-onboarding skill -->
 | 82–88   | Stage 1: GitHub Setup               | methodology (trivial, inline)  | Duplicated. Keep minimal.                                                                      |
 | 90–94   | Stage 2: Design Exploration         | methodology→`design-exploration` | Already a pointer-only section. Keep.                                                          |
 | 96–104  | Hub/Consumer Classification Gate    | **orphan→`customer-experience`** | Same gate as EO. Extend `customer-experience` once; both agents point to it.                  |
@@ -114,6 +116,7 @@ Claims made by this audit about skill coverage were verified by reading the name
 - Provenance-gate Process block — identical across all 3. Skill pointer suffices everywhere.
 - GitHub Setup (branch creation) — 3-line trivial duplicate. Keep inline; no skill worth creating.
 - Questioning Policy — same wording across all 3. Move to `platforms/copilot.md` once; the policy IS the platform (what tool to call).
+<!-- Resolved by #481: Questioning Policy removed from agent bodies; judgment guidance now shared via upstream-onboarding skill -->
 - Hub/Consumer Classification Gate — present in EO and SD. Extend `customer-experience` once.
 
 **Claude-native platform notes** (for `platforms/claude.md` of each skill / agent shell):

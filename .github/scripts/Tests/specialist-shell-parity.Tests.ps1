@@ -203,6 +203,11 @@ Final fallback — manual screenshot paste:
   Paste a screenshot of the current state and the agent will proceed with manual iteration. Note: this loses the verify-after-edit cycle that automated polish provides.
 '@
 
+        # NOTE: experience-owner is intentionally excluded from this specialist fixture.
+        # solution-designer is likewise excluded. Both are user-invocable upstream agents
+        # (not specialists) and do not carry Step 0 environment-handshake sections. Their
+        # heading bijection is already enforced by claude-shell-parity.Tests.ps1.
+        # Added as explicit note per #481.
         $script:ExpectedShells = @(
             [pscustomobject]@{
                 Name                        = 'code-smith'

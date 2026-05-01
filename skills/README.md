@@ -20,7 +20,7 @@ Each skill should use this flow:
 
 This keeps prompts concise while preserving depth when needed.
 
-## Available Skills (42)
+## Available Skills (44)
 
 | Skill | Purpose | Status |
 | ----- | ------- | ------ |
@@ -33,6 +33,7 @@ This keeps prompts concise while preserving depth when needed.
 | `customer-experience` | Reusable customer framing and CE evidence methodology | ✅ Included |
 | `design-exploration` | Technical design option comparison and decision-framing workflow | ✅ Included |
 | `documentation-finalization` | Documentation cleanup and design-doc maintenance workflow | ✅ Included |
+| `frame-credit-ledger` | Warn-only frame port-coverage ledger posted as a PR comment after `gh pr create` | ✅ Included |
 | `frontend-design` | Guide for creating distinctive UI designs that avoid generic templates | ✅ Included |
 | `guidance-measurement` | Guidance-complexity measurement tooling and deterministic analysis guidance | ✅ Included |
 | `implementation-discipline` | Minimal implementation workflow for plan-driven coding | ✅ Included |
@@ -62,6 +63,7 @@ This keeps prompts concise while preserving depth when needed.
 | `test-driven-development` | TDD workflow guidance, quality standards, and practical patterns | ✅ Included |
 | `tracking-format` | Tracking-file frontmatter and local coordination format guidance | ✅ Included |
 | `ui-iteration` | Screenshot-driven UI polish workflow | ✅ Included |
+| `upstream-onboarding` | Scaled context brief and standards check for upstream agents at each phase boundary | ✅ Included |
 | `ui-testing` | Resilient React component testing strategies focusing on user behavior | ✅ Included |
 | `validation-methodology` | Staged validation and review methodology for implementation workflows | ✅ Included |
 | `verification-before-completion` | Evidence-based verification checklist before marking work complete | ✅ Included |
