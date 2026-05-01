@@ -3,6 +3,7 @@ name: specification
 description: Specification authoring specialist shell for Claude Code. Use when parent agents need formal specification documents created or updated.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch
 user-invocable: false
+# model/effort intentionally omitted: inherits dispatcher per agent-orchestra routing convention (see CLAUDE.md "Per-agent model + reasoning routing").
 ---
 
 # Specification (Claude Code shell)

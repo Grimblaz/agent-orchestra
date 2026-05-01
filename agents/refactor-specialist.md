@@ -3,6 +3,8 @@ name: refactor-specialist
 description: Refactoring specialist shell for Claude Code. Use when Code-Conductor needs maintainability improvements without behavior changes.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 user-invocable: false
+model: sonnet
+effort: high
 ---
 
 # Refactor-Specialist (Claude Code shell)

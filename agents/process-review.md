@@ -3,6 +3,8 @@ name: process-review
 description: Process review specialist shell for Claude Code. Use when Code-Conductor needs systemic workflow analysis or Track 2 CE Gate defect analysis.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 user-invocable: false
+model: sonnet
+effort: high
 ---
 
 # Process-Review (Claude Code shell)
