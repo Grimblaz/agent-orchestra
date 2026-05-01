@@ -61,6 +61,20 @@ The conductor's only contract with this skill is:
 
 None — this skill is methodology, not a port-filling adapter. The credit-ledger orchestrator is the **enforcement** layer for the frame; no port is "filled" by enforcement itself. Per [`Documents/Design/frame-architecture.md`](../../Documents/Design/frame-architecture.md) Adapter Model, ports are filled by skills and agents whose terminal output becomes the credit for that port. The ledger reads those credits, it does not produce one.
 
+## Gotchas
+
+- **Cost telemetry is best-effort and always fail-open.** If the cost libs fail to load (parse error, missing file) or if any step in the cost composition block throws, the orchestrator degrades gracefully: the ledger comment is posted without a Cost Pattern section. The cost pattern never gates or delays PR creation.
+
+- **Cost Pattern section requires the `cost-reduction` label.** The CI presence-check workflow (`cost-pattern-presence-check.yml`) only fires on PRs that carry the `cost-reduction` label. PRs without that label have no CI gate and may have no Cost Pattern section at all (the orchestrator still attempts composition, but there is no CI verification pass).
+
+- **Model key matching in the rate table is exact.** The `cost-rate-table.json` keys must match the model string that appears in `message.model` in the JSONL transcript. If Claude introduces a new model variant (e.g., `claude-sonnet-4-7`) that is not yet in the rate table, cost for that model is set to null and `null_cost_events` increments. Update `cost-rate-table.json` and commit a new version entry when a new model is deployed.
+
+- **Transcript slug derivation is case-sensitive for path segments.** `Get-CostTranscriptSlug` produces slugs like `c--Users-Micah-Code-2-copilot-orchestra` (drive letter lowercased, path segments case-preserved, spaces replaced with dashes). If the Claude projects directory uses a different slug format in practice, adjust the derivation in `cost-walker.ps1` rather than trying to rename directories.
+
+- **Partial or unknown sessions are excluded from rolling baselines.** `excluded_from_rolling_baseline: true` is emitted in the `cost-pattern-data` YAML for any session that did not end with `stop_reason: end_turn`. These entries are skipped by `ConvertTo-CostRollingEntries` and do not contribute to anomaly detection statistics. A PR that ends mid-session (e.g., operator-interrupted) will show the partial-session warning header and will not pollute the rolling baseline.
+
+- **The foundational #467 PR should be annotated as an outlier baseline exclusion.** Pass `-ExcludeReason 'foundational-baseline-pr'` to `Get-SessionCompleteness` at the call site, or annotate the PR comment post-hoc. This prevents the unusually large foundational session from skewing the rolling mean and stddev used by anomaly detection on all future PRs.
+
 ## Platform-specific invocation
 
 This skill's methodology is tool-agnostic. Platform-specific routing lives alongside:
