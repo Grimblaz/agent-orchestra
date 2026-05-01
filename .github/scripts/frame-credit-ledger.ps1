@@ -59,6 +59,24 @@ catch {
     exit 1
 }
 
+# Cost pattern lib dot-sources (warn-mode fail-open: cost composition failure never blocks PR creation)
+$script:CostLibLoadFailed = $false  # default; set to $true below if load fails
+try {
+    . (Join-Path $PSScriptRoot 'lib/path-normalize.ps1')
+    . (Join-Path $PSScriptRoot 'lib/cost-walker.ps1')
+    . (Join-Path $PSScriptRoot 'lib/cost-attribution.ps1')
+    . (Join-Path $PSScriptRoot 'lib/cost-anomaly.ps1')
+    . (Join-Path $PSScriptRoot 'lib/cost-rolling-history.ps1')
+    . (Join-Path $PSScriptRoot 'lib/cost-checkpoint-core.ps1')
+    . (Join-Path $PSScriptRoot 'lib/cost-completeness.ps1')
+    . (Join-Path $PSScriptRoot 'lib/cost-pattern-renderer.ps1')
+}
+catch {
+    [Console]::Error.WriteLine("frame-credit-ledger: cost lib load failed (cost composition disabled): $($_.Exception.Message)")
+    # Cost lib load failure is non-fatal — cost pattern composition will be skipped
+    $script:CostLibLoadFailed = $true
+}
+
 # ---------------------------------------------------------------------------
 # Read a single scalar field from an adapter's frontmatter block. Strips a
 # pair of balanced single or double quotes when present. Returns $null when
@@ -421,21 +439,27 @@ function Invoke-FrameCreditLedger {
     # 1. Resolve baseRefOid (best-effort; failure is non-fatal in warn mode).
     $baseRefOid = Get-FrameCreditLedgerBaseRefOid -Pr $Pr
 
-    # 2. Fetch PR body.
+    # 2. Fetch PR body (and comments for cost preservation — M4 combined call).
+    # Note: 'body,comments' is quoted to prevent PowerShell from splitting it on the comma
+    # into an array when passed to the gh function mock in tests.
     $bodyJsonRaw = $null
     try {
-        $bodyJsonRaw = & gh pr view $Pr --json body 2>$null
+        $bodyJsonRaw = & gh pr view $Pr --json 'body,comments' 2>$null
     }
     catch {
         $bodyJsonRaw = $null
     }
 
     $prBody = ''
+    $script:PrComments = $null
     if ($null -ne $bodyJsonRaw -and $bodyJsonRaw -ne '') {
         try {
             $parsed = $bodyJsonRaw | ConvertFrom-Json -ErrorAction Stop
             if ($null -ne $parsed -and $null -ne $parsed.body) {
                 $prBody = [string]$parsed.body
+            }
+            if ($null -ne $parsed -and $null -ne $parsed.comments) {
+                $script:PrComments = $parsed.comments
             }
         }
         catch {
@@ -565,7 +589,86 @@ function Invoke-FrameCreditLedger {
     $reportsArray = $portReports.ToArray()
     $hasNotCovered = @($reportsArray | Where-Object { [string]$_.Status -eq 'NotCovered' }).Count -gt 0
 
-    $comment = Compose-Comment -MarkerToken $marker -PortReports $reportsArray
+    # ---------------------------------------------------------------------------
+    # Step 6: Cost Pattern composition (issue #467)
+    # Sub-budgets total: 19s within the 30s outer budget.
+    # On any sub-step failure, graceful degradation applies (cost section is empty string).
+    # ---------------------------------------------------------------------------
+    $costSection = ''
+    if (-not $script:CostLibLoadFailed) {
+        $costStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        try {
+            $costBudgetSeconds = 19
+
+            # 6a. Walker
+            $slug = Get-CostTranscriptSlug -CwdPath $repoRoot
+            $costBranch = & git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null
+            $costEvents = @()
+            if (-not [string]::IsNullOrWhiteSpace($slug) -and -not [string]::IsNullOrWhiteSpace($costBranch)) {
+                $costEvents = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $costBranch -ParentCwd $repoRoot)
+            }
+
+            # 6b. Attribution
+            # Use $repoRoot to build the lib path because $PSScriptRoot may be empty
+            # inside the worker runspace (it is re-derived from $PSCommandPath at call time).
+            $costScriptsDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+                $PSScriptRoot
+            } else {
+                Join-Path $repoRoot '.github/scripts'
+            }
+            $costAttribution = Get-CostAttribution -Events $costEvents -RateTablePath (Join-Path $costScriptsDir 'lib/cost-rate-table.json')
+
+            # 6c. Rolling history (has its own 10s timeout via Get-CostRollingHistory)
+            $rollingResult = @{ timed_out = $false; entries = @() }
+            if ($costStopwatch.Elapsed.TotalSeconds -lt $costBudgetSeconds) {
+                try { $rollingResult = Get-CostRollingHistory -TimeoutSeconds 10 }
+                catch { $rollingResult = @{ timed_out = $true; entries = @() } }
+            }
+
+            # 6d. Regime checkpoint
+            $checkpoint = $null
+            if ($costStopwatch.Elapsed.TotalSeconds -lt $costBudgetSeconds) {
+                try {
+                    $cpPath = Join-Path $repoRoot '.github/scripts/cost-regime-checkpoints.yaml'
+                    if (Test-Path $cpPath) { $checkpoint = Get-MostRecentRegimeCheckpoint -Path $cpPath }
+                } catch { $checkpoint = $null }
+            }
+
+            # 6e. Completeness + preservation
+            $completeness = Get-SessionCompleteness -Events $costEvents
+            $priorCostData = $null
+            if ($null -ne $script:PrComments) {
+                $priorComment = @($script:PrComments | Where-Object { $_.body -match '<!-- cost-pattern-data' }) | Select-Object -Last 1
+                if ($priorComment) {
+                    $priorCompleteness = @{ completeness = 'complete'; excluded_from_rolling_baseline = $false }
+                    $priorCostData = @{ completeness = $priorCompleteness }
+                }
+            }
+            # preservation result is computed for future use (D10 re-emission prevention);
+            # currently emitted to output pipeline for visibility — suppressed to avoid unused-var warning.
+            $null = Resolve-CostDataPreservation -Current $completeness -Prior $priorCostData
+
+            # 6f. Anomaly flags
+            $anomalyFlags = @()
+            if (-not $rollingResult.timed_out -and $costStopwatch.Elapsed.TotalSeconds -lt $costBudgetSeconds) {
+                try { $anomalyFlags = @(Get-CostAnomalyFlags -ThisRun $costAttribution -RollingHistory @($rollingResult.entries) -RegimeCheckpoint $checkpoint) }
+                catch { $anomalyFlags = @() }
+            }
+
+            # 6g. Render
+            if ($costStopwatch.Elapsed.TotalSeconds -lt $costBudgetSeconds) {
+                $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$costBranch)
+                $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$costBranch)
+                $costSection = $costMarkdown + "`n" + $costYaml
+            }
+        } catch {
+            [Console]::Error.WriteLine("frame-credit-ledger: cost pattern composition failed: $($_.Exception.Message)")
+            $costSection = ''
+        }
+        $costStopwatch.Stop()
+    }
+
+    $comment = Compose-CommentWithCostPattern -MarkerToken $marker -PortReports $reportsArray -CostSection $costSection
     try {
         $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $marker -Body $comment
     }

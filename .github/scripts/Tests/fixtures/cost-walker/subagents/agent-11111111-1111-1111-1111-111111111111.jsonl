@@ -1,0 +1,2 @@
+{"type":"assistant","uuid":"bbbbbbbb-0001-0000-0000-000000000001","timestamp":"2026-01-01T10:02:00Z","message":{"usage":{"output_tokens":300,"cache_read_input_tokens":100,"input_tokens":500,"cache_creation_input_tokens":20},"content":[]}}
+{"type":"assistant","uuid":"bbbbbbbb-0001-0000-0000-000000000002","timestamp":"2026-01-01T10:03:00Z","message":{"usage":{"output_tokens":150,"cache_read_input_tokens":200,"input_tokens":200,"cache_creation_input_tokens":0},"content":[]}}

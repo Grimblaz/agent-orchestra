@@ -1,0 +1,38 @@
+name: Cost Pattern Presence Check
+
+on:
+  pull_request:
+    types: [opened, edited, labeled, synchronize]
+  issue_comment:
+    types: [created]
+
+# Fix Pass3-F5: bound CI cost. Without this, every issue_comment.created
+# event on a `cost-reduction`-labeled PR queues another ~150s sleep-loop
+# job, so a chatty PR (or comment-spam) can multiply Actions minutes.
+# Coalesce on PR/issue number and cancel in-flight runs when a newer
+# event lands — only the latest evaluation matters.
+concurrency:
+  group: cost-pattern-presence-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  check-cost-pattern:
+    if: contains(github.event.pull_request.labels.*.name, 'cost-reduction') || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.issue.labels.*.name, 'cost-reduction'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for cost-pattern-data marker
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number || github.event.issue.number }}"
+          for i in 1 2 3 4 5; do
+            if gh pr view "$PR_NUM" -R "$GH_REPO" --json comments --jq '.comments[].body' | grep -q '<!-- cost-pattern-data'; then
+              echo "Cost Pattern marker found on attempt $i"
+              exit 0
+            fi
+            echo "Marker not found, attempt $i/5; sleeping 30s"
+            sleep 30
+          done
+          echo "::error::cost-reduction PR is missing cost-pattern-data marker after 5 retries (~150s)"
+          exit 1
