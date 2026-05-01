@@ -17,8 +17,9 @@ Load this skill after `provenance-gate` completes a **non-stop outcome** (`I wro
 
 - **Same-agent resume**: the most recent upstream completion marker on the issue belongs to the active agent's own role (e.g., Solution-Designer re-entering when `<!-- design-phase-complete-{ID} -->` is the latest marker). In this case the brief and standards check are skipped — the agent proceeds directly to its next phase action.
 - **Provenance-gate stop outcomes** (`Stop — needs rework first` or `Needs rework — stop here`): provenance-gate halts; this skill never fires.
-- **No issue ID**: if no issue ID can be determined, skip silently.
-- **Greenfield fresh start**: no markers exist yet — see Greenfield Mode below.
+- **Issue exists but no upstream markers yet**: an issue ID is present but the issue carries no upstream completion markers (no inherited work to brief on or check against). Skip silently. This is **not** Greenfield Mode.
+- **No issue ID and not a Greenfield start**: if no issue ID can be determined and the developer is not describing a brand-new idea (i.e., the request is unrelated to issue work), skip silently.
+- **Greenfield Mode is the exception**: when the developer is describing a brand-new idea in plain language with no issue yet, the brief and issue-creation prompt **do** run — see Greenfield Mode below. Greenfield Mode takes precedence over the "No issue ID" skip rule above.
 
 ## Trigger Rules
 
@@ -86,7 +87,7 @@ Do not render empty section headers or `(none)` placeholders. If a conditional s
 When no issue exists yet (the developer is describing a new idea in plain language):
 
 - Synthesize the brief from the user's prompt words.
-- Mark every conditional field with a `(proposed)` suffix to signal that the content is not yet anchored to a real issue.
+- Mark **every field** (required core and conditional alike) with a `(proposed)` suffix to signal that the content is not yet anchored to a real issue. The whole brief is unanchored when no issue exists, so the suffix applies uniformly to `What`, `Scope tier`, and any conditional content.
 - Include a prompt for issue creation: use the platform's structured-question tool to ask 'No issue exists yet — create a GitHub issue for this work?' with 'Create issue now (Recommended)' and 'Continue without issue (exploratory session)' as options. The active agent's GitHub Setup step then handles the actual creation.
 - Omit the standards check — there is no inherited work to check against.
 
@@ -169,7 +170,7 @@ Each agent applies the standards check through its own lens, using the anchors b
 
 **Anchors**:
 
-- `skills/plan-authoring/SKILL.md` — Requirement Contract, AC-slice requirement, CE Gate coverage, Alignment Workflow (`## Alignment Workflow` at line 47)
+- `skills/plan-authoring/SKILL.md` — Requirement Contract, AC-slice requirement, CE Gate coverage, Alignment Workflow (`## Alignment Workflow` heading)
 - `skills/tracking-format/SKILL.md` — tracking-file frontmatter format
 
 **Concern triggers**:

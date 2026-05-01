@@ -195,6 +195,8 @@ Describe 'execution handoff persistence contract' {
         $skillContent | Should -Match $script:ProvenanceGateStage2Pattern -Because 'provenance-gate/SKILL.md must describe the cold-only stage-2 outcomes'
         $skillContent | Should -Match $script:ProvenanceGateNoMarkerOnStopPattern -Because 'provenance-gate/SKILL.md must keep both stop paths marker-free'
         $skillContent | Should -Match $script:ProvenanceGateDecorativeMarkerPattern -Because 'provenance-gate/SKILL.md must document that the second line is decorative/human-readable'
+        $skillContent | Should -Match '(?i)HTML token.{0,80}(only skip-check anchor|only parser anchor|only anchor)' -Because 'provenance-gate/SKILL.md must enforce that the HTML token is the only skip-check/parser anchor'
+        $skillContent | Should -Match '(?i)<!-- first-contact-assessed-\{ID\} -->' -Because 'provenance-gate/SKILL.md must reference the canonical HTML marker token format verbatim'
         $skillContent | Should -Match $script:ProvenanceGateOfflineSyncPattern -Because 'provenance-gate/SKILL.md must describe the offline fallback payload and next-online sync behavior'
         $skillContent | Should -Match '(?is)(MCP tools are unavailable|API call fails).{0,80}fail open' -Because 'provenance-gate/SKILL.md must describe fail-open semantics when MCP tools are unavailable'
     }
