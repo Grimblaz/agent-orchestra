@@ -262,24 +262,35 @@ The grammar is small and deterministic. Current validation is parse-only: it acc
 
 This is the **Provisional DSL surface (v1)**: every identifier or function below is used by a live adapter predicate and is subject to revision in #429 once warn-only hook interpretation is in place. The current parser accepts the shapes; #429 owns runtime meaning.
 
-| Identifier or function | Current intended shape |
-|---|---|
-| `changeset.touches` | Function with a literal glob argument, e.g., `changeset.touches('docs/**')` |
-| `changeset.touchesSource` | Function returning whether source files changed |
-| `changeset.touchesTestableCode` | Function returning whether testable production code changed |
-| `changeset.touchedAreaHasRefactorableDebt` | Function returning whether touched areas need refactor review |
-| `changeset.changesBehaviorOrInterface` | Function returning whether behavior or interface docs changed |
-| `changeset.touchesCliSurface` | Function returning whether CLI surface files changed |
-| `changeset.touchesBrowserSurface` | Function returning whether browser UI surface files changed |
-| `changeset.touchesCanvasSurface` | Function returning whether canvas surface files changed |
-| `changeset.touchesApiSurface` | Function returning whether API surface files changed |
-| `changeset.touchesPluginEntryPoint` | Function returning whether plugin entry-point or distributed plugin files changed |
-| `changeset.totalLines` | Numeric identifier used in comparisons |
-| `changeset.complexity` | String identifier; current predicates use `'trivial'` |
-| `scope.isReReview` | Bare boolean identifier for judge-only reruns |
-| `scope.isProxyGithub` | Bare boolean identifier for proxy-GitHub review intake |
-| `review.sustainedCriticalOrHigh` | Boolean credit-reference identifier for post-fix-review trigger predicates |
-| `ceGate.defectsFound` | Numeric credit-reference identifier for process-review trigger predicates |
+#### Predicate-DSL-evaluable vs runtime-resolver-only (issue #441 Decision 4)
+
+Two tiers of identifier exist:
+
+- **Predicate-DSL-evaluable** — evaluated by the parser and the warn-only hook evaluator without external port state: all `changeset.*` functions, `scope.*` bare booleans, and numeric/string comparisons. These identifiers describe changeset shape or invocation context and can be evaluated at hook time from the PR changeset alone.
+- **Runtime-resolver-only** — credit-reference identifiers (`review.*`, `ceGate.*`) that read finding-shape semantics from a completed credit. These are evaluated by the **runtime resolver** in `.github/scripts/lib/frame-predicate-core.ps1` (`Resolve-SustainedCriticalOrHigh`), not by the predicate-DSL evaluator in isolation. The DSL parser accepts the syntax; the resolver supplies the runtime value when a `JudgeScore` is present.
+
+Express-lane carve-out (`express_lane`) lives entirely in the runtime resolver alongside `review.sustainedCriticalOrHigh`. It is a per-finding field evaluated at credit-resolution time — never a predicate-DSL token.
+
+| Identifier or function | Current intended shape | Tier |
+|---|---|---|
+| `changeset.touches` | Function with a literal glob argument, e.g., `changeset.touches('docs/**')` | DSL |
+| `changeset.touchesAny` | Function with a literal array argument, e.g., `changeset.touchesAny(['plugin.json', '.claude-plugin/plugin.json'])` (issue #441 Step 4a) | DSL |
+| `changeset.touchesSource` | Function returning whether source files changed | DSL |
+| `changeset.touchesTestableCode` | Function returning whether testable production code changed | DSL |
+| `changeset.touchedAreaHasRefactorableDebt` | Function returning whether touched areas need refactor review | DSL |
+| `changeset.changesBehaviorOrInterface` | Function returning whether behavior or interface docs changed | DSL |
+| `changeset.touchesCliSurface` | Function returning whether CLI surface files changed | DSL |
+| `changeset.touchesBrowserSurface` | Function returning whether browser UI surface files changed | DSL |
+| `changeset.touchesCanvasSurface` | Function returning whether canvas surface files changed | DSL |
+| `changeset.touchesApiSurface` | Function returning whether API surface files changed | DSL |
+| `changeset.touchesPluginEntryPoint` | Function returning whether plugin entry-point or distributed plugin files changed | DSL |
+| `changeset.totalLines` | Numeric identifier used in comparisons | DSL |
+| `changeset.complexity` | String identifier; current predicates use `'trivial'` | DSL |
+| `scope.isReReview` | Bare boolean identifier for judge-only reruns | DSL |
+| `scope.isProxyGithub` | Bare boolean identifier for proxy-GitHub review intake | DSL |
+| `review.sustainedCriticalOrHigh` | Boolean credit-reference identifier for post-fix-review trigger predicates. **Resolved** (issue #441 Steps 4c/4d) by `Resolve-SustainedCriticalOrHigh` in `frame-predicate-core.ps1`: true iff any finding has severity in {Critical, High} AND ruling = uphold AND express_lane != true. | Runtime |
+| `express_lane` | Per-finding boolean field evaluated at credit-resolution time. Not a predicate-DSL token; evaluated by the runtime resolver alongside `review.sustainedCriticalOrHigh`. **Resolved** (issue #441 Step 4d) — a qualifying finding with `express_lane: true` is excluded from the sustained-critical-or-high count. | Runtime |
+| `ceGate.defectsFound` | Numeric credit-reference identifier for process-review trigger predicates | Runtime |
 
 ### Rejected alternative: all-in-adapters
 
