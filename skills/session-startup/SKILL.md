@@ -196,7 +196,7 @@ After the automatic startup path is complete, continue with the user's original 
 
 This step is not gated by the session-startup run-once marker and fires on every agent-role adoption in the conversation, including every subagent dispatch. Do not wrap this step in the Step 2 or Step 4 marker guard.
 
-If you are operating as an agent shell at `agents/{name}.md` whose body contains a `## Shared methodology` section naming a paired `agents/{Name}.agent.md`, **or if you are an inline slash-command dispatch at `commands/{name}.md` that names a paired `agents/{Name}.agent.md` body in its load reference**, load that paired file via the platform's file-read tool before proceeding. Use the D1 plugin-cache-first resolution sequence named in the command file's `### Step 9 — Paired-body halt-on-fail` block.
+If you are operating as an agent shell at `agents/{name}.md` whose body contains a `## Shared methodology` section naming a paired `agents/{Name}.agent.md`, **or if you are an inline slash-command dispatch at `commands/{name}.md` that names a paired `agents/{Name}.agent.md` body in its load reference**, load that paired file via the platform's file-read tool before proceeding. Use the D1 plugin-cache-first body resolution sequence documented in your host file's own `### Step 9 — Paired-body halt-on-fail` block (each agent shell and each command file carries its own per-body cascade).
 
 If that load fails, emit exactly: `⚠️ Shared-body load failed for agents/{Name}.agent.md — {error}. This run cannot continue without the canonical methodology; surface this to the user and stop.` After emitting that message, do not make any further tool calls, subagent dispatches, structured-question calls, or any other agent actions.
 
