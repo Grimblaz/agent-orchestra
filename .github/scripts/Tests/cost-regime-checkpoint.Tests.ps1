@@ -491,8 +491,7 @@ Describe 'Round-trip: Add-RegimeCheckpoint and Get-MostRecentRegimeCheckpoint' {
 
         # --- Append call (entry 2) ---
         # newer timestamp; exercises the double-quote escape round-trip ("..." → \"...\" → "...").
-        # Backslash round-trip is not tested here — the writer currently over-escapes \ → \\\\
-        # (a pre-existing issue separate from the metachar fix in entry 1).
+        # Backslash round-trip is covered by the dedicated 'single backslashes' test below.
         $entry2 = @{
             id         = 'cp-rt-002'
             timestamp  = '2026-02-01T10:00:00Z'
@@ -568,5 +567,57 @@ Describe 'Round-trip: Add-RegimeCheckpoint and Get-MostRecentRegimeCheckpoint' {
         [string]$after2['reason']    | Should -Be 'second snapshot'
         $after2['metrics'].Count    | Should -Be 0
         $after2['exclusions'].Count | Should -Be 0
+    }
+
+    It 'round-trip preserves single backslashes in scalar values (writer escape parity)' {
+        # Spawned-task fix: the writer previously used `-replace '\\', '\\\\'`
+        # in cost-checkpoint-core.ps1, which produces 4 literal backslashes per
+        # input `\` because .NET regex replacement treats `\` as literal (only
+        # `$` is special). The reader unescapes pairs `\\` → `\`, so 4 in the
+        # file became 2 after read — net: each `\` doubled per round-trip.
+        # The fix changes the replacement to `'\\'` (2 backslashes literal) so
+        # one `\` becomes `\\` in YAML and `\` after read.
+        if (-not (Get-Command Add-RegimeCheckpoint -ErrorAction SilentlyContinue) -or
+            -not (Get-Command Get-MostRecentRegimeCheckpoint -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'core functions not loaded'
+            return
+        }
+
+        $tmpPath = Join-Path $TestDrive "rt-bs-$([System.Guid]::NewGuid().ToString('N')).yaml"
+
+        # Bootstrap call: backslashes in reason (typical case: a Windows-style path).
+        $entry1 = @{
+            id         = 'cp-bs-001'
+            timestamp  = '2026-05-01T00:00:00Z'
+            reason     = 'path\to\file'
+            metrics    = @{}
+            exclusions = @{}
+        }
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry1
+
+        # YAML on disk should contain exactly one `\\` escape per source `\`,
+        # i.e. `path\\to\\file` — not `path\\\\to\\\\file`.
+        $rawYaml = Get-Content -Path $tmpPath -Raw
+        $rawYaml | Should -Match 'reason: "path\\\\to\\\\file"' `
+            -Because 'YAML scalar must double each backslash exactly once for valid round-trip'
+
+        $after1 = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $after1 | Should -Not -BeNullOrEmpty
+        [string]$after1['reason'] | Should -Be 'path\to\file' `
+            -Because 'round-trip must restore the original single-backslash value'
+
+        # Append call: backslashes in id and reason (multiple fields).
+        $entry2 = @{
+            id         = 'cp-bs\002'
+            timestamp  = '2026-06-01T00:00:00Z'
+            reason     = 'mixed \"quote\" and \backslash'
+            metrics    = @{}
+            exclusions = @{}
+        }
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry2
+
+        $after2 = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        [string]$after2['id']     | Should -Be 'cp-bs\002'
+        [string]$after2['reason'] | Should -Be 'mixed \"quote\" and \backslash'
     }
 }

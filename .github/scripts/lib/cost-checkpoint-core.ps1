@@ -239,11 +239,18 @@ checkpoints: []
     # back correctly (it splits on the first `:` and Trim('"') leaves quotes
     # mid-value). Backslashes must be escaped first to avoid double-escaping
     # the replacement we add for quotes.
-    $escId = ($id -replace '\\', '\\\\') -replace '"', '\"'
-    $escTimestamp = ($timestamp -replace '\\', '\\\\') -replace '"', '\"'
-    $escSubIssue = ($subIssue -replace '\\', '\\\\') -replace '"', '\"'
-    $escReason = ($reason -replace '\\', '\\\\') -replace '"', '\"'
-    $escNote = ($note -replace '\\', '\\\\') -replace '"', '\"'
+    #
+    # Spawned-task fix: the replacement string `'\\'` is two literal backslashes
+    # (PowerShell single-quote does no escaping). In .NET regex replacement,
+    # `\` is NOT a special character — only `$` is — so `'\\'` outputs exactly
+    # two backslashes per match. The previous `'\\\\'` (four chars) output four
+    # backslashes per match, which the reader's `\\` → `\` unescape only halved,
+    # leaving each input `\` doubled after a round-trip.
+    $escId = ($id -replace '\\', '\\') -replace '"', '\"'
+    $escTimestamp = ($timestamp -replace '\\', '\\') -replace '"', '\"'
+    $escSubIssue = ($subIssue -replace '\\', '\\') -replace '"', '\"'
+    $escReason = ($reason -replace '\\', '\\') -replace '"', '\"'
+    $escNote = ($note -replace '\\', '\\') -replace '"', '\"'
 
     # Build YAML entry block
     $entryLines = [System.Collections.Generic.List[string]]::new()
