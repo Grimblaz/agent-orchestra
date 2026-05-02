@@ -12,11 +12,9 @@ Run the Experience-Owner role inline in this conversation for the provided issue
 1. If the arguments reference an existing GitHub issue (e.g., `#369` or a URL), include that context.
 2. If there are no arguments, use the `AskUserQuestion` tool to ask whether this is upstream framing (issue to frame) or downstream CE Gate (issue with a branch ready to exercise).
 
-## Pre-flight (session-startup + provenance-gate)
+## Pre-flight (session-startup)
 
 Load `skills/session-startup/SKILL.md` and follow Steps 4, 6, 7b, and 9 (paired body for Step 9: `agents/Experience-Owner.agent.md`).
-
-Then load `skills/provenance-gate/SKILL.md` and follow its protocol for any GitHub-issue-referencing argument.
 
 ### Step 9 — Paired-body halt-on-fail
 

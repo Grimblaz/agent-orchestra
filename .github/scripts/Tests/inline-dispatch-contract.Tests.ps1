@@ -2,7 +2,8 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
 .SYNOPSIS
-    Contract tests for inline-dispatch enforcement — DRY shape enforced per #498.
+    Contract tests for inline-dispatch enforcement — DRY shape enforced per #498
+    and provenance-gate retirement.
 
 .DESCRIPTION
     Verifies the Claude Code command-file DRY contract across
@@ -10,12 +11,11 @@
     commands/orchestrate.md, and commands/polish.md.
 
     Issue #481 first established the load-reference pattern for agent bodies.
-    Issue #437 intentionally rolled back the #412 D5/D6 /plan carve-out so
-    /plan carried inline paired-body and provenance-gate prose like /experience
-    and /design. Issue #498 reverses the #437 carve-out: each command now defers
-    pre-flight protocol to the owning skills (skills/session-startup/SKILL.md and
-    skills/provenance-gate/SKILL.md) via a single load-reference line rather than
-    duplicating the prose inline.
+    Issue #498 reshaped the command-file pre-flight surface into a DRY load
+    reference into skills/session-startup/SKILL.md plus a per-command D1
+    body-resolution cascade. The provenance-gate retirement removes the
+    (formerly second) load reference into skills/provenance-gate/SKILL.md;
+    the upstream-onboarding skill now owns the framing/orientation phase.
 
     The Copilot asymmetry remains tracked by #414.
 
@@ -23,10 +23,8 @@
         are thin one-line dispatchers without a parent-side prose surface. Copilot
         inline-dispatch enforcement is owned by the agent body and tracked in #414.
 
-        Canonical option-label extraction continues to pull from the owning skills so
-        that label changes cause explicit contract-test failures instead of silent drift.
-        The legacy-label guard (LegacyProvenanceLabels) ensures old labels cannot
-        re-enter any command file.
+        Canonical option-label extraction continues to pull from skills/session-startup
+        so that label changes cause explicit contract-test failures instead of silent drift.
 #>
 
 Describe 'inline dispatch contract' {
@@ -34,7 +32,6 @@ Describe 'inline dispatch contract' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:SessionStartupSkill = Join-Path $script:RepoRoot 'skills\session-startup\SKILL.md'
-        $script:ProvenanceGateSkill = Join-Path $script:RepoRoot 'skills\provenance-gate\SKILL.md'
 
         $script:GetCanonicalLabelYaml = {
             param(
@@ -135,12 +132,6 @@ Describe 'inline dispatch contract' {
         }
 
         $script:SessionStartupLabels = & $script:GetCanonicalLabelMap -SkillPath $script:SessionStartupSkill -Heading '### Inline-Dispatch Option Labels' -ExpectedCount 4
-        $script:ProvenanceStage1Labels = & $script:GetCanonicalLabelList -SkillPath $script:ProvenanceGateSkill -Heading '### Stage-1 Self-Classification Labels' -ExpectedCount 3
-        $script:ProvenanceStage2Labels = & $script:GetCanonicalLabelList -SkillPath $script:ProvenanceGateSkill -Heading '### Stage-2 Cold-Only Assessment Labels' -ExpectedCount 3
-        $script:LegacyProvenanceLabels = @(
-            'Assessment looks right - proceed with caution',
-            'Needs rework - stop here'
-        )
 
         $script:BodyResolutionCommandSpecs = @(
             [pscustomobject]@{
@@ -148,55 +139,40 @@ Describe 'inline dispatch contract' {
                 Path                     = 'commands\experience.md'
                 BodyFile                 = 'Experience-Owner.agent.md'
                 ForbiddenDirectReadPaths = @('agents/Experience-Owner.agent.md')
-                HasProvenanceGate        = $true
             },
             [pscustomobject]@{
                 Name                     = '/design'
                 Path                     = 'commands\design.md'
                 BodyFile                 = 'Solution-Designer.agent.md'
                 ForbiddenDirectReadPaths = @('agents/Solution-Designer.agent.md')
-                HasProvenanceGate        = $true
             },
             [pscustomobject]@{
                 Name                     = '/plan'
                 Path                     = 'commands\plan.md'
                 BodyFile                 = 'Issue-Planner.agent.md'
                 ForbiddenDirectReadPaths = @('agents/Issue-Planner.agent.md')
-                HasProvenanceGate        = $true
             },
             [pscustomobject]@{
                 Name                     = '/polish'
                 Path                     = 'commands\polish.md'
                 BodyFile                 = 'UI-Iterator.agent.md'
                 ForbiddenDirectReadPaths = @('agents/UI-Iterator.agent.md', 'agents/ui-iterator.md')
-                HasProvenanceGate        = $false
             },
             [pscustomobject]@{
                 Name                     = '/orchestrate'
                 Path                     = 'commands\orchestrate.md'
                 BodyFile                 = 'Code-Conductor.agent.md'
                 ForbiddenDirectReadPaths = @('agents/Code-Conductor.agent.md')
-                HasProvenanceGate        = $true
             }
         )
     }
 
-    It 'extracts canonical inline-dispatch labels from the source skills' {
+    It 'extracts canonical inline-dispatch labels from the source skill' {
         $script:SessionStartupLabels.Count | Should -Be 4
         $script:SessionStartupLabels['cleanup_yes'] | Should -Be 'Yes — run cleanup'
         $script:SessionStartupLabels['cleanup_no'] | Should -Be 'No — skip for now'
         $script:SessionStartupLabels['drift_stop'] | Should -Be "Stop — I'll restart now"
         $script:SessionStartupLabels['drift_continue'] | Should -Be 'Continue — run under old code'
-
-        $script:ProvenanceStage1Labels.Count | Should -Be 3
-        $script:ProvenanceStage1Labels[0] | Should -Be "I wrote this / I'm fully briefed"
-        $script:ProvenanceStage1Labels[1] | Should -Be "I'm picking this up cold"
-        $script:ProvenanceStage1Labels[2] | Should -Be 'Stop — needs rework first'
-
-        $script:ProvenanceStage2Labels.Count | Should -Be 3
-        $script:ProvenanceStage2Labels[0] | Should -Be 'Assessment looks right — proceed'
-        $script:ProvenanceStage2Labels[1] | Should -Be 'Proceed but carry concerns forward'
-        $script:ProvenanceStage2Labels[2] | Should -Be 'Needs rework — stop here'
     }
 
     It 'requires each command file to carry DRY load references replacing inline pre-flight prose' {
@@ -207,16 +183,7 @@ Describe 'inline dispatch contract' {
 
             $content | Should -Match ('Load `skills/session-startup/SKILL\.md` and follow Steps 4, 6, 7b, and 9 \(paired body for Step 9: `agents/' + $escapedBody + '`\)\.') -Because "$($command.Name) must carry the canonical session-startup load reference naming its paired body"
 
-            foreach ($legacyLabel in $script:LegacyProvenanceLabels) {
-                $content | Should -Not -Match ([regex]::Escape($legacyLabel)) -Because "$($command.Name) must not keep the legacy provenance-gate label '$legacyLabel'"
-            }
-
-            if ($command.HasProvenanceGate) {
-                $content | Should -Match 'Load `skills/provenance-gate/SKILL\.md` and follow its protocol' -Because "$($command.Name) must carry the canonical provenance-gate load reference"
-            }
-            else {
-                $content | Should -Not -Match 'Load `skills/provenance-gate/SKILL\.md`' -Because "$($command.Name) must not add a provenance-gate load reference (this command has no GitHub-issue argument)"
-            }
+            $content | Should -Not -Match 'provenance-gate' -Because "$($command.Name) must not reference the retired provenance-gate skill"
         }
     }
 
@@ -406,11 +373,11 @@ Describe 'inline dispatch contract' {
         }
     }
 
-    It 'documents the #498 DRY reversal, #437 plan rollback, and #414 Copilot asymmetry in the test header' {
+    It 'documents the #498 DRY reshape, provenance-gate retirement, and #414 Copilot asymmetry in the test header' {
         $content = Get-Content -Path (Join-Path $script:RepoRoot '.github\scripts\Tests\inline-dispatch-contract.Tests.ps1') -Raw -ErrorAction Stop
 
-        $content | Should -Match ([regex]::Escape('Issue #498 reverses the #437 carve-out')) -Because 'the test header must explain the #498 DRY reversal of the command-file pre-flight prose'
-        $content | Should -Match ([regex]::Escape('Issue #437 intentionally rolled back the #412 D5/D6 /plan carve-out')) -Because 'the test header must explain the intentional #437 rollback of the /plan carve-out'
+        $content | Should -Match ([regex]::Escape('Issue #498 reshaped the command-file pre-flight surface')) -Because 'the test header must explain the #498 DRY reshape of the command-file pre-flight prose'
+        $content | Should -Match ([regex]::Escape('provenance-gate retirement')) -Because 'the test header must explain the provenance-gate retirement and upstream-onboarding ownership transfer'
         $content | Should -Match ([regex]::Escape('Copilot asymmetry remains tracked by #414')) -Because 'the test header must preserve the tracked Copilot asymmetry context'
     }
 }

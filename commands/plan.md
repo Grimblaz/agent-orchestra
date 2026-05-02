@@ -14,11 +14,9 @@ Run the Issue-Planner role inline in this conversation to produce an implementat
 1. Require an issue number (the plan is posted as a durable comment on that issue). If missing, use the `AskUserQuestion` tool.
 2. Check the issue's comments/timeline for the `<!-- design-phase-complete-{ID} -->` marker (design completion lives on a comment, not in the issue body). If the marker is not present on the issue, use `AskUserQuestion` to ask whether to run `/design` first or to plan from whatever framing already exists.
 
-## Pre-flight (session-startup + provenance-gate)
+## Pre-flight (session-startup)
 
 Load `skills/session-startup/SKILL.md` and follow Steps 4, 6, 7b, and 9 (paired body for Step 9: `agents/Issue-Planner.agent.md`).
-
-Then load `skills/provenance-gate/SKILL.md` and follow its protocol for any GitHub-issue-referencing argument.
 
 ### Step 9 — Paired-body halt-on-fail
 
