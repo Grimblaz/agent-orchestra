@@ -15,6 +15,11 @@
 BeforeAll {
     $script:RepoRoot     = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:AdaptersPath = Join-Path $script:RepoRoot 'skills/adversarial-review/adapters'
+    $script:LibPath      = Join-Path $script:RepoRoot '.github/scripts/lib/frame-credit-ledger-core.ps1'
+
+    if (Test-Path $script:LibPath) {
+        . $script:LibPath
+    }
 
     # ---------------------------------------------------------------------------
     # Frontmatter YAML parser (regex-based — no YAML module required)
@@ -171,5 +176,155 @@ Describe 'adversarial-review SKILL.md integrity contract table (Step 8a)' {
         $script:Skill | Should -Match 'exempt' -Because 'SKILL.md must document the exempt concept'
         $script:Skill | Should -Match 'judge.only|judge-only' -Because 'SKILL.md must name judge-only adapter'
         $script:Skill | Should -Match 'proxy.github|proxy-github' -Because 'SKILL.md must name proxy-github adapter'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Section 3 — Build-ReviewCreditRow (Step 8b — Decision 2 + M1 emission)
+# ---------------------------------------------------------------------------
+
+Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)' {
+
+    BeforeAll {
+    # Fixture judge-rulings comment: two findings, one sustained (medium), one defense-sustained.
+    $script:JudgeRulingsAllPassed = @'
+### Adversarial Review Score Summary
+
+| Finding | Pass | Prosecution (severity, pts) | Defense verdict | Ruling | Confidence | Points |
+| ------- | ---- | --------------------------- | --------------- | ------ | ---------- | ------ |
+| F1: Minor doc drift | 1 | low (1 pt) | disproved | ❌ Defense sustained | high | D+1 |
+| F2: Missing type guard | 2 | medium (5 pts) | conceded | ✅ Sustained | high | P+5 |
+
+<!-- judge-rulings
+- id: F1
+  judge_ruling: defense-sustained
+  judge_confidence: high
+  points_awarded: D+1
+- id: F2
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+-->
+'@
+
+    # Fixture with a sustained HIGH finding (P+10) → should produce status=failed.
+    $script:JudgeRulingsHighSustained = @'
+<!-- judge-rulings
+- id: F1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+10
+- id: F2
+  judge_ruling: defense-sustained
+  judge_confidence: medium
+  points_awarded: D+5
+-->
+'@
+
+    # Fixture with all defense-sustained.
+    $script:JudgeRulingsAllDefense = @'
+<!-- judge-rulings
+- id: F1
+  judge_ruling: defense-sustained
+  judge_confidence: high
+  points_awarded: D+5
+-->
+'@
+    }
+
+
+    It 'returns a credit row with all required v4 fields' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'standard'
+
+        $row | Should -Not -BeNullOrEmpty
+        $row.PSObject.Properties.Name | Should -Contain 'port'
+        $row.PSObject.Properties.Name | Should -Contain 'adapter'
+        $row.PSObject.Properties.Name | Should -Contain 'status'
+        $row.PSObject.Properties.Name | Should -Contain 'run_index'
+        $row.PSObject.Properties.Name | Should -Contain 'evidence'
+        $row.PSObject.Properties.Name | Should -Contain 'judge-score'
+        $row.PSObject.Properties.Name | Should -Contain 'integrity-check'
+    }
+
+    It 'port is always review' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed
+        $row.port | Should -Be 'review'
+    }
+
+    It 'adapter defaults to standard' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed
+        $row.adapter | Should -Be 'standard'
+    }
+
+    It 'run_index defaults to 1' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed
+        $row.run_index | Should -Be 1
+    }
+
+    It 'run_index is overridable via parameter' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -RunIndex 3
+        $row.run_index | Should -Be 3
+    }
+
+    It 'status is passed when no P+10 finding is sustained' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed
+        $row.status | Should -Be 'passed'
+    }
+
+    It 'status is failed when a P+10 finding is sustained' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsHighSustained
+        $row.status | Should -Be 'failed'
+    }
+
+    It 'status is passed when all findings are defense-sustained' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllDefense
+        $row.status | Should -Be 'passed'
+    }
+
+    It 'judge-score.findings list contains one entry per judge-rulings row' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed
+        @($row.'judge-score'.findings).Count | Should -Be 2
+    }
+
+    It 'judge-score.findings entries carry id and ruling fields' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed
+        $f1 = $row.'judge-score'.findings | Where-Object { $_.id -eq 'F1' }
+        $f1 | Should -Not -BeNullOrEmpty
+        $f1.ruling | Should -Be 'defense-sustained'
+    }
+
+    It 'integrity-check.pass-blocks is [1,2,3] for standard adapter' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'standard' -AdaptersDir $script:AdaptersPath
+
+        @($row.'integrity-check'.'pass-blocks') | Should -Be @(1, 2, 3)
+    }
+
+    It 'integrity-check.pass-blocks is [1] for lite adapter' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'lite' -AdaptersDir $script:AdaptersPath
+
+        @($row.'integrity-check'.'pass-blocks') | Should -Be @(1)
+    }
+
+    It 'integrity-check.status is not-applicable for exempt adapters (judge-only)' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllDefense `
+            -AdapterName 'judge-only' -AdaptersDir $script:AdaptersPath
+
+        $row.'integrity-check'.status | Should -Be 'not-applicable'
+    }
+
+    It 'evidence is a non-empty string' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed
+        [string]::IsNullOrWhiteSpace($row.evidence) | Should -Be $false
+    }
+
+    It 'custom evidence string is used when provided' {
+        $customEvidence = 'judge ruling: keep — all findings minor or disproved'
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -Evidence $customEvidence
+        $row.evidence | Should -Be $customEvidence
     }
 }

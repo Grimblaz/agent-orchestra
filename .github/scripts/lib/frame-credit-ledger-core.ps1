@@ -3,11 +3,15 @@
 .SYNOPSIS
     Pure-logic library for the frame credit-ledger pre-PR warn hook (issue #429).
 
-    Exposes nine functions:
+    Exposes eleven functions:
       - Read-PRMetricsBlock               : parse a pipeline-metrics v4 marker out of a PR body
       - Select-LastCreditByRunIndex       : pick the highest-run_index credit for (port, adapter)
       - Test-ReviewSentinelPresent        : check for <!-- review-judge-produced-{PR} --> sentinel
       - Resolve-NotPersistedSynthesis     : synthesize not-persisted credit when sentinel present
+      - Build-ReviewCreditRow             : construct a v4 review credit row from judge-rulings
+                                           comment + adapter integrity contract (issue #441, Step 8b)
+      - ConvertFrom-JudgeRulingsComment   : parse the <!-- judge-rulings --> YAML block from a
+                                           PR comment body into structured finding objects
       - Get-PortFiles                     : enumerate frame/ports/*.yaml as objects
       - Resolve-PortStatus                : classify a single port given adapters + credit
       - Compose-Comment                   : render the warn-mode unified per-port table report
@@ -383,6 +387,153 @@ function Resolve-NotPersistedSynthesis {
         Port    = 'review'
         Status  = 'not-persisted'
         Evidence = $evidence
+    }
+}
+
+# ---------------------------------------------------------------------------
+# ConvertFrom-JudgeRulingsComment (issue #441, Step 8b)
+# ---------------------------------------------------------------------------
+# Parse the <!-- judge-rulings --> YAML block from a PR comment body.
+# Returns an array of pscustomobject with: id, judge_ruling, judge_confidence,
+# points_awarded.  Returns an empty array when no valid block is found.
+
+function ConvertFrom-JudgeRulingsComment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CommentBody
+    )
+
+    $blockMatch = [regex]::Match($CommentBody, '(?ms)<!--\s*judge-rulings\s*\r?\n(?<body>.*?)\r?\n-->')
+    if (-not $blockMatch.Success) { return @() }
+
+    $rows    = [System.Collections.Generic.List[object]]::new()
+    $current = $null
+
+    foreach ($rawLine in ($blockMatch.Groups['body'].Value -split "`r?`n")) {
+        $line = $rawLine.Trim()
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+        if ($line -match '^-\s+(?<key>[a-z_]+):\s+(?<value>.+?)\s*$') {
+            if ($null -ne $current) { $rows.Add([pscustomobject]$current) }
+            $current = [ordered]@{}
+            $current[$matches['key']] = $matches['value']
+            continue
+        }
+
+        if ($line -match '^(?<key>[a-z_]+):\s+(?<value>.+?)\s*$') {
+            if ($null -ne $current) { $current[$matches['key']] = $matches['value'] }
+            continue
+        }
+    }
+
+    if ($null -ne $current) { $rows.Add([pscustomobject]$current) }
+    return @($rows)
+}
+
+# ---------------------------------------------------------------------------
+# Build-ReviewCreditRow (issue #441, Step 8b — Decision 2 + M1 emission)
+# ---------------------------------------------------------------------------
+# Construct a v4 review credit row from a judge-rulings PR comment + adapter
+# integrity contract.  Used by Code-Conductor's pipeline-metrics emitter at
+# PR creation time.
+#
+# Parameters:
+#   JudgeRulingsComment — full text of a PR comment containing <!-- judge-rulings -->
+#   AdapterName         — 'standard' | 'lite' | 'judge-only' | 'proxy-github' (default: 'standard')
+#   AdaptersDir         — path to skills/adversarial-review/adapters/ (optional; enables
+#                         live integrity-contract lookup from adapter frontmatter)
+#   RunIndex            — monotonically increasing integer per (port, adapter) (default: 1)
+#   Evidence            — custom evidence string; auto-generated when absent
+#
+# Returns a pscustomobject shaped for direct emission into credits[]:
+#   port, adapter, status, run_index, evidence, judge-score, integrity-check
+
+function Build-ReviewCreditRow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$JudgeRulingsComment,
+        [string]$AdapterName = 'standard',
+        [string]$AdaptersDir = '',
+        [int]$RunIndex = 1,
+        [string]$Evidence = ''
+    )
+
+    # Parse findings from the judge-rulings block.
+    $findings = @(ConvertFrom-JudgeRulingsComment -CommentBody $JudgeRulingsComment)
+
+    # Determine credit status.
+    # Presence of any sustained finding with P+10 (critical/high severity) → failed.
+    # All findings defense-sustained or only P+1/P+5 sustained → passed.
+    $hasSustainedHigh = $false
+    foreach ($f in $findings) {
+        if ([string]$f.judge_ruling -eq 'sustained' -and [string]$f.points_awarded -match 'P\+10') {
+            $hasSustainedHigh = $true
+            break
+        }
+    }
+    $status = if ($hasSustainedHigh) { 'failed' } else { 'passed' }
+
+    # Evidence string.
+    $sustainedCount = @($findings | Where-Object { [string]$_.judge_ruling -eq 'sustained' }).Count
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) {
+        $Evidence
+    }
+    else {
+        "Review completed; $sustainedCount finding(s) sustained, status: $status."
+    }
+
+    # Integrity contract from adapter frontmatter (optional live lookup).
+    $passBlocks      = @(1, 2, 3)   # default for standard
+    $integrityStatus = 'passed'
+
+    if (-not [string]::IsNullOrWhiteSpace($AdaptersDir)) {
+        $adapterMd = Join-Path $AdaptersDir "$AdapterName.md"
+        if (Test-Path $adapterMd) {
+            $content = Get-Content $adapterMd -Raw
+            if ($content -match '(?ms)integrity-contract:.*?exempt:\s*(?<val>true|false)') {
+                $isExempt = [System.Boolean]::Parse($matches['val'].Trim())
+                if ($isExempt) {
+                    $passBlocks      = @()
+                    $integrityStatus = 'not-applicable'
+                }
+                elseif ($content -match '(?ms)integrity-contract:.*?pass-blocks:\s*\[(?<blocks>[^\]]*)\]') {
+                    $blockStr  = $matches['blocks']
+                    $passBlocks = @(
+                        $blockStr -split '[,\s]+' |
+                        Where-Object { $_ -match '^\d+$' } |
+                        ForEach-Object { [int]$_ }
+                    )
+                }
+            }
+        }
+    }
+    elseif ($AdapterName -eq 'lite') {
+        $passBlocks = @(1)
+    }
+    elseif ($AdapterName -in @('judge-only', 'proxy-github')) {
+        $passBlocks      = @()
+        $integrityStatus = 'not-applicable'
+    }
+
+    return [pscustomobject]@{
+        port             = 'review'
+        adapter          = $AdapterName
+        status           = $status
+        run_index        = $RunIndex
+        evidence         = $resolvedEvidence
+        'judge-score'    = [pscustomobject]@{
+            ruling   = $status
+            findings = @($findings | ForEach-Object {
+                [pscustomobject]@{
+                    id     = [string]$_.id
+                    ruling = [string]$_.judge_ruling
+                }
+            })
+        }
+        'integrity-check' = [pscustomobject]@{
+            'pass-blocks' = $passBlocks
+            status        = $integrityStatus
+        }
     }
 }
 
