@@ -115,33 +115,70 @@ If the user confirms, run all lines from the fenced code block inside `additiona
 
 After the cleanup path completes, run this Claude-only sub-step before continuing with the user's request. Copilot skips this sub-step silently because it has no version-cache analog.
 
-Before reading the marketplace view, run `claude plugin marketplace update` with a 5-second timeout. This freshness budget is scoped only to the marketplace freshness probe; the existing 30-second timeout on `claude plugin update agent-orchestra@agent-orchestra --yes` is independent because that later path performs install/update. Do not retry transient freshness failures; fail open within the 5-second budget, preserve the retry-once contract below for the later `claude plugin update agent-orchestra@agent-orchestra --yes` call, emit `marketplace freshness check failed — using cached view` on timeout or non-zero exit, and continue with the cached marketplace read.
+**Ordered procedure (must follow this exact sequence):**
 
-Silent skip remains for environment/setup failures such as `pwsh` missing; fail-open emission applies to execution failures such as the `claude` CLI failed/missing. For marketplace registrations classified in the local-path branch below as a non-git local directory or dirty tree/detached HEAD, suppress the freshness emit because the existing classification surfaces the appropriate remediation.
+1. **Refresh marketplace view**: Run `claude plugin marketplace update` with a 5-second timeout. If it fails or times out, emit `marketplace freshness check failed — using cached view` and continue with the cached view. Do not retry transient freshness failures.
 
-Headless Claude runs perform the same freshness attempt and same fail-open emission; only the post-drift stop/continue prompt remains suppressed. The verified-current silence guarantee applies only on the freshness-success branch; on freshness failure, cached comparison is a documented accepted limitation.
+2. **Resolve installed state**: Read `~/.claude/plugins/installed_plugins.json`. Find the `agent-orchestra@agent-orchestra` entry and read its installed `version` plus `marketplace` field. If the file is missing, the entry is absent, or the entry has no `marketplace` field, fail open: silent-skip or emit a one-line minimal error and continue.
 
-This freshness step shares the existing Step 4 run-once marker; do not introduce a second marker or persistence mechanism.
+3. **Resolve marketplace latest**: Read `~/.claude/plugins/marketplaces/{marketplace}/.claude-plugin/plugin.json`. If the installed version matches, continue silently (verified-current silence).
 
-1. Resolve the installed plugin state from `~/.claude/plugins/installed_plugins.json`.
-2. Find the `agent-orchestra@agent-orchestra` entry and read its installed `version` plus `marketplace` field.
-3. If the file is missing, the entry is absent, or the entry has no `marketplace` field, fail open: silent-skip or emit a one-line minimal error and continue.
-4. Resolve the marketplace view of latest from `~/.claude/plugins/marketplaces/{marketplace}/.claude-plugin/plugin.json`.
-5. If the installed version is current, continue silently.
-6. If the installed version is behind, emit an inline status line before any command runs: `Drift detected — updating…`
-7. Run `claude plugin update agent-orchestra@agent-orchestra --yes` with a 30-second timeout.
-8. On success, emit the inline summary `Updated 'agent-orchestra@agent-orchestra' from {old} -> {new}. Current session runs under old code until restart.` and ask the user to choose one of these exact options: `Stop — I'll restart now` or `Continue — run under old code`.
-9. After the choice, acknowledge the selected mode explicitly. If the user continues, say that the new code goes live next session and then continue with the original request.
-10. If the update fails, retry once on transient errors. If it still fails, fail open with a minimal error plus the manual fallback command, then continue under the installed version.
+4. **Detect drift and emit marker**: If the installed version is behind the marketplace version, emit `Drift detected — updating…` as an inline status line. This marker signals that the install is about to begin.
 
-When the marketplace registration points at a local path instead of a GitHub remote, classify it before running the update:
+5. **Run the install**: Run `claude plugin update agent-orchestra@agent-orchestra --yes` with a 30-second timeout. On success, emit:
+   `Updated 'agent-orchestra@agent-orchestra' from {old} -> {new}. Current session runs under old code until restart.`
+   On failure, retry once on transient errors. If the retry also fails, emit a failure summary and the manual fallback command:
+   `Plugin update failed: {error}. Manual fallback: claude plugin install agent-orchestra@agent-orchestra`
 
-- Clean git repo behind `origin/main`: surface that the marketplace path is behind and include the remediation commands `claude plugin marketplace remove agent-orchestra` and `claude plugin marketplace add Grimblaz/agent-orchestra`
+6. **Present structured question (only after step 5 completes)**: The structured question MUST NOT be presented while the install is in flight or before it has been attempted (success or announced failure). After step 5 completes — whether it succeeded or failed — present the appropriate prompt (see the `Drift Failure-Mode Prompt` subsection below).
+
+**Silent skip conditions for this sub-step**: when `pwsh` is missing; when the `claude` CLI is missing or fails; when the marketplace registration points at a non-git local directory, dirty tree, or detached HEAD (the local-path classification already surfaces remediation).
+
+**Local-path marketplace classification** (run before step 4 when a local path is detected):
+- Clean git repo behind `origin/main`: surface that the marketplace path is behind and include `claude plugin marketplace remove agent-orchestra` and `claude plugin marketplace add Grimblaz/agent-orchestra` remediation commands
 - Non-git local directory: surface that the registration is a non-git local directory
 - Dirty tree or detached HEAD: surface that local marketplace remediation is skipped because the clone has local work
 - Fetch failure: fail open and continue
 
-Headless Claude runs skip the stop/continue prompt and emit the update result inline only. This sub-step shares the same run-once marker written in Step 4; do not create a second session-startup marker.
+**Headless Claude behavior**: Headless Claude runs perform the same steps 1–5 and same fail-open emission; only step 6 (the stop/continue structured question) is suppressed. The verified-current silence guarantee applies only on the freshness-success branch; on freshness failure, cached comparison is a documented accepted limitation.
+
+This sub-step shares the existing Step 4 run-once marker; do not introduce a second marker or persistence mechanism.
+
+### Drift Failure-Mode Prompt
+
+The canonical `### Inline-Dispatch Option Labels` YAML block keeps exactly 4 keys (`cleanup_yes`, `cleanup_no`, `drift_stop`, `drift_continue`) — no additional keys are added for failure-mode labels.
+
+**On install success** (step 5 of Step 7b succeeded): present the structured question using the canonical `drift_stop` and `drift_continue` option labels verbatim:
+- `Stop — I'll restart now` (maps to `drift_stop`)
+- `Continue — run under old code` (maps to `drift_continue`)
+
+**On install failure** (step 5 of Step 7b failed, including post-retry): render a one-off failure-recovery prompt (not a canonical labeled option — these labels are session-ephemeral only):
+- `Stop — I'll restart and try the install again`
+- `Continue — under old code (install failed)`
+
+Include the manual fallback command in the failure prompt body so the user has something concrete to act on when they choose to restart: `claude plugin install agent-orchestra@agent-orchestra`.
+
+This conditional rendering keeps the `inline-dispatch-contract.Tests.ps1` `ExpectedCount 4` and `Should -Be 4` assertions green because failure-mode labels are prose-rendered and session-ephemeral, not added to the canonical YAML block.
+
+### Permission allowlist (recommended)
+
+To avoid repeated per-command permission prompts when the session-startup cleanup runs, add these entries to your project's `.claude/settings.json` `allow` list:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(pwsh*post-merge-cleanup.ps1*)",
+      "Bash(git branch -D feature/*)",
+      "Bash(git branch -D claude/*)"
+    ]
+  }
+}
+```
+
+The first entry covers the composite cleanup-script invocation that the session-startup hook emits. The second and third entries cover edge cases where manual cleanup commands are needed outside the script (for example, when the current-worktree narrative guidance is followed manually from another checkout).
+
+Automated detection or installation of these allowlist rules is out of scope for this issue and would be a follow-up. AC4 of issue #500 is satisfied by this documentation per the Experience-Owner framing: "documents how the cleanup confirmation answer translates into permission."
 
 ### Step 8 — Continue with the user's request
 
