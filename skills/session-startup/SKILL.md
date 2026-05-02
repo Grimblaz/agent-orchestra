@@ -196,7 +196,7 @@ After the automatic startup path is complete, continue with the user's original 
 
 This step is not gated by the session-startup run-once marker and fires on every agent-role adoption in the conversation, including every subagent dispatch. Do not wrap this step in the Step 2 or Step 4 marker guard.
 
-If you are operating as an agent shell at `agents/{name}.md` whose body contains a `## Shared methodology` section naming a paired `agents/{Name}.agent.md`, load that paired file via the platform's file-read tool before proceeding.
+If you are operating as an agent shell at `agents/{name}.md` whose body contains a `## Shared methodology` section naming a paired `agents/{Name}.agent.md`, **or if you are an inline slash-command dispatch at `commands/{name}.md` that names a paired `agents/{Name}.agent.md` body in its load reference**, load that paired file via the platform's file-read tool before proceeding. Use the D1 plugin-cache-first body resolution sequence documented in your host file's own `### Step 9 — Paired-body halt-on-fail` block (each agent shell and each command file carries its own per-body cascade).
 
 If that load fails, emit exactly: `⚠️ Shared-body load failed for agents/{Name}.agent.md — {error}. This run cannot continue without the canonical methodology; surface this to the user and stop.` After emitting that message, do not make any further tool calls, subagent dispatches, structured-question calls, or any other agent actions.
 
@@ -216,7 +216,7 @@ canonical_option_labels:
   drift_continue: "Continue — run under old code"
 ```
 
-Enforcement paths: Claude inline slash-command dispatch (`/experience`, `/design`, and `/plan`) has command-file contract enforcement for the paired-body read requirement and fail-closed error text. `/plan` now enforces Step 9 inline as the issue #437 rollback of its earlier delegated path, matching `/experience` and `/design`; startup option-label parity still spans all three Claude command files from issue #412. `Agent` tool and other subagent dispatch continue to rely on paired shell Step 9, which fires before the agent acts and halts on failure. Inline dispatch still does not have full Step 9 success-path citation parity.
+Enforcement paths: Claude inline slash-command dispatch (`/experience`, `/design`, `/plan`, `/orchestrate`, and `/polish`) enforces the pre-flight protocol via a load reference to this skill (and, where applicable, `skills/provenance-gate/SKILL.md`); the per-command prose duplication was removed in issue #498 (DRY pass following #481). Each command file retains a `### Step 9 — Paired-body halt-on-fail` block with its D1 body-resolution cascade immediately after the load reference; Step 9 of this skill now recognizes inline slash-command dispatch as a paired-body context, so the halt-on-fail contract applies to both `Agent` tool subagent dispatches and inline command invocations.
 
 ## Silent Skip Conditions
 

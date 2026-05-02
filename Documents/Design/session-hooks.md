@@ -125,18 +125,19 @@ Added alongside the portability fix to close a gap found in the post-PR review o
 
 ## Inline-Dispatch Contract
 
-The inline-dispatch contract added for issue #412 and updated by issue #437 enforces the same direct-command pre-flight surface across all three Claude command files: `commands/experience.md`, `commands/design.md`, and `commands/plan.md`. Each command file carries command-side enforcement for session-startup Steps 4, 6, and 7b, the canonical startup option labels, Step 9 paired-body halt-on-fail prose, and provenance-gate labels/prose. `.github/scripts/Tests/inline-dispatch-contract.Tests.ps1` asserts prose presence per command and per step using canonical option labels extracted from the fenced YAML blocks in `skills/session-startup/SKILL.md` and `skills/provenance-gate/SKILL.md`.
+The inline-dispatch contract was added for issue #412, updated by issue #437, and re-shaped into a DRY load-reference contract by issue #498 (follow-up to #481). After #498 each Claude command file carries a single load reference to the owning skills (`skills/session-startup/SKILL.md` for Steps 4, 6, 7b, 9 and, where applicable, `skills/provenance-gate/SKILL.md` for the cold-pickup gate) plus a command-specific `### Step 9 — Paired-body halt-on-fail` D1 body-resolution cascade block immediately after the load reference. The full per-command duplication of Step 4/6/7b/9/provenance-gate prose that used to live in each command file was removed in #498. `.github/scripts/Tests/inline-dispatch-contract.Tests.ps1` now asserts the DRY load-reference shape (presence of the canonical load-reference lines, absence of the legacy duplicated prose) plus the per-command D1 cascade content (`installed_plugins.json`, SemVer-sorted glob, `.claude-plugin/plugin.json` source-repo gate, ordering, halt emit string, remediation command). Canonical option labels extracted from the fenced YAML blocks in `skills/session-startup/SKILL.md` and `skills/provenance-gate/SKILL.md` remain the single source of truth for label-drift tests.
 
-| Command file | Enforced here | Deferred elsewhere |
-| --- | --- | --- |
-| `commands/experience.md` | Steps 4, 6, 7b, 9, provenance-gate | None |
-| `commands/design.md` | Steps 4, 6, 7b, 9, provenance-gate | None |
-| `commands/plan.md` | Steps 4, 6, 7b, 9, provenance-gate | None for direct `/plan` |
-| `commands/orchestrate.md` | Steps 4, 6, 7b, 9, provenance-gate | None for direct `/orchestrate` |
+| Command file | Pre-flight load references | Per-command inline content | Provenance-gate? |
+| --- | --- | --- | --- |
+| `commands/experience.md` | session-startup + provenance-gate | Step 9 D1 cascade for `agents/Experience-Owner.agent.md` | Yes |
+| `commands/design.md` | session-startup + provenance-gate | Step 9 D1 cascade for `agents/Solution-Designer.agent.md` | Yes |
+| `commands/plan.md` | session-startup + provenance-gate | Step 9 D1 cascade for `agents/Issue-Planner.agent.md`; inline adversarial-pipeline dispatch section | Yes |
+| `commands/orchestrate.md` | session-startup + provenance-gate | Step 9 D1 cascade for `agents/Code-Conductor.agent.md`; smart-resume marker handling; downstream Agent handshake guidance | Yes |
+| `commands/polish.md` | session-startup only | Step 9 D1 cascade for `agents/UI-Iterator.agent.md` | No (UI-only command) |
 
-Historical note: issue #412 originally treated direct `/plan` as a carve-out for Step 9 and provenance. Issue #437 removed that carve-out for the command file, so direct `/plan` now matches `/experience` and `/design`. Issue #465 extended the inline-dispatch contract to `/orchestrate` and supersedes the narrower #457 lift; `/orchestrate` now adopts Code-Conductor inline in the parent conversation, so all four user-invocable inline commands carry the same pre-flight prose. Parent-agent delegation may still dispatch the `issue-planner` subagent shell for non-`/orchestrate` flows.
+Historical note: issue #412 originally treated direct `/plan` as a carve-out for Step 9 and provenance. Issue #437 reversed that carve-out so direct `/plan` carried inline paired-body and provenance-gate prose like `/experience` and `/design`. Issue #465 extended the inline-dispatch contract to `/orchestrate`, and `/polish` joined the contract surface as part of the broader inline-dispatch coverage. Issue #498 then re-shaped all five command files: the duplicated session-startup step prose, option-label literals, and provenance-gate stage prose were replaced by load references to the owning skills, while each command's command-specific D1 body-resolution cascade was preserved as a separate block. The two ideas that coexist after #498 are: (1) protocol prose lives once, in the owning skill; (2) per-body resolution remains per-command because each command names a different paired body. Parent-agent delegation may still dispatch the `issue-planner` subagent shell for non-`/orchestrate` flows.
 
-Cross-tool asymmetry per D6 of #412: Copilot's `.github/prompts/*.prompt.md` files are thin one-line dispatchers without a parent-side prose surface. Copilot inline-dispatch enforcement is owned by the agent body (`agents/{Name}.agent.md`) and is tracked in #414.
+Cross-tool asymmetry per D6 of #412: Copilot's `.github/prompts/*.prompt.md` files are thin one-line dispatchers without a parent-side prose surface. Copilot inline-dispatch enforcement is owned by the agent body (`agents/{Name}.agent.md`) and is tracked in #414. The #498 DRY pass changed the Claude command-file shape only; the Copilot-side asymmetry described here is unchanged.
 
 ---
 
