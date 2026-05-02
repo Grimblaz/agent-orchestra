@@ -64,7 +64,14 @@ Describe 'Find-OrUpsertComment' {
     }
 
     AfterEach {
-        Remove-Item function:global:gh -ErrorAction SilentlyContinue
+        # NOTE: `Remove-Item function:global:gh` (with `global:` in the path)
+        # interprets `global:gh` as a function NAME, not a scope qualifier — it
+        # silently no-ops with -ErrorAction SilentlyContinue and the global mock
+        # leaks into other test files (manifesting as `$script:ghCallCount`
+        # strict-mode errors when StrictMode-enabled libraries call the leaked
+        # mock). The Function: PSDrive holds one entry per name regardless of
+        # scope, so `Remove-Item Function:gh` actually removes the global mock.
+        Remove-Item Function:gh -ErrorAction SilentlyContinue
     }
 
     Context 'PR comment - zero matches' {
