@@ -34,6 +34,8 @@ This document provides a standardized checklist for agents to follow after a Pul
 # Preferred: use the cleanup script (handles archival, branch deletion, git sync).
 # The script is shipped with the agent-orchestra plugin/clone and self-resolves its paths.
 pwsh "skills/session-startup/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description
+# Optional: also pass sibling worktrees or orphan branches for composite cleanup (see session-startup SKILL.md § Permission allowlist):
+# pwsh "skills/session-startup/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description -OrphanBranches @('claude/old-branch') -SiblingWorktrees @('path/to/worktree')
 
 # Or manual archive only (PowerShell):
 $archivePath = Join-Path ".copilot-tracking-archive" (Get-Date -Format 'yyyy') (Get-Date -Format 'MM') "issue-{ID}"
@@ -50,7 +52,7 @@ Get-ChildItem .copilot-tracking -Recurse -File |
 - Files moved to `.copilot-tracking-archive/{year}/{month}/issue-{ID}/`
 - No tracking files remain in `.copilot-tracking/research/` for this issue
 
-> **Automation**: The `.github/copilot-instructions.md` "Session Startup Check" detects stale tracking files and prompts you at the start of your next conversation — cleanup requires one confirmation. You can also run the script directly: `pwsh "skills/session-startup/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description` (script path is relative to the agent-orchestra plugin or repo clone).
+> **Automation**: The plugin's `SessionStart` hook detects stale tracking files, sibling worktrees, and orphan branches and prompts you at the start of your next conversation — cleanup requires one confirmation and runs as a single composite `pwsh ...post-merge-cleanup.ps1 ...` invocation (no per-branch permission prompts). You can also run the script directly: `pwsh "skills/session-startup/scripts/post-merge-cleanup.ps1" -IssueNumber {ID} -FeatureBranch feature/issue-{ID}-description` (script path is relative to the agent-orchestra plugin or repo clone). See the `### Permission allowlist (recommended)` subsection in `skills/session-startup/SKILL.md` for opt-in allowlist entries that suppress the single prompt.
 
 ### 2. Update Documentation
 
