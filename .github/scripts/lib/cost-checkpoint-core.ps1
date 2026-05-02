@@ -285,9 +285,13 @@ checkpoints: []
 
     # Replace "checkpoints: []" with the new entry in the array, or append to existing array
     if ($existing -match 'checkpoints:\s*\[\s*\]') {
-        # Bootstrap case: replace empty array with list containing first entry
+        # Bootstrap case: replace empty array with list containing first entry.
+        # Fix issue #492 Step 2: escape $ in $replacement before passing to -replace.
+        # PowerShell's -replace operator treats $1, $&, $$ etc. as substitution
+        # metacharacters in the replacement string. Pre-escaping each $ to $$ means
+        # the outer -replace sees $$ (literal $) wherever the caller intended $.
         $replacement = "checkpoints:`n$entryBlock"
-        $result = $existing -replace 'checkpoints:\s*\[\s*\]', $replacement
+        $result = $existing -replace 'checkpoints:\s*\[\s*\]', ($replacement -replace '\$', '$$$$')
     }
     else {
         # Append case: add new entry before any trailing newlines at end of file

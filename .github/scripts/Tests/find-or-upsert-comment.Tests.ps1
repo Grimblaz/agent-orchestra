@@ -205,3 +205,87 @@ Describe 'Find-OrUpsertComment' {
         }
     }
 }
+
+# ---------------------------------------------------------------------------
+# Describe: Get-RestCommentId helper — static structure
+# (AC6 — issue #492 Step 4 RED / Step 5 GREEN)
+#
+# These tests verify that Get-RestCommentId is a file-level function rather
+# than a nested helper defined inside Find-OrUpsertComment. Two assertions:
+#   (a) AST position: no FunctionDefinitionAst ancestor in the parent chain.
+#   (b) Resolvability: the function is visible after dot-sourcing the library
+#       (before hoist it is defined only at call time — invisible at load time).
+#
+# RED phase: (a) finds the helper nested inside Find-OrUpsertComment and
+#            (b) dot-source does not expose it.
+# GREEN phase (after Step 5 hoist): both assertions pass.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-RestCommentId helper — static structure (AC6)' {
+
+    BeforeAll {
+        $script:Ac6LibPath = Join-Path $PSScriptRoot '..\lib\find-or-upsert-comment.ps1'
+        $libContent = Get-Content -Path $script:Ac6LibPath -Raw
+        $parseErrors = $null
+        $script:Ac6LibAst = [System.Management.Automation.Language.Parser]::ParseInput(
+            $libContent, [ref]$null, [ref]$parseErrors
+        )
+    }
+
+    It 'Get-RestCommentId is defined at file scope, not nested inside Find-OrUpsertComment' {
+        # Find ALL FunctionDefinitionAst nodes whose name contains Get-RestCommentId.
+        # Using -match to catch both 'Get-RestCommentId' and 'script:Get-RestCommentId'.
+        $helperDefs = @($script:Ac6LibAst.FindAll(
+            {
+                $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+                $args[0].Name -match 'Get-RestCommentId'
+            },
+            $true
+        ))
+        $helperDefs.Count | Should -BeGreaterThan 0 `
+            -Because 'Get-RestCommentId must be defined somewhere in find-or-upsert-comment.ps1'
+
+        # Walk each definition's parent chain. If any ancestor is a FunctionDefinitionAst,
+        # the helper is nested inside another function (RED). After the hoist (GREEN),
+        # the parent chain goes to the script root with no function ancestor.
+        $nestedDefs = @($helperDefs | Where-Object {
+            $node = $_
+            $ancestor = $node.Parent
+            $foundFunctionAncestor = $false
+            while ($null -ne $ancestor) {
+                if ($ancestor -is [System.Management.Automation.Language.FunctionDefinitionAst]) {
+                    $foundFunctionAncestor = $true
+                    break
+                }
+                $ancestor = $ancestor.Parent
+            }
+            $foundFunctionAncestor
+        })
+        $nestedDefs.Count | Should -Be 0 `
+            -Because 'Get-RestCommentId must be at file scope, not nested inside Find-OrUpsertComment'
+    }
+
+    It 'Get-RestCommentId is resolvable after dot-sourcing the library (isolated runspace check)' {
+        # Before the hoist, Get-RestCommentId is defined with `function script:Get-RestCommentId`
+        # inside Find-OrUpsertComment. Dot-sourcing only runs the script top level, which
+        # defines Find-OrUpsertComment but does NOT execute its body — so Get-RestCommentId
+        # is never defined at load time. After the hoist it is defined at the top level and
+        # becomes available immediately on dot-source.
+        #
+        # Use an in-process isolated PowerShell runspace to avoid scope pollution from
+        # other tests that called Find-OrUpsertComment (which lazily defines
+        # script:Get-RestCommentId in the shared test-file scope).
+        $dotSourceScript = ". '$($script:Ac6LibPath)'"
+        $checkScript = "if (Get-Command Get-RestCommentId -ErrorAction SilentlyContinue) { 'found' } else { 'not-found' }"
+        $ps = [System.Management.Automation.PowerShell]::Create()
+        try {
+            $null = $ps.AddScript($dotSourceScript).AddScript($checkScript)
+            $results = $ps.Invoke()
+        }
+        finally {
+            $ps.Dispose()
+        }
+        ($results | Select-Object -Last 1) | Should -Be 'found' `
+            -Because 'Get-RestCommentId must be resolvable after dot-sourcing the library, not only when Find-OrUpsertComment runs'
+    }
+}
