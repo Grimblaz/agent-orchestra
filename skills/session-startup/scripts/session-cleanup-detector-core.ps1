@@ -1008,41 +1008,12 @@ function Invoke-SessionCleanupDetector {
         return $out
     }
 
-    function Get-SiblingWorktreeCommands {
-        param([array]$Items)
-
-        $out = @()
-        foreach ($item in $Items) {
-            $safeWorktreePath = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $item.WorktreePath
-            $safeBranch = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $item.BranchName
-            if ($item.IsLocked) {
-                $out += "git worktree remove --force '$safeWorktreePath'"
-            }
-            else {
-                $out += "git worktree remove '$safeWorktreePath'"
-            }
-            $out += "git branch -D '$safeBranch'"
-        }
-        return $out
-    }
-
     function Get-OrphanBranchLines {
         param([array]$Items)
 
         $out = @()
         foreach ($item in $Items) {
             $out += "- Orphan branch ``$($item.BranchName)`` — $($item.Reason)"
-        }
-        return $out
-    }
-
-    function Get-OrphanBranchCommands {
-        param([array]$Items)
-
-        $out = @()
-        foreach ($item in $Items) {
-            $safeBranch = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $item.BranchName
-            $out += "git branch -D '$safeBranch'"
         }
         return $out
     }
@@ -1160,7 +1131,6 @@ function Invoke-SessionCleanupDetector {
             $compositeArgs += "-OrphanBranches @($($orphanNames -join ','))"
         }
         # Untagged tracking files (unknown issue ID)
-        $untaggedFiles = @()
         if ($cleanupNeeded.Count -gt 0) {
             $untaggedItems = @($cleanupNeeded | Where-Object { $_.IssueId -eq 'unknown' })
             if ($untaggedItems.Count -gt 0) {

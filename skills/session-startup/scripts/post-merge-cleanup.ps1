@@ -117,6 +117,94 @@ function Remove-EmptyDirectory {
         }
 }
 
+function Remove-OrphanBranch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Branch,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch,
+
+        [ref]$DeletedCount,
+
+        [System.Collections.Generic.List[string]]$DeletedNames
+    )
+
+    $isMerged = Test-BranchMergedIntoDefault -BranchName $Branch -DefaultBranch $DefaultBranch
+    if (-not $isMerged) {
+        Write-Output "Skipped '$Branch' — unmerged commits — review before deleting"
+        return
+    }
+
+    # Prefer -d (safe); escalate to -D only after re-confirming merged
+    git branch -d $Branch 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        # Re-confirm still merged before forcing
+        if (Test-BranchMergedIntoDefault -BranchName $Branch -DefaultBranch $DefaultBranch) {
+            git branch -D $Branch 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Failed to delete orphan branch '$Branch' (exit $LASTEXITCODE)"
+                return
+            }
+        }
+        else {
+            Write-Output "Skipped '$Branch' — unmerged commits — review before deleting"
+            return
+        }
+    }
+
+    $DeletedCount.Value++
+    $DeletedNames.Add($Branch)
+}
+
+function Remove-SiblingWorktree {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$WorktreePath,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch,
+
+        [ref]$DeletedCount,
+
+        [System.Collections.Generic.List[string]]$DeletedPaths
+    )
+
+    $worktreeBranch = git -C $WorktreePath branch --show-current 2>$null
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($worktreeBranch)) {
+        Write-Warning "Could not determine branch for worktree '$WorktreePath' — skipping"
+        return
+    }
+
+    $isMerged = Test-BranchMergedIntoDefault -BranchName $worktreeBranch -DefaultBranch $DefaultBranch
+    if (-not $isMerged) {
+        Write-Output "Skipped '$worktreeBranch' (worktree '$WorktreePath') — unmerged commits — review before deleting"
+        return
+    }
+
+    git worktree remove --force $WorktreePath 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to remove worktree '$WorktreePath' (exit $LASTEXITCODE)"
+        return
+    }
+
+    git branch -d $worktreeBranch 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-BranchMergedIntoDefault -BranchName $worktreeBranch -DefaultBranch $DefaultBranch) {
+            git branch -D $worktreeBranch 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Failed to delete branch '$worktreeBranch' after worktree removal"
+                return
+            }
+        }
+    }
+
+    $DeletedCount.Value++
+    $DeletedPaths.Add($WorktreePath)
+}
+
 if ($null -ne $IssueNumber) {
     Write-Output "== Post-merge cleanup: issue #$IssueNumber =="
 } else {
@@ -136,29 +224,7 @@ $defaultBranch = Get-SCDDefaultBranch
 $deletedOrphanCount = 0
 $deletedOrphanNames = [System.Collections.Generic.List[string]]::new()
 foreach ($branch in $OrphanBranches) {
-    $isMerged = Test-BranchMergedIntoDefault -BranchName $branch -DefaultBranch $defaultBranch
-    if (-not $isMerged) {
-        Write-Output "Skipped '$branch' — unmerged commits — review before deleting"
-        continue
-    }
-    # Prefer -d (safe); escalate to -D only after re-confirming merged
-    git branch -d $branch 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        # Re-confirm still merged before forcing
-        if (Test-BranchMergedIntoDefault -BranchName $branch -DefaultBranch $defaultBranch) {
-            git branch -D $branch 2>$null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Failed to delete orphan branch '$branch' (exit $LASTEXITCODE)"
-                continue
-            }
-        }
-        else {
-            Write-Output "Skipped '$branch' — unmerged commits — review before deleting"
-            continue
-        }
-    }
-    $deletedOrphanCount++
-    $deletedOrphanNames.Add($branch)
+    Remove-OrphanBranch -Branch $branch -DefaultBranch $defaultBranch -DeletedCount ([ref]$deletedOrphanCount) -DeletedNames $deletedOrphanNames
 }
 if ($deletedOrphanCount -gt 0) {
     Write-Output "Deleted $deletedOrphanCount orphan branch(es): $($deletedOrphanNames -join ', ')"
@@ -168,34 +234,7 @@ if ($deletedOrphanCount -gt 0) {
 $deletedSiblingCount = 0
 $deletedSiblingPaths = [System.Collections.Generic.List[string]]::new()
 foreach ($worktreePath in $SiblingWorktrees) {
-    # Determine branch from worktree
-    $worktreeBranch = git -C $worktreePath branch --show-current 2>$null
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($worktreeBranch)) {
-        Write-Warning "Could not determine branch for worktree '$worktreePath' — skipping"
-        continue
-    }
-    $isMerged = Test-BranchMergedIntoDefault -BranchName $worktreeBranch -DefaultBranch $defaultBranch
-    if (-not $isMerged) {
-        Write-Output "Skipped '$worktreeBranch' (worktree '$worktreePath') — unmerged commits — review before deleting"
-        continue
-    }
-    git worktree remove --force $worktreePath 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Failed to remove worktree '$worktreePath' (exit $LASTEXITCODE)"
-        continue
-    }
-    git branch -d $worktreeBranch 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        if (Test-BranchMergedIntoDefault -BranchName $worktreeBranch -DefaultBranch $defaultBranch) {
-            git branch -D $worktreeBranch 2>$null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Failed to delete branch '$worktreeBranch' after worktree removal"
-                continue
-            }
-        }
-    }
-    $deletedSiblingCount++
-    $deletedSiblingPaths.Add($worktreePath)
+    Remove-SiblingWorktree -WorktreePath $worktreePath -DefaultBranch $defaultBranch -DeletedCount ([ref]$deletedSiblingCount) -DeletedPaths $deletedSiblingPaths
 }
 if ($deletedSiblingCount -gt 0) {
     Write-Output "Deleted $deletedSiblingCount sibling worktree(s): $($deletedSiblingPaths -join ', ')"
