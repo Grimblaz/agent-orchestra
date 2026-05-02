@@ -226,10 +226,22 @@ Describe 'Get-RestCommentId helper — static structure (AC6)' {
     BeforeAll {
         $script:Ac6LibPath = Join-Path $PSScriptRoot '..\lib\find-or-upsert-comment.ps1'
         $libContent = Get-Content -Path $script:Ac6LibPath -Raw
-        $parseErrors = $null
+        $script:Ac6ParseErrors = $null
         $script:Ac6LibAst = [System.Management.Automation.Language.Parser]::ParseInput(
-            $libContent, [ref]$null, [ref]$parseErrors
+            $libContent, [ref]$null, [ref]$script:Ac6ParseErrors
         )
+    }
+
+    It 'find-or-upsert-comment.ps1 parses without errors (AST test prerequisite)' {
+        # Without this guard, a syntax error in the file under test would silently
+        # produce an incomplete AST — FindAll could return zero matches, and the
+        # downstream nested/resolvable assertions would either pass with a misleading
+        # zero-count or fail with cryptic messages. Surface parser errors directly.
+        $errorMessages = if ($script:Ac6ParseErrors) {
+            ($script:Ac6ParseErrors | ForEach-Object { "$($_.Extent.StartLineNumber): $($_.Message)" }) -join '; '
+        } else { '' }
+        $script:Ac6ParseErrors.Count | Should -Be 0 `
+            -Because "find-or-upsert-comment.ps1 must parse cleanly for AST tests to be meaningful — errors: $errorMessages"
     }
 
     It 'Get-RestCommentId is defined at file scope, not nested inside Find-OrUpsertComment' {
@@ -275,11 +287,15 @@ Describe 'Get-RestCommentId helper — static structure (AC6)' {
         # Use an in-process isolated PowerShell runspace to avoid scope pollution from
         # other tests that called Find-OrUpsertComment (which lazily defines
         # script:Get-RestCommentId in the shared test-file scope).
-        $dotSourceScript = ". '$($script:Ac6LibPath)'"
-        $checkScript = "if (Get-Command Get-RestCommentId -ErrorAction SilentlyContinue) { 'found' } else { 'not-found' }"
+        #
+        # Pass the path via SessionStateProxy.SetVariable rather than string
+        # interpolation so paths containing single quotes (or other PS metachars)
+        # cannot break parsing of the script.
+        $checkScript = ". `$LibPath; if (Get-Command Get-RestCommentId -ErrorAction SilentlyContinue) { 'found' } else { 'not-found' }"
         $ps = [System.Management.Automation.PowerShell]::Create()
         try {
-            $null = $ps.AddScript($dotSourceScript).AddScript($checkScript)
+            $ps.Runspace.SessionStateProxy.SetVariable('LibPath', $script:Ac6LibPath)
+            $null = $ps.AddScript($checkScript)
             $results = $ps.Invoke()
         }
         finally {

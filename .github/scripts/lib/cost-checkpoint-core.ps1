@@ -297,8 +297,12 @@ checkpoints: []
         # PowerShell's -replace operator treats $1, $&, $$ etc. as substitution
         # metacharacters in the replacement string. Pre-escaping each $ to $$ means
         # the outer -replace sees $$ (literal $) wherever the caller intended $.
+        # `'$$$$'` (4 chars) emits two $ — the inner -replace pass produces a $$
+        # for each input $, which the outer -replace then collapses back to a
+        # single $.
         $replacement = "checkpoints:`n$entryBlock"
-        $result = $existing -replace 'checkpoints:\s*\[\s*\]', ($replacement -replace '\$', '$$$$')
+        $escapedReplacement = $replacement -replace '\$', '$$$$'
+        $result = $existing -replace 'checkpoints:\s*\[\s*\]', $escapedReplacement
     }
     else {
         # Append case: add new entry before any trailing newlines at end of file
