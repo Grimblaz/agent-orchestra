@@ -43,7 +43,7 @@ Every `.agent.md` body follows two tiers:
     instruction, for example:
 
     ```text
-    Load `skills/provenance-gate/SKILL.md` and follow the protocol.
+    Load `skills/upstream-onboarding/SKILL.md` and follow the protocol.
     ```
 
     Skill names, file paths, and load directives are the only implementation detail the agent body

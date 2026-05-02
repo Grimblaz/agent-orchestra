@@ -216,7 +216,7 @@ canonical_option_labels:
   drift_continue: "Continue — run under old code"
 ```
 
-Enforcement paths: Claude inline slash-command dispatch (`/experience`, `/design`, `/plan`, `/orchestrate`, and `/polish`) enforces the pre-flight protocol via a load reference to this skill (and, where applicable, `skills/provenance-gate/SKILL.md`); the per-command prose duplication was removed in issue #498 (DRY pass following #481). Each command file retains a `### Step 9 — Paired-body halt-on-fail` block with its D1 body-resolution cascade immediately after the load reference; Step 9 of this skill now recognizes inline slash-command dispatch as a paired-body context, so the halt-on-fail contract applies to both `Agent` tool subagent dispatches and inline command invocations.
+Enforcement paths: Claude inline slash-command dispatch (`/experience`, `/design`, `/plan`, `/orchestrate`, and `/polish`) enforces the pre-flight protocol via a load reference to this skill; the per-command prose duplication was removed in issue #498 (DRY pass following #481). Each command file retains a `### Step 9 — Paired-body halt-on-fail` block with its D1 body-resolution cascade immediately after the load reference; Step 9 of this skill now recognizes inline slash-command dispatch as a paired-body context, so the halt-on-fail contract applies to both `Agent` tool subagent dispatches and inline command invocations.
 
 ## Silent Skip Conditions
 

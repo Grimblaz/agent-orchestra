@@ -26,7 +26,7 @@ Layout (Shape A):
 - `plugin.json` (repo root) — Copilot manifest, paths resolved relative to the manifest directory. Manifest sits at the plugin root so entries use plugin-root-relative `./agents/` + `./skills/...` with no `..` escapes. (Relocated from `.github/plugin.json` in v2.0.0 per D10 fallback.)
 - `.claude-plugin/plugin.json` — Claude Code manifest, metadata-only (auto-discovers `agents/` and `skills/` at plugin root; setting `agents`/`skills` arrays would disable auto-discovery per ADR-0002).
 
-Content is platform-neutral. Six skills that require tool-specific invocation syntax (`session-startup`, `provenance-gate`, `step-commit`, `parallel-execution`, `design-exploration`, `customer-experience`) split platform-specific blocks into `platforms/copilot.md` and `platforms/claude.md` under each skill, with a canonical routing footer in SKILL.md. `session-startup` has a documented D3b soft exemption to retain methodology alongside the footer.
+Content is platform-neutral. Five skills that require tool-specific invocation syntax (`session-startup`, `step-commit`, `parallel-execution`, `design-exploration`, `customer-experience`) split platform-specific blocks into `platforms/copilot.md` and `platforms/claude.md` under each skill, with a canonical routing footer in SKILL.md. `session-startup` has a documented D3b soft exemption to retain methodology alongside the footer. (The `provenance-gate` skill that was originally part of this list was retired when the cold-pickup self-classification flow was collapsed into `upstream-onboarding`.)
 
 ## Rationale
 

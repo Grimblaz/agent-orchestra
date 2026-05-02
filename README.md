@@ -236,7 +236,6 @@ Skills are domain-specific knowledge packages in `skills/` (repo root) that agen
 | **post-pr-review** | Post-merge cleanup, archiving tracking files, strategic assessment |
 | **process-troubleshooting** | Diagnosing premature implementation, agent confusion, validation gaps, or terminal stalls |
 | **bdd-scenarios** | Structured Given/When/Then scenario authoring and CE Gate coverage checks |
-| **provenance-gate** | First-contact issue-framing assessment for cold pickups |
 | **session-memory-contract** | Session-state survival labels, canonical mechanisms, and cross-tool handoff rules |
 | **session-startup** | Automatic startup cleanup guard for new conversations |
 | **terminal-hygiene** | Terminal and test execution guardrails for Agent Orchestra workflows |

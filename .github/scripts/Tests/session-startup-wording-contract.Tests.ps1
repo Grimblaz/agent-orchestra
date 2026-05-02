@@ -198,7 +198,7 @@ Describe 'session startup wording contract' {
             $content = $document.Content
             $processSectionMatch = [regex]::Match($content, '(?ms)^## Process\s*\r?\n(?<body>.*?)(?=^## |\z)')
 
-            $processSectionMatch.Success | Should -BeTrue -Because "$($agent.Name) must keep a bounded Process section for provenance-gate instructions"
+            $processSectionMatch.Success | Should -BeTrue -Because "$($agent.Name) must keep a bounded Process section for upstream-onboarding instructions"
 
             $processSection = $processSectionMatch.Groups['body'].Value
 

@@ -12,9 +12,11 @@ The three upstream agents (Experience-Owner, Solution-Designer, Issue-Planner) s
 2. **Silent acceptance**: Agents inherited poorly-framed or standards-violating prior-phase output without challenge, compounding problems into planning and implementation.
 3. **Redundant scaffolding**: Each agent body duplicated the same provenance-gate prose (three paragraphs + Questioning Policy heading), adding noise without value.
 
+> **Update**: After this design landed, the `provenance-gate` skill itself was retired. The cold-pickup self-classification flow (the two-stage stop/proceed prompt) was found to be unintuitive in practice and its responsibilities were collapsed into `upstream-onboarding`. The historical references to `provenance-gate` in this design doc remain for context — they describe the original sequencing decision that has since been simplified.
+
 ## Design Decision
 
-Introduce a single shared skill, `upstream-onboarding`, that all three upstream agents load after `provenance-gate` completes a non-stop outcome. The skill has two responsibilities:
+Introduce a single shared skill, `upstream-onboarding`, that user-invocable upstream agents (Experience-Owner, Solution-Designer, Issue-Planner) and Code-Conductor load when receiving an issue-referencing request. The skill has two responsibilities:
 
 1. **Scaled context brief**: renders a brief oriented to the current phase's starting point — required core always present (one-line summary, scope tier, blocking questions), conditional sections (inherited decisions, standards concerns, constraints) omitted when empty.
 2. **Standards check**: evaluates inherited work against the active agent's anchor standards, cites the specific violated standard by skill path + rule name, quotes the offending text, and presents a corrective approach as a structured question with a strong recommendation.
@@ -31,7 +33,7 @@ Embed the brief and standards check logic directly in each of the three agent bo
 
 ### Provenance-Gate Extension
 
-Extend `provenance-gate` to carry the brief and standards check. Rejected because provenance-gate targets a different artifact (issue framing on cold pickup by any agent, including Code-Conductor) at a different trigger condition. Conflating the two would widen provenance-gate's scope inappropriately and make it harder to skip for agents that don't need it.
+Extend `provenance-gate` to carry the brief and standards check. Rejected at the time of this design because provenance-gate targeted a different artifact (issue framing on cold pickup by any agent, including Code-Conductor) at a different trigger condition. (Subsequent retirement of provenance-gate reversed this rejection by removing the gate entirely; `upstream-onboarding` now serves as the single opening-phase protocol regardless of whether the developer is cold-picking-up the issue or already briefed.)
 
 ### Hard Cap on Questions
 
@@ -51,18 +53,9 @@ Each upstream agent applies the standards check through its own lens. The lenses
 | Solution-Designer | `design-exploration`, `software-architecture`, consumer `architecture-rules.md` | Single prescription without alternatives, layer boundary violation, missing rejected alternatives |
 | Issue-Planner | `plan-authoring`, `tracking-format` | Step without AC slice, CE Gate gap, missing Requirement Contract, scope mismatch |
 
-## Relationship to `provenance-gate`
+## Relationship to `provenance-gate` (historical)
 
-`provenance-gate` and `upstream-onboarding` serve different trigger conditions and target different artifacts:
-
-| | `provenance-gate` | `upstream-onboarding` |
-| --- | --- | --- |
-| **Fires when** | Any cold pickup by any user-invocable agent | Prior phase completed by a *different* upstream agent |
-| **Artifact checked** | Issue framing accuracy (root cause, mechanism fitness, scope accuracy) | Prior agent's output against the current agent's standards |
-| **Outcome on stop** | Halts; no marker posted | Does not fire (provenance-gate already halted) |
-| **Skip condition** | Warm handoff markers or prior assessment marker present | Same-agent resume (own marker is most recent) |
-
-`upstream-onboarding` defers to provenance-gate's stop outcomes. On a non-stop outcome, `upstream-onboarding` fires next and focuses on what the prior upstream phase produced.
+This design originally sequenced `upstream-onboarding` after `provenance-gate` on cold pickups, deferring to the gate's stop outcomes. After this design landed, the gate was retired (the two-stage cold-pickup self-classification was unintuitive in practice) and its responsibilities were collapsed into `upstream-onboarding`. The skill now serves as the single opening-phase protocol regardless of whether the developer is cold-picking-up the issue or already briefed; the brief is descriptive (no upfront question to answer), and the standards check uses targeted structured questions only when concerns actually fire.
 
 ## Relationship to Issue #375
 
