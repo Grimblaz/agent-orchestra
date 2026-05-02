@@ -15,7 +15,7 @@
     - Routing-table parity:   CLAUDE.md routing table matches shell frontmatter for oracle shells.
     - Command enforcement D3: upstream commands (/experience /design /plan /polish) must NOT declare model/effort.
     - Command enforcement D1: commands/orchestrate.md MUST declare model: sonnet, effort: medium.
-    - Scope guard:            commands/orchestrate.md line index [9] is permanently <!-- scope: claude-only -->.
+    - Scope guard:            commands/orchestrate.md `# /orchestrate` H1 is permanently followed by <!-- scope: claude-only -->.
 
     Parser strategy: ALL frontmatter parsing uses raw-text regex against the frontmatter slice
     (content between the first pair of --- delimiters), NOT ConvertFrom-Yaml, because YAML
@@ -64,10 +64,12 @@ Describe 'Per-agent model + effort routing contract' {
             return $match.Groups['fm'].Value
         }
 
-        # Read a scalar field from the frontmatter slice via raw-text regex
+        # Read a scalar field from the frontmatter slice via raw-text regex.
+        # Trailing whitespace + optional `# comment` is permitted so YAML lines like
+        # `model: sonnet  # quality-justified` parse correctly (per Gemini review).
         $script:GetFrontmatterField = {
             param([string]$Frontmatter, [string]$FieldName)
-            $match = [regex]::Match($Frontmatter, "(?m)^${FieldName}:\s*(?<val>\S+)\s*$")
+            $match = [regex]::Match($Frontmatter, "(?m)^${FieldName}:\s*(?<val>\S+)\s*(#.*)?$")
             if (-not $match.Success) { return $null }
             return $match.Groups['val'].Value.Trim()
         }
@@ -129,8 +131,10 @@ Describe 'Per-agent model + effort routing contract' {
         $script:ClaudeMdContent = Get-Content -Path $script:ClaudeMdPath -Raw -ErrorAction Stop
         $script:RoutingTable = & $script:ParseRoutingTable -Content $script:ClaudeMdContent
 
+        # Recursive scan future-proofs against any subdirectory layout under agents/
+        # (currently flat). The `-notlike '*.agent.md'` filter still excludes shared bodies.
         $script:ShellFiles = @(
-            Get-ChildItem -Path $script:AgentsDirectory -Filter '*.md' -File |
+            Get-ChildItem -Path $script:AgentsDirectory -Filter '*.md' -File -Recurse |
                 Where-Object { $_.Name -notlike '*.agent.md' }
         )
     }
@@ -304,21 +308,33 @@ Describe 'Per-agent model + effort routing contract' {
         }
     }
 
-    It 'scope guard: orchestrate.md body line at index 9 must be the scope comment (permanent regression guard)' {
-        # After adding model: + effort: frontmatter (+2 lines) in issue #477, the scope comment
-        # shifted from index [7] (pre-edit) to index [9] (post-edit). This test is the permanent
-        # guard for that position.
+    It 'scope guard: orchestrate.md scope comment follows the H1 heading (permanent regression guard)' {
+        # The scope marker '<!-- scope: claude-only -->' must appear immediately after the
+        # `# /orchestrate` H1, separated only by blank lines. Asserted positionally relative
+        # to the H1 (not at a hard-coded line index) so the test is robust to harmless edits
+        # like adding/removing frontmatter fields or reflowing whitespace, while still
+        # catching scope-marker removal, relocation, or text drift.
         $orchestratePath = Join-Path $script:RepoRoot 'commands/orchestrate.md'
         Test-Path $orchestratePath | Should -BeTrue -Because 'commands/orchestrate.md must exist'
 
-        $lines = Get-Content -Path $orchestratePath
-        $lines.Count | Should -BeGreaterThan 9 -Because (
-            'commands/orchestrate.md must have at least 10 lines; the scope guard at index [9] cannot be validated on a shorter file'
+        $content = Get-Content -Path $orchestratePath -Raw
+
+        # Match opening ---, frontmatter body, closing --- and trailing newline.
+        $fmMatch = [regex]::Match($content, '(?ms)\A---\r?\n.*?\r?\n---\r?\n')
+        $fmMatch.Success | Should -BeTrue -Because (
+            'commands/orchestrate.md must start with YAML frontmatter delimited by --- on its own lines'
         )
-        $lines[9] | Should -Be '<!-- scope: claude-only -->' -Because (
-            "commands/orchestrate.md line [9] (0-indexed) must be exactly '<!-- scope: claude-only -->'. " +
-            'The scope comment shifted from index [7] to [9] when model: + effort: frontmatter (+2 lines) was added in issue #477. ' +
-            'A mismatch means the frontmatter or body structure changed since then — if the shift is intentional, update this index.'
+
+        $afterFm = $content.Substring($fmMatch.Length)
+
+        # The scope comment must follow the `# /orchestrate` H1 heading with only blank
+        # lines between. This is the structural invariant: H1 first, then scope marker.
+        $pattern = '(?ms)^\s*\r?\n*# /orchestrate\s*\r?\n(\s*\r?\n)*<!--\s*scope:\s*claude-only\s*-->'
+        $afterFm | Should -Match $pattern -Because (
+            "commands/orchestrate.md must contain '# /orchestrate' as its first H1, immediately " +
+            "followed (allowing only blank lines) by '<!-- scope: claude-only -->'. This positional " +
+            'invariant anchors the Claude-only command-routing contract; if the scope marker has ' +
+            'moved, been removed, or had its text changed, the contract is broken.'
         )
     }
 }
