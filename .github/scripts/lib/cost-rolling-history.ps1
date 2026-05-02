@@ -159,7 +159,7 @@ function script:ConvertFrom-CostPatternYaml {
                             $portEntry['tokens'] = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
                         }
                         # Ensure numeric fields exist with defaults
-                        if (-not $portEntry.ContainsKey('dispatch_count'))    { $portEntry['dispatch_count']    = 0 }
+                        if (-not $portEntry.ContainsKey('dispatch_count')) { $portEntry['dispatch_count'] = 0 }
                         if (-not $portEntry.ContainsKey('cost_estimate_usd')) { $portEntry['cost_estimate_usd'] = 0.0 }
                         if (-not $portEntry.ContainsKey('cache_read_hit_ratio')) { $portEntry['cache_read_hit_ratio'] = 0.0 }
                         if (-not $portEntry.ContainsKey('prompt_size_chars')) { $portEntry['prompt_size_chars'] = 0 }
@@ -349,11 +349,11 @@ function Get-CostRollingHistory {
     [CmdletBinding()]
     [OutputType([hashtable])]
     param(
-        [int]$Limit           = 30,
-        [string]$CachePath    = '',
+        [int]$Limit = 30,
+        [string]$CachePath = '',
         [switch]$ForceRefresh,
-        [int]$TimeoutSeconds  = 10,
-        [string]$RepoRoot     = ''
+        [int]$TimeoutSeconds = 10,
+        [string]$RepoRoot = ''
     )
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -383,7 +383,7 @@ function Get-CostRollingHistory {
     # ---- Cache hit: return if fresh (< 1 hour old) ----
     if (-not $ForceRefresh -and (Test-Path -LiteralPath $CachePath)) {
         try {
-            $cacheRaw  = Get-Content -LiteralPath $CachePath -Raw -ErrorAction Stop
+            $cacheRaw = Get-Content -LiteralPath $CachePath -Raw -ErrorAction Stop
             $cacheData = $cacheRaw | ConvertFrom-Json -AsHashtable -ErrorAction Stop
             if ($null -ne $cacheData -and $cacheData.ContainsKey('generated_at')) {
                 # ConvertFrom-Json -AsHashtable may auto-parse the ISO-8601 string into a
@@ -425,7 +425,7 @@ function Get-CostRollingHistory {
         return @{ timed_out = $true; entries = @() }
     }
 
-    $repoViewJson = & gh repo view --json owner,name 2>&1
+    $repoViewJson = & gh repo view --json owner, name 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "cost-rolling-history: gh repo view failed: $repoViewJson"
         return @{ timed_out = $false; entries = @() }
@@ -440,7 +440,7 @@ function Get-CostRollingHistory {
     try {
         $repoInfo = ($repoViewJson | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
         $owner = $repoInfo['owner']['login']
-        $name  = $repoInfo['name']
+        $name = $repoInfo['name']
     }
     catch {
         Write-Warning "cost-rolling-history: failed to parse repo view response: $_"
@@ -448,7 +448,7 @@ function Get-CostRollingHistory {
     }
 
     # ---- Try GraphQL first ----
-    $gqlQueryStr  = "{ search(query: `"repo:$owner/$name is:pr is:merged`", type: ISSUE, first: $Limit) { nodes { ... on PullRequest { number comments(first: 100) { nodes { body } } } } } }"
+    $gqlQueryStr = "{ search(query: `"repo:$owner/$name is:pr is:merged`", type: ISSUE, first: $Limit) { nodes { ... on PullRequest { number comments(first: 100) { nodes { body } } } } } }"
     $graphqlOutput = & gh api graphql -f "query=$gqlQueryStr" 2>&1
 
     if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
@@ -456,7 +456,7 @@ function Get-CostRollingHistory {
         return @{ timed_out = $true; entries = @() }
     }
 
-    $useRest       = $false
+    $useRest = $false
     $commentBodies = [System.Collections.Generic.List[string]]::new()
 
     if ($LASTEXITCODE -ne 0) {
@@ -556,7 +556,7 @@ function Get-CostRollingHistory {
                 if ($LASTEXITCODE -ne 0) { continue }
 
                 try {
-                    $prData    = ($prCommentsOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+                    $prData = ($prCommentsOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
                     # Use @() to guarantee array identity (single-element JSON may be unwrapped)
                     $prComments = @($prData['comments'])
                     if ($prComments.Count -eq 0) { continue }

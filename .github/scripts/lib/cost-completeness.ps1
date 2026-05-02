@@ -54,7 +54,7 @@ function Get-SessionCompleteness {
 
     # Default result
     $completeness = 'unknown'
-    $stopReason   = $null
+    $stopReason = $null
 
     if ($null -ne $Events -and $Events.Count -gt 0) {
         # Walk in reverse to find the last assistant event
@@ -146,15 +146,15 @@ function Get-SessionCompleteness {
 
     # Determine excluded_from_rolling_baseline
     $excluded = $false
-    $reason   = $null
+    $reason = $null
 
     if ($completeness -eq 'partial' -or $completeness -eq 'unknown') {
         $excluded = $true
-        $reason   = "session completeness: $completeness"
+        $reason = "session completeness: $completeness"
     }
     elseif ($ExcludeReason -ne '') {
         $excluded = $true
-        $reason   = $ExcludeReason
+        $reason = $ExcludeReason
     }
 
     return @{

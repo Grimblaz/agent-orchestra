@@ -21,7 +21,7 @@ Describe 'Get-NormalizedPath' {
         Get-NormalizedPath -Path '/c/Users/Micah/Code/' | Should -Be '/c/Users/Micah/Code'
     }
     It 'is idempotent' {
-        $once  = Get-NormalizedPath -Path 'C:\Users\Micah\Code'
+        $once = Get-NormalizedPath -Path 'C:\Users\Micah\Code'
         $twice = Get-NormalizedPath -Path $once
         $twice | Should -Be $once
     }

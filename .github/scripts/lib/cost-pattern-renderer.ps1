@@ -83,9 +83,9 @@ function script:Build-CostPatternHeader {
     )
 
     $completenessValue = $Completeness['completeness']
-    $excluded           = $Completeness['excluded_from_rolling_baseline']
-    $excludeReason      = $Completeness['exclude_reason']
-    $stopReason         = $Completeness['stop_reason']
+    $excluded = $Completeness['excluded_from_rolling_baseline']
+    $excludeReason = $Completeness['exclude_reason']
+    $stopReason = $Completeness['stop_reason']
 
     # partial session
     if ($completenessValue -eq 'partial') {
@@ -140,10 +140,10 @@ function script:Get-PortAnomalyNames {
     }
 
     $portFlags = @($AnomalyFlags | Where-Object {
-        $flagPort = $_['port']
-        ($null -ne $flagPort -and $flagPort -eq $PortName) -or
-        ($null -eq $flagPort -and [string]::IsNullOrEmpty($PortName))
-    })
+            $flagPort = $_['port']
+            ($null -ne $flagPort -and $flagPort -eq $PortName) -or
+            ($null -eq $flagPort -and [string]::IsNullOrEmpty($PortName))
+        })
 
     if ($portFlags.Count -eq 0) {
         return ' — '
@@ -179,10 +179,10 @@ function script:Build-CostPatternTable {
     $lines.Add('| Port | Dispatches | Input Tokens | Output Tokens | Cache Creation | Cache Read | Cache Hit% | Cost (USD) | Anomalies |')
     $lines.Add('|---|---|---|---|---|---|---|---|---|')
 
-    $ports     = $Attribution['ports']
-    $overhead  = $Attribution['orchestrator_overhead']
+    $ports = $Attribution['ports']
+    $overhead = $Attribution['orchestrator_overhead']
     $dispatches = $Attribution['dispatches']
-    $totals    = $Attribution['totals']
+    $totals = $Attribution['totals']
 
     # Determine which ports to show: canonical order + any extras not in canonical list
     $allPortNames = [System.Collections.Generic.List[string]]::new()
@@ -212,23 +212,23 @@ function script:Build-CostPatternTable {
     # Per-port rows
     foreach ($portName in $allPortNames) {
         if ($ports.ContainsKey($portName)) {
-            $bucket    = $ports[$portName]
-            $dc        = $bucket['dispatch_count']
-            $tok       = $bucket['tokens']
-            $inputTok  = $tok['input']
+            $bucket = $ports[$portName]
+            $dc = $bucket['dispatch_count']
+            $tok = $bucket['tokens']
+            $inputTok = $tok['input']
             $outputTok = $tok['output']
-            $cc        = $tok['cache_creation']
-            $cr        = $tok['cache_read']
-            $ratio     = $bucket['cache_read_hit_ratio']
-            $cost      = $bucket['cost_estimate_usd']
+            $cc = $tok['cache_creation']
+            $cr = $tok['cache_read']
+            $ratio = $bucket['cache_read_hit_ratio']
+            $cost = $bucket['cost_estimate_usd']
 
-            $inputStr  = if ($inputTok -gt 0)  { script:Format-TokenCount -Value $inputTok  } else { '—' }
+            $inputStr = if ($inputTok -gt 0) { script:Format-TokenCount -Value $inputTok } else { '—' }
             $outputStr = if ($outputTok -gt 0) { script:Format-TokenCount -Value $outputTok } else { '—' }
-            $ccStr     = if ($cc -gt 0)        { script:Format-TokenCount -Value $cc        } else { '—' }
-            $crStr     = if ($cr -gt 0)        { script:Format-TokenCount -Value $cr        } else { '—' }
-            $ratioStr  = if (($inputTok + $cc + $cr) -gt 0) { script:Format-Ratio -Value $ratio } else { '—' }
-            $costStr   = if ($cost -gt 0)   { script:Format-Cost -Value $cost         } else { '—' }
-            $anomStr   = script:Get-PortAnomalyNames -AnomalyFlags $AnomalyFlags -PortName $portName
+            $ccStr = if ($cc -gt 0) { script:Format-TokenCount -Value $cc } else { '—' }
+            $crStr = if ($cr -gt 0) { script:Format-TokenCount -Value $cr } else { '—' }
+            $ratioStr = if (($inputTok + $cc + $cr) -gt 0) { script:Format-Ratio -Value $ratio } else { '—' }
+            $costStr = if ($cost -gt 0) { script:Format-Cost -Value $cost } else { '—' }
+            $anomStr = script:Get-PortAnomalyNames -AnomalyFlags $AnomalyFlags -PortName $portName
 
             $lines.Add("| $portName | $dc | $inputStr | $outputStr | $ccStr | $crStr | $ratioStr | $costStr |$anomStr|")
         }
@@ -241,22 +241,22 @@ function script:Build-CostPatternTable {
 
     # dispatches.general_purpose row
     if ($ports.ContainsKey('dispatches.general_purpose')) {
-        $bucket    = $ports['dispatches.general_purpose']
-        $dc        = $dispatches['general_purpose_count']
-        $tok       = $bucket['tokens']
-        $inputTok  = $tok['input']
+        $bucket = $ports['dispatches.general_purpose']
+        $dc = $dispatches['general_purpose_count']
+        $tok = $bucket['tokens']
+        $inputTok = $tok['input']
         $outputTok = $tok['output']
-        $cc        = $tok['cache_creation']
-        $cr        = $tok['cache_read']
-        $ratio     = $bucket['cache_read_hit_ratio']
-        $cost      = $bucket['cost_estimate_usd']
+        $cc = $tok['cache_creation']
+        $cr = $tok['cache_read']
+        $ratio = $bucket['cache_read_hit_ratio']
+        $cost = $bucket['cost_estimate_usd']
 
-        $inputStr  = if ($inputTok -gt 0)  { script:Format-TokenCount -Value $inputTok  } else { '—' }
+        $inputStr = if ($inputTok -gt 0) { script:Format-TokenCount -Value $inputTok } else { '—' }
         $outputStr = if ($outputTok -gt 0) { script:Format-TokenCount -Value $outputTok } else { '—' }
-        $ccStr     = if ($cc -gt 0)        { script:Format-TokenCount -Value $cc        } else { '—' }
-        $crStr     = if ($cr -gt 0)        { script:Format-TokenCount -Value $cr        } else { '—' }
-        $ratioStr  = if (($inputTok + $cc + $cr) -gt 0) { script:Format-Ratio -Value $ratio } else { '—' }
-        $costStr   = if ($cost -gt 0)   { script:Format-Cost -Value $cost         } else { '—' }
+        $ccStr = if ($cc -gt 0) { script:Format-TokenCount -Value $cc } else { '—' }
+        $crStr = if ($cr -gt 0) { script:Format-TokenCount -Value $cr } else { '—' }
+        $ratioStr = if (($inputTok + $cc + $cr) -gt 0) { script:Format-Ratio -Value $ratio } else { '—' }
+        $costStr = if ($cost -gt 0) { script:Format-Cost -Value $cost } else { '—' }
         $lines.Add("| dispatches.general_purpose | $dc | $inputStr | $outputStr | $ccStr | $crStr | $ratioStr | $costStr | — |")
     }
     else {
@@ -267,14 +267,14 @@ function script:Build-CostPatternTable {
     # unattributed-dispatch row
     $uaCount = $dispatches['unattributed_count']
     if ($ports.ContainsKey('unattributed-dispatch')) {
-        $bucket  = $ports['unattributed-dispatch']
-        $dc      = $uaCount
-        $tok     = $bucket['tokens']
-        $inputStr  = if ($tok['input'] -gt 0)  { script:Format-TokenCount -Value $tok['input']  } else { '—' }
+        $bucket = $ports['unattributed-dispatch']
+        $dc = $uaCount
+        $tok = $bucket['tokens']
+        $inputStr = if ($tok['input'] -gt 0) { script:Format-TokenCount -Value $tok['input'] } else { '—' }
         $outputStr = if ($tok['output'] -gt 0) { script:Format-TokenCount -Value $tok['output'] } else { '—' }
-        $ccStr     = if ($tok['cache_creation'] -gt 0) { script:Format-TokenCount -Value $tok['cache_creation'] } else { '—' }
-        $crStr     = if ($tok['cache_read'] -gt 0)     { script:Format-TokenCount -Value $tok['cache_read']     } else { '—' }
-        $costStr   = if ($bucket['cost_estimate_usd'] -gt 0) { script:Format-Cost -Value $bucket['cost_estimate_usd'] } else { '—' }
+        $ccStr = if ($tok['cache_creation'] -gt 0) { script:Format-TokenCount -Value $tok['cache_creation'] } else { '—' }
+        $crStr = if ($tok['cache_read'] -gt 0) { script:Format-TokenCount -Value $tok['cache_read'] } else { '—' }
+        $costStr = if ($bucket['cost_estimate_usd'] -gt 0) { script:Format-Cost -Value $bucket['cost_estimate_usd'] } else { '—' }
         $lines.Add("| unattributed-dispatch | $dc | $inputStr | $outputStr | $ccStr | $crStr | — | $costStr | — |")
     }
     else {
@@ -282,25 +282,25 @@ function script:Build-CostPatternTable {
     }
 
     # orchestrator-overhead row
-    $ohTok   = $overhead['tokens']
-    $ohInput  = $ohTok['input']
+    $ohTok = $overhead['tokens']
+    $ohInput = $ohTok['input']
     $ohOutput = $ohTok['output']
-    $ohCC     = $ohTok['cache_creation']
-    $ohCR     = $ohTok['cache_read']
-    $ohRatio  = $overhead['cache_read_hit_ratio']
-    $ohCost   = $overhead['cost_estimate_usd']
+    $ohCC = $ohTok['cache_creation']
+    $ohCR = $ohTok['cache_read']
+    $ohRatio = $overhead['cache_read_hit_ratio']
+    $ohCost = $overhead['cost_estimate_usd']
 
-    $ohInputStr  = if ($ohInput -gt 0)  { script:Format-TokenCount -Value $ohInput  } else { '—' }
+    $ohInputStr = if ($ohInput -gt 0) { script:Format-TokenCount -Value $ohInput } else { '—' }
     $ohOutputStr = if ($ohOutput -gt 0) { script:Format-TokenCount -Value $ohOutput } else { '—' }
-    $ohCCStr     = if ($ohCC -gt 0)     { script:Format-TokenCount -Value $ohCC     } else { '—' }
-    $ohCRStr     = if ($ohCR -gt 0)     { script:Format-TokenCount -Value $ohCR     } else { '—' }
-    $ohRatioStr  = if (($ohInput + $ohCC + $ohCR) -gt 0) { script:Format-Ratio -Value $ohRatio } else { '—' }
-    $ohCostStr   = if ($ohCost -gt 0)   { script:Format-Cost -Value $ohCost         } else { '—' }
-    $ohFootnote  = if ($hasSkillDriven) { ' *' } else { '' }
+    $ohCCStr = if ($ohCC -gt 0) { script:Format-TokenCount -Value $ohCC } else { '—' }
+    $ohCRStr = if ($ohCR -gt 0) { script:Format-TokenCount -Value $ohCR } else { '—' }
+    $ohRatioStr = if (($ohInput + $ohCC + $ohCR) -gt 0) { script:Format-Ratio -Value $ohRatio } else { '—' }
+    $ohCostStr = if ($ohCost -gt 0) { script:Format-Cost -Value $ohCost } else { '—' }
+    $ohFootnote = if ($hasSkillDriven) { ' *' } else { '' }
     $lines.Add("| orchestrator-overhead$ohFootnote | — | $ohInputStr | $ohOutputStr | $ohCCStr | $ohCRStr | $ohRatioStr | $ohCostStr | — |")
 
     # Totals row
-    $totTok  = $totals['tokens']
+    $totTok = $totals['tokens']
     $totDisp = 0
     foreach ($p in $ports.Keys) {
         if ($ports[$p].ContainsKey('dispatch_count')) {
@@ -310,17 +310,17 @@ function script:Build-CostPatternTable {
     $totDisp += $dispatches['general_purpose_count']
     $totDisp += $dispatches['unattributed_count']
 
-    $totInput  = $totTok['input']
+    $totInput = $totTok['input']
     $totOutput = $totTok['output']
-    $totCC     = $totTok['cache_creation']
-    $totCR     = $totTok['cache_read']
-    $totCost   = $totals['cost_estimate_usd']
+    $totCC = $totTok['cache_creation']
+    $totCR = $totTok['cache_read']
+    $totCost = $totals['cost_estimate_usd']
 
-    $totInputStr  = if ($totInput -gt 0)  { script:Format-TokenCount -Value $totInput  } else { '—' }
+    $totInputStr = if ($totInput -gt 0) { script:Format-TokenCount -Value $totInput } else { '—' }
     $totOutputStr = if ($totOutput -gt 0) { script:Format-TokenCount -Value $totOutput } else { '—' }
-    $totCCStr     = if ($totCC -gt 0)     { script:Format-TokenCount -Value $totCC     } else { '—' }
-    $totCRStr     = if ($totCR -gt 0)     { script:Format-TokenCount -Value $totCR     } else { '—' }
-    $totCostStr   = if ($totCost -gt 0)   { script:Format-Cost -Value $totCost         } else { '—' }
+    $totCCStr = if ($totCC -gt 0) { script:Format-TokenCount -Value $totCC } else { '—' }
+    $totCRStr = if ($totCR -gt 0) { script:Format-TokenCount -Value $totCR } else { '—' }
+    $totCostStr = if ($totCost -gt 0) { script:Format-Cost -Value $totCost } else { '—' }
 
     $lines.Add("| **TOTAL** | **$totDisp** | **$totInputStr** | **$totOutputStr** | **$totCCStr** | **$totCRStr** | — | **$totCostStr** | |")
 
@@ -369,7 +369,7 @@ function Format-CostPatternMarkdown {
     )
 
     $header = script:Build-CostPatternHeader -Completeness $Completeness -AnomalyFlags $AnomalyFlags -RollingMeta $RollingMeta
-    $table  = script:Build-CostPatternTable  -Attribution $Attribution -AnomalyFlags $AnomalyFlags
+    $table = script:Build-CostPatternTable  -Attribution $Attribution -AnomalyFlags $AnomalyFlags
 
     # Fix Pass3-F4: surface null_cost_events when nonzero so unknown-model
     # cost undercounting is visible in the rendered markdown, not just buried
@@ -429,14 +429,14 @@ function Format-CostPatternYaml {
     $inv = [System.Globalization.CultureInfo]::InvariantCulture
 
     $completenessValue = $Completeness['completeness']
-    $excluded          = $Completeness['excluded_from_rolling_baseline']
-    $excludedStr       = if ($excluded) { 'true' } else { 'false' }
-    $generatedAt       = [System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', $inv)
+    $excluded = $Completeness['excluded_from_rolling_baseline']
+    $excludedStr = if ($excluded) { 'true' } else { 'false' }
+    $generatedAt = [System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', $inv)
 
-    $ports     = $Attribution['ports']
-    $overhead  = $Attribution['orchestrator_overhead']
+    $ports = $Attribution['ports']
+    $overhead = $Attribution['orchestrator_overhead']
     $dispatches = $Attribution['dispatches']
-    $totals    = $Attribution['totals']
+    $totals = $Attribution['totals']
 
     $sb = [System.Text.StringBuilder]::new()
     $null = $sb.AppendLine('<!-- cost-pattern-data')
@@ -459,10 +459,10 @@ function Format-CostPatternYaml {
     }
     foreach ($portName in $portKeys) {
         $bucket = $ports[$portName]
-        $tok    = $bucket['tokens']
-        $cost   = script:Format-CostYaml -Value ([double]$bucket['cost_estimate_usd'])
-        $ratio  = script:Format-RatioYaml -Value ([double]$bucket['cache_read_hit_ratio'])
-        $mixed  = if ($bucket['mixed_regime']) { 'true' } else { 'false' }
+        $tok = $bucket['tokens']
+        $cost = script:Format-CostYaml -Value ([double]$bucket['cost_estimate_usd'])
+        $ratio = script:Format-RatioYaml -Value ([double]$bucket['cache_read_hit_ratio'])
+        $mixed = if ($bucket['mixed_regime']) { 'true' } else { 'false' }
         $null = $sb.AppendLine("  - name: $portName")
         $null = $sb.AppendLine('    tokens:')
         $null = $sb.AppendLine("      input: $($tok['input'])")
@@ -483,8 +483,8 @@ function Format-CostPatternYaml {
     }
 
     # orchestrator_overhead
-    $ohTok   = $overhead['tokens']
-    $ohCost  = script:Format-CostYaml -Value ([double]$overhead['cost_estimate_usd'])
+    $ohTok = $overhead['tokens']
+    $ohCost = script:Format-CostYaml -Value ([double]$overhead['cost_estimate_usd'])
     $ohRatio = script:Format-RatioYaml -Value ([double]$overhead['cache_read_hit_ratio'])
     $null = $sb.AppendLine('orchestrator_overhead:')
     $null = $sb.AppendLine('  tokens:')
@@ -504,7 +504,7 @@ function Format-CostPatternYaml {
     $null = $sb.AppendLine("  unattributed_count: $($dispatches['unattributed_count'])")
 
     # totals
-    $totTok  = $totals['tokens']
+    $totTok = $totals['tokens']
     $totCost = script:Format-CostYaml -Value ([double]$totals['cost_estimate_usd'])
     $null = $sb.AppendLine('totals:')
     $null = $sb.AppendLine('  tokens:')
@@ -521,17 +521,17 @@ function Format-CostPatternYaml {
     else {
         $null = $sb.AppendLine('anomaly_flags:')
         foreach ($flag in $AnomalyFlags) {
-            $metric   = $flag['metric']
+            $metric = $flag['metric']
             $flagPort = if ($null -ne $flag['port']) { $flag['port'] } else { 'null' }
-            $dir      = $flag['direction']
-            $conf     = $flag['confidence']
-            $vsBase   = $flag['vs_baseline']
-            $thisVal  = if ($null -ne $flag['this_value']) { ([double]$flag['this_value']).ToString('G', $inv) } else { 'null' }
-            $bMean    = if ($null -ne $flag['baseline_mean'])   { ([double]$flag['baseline_mean']).ToString('G', $inv) }   else { 'null' }
-            $bMedian  = if ($null -ne $flag['baseline_median']) { ([double]$flag['baseline_median']).ToString('G', $inv) } else { 'null' }
-            $bStddev  = if ($null -ne $flag['baseline_stddev']) { ([double]$flag['baseline_stddev']).ToString('G', $inv) } else { 'null' }
-            $bN       = if ($null -ne $flag['baseline_n'])      { $flag['baseline_n'] } else { 0 }
-            $cpVal    = if ($null -ne $flag['checkpoint_value']) { ([double]$flag['checkpoint_value']).ToString('G', $inv) } else { 'null' }
+            $dir = $flag['direction']
+            $conf = $flag['confidence']
+            $vsBase = $flag['vs_baseline']
+            $thisVal = if ($null -ne $flag['this_value']) { ([double]$flag['this_value']).ToString('G', $inv) } else { 'null' }
+            $bMean = if ($null -ne $flag['baseline_mean']) { ([double]$flag['baseline_mean']).ToString('G', $inv) }   else { 'null' }
+            $bMedian = if ($null -ne $flag['baseline_median']) { ([double]$flag['baseline_median']).ToString('G', $inv) } else { 'null' }
+            $bStddev = if ($null -ne $flag['baseline_stddev']) { ([double]$flag['baseline_stddev']).ToString('G', $inv) } else { 'null' }
+            $bN = if ($null -ne $flag['baseline_n']) { $flag['baseline_n'] } else { 0 }
+            $cpVal = if ($null -ne $flag['checkpoint_value']) { ([double]$flag['checkpoint_value']).ToString('G', $inv) } else { 'null' }
             $null = $sb.AppendLine("  - metric: $metric")
             $null = $sb.AppendLine("    port: $flagPort")
             $null = $sb.AppendLine("    this_value: $thisVal")

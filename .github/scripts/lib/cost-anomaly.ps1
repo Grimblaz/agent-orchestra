@@ -135,7 +135,7 @@ function script:Test-AnomalyRules {
     )
 
     $n = $BaselineValues.Count
-    $mean   = script:Get-Mean   -Values $BaselineValues
+    $mean = script:Get-Mean   -Values $BaselineValues
     $median = script:Get-Median -Values $BaselineValues
     $stddev = script:Get-Stddev -Values $BaselineValues
 
@@ -212,25 +212,25 @@ function script:Get-MetricDescriptors {
         # Skip review port tokens.per_dispatch metrics unless opt-in present
         $skipTokensPerDispatch = ($port -eq 'review') -and (-not $IncludeReviewDispatch)
 
-        $metrics.Add(@{ MetricKey = "dispatches.per_port[$port]";             Port = $port; Direction = 'shrink' })
+        $metrics.Add(@{ MetricKey = "dispatches.per_port[$port]"; Port = $port; Direction = 'shrink' })
 
         if (-not $skipTokensPerDispatch) {
             $metrics.Add(@{ MetricKey = "tokens.per_dispatch.avg.output[$port]"; Port = $port; Direction = 'shrink' })
-            $metrics.Add(@{ MetricKey = "tokens.per_dispatch.avg.input[$port]";  Port = $port; Direction = 'shrink' })
+            $metrics.Add(@{ MetricKey = "tokens.per_dispatch.avg.input[$port]"; Port = $port; Direction = 'shrink' })
         }
 
         $metrics.Add(@{ MetricKey = "prompt_size.per_dispatch.avg.chars[$port]"; Port = $port; Direction = 'shrink' })
-        $metrics.Add(@{ MetricKey = "cache_read.hit_ratio[$port]";            Port = $port; Direction = 'grow'   })
-        $metrics.Add(@{ MetricKey = "cost_estimate_usd[$port]";               Port = $port; Direction = 'shrink' })
+        $metrics.Add(@{ MetricKey = "cache_read.hit_ratio[$port]"; Port = $port; Direction = 'grow' })
+        $metrics.Add(@{ MetricKey = "cost_estimate_usd[$port]"; Port = $port; Direction = 'shrink' })
     }
 
     # Orchestrator-overhead metrics
-    $metrics.Add(@{ MetricKey = 'orchestrator_overhead.tokens.input';          Port = $null; Direction = 'shrink' })
-    $metrics.Add(@{ MetricKey = 'orchestrator_overhead.cache_read.hit_ratio';  Port = $null; Direction = 'grow'   })
-    $metrics.Add(@{ MetricKey = 'dispatches.general_purpose.count';            Port = $null; Direction = 'shrink' })
+    $metrics.Add(@{ MetricKey = 'orchestrator_overhead.tokens.input'; Port = $null; Direction = 'shrink' })
+    $metrics.Add(@{ MetricKey = 'orchestrator_overhead.cache_read.hit_ratio'; Port = $null; Direction = 'grow' })
+    $metrics.Add(@{ MetricKey = 'dispatches.general_purpose.count'; Port = $null; Direction = 'shrink' })
 
     # Cross-port cost metric
-    $metrics.Add(@{ MetricKey = 'cost_estimate_usd.total';                     Port = $null; Direction = 'shrink' })
+    $metrics.Add(@{ MetricKey = 'cost_estimate_usd.total'; Port = $null; Direction = 'shrink' })
 
     return $metrics.ToArray()
 }
@@ -280,7 +280,7 @@ function Get-CostAnomalyFlags {
 
     foreach ($desc in $descriptors) {
         $metricKey = $desc.MetricKey
-        $port      = $desc.Port
+        $port = $desc.Port
         $direction = $desc.Direction
 
         # Extract this run's value

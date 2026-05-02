@@ -20,21 +20,21 @@ Describe 'Get-CostAnomalyFlags' {
                 [double]$TotalCost = 0.01
             )
             return @{
-                ports = @{
+                ports                 = @{
                     $PortName = @{
-                        tokens              = @{ input = $InputTok; output = $OutputTok; cache_creation = $CacheCreate; cache_read = $CacheRead }
-                        dispatch_count      = $DispatchCount
-                        cost_estimate_usd   = $TotalCost
+                        tokens               = @{ input = $InputTok; output = $OutputTok; cache_creation = $CacheCreate; cache_read = $CacheRead }
+                        dispatch_count       = $DispatchCount
+                        cost_estimate_usd    = $TotalCost
                         cache_read_hit_ratio = if (($CacheRead + $CacheCreate + $InputTok) -gt 0) { $CacheRead / ($CacheRead + $CacheCreate + $InputTok) } else { 0 }
                     }
                 }
                 orchestrator_overhead = @{
-                    tokens              = @{ input = 500; output = 200; cache_creation = 50; cache_read = 100 }
-                    cost_estimate_usd   = 0.005
+                    tokens               = @{ input = 500; output = 200; cache_creation = 50; cache_read = 100 }
+                    cost_estimate_usd    = 0.005
                     cache_read_hit_ratio = 0.15
                 }
-                dispatches = @{ general_purpose_count = 0; unattributed_count = 0 }
-                totals = @{
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{
                     tokens            = @{ input = $InputTok; output = $OutputTok; cache_creation = $CacheCreate; cache_read = $CacheRead }
                     cost_estimate_usd = $TotalCost
                 }
@@ -339,7 +339,7 @@ Describe 'Get-CostAnomalyFlags' {
             $flags = Get-CostAnomalyFlags -ThisRun $thisRun -RollingHistory $history
 
             $outputFlag = $flags | Where-Object { $_.metric -eq 'tokens.per_dispatch.avg.output[review]' }
-            $inputFlag  = $flags | Where-Object { $_.metric -eq 'tokens.per_dispatch.avg.input[review]' }
+            $inputFlag = $flags | Where-Object { $_.metric -eq 'tokens.per_dispatch.avg.input[review]' }
             $outputFlag | Should -BeNullOrEmpty
             $inputFlag  | Should -BeNullOrEmpty
         }

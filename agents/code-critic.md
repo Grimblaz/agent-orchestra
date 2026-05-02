@@ -3,6 +3,8 @@ name: code-critic
 description: Adversarial review shell for Claude Code. Use when you need prosecution or defense findings for a code review pipeline.
 tools: Read, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
 user-invocable: true
+model: opus
+effort: high
 ---
 
 # Code-Critic (Claude Code shell)

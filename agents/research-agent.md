@@ -3,6 +3,7 @@ name: research-agent
 description: Research specialist shell for Claude Code. Use when parent agents need evidence-backed technical analysis and recommendation output.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, WebSearch
 user-invocable: false
+# model/effort intentionally omitted: inherits dispatcher per agent-orchestra routing convention (see CLAUDE.md "Per-agent model + reasoning routing").
 ---
 
 # Research-Agent (Claude Code shell)

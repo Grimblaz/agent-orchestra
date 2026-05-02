@@ -33,9 +33,9 @@ function Write-Jsonl {
     $Events | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 10 } | Set-Content -Path $Path -Encoding utf8NoBOM
 }
 
-$TestCwd    = '/c/test/repo'
-$BranchA    = 'feature/branch-a'
-$BranchB    = 'feature/branch-b'
+$TestCwd = '/c/test/repo'
+$BranchA = 'feature/branch-a'
+$BranchB = 'feature/branch-b'
 
 # ---- Fixture 1: single-session-clean ----
 # Three matching assistant events, one wrong-branch, one user, one Agent dispatch

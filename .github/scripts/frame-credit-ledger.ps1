@@ -613,7 +613,8 @@ function Invoke-FrameCreditLedger {
             # inside the worker runspace (it is re-derived from $PSCommandPath at call time).
             $costScriptsDir = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
                 $PSScriptRoot
-            } else {
+            }
+            else {
                 Join-Path $repoRoot '.github/scripts'
             }
             $costAttribution = Get-CostAttribution -Events $costEvents -RateTablePath (Join-Path $costScriptsDir 'lib/cost-rate-table.json')
@@ -631,7 +632,8 @@ function Invoke-FrameCreditLedger {
                 try {
                     $cpPath = Join-Path $repoRoot '.github/scripts/cost-regime-checkpoints.yaml'
                     if (Test-Path $cpPath) { $checkpoint = Get-MostRecentRegimeCheckpoint -Path $cpPath }
-                } catch { $checkpoint = $null }
+                }
+                catch { $checkpoint = $null }
             }
 
             # 6e. Completeness + preservation
@@ -661,7 +663,8 @@ function Invoke-FrameCreditLedger {
                 $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$costBranch)
                 $costSection = $costMarkdown + "`n" + $costYaml
             }
-        } catch {
+        }
+        catch {
             [Console]::Error.WriteLine("frame-credit-ledger: cost pattern composition failed: $($_.Exception.Message)")
             $costSection = ''
         }

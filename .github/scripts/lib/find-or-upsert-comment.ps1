@@ -132,8 +132,8 @@ function Find-OrUpsertComment {
     }
 
     $sorted = @($matchedComments |
-        Where-Object { $null -ne (script:Get-RestCommentId $_) } |
-        Sort-Object -Property { script:Get-RestCommentId $_ })
+            Where-Object { $null -ne (script:Get-RestCommentId $_) } |
+            Sort-Object -Property { script:Get-RestCommentId $_ })
     if ($sorted.Count -eq 0) {
         [Console]::Error.WriteLine("Find-OrUpsertComment: matched comment(s) have no resolvable REST id; posting new comment.")
         $verb = if ($Type -eq 'pr') { 'pr' } else { 'issue' }

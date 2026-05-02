@@ -54,8 +54,8 @@ function script:ConvertFrom-CheckpointYaml {
     $checkpoints = [System.Collections.Generic.List[hashtable]]::new()
 
     $inCheckpoints = $false
-    $current       = $null
-    $subBlockKey   = $null   # name of the active nested block (e.g. 'metrics')
+    $current = $null
+    $subBlockKey = $null   # name of the active nested block (e.g. 'metrics')
     $subBlockIndent = -1     # indent of the sub-block opener line ('    metrics:')
 
     foreach ($line in $lines) {
@@ -169,7 +169,7 @@ function Get-MostRecentRegimeCheckpoint {
             continue
         }
         $bestTs = [string]$best['timestamp']
-        $curTs  = [string]$entry['timestamp']
+        $curTs = [string]$entry['timestamp']
         if ([string]::Compare($curTs, $bestTs, [System.StringComparison]::Ordinal) -gt 0) {
             $best = $entry
         }
@@ -213,24 +213,24 @@ checkpoints: []
     }
 
     # Build the YAML block for this entry
-    $id        = [string]$Entry['id']
+    $id = [string]$Entry['id']
     $timestamp = [string]$Entry['timestamp']
-    $subIssue  = if ($Entry.ContainsKey('sub_issue') -and -not [string]::IsNullOrEmpty($Entry['sub_issue'])) { [string]$Entry['sub_issue'] } else { '' }
-    $reason    = [string]$Entry['reason']
-    $note      = if ($Entry.ContainsKey('note') -and -not [string]::IsNullOrEmpty([string]$Entry['note'])) { [string]$Entry['note'] } else { '' }
+    $subIssue = if ($Entry.ContainsKey('sub_issue') -and -not [string]::IsNullOrEmpty($Entry['sub_issue'])) { [string]$Entry['sub_issue'] } else { '' }
+    $reason = [string]$Entry['reason']
+    $note = if ($Entry.ContainsKey('note') -and -not [string]::IsNullOrEmpty([string]$Entry['note'])) { [string]$Entry['note'] } else { '' }
 
     $metricsLines = ''
     if ($Entry.ContainsKey('metrics') -and $Entry['metrics'] -is [hashtable] -and $Entry['metrics'].Count -gt 0) {
         $metricsLines = ($Entry['metrics'].GetEnumerator() | Sort-Object Key | ForEach-Object {
-            "      $($_.Key): $($_.Value)"
-        }) -join "`n"
+                "      $($_.Key): $($_.Value)"
+            }) -join "`n"
     }
 
     $exclusionsLines = ''
     if ($Entry.ContainsKey('exclusions') -and $Entry['exclusions'] -is [hashtable] -and $Entry['exclusions'].Count -gt 0) {
         $exclusionsLines = ($Entry['exclusions'].GetEnumerator() | Sort-Object Key | ForEach-Object {
-            "      $($_.Key): $($_.Value)"
-        }) -join "`n"
+                "      $($_.Key): $($_.Value)"
+            }) -join "`n"
     }
 
     # Fix Pass3-F7: YAML-escape user-supplied strings before interpolating
@@ -239,11 +239,11 @@ checkpoints: []
     # back correctly (it splits on the first `:` and Trim('"') leaves quotes
     # mid-value). Backslashes must be escaped first to avoid double-escaping
     # the replacement we add for quotes.
-    $escId        = ($id        -replace '\\', '\\\\') -replace '"', '\"'
+    $escId = ($id -replace '\\', '\\\\') -replace '"', '\"'
     $escTimestamp = ($timestamp -replace '\\', '\\\\') -replace '"', '\"'
-    $escSubIssue  = ($subIssue  -replace '\\', '\\\\') -replace '"', '\"'
-    $escReason    = ($reason    -replace '\\', '\\\\') -replace '"', '\"'
-    $escNote      = ($note      -replace '\\', '\\\\') -replace '"', '\"'
+    $escSubIssue = ($subIssue -replace '\\', '\\\\') -replace '"', '\"'
+    $escReason = ($reason -replace '\\', '\\\\') -replace '"', '\"'
+    $escNote = ($note -replace '\\', '\\\\') -replace '"', '\"'
 
     # Build YAML entry block
     $entryLines = [System.Collections.Generic.List[string]]::new()
@@ -400,19 +400,19 @@ function Invoke-CostRegimeCheckpoint {
     # legacy comment_body match for any cache entries from before this fix.
     if (-not [string]::IsNullOrEmpty($SubIssue)) {
         $entries = @($entries | Where-Object {
-            if ($_.ContainsKey('sub_issue_refs')) {
-                $refs = @($_['sub_issue_refs'])
-                # Exact membership test — exclude when this PR cited the sub-issue.
-                return ($refs -notcontains $SubIssue)
-            }
-            # Legacy fallback for older cache shapes that stashed comment_body.
-            if ($_.ContainsKey('comment_body')) {
-                $body = [string]$_['comment_body']
-                # Word-boundary regex prevents '#469' from matching '#4690'.
-                return -not ($body -match ('(?<![\w])' + [regex]::Escape($SubIssue) + '(?![\w])'))
-            }
-            return $true   # No reference data available → don't exclude.
-        })
+                if ($_.ContainsKey('sub_issue_refs')) {
+                    $refs = @($_['sub_issue_refs'])
+                    # Exact membership test — exclude when this PR cited the sub-issue.
+                    return ($refs -notcontains $SubIssue)
+                }
+                # Legacy fallback for older cache shapes that stashed comment_body.
+                if ($_.ContainsKey('comment_body')) {
+                    $body = [string]$_['comment_body']
+                    # Word-boundary regex prevents '#469' from matching '#4690'.
+                    return -not ($body -match ('(?<![\w])' + [regex]::Escape($SubIssue) + '(?![\w])'))
+                }
+                return $true   # No reference data available → don't exclude.
+            })
     }
 
     # ---- M5 Step 4: Exclude most-recent N entries ----
@@ -427,10 +427,10 @@ function Invoke-CostRegimeCheckpoint {
     $metrics = @{}
 
     if ($entries.Count -gt 0) {
-        $portAccum    = @{}
-        $portCounts   = @{}
-        $ooCostTotal  = 0.0
-        $ooCount      = 0
+        $portAccum = @{}
+        $portCounts = @{}
+        $ooCostTotal = 0.0
+        $ooCount = 0
 
         foreach ($e in $entries) {
             # Ports — Get-CostRollingHistory returns ports as a hashtable keyed by
@@ -451,15 +451,15 @@ function Invoke-CostRegimeCheckpoint {
                     }
                 }
                 foreach ($p in $portIter) {
-                    $pName  = $p.Name
+                    $pName = $p.Name
                     $bucket = $p.Bucket
                     if ([string]::IsNullOrEmpty($pName) -or $null -eq $bucket -or -not ($bucket -is [hashtable])) { continue }
                     if (-not $bucket.ContainsKey('cost_estimate_usd')) { continue }
                     if (-not $portAccum.ContainsKey($pName)) {
-                        $portAccum[$pName]  = 0.0
+                        $portAccum[$pName] = 0.0
                         $portCounts[$pName] = 0
                     }
-                    $portAccum[$pName]  += [double]$bucket['cost_estimate_usd']
+                    $portAccum[$pName] += [double]$bucket['cost_estimate_usd']
                     $portCounts[$pName] += 1
                 }
             }
@@ -485,8 +485,8 @@ function Invoke-CostRegimeCheckpoint {
     }
 
     # ---- Build checkpoint entry ----
-    $nowUtc    = (Get-Date).ToUniversalTime()
-    $cpId      = "cp-$($nowUtc.ToString('yyyyMMdd-HHmmss'))"
+    $nowUtc = (Get-Date).ToUniversalTime()
+    $cpId = "cp-$($nowUtc.ToString('yyyyMMdd-HHmmss'))"
     $timestamp = $nowUtc.ToString('o')
 
     $exclusions = @{ recent_count = $ExcludeMostRecent }

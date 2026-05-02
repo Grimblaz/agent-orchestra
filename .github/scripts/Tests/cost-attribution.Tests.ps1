@@ -33,10 +33,10 @@ Describe 'Get-CostAttribution' {
                 message   = @{
                     model   = $Model
                     usage   = @{
-                        input_tokens              = $InputTokens
-                        output_tokens             = $OutputTokens
+                        input_tokens                = $InputTokens
+                        output_tokens               = $OutputTokens
                         cache_creation_input_tokens = $CacheCreation
-                        cache_read_input_tokens   = $CacheRead
+                        cache_read_input_tokens     = $CacheRead
                     }
                     content = $Content
                 }
@@ -77,10 +77,10 @@ Describe 'Get-CostAttribution' {
                 message   = @{
                     model   = $Model
                     usage   = @{
-                        input_tokens              = $InputTokens
-                        output_tokens             = $OutputTokens
+                        input_tokens                = $InputTokens
+                        output_tokens               = $OutputTokens
                         cache_creation_input_tokens = $CacheCreation
-                        cache_read_input_tokens   = $CacheRead
+                        cache_read_input_tokens     = $CacheRead
                     }
                     content = @()
                 }
