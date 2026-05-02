@@ -1034,6 +1034,36 @@ function Resolve-FVChangesetIdentifierBoolean {
         [Parameter(Mandatory)]$Changeset
     )
 
+    # review.sustainedCriticalOrHigh: resolved from JudgeScore when present in
+    # the changeset; otherwise falls through to the deferred-unknown path.
+    # Introduced by issue #441 Step 4c/4d — D-new-3 runtime-resolver.
+    if ($Name -eq 'review.sustainedCriticalOrHigh') {
+        $judgeScore = $null
+        if ($null -ne $Changeset -and $Changeset -is [System.Collections.IDictionary] -and $Changeset.ContainsKey('JudgeScore')) {
+            $judgeScore = $Changeset['JudgeScore']
+        } elseif ($null -ne $Changeset -and $null -ne $Changeset.PSObject.Properties['JudgeScore']) {
+            $judgeScore = $Changeset.JudgeScore
+        }
+
+        if ($null -ne $judgeScore) {
+            $findings = @()
+            if ($judgeScore -is [System.Collections.IDictionary] -and $judgeScore.ContainsKey('Findings')) {
+                $findings = @($judgeScore['Findings'])
+            } elseif ($null -ne $judgeScore.PSObject.Properties['Findings']) {
+                $findings = @($judgeScore.Findings)
+            }
+            # Qualifying finding: severity in {Critical, High}, ruling = uphold.
+            $hasQualifying = @($findings | Where-Object {
+                $sev = [string]$_.Severity
+                $ruling = [string]$_.Ruling
+                ($sev -eq 'Critical' -or $sev -eq 'High') -and $ruling -eq 'uphold'
+            }).Count -gt 0
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hasQualifying))
+        }
+        # No JudgeScore: fall through to deferred-unknown.
+        return $null
+    }
+
     $paths = Get-FVChangedFiles -Changeset $Changeset
 
     switch ($Name) {
@@ -1136,6 +1166,29 @@ function Resolve-FVCallNode {
         return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hit))
     }
 
+    # changeset.touchesAny(['glob1','glob2',...]) — true when any changed path
+    # matches any glob in the provided array. Introduced by issue #441 D-new-3.
+    if ($name -eq 'changeset.touchesAny') {
+        $arguments = @($Node.Arguments)
+        if ($arguments.Count -lt 1 -or $arguments[0].LiteralType -ne 'Array') {
+            return (New-FVEvaluationResult -Result 'unknown' -Reason "unsupported-identifier: changeset.touchesAny requires an array literal argument")
+        }
+        $arrayNode = $arguments[0]
+        $globs = @($arrayNode.Items | Where-Object { $_.LiteralType -eq 'String' } | ForEach-Object { [string]$_.Value })
+        if ($globs.Count -eq 0) {
+            return (New-FVEvaluationResult -Result 'false')
+        }
+        $paths = Get-FVChangedFiles -Changeset $Changeset
+        $hit = $false
+        foreach ($path in $paths) {
+            foreach ($glob in $globs) {
+                if ([string]$path -like $glob) { $hit = $true; break }
+            }
+            if ($hit) { break }
+        }
+        return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hit))
+    }
+
     if ($name -in (Get-FVDeferredCreditReferenceIdentifiers)) {
         return (New-FVEvaluationResult -Result 'unknown' -Reason "deferred-credit-reference-identifier: '$name'")
     }
@@ -1155,6 +1208,12 @@ function Resolve-FVIdentifierAsBoolean {
 
     $name = $Node.Name
 
+    # Attempt JudgeScore-based resolution before the deferred-unknown check.
+    # This allows review.sustainedCriticalOrHigh to resolve when JudgeScore
+    # is present in the changeset, suppressing the deferred-unknown warning.
+    $judgeResolved = Resolve-FVChangesetIdentifierBoolean -Name $name -Changeset $Changeset
+    if ($null -ne $judgeResolved) { return $judgeResolved }
+
     if ($name -in (Get-FVDeferredCreditReferenceIdentifiers)) {
         return (New-FVEvaluationResult -Result 'unknown' -Reason "deferred-credit-reference-identifier: '$name'")
     }
@@ -1162,9 +1221,6 @@ function Resolve-FVIdentifierAsBoolean {
     if ($name -in (Get-FVHeuristicDeferredIdentifiers)) {
         return (New-FVEvaluationResult -Result 'unknown' -Reason "heuristic-deferred: '$name'")
     }
-
-    $resolved = Resolve-FVChangesetIdentifierBoolean -Name $name -Changeset $Changeset
-    if ($null -ne $resolved) { return $resolved }
 
     return (New-FVEvaluationResult -Result 'unknown' -Reason "unsupported-identifier: '$name'")
 }
@@ -1176,6 +1232,14 @@ function Resolve-FVIdentifierForComparison {
     )
 
     $name = $Node.Name
+
+    # Attempt JudgeScore-based resolution before the deferred-unknown check.
+    # Handles review.sustainedCriticalOrHigh when JudgeScore present.
+    $judgeResolved = Resolve-FVChangesetIdentifierBoolean -Name $name -Changeset $Changeset
+    if ($null -ne $judgeResolved) {
+        $b = ($judgeResolved.Result -eq 'true')
+        return [PSCustomObject]@{ Status = 'value'; Reason = ''; Value = $b; ValueType = 'Boolean' }
+    }
 
     if ($name -in (Get-FVDeferredCreditReferenceIdentifiers)) {
         return [PSCustomObject]@{ Status = 'unknown'; Reason = "deferred-credit-reference-identifier: '$name'"; Value = $null }
@@ -1397,4 +1461,48 @@ function Test-FVPredicateAgainstChangeset {
     }
 
     return (Invoke-FVPredicateEvaluation -Node $Ast -Changeset $Changeset)
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-SustainedCriticalOrHigh (issue #441, Steps 4c/4d)
+#
+# Runtime resolver for the review.sustainedCriticalOrHigh predicate.
+# Operates on a findings array where each entry has:
+#   - Severity:    'Critical' | 'High' | 'Medium' | 'Low'
+#   - Ruling:      'uphold' | 'override' | 'inconclusive'
+#   - ExpressLane: [bool] (optional; default = not express-laned)
+#
+# Returns $true when at least one qualifying finding exists (severity in
+# {Critical, High}, ruling = uphold). When ApplyExpressLaneCarveOut is $true,
+# qualifying findings with ExpressLane=$true are excluded — if all remaining
+# qualifying findings are express-laned, returns $false.
+# ---------------------------------------------------------------------------
+function Resolve-SustainedCriticalOrHigh {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyCollection()][object[]]$Findings = @(),
+        [bool]$ApplyExpressLaneCarveOut = $false
+    )
+
+    if ($null -eq $Findings -or $Findings.Count -eq 0) { return $false }
+
+    $qualifying = @($Findings | Where-Object {
+        $sev = [string]$_.Severity
+        $ruling = [string]$_.Ruling
+        ($sev -eq 'Critical' -or $sev -eq 'High') -and $ruling -eq 'uphold'
+    })
+
+    if ($qualifying.Count -eq 0) { return $false }
+
+    if ($ApplyExpressLaneCarveOut) {
+        # Remove express-laned findings; if none remain, return $false.
+        $nonExpressLaned = @($qualifying | Where-Object {
+            $el = $_.PSObject.Properties['ExpressLane']
+            if ($null -eq $el) { return $true }   # missing field = not express-laned
+            return -not [bool]$el.Value
+        })
+        return ($nonExpressLaned.Count -gt 0)
+    }
+
+    return $true
 }

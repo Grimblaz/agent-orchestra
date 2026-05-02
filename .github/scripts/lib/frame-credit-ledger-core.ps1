@@ -3,11 +3,14 @@
 .SYNOPSIS
     Pure-logic library for the frame credit-ledger pre-PR warn hook (issue #429).
 
-    Exposes six functions:
+    Exposes nine functions:
       - Read-PRMetricsBlock               : parse a pipeline-metrics v4 marker out of a PR body
+      - Select-LastCreditByRunIndex       : pick the highest-run_index credit for (port, adapter)
+      - Test-ReviewSentinelPresent        : check for <!-- review-judge-produced-{PR} --> sentinel
+      - Resolve-NotPersistedSynthesis     : synthesize not-persisted credit when sentinel present
       - Get-PortFiles                     : enumerate frame/ports/*.yaml as objects
       - Resolve-PortStatus                : classify a single port given adapters + credit
-      - Compose-Comment                   : render the warn-mode markdown report
+      - Compose-Comment                   : render the warn-mode unified per-port table report
       - Compose-CommentWithCostPattern    : wrapper around Compose-Comment that appends the
                                            cost telemetry section (issue #467) when non-empty
       - Compose-PreV4ShortCircuitComment  : render the literal pre-v4 short-circuit text
@@ -262,12 +265,26 @@ function Read-PRMetricsBlock {
             }
         }
 
-        $creditsRaw = script:ConvertFrom-FCLListSection -Block $block -SectionName 'credits' -Fields @('port', 'status', 'evidence')
+        $creditsRaw = script:ConvertFrom-FCLListSection -Block $block -SectionName 'credits' `
+            -Fields @('port', 'adapter', 'status', 'run_index', 'evidence',
+                      'mode_backfilled_at', 'mode_original_pr_merged_at')
         $credits = @($creditsRaw | ForEach-Object {
+                $runIndexRaw = [string]$_.run_index
+                $runIndexInt = $null
+                if (-not [string]::IsNullOrWhiteSpace($runIndexRaw)) {
+                    $parsedRunIndex = 0
+                    if ([int]::TryParse($runIndexRaw, [ref]$parsedRunIndex)) {
+                        $runIndexInt = $parsedRunIndex
+                    }
+                }
                 [pscustomobject]@{
-                    Port     = [string]$_.port
-                    Status   = [string]$_.status
-                    Evidence = [string]$_.evidence
+                    Port                  = [string]$_.port
+                    Adapter               = [string]$_.adapter
+                    Status                = [string]$_.status
+                    RunIndex              = $runIndexInt
+                    Evidence              = [string]$_.evidence
+                    ModeBackfilledAt      = if ([string]::IsNullOrWhiteSpace([string]$_.mode_backfilled_at)) { $null } else { [string]$_.mode_backfilled_at }
+                    ModeOriginalPrMergedAt = if ([string]::IsNullOrWhiteSpace([string]$_.mode_original_pr_merged_at)) { $null } else { [string]$_.mode_original_pr_merged_at }
                 }
             })
 
@@ -295,6 +312,101 @@ function Read-PRMetricsBlock {
             Reason         = $_.Exception.Message
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Sentinel-based not-persisted synthesis (issue #441, Step 5a)
+# Sentinel marker token: <!-- review-judge-produced-{PR} -->
+# ---------------------------------------------------------------------------
+
+# Returns $true when any comment in the $Comments array contains the sentinel
+# token for the given PR number.
+function Test-ReviewSentinelPresent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$PrNumber,
+        [AllowEmptyCollection()][AllowNull()][object[]]$Comments
+    )
+
+    if ($null -eq $Comments -or $Comments.Count -eq 0) { return $false }
+
+    $token = "<!-- review-judge-produced-$PrNumber -->"
+    foreach ($c in $Comments) {
+        $body = ''
+        if ($null -ne $c.PSObject.Properties['body']) { $body = [string]$c.body }
+        elseif ($c -is [System.Collections.IDictionary] -and $c.ContainsKey('body')) { $body = [string]$c['body'] }
+        if ($body -like "*$token*") { return $true }
+    }
+    return $false
+}
+
+# Synthesizes a `review: not-persisted` credit row when:
+#   - The review-judge-produced-{PR} sentinel comment is present (Path A), AND
+#   - No review port credit already exists in the metrics block (Paths B/C guard).
+# Returns $null when synthesis is not applicable (no sentinel, or credit already exists).
+function Resolve-NotPersistedSynthesis {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$PrNumber,
+        [Parameter(Mandatory)]$MetricsBlock,
+        [AllowEmptyCollection()][AllowNull()][object[]]$Comments
+    )
+
+    # Guard: a review credit already exists — do not synthesize.
+    $existingReviewCredit = @($MetricsBlock.Credits | Where-Object { [string]$_.Port -eq 'review' })
+    if ($existingReviewCredit.Count -gt 0) { return $null }
+
+    # Check sentinel presence.
+    if (-not (Test-ReviewSentinelPresent -PrNumber $PrNumber -Comments $Comments)) {
+        return $null
+    }
+
+    # Find the sentinel comment URL for evidence.
+    $sentinelUrl = ''
+    $token = "<!-- review-judge-produced-$PrNumber -->"
+    foreach ($c in @($Comments)) {
+        $body = ''
+        if ($null -ne $c.PSObject.Properties['body']) { $body = [string]$c.body }
+        if ($body -like "*$token*") {
+            if ($null -ne $c.PSObject.Properties['url']) { $sentinelUrl = [string]$c.url }
+            break
+        }
+    }
+
+    $evidence = if ([string]::IsNullOrWhiteSpace($sentinelUrl)) {
+        "sentinel $token present but no review credit row was written."
+    } else {
+        "sentinel $token present (comment: $sentinelUrl) but no review credit row was written."
+    }
+
+    return [pscustomobject]@{
+        Port    = 'review'
+        Status  = 'not-persisted'
+        Evidence = $evidence
+    }
+}
+
+# Return the credit row with the highest RunIndex for a given (Port, Adapter) pair.
+# When Adapter is omitted / empty, matches on Port alone.
+# Returns $null when no matching entry exists.
+function Select-LastCreditByRunIndex {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Credits,
+        [Parameter(Mandatory)][string]$Port,
+        [AllowEmptyString()][string]$Adapter = ''
+    )
+
+    $pool = @($Credits | Where-Object { [string]$_.Port -eq $Port })
+    if (-not [string]::IsNullOrWhiteSpace($Adapter)) {
+        $pool = @($pool | Where-Object { [string]$_.Adapter -eq $Adapter })
+    }
+
+    if ($pool.Count -eq 0) { return $null }
+    if ($pool.Count -eq 1) { return $pool[0] }
+
+    # Sort by RunIndex descending; treat $null RunIndex as 0.
+    return ($pool | Sort-Object -Property { if ($null -eq $_.RunIndex) { 0 } else { [int]$_.RunIndex } } -Descending | Select-Object -First 1)
 }
 
 function Get-PortFiles {
@@ -501,61 +613,68 @@ function Compose-Comment {
     $autoNotApplicable = @($reports | Where-Object {
             [string]$_.Status -eq 'Covered' -and [string]$_.SubReason -eq 'AutoNotApplicable'
         })
-    $reports = @($reports | Where-Object {
+    $tableReports = @($reports | Where-Object {
             -not ([string]$_.Status -eq 'Covered' -and [string]$_.SubReason -eq 'AutoNotApplicable')
         })
-
-    $covered = @($reports | Where-Object { [string]$_.Status -eq 'Covered' })
-    $inconclusive = @($reports | Where-Object { [string]$_.Status -eq 'Inconclusive' })
-    $notCovered = @($reports | Where-Object { [string]$_.Status -eq 'NotCovered' })
 
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine($MarkerToken)
     [void]$sb.AppendLine('## Frame credit ledger — port coverage report')
     [void]$sb.AppendLine('')
 
-    if ($covered.Count -gt 0) {
-        [void]$sb.AppendLine(("### ✅ Covered ({0})" -f $covered.Count))
-        foreach ($r in $covered) {
-            $reasonLabel = switch ([string]$r.SubReason) {
-                'PassedCredit' { 'passed credit' }
-                'NotApplicableCredit' { 'not applicable per credit' }
-                'SkippedCredit' { 'skipped credit' }
-                default { [string]$r.SubReason }
-            }
-            [void]$sb.AppendLine(("- {0} — {1}" -f [string]$r.PortName, $reasonLabel))
-        }
-        [void]$sb.AppendLine('')
-    }
+    # Unified per-port table (D2 single-shape parity — issue #441 Step 5b).
+    # All status values appear in the same table; no three-section split.
+    if ($tableReports.Count -gt 0) {
+        [void]$sb.AppendLine('| Port | Status | Evidence | Next step |')
+        [void]$sb.AppendLine('|------|--------|----------|-----------|')
 
-    if ($inconclusive.Count -gt 0) {
-        [void]$sb.AppendLine(("### ⚠️ Inconclusive ({0})" -f $inconclusive.Count))
-        foreach ($r in $inconclusive) {
-            [void]$sb.AppendLine(("- **{0}** — {1}" -f [string]$r.PortName, [string]$r.SubReason))
-            $adapterName = [string]$r.AdapterName
-            if (-not [string]::IsNullOrWhiteSpace($adapterName)) {
-                [void]$sb.AppendLine(("  - Adapter: {0}" -f $adapterName))
-            }
-            $step = $r.SuggestedNextStep
-            if ($null -ne $step -and -not [string]::IsNullOrWhiteSpace([string]$step)) {
-                [void]$sb.AppendLine(("  - Suggested next step: ``{0}``" -f [string]$step))
-            }
-        }
-        [void]$sb.AppendLine('')
-    }
+        foreach ($r in $tableReports) {
+            $portName = [string]$r.PortName
 
-    if ($notCovered.Count -gt 0) {
-        [void]$sb.AppendLine(("### 🚫 Not covered ({0})" -f $notCovered.Count))
-        foreach ($r in $notCovered) {
-            [void]$sb.AppendLine(("- **{0}** — {1}" -f [string]$r.PortName, [string]$r.SubReason))
-            $adapterName = [string]$r.AdapterName
-            if (-not [string]::IsNullOrWhiteSpace($adapterName)) {
-                [void]$sb.AppendLine(("  - Adapter: {0}" -f $adapterName))
+            # Determine the credit-status label and glyph.
+            $creditStatus = ''
+            if ($null -ne $r.PSObject.Properties['CreditStatus'] -and -not [string]::IsNullOrWhiteSpace([string]$r.CreditStatus)) {
+                $creditStatus = [string]$r.CreditStatus
+            } else {
+                # Derive from SubReason when CreditStatus is not provided.
+                $creditStatus = switch ([string]$r.SubReason) {
+                    'PassedCredit'        { 'passed' }
+                    'NotApplicableCredit' { 'not-applicable' }
+                    'SkippedCredit'       { 'skipped' }
+                    'AdapterFailed'       { 'failed' }
+                    'InconclusiveCredit'  { 'inconclusive' }
+                    'NotPersistedCredit'  { 'not-persisted' }
+                    'MissingAdapter'      { 'missing' }
+                    default               { [string]$r.SubReason }
+                }
             }
-            $step = $r.SuggestedNextStep
-            if ($null -ne $step -and -not [string]::IsNullOrWhiteSpace([string]$step)) {
-                [void]$sb.AppendLine(("  - Suggested next step: ``{0}``" -f [string]$step))
+
+            $glyph = switch ($creditStatus) {
+                'passed'        { '✅' }
+                'not-applicable'{ '➖' }
+                'skipped'       { '⏭️' }
+                'failed'        { '❌' }
+                'inconclusive'  { '⚠️' }
+                'not-persisted' { '🔇' }
+                default         { '❓' }
             }
+
+            $statusCell = "$glyph $creditStatus"
+
+            $evidence = ''
+            if ($null -ne $r.PSObject.Properties['Evidence']) { $evidence = [string]$r.Evidence }
+
+            $nextStep = ''
+            if ($null -ne $r.SuggestedNextStep -and -not [string]::IsNullOrWhiteSpace([string]$r.SuggestedNextStep)) {
+                $nextStep = [string]$r.SuggestedNextStep
+            }
+
+            # Escape pipe characters in cell content to avoid table breakage.
+            $portName  = $portName  -replace '\|', '\|'
+            $evidence  = $evidence  -replace '\|', '\|'
+            $nextStep  = $nextStep  -replace '\|', '\|'
+
+            [void]$sb.AppendLine("| $portName | $statusCell | $evidence | $nextStep |")
         }
         [void]$sb.AppendLine('')
     }
