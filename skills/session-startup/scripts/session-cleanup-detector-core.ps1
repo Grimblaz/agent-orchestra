@@ -1118,6 +1118,13 @@ function Invoke-SessionCleanupDetector {
             $compositeArgs += "-IssueNumber $($staleBranch.IssueId)"
             $compositeArgs += "-FeatureBranch '$escaped'"
         }
+        # C1+G4+C6: Route no-issue-id stale-branch cleanup through the composite
+        # script via -FeatureBranch so the fenced block stays a single pwsh call
+        # and triggers exactly one permission prompt — not raw 'git checkout && git pull
+        # && git branch -d' lines that would re-introduce the multi-prompt problem.
+        if ($null -ne $staleBranch -and -not $staleBranch.IssueId) {
+            $compositeArgs += "-FeatureBranch '$escaped'"
+        }
         if ($visibleSiblingWorktreeCleanups.Count -gt 0) {
             $siblingPaths = $visibleSiblingWorktreeCleanups | ForEach-Object {
                 "'" + (ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $_.WorktreePath) + "'"
@@ -1156,11 +1163,6 @@ function Invoke-SessionCleanupDetector {
         }
         if ($compositeArgs.Count -gt 0) {
             $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' $($compositeArgs -join ' ')"
-        }
-        if ($null -ne $staleBranch -and -not $staleBranch.IssueId) {
-            # No-issue-id stale branch: use git checkout fallback for stale branch
-            # This fires in addition to (not instead of) the composite invocation above
-            $lines += "git checkout '$escapedDefault' && git pull && git branch -d '$escaped'  # use -D to force if already confirmed merged"
         }
         $lines += '```'
         $lines += ''

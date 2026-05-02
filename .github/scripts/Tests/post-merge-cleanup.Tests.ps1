@@ -952,4 +952,89 @@ title: "Issue 42 back-compat test"
             Test-Path $script:CombinedTrackingFile | Should -Be $false -Because 'archived file must be moved out of .copilot-tracking/'
         }
     }
+
+    # =========================================================================
+    # Post-review fixes from PR #502 bot reviewers (Copilot + Gemini)
+    # =========================================================================
+    Describe 'Post-review hardening (PR #502 bot findings)' {
+
+        It 'TC-FeatureBranch-Guard: -FeatureBranch alone satisfies the guard (C6/C1)' {
+            # Per Copilot reviewer: -FeatureBranch should satisfy the guard so the
+            # detector can route no-issue-id stale-branch cleanup through the
+            # composite script instead of raw git lines.
+            $workDir = Join-Path $TestDrive 'fb-only'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+                'fetch-exit'               = 0
+                'ls-remote-exit'           = 0
+                'branch-d-exit'            = 0
+            } -ScriptParams @{
+                FeatureBranch    = 'feature/issue-500-test-fb-only'
+                SkipRemoteDelete = $true
+                SkipGitUpdate    = $true
+            }
+            $result.ExitCode | Should -Be 0 -Because '-FeatureBranch alone must be a valid invocation per C1/C6 fix'
+            $result.Output | Should -Not -Match 'Must specify -IssueNumber' -Because 'guard must accept -FeatureBranch alone'
+        }
+
+        It 'TC-Cherry-DashLines: cherry output with only "-" lines is treated as merged (C4)' {
+            # Per Copilot reviewer: git cherry prefixes with '+' (not in upstream)
+            # or '-' (patch-equivalent). A branch with only '-' lines is merged.
+            $workDir = Join-Path $TestDrive 'cherry-dash'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'pester-temp/issue-500-cherry-dash'
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+                'fetch-exit'               = 0
+                # cherry returns "- abc1234 patch-equivalent" — should be treated as merged
+                "cherry-$branch"           = "- abc1234 Patch-equivalent commit already in upstream"
+                'branch-d-exit'            = 0
+            } -ScriptParams @{
+                OrphanBranches = [string[]]@($branch)
+            }
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'Deleted 1 orphan branch' -Because 'branch with only "-" lines is merged (patch-equivalent) and must be deleted'
+            $result.Output | Should -Not -Match 'Skipped' -Because 'branch should not be skipped — "-" lines indicate it IS merged'
+        }
+
+        It 'TC-Cherry-PlusLines: cherry output with "+" lines correctly treated as unmerged (C4 sanity check)' {
+            # Sanity check: branches with '+' lines must still be skipped.
+            $workDir = Join-Path $TestDrive 'cherry-plus'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'pester-temp/issue-500-cherry-plus'
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+                'fetch-exit'               = 0
+                "cherry-$branch"           = "+ def5678 New commit not yet in upstream"
+                'branch-d-exit'            = 0
+            } -ScriptParams @{
+                OrphanBranches = [string[]]@($branch)
+            }
+            $result.ExitCode | Should -Be 0
+            $result.Output | Should -Match 'Skipped' -Because 'branch with "+" lines is unmerged and must be skipped'
+            $result.Output | Should -Not -Match 'Deleted 1 orphan branch'
+        }
+
+        It 'TC-Path-Traversal-1: -UntaggedTrackingFiles blocks paths outside .copilot-tracking/ (C2)' {
+            # Per Copilot reviewer: validate path resolves under .copilot-tracking/
+            # to block ../somefile or absolute paths.
+            $workDir = Join-Path $TestDrive 'traversal'
+            $trackingDir = Join-Path $workDir '.copilot-tracking'
+            New-Item -ItemType Directory -Path $trackingDir -Force | Out-Null
+            # Create a file OUTSIDE .copilot-tracking that we'll try to attack via traversal
+            $sensitiveFile = Join-Path $workDir 'sensitive-data.txt'
+            'should not be moved' | Set-Content -Path $sensitiveFile -Encoding UTF8
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+                'fetch-exit'               = 0
+            } -ScriptParams @{
+                UntaggedTrackingFiles = [string[]]@('.copilot-tracking/../sensitive-data.txt')
+            }
+            $result.ExitCode | Should -Be 0 -Because 'script continues after blocking the malicious path'
+            $result.Output | Should -Match 'Path traversal blocked' -Because 'traversal attempt must be reported'
+            Test-Path $sensitiveFile | Should -Be $true -Because 'sensitive file outside .copilot-tracking/ must NOT be moved'
+            $result.Output | Should -Not -Match 'Archived 1 untagged file' -Because 'no archival should occur when path traversal is blocked'
+        }
+    }
 }

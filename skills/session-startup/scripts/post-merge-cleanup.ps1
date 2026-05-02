@@ -55,10 +55,31 @@ $ErrorActionPreference = 'Stop'
 
 . "$PSScriptRoot/session-startup-git-helpers.ps1"
 
-# Guard: require IssueNumber OR at least one of the new category parameters
-if ($null -eq $IssueNumber -and $OrphanBranches.Count -eq 0 -and $SiblingWorktrees.Count -eq 0 -and $UntaggedTrackingFiles.Count -eq 0) {
-    Write-Error "Must specify -IssueNumber or at least one of -OrphanBranches, -SiblingWorktrees, -UntaggedTrackingFiles."
+# Guard: require IssueNumber, FeatureBranch, OR at least one of the new category parameters
+# (C6/C1: -FeatureBranch alone is sufficient — used by detector for no-issue-id stale branches
+#  so the no-issue-id path can also flow through this composite script instead of raw git.)
+if ($null -eq $IssueNumber -and
+    [string]::IsNullOrWhiteSpace($FeatureBranch) -and
+    $OrphanBranches.Count -eq 0 -and
+    $SiblingWorktrees.Count -eq 0 -and
+    $UntaggedTrackingFiles.Count -eq 0) {
+    Write-Error "Must specify -IssueNumber, -FeatureBranch, or at least one of -OrphanBranches, -SiblingWorktrees, -UntaggedTrackingFiles."
     exit 1
+}
+
+function Get-RemoteDefaultRef {
+    # G1: Resolve the remote-tracking ref dynamically rather than hardcoding 'origin/'.
+    # Handles users who configure the default branch's upstream as e.g. 'upstream/main'.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch
+    )
+    $upstream = git rev-parse --abbrev-ref "${DefaultBranch}@{upstream}" 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($upstream)) {
+        return $upstream.Trim()
+    }
+    return "origin/$DefaultBranch"
 }
 
 function Test-BranchMergedIntoDefault {
@@ -71,12 +92,15 @@ function Test-BranchMergedIntoDefault {
         [string]$DefaultBranch
     )
 
-    # Primary: git cherry — empty stdout means all commits already in default (squash-merge safe)
-    # Use origin/$DefaultBranch so we compare against the fetched remote tip, not the stale local ref
-    $cherryOutput = git cherry origin/$DefaultBranch $BranchName 2>$null
+    # Primary: git cherry against the resolved remote default ref (G1)
+    $remoteDefault = Get-RemoteDefaultRef -DefaultBranch $DefaultBranch
+    $cherryOutput = git cherry $remoteDefault $BranchName 2>$null
     if ($LASTEXITCODE -eq 0) {
-        # Empty output means merged
-        return [string]::IsNullOrWhiteSpace($cherryOutput)
+        # C4: cherry prefixes lines with '+' (not in upstream) or '-' (patch-equivalent
+        # already in upstream). Branch is merged when there are NO '+' lines.
+        # (Empty stdout is the trivial subset of "no '+' lines".)
+        $unmergedLines = @($cherryOutput | Where-Object { $_ -match '^\+\s' })
+        return ($unmergedLines.Count -eq 0)
     }
 
     # Fallback: gh pr list
@@ -178,10 +202,34 @@ function Remove-SiblingWorktree {
         [System.Collections.Generic.List[string]]$DeletedPaths
     )
 
+    # G2: Resolve branch name. Try the in-worktree query first; fall back to the
+    # porcelain worktree list if the directory is missing or detached (prunable).
     $worktreeBranch = git -C $WorktreePath branch --show-current 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($worktreeBranch)) {
-        Write-Warning "Could not determine branch for worktree '$WorktreePath' — skipping"
-        return
+        $porcelain = git worktree list --porcelain 2>$null
+        if ($LASTEXITCODE -eq 0 -and $porcelain) {
+            $blocks = ($porcelain -join "`n") -split "`n`n+"
+            foreach ($block in $blocks) {
+                $blockLines = $block -split "`r?`n"
+                $pathLine = ($blockLines | Where-Object { $_ -match '^worktree\s+(.+)$' } | Select-Object -First 1)
+                if (-not $pathLine) { continue }
+                $blockPath = ($pathLine -replace '^worktree\s+', '').Trim()
+                # Compare normalized paths (case-insensitive on Windows, slash-direction agnostic)
+                $normBlock = $blockPath.Replace('\', '/').TrimEnd('/')
+                $normTarget = $WorktreePath.Replace('\', '/').TrimEnd('/')
+                if ([string]::Equals($normBlock, $normTarget, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $branchLine = ($blockLines | Where-Object { $_ -match '^branch\s+refs/heads/(.+)$' } | Select-Object -First 1)
+                    if ($branchLine -match '^branch\s+refs/heads/(.+)$') {
+                        $worktreeBranch = $Matches[1].Trim()
+                    }
+                    break
+                }
+            }
+        }
+        if ([string]::IsNullOrWhiteSpace($worktreeBranch)) {
+            Write-Warning "Could not determine branch for worktree '$WorktreePath' — skipping"
+            return
+        }
     }
 
     $isMerged = Test-BranchMergedIntoDefault -BranchName $worktreeBranch -DefaultBranch $DefaultBranch
@@ -190,10 +238,45 @@ function Remove-SiblingWorktree {
         return
     }
 
-    git worktree remove --force $WorktreePath 2>$null
+    # C5: Try non-force removal first. Only escalate to --force when the worktree
+    # is prunable (directory deleted) or already gone — never silently --force
+    # over a worktree with uncommitted changes.
+    git worktree remove $WorktreePath 2>$null
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Failed to remove worktree '$WorktreePath' (exit $LASTEXITCODE)"
-        return
+        $shouldForce = $false
+        if (-not (Test-Path $WorktreePath)) {
+            $shouldForce = $true  # directory missing => prunable
+        } else {
+            # Check porcelain output for 'prunable' or 'locked' markers
+            $porcelainCheck = git worktree list --porcelain 2>$null
+            if ($LASTEXITCODE -eq 0 -and $porcelainCheck) {
+                $blocks2 = ($porcelainCheck -join "`n") -split "`n`n+"
+                foreach ($block in $blocks2) {
+                    $blockLines = $block -split "`r?`n"
+                    $pathLine = ($blockLines | Where-Object { $_ -match '^worktree\s+(.+)$' } | Select-Object -First 1)
+                    if (-not $pathLine) { continue }
+                    $blockPath = ($pathLine -replace '^worktree\s+', '').Trim()
+                    $normBlock = $blockPath.Replace('\', '/').TrimEnd('/')
+                    $normTarget = $WorktreePath.Replace('\', '/').TrimEnd('/')
+                    if ([string]::Equals($normBlock, $normTarget, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        if ($block -match '(?m)^prunable' -or $block -match '(?m)^locked') {
+                            $shouldForce = $true
+                        }
+                        break
+                    }
+                }
+            }
+        }
+        if ($shouldForce) {
+            git worktree remove --force $WorktreePath 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "Failed to remove worktree '$WorktreePath' even with --force (exit $LASTEXITCODE)"
+                return
+            }
+        } else {
+            Write-Warning "Worktree '$WorktreePath' has uncommitted changes or other state preventing safe removal — skipping. Inspect manually and run 'git worktree remove --force' if appropriate."
+            return
+        }
     }
 
     git branch -d $worktreeBranch 2>$null
@@ -249,15 +332,38 @@ if ($deletedSiblingCount -gt 0) {
 # ── Untagged tracking file archival ───────────────────────────────────────
 $archivedUntaggedCount = 0
 if ($UntaggedTrackingFiles.Count -gt 0) {
+    # G3: Anchor on the repo root so behavior is independent of the script's CWD.
+    $repoRoot = (git rev-parse --show-toplevel 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoRoot)) {
+        $repoRoot = (Get-Location).Path
+    } else {
+        $repoRoot = $repoRoot.Trim()
+    }
+    # C2: Resolve the canonical .copilot-tracking root for path-traversal validation.
+    $trackingRootCanonical = $null
+    $trackingRootDir = Join-Path $repoRoot '.copilot-tracking'
+    if (Test-Path $trackingRootDir) {
+        $trackingRootCanonical = (Resolve-Path -LiteralPath $trackingRootDir).Path.TrimEnd('\', '/')
+    }
     $timestamp = Get-Date
     $year = $timestamp.ToString('yyyy')
     $month = $timestamp.ToString('MM')
     $unknownArchiveDir = Join-Path '.copilot-tracking-archive' (Join-Path $year (Join-Path $month 'unknown'))
     New-Item -ItemType Directory -Path $unknownArchiveDir -Force | Out-Null
     foreach ($relPath in $UntaggedTrackingFiles) {
-        $absPath = Join-Path (Get-Location) $relPath
+        $absPath = Join-Path $repoRoot $relPath
         if (-not (Test-Path $absPath)) {
             Write-Warning "Untagged tracking file not found: '$relPath' — skipping"
+            continue
+        }
+        # C2: Validate the resolved path lives under .copilot-tracking/. This blocks
+        # both '..' traversal (e.g. '../../etc/hosts') and absolute paths that
+        # escape the tracking root.
+        $resolvedAbs = (Resolve-Path -LiteralPath $absPath).Path
+        if (-not $trackingRootCanonical -or
+            -not $resolvedAbs.StartsWith("$trackingRootCanonical$([System.IO.Path]::DirectorySeparatorChar)", [System.StringComparison]::OrdinalIgnoreCase) -and
+            -not [string]::Equals($resolvedAbs, $trackingRootCanonical, [System.StringComparison]::OrdinalIgnoreCase)) {
+            Write-Warning "Path traversal blocked: '$relPath' resolves outside .copilot-tracking/ — skipping"
             continue
         }
         $fileInfo = Get-Item $absPath
