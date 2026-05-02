@@ -122,12 +122,16 @@ Describe 'session-memory contract structural surface' {
             [pscustomobject]@{ Path = 'agents\Code-Conductor.agent.md'; Rows = @('SMC-01', 'SMC-02', 'SMC-03', 'SMC-08') }
         )
 
+        # Issue #498 DRY pass: commands/experience.md, commands/design.md, commands/plan.md, and
+        # commands/polish.md no longer reproduce pre-flight prose (SMC-04, SMC-07 citations were in
+        # the duplicated provenance-gate and session-startup sections). Those SMC rows now live only
+        # in their owning skills. The Rows arrays below reflect the post-DRY citation state.
         $script:CommandAndShellSurfaces = @(
-            [pscustomobject]@{ Path = 'commands\experience.md'; Rows = @('SMC-04', 'SMC-07') },
-            [pscustomobject]@{ Path = 'commands\design.md'; Rows = @('SMC-04', 'SMC-07') },
-            [pscustomobject]@{ Path = 'commands\plan.md'; Rows = @('SMC-07') },
+            [pscustomobject]@{ Path = 'commands\experience.md'; Rows = @() },
+            [pscustomobject]@{ Path = 'commands\design.md'; Rows = @() },
+            [pscustomobject]@{ Path = 'commands\plan.md'; Rows = @() },
             [pscustomobject]@{ Path = 'commands\orchestrate.md'; Rows = @('SMC-01', 'SMC-03', 'SMC-08') },
-            [pscustomobject]@{ Path = 'commands\polish.md'; Rows = @('SMC-07') },
+            [pscustomobject]@{ Path = 'commands\polish.md'; Rows = @() },
             [pscustomobject]@{ Path = 'agents\code-conductor.md'; Rows = @('SMC-01', 'SMC-03', 'SMC-06', 'SMC-08') },
             [pscustomobject]@{ Path = 'agents\code-smith.md'; Rows = @('SMC-01', 'SMC-03') },
             [pscustomobject]@{ Path = 'agents\test-writer.md'; Rows = @('SMC-01', 'SMC-03') },

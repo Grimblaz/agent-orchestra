@@ -173,4 +173,18 @@ Describe 'provenance-gate UX contract' {
             }
         }
     }
+
+    It 'carries the offline-fallback notice and Claude-inline persistence gap in the skill and Claude platform file (issue #498 DRY pass)' {
+        # After issue #498 removed the duplicated provenance-gate prose from command files,
+        # the offline-mode notice and the Claude-inline session-memory gap must live in the
+        # owning skill and the Claude platform companion only — not in any commands/*.md file.
+        $offlineModeNoticePattern = '(?is)(offline mode|GitHub lookup or posting is unavailable)'
+        $claudeInlineNoPersistencePattern = '(?is)(Claude Code inline currently lacks a session-memory write surface|cannot persist the shared skill.{0,30}local fallback payload)'
+        $claudeInlineLocalPayloadPathPattern = '(?is)(recover the GitHub marker on a later online run|recover.*GitHub marker.*later online)'
+
+        $script:SkillContent | Should -Match $offlineModeNoticePattern -Because 'the provenance-gate skill must describe the offline fallback behavior'
+        $script:ClaudePlatformContent | Should -Match $offlineModeNoticePattern -Because 'the Claude platform note must describe the offline fallback behavior'
+        $script:ClaudePlatformContent | Should -Match $claudeInlineNoPersistencePattern -Because 'the Claude platform note must document the inline session-memory gap (SMC-04)'
+        $script:ClaudePlatformContent | Should -Match $claudeInlineLocalPayloadPathPattern -Because 'the Claude platform note must document that the local fallback payload cannot be recovered on a later online run'
+    }
 }
