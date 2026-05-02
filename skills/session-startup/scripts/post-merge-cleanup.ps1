@@ -72,7 +72,8 @@ function Test-BranchMergedIntoDefault {
     )
 
     # Primary: git cherry — empty stdout means all commits already in default (squash-merge safe)
-    $cherryOutput = git cherry $DefaultBranch $BranchName 2>$null
+    # Use origin/$DefaultBranch so we compare against the fetched remote tip, not the stale local ref
+    $cherryOutput = git cherry origin/$DefaultBranch $BranchName 2>$null
     if ($LASTEXITCODE -eq 0) {
         # Empty output means merged
         return [string]::IsNullOrWhiteSpace($cherryOutput)
@@ -130,6 +131,11 @@ function Remove-OrphanBranch {
 
         [System.Collections.Generic.List[string]]$DeletedNames
     )
+
+    if ($Branch -eq $DefaultBranch) {
+        Write-Warning "Remove-OrphanBranch: Refusing to delete default branch '$Branch'."
+        return
+    }
 
     $isMerged = Test-BranchMergedIntoDefault -BranchName $Branch -DefaultBranch $DefaultBranch
     if (-not $isMerged) {
@@ -271,6 +277,7 @@ if ($UntaggedTrackingFiles.Count -gt 0) {
     }
     if ($archivedUntaggedCount -gt 0) {
         Write-Output "Archived $archivedUntaggedCount untagged file(s) under $year/$month/unknown/"
+        Remove-EmptyDirectory -Root '.copilot-tracking'
     }
 }
 

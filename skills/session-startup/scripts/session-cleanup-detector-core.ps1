@@ -1156,8 +1156,10 @@ function Invoke-SessionCleanupDetector {
         }
         if ($compositeArgs.Count -gt 0) {
             $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' $($compositeArgs -join ' ')"
-        } elseif ($null -ne $staleBranch -and -not $staleBranch.IssueId) {
-            # No-issue-id stale branch with siblings/orphans: use git checkout fallback for stale branch
+        }
+        if ($null -ne $staleBranch -and -not $staleBranch.IssueId) {
+            # No-issue-id stale branch: use git checkout fallback for stale branch
+            # This fires in addition to (not instead of) the composite invocation above
             $lines += "git checkout '$escapedDefault' && git pull && git branch -d '$escaped'  # use -D to force if already confirmed merged"
         }
         $lines += '```'

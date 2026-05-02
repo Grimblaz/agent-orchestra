@@ -72,7 +72,7 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 7. After that first automatic startup check, the `session-startup` skill records `/memories/session/session-startup-check-complete.md` regardless of whether cleanup will later be accepted, declined, or skipped.
 8. The `session-startup` skill surfaces `additionalContext` describing what needs cleanup (branch signal leads when both fire).
 9. Agent asks user via `vscode/askQuestions`: context reflects which signal(s) fired and asks whether to run the fenced cleanup block.
-10. If confirmed → runs only the fenced commands. These may call `post-merge-cleanup.ps1` for current/tracking-file cleanup or direct `git worktree remove` / `git branch -D` commands for sibling and orphan cleanup.
+10. If confirmed → runs only the fenced commands. All cleanup — including current/tracking-file, sibling worktree, and orphan branch cleanup — goes through `post-merge-cleanup.ps1`, invoked as a composite `pwsh ... post-merge-cleanup.ps1 -SiblingWorktrees @(...) -OrphanBranches @(...)` call (composite invocation eliminates per-command permission prompts; see issue #500).
 11. Cleanup remains opt-in. Current-worktree inline commands are manual instructions that must be run from another checkout.
 12. Claude Code then runs Step 7b under the same startup run-once marker. Before reading cached marketplace state, it attempts `claude plugin marketplace update` for up to 5 seconds.
 13. Freshness failures emit `marketplace freshness check failed — using cached view` and continue from cache without retrying freshness. Local-path non-git and dirty/detached classifications use their existing remediation text instead of the generic freshness emit.

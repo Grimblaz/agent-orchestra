@@ -196,9 +196,10 @@ if ($a.Count -ge 1 -and $a[0] -eq 'fetch') {
     exit ([int]$exitVal)
 }
 
-# git cherry <defaultBranch> <branch>
+# git cherry <baseRef> <branch>
 # Empty stdout = merged; lines starting with - or + = unmerged commits present
 if ($a.Count -ge 3 -and $a[0] -eq 'cherry') {
+    $baseRef = $a[1]       # the base ref (should be origin/<defaultBranch>)
     $targetBranch = $a[2]  # the branch being checked
     $cherryKey = "cherry-$targetBranch"
     $cherryOutput = Get-ConfigValue $cherryKey
@@ -208,8 +209,14 @@ if ($a.Count -ge 3 -and $a[0] -eq 'cherry') {
     if ($null -ne $cherryOutput -and $cherryOutput -ne '') {
         Write-Output $cherryOutput
     }
-    # Log the call for assertion
-    "cherry-called`t$($a[1])`t$targetBranch" | Add-Content -Path $callLogPath -Encoding UTF8
+    # Log the call for assertion: includes baseRef so tests can verify origin/ prefix is used
+    "cherry-called`t$baseRef`t$targetBranch" | Add-Content -Path $callLogPath -Encoding UTF8
+    # Assert base ref uses origin/ prefix when config requires it
+    $requireOrgRef = Get-ConfigValue 'cherry-require-origin-prefix'
+    if ($null -ne $requireOrgRef -and [bool]$requireOrgRef -and -not $baseRef.StartsWith('origin/')) {
+        "cherry-base-ref-error`t$baseRef`t(expected origin/ prefix)" | Add-Content -Path $callLogPath -Encoding UTF8
+        exit 2
+    }
     exit ([int]$cherryExit)
 }
 
@@ -803,6 +810,37 @@ exit $LASTEXITCODE
             $deleteCalls = @($result.GitCalls | Where-Object { $_ -match "^branch-deleted\t.*$([regex]::Escape($branch))" })
             $deleteCalls.Count | Should -Be 0 -Because 'when gh is unavailable, branch must be treated as unmerged (safe default: do not delete)'
         }
+
+        It 'TC-Cherry-OrgRef: git cherry is called with origin/<defaultBranch> as the base ref (not bare <defaultBranch>)' {
+            # Regression test for M1: Test-BranchMergedIntoDefault must use origin/$DefaultBranch
+            # so it compares against the fetched remote tip, not a potentially stale local ref.
+            $workDir = Join-Path $TestDrive 'cherry-org-ref'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'pester-temp/issue-500-cherry-org-ref'
+
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD'     = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                   = 0
+                "cherry-$branch"               = ''   # empty = merged
+                'branch-d-exit'                = 0
+                'cherry-require-origin-prefix' = $true   # mock enforces origin/ prefix
+            } -ScriptParams @{
+                OrphanBranches = [string[]]@($branch)
+            }
+
+            $result.ExitCode | Should -Be 0 -Because 'script must succeed when git cherry is called with origin/<defaultBranch>'
+
+            # Verify the logged cherry-called line uses origin/main as the base ref
+            $cherryCalls = @($result.GitCalls | Where-Object { $_ -match "^cherry-called\t" })
+            $cherryCalls.Count | Should -BeGreaterThan 0 -Because 'git cherry must have been called'
+            $baseRefCall = $cherryCalls | Where-Object { $_ -match "^cherry-called\torigin/" } | Select-Object -First 1
+            $baseRefCall | Should -Not -BeNullOrEmpty -Because "git cherry base ref must use origin/ prefix (M1 fix: compare against fetched remote tip, not stale local ref)"
+
+            # Also confirm no error log entries (which the mock writes when origin/ prefix is missing)
+            $errorCalls = @($result.GitCalls | Where-Object { $_ -match 'cherry-base-ref-error' })
+            $errorCalls.Count | Should -Be 0 -Because 'mock must not have detected a missing origin/ prefix'
+        }
     }
 
     # =========================================================================
@@ -846,6 +884,72 @@ title: "Issue 42 back-compat test"
             $result.Output | Should -Match 'Archived 1 file' -Because 'back-compat: tracking file must be archived'
             $result.Output | Should -Match ([regex]::Escape($featureBranch)) -Because 'back-compat: feature branch must be mentioned in output'
             $result.Output | Should -Match 'Cleanup complete' -Because 'back-compat: completion message must appear'
+        }
+    }
+
+    # =========================================================================
+    # Combined-categories integration test (M7)
+    # Verifies that -OrphanBranches, -SiblingWorktrees, AND -UntaggedTrackingFiles
+    # all work correctly in a single invocation. M2 showed combined-category paths
+    # need explicit coverage.
+    # =========================================================================
+    Describe 'TC-Combined-1: combined OrphanBranches + SiblingWorktrees + UntaggedTrackingFiles in one invocation' {
+
+        BeforeAll {
+            $script:CombinedWorkDir = Join-Path $TestDrive 'combined-categories'
+            $script:CombinedSiblingDir = Join-Path $TestDrive 'combined-sibling'
+            New-Item -ItemType Directory -Path $script:CombinedWorkDir, $script:CombinedSiblingDir -Force | Out-Null
+
+            # Create untagged tracking file in the work dir
+            $trackingDir = Join-Path $script:CombinedWorkDir '.copilot-tracking\misc'
+            New-Item -ItemType Directory -Path $trackingDir -Force | Out-Null
+            $script:CombinedTrackingFile = Join-Path $trackingDir 'combined-untagged.md'
+            Set-Content -Path $script:CombinedTrackingFile -Value '# No issue_id frontmatter' -Encoding UTF8
+        }
+
+        It 'TC-Combined-1: all three categories succeed; orphan deleted, sibling removed, untagged archived; exit 0' {
+            $orphanBranch = 'pester-temp/issue-500-combined-orphan'
+            $siblingBranch = 'pester-temp/issue-500-combined-sibling-branch'
+            $siblingFwdPath = $script:CombinedSiblingDir -replace '\\', '/'
+            $relTrackingPath = '.copilot-tracking\misc\combined-untagged.md'
+
+            $result = & $script:InvokeScript -WorkDir $script:CombinedWorkDir -GitConfig @{
+                'symbolic-ref-origin-HEAD'         = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                        = 0
+                "cherry-$orphanBranch"              = ''   # merged
+                "cherry-$siblingBranch"             = ''   # merged
+                'branch-d-exit'                     = 0
+                'worktree-remove-exit'              = 0
+                'path-configs'                      = @{
+                    $siblingFwdPath = @{ 'branch--show-current' = $siblingBranch }
+                }
+            } -ScriptParams @{
+                OrphanBranches        = [string[]]@($orphanBranch)
+                SiblingWorktrees      = [string[]]@($siblingFwdPath)
+                UntaggedTrackingFiles = [string[]]@($relTrackingPath)
+            }
+
+            # Exit code must be 0
+            $result.ExitCode | Should -Be 0 -Because 'combined invocation must succeed'
+
+            # Orphan branch deleted
+            $result.Output | Should -Match 'Deleted 1 orphan branch' -Because 'orphan branch summary line must appear'
+
+            # Sibling worktree removed
+            $result.Output | Should -Match 'Deleted 1 sibling worktree' -Because 'sibling worktree summary line must appear'
+            $worktreeRemovals = @($result.GitCalls | Where-Object { $_ -match 'worktree-removed' })
+            $worktreeRemovals.Count | Should -BeGreaterThan 0 -Because 'git worktree remove must have been called'
+
+            # Untagged tracking file archived
+            $result.Output | Should -Match 'Archived 1 untagged file' -Because 'untagged archival summary line must appear'
+            $archiveRoot = Join-Path $script:CombinedWorkDir '.copilot-tracking-archive'
+            $archivedFiles = @(Get-ChildItem -Path $archiveRoot -Recurse -File -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match 'combined-untagged' })
+            $archivedFiles.Count | Should -BeGreaterThan 0 -Because 'untagged tracking file must be archived to disk'
+
+            # Original file must no longer exist at its source location
+            Test-Path $script:CombinedTrackingFile | Should -Be $false -Because 'archived file must be moved out of .copilot-tracking/'
         }
     }
 }

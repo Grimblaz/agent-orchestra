@@ -92,12 +92,20 @@ The detector returns one of two JSON shapes.
 
 The `additionalContext` field is a Markdown-formatted description of what was found plus the command block to clean it up.
 
+**Multi-category example** (when sibling worktrees or orphan branches are also found, the cleanup command uses the composite form):
+
+```
+pwsh '/path/to/agent-orchestra/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber 42 -FeatureBranch 'feature/issue-42-my-feature' -SiblingWorktrees @('/path/to/worktree') -OrphanBranches @('claude/old-feature')
+```
+
+When writing a `.claude/settings.json` allowlist entry, match against `Bash(pwsh*post-merge-cleanup.ps1*)` — this covers both the single-issue form and the composite form with `-SiblingWorktrees` and `-OrphanBranches` arguments.
+
 Detector findings are reported in this order when present:
 
 - **Current branch**: flags the current branch when its upstream was merged/deleted, and flags a current `claude/*` no-upstream branch only when it is reachable from the resolved remote default branch. Current-worktree cleanup commands are narrative inline text only and must be run from another checkout.
 - **Tracking files**: flags issue-scoped `.copilot-tracking/` files whose remote `feature/issue-*` branch is gone; persistent calibration data remains excluded.
-- **Sibling worktrees**: flags sibling worktrees on merged `claude/*` no-upstream branches or upstream-deleted `feature/issue-*` branches. Their `git worktree remove` and `git branch -D` commands appear inside the fenced PowerShell block.
-- **Orphan branches**: flags unattached merged `claude/*` no-upstream branches and unattached upstream-deleted `feature/issue-*` branches. Their `git branch -D` commands appear inside the fenced PowerShell block.
+- **Sibling worktrees**: flags sibling worktrees on merged `claude/*` no-upstream branches or upstream-deleted `feature/issue-*` branches. Their cleanup is rolled into the single composite `pwsh ... post-merge-cleanup.ps1 -SiblingWorktrees @(...) -OrphanBranches @(...)` invocation appearing inside the fenced PowerShell block — not as individual `git` commands.
+- **Orphan branches**: flags unattached merged `claude/*` no-upstream branches and unattached upstream-deleted `feature/issue-*` branches. Their cleanup is rolled into the single composite `pwsh ... post-merge-cleanup.ps1 -SiblingWorktrees @(...) -OrphanBranches @(...)` invocation appearing inside the fenced PowerShell block — not as individual `git` commands. Orphan branches with unmerged commits are reported as `Skipped — unmerged commits — review before deleting` and re-evaluated on the next session startup; they are never auto-deleted.
 - **Fail-open behavior**: fetch, worktree-list, for-each-ref, per-candidate merge-base, and ref-lookup failures suppress only the unverifiable candidate and do not fail the startup session.
 - **Opt-in cleanup**: the detector only reports findings. Nothing is removed unless the user confirms, and explicit manual detector runs remain available after the automatic guard fires.
 
