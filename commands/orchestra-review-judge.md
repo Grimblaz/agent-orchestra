@@ -27,7 +27,7 @@ If the ingested ledgers make tree-grounded claims and you want the judge prompt 
 
 1. Use the `Agent` tool with `subagent_type: code-review-response`.
 2. Pass the prosecution ledger and defense report together in one prompt.
-3. Return the Markdown score summary, the `<!-- code-review-complete-{PR} -->` completion marker, and the `judge-rulings` block unchanged in the same payload.
+3. Return the Markdown score summary and the `judge-rulings` block unchanged in the same payload.
 
 **Body-load failure policy**:
 

@@ -54,7 +54,7 @@ Handshake disposition by command:
 | `/orchestra:review-defend` | Required |
 | `/orchestra:review-judge` | Optional |
 
-The judge result is designed for same-comment persistence: the completion marker `<!-- code-review-complete-{PR} -->` and the `<!-- judge-rulings ... -->` YAML block travel together in one PR comment so Copilot and Claude Code can consume the same durable artifact.
+The judge result is designed for same-comment persistence: the Markdown score summary and the `<!-- judge-rulings ... -->` YAML block travel together in one PR comment so Copilot and Claude Code can consume the same durable artifact. The `<!-- review-judge-produced-{PR} -->` sentinel is written as a separate PR comment before the judge-rulings comment. The legacy `<!-- code-review-complete-{PR} -->` marker was retired in issue #441 Step 11; Code-Conductor reads `credits[]` from the PR-body pipeline-metrics block instead.
 
 ## Cross-tool handoffs
 

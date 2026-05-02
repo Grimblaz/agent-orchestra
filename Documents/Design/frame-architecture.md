@@ -302,7 +302,7 @@ The all-in-adapters shape would put every adapter, including single work adapter
 
 The audit revealed that the **`<!-- pipeline-metrics ... -->` YAML block already embedded in every recent PR body IS the de facto credit ledger.** It is in production at `metrics_version: 2`, written by Code-Conductor on PR creation, and machine-parseable today. The frame ledger is `metrics_version: 3` — a backwards-compatible extension that adds port-level structure on top of the existing finding-level fields.
 
-The previously documented marker `<!-- code-review-complete-{PR} -->` is design-on-paper — it does **not** appear on real PRs. Do not anchor enforcement on it. Anchor on the pipeline-metrics block in the PR body.
+The previously documented marker `<!-- code-review-complete-{PR} -->` was design-on-paper — it did **not** appear on real PRs. It is officially retired as of issue #441 Step 11. Enforcement anchors on `credits[]` in the pipeline-metrics block in the PR body.
 
 Per-agent issue markers (`<!-- experience-owner-complete-{ID} -->`, `<!-- design-phase-complete-{ID} -->`, `<!-- plan-issue-{ID} -->`) **do** appear reliably on linked issues and remain valuable as **evidence pointers** referenced by credit entries. They are not replaced.
 
@@ -583,7 +583,7 @@ Active aggregation issues: #441 covers sub-A rows 5, 6, and 10; #442 covers sub-
 
 ## Open Questions Still Live (Resolve During Sub-Issue Work)
 
-- The `<!-- code-review-complete-{PR} -->` marker is documented but absent from real PRs. Should we (a) retire the marker from documentation, (b) backfill it via a hook on PR creation, or (c) leave it as an alias for the v3 review credit? Decide in sub-issue #5.
+- ~~The `<!-- code-review-complete-{PR} -->` marker is documented but absent from real PRs. Should we (a) retire the marker from documentation, (b) backfill it via a hook on PR creation, or (c) leave it as an alias for the v3 review credit?~~ **Resolved in issue #441 Step 11**: chose option (a) — marker retired from documentation and emission. Code-Conductor reads `credits[]` from the `<!-- pipeline-metrics -->` block directly; legacy fallback preserved for pre-Step-11 PRs.
 - `process-retrospective` was visible in only 1 of 4 audited PRs. Decide in sub-issue #11 whether to formalize as a port, fold into `post-pr`, or retire the practice.
 - CE Gate surface tagging is currently single-credit (one `ce-gate` block per PR, not per surface). Decide in sub-issue #7 whether to require surface-tagged credits or accept the single-credit shape with a `surfaces: [cli, browser]` field.
 - For PRs that ran `review` in *both* main and proxy-GitHub modes (PR #415), do we emit one `review` credit or two? Decide in sub-issue #5 — probably one credit with a `mode: main+proxy` field, evidence linking both.
@@ -595,7 +595,7 @@ Active aggregation issues: #441 covers sub-A rows 5, 6, and 10; #442 covers sub-
 | # | Decision | Choice | Rationale | Status |
 |---|---|---|---|---|
 | F1 | Enforcement gate location | Pre-PR hook only | Strongest rails; agent prose stops being load-bearing for completion checks. | V1 |
-| F2 | Credit shape | **Evolve existing pipeline-metrics block to v3** (extend, don't replace) | Audit confirmed pipeline-metrics block already exists and is in production at v2. The `<!-- code-review-complete-{PR} -->` marker is design-on-paper and absent from real PRs. Anchor on what exists. | V1 → **V2 revised** |
+| F2 | Credit shape | **Evolve existing pipeline-metrics block to v3** (extend, don't replace) | Audit confirmed pipeline-metrics block already exists and is in production at v2. The `<!-- code-review-complete-{PR} -->` marker was design-on-paper and absent from real PRs — officially retired in issue #441 Step 11. Anchor on what exists. | V1 → **V2 revised** → **V3 marker retired** |
 | F3 | First cut scope | Audit-only across all ports as sub-issue #1 | Cheapest path to evidence; surfaces real gap rate before building enforcement. | V1 |
 | F4 | Adapter declaration | Skill/agent frontmatter declares `provides`, central manifest is truth | Robustness + low ceremony; validator catches drift. | V1 |
 | F5 | Port shape | Flat ports, no sub-ports | Sub-port grouping added bookkeeping without structural meaning. Display can prefix-cluster. Confirmed by audit — no decomposition pressure emerged across 4 PRs. | V1 |

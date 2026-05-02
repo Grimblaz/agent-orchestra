@@ -222,10 +222,10 @@ Describe 'Sentinel ordering and idempotency contract (Step 6 — SMC-16)' {
         $sentinelBody | Should -Match '<!-- review-judge-produced-99 -->'
     }
 
-    It 'judge-rulings comment contains code-review-complete marker but NOT the sentinel (ordering enforced)' {
-        # After sentinel, the judge-rulings comment carries the completion marker + YAML block — not the sentinel again.
+    It 'judge-rulings comment contains judge-rulings block but NOT the sentinel or retired completion marker (ordering enforced, issue #441 Step 11)' {
+        # After the sentinel (a separate PR comment), the judge-rulings comment carries the YAML block only —
+        # not the sentinel again, and not the retired <!-- code-review-complete-{PR} --> marker.
         $judgeRulingsBody = @"
-<!-- code-review-complete-99 -->
 <!-- judge-rulings
 - id: F1
   judge_ruling: sustained
@@ -234,10 +234,11 @@ Describe 'Sentinel ordering and idempotency contract (Step 6 — SMC-16)' {
 -->
 "@
 
-        $judgeRulingsBody | Should -Match 'code-review-complete-99'
         $judgeRulingsBody | Should -Match 'judge-rulings'
         # The sentinel should NOT be duplicated inside the judge-rulings comment.
         $judgeRulingsBody | Should -Not -Match 'review-judge-produced'
+        # The retired completion marker must not appear in the judge-rulings comment (issue #441 Step 11).
+        $judgeRulingsBody | Should -Not -Match 'code-review-complete'
     }
 
     It 'Test-ReviewSentinelPresent is idempotent — returns true when sentinel appears in multiple comments' {

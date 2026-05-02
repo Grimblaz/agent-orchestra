@@ -112,10 +112,9 @@ This sentinel is separate from the judge-rulings comment. On GitHub, post it via
 
 ### Judge-rulings comment
 
-After the sentinel, emit the completion marker and `judge-rulings` block in the same PR comment:
+After the sentinel, emit the `judge-rulings` block in the same PR comment as the Markdown score summary:
 
 ```yaml
-<!-- code-review-complete-{PR} -->
 <!-- judge-rulings
 - id: F1
   judge_ruling: sustained
@@ -128,7 +127,7 @@ After the sentinel, emit the completion marker and `judge-rulings` block in the 
 -->
 ```
 
-Keep the Markdown score summary, the `<!-- code-review-complete-{PR} -->` marker, and the `judge-rulings` block together in the same response payload. On GitHub, keep them in the same PR comment rather than splitting them across separate comments. **This comment does not include pipeline-metrics body emission** — that is owned by Code-Conductor's `## Pipeline Metrics` emitter at PR creation time (per `agents/Code-Conductor.agent.md:412`).
+Keep the Markdown score summary and the `judge-rulings` block together in the same response payload. On GitHub, keep them in the same PR comment rather than splitting them across separate comments. **This comment does not include `<!-- code-review-complete-{PR} -->`** — that marker is retired as of issue #441 Step 11; Code-Conductor reads `credits[]` from the `<!-- pipeline-metrics -->` PR body block directly. **This comment does not include pipeline-metrics body emission** — that is owned by Code-Conductor's `## Pipeline Metrics` emitter at PR creation time.
 
 Field values:
 
@@ -171,4 +170,4 @@ Judgment does not implement fixes. It produces the ruling and the evidence packa
 
 | Trigger                             | Gotcha                                                         | Fix                                                                |
 | ----------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
-| A ruling omits the completion marker or structured block | Downstream consumers can miss completion or fail to route cleanly | Emit `<!-- code-review-complete-{PR} -->` and the `judge-rulings` block immediately after the score summary in the same payload |
+| A ruling omits the `judge-rulings` block | Downstream consumers can miss completion or fail to route cleanly | Emit the `judge-rulings` block immediately after the score summary in the same payload; ensure the `<!-- review-judge-produced-{PR} -->` sentinel was written as a separate PR comment before |

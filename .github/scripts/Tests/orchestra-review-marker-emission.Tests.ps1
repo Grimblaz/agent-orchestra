@@ -6,8 +6,12 @@
     Contract tests for same-comment review completion emission.
 
 .DESCRIPTION
-    Locks issue #379 Step 7 / D3: the review completion marker and the
-    judge-rulings block must travel in the same PR comment payload.
+    Locks issue #379 Step 7 / D3 (updated by issue #441 Step 11):
+    the judge-rulings block must travel in the same PR comment payload
+    as the Markdown score summary. The `<!-- code-review-complete-{PR} -->`
+    marker is retired as of issue #441 Step 11; the sentinel
+    `<!-- review-judge-produced-{PR} -->` precedes the judge-rulings comment
+    as a separate PR comment.
     The fixtures are deterministic and repo-local.
 #>
 
@@ -18,17 +22,17 @@ Describe 'orchestra-review marker emission contract' {
         $script:CodeReviewResponseShellPath = Join-Path $script:RepoRoot 'agents\code-review-response.md'
         $script:CodeReviewResponseBodyPath = Join-Path $script:RepoRoot 'agents\Code-Review-Response.agent.md'
         $script:ReviewJudgmentSkillPath = Join-Path $script:RepoRoot 'skills\review-judgment\SKILL.md'
-        $script:CompletionMarkerPattern = '<!--\s*code-review-complete-\d+\s*-->'
         $script:JudgeRulingsPattern = '(?s)<!--\s*judge-rulings\s*\r?\n.*?\r?\n-->'
-        $script:SamePayloadPattern = '(?s)<!--\s*code-review-complete-\d+\s*-->.*<!--\s*judge-rulings\s*\r?\n.*?\r?\n-->'
+        $script:ScoreSummaryPattern = '###\s+Adversarial Review Score Summary'
+        $script:SamePayloadPattern = '(?s)###\s+Adversarial Review Score Summary.*<!--\s*judge-rulings\s*\r?\n.*?\r?\n-->'
         $script:CodeReviewResponseShell = Get-Content -Path $script:CodeReviewResponseShellPath -Raw
         $script:CodeReviewResponseBody = Get-Content -Path $script:CodeReviewResponseBodyPath -Raw
         $script:ReviewJudgmentSkill = Get-Content -Path $script:ReviewJudgmentSkillPath -Raw
 
-        $script:ContainsMarkerAndRulings = {
+        $script:ContainsRulingsAndSummary = {
             param([string]$Payload)
 
-            return ($Payload -match $script:CompletionMarkerPattern) -and ($Payload -match $script:JudgeRulingsPattern)
+            return ($Payload -match $script:JudgeRulingsPattern) -and ($Payload -match $script:ScoreSummaryPattern)
         }
 
         $script:ValidSingleCommentPayload = @'
@@ -38,7 +42,6 @@ Describe 'orchestra-review marker emission contract' {
 | ------- | ---- | --------------------------- | --------------- | ------ | ---------- | ------ |
 | F1: Missing handshake guard | 1 | high (10 pts) | conceded | ✅ Sustained | high | P+10 |
 
-<!-- code-review-complete-379 -->
 <!-- judge-rulings
 - id: F1
   judge_ruling: sustained
@@ -51,7 +54,8 @@ Describe 'orchestra-review marker emission contract' {
             @'
 ### Adversarial Review Score Summary
 
-<!-- code-review-complete-379 -->
+| Finding | Pass | Prosecution (severity, pts) | Defense verdict | Ruling | Confidence | Points |
+| ------- | ---- | --------------------------- | --------------- | ------ | ---------- | ------ |
 '@,
             @'
 <!-- judge-rulings
@@ -62,46 +66,35 @@ Describe 'orchestra-review marker emission contract' {
 -->
 '@
         )
-
-        $script:InvalidMarkerPayload = @'
-### Adversarial Review Score Summary
-
-<!-- code-review-complete-pr-379 -->
-<!-- judge-rulings
-- id: F1
-  judge_ruling: sustained
-  judge_confidence: high
-  points_awarded: P+10
--->
-'@
     }
 
-    It 'accepts a single comment payload only when the completion marker and judge-rulings block coexist' {
-        (& $script:ContainsMarkerAndRulings -Payload $script:ValidSingleCommentPayload) | Should -BeTrue
-        $script:ValidSingleCommentPayload | Should -Match $script:SamePayloadPattern -Because 'the review completion marker and judge-rulings block must travel in the same comment payload'
+    It 'accepts a single comment payload only when the score summary and judge-rulings block coexist' {
+        (& $script:ContainsRulingsAndSummary -Payload $script:ValidSingleCommentPayload) | Should -BeTrue
+        $script:ValidSingleCommentPayload | Should -Match $script:SamePayloadPattern -Because 'the score summary and judge-rulings block must travel in the same comment payload'
     }
 
-    It 'rejects split comment fixtures where the marker and judge-rulings block are separated' {
+    It 'rejects split comment fixtures where the score summary and judge-rulings block are separated' {
         foreach ($payload in $script:SplitCommentPayloads) {
-            (& $script:ContainsMarkerAndRulings -Payload $payload) | Should -BeFalse
+            (& $script:ContainsRulingsAndSummary -Payload $payload) | Should -BeFalse
         }
     }
 
-    It 'requires the exact code-review-complete-{PR} marker shape' {
-        $script:ValidSingleCommentPayload | Should -Match $script:CompletionMarkerPattern
-        (& $script:ContainsMarkerAndRulings -Payload $script:InvalidMarkerPayload) | Should -BeFalse -Because 'the PR marker must be numeric and must not add extra marker text'
+    It 'valid payload must not contain the retired code-review-complete marker (issue #441 Step 11)' {
+        $script:ValidSingleCommentPayload | Should -Not -Match 'code-review-complete' -Because 'the code-review-complete-{PR} marker is retired as of issue #441 Step 11 and must not appear in judge output'
     }
 
-    It 'requires the Claude judge shell to document the same-payload marker contract' {
-        $script:CodeReviewResponseShell | Should -Match 'code-review-complete-\{PR\}' -Because 'the Claude judge shell must name the completion marker explicitly'
-        $script:CodeReviewResponseShell | Should -Match 'Return the Markdown score summary, `<!-- code-review-complete-\{PR\} -->` completion marker, and the `judge-rulings` block together in the same response payload\.' -Because 'the Claude judge shell must keep the marker and rulings in one response payload'
-        $script:CodeReviewResponseShell | Should -Match 'keep the score summary, `<!-- code-review-complete-\{PR\} -->`, and `judge-rulings` block in the same PR comment payload rather than splitting them across separate comments\.' -Because 'GitHub-backed judge output must keep the marker and rulings together in one comment'
+    It 'requires the Claude judge shell to document the sentinel-then-rulings emission contract (issue #441 Step 11)' {
+        $script:CodeReviewResponseShell | Should -Match 'review-judge-produced-\{PR\}' -Because 'the Claude judge shell must document the sentinel emission before the judge-rulings comment'
+        $script:CodeReviewResponseShell | Should -Match '`judge-rulings`' -Because 'the Claude judge shell must name the judge-rulings block explicitly'
+        $script:CodeReviewResponseShell | Should -Match 'same.*payload|payload.*same' -Because 'the Claude judge shell must keep the score summary and judge-rulings block in one response payload'
+        $script:CodeReviewResponseShell | Should -Not -Match 'Return the Markdown score summary, `<!-- code-review-complete-\{PR\} -->`' -Because 'the Claude judge shell must not document the retired completion marker emission'
     }
 
-    It 'requires the shared judge contract to keep completion and rulings in the same payload' {
-        $script:ReviewJudgmentSkill | Should -Match 'code-review-complete-\{PR\}' -Because 'the shared review-judgment skill must name the completion marker explicitly'
-        $script:ReviewJudgmentSkill | Should -Match 'Keep the Markdown score summary, the `<!-- code-review-complete-\{PR\} -->` marker, and the `judge-rulings` block together in the same response payload\.' -Because 'the shared skill must require the same-payload artifact contract'
+    It 'requires the shared judge contract to keep score summary and rulings in the same payload (issue #441 Step 11)' {
+        $script:ReviewJudgmentSkill | Should -Match 'judge-rulings' -Because 'the shared review-judgment skill must name the judge-rulings block explicitly'
+        $script:ReviewJudgmentSkill | Should -Match 'Keep the Markdown score summary and the `judge-rulings` block together in the same response payload\.' -Because 'the shared skill must require the same-payload artifact contract'
         $script:ReviewJudgmentSkill | Should -Match 'keep them in the same PR comment rather than splitting them across separate comments\.' -Because 'the shared skill must carry the same-comment GitHub persistence contract'
+        $script:ReviewJudgmentSkill | Should -Not -Match 'Keep the Markdown score summary, the `<!-- code-review-complete-\{PR\} -->` marker' -Because 'the shared skill must not document the retired completion marker as part of the same-payload contract'
         $script:CodeReviewResponseBody | Should -Match 'Load `skills/review-judgment/SKILL.md`.*`judge-rulings` output block' -Because 'the shared judge body must continue delegating output-shape ownership to the shared skill'
     }
 }
