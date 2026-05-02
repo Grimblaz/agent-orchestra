@@ -40,7 +40,6 @@ Describe 'session-memory contract structural surface' {
             [pscustomobject]@{ Id = 'SMC-01'; Label = 'single-issue plan cache'; Pending384 = $true; FollowUp379 = $true },
             [pscustomobject]@{ Id = 'SMC-02'; Label = 'bundled plan cache'; Pending384 = $true; FollowUp379 = $true },
             [pscustomobject]@{ Id = 'SMC-03'; Label = 'design cache'; Pending384 = $true; FollowUp379 = $false },
-            [pscustomobject]@{ Id = 'SMC-04'; Label = 'first-contact-assessed marker'; Pending384 = $false; FollowUp379 = $false },
             [pscustomobject]@{ Id = 'SMC-05'; Label = 'pre-PR review-state'; Pending384 = $false; FollowUp379 = $true },
             [pscustomobject]@{ Id = 'SMC-06'; Label = 'post-PR review-state resume'; Pending384 = $false; FollowUp379 = $false },
             [pscustomobject]@{ Id = 'SMC-07'; Label = 'run-once startup-check marker'; Pending384 = $false; FollowUp379 = $true },
@@ -99,9 +98,6 @@ Describe 'session-memory contract structural surface' {
         }
 
         $script:StateOwningSurfaces = @(
-            [pscustomobject]@{ Path = 'skills\provenance-gate\SKILL.md'; Rows = @('SMC-04') },
-            [pscustomobject]@{ Path = 'skills\provenance-gate\platforms\copilot.md'; Rows = @('SMC-04') },
-            [pscustomobject]@{ Path = 'skills\provenance-gate\platforms\claude.md'; Rows = @('SMC-04') },
             [pscustomobject]@{ Path = 'skills\session-startup\SKILL.md'; Rows = @('SMC-07') },
             [pscustomobject]@{ Path = 'skills\plugin-release-hygiene\SKILL.md'; Rows = @('SMC-12') },
             [pscustomobject]@{ Path = 'skills\plugin-release-hygiene\platforms\copilot.md'; Rows = @('SMC-12') },
@@ -122,10 +118,9 @@ Describe 'session-memory contract structural surface' {
             [pscustomobject]@{ Path = 'agents\Code-Conductor.agent.md'; Rows = @('SMC-01', 'SMC-02', 'SMC-03', 'SMC-08') }
         )
 
-        # Issue #498 DRY pass: commands/experience.md, commands/design.md, commands/plan.md, and
-        # commands/polish.md no longer reproduce pre-flight prose (SMC-04, SMC-07 citations were in
-        # the duplicated provenance-gate and session-startup sections). Those SMC rows now live only
-        # in their owning skills. The Rows arrays below reflect the post-DRY citation state.
+        # Issue #498 DRY pass and the provenance-gate retirement removed pre-flight prose from
+        # commands/{experience,design,plan,orchestrate,polish}.md and the SMC-04 row entirely.
+        # The Rows arrays below reflect the post-retirement citation state.
         $script:CommandAndShellSurfaces = @(
             [pscustomobject]@{ Path = 'commands\experience.md'; Rows = @() },
             [pscustomobject]@{ Path = 'commands\design.md'; Rows = @() },
@@ -139,7 +134,7 @@ Describe 'session-memory contract structural surface' {
             [pscustomobject]@{ Path = 'agents\doc-keeper.md'; Rows = @('SMC-01', 'SMC-03') },
             [pscustomobject]@{ Path = 'agents\process-review.md'; Rows = @('SMC-01', 'SMC-03', 'SMC-09') },
             [pscustomobject]@{ Path = 'agents\issue-planner.md'; Rows = @('SMC-01', 'SMC-03') },
-            [pscustomobject]@{ Path = 'agents\experience-owner.md'; Rows = @('SMC-04', 'SMC-08') },
+            [pscustomobject]@{ Path = 'agents\experience-owner.md'; Rows = @('SMC-08') },
             [pscustomobject]@{ Path = 'agents\research-agent.md'; Rows = @('SMC-13') },
             [pscustomobject]@{ Path = 'agents\specification.md'; Rows = @('SMC-13') }
         )
@@ -205,14 +200,6 @@ Describe 'session-memory contract structural surface' {
 
         $segment | Should -Match '`within-conversation`' -Because 'pre-PR review-state is stored under /memories/session and survives only with the active session memory surface'
         $segment | Should -Not -Match '`within-worktree`' -Because 'the SMC-05 storage path is not a worktree-backed .copilot-tracking artifact'
-    }
-
-    It 'documents SMC-04 as a durable GitHub parser anchor with an honest Claude inline fallback gap' {
-        $segment = & $script:GetContractRowSegment -RowId 'SMC-04'
-
-        $segment | Should -Match '(?is)GitHub marker.{0,120}durable parser anchor|durable parser anchor.{0,120}GitHub marker' -Because 'SMC-04 must preserve the GitHub issue-comment marker as the durable parser anchor'
-        $segment | Should -Match '(?is)local fallback.{0,160}(surface-bound|within-conversation:\{surface\}|write/read `/memories/session`|recovery input)' -Because 'SMC-04 must keep the local payload as bounded recovery input rather than a durable skip marker'
-        $segment | Should -Match '(?is)inline/no-write Claude.{0,160}cannot persist.{0,80}recover|Claude.{0,160}cannot persist.{0,80}recover|cannot persist.{0,80}recover.{0,160}Claude' -Because 'SMC-04 must be honest that inline/no-write Claude cannot persist or recover the local fallback payload'
     }
 
     It 'marks bounded worktree and hook state as partial cross-tool fungibility' {

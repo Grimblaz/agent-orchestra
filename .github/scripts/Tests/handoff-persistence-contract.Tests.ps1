@@ -73,12 +73,6 @@ Describe 'execution handoff persistence contract' {
         $script:LatestCommentWinsPattern = '(?is)(if multiple matching comments exist, use the most recently posted one|latest matching comment)'
         $script:D9SuppressionRequiresTierDurabilityPattern = '(?is)Smart resume found ALL prior-session artifacts required by the current pipeline tier.{0,400}abbreviated pipeline:.*plan-issue-\{ID\}.*required durable handoff artifact.{0,400}full pipeline:.*experience-owner-complete-\{ID\}.*design-phase-complete-\{ID\}.*plan-issue-\{ID\}.*design-issue-\{ID\}.*durable handoff comments.{0,300}D9 suppression requires those prior-session durable handoff artifacts when the selected tier needs them, not just phase markers'
         $script:BundleD9SuppressionPattern = '(?is)For multi-issue bundles, ALL required prior-session markers and durable handoff comments for ALL bundled issues \(not just the primary issue\) must already exist before D9 may be suppressed'
-        $script:ProvenanceGateMarkerPattern = '(?i)first-contact-assessed-\{ID\}'
-        $script:ProvenanceGateStage1Pattern = '(?is)(stage 1|self-classification).{0,220}I wrote this / I''m fully briefed.{0,180}I''m picking this up cold.{0,180}Stop — needs rework first'
-        $script:ProvenanceGateStage2Pattern = '(?is)(stage 2|cold-only|cold path).{0,240}Assessment looks right — proceed.{0,180}Proceed but carry concerns forward.{0,180}Needs rework — stop here'
-        $script:ProvenanceGateNoMarkerOnStopPattern = '(?is)(Stop — needs rework first|Needs rework — stop here).{0,220}(do not post|without posting|no marker).{0,160}first-contact-assessed'
-        $script:ProvenanceGateDecorativeMarkerPattern = '(?is)(second line|second-line).{0,200}(human-readable|decorative)'
-        $script:ProvenanceGateOfflineSyncPattern = '(?is)(offline|MCP tools are unavailable|API call fails).{0,220}(local payload|fallback payload|session memory payload).{0,280}(next online invocation|next online run|cross-session).{0,220}(sync|reconstruct|rebuild).{0,180}(GitHub marker|first-contact-assessed)'
         $script:AssertSharedDocContract = {
             param(
                 [string]$Content,
@@ -165,12 +159,12 @@ Describe 'execution handoff persistence contract' {
         $codeConductor | Should -Match $script:LatestCommentWinsPattern -Because 'the lookup contract must keep latest-comment-wins semantics'
     }
 
-    It 'requires the four pipeline-entry agents to reference the provenance-gate skill from their Process section' {
-        # The detailed provenance gate protocol (stage labels, marker recording, offline fallback)
-        # lives in skills/provenance-gate/SKILL.md (issue #481 delegation model). Agent bodies
-        # are required to reference the skill from their Process section; the full protocol checks
-        # are enforced at the skill level in the companion test below.
-        $script:PipelineEntryAgents.Count | Should -Be 4 -Because 'the provenance trigger contract is owned by exactly the four pipeline-entry agents'
+    It 'requires the four pipeline-entry agents to reference the upstream-onboarding skill from their Process section' {
+        # The provenance-gate retirement collapsed the gate's stage-label protocol into
+        # the upstream-onboarding skill. Agent bodies must reference upstream-onboarding
+        # from their Process section as the single opening protocol for issue-referencing
+        # invocations.
+        $script:PipelineEntryAgents.Count | Should -Be 4 -Because 'the upstream-onboarding trigger contract is owned by exactly the four pipeline-entry agents'
 
         foreach ($agent in $script:PipelineEntryAgents) {
             $content = & $script:ReadContent -Path $agent.Path
@@ -180,24 +174,8 @@ Describe 'execution handoff persistence contract' {
 
             $processSection = $processSectionMatch.Groups['body'].Value
 
-            $processSection | Should -Match ([regex]::Escape('When this user-invocable agent receives a request referencing an existing GitHub issue, load the `provenance-gate` skill and follow its protocol.')) -Because "$($agent.Name) must reference the provenance-gate skill from its Process section"
+            $processSection | Should -Match ([regex]::Escape('When this user-invocable agent receives a request referencing an existing GitHub issue, load `skills/upstream-onboarding/SKILL.md` and follow its protocol.')) -Because "$($agent.Name) must reference the upstream-onboarding skill from its Process section"
+            $processSection | Should -Not -Match 'provenance-gate' -Because "$($agent.Name) must not reference the retired provenance-gate skill"
         }
-    }
-
-    It 'requires provenance-gate skill file to exist and contain the full gate protocol' {
-        $skillPath = Join-Path $PSScriptRoot '../../../skills/provenance-gate/SKILL.md'
-
-        Test-Path $skillPath | Should -BeTrue -Because 'provenance-gate/SKILL.md must exist as the full assessment protocol'
-        $skillContent = Get-Content -Path $skillPath -Raw
-        $skillContent | Should -Not -BeNullOrEmpty -Because 'provenance-gate/SKILL.md must have content'
-        $skillContent | Should -Match $script:ProvenanceGateMarkerPattern -Because 'provenance-gate/SKILL.md must reference the first-contact-assessed marker'
-        $skillContent | Should -Match $script:ProvenanceGateStage1Pattern -Because 'provenance-gate/SKILL.md must describe the stage-1 self-classification options'
-        $skillContent | Should -Match $script:ProvenanceGateStage2Pattern -Because 'provenance-gate/SKILL.md must describe the cold-only stage-2 outcomes'
-        $skillContent | Should -Match $script:ProvenanceGateNoMarkerOnStopPattern -Because 'provenance-gate/SKILL.md must keep both stop paths marker-free'
-        $skillContent | Should -Match $script:ProvenanceGateDecorativeMarkerPattern -Because 'provenance-gate/SKILL.md must document that the second line is decorative/human-readable'
-        $skillContent | Should -Match '(?i)HTML token.{0,80}(only skip-check anchor|only parser anchor|only anchor)' -Because 'provenance-gate/SKILL.md must enforce that the HTML token is the only skip-check/parser anchor'
-        $skillContent | Should -Match '(?i)<!-- first-contact-assessed-\{ID\} -->' -Because 'provenance-gate/SKILL.md must reference the canonical HTML marker token format verbatim'
-        $skillContent | Should -Match $script:ProvenanceGateOfflineSyncPattern -Because 'provenance-gate/SKILL.md must describe the offline fallback payload and next-online sync behavior'
-        $skillContent | Should -Match '(?is)(MCP tools are unavailable|API call fails).{0,80}fail open' -Because 'provenance-gate/SKILL.md must describe fail-open semantics when MCP tools are unavailable'
     }
 }
