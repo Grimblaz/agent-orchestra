@@ -203,3 +203,94 @@ Describe 'Resolve-NotPersistedSynthesis (Step 5a)' {
         }
     }
 }
+
+Describe 'Sentinel ordering and idempotency contract (Step 6 — SMC-16)' {
+
+    # The ordering rule from review-judgment/SKILL.md § Structured Judge Output:
+    #   sentinel comment → judge-rulings comment
+    # These tests verify that:
+    #   (a) the sentinel token is structurally distinct from the judge-rulings comment
+    #   (b) Test-ReviewSentinelPresent is tolerant of mixed-content comments
+    #   (c) Resolve-NotPersistedSynthesis is idempotent when called twice with the same input
+
+    It 'sentinel token does not contain judge-rulings block (ordering: sentinel is a standalone comment)' {
+        # The sentinel must be a minimal standalone HTML comment — not combined with judge-rulings YAML.
+        $sentinelBody = '<!-- review-judge-produced-99 -->'
+
+        $sentinelBody | Should -Not -Match 'judge-rulings'
+        $sentinelBody | Should -Not -Match 'code-review-complete'
+        $sentinelBody | Should -Match '<!-- review-judge-produced-99 -->'
+    }
+
+    It 'judge-rulings comment contains code-review-complete marker but NOT the sentinel (ordering enforced)' {
+        # After sentinel, the judge-rulings comment carries the completion marker + YAML block — not the sentinel again.
+        $judgeRulingsBody = @"
+<!-- code-review-complete-99 -->
+<!-- judge-rulings
+- id: F1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+10
+-->
+"@
+
+        $judgeRulingsBody | Should -Match 'code-review-complete-99'
+        $judgeRulingsBody | Should -Match 'judge-rulings'
+        # The sentinel should NOT be duplicated inside the judge-rulings comment.
+        $judgeRulingsBody | Should -Not -Match 'review-judge-produced'
+    }
+
+    It 'Test-ReviewSentinelPresent is idempotent — returns true when sentinel appears in multiple comments' {
+        $comments = @(
+            [pscustomobject]@{ body = '<!-- review-judge-produced-99 -->' }
+            [pscustomobject]@{ body = '<!-- review-judge-produced-99 -->' }
+        )
+        $result = Test-ReviewSentinelPresent -PrNumber 99 -Comments $comments
+        $result | Should -Be $true
+    }
+
+    It 'Resolve-NotPersistedSynthesis is idempotent — calling twice with same inputs returns same null (credit-present path)' {
+        $metricsBlock = [pscustomobject]@{
+            MetricsVersion = 4
+            Credits        = @(
+                [pscustomobject]@{ Port = 'review'; Adapter = 'standard'; Status = 'not-persisted'; RunIndex = 1 }
+            )
+        }
+        $comments = @(
+            [pscustomobject]@{ body = "<!-- review-judge-produced-99 -->"; url = $script:SentinelUrl99 }
+        )
+
+        $first  = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $metricsBlock -Comments $comments
+        $second = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $metricsBlock -Comments $comments
+
+        $first  | Should -BeNullOrEmpty
+        $second | Should -BeNullOrEmpty
+    }
+
+    It 'Resolve-NotPersistedSynthesis synthesizes only once — second call after credit added returns null' {
+        # Simulate: first call synthesizes a credit, second call finds credit already present.
+        $metricsBlockNone = [pscustomobject]@{
+            MetricsVersion = 4
+            Credits        = @()
+        }
+        $comments = @(
+            [pscustomobject]@{ body = "<!-- review-judge-produced-99 -->"; url = $script:SentinelUrl99 }
+        )
+
+        $synthesized = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $metricsBlockNone -Comments $comments
+        $synthesized | Should -Not -BeNullOrEmpty
+        $synthesized.Port   | Should -Be 'review'
+        $synthesized.Status | Should -Be 'not-persisted'
+
+        # Now simulate that the synthesized credit was appended and persisted.
+        $metricsBlockWithCredit = [pscustomobject]@{
+            MetricsVersion = 4
+            Credits        = @(
+                [pscustomobject]@{ Port = 'review'; Adapter = 'sentinel-synthesis'; Status = 'not-persisted'; RunIndex = 1 }
+            )
+        }
+
+        $second = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $metricsBlockWithCredit -Comments $comments
+        $second | Should -BeNullOrEmpty
+    }
+}

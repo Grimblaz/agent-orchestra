@@ -66,6 +66,7 @@ Handoffs between phases use durable GitHub issue comments rather than session-lo
 - `<!-- plan-issue-{ID} -->` — approved plan persisted
 - `<!-- first-contact-assessed-{ID} -->` — provenance-gate marker token for a completed fast-path or cold-path assessment; the optional human-readable second line in that issue comment is decorative only and is not part of skip-check or parser logic
 - `<!-- frame-credit-ledger-{PR} -->` — warn-only frame credit-ledger comment posted by the pre-PR hook (sub-issue #429 of frame umbrella #425); idempotently upserted on every PR after `gh pr create`
+- `<!-- review-judge-produced-{PR} -->` — sentinel written by the judge (both Copilot and Claude) immediately after the ruling finalizes, before pipeline-metrics persistence; the warn-only hook detects this to synthesize a `not-persisted` review credit when the PR body carries no review credit yet (SMC-16)
 
 Because the markers live on the issue, you can start a feature in Copilot, pick it up in Claude Code, and vice versa without losing context.
 
