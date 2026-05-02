@@ -175,6 +175,23 @@ function Get-FrameCreditLedgerAdapters {
             $providesValue = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'provides'
             if ($null -eq $providesValue) { continue }
 
+            # Step 10 (issue #441): YAML sanity check on the frontmatter.
+            # When frontmatter fails basic YAML validation (empty key, missing colon,
+            # or unterminated quoted value), emit a parse-error adapter entry instead
+            # of silently skipping.  The provides: value was already extracted above,
+            # so the entry carries the correct port name.
+            if (-not (script:Test-FCLYamlSane -Text $fm)) {
+                $results.Add([pscustomobject]@{
+                    Path              = $path
+                    Name              = "<malformed:$([System.IO.Path]::GetFileNameWithoutExtension($path))>"
+                    Provides          = $providesValue
+                    AppliesWhen       = $null
+                    SuggestedNextStep = $null
+                    ParseError        = 'malformed-frontmatter'
+                }) | Out-Null
+                continue
+            }
+
             $appliesWhen = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'applies-when'
             $suggestedNextStep = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'suggested-next-step'
 

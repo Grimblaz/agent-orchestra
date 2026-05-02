@@ -628,6 +628,39 @@ function Resolve-PortStatus {
     $adapters = @()
     if ($null -ne $WorkAdapters) { $adapters = @($WorkAdapters) }
 
+    # ---------------------------------------------------------------------------
+    # Step 10 (issue #441): adapter parse-failure reporting.
+    # Partition adapters into valid (no ParseError) and parse-error (ParseError
+    # field non-null/non-empty).  When ALL adapters are parse-error entries, surface
+    # Inconclusive/AdapterParseError instead of silently falling through to the
+    # NoEvidence or AdapterDiscoveryFailed paths.  When some adapters are valid,
+    # discard the parse-error entries and use only the valid ones.
+    # ---------------------------------------------------------------------------
+    $parseErrorAdapters = @($adapters | Where-Object {
+        $null -ne $_.PSObject.Properties['ParseError'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.ParseError)
+    })
+    $validAdapters = @($adapters | Where-Object {
+        $null -eq $_.PSObject.Properties['ParseError'] -or
+        [string]::IsNullOrWhiteSpace([string]$_.ParseError)
+    })
+
+    if ($parseErrorAdapters.Count -gt 0 -and $validAdapters.Count -eq 0) {
+        $reasons = @($parseErrorAdapters | ForEach-Object { [string]$_.ParseError }) -join '; '
+        return [pscustomobject]@{
+            PortName          = $portName
+            Status            = 'Inconclusive'
+            SubReason         = 'AdapterParseError'
+            AdapterName       = ''
+            SuggestedNextStep = $null
+            Evidence          = "0 parseable adapters (parse error: $reasons)"
+        }
+    }
+
+    # Replace the working adapter set with valid-only adapters (non-goal: do not
+    # block discovery for other ports when one adapter parses badly).
+    $adapters = $validAdapters
+
     $map = @{}
     if ($null -ne $ApplicableMap) {
         if ($ApplicableMap -is [System.Collections.IDictionary]) {

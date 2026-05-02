@@ -379,6 +379,52 @@ Describe 'Resolve-PortStatus' {
 
         $result.SuggestedNextStep | Should -BeNullOrEmpty
     }
+
+    # ---------------------------------------------------------------------------
+    # Step 10 — Adapter parse-failure reporting (issue #441, Open Question 4)
+    # ---------------------------------------------------------------------------
+
+    It 'returns Inconclusive/AdapterParseError when all adapters carry a ParseError field (Step 10)' {
+        $brokenAdapter = [pscustomobject]@{
+            Name              = '<malformed:standard>'
+            Provides          = 'review'
+            AppliesWhen       = $null
+            SuggestedNextStep = $null
+            ParseError        = 'malformed-frontmatter'
+        }
+
+        $result = Resolve-PortStatus -Port $script:Port `
+            -WorkAdapters @($brokenAdapter) `
+            -ApplicableMap @{} `
+            -Credit $null
+
+        $result.Status    | Should -Be 'Inconclusive'
+        $result.SubReason | Should -Be 'AdapterParseError'
+        $result.Evidence  | Should -Match '0 parseable adapters'
+        $result.Evidence  | Should -Match 'malformed-frontmatter'
+    }
+
+    It 'discards parse-error adapters when valid adapters also exist for the same port (Step 10)' {
+        $brokenAdapter = [pscustomobject]@{
+            Name              = '<malformed:standard>'
+            Provides          = 'review'
+            AppliesWhen       = $null
+            SuggestedNextStep = $null
+            ParseError        = 'malformed-frontmatter'
+        }
+
+        # $script:AdapterApplies is a valid adapter (no ParseError field)
+        $map = @{ 'review-adapter' = 'true' }
+
+        $result = Resolve-PortStatus -Port $script:Port `
+            -WorkAdapters @($brokenAdapter, $script:AdapterApplies) `
+            -ApplicableMap $map `
+            -Credit $null
+
+        # Valid adapter drives the result; parse-error one is discarded
+        $result.Status    | Should -Be 'NotCovered'
+        $result.SubReason | Should -Be 'MissingAdapter'
+    }
 }
 
 Describe 'Compose-Comment' {
@@ -531,6 +577,29 @@ Describe 'Compose-Comment' {
         $out | Should -Match '\|\s*plan\s*\|'
         # No "Suggested next step" label (old format) — just empty column.
         $out | Should -Not -Match '(?i)suggested next step'
+    }
+
+    It 'renders AdapterParseError as a table row surfacing the 0-parseable-adapters evidence (Step 10)' {
+        $reports = @(
+            [pscustomobject]@{
+                PortName          = 'review'
+                Status            = 'Inconclusive'
+                SubReason         = 'AdapterParseError'
+                AdapterName       = ''
+                SuggestedNextStep = $null
+                Evidence          = '0 parseable adapters (parse error: malformed-frontmatter)'
+            }
+        )
+
+        $out = Compose-Comment -MarkerToken $script:Marker -PortReports $reports
+
+        # Port row appears in the unified table.
+        $out | Should -Match '\|\s*review\s*\|'
+        # Evidence text flows into the table row.
+        $out | Should -Match '0 parseable adapters'
+        # No separate section headers (D2 single-shape parity).
+        $out | Should -Not -Match '### ✅ Covered'
+        $out | Should -Not -Match '### 🚫 Not covered'
     }
 }
 
