@@ -7,7 +7,7 @@ description: "Shared opening-phase protocol for upstream agents (Experience-Owne
 
 # Upstream Onboarding
 
-Shared opening-phase protocol for the three upstream agents in the Agent Orchestra pipeline: Experience-Owner, Solution-Designer, and Issue-Planner. Two responsibilities: render a scaled context brief so the agent and developer share a common starting point, and run a standards check on any work inherited from the prior phase so concerns are surfaced and resolved before execution continues.
+Shared opening-phase protocol for the three upstream agents in the Agent Orchestra pipeline (Experience-Owner, Solution-Designer, Issue-Planner) and Code-Conductor when invoked on an existing GitHub issue. Two responsibilities: render a scaled context brief so the agent and developer share a common starting point, and run a standards check on any work inherited from the prior phase so concerns are surfaced and resolved before execution continues.
 
 ## When to Use
 

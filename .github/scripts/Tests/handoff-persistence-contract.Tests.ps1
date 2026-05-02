@@ -2,7 +2,7 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
 .SYNOPSIS
-    Contract tests for handoff persistence wording and pipeline gate markers.
+    Contract tests for handoff persistence wording and upstream-onboarding trigger.
 
 .DESCRIPTION
     Locks the execution handoff persistence contract across:
@@ -21,9 +21,12 @@
             - Solution-Designer issue-body persistence remains unconditional
             - Canonical plan and design markers remain unchanged
             - Latest-comment-wins lookup and bundle plan naming remain unchanged
-            - First-contact provenance gate trigger and marker reference present
+            - The four pipeline-entry agents reference upstream-onboarding from their Process section
+              and do not reference the retired provenance-gate skill
 
-        These tests actively enforce the D9-owned handoff persistence wording contract (issue #186) and the provenance gate trigger contract (issue #300), guarding against future contract drift.
+        These tests actively enforce the D9-owned handoff persistence wording contract (issue #186)
+        and the upstream-onboarding trigger contract (formerly the provenance-gate trigger contract,
+        issue #300, retired in favor of upstream-onboarding), guarding against future contract drift.
 #>
 
 Describe 'execution handoff persistence contract' {
