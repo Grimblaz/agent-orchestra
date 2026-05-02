@@ -27,17 +27,17 @@ BeforeAll {
     # Build a minimal embedded cost-pattern-data YAML comment body.
     function global:New-CostPatternComment {
         param(
-            [string]$Ports             = "- name: experience`n    cost_estimate_usd: 0.05",
-            [string]$OrchestratorCost  = '0.01',
-            [string]$Dispatches        = 'general_purpose_count: 0',
-            [string]$Totals            = 'cost_estimate_usd: 0.06',
-            [string]$ExcludedField     = '',          # e.g. 'excluded_from_rolling_baseline: true'
-            [string]$SourceField       = '',          # e.g. "source: copilot\n    accessible: false"
-            [string]$ExtraTopLevel     = ''           # any extra top-level YAML lines
+            [string]$Ports = "- name: experience`n    cost_estimate_usd: 0.05",
+            [string]$OrchestratorCost = '0.01',
+            [string]$Dispatches = 'general_purpose_count: 0',
+            [string]$Totals = 'cost_estimate_usd: 0.06',
+            [string]$ExcludedField = '',          # e.g. 'excluded_from_rolling_baseline: true'
+            [string]$SourceField = '',          # e.g. "source: copilot\n    accessible: false"
+            [string]$ExtraTopLevel = ''           # any extra top-level YAML lines
         )
         $excludedLine = if ($ExcludedField) { "`n$ExcludedField" } else { '' }
-        $extraLine    = if ($ExtraTopLevel) { "`n$ExtraTopLevel" } else { '' }
-        $sourceBlock  = if ($SourceField) { "`ncost_pattern_data:`n    $SourceField" } else { '' }
+        $extraLine = if ($ExtraTopLevel) { "`n$ExtraTopLevel" } else { '' }
+        $sourceBlock = if ($SourceField) { "`ncost_pattern_data:`n    $SourceField" } else { '' }
 
         return @"
 Some PR comment text before the block.
@@ -117,13 +117,13 @@ Some text after the block.
     # helpers (which may not be visible from within global:gh in Pester 5).
     function global:Install-GhMock {
         param(
-            [string]$GraphQLResponse         = $null,    # $null => success with one cost comment
-            [int]$GraphQLExitCode            = 0,
-            [string]$RestPRListResponse      = $null,
-            [string[]]$RestPRCommentBodies   = @(),
-            [int]$RestExitCode               = 0,
+            [string]$GraphQLResponse = $null,    # $null => success with one cost comment
+            [int]$GraphQLExitCode = 0,
+            [string]$RestPRListResponse = $null,
+            [string[]]$RestPRCommentBodies = @(),
+            [int]$RestExitCode = 0,
             [switch]$GraphQLSleep,                       # simulate a slow GraphQL call
-            [int]$SleepSeconds               = 5
+            [int]$SleepSeconds = 5
         )
 
         $global:ghCallCount = 0
@@ -132,7 +132,8 @@ Some text after the block.
         # Use IsNullOrEmpty because [string] params coerce $null to '' in PowerShell.
         $graphqlBody = if (-not [string]::IsNullOrEmpty($GraphQLResponse)) {
             $GraphQLResponse
-        } else {
+        }
+        else {
             # Default: one PR with one cost comment
             $commentBody = New-CostPatternComment
             New-GraphQLResponse -CommentBodies @($commentBody)
@@ -141,7 +142,8 @@ Some text after the block.
         # Build REST pr-list response string up-front
         $restPRList = if (-not [string]::IsNullOrEmpty($RestPRListResponse)) {
             $RestPRListResponse
-        } else {
+        }
+        else {
             New-RestPRListResponse -Numbers @(100)
         }
 
@@ -149,18 +151,19 @@ Some text after the block.
         # return it directly without calling any global:-scoped functions.
         $restCommentsResponse = if ($RestPRCommentBodies.Count -gt 0) {
             New-RestPRCommentsResponse -CommentBodies $RestPRCommentBodies
-        } else {
+        }
+        else {
             $defaultComment = New-CostPatternComment
             New-RestPRCommentsResponse -CommentBodies @($defaultComment)
         }
 
-        $global:mockGraphQLResponse     = $graphqlBody
-        $global:mockGraphQLExitCode     = $GraphQLExitCode
-        $global:mockRestPRList          = $restPRList
+        $global:mockGraphQLResponse = $graphqlBody
+        $global:mockGraphQLExitCode = $GraphQLExitCode
+        $global:mockRestPRList = $restPRList
         $global:mockRestCommentsResponse = $restCommentsResponse
-        $global:mockRestExitCode        = $RestExitCode
-        $global:mockGraphQLSleep        = $GraphQLSleep.IsPresent
-        $global:mockSleepSeconds        = $SleepSeconds
+        $global:mockRestExitCode = $RestExitCode
+        $global:mockGraphQLSleep = $GraphQLSleep.IsPresent
+        $global:mockSleepSeconds = $SleepSeconds
 
         function global:gh {
             param([Parameter(ValueFromRemainingArguments = $true)]$Args)

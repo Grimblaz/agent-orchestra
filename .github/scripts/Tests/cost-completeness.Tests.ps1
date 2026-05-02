@@ -187,46 +187,46 @@ Describe 'Resolve-CostDataPreservation' {
 
     It '(complete, any prior) -> use current' {
         $current = script:New-CompletenessResult -Completeness 'complete'
-        $prior   = script:New-CompletenessResult -Completeness 'complete'
-        $result  = Resolve-CostDataPreservation -Current $current -Prior $prior
+        $prior = script:New-CompletenessResult -Completeness 'complete'
+        $result = Resolve-CostDataPreservation -Current $current -Prior $prior
         $result.use_prior | Should -Be $false
         $result.notice | Should -BeNullOrEmpty
     }
 
     It '(partial, prior=complete) -> use_prior: true, notice set' {
         $current = script:New-CompletenessResult -Completeness 'partial' -StopReason 'max_tokens' -Timestamp '2026-01-02T00:00:00Z'
-        $prior   = script:New-CompletenessResult -Completeness 'complete' -Timestamp '2026-01-01T00:00:00Z'
-        $result  = Resolve-CostDataPreservation -Current $current -Prior $prior
+        $prior = script:New-CompletenessResult -Completeness 'complete' -Timestamp '2026-01-01T00:00:00Z'
+        $result = Resolve-CostDataPreservation -Current $current -Prior $prior
         $result.use_prior | Should -Be $true
         $result.notice | Should -Not -BeNullOrEmpty
     }
 
     It '(unknown, prior=complete) -> use_prior: true, notice set' {
         $current = script:New-CompletenessResult -Completeness 'unknown' -StopReason $null -Timestamp '2026-01-02T00:00:00Z'
-        $prior   = script:New-CompletenessResult -Completeness 'complete' -Timestamp '2026-01-01T00:00:00Z'
-        $result  = Resolve-CostDataPreservation -Current $current -Prior $prior
+        $prior = script:New-CompletenessResult -Completeness 'complete' -Timestamp '2026-01-01T00:00:00Z'
+        $result = Resolve-CostDataPreservation -Current $current -Prior $prior
         $result.use_prior | Should -Be $true
         $result.notice | Should -Not -BeNullOrEmpty
     }
 
     It '(partial, prior=partial) -> use current (most recent wins)' {
         $current = script:New-CompletenessResult -Completeness 'partial' -StopReason 'max_tokens' -Timestamp '2026-01-02T00:00:00Z'
-        $prior   = script:New-CompletenessResult -Completeness 'partial' -StopReason 'pause_turn' -Timestamp '2026-01-01T00:00:00Z'
-        $result  = Resolve-CostDataPreservation -Current $current -Prior $prior
+        $prior = script:New-CompletenessResult -Completeness 'partial' -StopReason 'pause_turn' -Timestamp '2026-01-01T00:00:00Z'
+        $result = Resolve-CostDataPreservation -Current $current -Prior $prior
         $result.use_prior | Should -Be $false
         $result.notice | Should -BeNullOrEmpty
     }
 
     It '(partial, prior=none) -> use current' {
         $current = script:New-CompletenessResult -Completeness 'partial' -StopReason 'max_tokens'
-        $result  = Resolve-CostDataPreservation -Current $current
+        $result = Resolve-CostDataPreservation -Current $current
         $result.use_prior | Should -Be $false
         $result.notice | Should -BeNullOrEmpty
     }
 
     It '(complete, prior=none) -> use current' {
         $current = script:New-CompletenessResult -Completeness 'complete'
-        $result  = Resolve-CostDataPreservation -Current $current
+        $result = Resolve-CostDataPreservation -Current $current
         $result.use_prior | Should -Be $false
         $result.notice | Should -BeNullOrEmpty
     }
@@ -234,8 +234,8 @@ Describe 'Resolve-CostDataPreservation' {
     It 'notice text mentions prior_run_timestamp when use_prior is true' {
         $priorTimestamp = '2026-01-01T12:00:00Z'
         $current = script:New-CompletenessResult -Completeness 'partial' -StopReason 'max_tokens' -Timestamp '2026-01-02T00:00:00Z'
-        $prior   = script:New-CompletenessResult -Completeness 'complete' -Timestamp $priorTimestamp
-        $result  = Resolve-CostDataPreservation -Current $current -Prior $prior
+        $prior = script:New-CompletenessResult -Completeness 'complete' -Timestamp $priorTimestamp
+        $result = Resolve-CostDataPreservation -Current $current -Prior $prior
         $result.use_prior | Should -Be $true
         $result.notice | Should -Match $priorTimestamp
     }

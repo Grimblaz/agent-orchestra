@@ -46,7 +46,7 @@ function Get-CostTranscriptSlug {
     # Step 3: Strip drive-letter colon and lowercase drive (e.g. "C:/..." -> "c/...")
     if ($p -match '^([A-Za-z]):(.*)$') {
         $driveLetter = $Matches[1].ToLowerInvariant()
-        $afterColon  = $Matches[2].TrimStart('/')
+        $afterColon = $Matches[2].TrimStart('/')
         $p = if ($afterColon) { "$driveLetter/$afterColon" } else { $driveLetter }
     }
 
@@ -65,7 +65,7 @@ function Get-CostTranscriptSlug {
         return $processedSegments[0]
     }
 
-    $driveSegment    = $processedSegments[0]
+    $driveSegment = $processedSegments[0]
     $remainingJoined = $processedSegments[1..($processedSegments.Count - 1)] -join '-'
     return "$driveSegment--$remainingJoined"
 }
@@ -122,7 +122,7 @@ function Invoke-CostTranscriptWalk {
 
     # Worktree slug directories: {Slug}--claude-worktrees-*
     $worktreeDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -like "$Slug--claude-worktrees-*" })
+            Where-Object { $_.Name -like "$Slug--claude-worktrees-*" })
     foreach ($wtd in $worktreeDirs) {
         $slugDirs.Add($wtd.FullName)
     }
@@ -154,7 +154,7 @@ function Invoke-CostTranscriptWalk {
 
                 if ($eventType -eq 'assistant') {
                     # Apply per-event D1 filter — absent cwd or gitBranch means non-matching
-                    $eventCwd    = $parsedEvent['cwd']
+                    $eventCwd = $parsedEvent['cwd']
                     $eventBranch = $parsedEvent['gitBranch']
 
                     if ($null -eq $eventCwd -or $null -eq $eventBranch) {

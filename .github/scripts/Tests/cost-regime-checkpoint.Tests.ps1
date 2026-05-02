@@ -13,10 +13,10 @@
 # GREEN phase: implementing those files turns the RED signals green.
 
 BeforeAll {
-    $script:RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-    $script:CoreLib   = Join-Path $script:RepoRoot '.github/scripts/lib/cost-checkpoint-core.ps1'
+    $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+    $script:CoreLib = Join-Path $script:RepoRoot '.github/scripts/lib/cost-checkpoint-core.ps1'
     $script:CliScript = Join-Path $script:RepoRoot '.github/scripts/cost-regime-checkpoint.ps1'
-    $script:YamlFile  = Join-Path $script:RepoRoot '.github/scripts/cost-regime-checkpoints.yaml'
+    $script:YamlFile = Join-Path $script:RepoRoot '.github/scripts/cost-regime-checkpoints.yaml'
     $script:CachePath = Join-Path $script:RepoRoot '.github/scripts/cache/cost-rolling-history.json'
 
     # Dot-source the core lib if it exists (GREEN phase). During RED phase this is a no-op.
@@ -165,12 +165,12 @@ Describe 'Add-RegimeCheckpoint' {
         Test-Path $tmpPath | Should -Be $false
 
         $entry = @{
-            id        = 'cp-20260501-040000'
-            timestamp = '2026-05-01T04:00:00Z'
-            sub_issue = '#469'
-            reason    = 'post-#469 pre-flight reduction'
-            note      = ''
-            metrics   = @{ 'orchestrator_overhead.tokens.input.mean' = 11000 }
+            id         = 'cp-20260501-040000'
+            timestamp  = '2026-05-01T04:00:00Z'
+            sub_issue  = '#469'
+            reason     = 'post-#469 pre-flight reduction'
+            note       = ''
+            metrics    = @{ 'orchestrator_overhead.tokens.input.mean' = 11000 }
             exclusions = @{ sub_issue = '#469'; recent_count = 1 }
         }
 
@@ -187,22 +187,22 @@ Describe 'Add-RegimeCheckpoint' {
         $tmpPath = Join-Path $TestDrive "append-$([System.Guid]::NewGuid().ToString('N')).yaml"
 
         $entry1 = @{
-            id        = 'cp-20260501-000000'
-            timestamp = '2026-05-01T00:00:00Z'
-            sub_issue = '#400'
-            reason    = 'first checkpoint'
-            note      = ''
-            metrics   = @{}
+            id         = 'cp-20260501-000000'
+            timestamp  = '2026-05-01T00:00:00Z'
+            sub_issue  = '#400'
+            reason     = 'first checkpoint'
+            note       = ''
+            metrics    = @{}
             exclusions = @{ sub_issue = '#400'; recent_count = 1 }
         }
 
         $entry2 = @{
-            id        = 'cp-20260502-000000'
-            timestamp = '2026-05-02T00:00:00Z'
-            sub_issue = '#401'
-            reason    = 'second checkpoint'
-            note      = ''
-            metrics   = @{}
+            id         = 'cp-20260502-000000'
+            timestamp  = '2026-05-02T00:00:00Z'
+            sub_issue  = '#401'
+            reason     = 'second checkpoint'
+            note       = ''
+            metrics    = @{}
             exclusions = @{ sub_issue = '#401'; recent_count = 1 }
         }
 
@@ -227,12 +227,12 @@ Describe 'Add-RegimeCheckpoint' {
 
         foreach ($i in 0..2) {
             $entry = @{
-                id        = "cp-entry-$i"
-                timestamp = $timestamps[$i]
-                sub_issue = "#$i"
-                reason    = "checkpoint $i"
-                note      = ''
-                metrics   = @{}
+                id         = "cp-entry-$i"
+                timestamp  = $timestamps[$i]
+                sub_issue  = "#$i"
+                reason     = "checkpoint $i"
+                note       = ''
+                metrics    = @{}
                 exclusions = @{ recent_count = 1 }
             }
             Add-RegimeCheckpoint -Path $tmpPath -Entry $entry
@@ -266,7 +266,7 @@ Describe 'cost-regime-checkpoint.ps1 CLI' {
     }
 
     BeforeEach {
-        $script:TmpDir  = Join-Path $TestDrive "cli-$([System.Guid]::NewGuid().ToString('N'))"
+        $script:TmpDir = Join-Path $TestDrive "cli-$([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $script:TmpDir -Force | Out-Null
         $script:TmpYaml = Join-Path $script:TmpDir 'cost-regime-checkpoints.yaml'
         $script:TmpCache = Join-Path $script:TmpDir 'cost-rolling-history.json'
@@ -300,28 +300,28 @@ Describe 'cost-regime-checkpoint.ps1 CLI' {
                 timed_out = $false
                 entries   = @(
                     @{
-                        pr_number = 100
-                        sub_issue_refs = @('#469')
-                        ports = @{ experience = @{ name = 'experience'; cost_estimate_usd = 0.05; dispatch_count = 1; tokens = @{ input = 100; output = 50; cache_creation = 0; cache_read = 25 } } }
+                        pr_number             = 100
+                        sub_issue_refs        = @('#469')
+                        ports                 = @{ experience = @{ name = 'experience'; cost_estimate_usd = 0.05; dispatch_count = 1; tokens = @{ input = 100; output = 50; cache_creation = 0; cache_read = 25 } } }
                         orchestrator_overhead = @{ cost_estimate_usd = 0.01 }
-                        dispatches = @{ general_purpose_count = 2 }
-                        totals = @{ cost_estimate_usd = 0.06 }
+                        dispatches            = @{ general_purpose_count = 2 }
+                        totals                = @{ cost_estimate_usd = 0.06 }
                     },
                     @{
-                        pr_number = 101
-                        sub_issue_refs = @('#469')
-                        ports = @{ experience = @{ name = 'experience'; cost_estimate_usd = 0.04; dispatch_count = 1; tokens = @{ input = 90; output = 45; cache_creation = 0; cache_read = 20 } } }
+                        pr_number             = 101
+                        sub_issue_refs        = @('#469')
+                        ports                 = @{ experience = @{ name = 'experience'; cost_estimate_usd = 0.04; dispatch_count = 1; tokens = @{ input = 90; output = 45; cache_creation = 0; cache_read = 20 } } }
                         orchestrator_overhead = @{ cost_estimate_usd = 0.01 }
-                        dispatches = @{ general_purpose_count = 1 }
-                        totals = @{ cost_estimate_usd = 0.05 }
+                        dispatches            = @{ general_purpose_count = 1 }
+                        totals                = @{ cost_estimate_usd = 0.05 }
                     },
                     @{
-                        pr_number = 99
-                        sub_issue_refs = @('#465')
-                        ports = @{ design = @{ name = 'design'; cost_estimate_usd = 0.10; dispatch_count = 1; tokens = @{ input = 200; output = 80; cache_creation = 0; cache_read = 50 } } }
+                        pr_number             = 99
+                        sub_issue_refs        = @('#465')
+                        ports                 = @{ design = @{ name = 'design'; cost_estimate_usd = 0.10; dispatch_count = 1; tokens = @{ input = 200; output = 80; cache_creation = 0; cache_read = 50 } } }
                         orchestrator_overhead = @{ cost_estimate_usd = 0.02 }
-                        dispatches = @{ general_purpose_count = 3 }
-                        totals = @{ cost_estimate_usd = 0.12 }
+                        dispatches            = @{ general_purpose_count = 3 }
+                        totals                = @{ cost_estimate_usd = 0.12 }
                     }
                 )
             }

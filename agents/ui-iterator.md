@@ -3,6 +3,7 @@ name: ui-iterator
 description: UI polish specialist shell for Claude Code. Use when Code-Conductor needs screenshot-driven iteration and visual refinement.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
 user-invocable: false
+# model/effort intentionally omitted: inherits dispatcher per agent-orchestra routing convention (see CLAUDE.md "Per-agent model + reasoning routing").
 ---
 
 # UI-Iterator (Claude Code shell)

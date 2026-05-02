@@ -20,7 +20,7 @@ Describe 'cost-rate-table.json' {
     It 'contains claude-haiku-4-x' { $script:Table.rates.'claude-haiku-4-x' | Should -Not -BeNullOrEmpty }
     It 'all rate values are positive' {
         foreach ($model in $script:Table.rates.PSObject.Properties) {
-            foreach ($field in @('input_per_mtok','output_per_mtok','cache_creation_per_mtok','cache_read_per_mtok')) {
+            foreach ($field in @('input_per_mtok', 'output_per_mtok', 'cache_creation_per_mtok', 'cache_read_per_mtok')) {
                 $val = $model.Value.$field
                 $val | Should -BeGreaterThan 0 -Because "$($model.Name).$field must be positive"
             }
@@ -28,7 +28,7 @@ Describe 'cost-rate-table.json' {
     }
     It 'all rate values are in plausible range $0.01-$200 per Mtok' {
         foreach ($model in $script:Table.rates.PSObject.Properties) {
-            foreach ($field in @('input_per_mtok','output_per_mtok','cache_creation_per_mtok','cache_read_per_mtok')) {
+            foreach ($field in @('input_per_mtok', 'output_per_mtok', 'cache_creation_per_mtok', 'cache_read_per_mtok')) {
                 $val = [double]$model.Value.$field
                 $val | Should -BeGreaterOrEqual 0.01 -Because "$($model.Name).$field below $0.01/Mtok is implausible"
                 $val | Should -BeLessOrEqual 200   -Because "$($model.Name).$field above $200/Mtok is implausible"

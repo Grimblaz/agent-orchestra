@@ -3,6 +3,7 @@ name: code-smith
 description: Implementation specialist shell for Claude Code. Use when Code-Conductor needs minimal, plan-driven code changes executed.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 user-invocable: false
+# model/effort intentionally omitted: inherits dispatcher per agent-orchestra routing convention (see CLAUDE.md "Per-agent model + reasoning routing").
 ---
 
 # Code-Smith (Claude Code shell)

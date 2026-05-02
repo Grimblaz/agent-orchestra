@@ -106,6 +106,49 @@ claude plugin uninstall <plugin@marketplace>
 - `skills/` — reusable methodology loaded by both platforms; each skill has `platforms/claude.md` for Claude-specific invocation details
 - `platforms/` (at skill root) — platform-specific routing notes
 
+## Per-agent model + reasoning routing
+
+Each Claude subagent shell in `agents/*.md` may declare `model:` and `effort:` in its YAML frontmatter to request a specific model tier for that role's dispatch. The convention is governed by [D9 in `Documents/Design/agent-body-architecture.md`](Documents/Design/agent-body-architecture.md): shells that justify a non-default tier declare both fields (both-or-neither discipline); shells that inherit the dispatcher's model omit both fields and document the reason with a YAML comment. The goal is to concentrate quality-justified upgrades at the roles that genuinely need them (adversarial review, deep synthesis) while keeping routine specialist work at the dispatcher's tier.
+
+| Agent shell | `model` | `effort` | Effective model + effort | Why |
+|---|---|---|---|---|
+| `commands/orchestrate.md` | `sonnet` | `medium` | sonnet + medium | D1: command front-end sets the primary dispatch tier |
+| `agents/code-conductor.md` | `sonnet` | `medium` | sonnet + medium | D2: redundant declaration; ensures orchestrator tier even without command override |
+| `agents/code-critic.md` | `opus` | `high` | opus + high | D5: adversarial review requires maximum reasoning depth |
+| `agents/code-review-response.md` | `opus` | `xhigh` | opus + xhigh | D5: judge pass requires full synthesis depth |
+| `agents/refactor-specialist.md` | `sonnet` | `high` | sonnet + high | D5: code-quality analysis benefits from extended reasoning |
+| `agents/process-review.md` | `sonnet` | `high` | sonnet + high | D5: workflow meta-analysis requires extended reasoning |
+| `agents/code-smith.md` | `inherit` | `inherit` | dispatcher | D4: routine implementation; inherits dispatcher |
+| `agents/test-writer.md` | `inherit` | `inherit` | dispatcher | D4: routine test authoring; inherits dispatcher |
+| `agents/doc-keeper.md` | `inherit` | `inherit` | dispatcher | D4: routine documentation; inherits dispatcher |
+| `agents/research-agent.md` | `inherit` | `inherit` | dispatcher | D4: evidence gathering; inherits dispatcher |
+| `agents/specification.md` | `inherit` | `inherit` | dispatcher | D4: specification authoring; inherits dispatcher |
+| `agents/ui-iterator.md` | `inherit` | `inherit` | dispatcher | D4: UI polish; inherits dispatcher |
+| `agents/experience-owner.md` | `inherit` | `inherit` | user-session (inline) / dispatcher (subagent) | D6: inline `/experience` uses user session; subagent dispatch inherits dispatcher |
+| `agents/solution-designer.md` | `inherit` | `inherit` | user-session (inline) / dispatcher (subagent) | D6: inline `/design` uses user session; subagent dispatch inherits dispatcher |
+| `agents/issue-planner.md` | `inherit` | `inherit` | user-session (inline) / dispatcher (subagent) | D6: inline `/plan` uses user session; subagent dispatch inherits dispatcher |
+
+**Inheritance order** (highest priority first, per the [Claude Code sub-agents docs](https://code.claude.com/docs/en/sub-agents)):
+
+1. `CLAUDE_CODE_SUBAGENT_MODEL` environment variable (process-level override)
+2. Per-invocation `model:` parameter passed in the `Agent` tool call
+3. Shell frontmatter `model:` / `effort:` declaration (this table)
+4. Dispatcher's current model (user's active session model)
+
+Note: the user-session default (`/model` setting) never propagates to subagents — it applies only to inline commands (`/experience`, `/design`, `/plan`, `/orchestrate`). Downstream specialist `Agent` dispatches from those commands inherit the dispatcher's model, not the user-session default.
+
+**Multi-turn `/orchestrate` boundary**: the `model: sonnet, effort: medium` override declared in `commands/orchestrate.md` applies for the duration of the command's turn. If a user interrupts a multi-turn `/orchestrate` session mid-flow, the override resets to the user's session model. Re-invoking `/orchestrate` re-applies the override for the new turn.
+
+**Sonnet-default trade-off**: `commands/orchestrate.md` and `agents/code-conductor.md` default to `sonnet + medium` because the majority of orchestration work (plan parsing, dispatch, coordination) does not need full reasoning depth. Quality-critical roles (adversarial review, judge synthesis) explicitly upgrade to `opus`. This is an intentional cost-vs-depth trade-off per D3.
+
+**Override-discipline rule**: every `agents/*.md` shell must declare both `model:` and `effort:`, or neither (both-or-neither). A shell with only one field is a test failure. The Pester test at `.github/scripts/Tests/per-agent-model-routing.Tests.ps1` enforces this, the enum membership set, the inherit-comment requirement, the D5 oracle, and CLAUDE.md routing-table parity.
+
+**How to override the declared routing**:
+
+- **Inline slash commands**: when a command file declares `model:` frontmatter (currently only `/orchestrate`), that frontmatter governs the command's turn — running `/model <name>` first does *not* override it. To run `/orchestrate` at a different tier, edit `commands/orchestrate.md` frontmatter directly. The user-session `/model` setting only governs inline commands that omit `model:` frontmatter (`/experience`, `/design`, `/plan`, `/polish`).
+- **Subagent dispatches** from any command follow the inheritance order above. For a process-wide override of every subagent, set the `CLAUDE_CODE_SUBAGENT_MODEL` environment variable. For a one-off override, pass `model:` on a specific `Agent` tool call. Shell frontmatter still wins over the dispatcher model, so quality-justified shells (code-critic, code-review-response, etc.) keep their declared tier even when the dispatcher's model differs.
+- **Multi-turn `/orchestrate` interruption**: if you interrupt mid-flow and the next message is not `/orchestrate`, the model falls back to the user-session default until you re-invoke `/orchestrate`, which re-applies the command frontmatter.
+
 ## Frame Port Declarations
 
 Before adding or changing any adapter that fills a frame port, read the Adapter Model in [Documents/Design/frame-architecture.md](Documents/Design/frame-architecture.md). That design doc owns the declaration locations, provisional predicate DSL, and the distinction between port-filling adapters that declare `provides:` and supporting methodology skills that do not.

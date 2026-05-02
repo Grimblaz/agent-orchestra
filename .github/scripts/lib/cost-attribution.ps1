@@ -14,35 +14,35 @@
 $script:CostAttributionPortMap = [System.Collections.Generic.Dictionary[string, string]]::new(
     [StringComparer]::OrdinalIgnoreCase
 )
-$script:CostAttributionPortMap.Add('agent-orchestra:Experience-Owner',    'experience')
-$script:CostAttributionPortMap.Add('experience-owner',                    'experience')
-$script:CostAttributionPortMap.Add('agent-orchestra:Solution-Designer',   'design')
-$script:CostAttributionPortMap.Add('solution-designer',                   'design')
-$script:CostAttributionPortMap.Add('agent-orchestra:Issue-Planner',       'plan')
-$script:CostAttributionPortMap.Add('issue-planner',                       'plan')
-$script:CostAttributionPortMap.Add('agent-orchestra:Code-Smith',          'implement-code')
-$script:CostAttributionPortMap.Add('code-smith',                          'implement-code')
-$script:CostAttributionPortMap.Add('agent-orchestra:Test-Writer',         'implement-test')
-$script:CostAttributionPortMap.Add('test-writer',                         'implement-test')
+$script:CostAttributionPortMap.Add('agent-orchestra:Experience-Owner', 'experience')
+$script:CostAttributionPortMap.Add('experience-owner', 'experience')
+$script:CostAttributionPortMap.Add('agent-orchestra:Solution-Designer', 'design')
+$script:CostAttributionPortMap.Add('solution-designer', 'design')
+$script:CostAttributionPortMap.Add('agent-orchestra:Issue-Planner', 'plan')
+$script:CostAttributionPortMap.Add('issue-planner', 'plan')
+$script:CostAttributionPortMap.Add('agent-orchestra:Code-Smith', 'implement-code')
+$script:CostAttributionPortMap.Add('code-smith', 'implement-code')
+$script:CostAttributionPortMap.Add('agent-orchestra:Test-Writer', 'implement-test')
+$script:CostAttributionPortMap.Add('test-writer', 'implement-test')
 $script:CostAttributionPortMap.Add('agent-orchestra:Refactor-Specialist', 'implement-refactor')
-$script:CostAttributionPortMap.Add('refactor-specialist',                 'implement-refactor')
-$script:CostAttributionPortMap.Add('agent-orchestra:Doc-Keeper',          'implement-docs')
-$script:CostAttributionPortMap.Add('doc-keeper',                          'implement-docs')
-$script:CostAttributionPortMap.Add('agent-orchestra:Code-Critic',         'review')
-$script:CostAttributionPortMap.Add('code-critic',                         'review')
+$script:CostAttributionPortMap.Add('refactor-specialist', 'implement-refactor')
+$script:CostAttributionPortMap.Add('agent-orchestra:Doc-Keeper', 'implement-docs')
+$script:CostAttributionPortMap.Add('doc-keeper', 'implement-docs')
+$script:CostAttributionPortMap.Add('agent-orchestra:Code-Critic', 'review')
+$script:CostAttributionPortMap.Add('code-critic', 'review')
 $script:CostAttributionPortMap.Add('agent-orchestra:Code-Review-Response', 'review')
-$script:CostAttributionPortMap.Add('code-review-response',                'review')
-$script:CostAttributionPortMap.Add('agent-orchestra:Process-Review',      'process-review')
-$script:CostAttributionPortMap.Add('process-review',                      'process-review')
-$script:CostAttributionPortMap.Add('agent-orchestra:UI-Iterator',         'implement-code')
-$script:CostAttributionPortMap.Add('ui-iterator',                         'implement-code')
-$script:CostAttributionPortMap.Add('agent-orchestra:Research-Agent',      'plan')
-$script:CostAttributionPortMap.Add('research-agent',                      'plan')
-$script:CostAttributionPortMap.Add('agent-orchestra:Code-Conductor',      'orchestrator-overhead')
-$script:CostAttributionPortMap.Add('code-conductor',                      'orchestrator-overhead')
-$script:CostAttributionPortMap.Add('Explore',                             'orchestrator-overhead')
-$script:CostAttributionPortMap.Add('general-purpose',                     'dispatches.general_purpose')
-$script:CostAttributionPortMap.Add('claude-code-guide',                   'orchestrator-overhead')
+$script:CostAttributionPortMap.Add('code-review-response', 'review')
+$script:CostAttributionPortMap.Add('agent-orchestra:Process-Review', 'process-review')
+$script:CostAttributionPortMap.Add('process-review', 'process-review')
+$script:CostAttributionPortMap.Add('agent-orchestra:UI-Iterator', 'implement-code')
+$script:CostAttributionPortMap.Add('ui-iterator', 'implement-code')
+$script:CostAttributionPortMap.Add('agent-orchestra:Research-Agent', 'plan')
+$script:CostAttributionPortMap.Add('research-agent', 'plan')
+$script:CostAttributionPortMap.Add('agent-orchestra:Code-Conductor', 'orchestrator-overhead')
+$script:CostAttributionPortMap.Add('code-conductor', 'orchestrator-overhead')
+$script:CostAttributionPortMap.Add('Explore', 'orchestrator-overhead')
+$script:CostAttributionPortMap.Add('general-purpose', 'dispatches.general_purpose')
+$script:CostAttributionPortMap.Add('claude-code-guide', 'orchestrator-overhead')
 
 function Get-AgentTypePort {
     <#
@@ -124,10 +124,10 @@ function Get-EventUsage {
         return @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
     }
 
-    $inputTok      = [int]($usage['input_tokens']                ?? 0)
-    $outputTok     = [int]($usage['output_tokens']               ?? 0)
+    $inputTok = [int]($usage['input_tokens'] ?? 0)
+    $outputTok = [int]($usage['output_tokens'] ?? 0)
     $cacheCreation = [int]($usage['cache_creation_input_tokens'] ?? 0)
-    $cacheRead     = [int]($usage['cache_read_input_tokens']     ?? 0)
+    $cacheRead = [int]($usage['cache_read_input_tokens'] ?? 0)
 
     return @{ input = $inputTok; output = $outputTok; cache_creation = $cacheCreation; cache_read = $cacheRead }
 }
@@ -169,10 +169,10 @@ function Add-TokensToAccumulator {
         [Parameter(Mandatory)][hashtable]$Usage
     )
 
-    $Accumulator['input']          += $Usage['input']
-    $Accumulator['output']         += $Usage['output']
+    $Accumulator['input'] += $Usage['input']
+    $Accumulator['output'] += $Usage['output']
     $Accumulator['cache_creation'] += $Usage['cache_creation']
-    $Accumulator['cache_read']     += $Usage['cache_read']
+    $Accumulator['cache_read'] += $Usage['cache_read']
 }
 
 function Add-CostToBucket {
@@ -197,10 +197,10 @@ function Add-CostToBucket {
 
     $rates = $RatesByModel[$Model]
     $cost = (
-        $Usage['input']          * $rates['input_per_mtok'] +
-        $Usage['output']         * $rates['output_per_mtok'] +
+        $Usage['input'] * $rates['input_per_mtok'] +
+        $Usage['output'] * $rates['output_per_mtok'] +
         $Usage['cache_creation'] * $rates['cache_creation_per_mtok'] +
-        $Usage['cache_read']     * $rates['cache_read_per_mtok']
+        $Usage['cache_read'] * $rates['cache_read_per_mtok']
     ) / 1000000.0
 
     $Bucket['cost_estimate_usd'] += $cost
@@ -459,10 +459,10 @@ function Get-CostAttribution {
         if ($null -ne $model -and $ratesByModel.ContainsKey($model)) {
             $rates = $ratesByModel[$model]
             $totals['cost_estimate_usd'] += (
-                $usage['input']          * $rates['input_per_mtok'] +
-                $usage['output']         * $rates['output_per_mtok'] +
+                $usage['input'] * $rates['input_per_mtok'] +
+                $usage['output'] * $rates['output_per_mtok'] +
                 $usage['cache_creation'] * $rates['cache_creation_per_mtok'] +
-                $usage['cache_read']     * $rates['cache_read_per_mtok']
+                $usage['cache_read'] * $rates['cache_read_per_mtok']
             ) / 1000000.0
         }
     }

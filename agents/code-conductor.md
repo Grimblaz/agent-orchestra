@@ -3,6 +3,8 @@ name: code-conductor
 description: Hub-mode orchestration shell for Claude Code. Use to run an approved plan through implementation, validation, CE Gate, and PR creation.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
 user-invocable: true
+model: sonnet
+effort: medium
 ---
 
 # Code-Conductor (Claude Code shell)

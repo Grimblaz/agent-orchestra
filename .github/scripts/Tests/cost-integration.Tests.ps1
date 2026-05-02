@@ -12,10 +12,10 @@
 #   5. Idempotent re-run produces same comment structure
 
 BeforeAll {
-    $script:RepoRoot      = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+    $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:OrchestratorPath = Join-Path $script:RepoRoot '.github/scripts/frame-credit-ledger.ps1'
-    $script:CoreLibPath   = Join-Path $script:RepoRoot '.github/scripts/lib/frame-credit-ledger-core.ps1'
-    $script:LibDir        = Join-Path $script:RepoRoot '.github/scripts/lib'
+    $script:CoreLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/frame-credit-ledger-core.ps1'
+    $script:LibDir = Join-Path $script:RepoRoot '.github/scripts/lib'
 
     # Canonical v4 PR body fixture used across all tests
     $script:V4AllCoveredBody = @'
@@ -142,7 +142,7 @@ exit `$LASTEXITCODE
         }
 
         $escapedCostMarkdown = $CostMarkdown -replace "'", "''"
-        $escapedCostYaml     = $CostYaml     -replace "'", "''"
+        $escapedCostYaml = $CostYaml -replace "'", "''"
 
         $poisonBlock = if ($PoisonCostLib) {
             # Write a broken syntax file over cost-walker.ps1 path reference that the
@@ -150,7 +150,8 @@ exit `$LASTEXITCODE
             # a function override that's already in scope before the orchestrator runs.
             # Simpler approach: set the env var that makes the orchestrator skip cost lib.
             '$env:FRAME_CREDIT_LEDGER_TEST_NO_COST_LIB = "1"'
-        } else { '' }
+        }
+        else { '' }
 
         return @"
 `$global:GhCallLog = @()

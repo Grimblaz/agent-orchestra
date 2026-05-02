@@ -51,25 +51,25 @@ Describe 'Invoke-CostTranscriptWalk' {
         }
 
         # Standard CWD and branch used by most tests
-        $script:TestCwd    = '/c/test/repo'
+        $script:TestCwd = '/c/test/repo'
         $script:TestBranch = 'feature/test-branch'
 
         # Inline event builders
         function script:New-AssistantEvent {
             param(
                 [string]$Uuid = [System.Guid]::NewGuid().ToString(),
-                [string]$Cwd   = $script:TestCwd,
+                [string]$Cwd = $script:TestCwd,
                 [string]$Branch = $script:TestBranch,
                 [hashtable]$Usage = @{ input_tokens = 10; output_tokens = 5 },
                 [object[]]$Content = @()
             )
             return @{
-                type       = 'assistant'
-                uuid       = $Uuid
-                timestamp  = '2026-01-01T00:00:00Z'
-                cwd        = $Cwd
-                gitBranch  = $Branch
-                message    = @{ usage = $Usage; content = $Content }
+                type      = 'assistant'
+                uuid      = $Uuid
+                timestamp = '2026-01-01T00:00:00Z'
+                cwd       = $Cwd
+                gitBranch = $Branch
+                message   = @{ usage = $Usage; content = $Content }
             }
         }
 
@@ -207,7 +207,7 @@ Describe 'Invoke-CostTranscriptWalk' {
         It 'collects events from worktree slug directories' {
             $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
             $slug = 'test--repo'
-            $primaryDir  = Join-Path $tmp $slug
+            $primaryDir = Join-Path $tmp $slug
             $worktreeDir = Join-Path $tmp "$slug--claude-worktrees-main"
             $null = New-Item -ItemType Directory -Path $primaryDir  -Force
             $null = New-Item -ItemType Directory -Path $worktreeDir -Force
@@ -225,13 +225,13 @@ Describe 'Invoke-CostTranscriptWalk' {
         It 'loads subagent transcript for included Agent tool_use' {
             $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
             $slug = 'test--repo'
-            $slugDir  = Join-Path $tmp $slug
+            $slugDir = Join-Path $tmp $slug
             $subagDir = Join-Path $slugDir 'subagents'
             $null = New-Item -ItemType Directory -Path $subagDir -Force
 
             $toolUseId = [System.Guid]::NewGuid().ToString()
             $agentContent = script:New-AgentToolUseContent -ToolUseId $toolUseId
-            $parentEvent  = script:New-AssistantEvent -Content @($agentContent)
+            $parentEvent = script:New-AssistantEvent -Content @($agentContent)
 
             script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events @($parentEvent)
 
@@ -253,14 +253,14 @@ Describe 'Invoke-CostTranscriptWalk' {
         It 'does not load subagent transcript for excluded parent' {
             $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
             $slug = 'test--repo'
-            $slugDir  = Join-Path $tmp $slug
+            $slugDir = Join-Path $tmp $slug
             $subagDir = Join-Path $slugDir 'subagents'
             $null = New-Item -ItemType Directory -Path $subagDir -Force
 
             $toolUseId = [System.Guid]::NewGuid().ToString()
             $agentContent = script:New-AgentToolUseContent -ToolUseId $toolUseId
             # Parent has wrong branch — should be excluded
-            $parentEvent  = script:New-AssistantEvent -Branch 'wrong/branch' -Content @($agentContent)
+            $parentEvent = script:New-AssistantEvent -Branch 'wrong/branch' -Content @($agentContent)
 
             script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events @($parentEvent)
 
@@ -283,9 +283,9 @@ Describe 'Invoke-CostTranscriptWalk' {
             $slugDir = Join-Path $tmp $slug
             $null = New-Item -ItemType Directory -Path $slugDir -Force
 
-            $toolUseId    = [System.Guid]::NewGuid().ToString()
+            $toolUseId = [System.Guid]::NewGuid().ToString()
             $agentContent = script:New-AgentToolUseContent -ToolUseId $toolUseId
-            $parentEvent  = script:New-AssistantEvent -Content @($agentContent)
+            $parentEvent = script:New-AssistantEvent -Content @($agentContent)
 
             script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events @($parentEvent)
             # Note: no subagents/ dir and no subagent transcript file created
@@ -315,9 +315,9 @@ Describe 'Invoke-CostTranscriptWalk' {
             $slugDir = Join-Path $tmp $slug
             $null = New-Item -ItemType Directory -Path $slugDir -Force
 
-            $toolUseId    = [System.Guid]::NewGuid().ToString()
+            $toolUseId = [System.Guid]::NewGuid().ToString()
             $agentContent = script:New-AgentToolUseContent -ToolUseId $toolUseId
-            $parentEvent  = script:New-AssistantEvent -Content @($agentContent)
+            $parentEvent = script:New-AssistantEvent -Content @($agentContent)
             script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events @($parentEvent)
             # subagents/ dir deliberately absent
 

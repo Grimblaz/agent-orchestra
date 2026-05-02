@@ -52,8 +52,8 @@ Describe 'Format-CostPatternMarkdown' {
                     cost_estimate_usd    = $OhCost
                     cache_read_hit_ratio = $ohRatio
                 }
-                dispatches = @{ general_purpose_count = $GenPurpose; unattributed_count = $Unattributed }
-                totals     = @{
+                dispatches            = @{ general_purpose_count = $GenPurpose; unattributed_count = $Unattributed }
+                totals                = @{
                     tokens            = @{ input = $totalInput; output = $totalOutput; cache_creation = $totalCacheCreate; cache_read = $totalCacheRead }
                     cost_estimate_usd = $totalCost
                 }
@@ -83,9 +83,9 @@ Describe 'Format-CostPatternMarkdown' {
                 [string]$Port = 'experience'
             )
             return @{
-                metric    = $Metric
-                port      = $Port
-                direction = 'shrink'
+                metric     = $Metric
+                port       = $Port
+                direction  = 'shrink'
                 confidence = 'medium'
             }
         }
@@ -214,7 +214,7 @@ Describe 'Format-CostPatternYaml' {
         # Minimal attribution for YAML tests
         function script:New-YamlAttribution {
             return @{
-                ports = @{
+                ports                 = @{
                     experience = @{
                         tokens               = @{ input = 1234; output = 567; cache_creation = 89; cache_read = 456 }
                         dispatch_count       = 2
@@ -228,8 +228,8 @@ Describe 'Format-CostPatternYaml' {
                     cost_estimate_usd    = 0.0045
                     cache_read_hit_ratio = 0.115
                 }
-                dispatches = @{ general_purpose_count = 1; unattributed_count = 0 }
-                totals     = @{
+                dispatches            = @{ general_purpose_count = 1; unattributed_count = 0 }
+                totals                = @{
                     tokens            = @{ input = 2124; output = 801; cache_creation = 134; cache_read = 579 }
                     cost_estimate_usd = 0.0168
                 }
