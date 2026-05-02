@@ -241,7 +241,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
         $state.keying_strategy | Should -Be 'session_id'
     }
 
-    It 'stays silent when plugin.json is already ahead of main' {
+    It 'stays silent (no output) when plugin.json is already ahead of main but writes symmetric-bump credit to state file (issue #441, Step 7a)' {
         $fixture = New-PluginReleaseHygieneFixture
         $target = Join-Path $fixture 'agents\Example.agent.md'
         Set-Content -Path $target -Value '# Example' -Encoding UTF8
@@ -261,8 +261,16 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
         $raw = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $target -SessionId 'session-422-bumped'
 
+        # Hook stays silent — no user-visible notification output.
         [string]::IsNullOrWhiteSpace($raw) | Should -BeTrue
-        Test-Path (Join-Path $fixture '.claude\.state\release-hygiene-session-422-bumped.json') | Should -BeFalse
+
+        # Step 7a: hook now writes symmetric-bump credit to state file when version is already bumped.
+        $statePath = Join-Path $fixture '.claude\.state\release-hygiene-session-422-bumped.json'
+        Test-Path $statePath | Should -BeTrue -Because 'symmetric-bump credit must be persisted when version is already bumped'
+        $state = Get-Content $statePath -Raw | ConvertFrom-Json
+        $state.symmetric_bump_credit        | Should -Not -BeNullOrEmpty
+        $state.symmetric_bump_credit.port   | Should -Be 'release-hygiene'
+        $state.symmetric_bump_credit.adapter | Should -Be 'symmetric-bump'
     }
 
     It 'does not stay silent when only part of the version set is bumped' {

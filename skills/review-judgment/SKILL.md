@@ -128,7 +128,7 @@ After the sentinel, emit the completion marker and `judge-rulings` block in the 
 -->
 ```
 
-Keep the Markdown score summary, the `<!-- code-review-complete-{PR} -->` marker, and the `judge-rulings` block together in the same PR comment. **This comment does not include pipeline-metrics body emission** — that is owned by Code-Conductor's `## Pipeline Metrics` emitter at PR creation time (per `agents/Code-Conductor.agent.md:412`).
+Keep the Markdown score summary, the `<!-- code-review-complete-{PR} -->` marker, and the `judge-rulings` block together in the same response payload. On GitHub, keep them in the same PR comment rather than splitting them across separate comments. **This comment does not include pipeline-metrics body emission** — that is owned by Code-Conductor's `## Pipeline Metrics` emitter at PR creation time (per `agents/Code-Conductor.agent.md:412`).
 
 Field values:
 
