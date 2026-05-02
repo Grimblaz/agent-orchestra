@@ -154,6 +154,19 @@ GitHub issue or PR markers where the operational contract defines them. This is
 why `/plan`, `/orchestrate`, and Claude specialist shells cite `SMC-01`,
 `SMC-03`, `SMC-06`, or `SMC-08` rather than referring to a Claude-local cache.
 
+## Issue #441 Sentinel Governance (SMC-16)
+
+Issue #441 introduced the `<!-- review-judge-produced-{PR} -->` sentinel as the durable signal that a review judge ran but the review credit was not yet persisted to the PR body. This produced contract row SMC-16 in the canonical skill.
+
+The design rationale follows the same Option A approach as the wider contract: rather than adding a new state mechanism, the sentinel reuses the existing durable GitHub PR comment surface to carry the out-of-band signal. The `Resolve-NotPersistedSynthesis` library function reads this signal and synthesizes a `not-persisted` credit row when the predicate fires (sentinel present, no review credit in metrics block). This keeps the synthesis logic pure and the orchestrator thin.
+
+Two ordering guarantees are enforced by SMC-16 and the associated `Gotchas` entry in the skill:
+
+1. **Sentinel precedes judge-rulings**: the sentinel comment must be posted before the `judge-rulings` YAML block comment, so any interrupted or late-read pipeline sees the sentinel even if the judge-rulings comment failed.
+2. **Idempotency**: `Resolve-NotPersistedSynthesis` is a guard — it returns `$null` if a review credit of any status already exists. Calling it twice on the same input is safe.
+
+The sentinel is intentionally minimal (a standalone HTML comment, no YAML payload) to distinguish it structurally from the `judge-rulings` block. Any consumer looking for review evidence reads the `judge-rulings` block; the sentinel is only the delivery guarantee signal read by the warn-hook synthesis path.
+
 ## Related Sources
 
 - [skills/session-memory-contract/SKILL.md](../../skills/session-memory-contract/SKILL.md)

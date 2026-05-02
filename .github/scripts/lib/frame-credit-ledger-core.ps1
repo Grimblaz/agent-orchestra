@@ -466,7 +466,7 @@ function Build-ReviewCreditRow {
     # All findings defense-sustained or only P+1/P+5 sustained → passed.
     $hasSustainedHigh = $false
     foreach ($f in $findings) {
-        if ([string]$f.judge_ruling -eq 'sustained' -and [string]$f.points_awarded -match 'P\+10') {
+        if ([string]$f.judge_ruling -eq 'sustained' -and [string]$f.points_awarded -match 'P\+10\b') {
             $hasSustainedHigh = $true
             break
         }

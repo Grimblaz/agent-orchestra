@@ -568,12 +568,33 @@ function Invoke-FrameCreditLedger {
     $credits = @()
     if ($null -ne $metrics.Credits) { $credits = @($metrics.Credits) }
 
+    # Step 5a (SMC-16): Synthesize a not-persisted review credit when the
+    # review-judge-produced-{PR} sentinel is present but no review credit
+    # has been written yet. This path fires on PRs like #446 where the judge
+    # ran but the credit was never persisted to the PR body.
+    $synthesizedReviewCredit = Resolve-NotPersistedSynthesis -PrNumber $Pr -MetricsBlock $metrics -Comments $script:PrComments
+    if ($null -ne $synthesizedReviewCredit) {
+        $credits = @($credits) + @($synthesizedReviewCredit)
+    }
+
     # Build a changeset descriptor from the diff between baseRefOid and HEAD.
     # Used by Test-FVPredicateAgainstChangeset to evaluate each adapter's
     # `applies-when` predicate. Failure to build the changeset is non-fatal —
     # we fall back to an empty changeset, which makes every predicate evaluate
     # to 'false' or 'unknown' (preserving warn-mode invariants).
     $changeset = Build-FrameCreditLedgerChangeset -BaseRefOid $baseRefOid
+
+    # H1 fix (issue #441 judge): Populate JudgeScore on the changeset from the
+    # PR's judge-rulings comment so the review.sustainedCriticalOrHigh predicate
+    # identifier resolves at runtime (not just in tests). Without this, the
+    # post-fix-review predicate always falls through to the deferred-unknown path.
+    if ($null -ne $script:PrComments) {
+        $judgeRulingsComment = @($script:PrComments | Where-Object { $_.body -match '<!--\s*judge-rulings' }) | Select-Object -Last 1
+        if ($null -ne $judgeRulingsComment) {
+            $findings = @(ConvertFrom-JudgeRulingsComment -CommentBody ([string]$judgeRulingsComment.body))
+            $changeset['JudgeScore'] = @{ Findings = $findings }
+        }
+    }
 
     # Track which (port, adapter) pairs have already emitted the deferred-
     # identifier stderr note so we don't spam the log.

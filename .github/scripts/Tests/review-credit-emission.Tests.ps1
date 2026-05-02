@@ -327,4 +327,40 @@ Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)'
             -Evidence $customEvidence
         $row.evidence | Should -Be $customEvidence
     }
+
+    It 'RunIndex=0 is preserved as-is and does not default to 1 (L5 fix — issue #441)' {
+        # PowerShell falsy-0 coercion footgun: explicit RunIndex=0 must not be silently
+        # replaced by the default value of 1. We verify the field carries 0 when supplied.
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -RunIndex 0
+        $row.run_index | Should -Be 0 -Because 'RunIndex=0 is a caller-supplied value and must not be overwritten by the default'
+    }
+
+    It 'P+100 points_awarded does not trigger failed status (M1 regex anchor fix — issue #441)' {
+        # Regression guard: the P\+10\b boundary fix must prevent P+100 from matching P+10.
+        $highPointsComment = @'
+<!-- judge-rulings
+- id: F1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+100
+-->
+'@
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $highPointsComment
+        # P+100 should NOT be interpreted as Critical/High (P+10) — status should stay passed.
+        $row.status | Should -Be 'passed' -Because 'P+100 must not match the P+10 boundary pattern after the word-boundary anchor fix'
+    }
+
+    It 'P+1000 points_awarded does not trigger failed status (M1 regex anchor fix — issue #441)' {
+        $veryHighPointsComment = @'
+<!-- judge-rulings
+- id: F1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+1000
+-->
+'@
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $veryHighPointsComment
+        $row.status | Should -Be 'passed' -Because 'P+1000 must not match the P+10 boundary pattern'
+    }
 }

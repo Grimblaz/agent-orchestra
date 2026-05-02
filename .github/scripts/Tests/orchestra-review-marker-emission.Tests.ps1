@@ -90,6 +90,30 @@ Describe 'orchestra-review marker emission contract' {
         $script:CodeReviewResponseShell | Should -Not -Match 'Return the Markdown score summary, `<!-- code-review-complete-\{PR\} -->`' -Because 'the Claude judge shell must not document the retired completion marker emission'
     }
 
+    It 'rejects a judge-rulings comment body that contains the sentinel token (ordering: they must be separate comments)' {
+        # L7 fix (issue #441 judge ruling): the sentinel <!-- review-judge-produced-{PR} -->
+        # must NEVER appear inside the judge-rulings YAML comment. They travel as two
+        # separate PR comments: sentinel first, then judge-rulings.
+        $invalidMixedBody = @"
+<!-- review-judge-produced-99 -->
+<!-- judge-rulings
+- id: F1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+10
+-->
+"@
+
+        $invalidMixedBody | Should -Match 'review-judge-produced-99' -Because 'fixture sanity check'
+        $invalidMixedBody | Should -Match 'judge-rulings' -Because 'fixture sanity check'
+
+        # The combined payload fails the same-payload contract because it mixes sentinel + rulings.
+        # Specifically: the judge-rulings comment must NOT contain the sentinel token.
+        $judgeRulingsSection = ($invalidMixedBody -split '<!-- judge-rulings')[1]
+        $judgeRulingsSection | Should -Not -Match 'review-judge-produced' `
+            -Because 'the judge-rulings comment body must not contain the sentinel token; they are separate PR comments'
+    }
+
     It 'requires the shared judge contract to keep score summary and rulings in the same payload (issue #441 Step 11)' {
         $script:ReviewJudgmentSkill | Should -Match 'judge-rulings' -Because 'the shared review-judgment skill must name the judge-rulings block explicitly'
         $script:ReviewJudgmentSkill | Should -Match 'Keep the Markdown score summary and the `judge-rulings` block together in the same response payload\.' -Because 'the shared skill must require the same-payload artifact contract'

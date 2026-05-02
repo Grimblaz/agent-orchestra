@@ -269,6 +269,88 @@ Describe 'Invoke-SymmetricBumpVerifier — state file persistence (Step 7a)' {
 }
 
 # ---------------------------------------------------------------------------
+# Section 3 — Missing-file and per-file drift evidence (M7 fix — issue #441)
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-SymmetricBumpVerifier — missing-file and per-file drift (M7 fix)' {
+
+    It 'returns status=failed when one manifest file is missing (deleted)' {
+        $root = $TestDrive
+        script:New-ManifestFixture -Root $root -Version '2.8.0'
+        # Delete plugin.json to simulate a missing manifest.
+        Remove-Item -Path (Join-Path $root 'plugin.json') -Force
+
+        $result = Invoke-SymmetricBumpVerifier -RepoRoot $root `
+            -TouchedFiles @('.claude-plugin/plugin.json')
+
+        $result.status | Should -Be 'failed'
+    }
+
+    It 'drift evidence includes the deleted file path in missing_files (symmetric_bump_credit)' {
+        $root = $TestDrive
+        script:New-ManifestFixture -Root $root -Version '2.8.0'
+        Remove-Item -Path (Join-Path $root 'plugin.json') -Force
+
+        $result = Invoke-SymmetricBumpVerifier -RepoRoot $root `
+            -TouchedFiles @('.claude-plugin/plugin.json')
+
+        # The missing_files entry in evidence (via symmetric_bump_credit.evidence) should mention
+        # the deleted file, OR the status should reflect the out-of-lockstep state.
+        $result.status | Should -Be 'failed'
+        $result.evidence | Should -Match 'plugin\.json|missing|drift'
+    }
+
+    It 'returns status=failed when one manifest file is at a different version than the others' {
+        $root = $TestDrive
+        script:New-ManifestFixture -Root $root -Version '2.8.0'
+        # README.md lags at the old version — per-file drift.
+        script:Write-ReadmeMd -Dir $root -Version '2.7.0'
+
+        $result = Invoke-SymmetricBumpVerifier -RepoRoot $root `
+            -TouchedFiles @('README.md', 'plugin.json')
+
+        $result.status | Should -Be 'failed'
+    }
+
+    It 'failed evidence names the specific drifting file in per-file drift' {
+        $root = $TestDrive
+        script:New-ManifestFixture -Root $root -Version '2.8.0'
+        # .github/plugin/marketplace.json lags.
+        script:Write-MarketplaceJson -Dir $root -RelPath '.github/plugin/marketplace.json' -Version '2.7.0'
+
+        $result = Invoke-SymmetricBumpVerifier -RepoRoot $root `
+            -TouchedFiles @('.github/plugin/marketplace.json')
+
+        $result.status   | Should -Be 'failed'
+        $result.evidence | Should -Match '\.github.plugin.marketplace\.json|drift'
+    }
+
+    It 'Get-SBVManifestVersions distinguishes file-missing from regex-incomplete in drift_details' {
+        $root = $TestDrive
+        # Create all manifests correctly, then write a broken plugin.json with no version field.
+        script:New-ManifestFixture -Root $root -Version '2.8.0'
+        Set-Content -Path (Join-Path $root 'plugin.json') -Value '{"name":"test"}' -Encoding UTF8
+
+        $result = Get-SBVManifestVersions -RepoRoot $root
+
+        # The result should be non-null (other files still provide versions).
+        $result | Should -Not -BeNullOrEmpty
+
+        # Drift details should have an entry for plugin.json with '(version pattern not found)'
+        # rather than '(file missing)'.
+        $pluginEntry = @($result.drift_details | Where-Object { $_.file -eq 'plugin.json' })
+        $pluginEntry.Count | Should -BeGreaterThan 0
+        $pluginEntry[0].found_versions | Should -Be '(version pattern not found)'
+
+        # The regex_incomplete_files list should include plugin.json.
+        $result.regex_incomplete_files | Should -Contain 'plugin.json'
+
+        # missing_files should NOT include plugin.json (it exists but is regex-incomplete).
+        $result.missing_files | Should -Not -Contain 'plugin.json'
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Section 3 — Merge-SymmetricBumpCreditToStateFile standalone
 # ---------------------------------------------------------------------------
 

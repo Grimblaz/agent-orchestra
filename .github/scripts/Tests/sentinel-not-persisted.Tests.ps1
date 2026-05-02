@@ -24,18 +24,6 @@ BeforeAll {
         return "## Summary`n`nA PR.`n`n$marker`n`n$SentinelComment"
     }
 
-    # PR body with sentinel, NO review credit.
-    $script:YamlNoReviewCredit = @'
-metrics_version: 4
-frame_version: 1
-credits:
-  - port: release-hygiene
-    adapter: symmetric-bump
-    status: passed
-    run_index: 1
-    evidence: "all manifests bumped"
-'@
-
     # PR body with sentinel AND review credit already present.
     $script:YamlWithReviewCredit = @'
 metrics_version: 4
@@ -110,6 +98,17 @@ Describe 'Test-ReviewSentinelPresent (Step 5a)' {
             [pscustomobject]@{ body = '<!-- review-judge-produced-100 -->' }
         )
         $result = Test-ReviewSentinelPresent -PrNumber 99 -Comments $comments
+        $result | Should -Be $false
+    }
+
+    It 'PrNumber=0 constructs token review-judge-produced-0 and does not match real-PR sentinels (L8 fix — issue #441)' {
+        # PrNumber=0 is not a valid GitHub PR number but the function must not blow up.
+        # The token would be <!-- review-judge-produced-0 --> which should not appear in practice.
+        $comments = @(
+            [pscustomobject]@{ body = '<!-- review-judge-produced-99 -->' }
+        )
+        # PrNumber=0 should not match the PR #99 sentinel.
+        $result = Test-ReviewSentinelPresent -PrNumber 0 -Comments $comments
         $result | Should -Be $false
     }
 }

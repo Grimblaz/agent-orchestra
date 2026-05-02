@@ -72,9 +72,10 @@ function script:Get-SBVManifestVersions {
         [string]$RepoRoot
     )
 
-    $allVersions     = [System.Collections.Generic.List[string]]::new()
-    $perFileVersions = [ordered]@{}
-    $missingFiles    = [System.Collections.Generic.List[string]]::new()
+    $allVersions          = [System.Collections.Generic.List[string]]::new()
+    $perFileVersions      = [ordered]@{}
+    $missingFiles         = [System.Collections.Generic.List[string]]::new()
+    $regexIncompleteFiles = [System.Collections.Generic.List[string]]::new()
 
     foreach ($manifest in $script:SBVManifests) {
         $fullPath = Join-Path $RepoRoot $manifest.RelPath
@@ -92,7 +93,10 @@ function script:Get-SBVManifestVersions {
 
         $matches = [regex]::Matches($content, $manifest.Pattern)
         if ($matches.Count -lt $manifest.Expected) {
-            $missingFiles.Add($manifest.RelPath)
+            # File is present but the version pattern did not match enough times.
+            # Track separately from truly absent files so drift_details can
+            # surface a distinct error signal (M3 fix — issue #441 judge ruling).
+            $regexIncompleteFiles.Add($manifest.RelPath)
             continue
         }
 
@@ -109,7 +113,7 @@ function script:Get-SBVManifestVersions {
 
     $distinct = @($allVersions | Sort-Object -Unique)
 
-    if ($distinct.Count -eq 1 -and $missingFiles.Count -eq 0) {
+    if ($distinct.Count -eq 1 -and $missingFiles.Count -eq 0 -and $regexIncompleteFiles.Count -eq 0) {
         return [pscustomobject]@{
             in_lockstep   = $true
             version       = $distinct[0]
@@ -130,15 +134,22 @@ function script:Get-SBVManifestVersions {
     foreach ($mf in $missingFiles) {
         $driftDetails.Add([pscustomobject]@{
             file           = $mf
-            found_versions = '(missing or unreadable)'
+            found_versions = '(file missing)'
+        })
+    }
+    foreach ($rf in $regexIncompleteFiles) {
+        $driftDetails.Add([pscustomobject]@{
+            file           = $rf
+            found_versions = '(version pattern not found)'
         })
     }
 
     return [pscustomobject]@{
-        in_lockstep   = $false
-        version       = $null
-        drift_details = @($driftDetails)
-        missing_files = @($missingFiles)
+        in_lockstep            = $false
+        version                = $null
+        drift_details          = @($driftDetails)
+        missing_files          = @($missingFiles)
+        regex_incomplete_files = @($regexIncompleteFiles)
     }
 }
 

@@ -9,6 +9,27 @@ After emitting the inherited v3 pipeline-metrics block, bump `metrics_version` t
 `credits[]` array and `frame_version: 1` using the canonical v4 schema from
 `frame/pipeline-metrics-v4-schema.md`. Credit rows are emitted at PR creation — not before.
 
+### Bash-Invoked Version Bump Fallback (C2 fix — issue #441 judge ruling)
+
+The PostToolUse hook fires only on `Edit`, `Write`, and `MultiEdit` tool calls
+(`matcher: "^(Edit|Write|MultiEdit)$"`). If `bump-version.ps1` is invoked via the
+`Bash` tool (e.g., `pwsh -NoProfile -File bump-version.ps1 -Version 2.8.0`), the
+hook does **not** fire automatically and the state file will not be populated.
+
+In this case, before creating the PR, explicitly trigger the symmetric-bump verifier
+to generate the state file:
+
+```powershell
+pwsh -NoProfile -NonInteractive -File "${CLAUDE_PLUGIN_ROOT}/skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1"
+```
+
+Or verify the state file exists and, if absent, call `Get-SBVManifestVersions` from
+`symmetric-bump-verifier.ps1` and write the symmetric-bump credit to the state file
+path (`.claude/.state/release-hygiene-{slug}.json`) before PR creation.
+
+After any Bash-invoked version bump, always confirm the state file exists and contains
+`symmetric_bump_credit` before running the "Reading the state file" steps below.
+
 ### Reading the state file
 
 Before creating the PR, determine the state-file slug using the same keying logic as

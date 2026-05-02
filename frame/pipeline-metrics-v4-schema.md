@@ -33,13 +33,13 @@ credits:
     adapter: symmetric-bump
     status: passed
     run_index: 1
-    evidence: "All four manifest files updated to the same version."
+    evidence: "All five manifest files updated to the same version."
     version-bump:
       from: "1.2.0"
       to: "1.3.0"
     symmetric-bump-verification:
       status: passed
-      files-checked: ["plugin.json", ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "README.md"]
+      files-checked: ["plugin.json", ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", ".github/plugin/marketplace.json", "README.md"]
   - port: post-fix-review
     adapter: post-fix
     status: not-applicable
