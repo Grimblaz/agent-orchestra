@@ -625,7 +625,7 @@ exit 99
             NoCache      = $true
         }
 
-        $result.ExitCode | Should -Be 0
+        $result.ExitCode | Should -Be 0 -Because "live audit window should succeed. Error: $($result.Error)"
 
         $defaultRender = & $script:Invoke @{
             Repo      = 'Grimblaz/agent-orchestra'
@@ -636,7 +636,7 @@ exit 99
             NoCache   = $true
         }
 
-        $defaultRender.ExitCode | Should -Be 0
+        $defaultRender.ExitCode | Should -Be 0 -Because "live audit window default render should succeed. Error: $($defaultRender.Error)"
         $defaultRender.Output | Should -Match '(?m)^Frame audit report \(audit-only\)\r?$'
         $defaultRender.Output | Should -Match '(?m)^Top post-pivot recommendations\r?$'
         $defaultRender.Output | Should -Not -Match '^\s*\{'

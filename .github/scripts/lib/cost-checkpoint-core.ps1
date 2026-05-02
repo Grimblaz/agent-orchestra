@@ -239,11 +239,18 @@ checkpoints: []
     # back correctly (it splits on the first `:` and Trim('"') leaves quotes
     # mid-value). Backslashes must be escaped first to avoid double-escaping
     # the replacement we add for quotes.
-    $escId = ($id -replace '\\', '\\\\') -replace '"', '\"'
-    $escTimestamp = ($timestamp -replace '\\', '\\\\') -replace '"', '\"'
-    $escSubIssue = ($subIssue -replace '\\', '\\\\') -replace '"', '\"'
-    $escReason = ($reason -replace '\\', '\\\\') -replace '"', '\"'
-    $escNote = ($note -replace '\\', '\\\\') -replace '"', '\"'
+    #
+    # Spawned-task fix: the replacement string `'\\'` is two literal backslashes
+    # (PowerShell single-quote does no escaping). In .NET regex replacement,
+    # `\` is NOT a special character — only `$` is — so `'\\'` outputs exactly
+    # two backslashes per match. The previous `'\\\\'` (four chars) output four
+    # backslashes per match, which the reader's `\\` → `\` unescape only halved,
+    # leaving each input `\` doubled after a round-trip.
+    $escId = ($id -replace '\\', '\\') -replace '"', '\"'
+    $escTimestamp = ($timestamp -replace '\\', '\\') -replace '"', '\"'
+    $escSubIssue = ($subIssue -replace '\\', '\\') -replace '"', '\"'
+    $escReason = ($reason -replace '\\', '\\') -replace '"', '\"'
+    $escNote = ($note -replace '\\', '\\') -replace '"', '\"'
 
     # Build YAML entry block
     $entryLines = [System.Collections.Generic.List[string]]::new()
@@ -285,9 +292,17 @@ checkpoints: []
 
     # Replace "checkpoints: []" with the new entry in the array, or append to existing array
     if ($existing -match 'checkpoints:\s*\[\s*\]') {
-        # Bootstrap case: replace empty array with list containing first entry
+        # Bootstrap case: replace empty array with list containing first entry.
+        # Fix issue #492 Step 2: escape $ in $replacement before passing to -replace.
+        # PowerShell's -replace operator treats $1, $&, $$ etc. as substitution
+        # metacharacters in the replacement string. Pre-escaping each $ to $$ means
+        # the outer -replace sees $$ (literal $) wherever the caller intended $.
+        # `'$$$$'` (4 chars) emits two $ — the inner -replace pass produces a $$
+        # for each input $, which the outer -replace then collapses back to a
+        # single $.
         $replacement = "checkpoints:`n$entryBlock"
-        $result = $existing -replace 'checkpoints:\s*\[\s*\]', $replacement
+        $escapedReplacement = $replacement -replace '\$', '$$$$'
+        $result = $existing -replace 'checkpoints:\s*\[\s*\]', $escapedReplacement
     }
     else {
         # Append case: add new entry before any trailing newlines at end of file

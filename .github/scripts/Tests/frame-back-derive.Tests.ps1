@@ -266,7 +266,7 @@ issue_number: 447
                 NoCache      = $true
             }
 
-            $result.ExitCode | Should -Be 0
+            $result.ExitCode | Should -Be 0 -Because "PR #$prNumber should derive cleanly. Error: $($result.Error)"
         }
     }
 }

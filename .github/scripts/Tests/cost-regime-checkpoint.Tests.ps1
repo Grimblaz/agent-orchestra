@@ -283,6 +283,13 @@ Describe 'cost-regime-checkpoint.ps1 CLI' {
                 [int]$TimeoutSeconds = 10,
                 [string]$RepoRoot = ''
             )
+            # AC2 (issue #492 Step 3): Capture whether the cache file existed at
+            # the moment this mock is invoked. Invoke-CostRegimeCheckpoint must
+            # delete the cache BEFORE calling Get-CostRollingHistory (M5 Step 1
+            # then Step 2). If that ordering is correct, the file is gone by the
+            # time we reach here and $global:cacheExistedAtFetch = $false.
+            $global:cacheExistedAtFetch = Test-Path -LiteralPath $CachePath
+
             # Simulate three entries: two from sub-issue #469, one unrelated.
             # Fix Pass1-F7: ports is now emitted as a hashtable keyed by port
             # name to match what production Get-CostRollingHistory returns
@@ -325,9 +332,11 @@ Describe 'cost-regime-checkpoint.ps1 CLI' {
         if (Get-Command 'Get-CostRollingHistory' -CommandType Function -ErrorAction SilentlyContinue) {
             Remove-Item -Path 'function:global:Get-CostRollingHistory' -ErrorAction SilentlyContinue
         }
+        # Clean up AC2 observation variable so it doesn't leak between tests.
+        Remove-Variable -Name cacheExistedAtFetch -Scope Global -ErrorAction SilentlyContinue
     }
 
-    It 'produces a correctly-shaped YAML entry (round-trip parse)' {
+    It 'produces a correctly-shaped YAML entry via the CLI (smoke check)' {
         if (-not (Get-Command Invoke-CostRegimeCheckpoint -ErrorAction SilentlyContinue)) {
             Set-ItResult -Skipped -Because 'Invoke-CostRegimeCheckpoint not loaded'
             return
@@ -369,9 +378,11 @@ Describe 'cost-regime-checkpoint.ps1 CLI' {
             -CacheFilePath $script:TmpCache `
             -RepoRoot $script:RepoRoot 6> $null
 
-        # The function must delete the cache file before calling Get-CostRollingHistory.
-        # After the run, the cache may or may not exist (the mock doesn't write one),
-        # but the checkpoint YAML should have been written — proving the flow ran.
+        # AC2 (issue #492): The function must delete the cache file BEFORE calling
+        # Get-CostRollingHistory. The mock records whether the cache existed at
+        # call time; $global:cacheExistedAtFetch must be $false to prove ordering.
+        $global:cacheExistedAtFetch | Should -Be $false -Because 'cache must be deleted before Get-CostRollingHistory is invoked'
+        # Checkpoint YAML should also have been written (flow completed).
         Test-Path $script:TmpYaml | Should -Be $true -Because 'function should have created the checkpoint file'
     }
 
@@ -412,5 +423,201 @@ Describe 'cost-regime-checkpoint.ps1 CLI' {
         # The exclusions block should record recent_count: 1 (default)
         $content | Should -Match 'recent_count'
         $content | Should -Match '1'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Describe: Round-trip — Add-RegimeCheckpoint <-> Get-MostRecentRegimeCheckpoint
+# (AC1 — issue #492 Step 1 RED)
+#
+# These tests write entries via Add-RegimeCheckpoint and read them back via
+# Get-MostRecentRegimeCheckpoint, asserting exact field-level round-trip
+# fidelity. Two cases:
+#   (a) Populated — edge values including regex-metachar strings ($1, $&, $$)
+#       that expose the bootstrap -replace substitution bug (issue #492 Step 2).
+#   (b) Empty-block — metrics = @{} / exclusions = @{} round-trip.
+#
+# RED phase: the populated case fails because Add-RegimeCheckpoint's bootstrap
+# path ($existing -replace '...', $replacement) silently mutates $1/$& in the
+# replacement string. GREEN after Step 2 escapes $ in $replacement.
+# ---------------------------------------------------------------------------
+
+Describe 'Round-trip: Add-RegimeCheckpoint and Get-MostRecentRegimeCheckpoint' {
+
+    It 'round-trip preserves all fields including regex-metachar values (populated case)' {
+        if (-not (Get-Command Add-RegimeCheckpoint -ErrorAction SilentlyContinue) -or
+            -not (Get-Command Get-MostRecentRegimeCheckpoint -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'core functions not loaded'
+            return
+        }
+
+        $tmpPath = Join-Path $TestDrive "rt-populated-$([System.Guid]::NewGuid().ToString('N')).yaml"
+
+        # --- Bootstrap call (entry 1) ---
+        # reason contains $1, $&, $$ — values that PowerShell's -replace operator
+        # treats as substitution metacharacters and will silently corrupt if not
+        # pre-escaped in the replacement string.
+        $entry1 = @{
+            id         = 'cp-rt-001'
+            timestamp  = '2026-01-01T10:00:00Z'
+            sub_issue  = '#492'
+            reason     = 'cost $1 savings: $& via regex $$double'
+            note       = ''
+            metrics    = @{ cost_usd = '0.05'; token_count = '1000' }
+            exclusions = @{ sub_issue = '#469'; recent_count = '1' }
+        }
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry1
+
+        # After bootstrap: most-recent must be entry1 with exact field values.
+        $after1 = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $after1 | Should -Not -BeNullOrEmpty
+        [string]$after1['id']        | Should -Be 'cp-rt-001'
+        [string]$after1['timestamp'] | Should -Be '2026-01-01T10:00:00Z'
+        [string]$after1['sub_issue'] | Should -Be '#492'
+        # Primary AC1 assertion: reason survives the bootstrap -replace boundary unmangled.
+        [string]$after1['reason']    | Should -Be 'cost $1 savings: $& via regex $$double'
+        # note not written when empty — key absent or null
+        [string]$after1['note']      | Should -BeNullOrEmpty
+        # metrics: per-key assertions (avoids hashtable ToString() false-positive)
+        $after1['metrics']                        | Should -BeOfType [hashtable]
+        $after1['metrics'].Keys.Count             | Should -Be 2
+        [string]$after1['metrics']['cost_usd']    | Should -Be '0.05'
+        [string]$after1['metrics']['token_count'] | Should -Be '1000'
+        # exclusions: per-key assertions
+        $after1['exclusions']                          | Should -BeOfType [hashtable]
+        $after1['exclusions'].Keys.Count               | Should -Be 2
+        [string]$after1['exclusions']['sub_issue']     | Should -Be '#469'
+        [string]$after1['exclusions']['recent_count']  | Should -Be '1'
+
+        # --- Append call (entry 2) ---
+        # newer timestamp; exercises the double-quote escape round-trip ("..." → \"...\" → "...").
+        # Backslash round-trip is covered by the dedicated 'single backslashes' test below.
+        $entry2 = @{
+            id         = 'cp-rt-002'
+            timestamp  = '2026-02-01T10:00:00Z'
+            sub_issue  = '#492'
+            reason     = 'append with "quoted text" in the reason'
+            note       = 'test note value'
+            metrics    = @{ delta_usd = '0.10' }
+            exclusions = @{ recent_count = '2' }
+        }
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry2
+
+        # After append: most-recent must now be entry2 (newer timestamp).
+        $after2 = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $after2 | Should -Not -BeNullOrEmpty
+        [string]$after2['id']        | Should -Be 'cp-rt-002'
+        [string]$after2['timestamp'] | Should -Be '2026-02-01T10:00:00Z'
+        [string]$after2['sub_issue'] | Should -Be '#492'
+        [string]$after2['reason']    | Should -Be 'append with "quoted text" in the reason'
+        [string]$after2['note']      | Should -Be 'test note value'
+        $after2['metrics'] | Should -BeOfType [hashtable]
+        [string]$after2['metrics']['delta_usd'] | Should -Be '0.10'
+        $after2['exclusions'] | Should -BeOfType [hashtable]
+        [string]$after2['exclusions']['recent_count'] | Should -Be '2'
+    }
+
+    It 'round-trip handles empty metrics and exclusions blocks (empty-block case)' {
+        if (-not (Get-Command Add-RegimeCheckpoint -ErrorAction SilentlyContinue) -or
+            -not (Get-Command Get-MostRecentRegimeCheckpoint -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'core functions not loaded'
+            return
+        }
+
+        $tmpPath = Join-Path $TestDrive "rt-empty-$([System.Guid]::NewGuid().ToString('N')).yaml"
+
+        # --- Bootstrap call with empty blocks ---
+        $entry1 = @{
+            id         = 'cp-empty-001'
+            timestamp  = '2026-03-01T00:00:00Z'
+            sub_issue  = ''
+            reason     = 'baseline snapshot'
+            metrics    = @{}
+            exclusions = @{}
+        }
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry1
+
+        $after1 = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $after1 | Should -Not -BeNullOrEmpty
+        [string]$after1['id']        | Should -Be 'cp-empty-001'
+        [string]$after1['timestamp'] | Should -Be '2026-03-01T00:00:00Z'
+        [string]$after1['reason']    | Should -Be 'baseline snapshot'
+        # sub_issue not written when empty — absent or null
+        [string]$after1['sub_issue'] | Should -BeNullOrEmpty
+        # metrics/exclusions: hashtable with zero keys
+        $after1['metrics']         | Should -BeOfType [hashtable]
+        $after1['metrics'].Count   | Should -Be 0
+        $after1['exclusions']      | Should -BeOfType [hashtable]
+        $after1['exclusions'].Count | Should -Be 0
+
+        # --- Append call with empty blocks ---
+        $entry2 = @{
+            id         = 'cp-empty-002'
+            timestamp  = '2026-04-01T00:00:00Z'
+            reason     = 'second snapshot'
+            metrics    = @{}
+            exclusions = @{}
+        }
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry2
+
+        $after2 = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $after2 | Should -Not -BeNullOrEmpty
+        [string]$after2['id']        | Should -Be 'cp-empty-002'
+        [string]$after2['timestamp'] | Should -Be '2026-04-01T00:00:00Z'
+        [string]$after2['reason']    | Should -Be 'second snapshot'
+        $after2['metrics'].Count    | Should -Be 0
+        $after2['exclusions'].Count | Should -Be 0
+    }
+
+    It 'round-trip preserves single backslashes in scalar values (writer escape parity)' {
+        # Spawned-task fix: the writer previously used `-replace '\\', '\\\\'`
+        # in cost-checkpoint-core.ps1, which produces 4 literal backslashes per
+        # input `\` because .NET regex replacement treats `\` as literal (only
+        # `$` is special). The reader unescapes pairs `\\` → `\`, so 4 in the
+        # file became 2 after read — net: each `\` doubled per round-trip.
+        # The fix changes the replacement to `'\\'` (2 backslashes literal) so
+        # one `\` becomes `\\` in YAML and `\` after read.
+        if (-not (Get-Command Add-RegimeCheckpoint -ErrorAction SilentlyContinue) -or
+            -not (Get-Command Get-MostRecentRegimeCheckpoint -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'core functions not loaded'
+            return
+        }
+
+        $tmpPath = Join-Path $TestDrive "rt-bs-$([System.Guid]::NewGuid().ToString('N')).yaml"
+
+        # Bootstrap call: backslashes in reason (typical case: a Windows-style path).
+        $entry1 = @{
+            id         = 'cp-bs-001'
+            timestamp  = '2026-05-01T00:00:00Z'
+            reason     = 'path\to\file'
+            metrics    = @{}
+            exclusions = @{}
+        }
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry1
+
+        # YAML on disk should contain exactly one `\\` escape per source `\`,
+        # i.e. `path\\to\\file` — not `path\\\\to\\\\file`.
+        $rawYaml = Get-Content -Path $tmpPath -Raw
+        $rawYaml | Should -Match 'reason: "path\\\\to\\\\file"' `
+            -Because 'YAML scalar must double each backslash exactly once for valid round-trip'
+
+        $after1 = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        $after1 | Should -Not -BeNullOrEmpty
+        [string]$after1['reason'] | Should -Be 'path\to\file' `
+            -Because 'round-trip must restore the original single-backslash value'
+
+        # Append call: backslashes in id and reason (multiple fields).
+        $entry2 = @{
+            id         = 'cp-bs\002'
+            timestamp  = '2026-06-01T00:00:00Z'
+            reason     = 'mixed \"quote\" and \backslash'
+            metrics    = @{}
+            exclusions = @{}
+        }
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry2
+
+        $after2 = Get-MostRecentRegimeCheckpoint -Path $tmpPath
+        [string]$after2['id']     | Should -Be 'cp-bs\002'
+        [string]$after2['reason'] | Should -Be 'mixed \"quote\" and \backslash'
     }
 }

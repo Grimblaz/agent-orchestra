@@ -44,6 +44,28 @@
     [string] The html_url of the upserted comment on success, or $null when
     any underlying gh call fails.
 #>
+
+# ---------------------------------------------------------------------------
+# Helper: Get-RestCommentId
+# (issue #492 Step 5 — hoisted from inside Find-OrUpsertComment per plan D9)
+#
+# Extracts the numeric REST comment ID from a comment object returned by
+# `gh issue view --json comments`. The GraphQL `id` field contains a node ID
+# string (e.g. IC_kwDO...) rather than the numeric REST ID required by the
+# PATCH endpoint. We extract the numeric ID from the `url` field when present
+# (the URL always ends in #issuecomment-<numeric-id>), falling back to a
+# direct [long] cast for callers that supply pre-resolved numeric IDs.
+#
+# Defined at file scope (not inside Find-OrUpsertComment) so that:
+#   - It is resolvable after dot-sourcing the library, without calling
+#     Find-OrUpsertComment first.
+#   - It can be tested independently via Get-Command and AST inspection.
+# ---------------------------------------------------------------------------
+function Get-RestCommentId([object]$c) {
+    if ($c.url -and ($c.url -match '#issuecomment-(\d+)$')) { return [long]$Matches[1] }
+    try { return [long]$c.id } catch { return $null }
+}
+
 function Find-OrUpsertComment {
     [CmdletBinding()]
     param(
@@ -123,17 +145,15 @@ function Find-OrUpsertComment {
     # 1+ matches: pick lowest REST (numeric) id, warn on duplicates.
     # gh issue view --json comments returns GraphQL node IDs (e.g. IC_kwDO...) in
     # the `id` field, not the numeric REST comment ID that the PATCH endpoint
-    # requires.  Extract the REST ID from the comment's `url` field when present
-    # (the URL always ends in #issuecomment-<numeric-id>), falling back to a
-    # direct [int] cast for callers that supply pre-resolved numeric IDs.
-    function script:Get-RestCommentId([object]$c) {
-        if ($c.url -and ($c.url -match '#issuecomment-(\d+)$')) { return [long]$Matches[1] }
-        try { return [long]$c.id } catch { return $null }
-    }
-
-    $sorted = @($matchedComments |
-            Where-Object { $null -ne (script:Get-RestCommentId $_) } |
-            Sort-Object -Property { script:Get-RestCommentId $_ })
+    # requires. Get-RestCommentId (hoisted to file scope in issue #492 Step 5)
+    # extracts the numeric ID from the comment's `url` field.
+    #
+    # Materialize (Comment, RestId) pairs up front to avoid calling
+    # Get-RestCommentId twice per entry in Where-Object + Sort-Object.
+    $pairs = @($matchedComments |
+        ForEach-Object { [PSCustomObject]@{ Comment = $_; RestId = Get-RestCommentId $_ } } |
+        Where-Object { $null -ne $_.RestId })
+    $sorted = @($pairs | Sort-Object -Property RestId)
     if ($sorted.Count -eq 0) {
         [Console]::Error.WriteLine("Find-OrUpsertComment: matched comment(s) have no resolvable REST id; posting new comment.")
         $verb = if ($Type -eq 'pr') { 'pr' } else { 'issue' }
@@ -144,10 +164,10 @@ function Find-OrUpsertComment {
         }
         return ($postOutput | Out-String).Trim()
     }
-    $target = $sorted[0]
-    $targetRestId = script:Get-RestCommentId $target
+    $target = $sorted[0].Comment
+    $targetRestId = $sorted[0].RestId
     if ($sorted.Count -gt 1) {
-        $dupIds = ($sorted | Select-Object -Skip 1 | ForEach-Object { script:Get-RestCommentId $_ }) -join ', '
+        $dupIds = ($sorted | Select-Object -Skip 1 | ForEach-Object { $_.RestId }) -join ', '
         [Console]::Error.WriteLine("Find-OrUpsertComment: multiple comments match marker '$Marker' (duplicates: $dupIds); patching earliest id $targetRestId")
     }
 

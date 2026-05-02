@@ -202,7 +202,9 @@ Some text after the block.
 AfterAll {
     # Remove global mock if it was installed
     if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
-        Remove-Item -Path 'function:global:gh' -ErrorAction SilentlyContinue
+        # The Function: PSDrive does not honor `global:` in the path — it would
+        # be parsed as a function NAME ('global:gh'). Use the bare 'gh' name.
+        Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
     }
 }
 
@@ -216,7 +218,9 @@ Describe 'Get-CostRollingHistory' {
     # Ensure no stale global:gh from a previous describe block leaks in
     BeforeAll {
         if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
-            Remove-Item -Path 'function:global:gh' -ErrorAction SilentlyContinue
+            # The Function: PSDrive does not honor `global:` in the path — it would
+            # be parsed as a function NAME ('global:gh'). Use the bare 'gh' name.
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
         }
     }
 
