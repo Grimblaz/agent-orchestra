@@ -131,4 +131,45 @@ Describe 'Code-Conductor inline commands contract' {
             $content | Should -Match '(?is)/review-github' -Because 'Code-Conductor.agent.md must mention /review-github command'
         }
     }
+
+    Context 'Code-Conductor.agent.md routing placement (issue #507 F1 regression)' {
+
+        It 'declares the Non-hub-mode invocation subsection' {
+            Test-Path $script:CodeConductorAgentPath | Should -BeTrue -Because 'agents/Code-Conductor.agent.md must exist'
+
+            $content = Get-Content -Path $script:CodeConductorAgentPath -Raw -ErrorAction Stop
+
+            $content | Should -Match '(?m)^####\s+Non-hub-mode invocation \(slash-command path\)\s*$' -Because 'Code-Conductor.agent.md must declare the Non-hub-mode invocation subsection'
+        }
+
+        It 'includes /code-conductor in the primary skip-hub-mode sentence' {
+            $content = Get-Content -Path $script:CodeConductorAgentPath -Raw -ErrorAction Stop
+
+            # Extract the main sentence (before "Exception:") that lists slash commands skipping hub mode
+            $skipHubSentencePattern = '(?s)Skip hub mode entirely when the user invokes a specific slash command.*?(?=Exception:|####|\z)'
+            $match = [regex]::Match($content, $skipHubSentencePattern)
+
+            $match.Success | Should -BeTrue -Because 'Code-Conductor.agent.md must contain the skip-hub-mode sentence'
+            $match.Value | Should -Match '/code-conductor' -Because 'The skip-hub-mode sentence must include /code-conductor in the examples list'
+        }
+
+        It 'excludes /code-conductor from the /orchestrate exception clause' {
+            $content = Get-Content -Path $script:CodeConductorAgentPath -Raw -ErrorAction Stop
+
+            # Find the paragraph containing "Skip hub mode entirely" through the next heading
+            $paragraphPattern = '(?s)Skip hub mode entirely.*?(?=\r?\n\r?\n####|\r?\n####)'
+            $match = [regex]::Match($content, $paragraphPattern)
+
+            $match.Success | Should -BeTrue -Because 'Code-Conductor.agent.md must contain the skip-hub-mode paragraph'
+
+            # Split on "Exception:" to isolate the exception clause (which re-enables hub mode for /orchestrate)
+            $sentenceAndException = $match.Value -split 'Exception:', 2
+
+            $sentenceAndException.Count | Should -BeGreaterThan 1 -Because 'The paragraph must contain an Exception clause'
+
+            # Verify /code-conductor does NOT appear in the exception clause (it should skip hub mode, not re-enable it)
+            $exceptionClause = $sentenceAndException[1]
+            $exceptionClause | Should -Not -Match '/code-conductor' -Because '/code-conductor must remain in skip-hub-mode list, not the hub-mode exception'
+        }
+    }
 }
