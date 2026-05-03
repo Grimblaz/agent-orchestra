@@ -947,6 +947,10 @@ function Test-FVAnyPathMatchesPredicate {
     return $false
 }
 
+# Cross-reference (issue #442): changeset.isPipelineEntryTrivial is a binary axis-pass
+# for pipeline-entry phases (<50 lines + <=3 files + no source touch);
+# Get-FVChangesetComplexity is a 4-tier/size categorization with a <10-line cutoff.
+# They coexist by design and are not interchangeable for recalibration.
 function Get-FVChangesetComplexity {
     param([Parameter(Mandatory)]$Changeset)
 
@@ -980,6 +984,7 @@ function Get-FVSupportedChangesetIdentifiers {
         'changeset.touchesCanvasSurface',
         'changeset.touchesApiSurface',
         'changeset.touchesPluginEntryPoint',
+        'changeset.isPipelineEntryTrivial',
         'changeset.totalLines',
         'changeset.complexity',
         'scope.isReReview',
@@ -1142,10 +1147,67 @@ function Resolve-FVChangesetIdentifierBoolean {
             $bool = [bool]$value
             return (New-FVEvaluationResult -Result ([string]$bool.ToString().ToLowerInvariant()))
         }
+        'changeset.isPipelineEntryTrivial' {
+            $result = Resolve-FVChangesetIsPipelineEntryTrivial -Changeset $Changeset
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $result))
+        }
         default {
             return $null
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-FVChangesetIsPipelineEntryTrivial (issue #442, Step 3a)
+#
+# Runtime resolver for the changeset.isPipelineEntryTrivial predicate.
+# Identifies small, safe pipeline-entry changesets that do not touch production
+# source code.
+#
+# Returns $true when ALL conditions hold:
+# - TotalLines < 50
+# - Changed file count <= 3
+# - Changeset does not touch source (uses existing changeset.touchesSource semantics: docs/tests/temp artifacts are non-source, everything else including workflow YAML is source)
+#
+# Cross-reference: Get-FVChangesetComplexity uses a <10-line cutoff for 'trivial'
+# as part of a 4-tier size categorization. isPipelineEntryTrivial is a binary
+# axis-pass for pipeline-entry phases with a <50-line threshold.
+# They coexist by design and are not interchangeable for recalibration.
+# ---------------------------------------------------------------------------
+function Resolve-FVChangesetIsPipelineEntryTrivial {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    # Check TotalLines < 50
+    $totalLinesRaw = Get-FVChangesetField -Changeset $Changeset -Name 'TotalLines'
+    $totalLines = 0
+    if ($null -ne $totalLinesRaw) {
+        $totalLines = [int]$totalLinesRaw
+    }
+    if ($totalLines -ge 50) { return $false }
+
+    # Check file count <= 3
+    $changedFiles = Get-FVChangedFiles -Changeset $Changeset
+    if ($changedFiles.Count -gt 3) { return $false }
+
+    # Check NOT changeset.touchesSource
+    # Reuses the existing changeset.touchesSource semantics exactly.
+    $paths = $changedFiles
+    $touchesSource = Test-FVAnyPathMatchesPredicate -Paths $paths -Predicate {
+        param($p)
+        # Apply base changeset.touchesSource exclusions
+        if (Test-FVPathIsDoc -Path $p) { return $false }
+        if (Test-FVPathIsTest -Path $p) { return $false }
+        if (Test-FVPathIsTempArtifact -Path $p) { return $false }
+        return $true
+    }
+
+    if ($touchesSource) { return $false }
+
+    return $true
 }
 
 function Resolve-FVCallNode {
