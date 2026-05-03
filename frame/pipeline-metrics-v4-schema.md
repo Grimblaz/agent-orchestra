@@ -51,6 +51,10 @@ credits:
   - port: experience
     status: passed
     evidence: "Short, audit-facing explanation of why the credit was assigned."
+  - port: ce-gate-cli
+    status: inconclusive
+    block_kind: environment
+    evidence: "CE Gate for cli surface blocked — no local Claude CLI binary in test runner."
   - port: process-retrospective
     status: inconclusive
     evidence: "Port pending decision per umbrella sub-issue #11."
@@ -85,9 +89,20 @@ Field notes:
 - `credits[].version-bump` (release-hygiene port) records the version range for which the bump was verified.
 - `credits[].symmetric-bump-verification` (release-hygiene port) records the symmetric-bump verifier result and file set checked.
 - `credits[].trigger` (post-fix-review port) records the predicate and its evaluated result.
-- `credits[].mode.synthetic-backfill` is present on rows produced by historical reconstruction (backfill). It carries two ISO-8601 UTC timestamps: `backfilled_at` (when the row was written to the PR body) and `original_pr_merged_at` (when the PR originally merged). Audit consumers use these to distinguish reconstructions from real-time emissions.
+- `credits[].mode.synthetic-backfill` is present on rows produced by historical reconstruction (backfill). It is a **nested object** (not a boolean) carrying two ISO-8601 UTC timestamps: `backfilled_at` (when the row was written to the PR body) and `original_pr_merged_at` (when the PR originally merged). Audit consumers use these to distinguish reconstructions from real-time emissions.
+- `credits[].block_kind` (CE Gate ports only) is present on rows with `status: inconclusive` that were blocked by an environmental or tooling constraint. Enum: `environment | tooling | runtime | orchestration`. This field is absent on `not-applicable`, `passed`, `failed`, and `skipped` rows, and on non-CE-Gate ports. Forward-emitted CE Gate `inconclusive` rows carry `block_kind`; back-derived `inconclusive` rows (from the synthetic back-deriver) do not, since the original blockage reason cannot be reconstructed.
 - `integrity_checks[]` captures audit provenance and confidence checks for the synthetic ledger. The same six-value status enum applies here.
 - Report-layer buckets preserve valid credit statuses, including a distinct `failed` bucket and `not-persisted` for detected-but-not-written review runs, while `missing` remains an absence bucket for ports with no credit entry.
+
+## Additive-Merge Rule (D9)
+
+When the back-deriver runs against a PR body that already contains a partial v4 `credits[]` block (i.e., some ports are present but not all twelve), the merge rule is:
+
+- **Back-deriver fills only absent ports.** If a port row already exists in the `credits[]` array, the back-deriver does not overwrite or duplicate it — that port's row is authoritative as written.
+- **Presence of a port row short-circuits back-derivation for that port only.** Other absent ports are still back-derived normally.
+- **No double-write.** The back-deriver never appends a second row for a port that already has at least one entry.
+
+This ensures forward-emitted rows (from specialist agents or pipeline-entry deferred emission) are preserved as-is while the back-deriver fills the gaps.
 
 ## Forward Compatibility
 
