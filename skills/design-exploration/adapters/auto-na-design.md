@@ -2,7 +2,7 @@
 name: auto-na-design
 provides: design
 suggested-next-step: none
-applies-when: changeset.complexity == 'trivial'
+applies-when: changeset.isPipelineEntryTrivial()
 ---
 
 # Auto N/A Design

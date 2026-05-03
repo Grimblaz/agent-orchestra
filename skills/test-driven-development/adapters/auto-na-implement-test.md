@@ -2,7 +2,7 @@
 name: auto-na-implement-test
 provides: implement-test
 suggested-next-step: none
-applies-when: not changeset.touchesTestableCode()
+applies-when: not changeset.touchesTestableCodeOrTests()
 ---
 
 # Auto N/A Implement Test

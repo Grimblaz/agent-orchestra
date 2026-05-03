@@ -2,7 +2,7 @@
 name: auto-na-experience
 provides: experience
 suggested-next-step: none
-applies-when: changeset.complexity == 'trivial'
+applies-when: changeset.isPipelineEntryTrivial()
 ---
 
 # Auto N/A Experience
