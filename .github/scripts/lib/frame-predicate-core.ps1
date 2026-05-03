@@ -985,6 +985,9 @@ function Get-FVSupportedChangesetIdentifiers {
         'changeset.touchesApiSurface',
         'changeset.touchesPluginEntryPoint',
         'changeset.isPipelineEntryTrivial',
+        'changeset.touchesTestableCodeOrTests',
+        'changeset.touchedAreaHasDebt',
+        'changeset.touchesBehaviorOrInterfaceDocsExtended',
         'changeset.totalLines',
         'changeset.complexity',
         'scope.isReReview',
@@ -1151,6 +1154,18 @@ function Resolve-FVChangesetIdentifierBoolean {
             $result = Resolve-FVChangesetIsPipelineEntryTrivial -Changeset $Changeset
             return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $result))
         }
+        'changeset.touchesTestableCodeOrTests' {
+            $result = Resolve-FVChangesetTouchesTestableCodeOrTests -Changeset $Changeset
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $result))
+        }
+        'changeset.touchedAreaHasDebt' {
+            $result = Resolve-FVChangesetTouchedAreaHasDebt -Changeset $Changeset
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $result))
+        }
+        'changeset.touchesBehaviorOrInterfaceDocsExtended' {
+            $result = Resolve-FVChangesetTouchesBehaviorOrInterfaceDocsExtended -Changeset $Changeset
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $result))
+        }
         default {
             return $null
         }
@@ -1208,6 +1223,106 @@ function Resolve-FVChangesetIsPipelineEntryTrivial {
     if ($touchesSource) { return $false }
 
     return $true
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-FVChangesetTouchesTestableCodeOrTests (issue #442, Step 3b)
+#
+# Returns $true when the changeset touches any *.ps1 file (source or test) OR
+# any file in a *Tests/* path. This is the union of testable-source and test-path
+# detection. Distinct from changeset.touchesTestableCode (shipped), which returns
+# true only for PS1 source files (excluding *Tests/* paths).
+# ---------------------------------------------------------------------------
+function Resolve-FVChangesetTouchesTestableCodeOrTests {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    $paths = Get-FVChangedFiles -Changeset $Changeset
+    foreach ($p in $paths) {
+        $s = [string]$p
+        if ($s -like '*.ps1') { return $true }
+        if (Test-FVPathIsTest -Path $s) { return $true }
+    }
+    return $false
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-FVChangesetTouchedAreaHasDebt (issue #442, Step 3c)
+#
+# Returns $true when the changeset touches a file whose lineCount exceeds the
+# threshold OR whose recorded cyclomatic complexity exceeds the threshold.
+# File-level metadata (lineCount, complexity) is supplied via the changeset's
+# FileMetadata field (an array of hashtables with Path, LineCount, MaxComplexity).
+# If FileMetadata is absent or empty, returns $false (no debt data = no debt
+# detected). Threshold defaults: lineCount=300, complexity=10.
+# ---------------------------------------------------------------------------
+function Resolve-FVChangesetTouchedAreaHasDebt {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]$Changeset,
+        [hashtable]$Threshold = @{ lineCount = 300; complexity = 10 }
+    )
+
+    $lineCountThreshold = if ($Threshold.ContainsKey('lineCount')) { [int]$Threshold['lineCount'] } else { 300 }
+    $complexityThreshold = if ($Threshold.ContainsKey('complexity')) { [int]$Threshold['complexity'] } else { 10 }
+
+    $fileMetadata = Get-FVChangesetField -Changeset $Changeset -Name 'FileMetadata'
+    if ($null -eq $fileMetadata) { return $false }
+
+    $metaArray = @($fileMetadata)
+    if ($metaArray.Count -eq 0) { return $false }
+
+    foreach ($meta in $metaArray) {
+        $lineCount = 0
+        $maxComplexity = 0
+
+        if ($meta -is [hashtable]) {
+            if ($meta.ContainsKey('LineCount')) { $lineCount = [int]$meta['LineCount'] }
+            if ($meta.ContainsKey('MaxComplexity')) { $maxComplexity = [int]$meta['MaxComplexity'] }
+        } else {
+            $lc = $meta.PSObject.Properties['LineCount']
+            if ($null -ne $lc) { $lineCount = [int]$lc.Value }
+            $mc = $meta.PSObject.Properties['MaxComplexity']
+            if ($null -ne $mc) { $maxComplexity = [int]$mc.Value }
+        }
+
+        if ($lineCount -gt $lineCountThreshold) { return $true }
+        if ($maxComplexity -gt $complexityThreshold) { return $true }
+    }
+    return $false
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-FVChangesetTouchesBehaviorOrInterfaceDocsExtended (issue #442, Step 3d)
+#
+# Returns $true when the changeset touches docs that carry behavioral or interface
+# intent: Documents/** design/decision docs, **/SKILL.md, **/*.agent.md,
+# commands/**/*.md, README.md, CLAUDE.md. Excludes other top-level *.md
+# (CHANGELOG.md, CONTRIBUTING.md, CUSTOMIZATION.md, etc.) and source *.ps1 files.
+# Distinct from changeset.changesBehaviorOrInterface (shipped — different semantics).
+# ---------------------------------------------------------------------------
+function Resolve-FVChangesetTouchesBehaviorOrInterfaceDocsExtended {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    $paths = Get-FVChangedFiles -Changeset $Changeset
+    foreach ($p in $paths) {
+        $s = [string]$p
+        if ($s -like 'Documents/*' -or $s -like 'Documents\*') { return $true }
+        if ($s -like '*/SKILL.md' -or $s -eq 'SKILL.md') { return $true }
+        if ($s -like '*.agent.md') { return $true }
+        if (($s -like 'commands/*' -or $s -like 'commands\*') -and $s -like '*.md') { return $true }
+        if ($s -eq 'README.md') { return $true }
+        if ($s -eq 'CLAUDE.md') { return $true }
+    }
+    return $false
 }
 
 function Resolve-FVCallNode {
