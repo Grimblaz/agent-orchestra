@@ -207,6 +207,145 @@ function script:ConvertFrom-FCLListSection {
     return $entries.ToArray()
 }
 
+# Split a list-of-mappings YAML section into per-entry raw line chunks.
+# Returns an array of strings, each containing the raw lines for one `- entry`.
+# Used for nested-field extraction (Findings 2 + 5: judge-score, integrity-check,
+# mode.synthetic-backfill that ConvertFrom-FCLListSection cannot represent).
+function script:Get-FCLEntryChunks {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Block,
+        [Parameter(Mandatory)][string]$SectionName
+    )
+
+    if ([string]::IsNullOrEmpty($Block)) { return @() }
+
+    $lines = script:ConvertTo-FCLNormalizedLines $Block
+    $chunks = [System.Collections.Generic.List[string]]::new()
+    $current = [System.Collections.Generic.List[string]]::new()
+    $inSection = $false
+    $sectionIndent = -1
+    $sectionPattern = '^(?<indent>\s*)' + [regex]::Escape($SectionName) + '\s*:\s*$'
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        if ($null -eq $line) { continue }
+
+        if (-not $inSection) {
+            $m = [regex]::Match($line, $sectionPattern)
+            if ($m.Success) {
+                $inSection = $true
+                $sectionIndent = $m.Groups['indent'].Value.Length
+            }
+            continue
+        }
+
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            if ($current.Count -gt 0) { [void]$current.Add($line) }
+            continue
+        }
+        $trimmed = $line.TrimStart()
+        $indent = $line.Length - $trimmed.Length
+
+        # End of section: same-or-lower indent non-list key.
+        if ($indent -le $sectionIndent -and -not $trimmed.StartsWith('-')) {
+            break
+        }
+
+        if ($trimmed.StartsWith('- ') -or $trimmed -eq '-') {
+            if ($current.Count -gt 0) {
+                [void]$chunks.Add(($current -join "`n"))
+                $current = [System.Collections.Generic.List[string]]::new()
+            }
+        }
+        [void]$current.Add($line)
+    }
+
+    if ($current.Count -gt 0) {
+        [void]$chunks.Add(($current -join "`n"))
+    }
+
+    # Return as a non-pipeline value to avoid PowerShell unwrapping the array
+    # to its individual elements (which @() at the call site would re-wrap into
+    # a flat array, not preserve the per-chunk structure).
+    return $chunks.ToArray()
+}
+
+# Build a dotted-key → scalar map from a single list-entry YAML chunk.
+# Handles arbitrary nesting depth driven by indentation. The leading "- " on
+# the first non-blank line is normalized so the entry-marker line aligns with
+# its sibling keys.
+#
+# Example chunk:
+#   - port: review
+#     mode:
+#       synthetic-backfill:
+#         backfilled_at: 2026-05-01T00:00:00Z
+#     judge-score:
+#       findings_sustained: 3
+#
+# Returns:
+#   @{
+#     'port' = 'review'
+#     'mode.synthetic-backfill.backfilled_at' = '2026-05-01T00:00:00Z'
+#     'judge-score.findings_sustained' = '3'
+#   }
+function script:Get-FCLChunkKeyMap {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Chunk)
+
+    $map = @{}
+    if ([string]::IsNullOrEmpty($Chunk)) { return $map }
+
+    $rawLines = $Chunk -split "`n"
+    # Normalize leading "- " entry marker to "  " so the first key aligns with siblings.
+    $lines = @($rawLines | ForEach-Object {
+            if ($_ -match '^(?<lead>\s*)-\s(?<rest>.*)$') {
+                "$($Matches['lead'])  $($Matches['rest'])"
+            }
+            else { $_ }
+        })
+
+    $stack = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($line in $lines) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $trimmed = $line.TrimStart()
+        if ($trimmed.StartsWith('#')) { continue }
+        $indent = $line.Length - $trimmed.Length
+
+        $kv = [regex]::Match($trimmed, '^(?<key>[A-Za-z0-9_-]+)\s*:\s*(?<value>.*)$')
+        if (-not $kv.Success) { continue }
+        $key = $kv.Groups['key'].Value
+        $val = $kv.Groups['value'].Value.Trim()
+
+        if ($val.Length -ge 2) {
+            $first = $val[0]; $last = $val[$val.Length - 1]
+            if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+                $val = $val.Substring(1, $val.Length - 2)
+            }
+        }
+
+        # Pop deeper-or-equal entries off the stack so we ascend back to the
+        # current indent's parent before recording the key.
+        while ($stack.Count -gt 0 -and $stack[$stack.Count - 1].Indent -ge $indent) {
+            $stack.RemoveAt($stack.Count - 1)
+        }
+
+        if ([string]::IsNullOrEmpty($val)) {
+            # Open a sub-block; push for descendants.
+            [void]$stack.Add(@{ Indent = $indent; Key = $key })
+        }
+        else {
+            $parts = @()
+            foreach ($s in $stack) { $parts += $s.Key }
+            $parts += $key
+            $dotted = $parts -join '.'
+            $map[$dotted] = $val
+        }
+    }
+
+    return $map
+}
+
 # endregion ---------------------------------------------------------------------
 
 # region: shared port-report helpers --------------------------------------------
@@ -272,8 +411,25 @@ function Read-PRMetricsBlock {
         $creditsRaw = script:ConvertFrom-FCLListSection -Block $block -SectionName 'credits' `
             -Fields @('port', 'adapter', 'status', 'run_index', 'evidence',
                       'mode_backfilled_at', 'mode_original_pr_merged_at')
-        $credits = @($creditsRaw | ForEach-Object {
-                $runIndexRaw = [string]$_.run_index
+
+        # Findings 2 + 5 (issue #441 follow-up): the flat-key parser cannot
+        # represent nested credit fields. Extract per-credit raw chunks here so
+        # the credit objects can carry nested data (mode.synthetic-backfill,
+        # judge-score, integrity-check, version-bump, symmetric-bump-verification)
+        # that real PR bodies emit per the v4 schema.
+        # Cast to [string[]] so a single-credit return value stays an array
+        # (PowerShell would otherwise unwrap a 1-element array to its scalar,
+        # making indexed access return characters of the string instead).
+        [string[]]$creditChunks = script:Get-FCLEntryChunks -Block $block -SectionName 'credits'
+        if ($null -eq $creditChunks) { $creditChunks = [string[]]@() }
+
+        $creditsList = [System.Collections.Generic.List[object]]::new()
+        for ($idx = 0; $idx -lt $creditsRaw.Count; $idx++) {
+                $entry = $creditsRaw[$idx]
+                $chunk = if ($idx -lt $creditChunks.Count) { [string]$creditChunks[$idx] } else { '' }
+                $nestedMap = if (-not [string]::IsNullOrEmpty($chunk)) { script:Get-FCLChunkKeyMap -Chunk $chunk } else { @{} }
+
+                $runIndexRaw = [string]$entry.run_index
                 $runIndexInt = $null
                 if (-not [string]::IsNullOrWhiteSpace($runIndexRaw)) {
                     $parsedRunIndex = 0
@@ -281,16 +437,60 @@ function Read-PRMetricsBlock {
                         $runIndexInt = $parsedRunIndex
                     }
                 }
-                [pscustomobject]@{
-                    Port                  = [string]$_.port
-                    Adapter               = [string]$_.adapter
-                    Status                = [string]$_.status
-                    RunIndex              = $runIndexInt
-                    Evidence              = [string]$_.evidence
-                    ModeBackfilledAt      = if ([string]::IsNullOrWhiteSpace([string]$_.mode_backfilled_at)) { $null } else { [string]$_.mode_backfilled_at }
-                    ModeOriginalPrMergedAt = if ([string]::IsNullOrWhiteSpace([string]$_.mode_original_pr_merged_at)) { $null } else { [string]$_.mode_original_pr_merged_at }
+
+                # Resolve nested-or-flat backfill timestamps. Nested form
+                # (`mode.synthetic-backfill.backfilled_at`) matches the schema
+                # and real PR bodies; flat form (`mode_backfilled_at`) is kept
+                # for backward compatibility with older test fixtures.
+                $backfilledAt = $nestedMap['mode.synthetic-backfill.backfilled_at']
+                if ([string]::IsNullOrWhiteSpace([string]$backfilledAt)) { $backfilledAt = [string]$entry.mode_backfilled_at }
+                $originalMergedAt = $nestedMap['mode.synthetic-backfill.original_pr_merged_at']
+                if ([string]::IsNullOrWhiteSpace([string]$originalMergedAt)) { $originalMergedAt = [string]$entry.mode_original_pr_merged_at }
+
+                # Build judge-score sub-object when any judge-score.* key is present.
+                $judgeScoreKeys = @($nestedMap.Keys | Where-Object { $_ -like 'judge-score.*' })
+                $judgeScore = $null
+                if ($judgeScoreKeys.Count -gt 0) {
+                    $jsMap = [ordered]@{}
+                    foreach ($k in $judgeScoreKeys) {
+                        $leaf = $k.Substring('judge-score.'.Length)
+                        $jsMap[$leaf] = $nestedMap[$k]
+                    }
+                    $judgeScore = [pscustomobject]$jsMap
                 }
-            })
+
+                # integrity-check is a scalar in real PR bodies (e.g. `integrity-check: pass`).
+                $integrityCheck = $nestedMap['integrity-check']
+                if ([string]::IsNullOrWhiteSpace([string]$integrityCheck)) { $integrityCheck = $null }
+
+                # version-bump may be a scalar (`version-bump: "2.7.0 to 2.8.0"`) or
+                # nested (`version-bump.from`, `version-bump.to`). Surface whichever shape exists.
+                $versionBump = $nestedMap['version-bump']
+                $versionBumpFrom = $nestedMap['version-bump.from']
+                $versionBumpTo = $nestedMap['version-bump.to']
+
+                $sbvStatus = $nestedMap['symmetric-bump-verification']
+                if ([string]::IsNullOrWhiteSpace([string]$sbvStatus)) {
+                    $sbvStatus = $nestedMap['symmetric-bump-verification.status']
+                }
+
+                [void]$creditsList.Add([pscustomobject]@{
+                    Port                          = [string]$entry.port
+                    Adapter                       = [string]$entry.adapter
+                    Status                        = [string]$entry.status
+                    RunIndex                      = $runIndexInt
+                    Evidence                      = [string]$entry.evidence
+                    ModeBackfilledAt              = if ([string]::IsNullOrWhiteSpace([string]$backfilledAt)) { $null } else { [string]$backfilledAt }
+                    ModeOriginalPrMergedAt        = if ([string]::IsNullOrWhiteSpace([string]$originalMergedAt)) { $null } else { [string]$originalMergedAt }
+                    JudgeScore                    = $judgeScore
+                    IntegrityCheck                = $integrityCheck
+                    VersionBump                   = if ([string]::IsNullOrWhiteSpace([string]$versionBump)) { $null } else { [string]$versionBump }
+                    VersionBumpFrom               = if ([string]::IsNullOrWhiteSpace([string]$versionBumpFrom)) { $null } else { [string]$versionBumpFrom }
+                    VersionBumpTo                 = if ([string]::IsNullOrWhiteSpace([string]$versionBumpTo)) { $null } else { [string]$versionBumpTo }
+                    SymmetricBumpVerificationStatus = if ([string]::IsNullOrWhiteSpace([string]$sbvStatus)) { $null } else { [string]$sbvStatus }
+                })
+        }
+        $credits = @($creditsList.ToArray())
 
         # Integrity check entries may use either 'name' or 'check' as the identifier key.
         $integrityRaw = script:ConvertFrom-FCLListSection -Block $block -SectionName 'integrity_checks' -Fields @('name', 'check', 'status', 'evidence')
@@ -352,12 +552,22 @@ function Resolve-NotPersistedSynthesis {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][int]$PrNumber,
-        [Parameter(Mandatory)]$MetricsBlock,
+        [Parameter(Mandatory)][AllowNull()]$MetricsBlock,
         [AllowEmptyCollection()][AllowNull()][object[]]$Comments
     )
 
+    # Guard: only synthesize for valid v4 metrics blocks. Pre-v4, parse-error,
+    # or missing blocks do not have a Credits property and would throw
+    # PropertyNotFoundException under strict mode.
+    if ($null -eq $MetricsBlock) { return $null }
+    if ($null -ne $MetricsBlock.PSObject.Properties['MetricsVersion']) {
+        $mv = [string]$MetricsBlock.MetricsVersion
+        if ($mv -eq 'parse-error' -or $mv -eq 'pre-v4') { return $null }
+    }
+
     # Guard: a review credit already exists — do not synthesize.
-    $existingReviewCredit = @($MetricsBlock.Credits | Where-Object { [string]$_.Port -eq 'review' })
+    $existingCredits = if ($null -ne $MetricsBlock.PSObject.Properties['Credits']) { @($MetricsBlock.Credits) } else { @() }
+    $existingReviewCredit = @($existingCredits | Where-Object { [string]$_.Port -eq 'review' })
     if ($existingReviewCredit.Count -gt 0) { return $null }
 
     # Check sentinel presence.
@@ -853,10 +1063,12 @@ function Compose-Comment {
                 $nextStep = [string]$r.SuggestedNextStep
             }
 
-            # Escape pipe characters in cell content to avoid table breakage.
-            $portName  = $portName  -replace '\|', '\|'
-            $evidence  = $evidence  -replace '\|', '\|'
-            $nextStep  = $nextStep  -replace '\|', '\|'
+            # Escape pipe characters and convert newlines to <br> in cell content
+            # to avoid Markdown table row breakage. Multi-line evidence (e.g., from
+            # Build-ReviewCreditRow) would otherwise terminate the table prematurely.
+            $portName  = ($portName  -replace '\|', '\|') -replace "`r`n", '<br>' -replace "`n", '<br>' -replace "`r", '<br>'
+            $evidence  = ($evidence  -replace '\|', '\|') -replace "`r`n", '<br>' -replace "`n", '<br>' -replace "`r", '<br>'
+            $nextStep  = ($nextStep  -replace '\|', '\|') -replace "`r`n", '<br>' -replace "`n", '<br>' -replace "`r", '<br>'
 
             [void]$sb.AppendLine("| $portName | $statusCell | $evidence | $nextStep |")
         }

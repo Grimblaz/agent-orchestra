@@ -778,6 +778,193 @@ credits:
         $credit.ModeOriginalPrMergedAt | Should -Be '2025-03-15T12:34:56Z'
     }
 
+    # -------------------------------------------------------------------------
+    # Nested-field parsing (issue #441 follow-up — Gemini findings 2 + 5)
+    # -------------------------------------------------------------------------
+    # Real PR bodies emit credit metadata using the nested form documented in
+    # frame/pipeline-metrics-v4-schema.md (e.g. mode.synthetic-backfill,
+    # judge-score, integrity-check, version-bump, symmetric-bump-verification).
+    # The flat-key fallback is kept for backward compatibility; the nested form
+    # must round-trip cleanly through Read-PRMetricsBlock.
+
+    It 'parses nested mode.synthetic-backfill keys (real-PR schema shape)' {
+        $nestedYaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: passed
+    run_index: 1
+    evidence: "review credit"
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-01T00:00:00Z
+        original_pr_merged_at: 2026-04-25T00:26:35Z
+'@
+        $body = & $script:NewV4PrBody -Yaml $nestedYaml
+        $result = Read-PRMetricsBlock -PrBody $body
+        $credit = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $credit | Should -Not -BeNullOrEmpty
+        $credit.ModeBackfilledAt | Should -Be '2026-05-01T00:00:00Z'
+        $credit.ModeOriginalPrMergedAt | Should -Be '2026-04-25T00:26:35Z'
+    }
+
+    It 'parses judge-score sub-block on a credit row (Gemini Finding 2)' {
+        $yaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: passed
+    run_index: 1
+    evidence: "review credit"
+    judge-score:
+      findings_sustained: 3
+      prosecutor_points: 20
+      defense_points: 0
+'@
+        $body = & $script:NewV4PrBody -Yaml $yaml
+        $result = Read-PRMetricsBlock -PrBody $body
+        $credit = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $credit.JudgeScore | Should -Not -BeNullOrEmpty
+        $credit.JudgeScore.findings_sustained | Should -Be '3'
+        $credit.JudgeScore.prosecutor_points  | Should -Be '20'
+        $credit.JudgeScore.defense_points     | Should -Be '0'
+    }
+
+    It 'parses integrity-check scalar field on a credit row (Gemini Finding 2)' {
+        $yaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: passed
+    run_index: 1
+    evidence: "review credit"
+    integrity-check: pass
+'@
+        $body = & $script:NewV4PrBody -Yaml $yaml
+        $result = Read-PRMetricsBlock -PrBody $body
+        $credit = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $credit.IntegrityCheck | Should -Be 'pass'
+    }
+
+    It 'parses version-bump and symmetric-bump-verification fields on release-hygiene credit' {
+        $yaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: release-hygiene
+    adapter: symmetric-bump
+    status: passed
+    run_index: 1
+    evidence: "version bump 2.7.0 to 2.8.0"
+    version-bump: 2.7.0 to 2.8.0
+    symmetric-bump-verification: passed
+'@
+        $body = & $script:NewV4PrBody -Yaml $yaml
+        $result = Read-PRMetricsBlock -PrBody $body
+        $credit = $result.Credits | Where-Object { $_.Port -eq 'release-hygiene' }
+        $credit.VersionBump | Should -Be '2.7.0 to 2.8.0'
+        $credit.SymmetricBumpVerificationStatus | Should -Be 'passed'
+    }
+
+    It 'splits per-credit chunks correctly (each credit gets only its own nested fields)' {
+        $yaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: passed
+    run_index: 1
+    evidence: "review credit"
+    judge-score:
+      findings_sustained: 1
+  - port: release-hygiene
+    adapter: symmetric-bump
+    status: passed
+    run_index: 1
+    evidence: "release-hygiene credit"
+    version-bump: 2.7.0 to 2.8.0
+'@
+        $body = & $script:NewV4PrBody -Yaml $yaml
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        $review = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $rh = $result.Credits | Where-Object { $_.Port -eq 'release-hygiene' }
+
+        # Review carries judge-score but NOT version-bump.
+        $review.JudgeScore | Should -Not -BeNullOrEmpty
+        $review.VersionBump | Should -BeNullOrEmpty
+
+        # Release-hygiene carries version-bump but NOT judge-score.
+        $rh.VersionBump | Should -Be '2.7.0 to 2.8.0'
+        $rh.JudgeScore | Should -BeNullOrEmpty
+    }
+
+    # -------------------------------------------------------------------------
+    # Defensive guard (Gemini Finding 1)
+    # -------------------------------------------------------------------------
+
+    It 'Resolve-NotPersistedSynthesis returns null when MetricsBlock is null' {
+        $result = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $null -Comments @(
+            [pscustomobject]@{ body = '<!-- review-judge-produced-99 -->' }
+        )
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'Resolve-NotPersistedSynthesis returns null when MetricsBlock is parse-error' {
+        $parseError = [pscustomobject]@{ MetricsVersion = 'parse-error'; Reason = 'malformed' }
+        $result = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $parseError -Comments @(
+            [pscustomobject]@{ body = '<!-- review-judge-produced-99 -->' }
+        )
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'Resolve-NotPersistedSynthesis returns null when MetricsBlock is pre-v4' {
+        $preV4 = [pscustomobject]@{ MetricsVersion = 'pre-v4' }
+        $result = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $preV4 -Comments @(
+            [pscustomobject]@{ body = '<!-- review-judge-produced-99 -->' }
+        )
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'Resolve-NotPersistedSynthesis tolerates MetricsBlock without a Credits property under strict mode' {
+        # A v4 metrics block missing the Credits property must not throw
+        # PropertyNotFoundException — instead, treat as no existing review credit.
+        $skinnyV4 = [pscustomobject]@{ MetricsVersion = 4; FrameVersion = 1 }  # No Credits
+        $comments = @(
+            [pscustomobject]@{ body = '<!-- review-judge-produced-99 -->'; url = 'https://example/c1' }
+        )
+        $result = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $skinnyV4 -Comments $comments
+        $result | Should -Not -BeNullOrEmpty
+        $result.Status | Should -Be 'not-persisted'
+    }
+
+    # -------------------------------------------------------------------------
+    # Markdown table newline escape (Gemini Finding 4)
+    # -------------------------------------------------------------------------
+
+    It 'Compose-Comment escapes literal newlines in evidence to <br> so table rows survive' {
+        $reports = @(
+            [pscustomobject]@{
+                PortName          = 'review'
+                Status            = 'NotApplicable'
+                SubReason         = 'PassedCredit'
+                Evidence          = "first line`nsecond line`r`nthird line"
+                SuggestedNextStep = $null
+            }
+        )
+        $output = Compose-Comment -MarkerToken 'frame-credit-ledger-99' -PortReports $reports
+        # Both \n and \r\n should be replaced with <br> so the row is a single Markdown line.
+        $output | Should -Match 'first line<br>second line<br>third line'
+        $output | Should -Not -Match "first line`nsecond line"
+    }
+
     It 'Select-LastCreditByRunIndex: when multiple credits exist for same (port, adapter), returns the one with the highest run_index' {
         $body = & $script:NewV4PrBody -Yaml $script:V4MultiRunYaml
         $result = Read-PRMetricsBlock -PrBody $body
