@@ -1544,3 +1544,171 @@ function Build-PostPrCreditRow {
         evidence = $resolvedEvidence
     }
 }
+
+function Invoke-CreditInputHarvest {
+    <#
+    .SYNOPSIS
+        Harvests credit-input deferred-emission markers from a GitHub issue's comments
+        and returns an array of credit rows, one per recognized port (SMC-17).
+
+    .DESCRIPTION
+        For each pipeline-entry port (experience, design, plan), scans the issue's
+        comment thread for a <!-- credit-input-{port}-{ID} --> marker, parses the
+        YAML payload, and calls the matching Build-*CreditRow with the parsed evidence.
+
+        Read-after-write retry: if an upstream completion marker is present but the
+        matching credit-input marker is absent, retries up to MaxRetries times with
+        exponential backoff starting at InitialBackoffSec seconds.
+
+        When -InMemoryMarkers is supplied (array of raw marker text strings from
+        same-conversation post calls), those texts are parsed directly without gh
+        API calls for the ports they cover.
+
+    .PARAMETER IssueNumber
+        The GitHub issue number to scan.
+
+    .PARAMETER Repo
+        The repository in owner/name format (e.g., Grimblaz/agent-orchestra).
+
+    .PARAMETER GhCliPath
+        Optional path to the gh CLI executable. Defaults to 'gh'.
+
+    .PARAMETER InMemoryMarkers
+        Optional array of raw marker text strings to parse directly (bypasses gh).
+
+    .PARAMETER MaxRetries
+        Maximum retry attempts when a completion marker is present but credit-input
+        marker is absent. Defaults to 3.
+
+    .PARAMETER InitialBackoffSec
+        Initial backoff in seconds for the first retry. Doubles each retry. Defaults to 1.
+
+    .OUTPUTS
+        Array of credit-row pscustomobject values (same shape as Build-*CreditRow output).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$IssueNumber,
+
+        [Parameter(Mandatory)]
+        [string]$Repo,
+
+        [string]$GhCliPath = 'gh',
+
+        [string[]]$InMemoryMarkers = @(),
+
+        [int]$MaxRetries = 3,
+
+        [double]$InitialBackoffSec = 1
+    )
+
+    $script:PipelineEntryPorts = @('experience', 'design', 'plan')
+
+    $script:CompletionMarkerByPort = @{
+        'experience' = "<!-- experience-owner-complete-$IssueNumber -->"
+        'design'     = "<!-- design-phase-complete-$IssueNumber -->"
+        'plan'       = "<!-- plan-issue-$IssueNumber -->"
+    }
+
+    $script:BuilderByPort = @{
+        'experience' = 'Build-ExperienceCreditRow'
+        'design'     = 'Build-DesignCreditRow'
+        'plan'       = 'Build-PlanCreditRow'
+    }
+
+    function script:Parse-SingleCreditInputMarker {
+        param([string]$Text)
+
+        if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+        if ($Text -notmatch '```yaml\s*([\s\S]*?)```') { return $null }
+
+        $yaml = $Matches[1].Trim()
+        $result = @{}
+        foreach ($line in ($yaml -split '\r?\n')) {
+            if ($line -match '^\s*(\w+)\s*:\s*"?(.*?)"?\s*$') {
+                $result[$Matches[1]] = $Matches[2].Trim('"').Trim()
+            }
+        }
+
+        if (-not $result.ContainsKey('port') -or [string]::IsNullOrWhiteSpace($result['port'])) {
+            return $null
+        }
+
+        return $result
+    }
+
+    function script:Get-IssueComments {
+        param([string]$IssueNum, [string]$RepoArg, [string]$Gh)
+
+        $raw = & $Gh issue view $IssueNum --repo $RepoArg --json comments --paginate 2>$null
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) { return @() }
+
+        try {
+            $parsed = $raw | ConvertFrom-Json
+            return @($parsed.comments | ForEach-Object { $_.body })
+        } catch {
+            return @()
+        }
+    }
+
+    # Build lookup from in-memory markers (port → payload hashtable)
+    $inMemoryByPort = @{}
+    foreach ($markerText in $InMemoryMarkers) {
+        $parsed = script:Parse-SingleCreditInputMarker -Text $markerText
+        if ($null -ne $parsed -and $parsed.ContainsKey('port')) {
+            $inMemoryByPort[$parsed['port']] = $parsed
+        }
+    }
+
+    $results = @()
+
+    foreach ($port in $script:PipelineEntryPorts) {
+        # Use in-memory marker when available (bypasses gh for this port)
+        if ($inMemoryByPort.ContainsKey($port)) {
+            $payload = $inMemoryByPort[$port]
+            $evidence = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
+            $builderName = $script:BuilderByPort[$port]
+            if (Get-Command $builderName -ErrorAction SilentlyContinue) {
+                $results += & $builderName -MarkerPresent $true -IssueNumber ([int]$IssueNumber) -Evidence $evidence
+            }
+            continue
+        }
+
+        # Fetch from gh with retry
+        $completionMarker = $script:CompletionMarkerByPort[$port]
+        $creditMarkerPrefix = "<!-- credit-input-$port-$IssueNumber"
+
+        $payload = $null
+        $attempt = 0
+        $backoff = $InitialBackoffSec
+
+        while ($attempt -le $MaxRetries) {
+            $comments = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
+            $completionPresent = $comments | Where-Object { $_ -like "*$completionMarker*" }
+            $creditComment = $comments | Where-Object { $_ -like "*$creditMarkerPrefix*" } | Select-Object -First 1
+
+            if ($null -ne $creditComment) {
+                $payload = script:Parse-SingleCreditInputMarker -Text $creditComment
+                break
+            }
+
+            # Only retry when the completion marker is present but credit-input is absent
+            if ($null -eq $completionPresent -or $attempt -ge $MaxRetries) { break }
+
+            Start-Sleep -Seconds $backoff
+            $backoff *= 2
+            $attempt++
+        }
+
+        if ($null -ne $payload) {
+            $evidence = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
+            $builderName = $script:BuilderByPort[$port]
+            if (Get-Command $builderName -ErrorAction SilentlyContinue) {
+                $results += & $builderName -MarkerPresent $true -IssueNumber ([int]$IssueNumber) -Evidence $evidence
+            }
+        }
+    }
+
+    return $results
+}
