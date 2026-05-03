@@ -19,11 +19,9 @@ In Claude Code, `/orchestrate` is also the resume entry point for paused Code-Co
 2. For each resolved issue, check the issue's comments/timeline for the smart-resume markers `<!-- plan-issue-{ID} -->`, `<!-- design-issue-{ID} -->`, `<!-- design-phase-complete-{ID} -->`, and `<!-- experience-owner-complete-{ID} -->`; SMC-08 governs these durable phase-completion markers.
 3. If any resolved issue is missing its `<!-- plan-issue-{ID} -->` marker, do not block dispatch. Carry the resolved issue list and marker status into the inline orchestration context so Code-Conductor can either resume from the most advanced durable artifact available or continue fresh hub-mode execution and call Issue-Planner itself. SMC-01 governs the plan-marker resume path, and SMC-03 governs the design fallback chain: parent dispatch context when available, latest durable `<!-- design-issue-{ID} -->` issue comment, then issue body. Include whether a durable `<!-- design-issue-{ID} -->` handoff already exists for D9 suppression and full-pipeline resume.
 
-## Pre-flight (session-startup + provenance-gate)
+## Pre-flight (session-startup)
 
 Load `skills/session-startup/SKILL.md` and follow Steps 4, 6, 7b, and 9 (paired body for Step 9: `agents/Code-Conductor.agent.md`).
-
-Then load `skills/provenance-gate/SKILL.md` and follow its protocol for any GitHub-issue-referencing argument.
 
 ### Step 9 — Paired-body halt-on-fail
 

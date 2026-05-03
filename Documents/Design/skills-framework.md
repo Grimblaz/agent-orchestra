@@ -30,7 +30,7 @@ Issue #344 changes the skills boundary from "skills are reference material" to "
 - Agents keep orchestration: user-turn routing, handoffs, trigger placement, step ordering, commit decisions, issue-state transitions, and any identity-level stance that defines the agent's role.
 - Skills keep methodology: reusable protocols, checklists, questioning patterns, validation ladders, evidence contracts, and decision heuristics that can be loaded by multiple agents.
 - Concrete examples: the Code-Conductor step loop, CE Gate orchestration, and defect routing remain agent-owned; the validation ladder and review-reconciliation method move to skills. Test-Writer keeps delegation flow in the agent while shared testing method consolidates into `test-driven-development`.
-- Portable trigger skills such as `session-startup`, `provenance-gate`, and `terminal-hygiene` remain skills; the logic for when an agent invokes them stays in the owning agent.
+- Portable trigger skills such as `session-startup`, `upstream-onboarding`, and `terminal-hygiene` remain skills; the logic for when an agent invokes them stays in the owning agent.
 - `guidance-complexity` stays agent-only in this issue. It remains an architecture check enforced from agent/instruction surfaces rather than becoming a skill.
 
 ---
@@ -57,7 +57,6 @@ Issue #344 changes the skills boundary from "skills are reference material" to "
 | `process-analysis` | `.github/skills/process-analysis/` | Reusable retrospective and process-analysis methodology for workflow reviews |
 | `process-troubleshooting` | `.github/skills/process-troubleshooting/` | Five-scenario workflow troubleshooting guide for diagnosing common orchestration failure patterns |
 | `property-based-testing` | `.github/skills/property-based-testing/` | Incremental rollout policy for property-based testing that preserves readable example-based tests |
-| `provenance-gate` | `.github/skills/provenance-gate/` | First-contact issue-framing assessment for cold pickups |
 | `refactoring-methodology` | `.github/skills/refactoring-methodology/` | Proactive refactoring workflow for touched files and nearby debt |
 | `research-methodology` | `.github/skills/research-methodology/` | Evidence-driven research methodology for technical analysis and recommendation building |
 | `review-judgment` | `.github/skills/review-judgment/` | Reusable single-shot review judgment methodology for scoring prosecution and defense ledgers |

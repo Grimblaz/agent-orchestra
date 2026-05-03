@@ -47,9 +47,7 @@ You are a meticulous strategist who leaves nothing to chance. Every step in your
 
 ## Process
 
-When this user-invocable agent receives a request referencing an existing GitHub issue, load the `provenance-gate` skill and follow its protocol.
-
-After `provenance-gate` completes a non-stop outcome, load `skills/upstream-onboarding/SKILL.md` and follow its protocol.
+When this user-invocable agent receives a request referencing an existing GitHub issue, load `skills/upstream-onboarding/SKILL.md` and follow its protocol.
 
 Cycle through the phases below iteratively based on user input.
 
