@@ -139,6 +139,64 @@ function Test-FBDReviewFindingDetail {
     )
 }
 
+function Get-FBDExistingCredits {
+    # D9 additive-merge: parse the credits: section from the pipeline-metrics block.
+    # Returns an ordered hashtable of port → credit-row for all ports already present.
+    # Callers skip back-derivation for any port found here and preserve the row as-is.
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$MetricsBlock)
+
+    $result = [ordered]@{}
+
+    if ([string]::IsNullOrWhiteSpace($MetricsBlock)) {
+        return $result
+    }
+
+    # Extract the indented block that follows "credits:"
+    $creditsMatch = [regex]::Match($MetricsBlock, '(?ms)^\s*credits\s*:\s*\r?\n(?<section>(?:[ \t]{2,}[^\r\n]*\r?\n?)*)')
+    if (-not $creditsMatch.Success) {
+        return $result
+    }
+
+    $section = $creditsMatch.Groups['section'].Value
+
+    # Split into individual items on "  - port:" boundaries; each item starts with the port value
+    $itemParts = [regex]::Split($section, '(?m)^[ \t]{2}-[ \t]+port[ \t]*:[ \t]*')
+
+    foreach ($part in $itemParts) {
+        if ([string]::IsNullOrWhiteSpace($part)) { continue }
+
+        $lines = ($part -split '\r?\n')
+        $port = $lines[0].Trim()
+        if ([string]::IsNullOrWhiteSpace($port)) { continue }
+
+        $statusMatch   = [regex]::Match($part, '(?m)^\s*status\s*:\s*(\S+)')
+        $blockKindMatch = [regex]::Match($part, '(?m)^\s*block_kind\s*:\s*(\S+)')
+        $evidenceMatchQ = [regex]::Match($part, '(?m)^\s*evidence\s*:\s*"((?:[^"\\]|\\.)*)"\s*$')
+        $evidenceMatchU = [regex]::Match($part, '(?m)^\s*evidence\s*:\s*(.+)')
+
+        if (-not $statusMatch.Success) { continue }
+
+        $evidence = if ($evidenceMatchQ.Success) {
+            $evidenceMatchQ.Groups[1].Value -replace '\\"', '"' -replace '\\\\', '\'
+        } elseif ($evidenceMatchU.Success) {
+            $evidenceMatchU.Groups[1].Value.Trim()
+        } else { '' }
+
+        $credit = [ordered]@{
+            port     = $port
+            status   = $statusMatch.Groups[1].Value.Trim()
+        }
+        if ($blockKindMatch.Success) {
+            $credit['block_kind'] = $blockKindMatch.Groups[1].Value.Trim()
+        }
+        $credit['evidence'] = $evidence
+
+        $result[$port] = $credit
+    }
+
+    return $result
+}
+
 function Get-FBDGitHubJson {
     param(
         [Parameter(Mandatory)][string]$GhCliPath,
@@ -697,20 +755,19 @@ function Get-FBDAuditSurface {
         [Parameter(Mandatory)][string]$MetricsVersion,
         $LinkedIssue,
         [Parameter(Mandatory)][string[]]$Ports,
-        [Parameter(Mandatory)][string]$MetricsBlock
+        [Parameter(Mandatory)][string]$MetricsBlock,
+        [string]$BackfilledAt = ''
     )
 
     $mergedAtValue = [string](Get-FBDPropertyValue -InputObject $PrPayload -Name 'mergedAt')
     $isMerged = -not [string]::IsNullOrWhiteSpace($mergedAtValue)
 
-    $credits = [System.Collections.Generic.List[object]]::new()
-    foreach ($port in $Ports) {
-        $credits.Add((Get-FBDPortCredit -Port $port -MetricsVersion $MetricsVersion -LinkedIssue $LinkedIssue -MetricsBlock $MetricsBlock -IsMerged:$isMerged))
-    }
+    # Resolve backfill timestamp (allow injection for deterministic tests)
+    $resolvedBackfilledAt = if ([string]::IsNullOrWhiteSpace($BackfilledAt)) {
+        [System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+    } else { $BackfilledAt }
 
-    # Add mode.synthetic-backfill to every back-derived credit row (D9 structural disambiguation).
-    $backfilledAt = [System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
-    # Normalize mergedAt to ISO-8601 string (gh CLI may return DateTime or string depending on PowerShell version)
+    # Normalize mergedAt to ISO-8601 string (gh CLI may return DateTime or string)
     $rawMergedAt = Get-FBDPropertyValue -InputObject $PrPayload -Name 'mergedAt'
     $originalPrMergedAt = if ($null -ne $rawMergedAt -and -not [string]::IsNullOrWhiteSpace([string]$rawMergedAt)) {
         if ($rawMergedAt -is [System.DateTime]) {
@@ -718,17 +775,28 @@ function Get-FBDAuditSurface {
         } else { [string]$rawMergedAt }
     } else { $null }
 
-    $decoratedCredits = [System.Collections.Generic.List[object]]::new()
-    foreach ($credit in $credits) {
-        $decorated = [ordered]@{}
-        foreach ($key in $credit.Keys) { $decorated[$key] = $credit[$key] }
-        $decorated['mode'] = [ordered]@{
-            'synthetic-backfill' = [ordered]@{
-                backfilled_at           = $backfilledAt
-                original_pr_merged_at   = $originalPrMergedAt
+    # D9 additive-merge: parse ports already present in the v4 credits block.
+    # Present ports are preserved as-is (no synthetic-backfill); absent ports are back-derived.
+    $existingCredits = Get-FBDExistingCredits -MetricsBlock $MetricsBlock
+
+    $credits = [System.Collections.Generic.List[object]]::new()
+    foreach ($port in $Ports) {
+        if ($existingCredits.Contains($port)) {
+            # Port already present — preserve as-is (D9: no double-write, no overwrite)
+            $credits.Add($existingCredits[$port])
+        } else {
+            # Port absent — back-derive and decorate with mode.synthetic-backfill
+            $derived = Get-FBDPortCredit -Port $port -MetricsVersion $MetricsVersion -LinkedIssue $LinkedIssue -MetricsBlock $MetricsBlock -IsMerged:$isMerged
+            $decorated = [ordered]@{}
+            foreach ($key in $derived.Keys) { $decorated[$key] = $derived[$key] }
+            $decorated['mode'] = [ordered]@{
+                'synthetic-backfill' = [ordered]@{
+                    backfilled_at         = $resolvedBackfilledAt
+                    original_pr_merged_at = $originalPrMergedAt
+                }
             }
+            $credits.Add($decorated)
         }
-        $decoratedCredits.Add($decorated)
     }
 
     $integrityChecks = @(
@@ -739,7 +807,7 @@ function Get-FBDAuditSurface {
 
     return [ordered]@{
         frame_version    = 1
-        credits          = $decoratedCredits.ToArray()
+        credits          = $credits.ToArray()
         integrity_checks = $integrityChecks
     }
 }
@@ -765,6 +833,9 @@ function ConvertTo-FBDAuditYaml {
     foreach ($credit in $AuditSurface.credits) {
         $lines.Add(("  - port: {0}" -f $credit.port))
         $lines.Add(("    status: {0}" -f $credit.status))
+        if ($credit.Contains('block_kind') -and -not [string]::IsNullOrWhiteSpace([string]$credit.block_kind)) {
+            $lines.Add(("    block_kind: {0}" -f $credit.block_kind))
+        }
         $lines.Add(("    evidence: {0}" -f (ConvertTo-FBDYamlQuotedString -Value $credit.evidence)))
         if ($credit.Contains('mode') -and $null -ne $credit.mode -and $credit.mode.Contains('synthetic-backfill')) {
             $sb = $credit.mode.'synthetic-backfill'
@@ -818,7 +889,8 @@ function Invoke-FrameBackDerive {
         [string]$GhCliPath = 'gh',
         [string]$PortsDir,
         [string]$CacheDir,
-        [switch]$NoCache
+        [switch]$NoCache,
+        [string]$BackfilledAt = ''
     )
 
     Set-StrictMode -Version Latest
@@ -846,7 +918,7 @@ function Invoke-FrameBackDerive {
 
         $ports = Get-FBDPortOrder -PortsDir $PortsDir
         $linkedIssue = Resolve-FBDLinkedIssue -PrPayload $prPayload
-        $auditSurface = Get-FBDAuditSurface -PrPayload $prPayload -MetricsVersion $metricsVersion -LinkedIssue $linkedIssue -Ports $ports -MetricsBlock $metricsBlock
+        $auditSurface = Get-FBDAuditSurface -PrPayload $prPayload -MetricsVersion $metricsVersion -LinkedIssue $linkedIssue -Ports $ports -MetricsBlock $metricsBlock -BackfilledAt $BackfilledAt
 
         $serializedOutput = switch ($OutputFormat) {
             'json' { ConvertTo-FBDAuditJson -AuditSurface $auditSurface }

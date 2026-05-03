@@ -1,6 +1,22 @@
 #Requires -Version 7.0
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
+BeforeDiscovery {
+    # Must be defined at discovery time so ForEach can consume the arrays.
+    $script:VersionFixtures = @(
+        @{ MetricsVersion = '1'; PrNumber = 286; FixtureFile = 'frame-pr-286-v1.json' }
+        @{ MetricsVersion = '2'; PrNumber = 338; FixtureFile = 'frame-pr-338-v2.json' }
+        @{ MetricsVersion = '3'; PrNumber = 415; FixtureFile = 'frame-pr-415-v3.json' }
+        @{ MetricsVersion = '4'; PrNumber = 411; FixtureFile = 'frame-pr-411-v4.json' }
+    )
+
+    $script:SyntheticFixtures = @(
+        @{ FixtureKey = 'V4-review-only';                       FixtureFile = 'frame-pr-V4-review-only.json';                       PrNumber = 9001; Label = 'D9 additive-merge: review pre-populated, 11 ports back-derived' }
+        @{ FixtureKey = 'docs-only-synthetic';                  FixtureFile = 'frame-pr-docs-only-synthetic.json';                  PrNumber = 9002; Label = 'docs-only PR: implement-code/test/refactor not-applicable, implement-docs passed, ce-gate-* not-applicable' }
+        @{ FixtureKey = 'cegate-orchestration-crash-synthetic'; FixtureFile = 'frame-pr-cegate-orchestration-crash-synthetic.json'; PrNumber = 9003; Label = 'CE Gate orchestration crash: 2 surfaces passed/inconclusive, 2 surfaces block_kind:orchestration' }
+    )
+}
+
 Describe 'Invoke-FrameBackDerive' {
 
     BeforeAll {
@@ -13,13 +29,6 @@ Describe 'Invoke-FrameBackDerive' {
         if (Test-Path $script:LibFile) {
             . $script:LibFile
         }
-
-        $script:VersionFixtures = @(
-            @{ MetricsVersion = '1'; PrNumber = 286; FixtureFile = 'frame-pr-286-v1.json' }
-            @{ MetricsVersion = '2'; PrNumber = 338; FixtureFile = 'frame-pr-338-v2.json' }
-            @{ MetricsVersion = '3'; PrNumber = 415; FixtureFile = 'frame-pr-415-v3.json' }
-            @{ MetricsVersion = '4'; PrNumber = 411; FixtureFile = 'frame-pr-411-v4.json' }
-        )
 
         $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "pester-frame-back-derive-$([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $script:TempRoot -Force | Out-Null
@@ -82,9 +91,9 @@ exit 99
         }
 
         $script:GetExpectedLedgerPath = {
-            param([int]$PrNumber)
+            param([string]$Key)
 
-            return (Join-Path $script:AuditFixtureDir ("pr-{0}.expected.yaml" -f $PrNumber))
+            return (Join-Path $script:AuditFixtureDir ("pr-{0}.expected.yaml" -f $Key))
         }
 
         $script:NormalizeMultiline = {
@@ -162,7 +171,7 @@ issue_number: 447
 
         $workDir = & $script:NewWorkDir
         $fixturePath = Join-Path $script:FixtureDir $FixtureFile
-        $expectedLedgerPath = & $script:GetExpectedLedgerPath -PrNumber $PrNumber
+        $expectedLedgerPath = & $script:GetExpectedLedgerPath -Key ([string]$PrNumber)
         $ghPath = & $script:WriteMockGh -WorkDir $workDir -FixturePath $fixturePath
 
         $result = & $script:Invoke @{
@@ -172,6 +181,7 @@ issue_number: 447
             GhCliPath    = $ghPath
             PortsDir     = $script:PortsDir
             CacheDir     = (Join-Path $workDir 'cache')
+            BackfilledAt = '2026-05-02T00:00:00Z'
         }
 
         if ($null -eq $result) {
@@ -216,7 +226,7 @@ issue_number: 447
         $plan.evidence | Should -Match 'issue linkage alone does not confirm plan completion'
     }
 
-    It 'keeps post-pr inconclusive when the fixture only proves merge state' -ForEach $script:VersionFixtures {
+    It 'keeps post-pr skipped when the fixture only proves merge state (D5 — no inconclusive for implement/post-pr)' -ForEach $script:VersionFixtures {
         param($MetricsVersion, $PrNumber, $FixtureFile)
 
         $workDir = & $script:NewWorkDir
@@ -240,7 +250,7 @@ issue_number: 447
         $audit = $result.Output | ConvertFrom-Json -AsHashtable
         $postPr = @($audit.credits | Where-Object { $_.port -eq 'post-pr' })[0]
 
-        $postPr.status | Should -Be 'inconclusive'
+        $postPr.status | Should -Be 'skipped' -Because 'D5 (issue #442): post-pr uses skipped, not inconclusive, when no checklist evidence exists'
         $postPr.evidence | Should -Match 'merge state alone does not confirm post-PR cleanup and archival completion'
     }
 
@@ -268,5 +278,33 @@ issue_number: 447
 
             $result.ExitCode | Should -Be 0 -Because "PR #$prNumber should derive cleanly. Error: $($result.Error)"
         }
+    }
+
+    It 'replays synthetic fixture <FixtureKey> byte-equivalent to expected YAML (D9 additive-merge, AC2/AC4/AC5)' -ForEach $script:SyntheticFixtures {
+        param($FixtureKey, $FixtureFile, $PrNumber, $Label)
+
+        if (-not (& $script:RequireImplementation)) { return }
+
+        $workDir = & $script:NewWorkDir
+        $fixturePath = Join-Path $script:FixtureDir $FixtureFile
+        $expectedLedgerPath = & $script:GetExpectedLedgerPath -Key $FixtureKey
+        $ghPath = & $script:WriteMockGh -WorkDir $workDir -FixturePath $fixturePath
+
+        $result = & $script:Invoke @{
+            Repo         = 'Grimblaz/agent-orchestra'
+            PrNumber     = $PrNumber
+            OutputFormat = 'yaml'
+            GhCliPath    = $ghPath
+            PortsDir     = $script:PortsDir
+            CacheDir     = (Join-Path $workDir 'cache')
+            BackfilledAt = '2026-05-02T00:00:00Z'
+        }
+
+        if ($null -eq $result) { return }
+
+        $expectedLedgerPath | Should -Exist -Because "expected fixture for $FixtureKey must exist"
+        $result.ExitCode | Should -Be 0 -Because "$Label — ExitCode: $($result.ExitCode) Error: $($result.Error)"
+        (& $script:NormalizeMultiline -Text $result.Output) | Should -BeExactly (& $script:NormalizeMultiline -Text (Get-Content -Raw -Path $expectedLedgerPath)) `
+            -Because $Label
     }
 }

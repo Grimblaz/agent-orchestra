@@ -1,0 +1,11 @@
+{
+  "number": 9003,
+  "mergedAt": "2026-04-20T15:00:00Z",
+  "title": "Synthetic fixture: CE Gate orchestration crash after 2 of 4 surfaces (AC5, S2)",
+  "closingIssuesReferences": [
+    {
+      "number": 501
+    }
+  ],
+  "body": "## Summary\n\nCE Gate orchestration crashed after completing CLI (passed) and browser (inconclusive/runtime).\nCanvas and API surfaces were not evaluated before the crash.\n\nRefs #501\n\n<!-- pipeline-metrics\nmetrics_version: 4\ncredits:\n  - port: ce-gate-cli\n    status: passed\n    evidence: \"CE Gate CLI surface: all 2 scenarios passed.\"\n  - port: ce-gate-browser\n    status: inconclusive\n    block_kind: runtime\n    evidence: \"CE Gate browser surface: browser automation failed to connect.\"\n  - port: ce-gate-canvas\n    status: inconclusive\n    block_kind: orchestration\n    evidence: \"orchestration crashed before surface evaluated\"\n  - port: ce-gate-api\n    status: inconclusive\n    block_kind: orchestration\n    evidence: \"orchestration crashed before surface evaluated\"\n-->\n"
+}
