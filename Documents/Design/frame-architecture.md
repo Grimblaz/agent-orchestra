@@ -565,9 +565,68 @@ Order is intentional but flexible — actual priority will shift based on audit-
 | 10 | #435 (closed) | Reify `post-pr` and `post-fix-review` ports | Trigger-conditional logic for post-fix-review; explicit credit for post-pr cleanup. | row 5 |
 | 11 | #436 (closed; bundled into #443) | Decision: `process-retrospective` port or retire | Audit shows usage rate; decide formalize-as-port or remove from practice. | row 1 |
 | 12 | #438 (closed) | Reify `process-review` port | Trigger-conditional on CE Gate defects. | row 7 |
-| 13 | #439 | Pre-PR hook switches to **blocking mode** | After all 17 ports have adapters and audit shows acceptable credit-rate, hook upgrades from warn → block. **The actual rails turn on.** | all preceding |
+| 13 | #439 | Pre-PR hook switches to **blocking mode** | After all 17 ports have adapters and audit shows acceptable credit-rate, hook upgrades from warn → block. **The actual rails turn on.** Per D17 (#442), blocking-mode activation requires ≥30-PR recalibration data as an explicit precondition. | all preceding |
 
-Active aggregation issues: #441 covers sub-A rows 5, 6, and 10; #442 covers sub-B rows 7, 8, and 9; #443 covers sub-C rows 11 and 12.
+Active aggregation issues: #441 (sub-A, closed 2026-05) covers rows 5, 6, and 10; **#442** (sub-B, active) covers rows 7, 8, and 9; #443 (sub-C) covers rows 11 and 12.
+
+---
+
+<!-- d14-reification-contract -->
+## Sub-Issue Reification Contract (D14)
+
+Patterns established in sub-B (#442) are the canonical contract for any future port-reification sub-issue (sub-C: `process-review`, `process-retrospective`; sub-D+: any later ports). Each sub-issue inherits this contract unless it explicitly overrides a named pattern and records the override here.
+
+### D7 — Builder shape
+
+One `Build-{Port}CreditRow` function per port in `.github/scripts/lib/frame-credit-ledger-core.ps1`, mirroring the sub-A `Build-ReviewCreditRow` pattern. CE Gate is a single builder parameterised by `-Surface [ValidateSet('cli','browser','canvas','api')]`. Each builder:
+
+- Accepts port-specific evidence inputs (not a generic bag).
+- Returns an ordered hashtable conforming to the v4 `credits[]` schema (`port`, `status`, `evidence`; optionally `block_kind`, `mode`).
+- Is unit-tested by a dedicated Pester contract in `Tests/{port}-credit-emission.Tests.ps1`.
+
+Schema-conformance contract (`Tests/credit-row-schema-conformance.Tests.ps1`) iterates all `Build-*CreditRow` functions and validates their output against `frame/pipeline-metrics-v4-schema.md` to prevent drift across ports over time.
+
+### D9 — Emission path and row disambiguation
+
+Two distinct emission paths with structurally distinguishable row shapes:
+
+| Row shape | Meaning |
+|---|---|
+| No `mode` field | Forward-emitted — adapter wrote the credit at its terminal step with concrete evidence |
+| `mode.synthetic-backfill: {backfilled_at, original_pr_merged_at}` | Back-derived — the back-deriver inferred the credit from historical PR evidence; audit confidence is limited |
+| `block_kind: environment\|tooling\|runtime\|orchestration` (CE Gate only) | Forward-emitted `inconclusive` — runtime environment prevented the surface from being exercised |
+
+**Additive-merge rule**: when the PR's pipeline-metrics block already contains a `credits[]` array (e.g., a v4-era PR that ran sub-A review adapters before sub-B shipped), the back-deriver fills only the absent ports. Present ports are preserved as-is — no double-write, no overwrite, no `mode.synthetic-backfill` added to forward-emitted rows.
+
+`block_kind: orchestration` covers the case where CE Gate orchestration crashed before a surface was evaluated; the missing-surface credits are emitted as `inconclusive` by the orchestration wrapper rather than silently absent.
+
+### D10 — Selector locus (4 categories)
+
+| Category | Ports | When credit is written | Who writes it |
+|---|---|---|---|
+| 1 — Agent-owned, post-PR | `implement-code`, `implement-test`, `implement-refactor`, `implement-docs` | Specialist's terminal step, after PR creation | Specialist agent, directly into PR-body pipeline-metrics block |
+| 2 — Agent-owned, pre-PR (deferred emission) | `experience`, `design`, `plan` | Stage A: agent posts `<!-- credit-input-{port}-{ID} -->` YAML comment alongside its completion marker. Stage B: Code-Conductor harvests at `gh pr create` time | Pipeline-entry agent (stage A); Code-Conductor (stage B) |
+| 3 — Skill-only | `post-pr` | Post-merge cleanup phase | Code-Conductor, after reading `frame/ports/post-pr.yaml` and invoking the post-pr-review skill |
+| 4 — CE Gate surface | `ce-gate-{cli,browser,canvas,api}` | Per-surface terminal step; missing-surface credits emitted by orchestration wrapper on crash | Experience-Owner / CE Gate orchestration |
+
+### D11 — Adapter stub bodies
+
+12 adapter stub files per port-reification sub-issue (`auto-na-{port}.md` and `explicit-skip-{port}.md`). Format: frontmatter declares `provides`, `suggested-next-step`, `applies-when`; body is one or two sentences describing the credit shape. Behavior lives in `Build-*CreditRow`, not in the adapter body.
+
+### D12 — Predicate identifiers
+
+New predicate identifiers for new semantics; shipped predicates left untouched. Introduced by sub-B:
+
+| Identifier | Semantics | Status |
+|---|---|---|
+| `changeset.isPipelineEntryTrivial` | `totalLines < 50 AND changedFiles <= 3 AND not changeset.touchesSource()` — auto-N/A for `experience`/`design`/`plan` | New in sub-B |
+| `changeset.touchesTestableCodeOrTests` | Matches `*.ps1` source files **or** test paths — distinct from shipped `touchesTestableCode` (which excludes tests) | New in sub-B |
+| `changeset.touchedAreaHasDebt(threshold)` | File > 300 lines OR cyclomatic complexity > 10 in any touched function | New in sub-B |
+| `changeset.touchesBehaviorOrInterfaceDocsExtended` | Matches `Documents/**`, `**/SKILL.md`, `**/*.agent.md`, `commands/**/*.md`, `README.md`, `CLAUDE.md` — distinct from shipped `changesBehaviorOrInterface` | New in sub-B |
+
+### D18 — Skill-first methodology
+
+Per-agent terminal-step methodology lives in `skills/frame-credit-emission/SKILL.md` — a single authoritative source covering forward-emission (post-PR specialists), deferred-emission (pre-PR pipeline-entry agents), and CE Gate per-surface orchestration. Agent bodies add only a one-line load pointer plus their role-specific identity bits (port name, terminal-step anchor, emission category from D10). Avoids 8-body drift. Sub-C agents follow the same pattern.
 
 ---
 
