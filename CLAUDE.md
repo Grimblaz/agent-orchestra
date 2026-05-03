@@ -56,6 +56,8 @@ Handshake disposition by command:
 
 The judge result is designed for same-comment persistence: the completion marker `<!-- code-review-complete-{PR} -->` and the `<!-- judge-rulings ... -->` YAML block travel together in one PR comment so Copilot and Claude Code can consume the same durable artifact.
 
+**Review-pipeline equivalence**: `/review-github` provides a deterministic entry point for GitHub review intake and proxy prosecution. It resolves the target PR (from arguments or via `gh pr view`), then routes through Code-Conductor's GitHub intake path and proxy prosecution flow, equivalent to prose triggers like `github review`, `review github`, or `cr review`. This command ensures explicit GitHub-review mode without requiring prose-based classification.
+
 ## Cross-tool handoffs
 
 Handoffs between phases use durable GitHub issue comments rather than session-local state. Markers:
@@ -101,7 +103,7 @@ claude plugin uninstall <plugin@marketplace>
 
 - `agents/*.agent.md` — shared, tool-agnostic agent bodies used by both Copilot and Claude Code (capitalized filename, `.agent.md` extension)
 - `agents/{name}.md` — Claude-native subagent shells that point at the shared bodies (lowercase filename, plain `.md`)
-- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/polish`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
+- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/code-conductor`, `/review-github`, `/polish`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
 - `skills/` — reusable methodology loaded by both platforms; each skill has `platforms/claude.md` for Claude-specific invocation details
 - `platforms/` (at skill root) — platform-specific routing notes
 
@@ -112,6 +114,8 @@ Each Claude subagent shell in `agents/*.md` may declare `model:` and `effort:` i
 | Agent shell | `model` | `effort` | Effective model + effort | Why |
 |---|---|---|---|---|
 | `commands/orchestrate.md` | `sonnet` | `medium` | sonnet + medium | D1: command front-end sets the primary dispatch tier |
+| `commands/code-conductor.md` | `sonnet` | `medium` | sonnet + medium | D1: command front-end sets the primary dispatch tier |
+| `commands/review-github.md` | `sonnet` | `medium` | sonnet + medium | D1: command front-end sets the primary dispatch tier |
 | `agents/code-conductor.md` | `sonnet` | `medium` | sonnet + medium | D2: redundant declaration; ensures orchestrator tier even without command override |
 | `agents/code-critic.md` | `opus` | `high` | opus + high | D5: adversarial review requires maximum reasoning depth |
 | `agents/code-review-response.md` | `opus` | `xhigh` | opus + xhigh | D5: judge pass requires full synthesis depth |
@@ -136,7 +140,7 @@ Each Claude subagent shell in `agents/*.md` may declare `model:` and `effort:` i
 
 Note: the user-session default (`/model` setting) never propagates to subagents — it applies only to inline commands (`/experience`, `/design`, `/plan`, `/orchestrate`). Downstream specialist `Agent` dispatches from those commands inherit the dispatcher's model, not the user-session default.
 
-**Multi-turn `/orchestrate` boundary**: the `model: sonnet, effort: medium` override declared in `commands/orchestrate.md` applies for the duration of the command's turn. If a user interrupts a multi-turn `/orchestrate` session mid-flow, the override resets to the user's session model. Re-invoking `/orchestrate` re-applies the override for the new turn.
+**Multi-turn `/orchestrate` boundary**: the `model: sonnet, effort: medium` override declared in `commands/orchestrate.md` applies for the duration of the command's turn. `/code-conductor` and `/review-github` have their own `sonnet + medium` command-front-end overrides that apply for their respective command turns. If a user interrupts a multi-turn `/orchestrate` session mid-flow, the override resets to the user's session model. Re-invoking `/orchestrate` re-applies the override for the new turn.
 
 **Sonnet-default trade-off**: `commands/orchestrate.md` and `agents/code-conductor.md` default to `sonnet + medium` because the majority of orchestration work (plan parsing, dispatch, coordination) does not need full reasoning depth. Quality-critical roles (adversarial review, judge synthesis) explicitly upgrade to `opus`. This is an intentional cost-vs-depth trade-off per D3.
 

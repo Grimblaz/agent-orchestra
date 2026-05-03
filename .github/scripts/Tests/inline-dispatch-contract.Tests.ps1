@@ -163,6 +163,18 @@ Describe 'inline dispatch contract' {
                 Path                     = 'commands\orchestrate.md'
                 BodyFile                 = 'Code-Conductor.agent.md'
                 ForbiddenDirectReadPaths = @('agents/Code-Conductor.agent.md')
+            },
+            [pscustomobject]@{
+                Name                     = '/code-conductor'
+                Path                     = 'commands\code-conductor.md'
+                BodyFile                 = 'Code-Conductor.agent.md'
+                ForbiddenDirectReadPaths = @('agents/Code-Conductor.agent.md')
+            },
+            [pscustomobject]@{
+                Name                     = '/review-github'
+                Path                     = 'commands\review-github.md'
+                BodyFile                 = 'Code-Conductor.agent.md'
+                ForbiddenDirectReadPaths = @('agents/Code-Conductor.agent.md')
             }
         )
     }
@@ -241,12 +253,15 @@ Describe 'inline dispatch contract' {
         }
     }
 
-    It 'forbids /orchestrate from dispatching Code-Conductor as a parent-side subagent' {
-        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\orchestrate.md') -Raw -ErrorAction Stop
+    It 'forbids /orchestrate, /code-conductor, and /review-github from dispatching Code-Conductor as a parent-side subagent' {
+        $commandFiles = @('commands\orchestrate.md', 'commands\code-conductor.md', 'commands\review-github.md')
+        foreach ($commandFile in $commandFiles) {
+            $content = Get-Content -Path (Join-Path $script:RepoRoot $commandFile) -Raw -ErrorAction Stop
 
-        $content | Should -Not -Match '(?is)subagent_type:\s*code-conductor' -Because '/orchestrate must not dispatch Code-Conductor as a parent-side subagent'
-        $content | Should -Not -Match '(?is)dispatch\s+the\s+`?code-conductor`?\s+subagent' -Because '/orchestrate must not keep parent-side Code-Conductor subagent dispatch wording'
-        $content | Should -Not -Match '(?is)The subagent will read `agents/code-conductor\.md`' -Because '/orchestrate must not describe Code-Conductor as a delegated subagent shell'
+            $content | Should -Not -Match '(?is)subagent_type:\s*code-conductor' -Because "$commandFile must not dispatch Code-Conductor as a parent-side subagent"
+            $content | Should -Not -Match '(?is)dispatch\s+the\s+`?code-conductor`?\s+subagent' -Because "$commandFile must not keep parent-side Code-Conductor subagent dispatch wording"
+            $content | Should -Not -Match '(?is)The subagent will read `agents/code-conductor\.md`' -Because "$commandFile must not describe Code-Conductor as a delegated subagent shell"
+        }
     }
 
     It 'requires /orchestrate to adopt Code-Conductor inline after D1 body resolution' {
