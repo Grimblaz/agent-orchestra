@@ -97,6 +97,8 @@ On user response: changes → revise and re-present for approval; approval → p
 
 ## 6. Persist Plan
 
+Load `skills/frame-credit-emission/SKILL.md` for the deferred-emission terminal-step contract.
+
 Persist the plan per the platform's persistence conventions (see `## Platform-specific invocation`). The plan YAML frontmatter format is identical across platforms:
 
 ```yaml
@@ -112,7 +114,20 @@ ce_gate: { true|false }
 ---
 ```
 
-Add `escalation_recommended: true` and `escalation_reason` when scope exceeds the issue's stated scope. After saving, stop — do not take any further action in this turn (no additional comments, no structured-question calls, no follow-up prompts).
+Add `escalation_recommended: true` and `escalation_reason` when scope exceeds the issue's stated scope.
+
+After posting the `<!-- plan-issue-{ID} -->` GitHub issue comment, immediately post a credit-input marker comment (SMC-17 deferred-emission):
+
+```markdown
+<!-- credit-input-plan-{ISSUE_NUMBER} -->
+```yaml
+port: plan
+adapter: work-adapter
+evidence: "issue #{ISSUE_NUMBER}; plan-issue marker posted"
+```
+```
+
+Retain the comment text returned by the post call so Code-Conductor harvest can use the `-InMemoryMarkers` fallback. After the credit-input comment is posted, stop — do not take any further action in this turn.
 
 The canonical session-memory handoff artifacts remain `/memories/session/plan-issue-{id}.md` for the plan and `/memories/session/design-issue-{id}.md` for the design snapshot.
 

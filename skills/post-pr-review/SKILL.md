@@ -266,6 +266,28 @@ Once all checklist items are verified:
 
 The work is now fully complete and properly documented.
 
+## Structured Outcome Contract
+
+When invoked from Code-Conductor's post-merge cleanup path, this skill returns a structured outcome hashtable with the following shape:
+
+```powershell
+@{
+    archive    = 'passed' | 'failed' | 'skipped'
+    docs       = 'passed' | 'failed' | 'skipped'
+    version    = 'passed' | 'failed' | 'skipped'
+    releaseTag = 'passed' | 'failed' | 'skipped'
+}
+```
+
+**Per-key outcome determination**:
+
+- `archive`: `passed` when tracking files were moved/archived and `git status` is clean; `failed` when archiving was attempted but incomplete; `skipped` when no tracking files existed.
+- `docs`: `passed` when README, CLAUDE.md, or ROADMAP edits land or explicit skip rationale is documented; `failed` when documentation is known to be out of date; `skipped` when no documentation scope applied.
+- `version`: `passed` when plugin manifest version bumps are verified (`bump-version.ps1` completed or version is already correct); `failed` when manifests are out of sync; `skipped` when no version-bump scope applied.
+- `releaseTag`: `passed` when the release tag exists on the merged commit or explicit skip rationale exists; `failed` when the tag was expected but is absent; `skipped` when no release-tag scope applied.
+
+Code-Conductor passes this hashtable to `Build-PostPrCreditRow -ChecklistOutcomes @{...}` to emit the `post-pr` credit row into the PR-body pipeline-metrics block.
+
 ## Gotchas
 
 | Trigger                                                                    | Gotcha                                                                                 | Fix                                                                                    |

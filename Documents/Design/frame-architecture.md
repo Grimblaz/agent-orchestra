@@ -565,9 +565,92 @@ Order is intentional but flexible — actual priority will shift based on audit-
 | 10 | #435 (closed) | Reify `post-pr` and `post-fix-review` ports | Trigger-conditional logic for post-fix-review; explicit credit for post-pr cleanup. | row 5 |
 | 11 | #436 (closed; bundled into #443) | Decision: `process-retrospective` port or retire | Audit shows usage rate; decide formalize-as-port or remove from practice. | row 1 |
 | 12 | #438 (closed) | Reify `process-review` port | Trigger-conditional on CE Gate defects. | row 7 |
-| 13 | #439 | Pre-PR hook switches to **blocking mode** | After all 17 ports have adapters and audit shows acceptable credit-rate, hook upgrades from warn → block. **The actual rails turn on.** | all preceding |
+| 13 | #439 | Pre-PR hook switches to **blocking mode** | After all 17 ports have adapters and audit shows acceptable credit-rate, hook upgrades from warn → block. **The actual rails turn on.** Per D17 (#442), blocking-mode activation requires ≥30-PR recalibration data as an explicit precondition. | all preceding |
 
-Active aggregation issues: #441 covers sub-A rows 5, 6, and 10; #442 covers sub-B rows 7, 8, and 9; #443 covers sub-C rows 11 and 12.
+Active aggregation issues: #441 (sub-A, closed 2026-05) covers rows 5, 6, and 10; **#442** (sub-B, active) covers rows 7, 8, and 9; #443 (sub-C) covers rows 11 and 12.
+
+---
+
+<!-- d14-reification-contract -->
+## Sub-Issue Reification Contract (D14)
+
+This section consolidates the named decisions governing port reification across all sub-issues. Decisions D7–D12 were first established during sub-A (#441) and the early sub-B (#442) design exploration; D13–D18 were named or reserved during sub-B. Together they form the canonical contract: any future port-reification sub-issue (sub-C: `process-review`, `process-retrospective`; sub-D+: any later ports) inherits this contract unless it explicitly overrides a named decision and records the override here.
+
+**Decision-numbering policy**: decisions are numbered sequentially starting from D7 (the first sub-A builder-shape decision). Numbers D13–D16 were reserved during sub-B to maintain forward continuity; they will be filled as patterns emerge. Do not re-use or re-assign a reserved slot without retiring its placeholder entry.
+
+### D7 — Builder shape
+
+One `Build-{Port}CreditRow` function per port in `.github/scripts/lib/frame-credit-ledger-core.ps1`, mirroring the sub-A `Build-ReviewCreditRow` pattern. CE Gate is a single builder parameterised by `-Surface [ValidateSet('cli','browser','canvas','api')]`. Each builder:
+
+- Accepts port-specific evidence inputs (not a generic bag).
+- Returns an ordered hashtable conforming to the v4 `credits[]` schema (`port`, `status`, `evidence`; optionally `block_kind`, `mode`).
+- Is unit-tested by a dedicated Pester contract in `Tests/{port}-credit-emission.Tests.ps1`.
+
+Schema-conformance contract (`Tests/credit-row-schema-conformance.Tests.ps1`) iterates all `Build-*CreditRow` functions and validates their output against `frame/pipeline-metrics-v4-schema.md` to prevent drift across ports over time.
+
+### D9 — Emission path and row disambiguation
+
+Two distinct emission paths with structurally distinguishable row shapes:
+
+| Row shape | Meaning |
+|---|---|
+| No `mode` field | Forward-emitted — adapter wrote the credit at its terminal step with concrete evidence |
+| `mode.synthetic-backfill: {backfilled_at, original_pr_merged_at}` | Back-derived — the back-deriver inferred the credit from historical PR evidence; audit confidence is limited |
+| `block_kind: environment\|tooling\|runtime\|orchestration` (CE Gate only) | Forward-emitted `inconclusive` — runtime environment prevented the surface from being exercised |
+
+**Additive-merge rule**: when the PR's pipeline-metrics block already contains a `credits[]` array (e.g., a v4-era PR that ran sub-A review adapters before sub-B shipped), the back-deriver fills only the absent ports. Present ports are preserved as-is — no double-write, no overwrite, no `mode.synthetic-backfill` added to forward-emitted rows.
+
+`block_kind: orchestration` covers the case where CE Gate orchestration crashed before a surface was evaluated; the missing-surface credits are emitted as `inconclusive` by the orchestration wrapper rather than silently absent.
+
+### D10 — Selector locus (4 categories)
+
+| Category | Ports | When credit is written | Who writes it |
+|---|---|---|---|
+| 1 — Agent-owned, post-PR | `implement-code`, `implement-test`, `implement-refactor`†, `implement-docs` | Specialist's terminal step, after PR creation | Specialist agent, directly into PR-body pipeline-metrics block |
+| 2 — Agent-owned, pre-PR (deferred emission) | `experience`, `design`, `plan` | Stage A: agent posts `<!-- credit-input-{port}-{ID} -->` YAML comment alongside its completion marker. Stage B: Code-Conductor harvests at `gh pr create` time | Pipeline-entry agent (stage A); Code-Conductor (stage B) |
+| 3 — Skill-only | `post-pr` | Post-merge cleanup phase | Code-Conductor, after reading `frame/ports/post-pr.yaml` and invoking the post-pr-review skill |
+| 4 — CE Gate surface | `ce-gate-{cli,browser,canvas,api}` | Per-surface terminal step; missing-surface credits emitted by orchestration wrapper on crash | Experience-Owner / CE Gate orchestration |
+
+† **`implement-refactor` — deferred-by-design (sub-B, #442)**: The `changeset.touchedAreaHasDebt(threshold)` predicate requires the changeset's `FileMetadata` field (per-file `LineCount` and `MaxComplexity`) to be populated by the changeset constructor. No production caller populates `FileMetadata` in sub-B. Until a `FileMetadata` populator is wired into the changeset construction path, `Resolve-FVChangesetTouchedAreaHasDebt` always returns `$false`, making `implement-refactor` structurally unreachable as a live (non-auto-N/A) port. Sub-issue #13 or a dedicated follow-up must wire the populator before this port can produce non-N/A credits.
+
+### D11 — Adapter stub bodies
+
+12 adapter stub files per port-reification sub-issue (`auto-na-{port}.md` and `explicit-skip-{port}.md`). Format: frontmatter declares `provides`, `suggested-next-step`, `applies-when`; body is one or two sentences describing the credit shape. Behavior lives in `Build-*CreditRow`, not in the adapter body.
+
+### D12 — Predicate identifiers
+
+New predicate identifiers for new semantics; shipped predicates left untouched. Introduced by sub-B:
+
+| Identifier | Semantics | Status |
+|---|---|---|
+| `changeset.isPipelineEntryTrivial` | `totalLines < 50 AND changedFiles <= 3 AND not changeset.touchesSource()` — auto-N/A for `experience`/`design`/`plan` | New in sub-B |
+| `changeset.touchesTestableCodeOrTests` | Matches `*.ps1` source files **or** test paths — distinct from shipped `touchesTestableCode` (which excludes tests) | New in sub-B |
+| `changeset.touchedAreaHasDebt(threshold)` | File > 300 lines OR cyclomatic complexity > 10 in any touched function | New in sub-B |
+| `changeset.touchesBehaviorOrInterfaceDocsExtended` | Matches `Documents/**`, `**/SKILL.md`, `**/*.agent.md`, `commands/**/*.md`, `README.md`, `CLAUDE.md` — distinct from shipped `changesBehaviorOrInterface` | New in sub-B |
+
+### D13 — Plan port back-derivation inference
+
+When back-deriving the `plan` port, the presence of a linked resolved issue confirms that the issue lifecycle ran, but the audit does not read issue-body markers or completion-marker state. The back-deriver therefore emits `status: inconclusive` with evidence citing the inference limitation. This is the conservative default for all pipeline-entry ports (`design`, `plan`) when marker-level confirmation is unavailable. Referenced in the audit table as "D12/D13 decisions in body."
+
+### D14 — (Reserved for future reification decisions)
+
+Reserved for a named decision that emerges during sub-B (#442), sub-C (#443), or a future reification sub-issue. Will be numbered and described when the pattern solidifies. Do not assign this slot ad-hoc; open a discussion in the relevant sub-issue first.
+
+### D15 — (Reserved for future reification decisions)
+
+Reserved. Same policy as D14.
+
+### D16 — (Reserved for future reification decisions)
+
+Reserved. Same policy as D14.
+
+### D17 — Blocking-mode activation precondition
+
+Blocking-mode activation for sub-issue #13 requires ≥30-PR recalibration data as an explicit precondition. The warn-only hook must accumulate that dataset before the gate switches from `warn` to `enforce` mode. Sub-issue #13 owns the enforcement switch; this decision prevents premature enforcement before the credit-rate baseline is established.
+
+### D18 — Skill-first methodology
+
+Per-agent terminal-step methodology lives in `skills/frame-credit-emission/SKILL.md` — a single authoritative source covering forward-emission (post-PR specialists), deferred-emission (pre-PR pipeline-entry agents), and CE Gate per-surface orchestration. Agent bodies add only a one-line load pointer plus their role-specific identity bits (port name, terminal-step anchor, emission category from D10). Avoids 8-body drift. Sub-C agents follow the same pattern.
 
 ---
 

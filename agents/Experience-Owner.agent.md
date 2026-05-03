@@ -82,6 +82,8 @@ When `## BDD Framework` is present, author structured G/W/T / Given-When-Then sc
 
 ## Update Issue with Customer Framing
 
+Load `skills/frame-credit-emission/SKILL.md` for the deferred-emission terminal-step contract.
+
 Update the GitHub issue body per `skills/customer-experience/SKILL.md` (use `## Scenarios` (H2) for the scenario section — Code-Conductor's pre-flight extraction anchors to it), then post:
 
 ```markdown
@@ -90,12 +92,26 @@ Update the GitHub issue body per `skills/customer-experience/SKILL.md` (use `## 
 Customer framing complete — design intent defined, scenarios drafted, CE Gate readiness assessed. Ready for technical design with @Solution-Designer.
 ```
 
+Immediately after posting the completion marker, post a credit-input marker comment (SMC-17 deferred-emission):
+
+```markdown
+<!-- credit-input-experience-{ISSUE_NUMBER} -->
+```yaml
+port: experience
+adapter: work-adapter
+evidence: "issue #{ISSUE_NUMBER}; experience-owner-complete marker posted"
+```
+```
+
+Retain the comment text returned by the post call so Code-Conductor harvest can use the `-InMemoryMarkers` fallback.
+
 ## Upstream Completion Gate (Mandatory)
 
 Hard-stop: never conclude without durable artifacts.
 
 - [ ] GitHub issue updated (problem statement, journeys, scenarios, surface, design intent, CE Gate readiness).
 - [ ] Completion comment with `<!-- experience-owner-complete-{ISSUE_NUMBER} -->` posted.
+- [ ] Credit-input marker `<!-- credit-input-experience-{ISSUE_NUMBER} -->` posted immediately after.
 
 **Exception**: purely exploratory sessions (user said "just brainstorming") skip documentation.
 

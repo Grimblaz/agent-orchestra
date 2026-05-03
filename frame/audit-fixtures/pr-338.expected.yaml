@@ -3,54 +3,122 @@ credits:
   - port: experience
     status: passed
     evidence: "Issue #301 was resolved from closingIssuesReferences for this v2-era PR."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: design
     status: inconclusive
     evidence: "Linked issue #301 was resolved, but issue linkage alone does not confirm design completion because the audit does not read issue-body markers or completion state."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: plan
     status: inconclusive
     evidence: "Linked issue #301 was resolved, but issue linkage alone does not confirm plan completion because the audit does not read issue-body markers or completion state."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: implement-code
-    status: inconclusive
-    evidence: "The v2 metrics block does not encode implementation-lane detail."
+    status: skipped
+    evidence: "The v2 metrics block does not encode implementation-lane detail; no validator evidence to credit."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: implement-test
-    status: inconclusive
-    evidence: "The v2 metrics block does not encode test-lane detail."
+    status: skipped
+    evidence: "The v2 metrics block does not encode test-lane detail; no validator evidence to credit."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: implement-refactor
-    status: inconclusive
-    evidence: "The v2 metrics block does not encode refactor-lane detail."
+    status: skipped
+    evidence: "The v2 metrics block does not encode refactor-lane detail; no validator evidence to credit."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: implement-docs
-    status: inconclusive
-    evidence: "The v2 metrics block does not encode documentation-lane detail."
+    status: skipped
+    evidence: "The v2 metrics block does not encode documentation-lane detail; no validator evidence to credit."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: review
     status: passed
     evidence: "Prosecution and judge counts are present, and the finding includes defense and judge detail."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: ce-gate-cli
     status: inconclusive
     evidence: "CE Gate passed, but the v2 fixture does not identify the audited surface."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: ce-gate-browser
     status: inconclusive
     evidence: "CE Gate passed, but the v2 fixture does not identify the audited surface."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: ce-gate-canvas
     status: inconclusive
     evidence: "CE Gate passed, but the v2 fixture does not identify the audited surface."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: ce-gate-api
     status: inconclusive
     evidence: "CE Gate passed, but the v2 fixture does not identify the audited surface."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: release-hygiene
     status: inconclusive
     evidence: "This PR predates the current release-hygiene audit path, so trigger evidence is not derivable from the fixture alone."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: post-pr
-    status: inconclusive
-    evidence: "The PR is merged, but merge state alone does not confirm post-PR cleanup and archival completion."
+    status: skipped
+    evidence: "The PR is merged, but merge state alone does not confirm post-PR cleanup and archival completion; no checklist evidence available."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: post-fix-review
     status: not-applicable
     evidence: "No post-fix review path is recorded, so the trigger is treated as absent."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: process-review
     status: not-applicable
     evidence: "The fixture encodes no systemic-gap trigger for process-review follow-up."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
   - port: process-retrospective
     status: inconclusive
     evidence: "Port pending decision per umbrella sub-issue #11."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2025-11-03T09:45:00Z
 integrity_checks:
   - name: linked-issue-resolution
     status: passed

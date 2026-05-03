@@ -2,7 +2,7 @@
 name: auto-na-implement-docs
 provides: implement-docs
 suggested-next-step: none
-applies-when: not changeset.changesBehaviorOrInterface()
+applies-when: not changeset.touchesBehaviorOrInterfaceDocsExtended()
 ---
 
 # Auto N/A Implement Docs

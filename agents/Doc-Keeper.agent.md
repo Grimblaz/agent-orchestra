@@ -86,5 +86,14 @@ See also: [Experience-Owner](Experience-Owner.agent.md) for customer framing doc
 
 - Load `documentation-finalization` for the documentation process and deletion-first cleanup workflow
 - Load relevant project guidance from `.github/copilot-instructions.md` and `.github/architecture-rules.md`
+- Load `skills/frame-credit-emission/SKILL.md` for the terminal-step credit-row emission contract
 
 **Note**: Doc-Keeper primarily handles documentation formatting and accuracy. Most deep implementation skills are owned by implementation agents.
+
+## Terminal Step: Frame Credit Emission
+
+At the terminal step (after documentation work is complete and the PR body is available), emit a frame credit row for the `implement-docs` port:
+
+1. Call `Build-ImplementDocsCreditRow` with the validation evidence from the documentation pass (e.g., files updated, doc-lint result).
+2. Upsert the returned credit row into the PR-body `<!-- pipeline-metrics -->` block's `credits[]` array.
+3. Apply the additive-merge rule (D9): if a credit row for `implement-docs` already exists in the block, skip the upsert.

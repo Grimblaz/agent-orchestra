@@ -1,0 +1,7 @@
+{
+  "number": 9002,
+  "mergedAt": "2026-04-15T09:30:00Z",
+  "title": "Synthetic fixture: docs-only PR (Documents/Design + SKILL.md, no commands/*.md)",
+  "closingIssuesReferences": [],
+  "body": "## Summary\n\nDocs-only changeset: updates to Documents/Design/foo.md and skills/frame-credit-emission/SKILL.md.\nDeliberately does not touch commands/*.md so touchesCliSurface() is false (AC4, S1).\n\n<!-- pipeline-metrics\nmetrics_version: 4\ncredits:\n  - port: implement-code\n    status: not-applicable\n    evidence: \"changeset.touchesTestableCodeOrTests() is false for this docs-only PR.\"\n  - port: implement-test\n    status: not-applicable\n    evidence: \"changeset.touchesTestableCodeOrTests() is false for this docs-only PR.\"\n  - port: implement-refactor\n    status: not-applicable\n    evidence: \"changeset.touchedAreaHasDebt() is false for this docs-only PR.\"\n  - port: implement-docs\n    status: passed\n    evidence: \"Doc-Keeper validated: Documents/Design/foo.md and skills/frame-credit-emission/SKILL.md updated.\"\n  - port: ce-gate-cli\n    status: not-applicable\n    evidence: \"changeset.touchesCliSurface() is false; no commands/*.md touched.\"\n  - port: ce-gate-browser\n    status: not-applicable\n    evidence: \"changeset.touchesBrowserSurface() is false.\"\n  - port: ce-gate-canvas\n    status: not-applicable\n    evidence: \"changeset.touchesCanvasSurface() is false.\"\n  - port: ce-gate-api\n    status: not-applicable\n    evidence: \"changeset.touchesApiSurface() is false.\"\n-->\n"
+}

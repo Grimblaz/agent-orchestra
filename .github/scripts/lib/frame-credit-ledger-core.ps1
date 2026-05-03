@@ -1173,3 +1173,564 @@ function Compose-MissingMetricsShortCircuitComment {
 
     return ($lines -join [Environment]::NewLine)
 }
+
+# ===========================================================================
+# Credit-row builders introduced by issue #442 (sub-B).
+# Each function returns a PSCustomObject credit row matching the v4
+# credits[] schema from frame/pipeline-metrics-v4-schema.md.
+# Required fields on every row: port, status, evidence.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Build-CeGateCreditRow (Step 4a)
+#
+# Shared parameterised builder for all four CE Gate surface ports.
+# Surface enum: cli | browser | canvas | api
+# Status resolution order:
+#   1. -EnvironmentBlocked $true  → inconclusive + block_kind
+#   2. -SurfaceTouchResult $false → not-applicable
+#   3. -EvidenceList non-empty   → passed
+#   4. -EvidenceList empty        → inconclusive (no block_kind)
+# ---------------------------------------------------------------------------
+function Build-CeGateCreditRow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('cli', 'browser', 'canvas', 'api')]
+        [string]$Surface,
+
+        [bool]$EnvironmentBlocked = $false,
+
+        [ValidateSet('environment', 'tooling', 'runtime', 'orchestration')]
+        [string]$BlockKind = '',
+
+        [bool]$SurfaceTouchResult = $true,
+
+        [AllowEmptyCollection()][object[]]$EvidenceList = @(),
+
+        [string]$Evidence = ''
+    )
+
+    $port = "ce-gate-$Surface"
+
+    if ($EnvironmentBlocked -and [string]::IsNullOrWhiteSpace($BlockKind)) {
+        throw "Build-CeGateCreditRow: -BlockKind is required when -EnvironmentBlocked is `$true (allowed values: environment, tooling, runtime, orchestration)"
+    }
+
+    if ($EnvironmentBlocked) {
+        $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                            else { "CE Gate for $Surface surface blocked — $BlockKind." }
+        return [pscustomobject]@{
+            port       = $port
+            status     = 'inconclusive'
+            block_kind = $BlockKind
+            evidence   = $resolvedEvidence
+        }
+    }
+
+    if (-not $SurfaceTouchResult) {
+        $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                            else { "CE Gate not applicable — $Surface surface not touched." }
+        return [pscustomobject]@{
+            port     = $port
+            status   = 'not-applicable'
+            evidence = $resolvedEvidence
+        }
+    }
+
+    if ($EvidenceList.Count -gt 0) {
+        $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                            else { $EvidenceList -join '; ' }
+        return [pscustomobject]@{
+            port     = $port
+            status   = 'passed'
+            evidence = $resolvedEvidence
+        }
+    }
+
+    # No evidence list and not blocked — inconclusive. Forward-emitted CE Gate inconclusive rows
+    # must carry block_kind per F13/schema; 'tooling' is the appropriate value when the surface
+    # was reachable but no scenario evidence was produced (builder called without evidence).
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        else { "CE Gate for $Surface surface inconclusive — no scenario evidence supplied." }
+    return [pscustomobject]@{
+        port       = $port
+        status     = 'inconclusive'
+        block_kind = 'tooling'
+        evidence   = $resolvedEvidence
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Shared helper: resolve pipeline-entry credit status.
+# Priority: explicit-skip adapter > auto-na predicate > marker present.
+# ---------------------------------------------------------------------------
+function script:Resolve-PipelineEntryCreditStatus {
+    param(
+        [string]$AdapterName,
+        [bool]$AutoNaResult,
+        [bool]$MarkerPresent
+    )
+
+    if ($AdapterName -eq 'explicit-skip') { return 'skipped' }
+    if ($AutoNaResult) { return 'not-applicable' }
+    if ($MarkerPresent) { return 'passed' }
+    # No marker and not auto-N/A: the agent did not post its completion marker — "no evidence"
+    # semantics per D5/AC9. Use 'skipped', not 'not-applicable' (which is predicate-derived only).
+    return 'skipped'
+}
+
+# ---------------------------------------------------------------------------
+# Build-ExperienceCreditRow (Step 4b)
+# ---------------------------------------------------------------------------
+function Build-ExperienceCreditRow {
+    [CmdletBinding()]
+    param(
+        [bool]$MarkerPresent = $false,
+        [bool]$AutoNaResult = $false,
+        [string]$AdapterName = 'work-adapter',
+        [int]$IssueNumber = 0,
+        [string]$Evidence = ''
+    )
+
+    $status = script:Resolve-PipelineEntryCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -MarkerPresent $MarkerPresent
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        elseif ($status -eq 'passed') { "Experience-Owner completion marker <!-- experience-owner-complete-$IssueNumber --> present." }
+                        elseif ($status -eq 'not-applicable') { "changeset.isPipelineEntryTrivial == true; experience port not applicable." }
+                        else { "$AdapterName adapter; status: $status." }
+
+    return [pscustomobject]@{
+        port     = 'experience'
+        adapter  = $AdapterName
+        status   = $status
+        evidence = $resolvedEvidence
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Build-DesignCreditRow (Step 4b)
+# ---------------------------------------------------------------------------
+function Build-DesignCreditRow {
+    [CmdletBinding()]
+    param(
+        [bool]$MarkerPresent = $false,
+        [bool]$AutoNaResult = $false,
+        [string]$AdapterName = 'work-adapter',
+        [int]$IssueNumber = 0,
+        [string]$Evidence = ''
+    )
+
+    $status = script:Resolve-PipelineEntryCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -MarkerPresent $MarkerPresent
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        elseif ($status -eq 'passed') { "Solution-Designer completion marker <!-- design-phase-complete-$IssueNumber --> present." }
+                        elseif ($status -eq 'not-applicable') { "changeset.isPipelineEntryTrivial == true; design port not applicable." }
+                        else { "$AdapterName adapter; status: $status." }
+
+    return [pscustomobject]@{
+        port     = 'design'
+        adapter  = $AdapterName
+        status   = $status
+        evidence = $resolvedEvidence
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Build-PlanCreditRow (Step 4b)
+# ---------------------------------------------------------------------------
+function Build-PlanCreditRow {
+    [CmdletBinding()]
+    param(
+        [bool]$MarkerPresent = $false,
+        [bool]$AutoNaResult = $false,
+        [string]$AdapterName = 'work-adapter',
+        [int]$IssueNumber = 0,
+        [string]$Evidence = ''
+    )
+
+    $status = script:Resolve-PipelineEntryCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -MarkerPresent $MarkerPresent
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        elseif ($status -eq 'passed') { "Issue-Planner completion marker <!-- plan-issue-$IssueNumber --> present." }
+                        elseif ($status -eq 'not-applicable') { "changeset.isPipelineEntryTrivial == true; plan port not applicable." }
+                        else { "$AdapterName adapter; status: $status." }
+
+    return [pscustomobject]@{
+        port     = 'plan'
+        adapter  = $AdapterName
+        status   = $status
+        evidence = $resolvedEvidence
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Shared helper: resolve implement-* status from validation evidence list.
+# ---------------------------------------------------------------------------
+function script:Resolve-ImplementCreditStatus {
+    param(
+        [string]$AdapterName,
+        [bool]$AutoNaResult,
+        [AllowEmptyCollection()][object[]]$ValidationEvidence
+    )
+
+    if ($AdapterName -eq 'explicit-skip') { return @{ status = 'skipped'; offending = $null } }
+    if ($AutoNaResult) { return @{ status = 'not-applicable'; offending = $null } }
+    if ($null -eq $ValidationEvidence -or $ValidationEvidence.Count -eq 0) {
+        return @{ status = 'skipped'; offending = $null }
+    }
+
+    foreach ($item in $ValidationEvidence) {
+        $itemStatus = ''
+        if ($item -is [hashtable]) {
+            $itemStatus = [string]$item['Status']
+        } else {
+            $sp = $item.PSObject.Properties['Status']
+            if ($null -ne $sp) { $itemStatus = [string]$sp.Value }
+        }
+        if ($itemStatus.ToLowerInvariant() -ne 'passed') {
+            $itemName = ''
+            if ($item -is [hashtable]) { $itemName = [string]$item['Name'] }
+            else {
+                $np = $item.PSObject.Properties['Name']
+                if ($null -ne $np) { $itemName = [string]$np.Value }
+            }
+            return @{ status = 'failed'; offending = $itemName }
+        }
+    }
+    return @{ status = 'passed'; offending = $null }
+}
+
+# ---------------------------------------------------------------------------
+# Build-ImplementCodeCreditRow (Step 4c)
+# ---------------------------------------------------------------------------
+function Build-ImplementCodeCreditRow {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
+        [bool]$AutoNaResult = $false,
+        [string]$AdapterName = 'work-adapter',
+        [string]$Evidence = ''
+    )
+
+    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
+                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
+                        else { "implement-code validation: $($r.status)." }
+
+    return [pscustomobject]@{
+        port     = 'implement-code'
+        adapter  = $AdapterName
+        status   = $r.status
+        evidence = $resolvedEvidence
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Build-ImplementTestCreditRow (Step 4c)
+# ---------------------------------------------------------------------------
+function Build-ImplementTestCreditRow {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
+        [bool]$AutoNaResult = $false,
+        [string]$AdapterName = 'work-adapter',
+        [string]$Evidence = ''
+    )
+
+    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
+                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
+                        else { "implement-test validation: $($r.status)." }
+
+    return [pscustomobject]@{
+        port     = 'implement-test'
+        adapter  = $AdapterName
+        status   = $r.status
+        evidence = $resolvedEvidence
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Build-ImplementRefactorCreditRow (Step 4c)
+# Accepts optional -DebtThreshold hashtable (forwarded for caller use).
+# ---------------------------------------------------------------------------
+function Build-ImplementRefactorCreditRow {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
+        [bool]$AutoNaResult = $false,
+        [string]$AdapterName = 'work-adapter',
+        [hashtable]$DebtThreshold = @{ lineCount = 300; complexity = 10 },
+        [string]$Evidence = ''
+    )
+
+    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
+                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
+                        else { "implement-refactor validation: $($r.status)." }
+
+    return [pscustomobject]@{
+        port     = 'implement-refactor'
+        adapter  = $AdapterName
+        status   = $r.status
+        evidence = $resolvedEvidence
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Build-ImplementDocsCreditRow (Step 4c)
+# ---------------------------------------------------------------------------
+function Build-ImplementDocsCreditRow {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
+        [bool]$AutoNaResult = $false,
+        [string]$AdapterName = 'work-adapter',
+        [string]$Evidence = ''
+    )
+
+    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
+                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
+                        else { "implement-docs validation: $($r.status)." }
+
+    return [pscustomobject]@{
+        port     = 'implement-docs'
+        adapter  = $AdapterName
+        status   = $r.status
+        evidence = $resolvedEvidence
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Build-PostPrCreditRow (Step 4d)
+#
+# Accepts -ChecklistOutcomes @{archive; docs; version; releaseTag}.
+# All true → passed; any false → failed (failing keys in evidence);
+# absent/empty → skipped.
+# ---------------------------------------------------------------------------
+function Build-PostPrCreditRow {
+    [CmdletBinding()]
+    param(
+        [hashtable]$ChecklistOutcomes = $null,
+        [string]$Evidence = ''
+    )
+
+    if ($null -eq $ChecklistOutcomes -or $ChecklistOutcomes.Count -eq 0) {
+        $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                            else { 'no checklist outcomes supplied to the credit-row builder' }
+        return [pscustomobject]@{
+            port     = 'post-pr'
+            status   = 'skipped'
+            evidence = $resolvedEvidence
+        }
+    }
+
+    $failing = @()
+    foreach ($key in @('archive', 'docs', 'version', 'releaseTag')) {
+        if ($ChecklistOutcomes.ContainsKey($key)) {
+            $val = $ChecklistOutcomes[$key]
+            # Accept booleans directly; for strings, 'passed' and 'skipped' are non-failure values.
+            $isSuccess = if ($val -is [bool]) { $val } else { [string]$val -in @('passed', 'skipped') }
+            if (-not $isSuccess) { $failing += $key }
+        }
+    }
+
+    if ($failing.Count -gt 0) {
+        $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                            else { "Post-PR checklist failed: $($failing -join ', ')." }
+        return [pscustomobject]@{
+            port     = 'post-pr'
+            status   = 'failed'
+            evidence = $resolvedEvidence
+        }
+    }
+
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        else { 'Post-PR checklist passed: archive, docs, version, releaseTag.' }
+    return [pscustomobject]@{
+        port     = 'post-pr'
+        status   = 'passed'
+        evidence = $resolvedEvidence
+    }
+}
+
+function Invoke-CreditInputHarvest {
+    <#
+    .SYNOPSIS
+        Harvests credit-input deferred-emission markers from a GitHub issue's comments
+        and returns an array of credit rows, one per recognized port (SMC-17).
+
+    .DESCRIPTION
+        For each pipeline-entry port (experience, design, plan), scans the issue's
+        comment thread for a <!-- credit-input-{port}-{ID} --> marker, parses the
+        YAML payload, and calls the matching Build-*CreditRow with the parsed evidence.
+
+        Read-after-write retry: if an upstream completion marker is present but the
+        matching credit-input marker is absent, retries up to MaxRetries times with
+        exponential backoff starting at InitialBackoffSec seconds.
+
+        When -InMemoryMarkers is supplied (array of raw marker text strings from
+        same-conversation post calls), those texts are parsed directly without gh
+        API calls for the ports they cover.
+
+    .PARAMETER IssueNumber
+        The GitHub issue number to scan.
+
+    .PARAMETER Repo
+        The repository in owner/name format (e.g., Grimblaz/agent-orchestra).
+
+    .PARAMETER GhCliPath
+        Optional path to the gh CLI executable. Defaults to 'gh'.
+
+    .PARAMETER InMemoryMarkers
+        Optional array of raw marker text strings to parse directly (bypasses gh).
+
+    .PARAMETER MaxRetries
+        Maximum retry attempts when a completion marker is present but credit-input
+        marker is absent. Defaults to 3.
+
+    .PARAMETER InitialBackoffSec
+        Initial backoff in seconds for the first retry. Doubles each retry. Defaults to 1.
+
+    .OUTPUTS
+        Array of credit-row pscustomobject values (same shape as Build-*CreditRow output).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$IssueNumber,
+
+        [Parameter(Mandatory)]
+        [string]$Repo,
+
+        [string]$GhCliPath = 'gh',
+
+        [string[]]$InMemoryMarkers = @(),
+
+        [int]$MaxRetries = 3,
+
+        [double]$InitialBackoffSec = 1
+    )
+
+    $script:PipelineEntryPorts = @('experience', 'design', 'plan')
+
+    $script:CompletionMarkerByPort = @{
+        'experience' = "<!-- experience-owner-complete-$IssueNumber -->"
+        'design'     = "<!-- design-phase-complete-$IssueNumber -->"
+        'plan'       = "<!-- plan-issue-$IssueNumber -->"
+    }
+
+    $script:BuilderByPort = @{
+        'experience' = 'Build-ExperienceCreditRow'
+        'design'     = 'Build-DesignCreditRow'
+        'plan'       = 'Build-PlanCreditRow'
+    }
+
+    function script:Parse-SingleCreditInputMarker {
+        param([string]$Text)
+
+        if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
+        if ($Text -notmatch '```yaml\s*([\s\S]*?)```') { return $null }
+
+        $yaml = $Matches[1].Trim()
+        $result = @{}
+        foreach ($line in ($yaml -split '\r?\n')) {
+            if ($line -match '^\s*(\w+)\s*:\s*"?(.*?)"?\s*$') {
+                $result[$Matches[1]] = $Matches[2].Trim('"').Trim()
+            }
+        }
+
+        if (-not $result.ContainsKey('port') -or [string]::IsNullOrWhiteSpace($result['port'])) {
+            return $null
+        }
+
+        return $result
+    }
+
+    function script:Get-IssueComments {
+        param([string]$IssueNum, [string]$RepoArg, [string]$Gh)
+
+        try {
+            $raw = & $Gh issue view $IssueNum --repo $RepoArg --json comments --paginate 2>$null
+        } catch {
+            return @()
+        }
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) { return @() }
+
+        try {
+            $parsed = $raw | ConvertFrom-Json
+            return @($parsed.comments | ForEach-Object { $_.body })
+        } catch {
+            return @()
+        }
+    }
+
+    # Build lookup from in-memory markers (port → payload hashtable)
+    $inMemoryByPort = @{}
+    foreach ($markerText in $InMemoryMarkers) {
+        $parsed = script:Parse-SingleCreditInputMarker -Text $markerText
+        if ($null -ne $parsed -and $parsed.ContainsKey('port')) {
+            $inMemoryByPort[$parsed['port']] = $parsed
+        }
+    }
+
+    $results = @()
+
+    foreach ($port in $script:PipelineEntryPorts) {
+        # Use in-memory marker when available (bypasses gh for this port)
+        if ($inMemoryByPort.ContainsKey($port)) {
+            $payload = $inMemoryByPort[$port]
+            $evidence    = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
+            $adapterName = if ($payload.ContainsKey('adapter'))  { $payload['adapter']  } else { '' }
+            $builderName = $script:BuilderByPort[$port]
+            if (Get-Command $builderName -ErrorAction SilentlyContinue) {
+                $buildParams = @{ MarkerPresent = $true; IssueNumber = [int]$IssueNumber; Evidence = $evidence }
+                if (-not [string]::IsNullOrWhiteSpace($adapterName)) { $buildParams['AdapterName'] = $adapterName }
+                $results += & $builderName @buildParams
+            }
+            continue
+        }
+
+        # Fetch from gh with retry
+        $completionMarker = $script:CompletionMarkerByPort[$port]
+        $creditMarkerPrefix = "<!-- credit-input-$port-$IssueNumber"
+
+        $payload = $null
+        $attempt = 0
+        $backoff = $InitialBackoffSec
+
+        while ($attempt -le $MaxRetries) {
+            $comments = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
+            $completionPresent = $comments | Where-Object { $_ -like "*$completionMarker*" }
+            $creditComment = $comments | Where-Object { $_ -like "*$creditMarkerPrefix*" } | Select-Object -First 1
+
+            if ($null -ne $creditComment) {
+                $payload = script:Parse-SingleCreditInputMarker -Text $creditComment
+                break
+            }
+
+            # Only retry when the completion marker is present but credit-input is absent
+            if ($null -eq $completionPresent -or $attempt -ge $MaxRetries) { break }
+
+            Start-Sleep -Seconds $backoff
+            $backoff *= 2
+            $attempt++
+        }
+
+        if ($null -ne $payload -and $null -ne $completionPresent) {
+            $evidence    = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
+            $adapterName = if ($payload.ContainsKey('adapter'))  { $payload['adapter']  } else { '' }
+            $builderName = $script:BuilderByPort[$port]
+            if (Get-Command $builderName -ErrorAction SilentlyContinue) {
+                $buildParams = @{ MarkerPresent = $true; IssueNumber = [int]$IssueNumber; Evidence = $evidence }
+                if (-not [string]::IsNullOrWhiteSpace($adapterName)) { $buildParams['AdapterName'] = $adapterName }
+                $results += & $builderName @buildParams
+            }
+        }
+    }
+
+    return $results
+}

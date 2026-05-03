@@ -81,6 +81,8 @@ Run the 3-pass Design Challenge per `skills/design-exploration/SKILL.md` after d
 
 ## Stage 4: Update Issue
 
+Load `skills/frame-credit-emission/SKILL.md` for the deferred-emission terminal-step contract.
+
 Update the GitHub issue body with full design details per `skills/design-exploration/SKILL.md` (decisions, acceptance criteria, testing scope, rejected alternatives), then post:
 
 ```markdown
@@ -89,6 +91,19 @@ Update the GitHub issue body with full design details per `skills/design-explora
 Technical design complete — decisions documented, acceptance criteria defined, adversarial design challenge complete. Ready for planning with @Issue-Planner.
 ```
 
+Immediately after posting the completion marker, post a credit-input marker comment (SMC-17 deferred-emission):
+
+```markdown
+<!-- credit-input-design-{ISSUE_NUMBER} -->
+```yaml
+port: design
+adapter: work-adapter
+evidence: "issue #{ISSUE_NUMBER}; design-phase-complete marker posted"
+```
+```
+
+Retain the comment text returned by the post call so Code-Conductor harvest can use the `-InMemoryMarkers` fallback.
+
 ## Completion Gate (Mandatory)
 
 Hard-stop: never conclude without durable artifacts.
@@ -96,6 +111,7 @@ Hard-stop: never conclude without durable artifacts.
 - [ ] **GitHub issue updated** with full design details, decisions, and acceptance criteria.
 - [ ] **Rejected alternatives documented** with brief rationale.
 - [ ] **Completion comment posted** with the `<!-- design-phase-complete-{ISSUE_NUMBER} -->` marker.
+- [ ] **Credit-input marker** `<!-- credit-input-design-{ISSUE_NUMBER} -->` posted immediately after.
 
 A `Documents/Design/` file is **not** created during design — Doc-Keeper creates it as part of the implementation PR.
 

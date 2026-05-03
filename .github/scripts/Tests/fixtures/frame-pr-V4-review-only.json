@@ -1,0 +1,11 @@
+{
+  "number": 9001,
+  "mergedAt": "2026-04-01T12:00:00Z",
+  "title": "Synthetic fixture: v4 metrics block with only the review credit pre-populated (D9 additive-merge)",
+  "closingIssuesReferences": [
+    {
+      "number": 500
+    }
+  ],
+  "body": "## Summary\n\nSynthetic v4 fixture for additive-merge (D9) validation.\nThe pipeline-metrics block carries only the review credit row.\nThe back-deriver must fill in the remaining 11 ports without overwriting review.\n\nRefs #500\n\n<!-- pipeline-metrics\nmetrics_version: 4\ncredits:\n  - port: review\n    status: passed\n    evidence: \"Full review pipeline completed: prosecution x3, defense, judgment.\"\n-->\n"
+}

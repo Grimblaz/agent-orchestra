@@ -50,7 +50,9 @@ Describe 'session-memory contract structural surface' {
             [pscustomobject]@{ Id = 'SMC-12'; Label = 'plugin release-hygiene decision'; Pending384 = $false; FollowUp379 = $false },
             [pscustomobject]@{ Id = 'SMC-13'; Label = '.copilot-tracking/ artifacts'; Pending384 = $false; FollowUp379 = $false },
             [pscustomobject]@{ Id = 'SMC-14'; Label = 'subagent-env-handshake state'; Pending384 = $false; FollowUp379 = $false },
-            [pscustomobject]@{ Id = 'SMC-15'; Label = 'rate-limit deferred work state'; Pending384 = $false; FollowUp379 = $false }
+            [pscustomobject]@{ Id = 'SMC-15'; Label = 'rate-limit deferred work state'; Pending384 = $false; FollowUp379 = $false },
+            [pscustomobject]@{ Id = 'SMC-16'; Label = 'review-judge-produced sentinel'; Pending384 = $false; FollowUp379 = $false },
+            [pscustomobject]@{ Id = 'SMC-17'; Label = 'credit-input deferred-emission marker'; Pending384 = $false; FollowUp379 = $false }
         )
 
         $script:GetRelativePath = {
@@ -152,7 +154,7 @@ Describe 'session-memory contract structural surface' {
         $script:ContractContent | Should -Match '(?is)(\{base\}:\{surface\}|base:\s*surface|surface-naming|surface naming|surface-specific label)' -Because 'the contract must require surface-specific labels when survival changes by surface'
     }
 
-    It 'lists SMC-01 through SMC-15 in order with the required row labels' {
+    It 'lists SMC-01 through SMC-17 in order with the required row labels' {
         $lastIndex = -1
 
         foreach ($row in $script:ContractRows) {
