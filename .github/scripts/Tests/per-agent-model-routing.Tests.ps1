@@ -45,7 +45,9 @@ Describe 'Per-agent model + effort routing contract' {
 
         # D1: commands/orchestrate.md required routing
         $script:RequiredCommandRouting = @{
-            'commands/orchestrate.md' = @{ model = 'sonnet'; effort = 'medium' }
+            'commands/orchestrate.md'     = @{ model = 'sonnet'; effort = 'medium' }
+            'commands/code-conductor.md'  = @{ model = 'sonnet'; effort = 'medium' }
+            'commands/review-github.md'   = @{ model = 'sonnet'; effort = 'medium' }
         }
 
         # D3: upstream commands that MUST NOT declare model/effort

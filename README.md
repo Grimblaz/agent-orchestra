@@ -1,6 +1,6 @@
 # Agent Orchestra
 
-[![Version](https://img.shields.io/badge/version-v2.9.1-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v2.10.0-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system that orchestrates AI-assisted software development across specialized agents in GitHub Copilot and Claude Code.
@@ -25,7 +25,7 @@ A multi-agent workflow system that orchestrates AI-assisted software development
 2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins agent-orchestra` and install.
 3. **Use** — All 14 agents and the shared skill library are immediately available in VS Code Chat.
 
-**What's included in the repo plugin payload**: 14 agents, the shared skill library, and 10 command files under `commands/` (`/design`, `/experience`, `/plan`, `/orchestrate`, `/polish`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`). VS Code currently ignores the plugin `commands` field; Claude Code and CLI consumers use it.
+**What's included in the repo plugin payload**: 14 agents, the shared skill library, and 12 command files under `commands/` (`/code-conductor`, `/design`, `/experience`, `/orchestrate`, `/plan`, `/polish`, `/review-github`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`). VS Code currently ignores the plugin `commands` field; Claude Code and CLI consumers use it.
 
 **What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo. Plugin-distributed hooks are also not active when you only point VS Code at a clone via `chat.agentFilesLocations`; deterministic `SessionStart` cleanup and Claude `PostToolUse` release-hygiene prompts require an actual plugin install.
 
@@ -62,6 +62,7 @@ See [`CLAUDE.md`](CLAUDE.md) for the Claude Code user guide and [issue #369](htt
 
 The Claude review surface now ships in the `orchestra-review-*` command namespace:
 
+- `/review-github` — deterministic GitHub review intake and proxy prosecution entry point
 - `/orchestra:review` — canonical entry for the full prosecution → defense → judge pipeline
 - `/orchestra:review-lite` — small-change variant with a single compact prosecution pass before defense and judge
 - `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge` — power-user and partial-rerun entry points for individual stages
@@ -69,6 +70,7 @@ The Claude review surface now ships in the `orchestra-review-*` command namespac
 ### Code-Conductor Orchestration In Claude Code
 
 - `/orchestrate` — Claude entry point for the full pipeline from durable issue state through implementation, validation, CE Gate, and PR readiness via Code-Conductor
+- `/code-conductor` — explicit non-hub-mode free-text Code-Conductor entry point
 
 For paused Claude orchestration work, `/orchestrate` is also the resume entry point. The shared workflow's `/implement` wording is Copilot-specific; Claude does not ship a `/implement` command.
 

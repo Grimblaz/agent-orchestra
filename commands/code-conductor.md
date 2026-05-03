@@ -1,0 +1,36 @@
+---
+description: "Invoke Code-Conductor in explicit non-hub-mode for a free-text task: route to local code review, GitHub review intake, or specialist dispatch (implementation, tests, docs, etc.) without the hub pipeline."
+argument-hint: "Free-text task for Code-Conductor"
+model: sonnet
+effort: medium
+---
+
+# /code-conductor
+
+<!-- scope: claude-only -->
+
+Run the Code-Conductor role inline in this conversation for an explicit non-hub-mode task.
+
+## Pre-flight (session-startup)
+
+Load `skills/session-startup/SKILL.md` and follow Steps 4, 6, 7b, and 9 (paired body for Step 9: `agents/Code-Conductor.agent.md`).
+
+### Step 9 — Paired-body halt-on-fail
+
+Resolve and read `agents/Code-Conductor.agent.md` before adopting the role. Use the D1 resolution order adapted for this command: first read `~/.claude/plugins/installed_plugins.json` and use the `installPath` for `agent-orchestra@agent-orchestra` to load `agents/Code-Conductor.agent.md`; if that registry entry is missing or unusable, fall back to the newest SemVer-sorted match for `~/.claude/plugins/cache/agent-orchestra/agent-orchestra/*/agents/Code-Conductor.agent.md`; only after those plugin-cache paths fail, allow a source-repo CWD read of `agents/Code-Conductor.agent.md` when `.claude-plugin/plugin.json` exists in the current repo and declares `name: agent-orchestra`. If every candidate load fails, emit exactly: `⚠️ Shared-body load failed for agents/Code-Conductor.agent.md — {error}. This run cannot continue without the canonical methodology; surface this to the user and stop.` The remediation command is `claude plugin install agent-orchestra@agent-orchestra`.
+
+**Pre-flight — empty task guard**:
+
+If `$ARGUMENTS` is empty or whitespace-only, use the `AskUserQuestion` tool to ask the user what task to route. Do not adopt the Conductor body with no task.
+
+**Inline execution**:
+
+Adopt the resolved Code-Conductor body inline. This invocation is explicit non-hub-mode; do not run the hub-mode upstream pipeline (Experience-Owner / Solution-Designer / Issue-Planner / D9). Per the Code-Conductor body's `#### Non-hub-mode invocation (slash-command path)` subsection, classify `$ARGUMENTS` and dispatch the appropriate specialist or mode.
+
+## Downstream Agent handshakes
+
+Before each downstream `Agent` dispatch, reconstruct a fresh `subagent-env-handshake` by capturing live HEAD, branch, CWD, and dirty fingerprint immediately before that dispatch. The working tree mutates during orchestration, so do not reuse or carry forward a command-entry-captured handshake, a single entry-time handshake, or any earlier per-dispatch block for later specialist calls.
+
+Construct each downstream handshake from `skills/subagent-env-handshake/SKILL.md` using the schema and inline prose template there, and prepend it as the first content of the `prompt` parameter for tree-dependent specialist `Agent` calls. If the live capture fails, skip that handshake and let the target specialist's Step 0 missing-handshake branch handle the fallback.
+
+ARGUMENTS: $ARGUMENTS
