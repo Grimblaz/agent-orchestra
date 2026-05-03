@@ -137,7 +137,7 @@ Describe 'Code-Conductor inline commands contract' {
             $content = Get-Content -Path $script:CodeConductorAgentPath -Raw -ErrorAction Stop
 
             $expectedSlashSentence = 'On Claude Code, the deterministic slash-command equivalent of these prose triggers is /review-github (see commands/review-github.md).'
-            $content | Should -Match ([regex]::Escape($expectedSlashSentence)) -Because 'Code-Conductor.agent.md must preserve the byte-equal /review-github additive sentence (line 339)'
+            $content | Should -Match ([regex]::Escape($expectedSlashSentence)) -Because 'Code-Conductor.agent.md must preserve the byte-equal /review-github additive sentence in the Review Reconciliation Loop section'
         }
     }
 
@@ -162,7 +162,7 @@ Describe 'Code-Conductor inline commands contract' {
             $match.Value | Should -Match '/code-conductor' -Because 'The skip-hub-mode sentence must include /code-conductor in the examples list'
         }
 
-        It 'Non-hub-mode subsection routes review tokens correctly (longest-phrase-first)' {
+        It 'Non-hub-mode subsection routes review tokens correctly (longest-phrase-first; binding-anchored)' {
             $content = Get-Content -Path $script:CodeConductorAgentPath -Raw -ErrorAction Stop
 
             # Verify the Non-hub-mode subsection documents both routing branches
@@ -170,9 +170,18 @@ Describe 'Code-Conductor inline commands contract' {
             $match = [regex]::Match($content, $subSectionPattern)
 
             $match.Success | Should -BeTrue -Because 'Code-Conductor.agent.md must contain the Non-hub-mode invocation subsection'
-            $match.Value | Should -Match '(?is)review github' -Because 'The Non-hub-mode subsection must route "review github" to GitHub intake'
-            $match.Value | Should -Match '(?is)Review Reconciliation Loop' -Because 'The Non-hub-mode subsection must route bare "review" to the Review Reconciliation Loop'
-            $match.Value | Should -Match '(?is)longest.phrase' -Because 'The Non-hub-mode subsection must specify longest-phrase-first match order'
+
+            # Binding-anchored assertions: each trigger phrase must co-occur with its target in the same routing clause,
+            # so a drift edit that swaps trigger->target pairings cannot pass independent substring checks.
+            $match.Value | Should -Match '(?is)`github review`[^.]*GitHub intake|`review github`[^.]*GitHub intake|`cr review`[^.]*GitHub intake' -Because 'The Non-hub-mode subsection must bind a GitHub-trigger phrase to the GitHub intake path'
+            $match.Value | Should -Match '(?is)bare\s+`review`[^.]*Review Reconciliation Loop' -Because 'The Non-hub-mode subsection must bind bare `review` to the Review Reconciliation Loop'
+            $match.Value | Should -Match '(?is)longest-phrase-first' -Because 'The Non-hub-mode subsection must specify literal longest-phrase-first match order'
+
+            # Canonical-trigger parity: all three line-338 GitHub-trigger phrases must appear in the routing prose
+            # (mirrors the byte-equal preservation of line 338).
+            $match.Value | Should -Match '(?is)github review' -Because 'The Non-hub-mode subsection must enumerate the canonical `github review` trigger'
+            $match.Value | Should -Match '(?is)review github' -Because 'The Non-hub-mode subsection must enumerate the canonical `review github` trigger'
+            $match.Value | Should -Match '(?is)cr review' -Because 'The Non-hub-mode subsection must enumerate the canonical `cr review` trigger'
         }
 
         It 'excludes /code-conductor from the /orchestrate exception clause' {

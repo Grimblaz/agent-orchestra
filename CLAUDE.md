@@ -140,7 +140,7 @@ Each Claude subagent shell in `agents/*.md` may declare `model:` and `effort:` i
 3. Shell frontmatter `model:` / `effort:` declaration (this table)
 4. Dispatcher's current model (user's active session model)
 
-Note: the user-session default (`/model` setting) never propagates to subagents — it applies only to inline commands (`/experience`, `/design`, `/plan`, `/orchestrate`). Downstream specialist `Agent` dispatches from those commands inherit the dispatcher's model, not the user-session default.
+Note: the user-session default (`/model` setting) never propagates to subagents — it applies only to inline commands without `model:` frontmatter (`/experience`, `/design`, `/plan`, `/polish`). Downstream specialist `Agent` dispatches from those commands inherit the dispatcher's model, not the user-session default.
 
 **Multi-turn `/orchestrate` boundary**: the `model: sonnet, effort: medium` override declared in `commands/orchestrate.md` applies for the duration of the command's turn. `/code-conductor` and `/review-github` have their own `sonnet + medium` command-front-end overrides that apply for their respective command turns. If a user interrupts a multi-turn `/orchestrate` session mid-flow, the override resets to the user's session model. Re-invoking `/orchestrate` re-applies the override for the new turn.
 
@@ -150,7 +150,7 @@ Note: the user-session default (`/model` setting) never propagates to subagents 
 
 **How to override the declared routing**:
 
-- **Inline slash commands**: when a command file declares `model:` frontmatter (currently only `/orchestrate`), that frontmatter governs the command's turn — running `/model <name>` first does *not* override it. To run `/orchestrate` at a different tier, edit `commands/orchestrate.md` frontmatter directly. The user-session `/model` setting only governs inline commands that omit `model:` frontmatter (`/experience`, `/design`, `/plan`, `/polish`).
+- **Inline slash commands**: when a command file declares `model:` frontmatter (currently `/orchestrate`, `/code-conductor`, and `/review-github`), that frontmatter governs the command's turn — running `/model <name>` first does *not* override it. To run any of those at a different tier, edit the corresponding `commands/*.md` frontmatter directly. The user-session `/model` setting only governs inline commands that omit `model:` frontmatter (`/experience`, `/design`, `/plan`, `/polish`).
 - **Subagent dispatches** from any command follow the inheritance order above. For a process-wide override of every subagent, set the `CLAUDE_CODE_SUBAGENT_MODEL` environment variable. For a one-off override, pass `model:` on a specific `Agent` tool call. Shell frontmatter still wins over the dispatcher model, so quality-justified shells (code-critic, code-review-response, etc.) keep their declared tier even when the dispatcher's model differs.
 - **Multi-turn `/orchestrate` interruption**: if you interrupt mid-flow and the next message is not `/orchestrate`, the model falls back to the user-session default until you re-invoke `/orchestrate`, which re-applies the command frontmatter.
 

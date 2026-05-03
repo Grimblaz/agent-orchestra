@@ -151,7 +151,9 @@ Skip hub mode entirely when the user invokes a specific slash command (e.g., `/i
 
 #### Non-hub-mode invocation (slash-command path)
 
-When Code-Conductor is invoked via a slash command that skips hub mode and carries `$ARGUMENTS` as a free-text task, such as `/code-conductor [text]`, classify the task using the existing prose-trigger and specialist-dispatch logic. Match in longest-phrase-first order: `review github` enters the GitHub intake path per `## Review Reconciliation Loop (Mandatory)`; bare `review` (when `review github` is not the leading phrase) enters the Review Reconciliation Loop for local code review; otherwise route via the specialist-dispatch table per `## Agent Selection`.
+(This subsection complements the Hub Mode discussion above by describing the path that skips hub mode.)
+
+When Code-Conductor is invoked via a slash command that skips hub mode and carries `$ARGUMENTS` as a free-text task, such as `/code-conductor [text]`, classify the task using the existing prose-trigger and specialist-dispatch logic. Trigger phrases are matched against the leading-token group of `$ARGUMENTS` (not as arbitrary mid-string substrings) in longest-phrase-first order, consistent with the design D6 best-effort prose-trigger semantics: `github review`, `review github`, or `cr review` (any of the canonical line-338 GitHub-trigger phrases) enter the GitHub intake path per `## Review Reconciliation Loop (Mandatory)`; bare `review` (when no GitHub-trigger phrase is the leading token group) enters the Review Reconciliation Loop for local code review; otherwise route via the specialist-dispatch table per `## Agent Selection`.
 
 ### Scope Classification Gate
 
