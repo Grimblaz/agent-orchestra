@@ -3,54 +3,122 @@ credits:
   - port: experience
     status: passed
     evidence: "Linked issue #403 resolved from closingIssuesReferences for a post-thin/fat pipeline PR."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: design
     status: inconclusive
     evidence: "Linked issue #403 was resolved, but issue linkage alone does not confirm design completion because the audit does not read issue-body markers or completion state."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: plan
     status: inconclusive
     evidence: "Linked issue #403 was resolved, but issue linkage alone does not confirm plan completion because the audit does not read issue-body markers or completion state."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: implement-code
     status: skipped
     evidence: "The historical metrics block does not expose which implementation specialist lanes ran; no validator evidence to credit."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: implement-test
     status: skipped
     evidence: "The historical metrics block does not expose whether test-writing ran as a distinct lane; no validator evidence to credit."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: implement-refactor
     status: skipped
     evidence: "No adapter-level refactor evidence is encoded in the historical metrics block; no validator evidence to credit."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: implement-docs
     status: skipped
     evidence: "No adapter-level documentation evidence is encoded in the historical metrics block; no validator evidence to credit."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: review
     status: inconclusive
     evidence: "The v4 metrics block does not encode enough review detail to credit review."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: ce-gate-cli
     status: inconclusive
     evidence: "CE Gate passed, but the PR body does not identify the surface as CLI."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: ce-gate-browser
     status: inconclusive
     evidence: "CE Gate passed, but the PR body does not identify the surface as browser."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: ce-gate-canvas
     status: inconclusive
     evidence: "CE Gate passed, but the PR body does not identify the surface as canvas."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: ce-gate-api
     status: inconclusive
     evidence: "CE Gate passed, but the PR body does not identify the surface as API."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: release-hygiene
     status: not-applicable
     evidence: "No release-hygiene trigger is implied by the fixture summary or metrics block."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: post-pr
     status: skipped
     evidence: "The PR is merged, but merge state alone does not confirm post-PR cleanup and archival completion; no checklist evidence available."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: post-fix-review
     status: not-applicable
     evidence: "postfix_triggered is false, so no targeted post-fix review path applied."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: process-review
     status: not-applicable
     evidence: "The fixture encodes no systemic-gap trigger for process-review follow-up."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
   - port: process-retrospective
     status: inconclusive
     evidence: "Port pending decision per umbrella sub-issue #11."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-08T11:10:00Z
 integrity_checks:
   - name: linked-issue-resolution
     status: passed

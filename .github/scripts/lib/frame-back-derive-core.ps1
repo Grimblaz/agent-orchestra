@@ -700,9 +700,35 @@ function Get-FBDAuditSurface {
         [Parameter(Mandatory)][string]$MetricsBlock
     )
 
+    $mergedAtValue = [string](Get-FBDPropertyValue -InputObject $PrPayload -Name 'mergedAt')
+    $isMerged = -not [string]::IsNullOrWhiteSpace($mergedAtValue)
+
     $credits = [System.Collections.Generic.List[object]]::new()
     foreach ($port in $Ports) {
-        $credits.Add((Get-FBDPortCredit -Port $port -MetricsVersion $MetricsVersion -LinkedIssue $LinkedIssue -MetricsBlock $MetricsBlock -IsMerged:([bool](Get-FBDPropertyValue -InputObject $PrPayload -Name 'mergedAt'))))
+        $credits.Add((Get-FBDPortCredit -Port $port -MetricsVersion $MetricsVersion -LinkedIssue $LinkedIssue -MetricsBlock $MetricsBlock -IsMerged:$isMerged))
+    }
+
+    # Add mode.synthetic-backfill to every back-derived credit row (D9 structural disambiguation).
+    $backfilledAt = [System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
+    # Normalize mergedAt to ISO-8601 string (gh CLI may return DateTime or string depending on PowerShell version)
+    $rawMergedAt = Get-FBDPropertyValue -InputObject $PrPayload -Name 'mergedAt'
+    $originalPrMergedAt = if ($null -ne $rawMergedAt -and -not [string]::IsNullOrWhiteSpace([string]$rawMergedAt)) {
+        if ($rawMergedAt -is [System.DateTime]) {
+            $rawMergedAt.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        } else { [string]$rawMergedAt }
+    } else { $null }
+
+    $decoratedCredits = [System.Collections.Generic.List[object]]::new()
+    foreach ($credit in $credits) {
+        $decorated = [ordered]@{}
+        foreach ($key in $credit.Keys) { $decorated[$key] = $credit[$key] }
+        $decorated['mode'] = [ordered]@{
+            'synthetic-backfill' = [ordered]@{
+                backfilled_at           = $backfilledAt
+                original_pr_merged_at   = $originalPrMergedAt
+            }
+        }
+        $decoratedCredits.Add($decorated)
     }
 
     $integrityChecks = @(
@@ -713,7 +739,7 @@ function Get-FBDAuditSurface {
 
     return [ordered]@{
         frame_version    = 1
-        credits          = $credits.ToArray()
+        credits          = $decoratedCredits.ToArray()
         integrity_checks = $integrityChecks
     }
 }
@@ -740,6 +766,18 @@ function ConvertTo-FBDAuditYaml {
         $lines.Add(("  - port: {0}" -f $credit.port))
         $lines.Add(("    status: {0}" -f $credit.status))
         $lines.Add(("    evidence: {0}" -f (ConvertTo-FBDYamlQuotedString -Value $credit.evidence)))
+        if ($credit.Contains('mode') -and $null -ne $credit.mode -and $credit.mode.Contains('synthetic-backfill')) {
+            $sb = $credit.mode.'synthetic-backfill'
+            $lines.Add('    mode:')
+            $lines.Add('      synthetic-backfill:')
+            $lines.Add(("        backfilled_at: {0}" -f $sb.backfilled_at))
+            $origMergedAt = if ($null -ne $sb.original_pr_merged_at) {
+                if ($sb.original_pr_merged_at -is [System.DateTime]) {
+                    $sb.original_pr_merged_at.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+                } else { [string]$sb.original_pr_merged_at }
+            } else { 'null' }
+            $lines.Add(("        original_pr_merged_at: {0}" -f $origMergedAt))
+        }
     }
 
     $lines.Add('integrity_checks:')
