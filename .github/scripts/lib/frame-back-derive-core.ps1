@@ -515,35 +515,39 @@ function Get-FBDPortCredit {
             }
         }
         'implement-code' {
+            # D5 (issue #442): implement-* uses skipped (not inconclusive) when no validator evidence exists in the historical record.
             switch ($MetricsVersion) {
-                '1' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The v1 metrics block does not encode implementation-lane detail.' }
-                '2' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The v2 metrics block does not encode implementation-lane detail.' }
-                '3' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The v3 metrics block does not expose which implementation specialist lanes ran.' }
-                default { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The PR body does not expose which implementation specialist lanes ran.' }
+                '1' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The v1 metrics block does not encode implementation-lane detail; no validator evidence to credit.' }
+                '2' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The v2 metrics block does not encode implementation-lane detail; no validator evidence to credit.' }
+                '3' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The v3 metrics block does not expose which implementation specialist lanes ran; no validator evidence to credit.' }
+                default { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The historical metrics block does not expose which implementation specialist lanes ran; no validator evidence to credit.' }
             }
         }
         'implement-test' {
+            # D5 (issue #442): implement-* uses skipped (not inconclusive) when no validator evidence exists in the historical record.
             switch ($MetricsVersion) {
-                '1' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The v1 metrics block does not encode test-lane detail.' }
-                '2' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The v2 metrics block does not encode test-lane detail.' }
-                '3' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The v3 metrics block does not expose whether test-writing ran as a distinct lane.' }
-                default { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The PR body does not expose whether test-writing ran as a distinct lane.' }
+                '1' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The v1 metrics block does not encode test-lane detail; no validator evidence to credit.' }
+                '2' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The v2 metrics block does not encode test-lane detail; no validator evidence to credit.' }
+                '3' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The v3 metrics block does not expose whether test-writing ran as a distinct lane; no validator evidence to credit.' }
+                default { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The historical metrics block does not expose whether test-writing ran as a distinct lane; no validator evidence to credit.' }
             }
         }
         'implement-refactor' {
+            # D5 (issue #442): implement-* uses skipped (not inconclusive) when no validator evidence exists in the historical record.
             switch ($MetricsVersion) {
-                '1' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The v1 metrics block does not encode refactor-lane detail.' }
-                '2' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The v2 metrics block does not encode refactor-lane detail.' }
-                '3' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'No adapter-level refactor evidence is encoded in the fixture body.' }
-                default { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'No adapter-level refactor evidence is encoded in the historical metrics block.' }
+                '1' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The v1 metrics block does not encode refactor-lane detail; no validator evidence to credit.' }
+                '2' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The v2 metrics block does not encode refactor-lane detail; no validator evidence to credit.' }
+                '3' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'No adapter-level refactor evidence is encoded in the fixture body; no validator evidence to credit.' }
+                default { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'No adapter-level refactor evidence is encoded in the historical metrics block; no validator evidence to credit.' }
             }
         }
         'implement-docs' {
+            # D5 (issue #442): implement-* uses skipped (not inconclusive) when no validator evidence exists in the historical record.
             switch ($MetricsVersion) {
-                '1' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The v1 metrics block does not encode documentation-lane detail.' }
-                '2' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The v2 metrics block does not encode documentation-lane detail.' }
-                '3' { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'No adapter-level documentation evidence is encoded in the fixture body.' }
-                default { return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'No adapter-level documentation evidence is encoded in the historical metrics block.' }
+                '1' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The v1 metrics block does not encode documentation-lane detail; no validator evidence to credit.' }
+                '2' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The v2 metrics block does not encode documentation-lane detail; no validator evidence to credit.' }
+                '3' { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'No adapter-level documentation evidence is encoded in the fixture body; no validator evidence to credit.' }
+                default { return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'No adapter-level documentation evidence is encoded in the historical metrics block; no validator evidence to credit.' }
             }
         }
         'review' {
@@ -623,11 +627,12 @@ function Get-FBDPortCredit {
             }
         }
         'post-pr' {
+            # D5 (issue #442): post-pr uses skipped (not inconclusive) when no checklist evidence exists in the historical record.
             if ($IsMerged.IsPresent) {
-                return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The PR is merged, but merge state alone does not confirm post-PR cleanup and archival completion.'
+                return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The PR is merged, but merge state alone does not confirm post-PR cleanup and archival completion; no checklist evidence available.'
             }
 
-            return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'The fixture does not preserve enough detail to confirm post-PR cleanup and archival completion.'
+            return New-FBDCredit -Port $Port -Status 'skipped' -Evidence 'The fixture does not preserve enough detail to confirm post-PR cleanup and archival completion; no checklist evidence available.'
         }
         'post-fix-review' {
             $postfixTriggered = Get-FBDMetricBoolean -MetricsBlock $MetricsBlock -Name 'postfix_triggered'

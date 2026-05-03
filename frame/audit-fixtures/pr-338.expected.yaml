@@ -10,17 +10,17 @@ credits:
     status: inconclusive
     evidence: "Linked issue #301 was resolved, but issue linkage alone does not confirm plan completion because the audit does not read issue-body markers or completion state."
   - port: implement-code
-    status: inconclusive
-    evidence: "The v2 metrics block does not encode implementation-lane detail."
+    status: skipped
+    evidence: "The v2 metrics block does not encode implementation-lane detail; no validator evidence to credit."
   - port: implement-test
-    status: inconclusive
-    evidence: "The v2 metrics block does not encode test-lane detail."
+    status: skipped
+    evidence: "The v2 metrics block does not encode test-lane detail; no validator evidence to credit."
   - port: implement-refactor
-    status: inconclusive
-    evidence: "The v2 metrics block does not encode refactor-lane detail."
+    status: skipped
+    evidence: "The v2 metrics block does not encode refactor-lane detail; no validator evidence to credit."
   - port: implement-docs
-    status: inconclusive
-    evidence: "The v2 metrics block does not encode documentation-lane detail."
+    status: skipped
+    evidence: "The v2 metrics block does not encode documentation-lane detail; no validator evidence to credit."
   - port: review
     status: passed
     evidence: "Prosecution and judge counts are present, and the finding includes defense and judge detail."
@@ -40,8 +40,8 @@ credits:
     status: inconclusive
     evidence: "This PR predates the current release-hygiene audit path, so trigger evidence is not derivable from the fixture alone."
   - port: post-pr
-    status: inconclusive
-    evidence: "The PR is merged, but merge state alone does not confirm post-PR cleanup and archival completion."
+    status: skipped
+    evidence: "The PR is merged, but merge state alone does not confirm post-PR cleanup and archival completion; no checklist evidence available."
   - port: post-fix-review
     status: not-applicable
     evidence: "No post-fix review path is recorded, so the trigger is treated as absent."

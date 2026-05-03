@@ -10,20 +10,20 @@ credits:
     status: inconclusive
     evidence: "Linked issue #403 was resolved, but issue linkage alone does not confirm plan completion because the audit does not read issue-body markers or completion state."
   - port: implement-code
-    status: inconclusive
-    evidence: "The PR body does not expose which implementation specialist lanes ran."
+    status: skipped
+    evidence: "The historical metrics block does not expose which implementation specialist lanes ran; no validator evidence to credit."
   - port: implement-test
-    status: inconclusive
-    evidence: "The PR body does not expose whether test-writing ran as a distinct lane."
+    status: skipped
+    evidence: "The historical metrics block does not expose whether test-writing ran as a distinct lane; no validator evidence to credit."
   - port: implement-refactor
-    status: inconclusive
-    evidence: "No adapter-level refactor evidence is encoded in the historical metrics block."
+    status: skipped
+    evidence: "No adapter-level refactor evidence is encoded in the historical metrics block; no validator evidence to credit."
   - port: implement-docs
-    status: inconclusive
-    evidence: "No adapter-level documentation evidence is encoded in the historical metrics block."
+    status: skipped
+    evidence: "No adapter-level documentation evidence is encoded in the historical metrics block; no validator evidence to credit."
   - port: review
-    status: passed
-    evidence: "metrics_version 4 block records prosecution, defense, and judgment as completed."
+    status: inconclusive
+    evidence: "The v4 metrics block does not encode enough review detail to credit review."
   - port: ce-gate-cli
     status: inconclusive
     evidence: "CE Gate passed, but the PR body does not identify the surface as CLI."
@@ -40,8 +40,8 @@ credits:
     status: not-applicable
     evidence: "No release-hygiene trigger is implied by the fixture summary or metrics block."
   - port: post-pr
-    status: inconclusive
-    evidence: "The PR is merged, but merge state alone does not confirm post-PR cleanup and archival completion."
+    status: skipped
+    evidence: "The PR is merged, but merge state alone does not confirm post-PR cleanup and archival completion; no checklist evidence available."
   - port: post-fix-review
     status: not-applicable
     evidence: "postfix_triggered is false, so no targeted post-fix review path applied."
