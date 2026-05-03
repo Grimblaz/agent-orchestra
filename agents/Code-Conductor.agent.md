@@ -147,7 +147,11 @@ When the user invokes Code-Conductor without a specific slash command (e.g., `@c
 - `<!-- design-phase-complete-{ID} -->` found → technical design done; skip Solution-Designer
 - Plan found (session memory or `<!-- plan-issue-{ID} -->` comment) → skip upstream phases; in hub mode, D9 still applies unless the later tier-aware prior-session artifact rules suppress it
 
-Skip hub mode entirely when the user invokes a specific slash command (e.g., `/implement #N`, `/plan #N`, `/design #N`) — these execute the named phase directly; smart resume applies at the phase level, not the hub level. Exception: `/orchestrate` is a slash command that explicitly triggers hub mode — treat it as equivalent to `@code-conductor issue #N` (single issue) or `@code-conductor issues #A #B #C` (multi-issue bundle, per the Multi-Issue Bundling section).
+Skip hub mode entirely when the user invokes a specific slash command (e.g., `/implement #N`, `/plan #N`, `/design #N`, `/code-conductor #N`) — these execute the named phase directly; smart resume applies at the phase level, not the hub level. Exception: `/orchestrate` is a slash command that explicitly triggers hub mode — treat it as equivalent to `@code-conductor issue #N` (single issue) or `@code-conductor issues #A #B #C` (multi-issue bundle, per the Multi-Issue Bundling section).
+
+#### Non-hub-mode invocation (slash-command path)
+
+When Code-Conductor is invoked via a slash command that skips hub mode and carries `$ARGUMENTS` as a free-text task, such as `/code-conductor [text]`, classify the task using the existing prose-trigger and specialist-dispatch logic: `review` enters the Review Reconciliation Loop; `review github` enters the same GitHub intake path as `/review-github`; otherwise route via the specialist-dispatch table per `## Skill Mapping`.
 
 ### Scope Classification Gate
 
@@ -332,6 +336,7 @@ Code-Conductor keeps only the orchestration boundary here: enter the correct rev
 If the Review Completion Gate fails, re-enter the missing review stage or stages by default. Escalate with `#tool:vscode/askQuestions` only when the missing-stage rerun is infeasible under the current context.
 
 GitHub-triggered review requests (`github review`, `review github`, `cr review`) still enter through the GitHub intake path described in the loaded references before the generic local review loop runs.
+On Claude Code, the deterministic slash-command equivalent of these prose triggers is /review-github (see commands/review-github.md).
 
 ### Skill Mapping
 
