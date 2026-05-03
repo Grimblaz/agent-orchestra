@@ -1641,7 +1641,11 @@ function Invoke-CreditInputHarvest {
     function script:Get-IssueComments {
         param([string]$IssueNum, [string]$RepoArg, [string]$Gh)
 
-        $raw = & $Gh issue view $IssueNum --repo $RepoArg --json comments --paginate 2>$null
+        try {
+            $raw = & $Gh issue view $IssueNum --repo $RepoArg --json comments --paginate 2>$null
+        } catch {
+            return @()
+        }
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) { return @() }
 
         try {
