@@ -1,0 +1,99 @@
+frame_version: 1
+credits:
+  - port: experience
+    status: inconclusive
+    evidence: "The historical fixture does not resolve a linked issue for this PR."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-15T09:30:00Z
+  - port: design
+    status: inconclusive
+    evidence: "The fixture does not preserve enough detail to confirm design completion."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-15T09:30:00Z
+  - port: plan
+    status: inconclusive
+    evidence: "The fixture does not preserve enough detail to confirm plan completion."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-15T09:30:00Z
+  - port: implement-code
+    status: not-applicable
+    evidence: "changeset.touchesTestableCodeOrTests() is false for this docs-only PR."
+  - port: implement-test
+    status: not-applicable
+    evidence: "changeset.touchesTestableCodeOrTests() is false for this docs-only PR."
+  - port: implement-refactor
+    status: not-applicable
+    evidence: "changeset.touchedAreaHasDebt() is false for this docs-only PR."
+  - port: implement-docs
+    status: passed
+    evidence: "Doc-Keeper validated: Documents/Design/foo.md and skills/frame-credit-emission/SKILL.md updated."
+  - port: review
+    status: inconclusive
+    evidence: "The v4 metrics block does not encode enough review detail to credit review."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-15T09:30:00Z
+  - port: ce-gate-cli
+    status: not-applicable
+    evidence: "changeset.touchesCliSurface() is false; no commands/*.md touched."
+  - port: ce-gate-browser
+    status: not-applicable
+    evidence: "changeset.touchesBrowserSurface() is false."
+  - port: ce-gate-canvas
+    status: not-applicable
+    evidence: "changeset.touchesCanvasSurface() is false."
+  - port: ce-gate-api
+    status: not-applicable
+    evidence: "changeset.touchesApiSurface() is false."
+  - port: release-hygiene
+    status: not-applicable
+    evidence: "No release-hygiene trigger is implied by the fixture summary or metrics block."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-15T09:30:00Z
+  - port: post-pr
+    status: skipped
+    evidence: "The PR is merged, but merge state alone does not confirm post-PR cleanup and archival completion; no checklist evidence available."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-15T09:30:00Z
+  - port: post-fix-review
+    status: not-applicable
+    evidence: "postfix_triggered is false, so no targeted post-fix review path applied."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-15T09:30:00Z
+  - port: process-review
+    status: not-applicable
+    evidence: "The fixture encodes no systemic-gap trigger for process-review follow-up."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-15T09:30:00Z
+  - port: process-retrospective
+    status: inconclusive
+    evidence: "Port pending decision per umbrella sub-issue #11."
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-02T00:00:00Z
+        original_pr_merged_at: 2026-04-15T09:30:00Z
+integrity_checks:
+  - name: linked-issue-resolution
+    status: inconclusive
+    evidence: "No linked issue could be resolved from closingIssuesReferences, PR body references, or commit-message fallback."
+  - name: metrics-version-input
+    status: passed
+    evidence: "metrics_version 4 input was parsed without fallback."
+  - name: adapter-selection-evidence
+    status: inconclusive
+    evidence: "Historical pipeline-metrics do not encode enough detail to classify every implementation and CE surface port."

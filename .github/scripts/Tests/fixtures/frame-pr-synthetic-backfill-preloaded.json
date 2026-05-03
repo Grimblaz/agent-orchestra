@@ -1,0 +1,11 @@
+{
+  "number": 9004,
+  "mergedAt": "2026-04-02T12:00:00Z",
+  "title": "Synthetic fixture: pre-populated synthetic-backfill row preserved as-is (D9 additive-merge round-trip)",
+  "closingIssuesReferences": [
+    {
+      "number": 502
+    }
+  ],
+  "body": "## Summary\n\nSynthetic v4 fixture for D9 additive-merge round-trip with a pre-populated synthetic-backfill row.\nThe pipeline-metrics block carries a ce-gate-cli credit with a mode.synthetic-backfill row that includes block_kind.\nThe back-deriver must preserve that row as-is (no overwrite, no double-write) and fill the remaining 15 ports.\n\nRefs #502\n\n<!-- pipeline-metrics\nmetrics_version: 4\ncredits:\n  - port: ce-gate-cli\n    status: inconclusive\n    block_kind: environment\n    evidence: \"Pre-existing synthetic-backfill: environment blocked CLI surface at audit time.\"\n    mode:\n      synthetic-backfill:\n        backfilled_at: 2026-04-10T00:00:00Z\n        original_pr_merged_at: 2026-04-02T12:00:00Z\n-->\n"
+}

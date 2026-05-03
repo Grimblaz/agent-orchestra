@@ -99,3 +99,12 @@ Generate Gherkin `.feature` files for `[auto]` scenarios only; exclude `[manual]
 - Load `skills/ui-testing/SKILL.md` for Testing Library patterns and query strategies
 - Load `skills/systematic-debugging/SKILL.md` before attempting fixes
 - Reference `skills/verification-before-completion/SKILL.md` and `.github/architecture-rules.md` when validating coverage and architecture compliance
+- Load `skills/frame-credit-emission/SKILL.md` for the terminal-step credit-row emission contract
+
+## Terminal Step: Frame Credit Emission
+
+At the terminal step (after test authoring is complete and the PR body is available), emit a frame credit row for the `implement-test` port:
+
+1. Call `Build-ImplementTestCreditRow` with the validation evidence from the test run (e.g., test names, pass counts).
+2. Upsert the returned credit row into the PR-body `<!-- pipeline-metrics -->` block's `credits[]` array.
+3. Apply the additive-merge rule (D9): if a credit row for `implement-test` already exists in the block, skip the upsert.

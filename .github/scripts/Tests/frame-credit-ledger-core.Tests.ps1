@@ -379,6 +379,52 @@ Describe 'Resolve-PortStatus' {
 
         $result.SuggestedNextStep | Should -BeNullOrEmpty
     }
+
+    # ---------------------------------------------------------------------------
+    # Step 10 — Adapter parse-failure reporting (issue #441, Open Question 4)
+    # ---------------------------------------------------------------------------
+
+    It 'returns Inconclusive/AdapterParseError when all adapters carry a ParseError field (Step 10)' {
+        $brokenAdapter = [pscustomobject]@{
+            Name              = '<malformed:standard>'
+            Provides          = 'review'
+            AppliesWhen       = $null
+            SuggestedNextStep = $null
+            ParseError        = 'malformed-frontmatter'
+        }
+
+        $result = Resolve-PortStatus -Port $script:Port `
+            -WorkAdapters @($brokenAdapter) `
+            -ApplicableMap @{} `
+            -Credit $null
+
+        $result.Status    | Should -Be 'Inconclusive'
+        $result.SubReason | Should -Be 'AdapterParseError'
+        $result.Evidence  | Should -Match '0 parseable adapters'
+        $result.Evidence  | Should -Match 'malformed-frontmatter'
+    }
+
+    It 'discards parse-error adapters when valid adapters also exist for the same port (Step 10)' {
+        $brokenAdapter = [pscustomobject]@{
+            Name              = '<malformed:standard>'
+            Provides          = 'review'
+            AppliesWhen       = $null
+            SuggestedNextStep = $null
+            ParseError        = 'malformed-frontmatter'
+        }
+
+        # $script:AdapterApplies is a valid adapter (no ParseError field)
+        $map = @{ 'review-adapter' = 'true' }
+
+        $result = Resolve-PortStatus -Port $script:Port `
+            -WorkAdapters @($brokenAdapter, $script:AdapterApplies) `
+            -ApplicableMap $map `
+            -Credit $null
+
+        # Valid adapter drives the result; parse-error one is discarded
+        $result.Status    | Should -Be 'NotCovered'
+        $result.SubReason | Should -Be 'MissingAdapter'
+    }
 }
 
 Describe 'Compose-Comment' {
@@ -387,7 +433,7 @@ Describe 'Compose-Comment' {
         $script:Marker = '<!-- frame-credit-ledger-PR-429 -->'
     }
 
-    It 'filters auto-N/A ports out of the Covered section and surfaces them as a footnote count' {
+    It 'filters auto-N/A ports out of the table and surfaces them as a footnote count' {
         $reports = @(
             [pscustomobject]@{
                 PortName          = 'review'
@@ -411,18 +457,19 @@ Describe 'Compose-Comment' {
 
         $out | Should -Match ([regex]::Escape($script:Marker))
         $out | Should -Match '## Frame credit ledger'
-        # Only the PassedCredit row is rendered (auto-N/A is filtered).
-        $out | Should -Match '### ✅ Covered \(1\)'
-        # Auto-N/A row is NOT rendered as a per-port row.
-        $out | Should -Not -Match '(?m)^- design'
-        $out | Should -Not -Match 'auto not-applicable'
+        # Unified table: review appears as a table row.
+        $out | Should -Match '\|\s*review\s*\|'
+        # Auto-N/A row is NOT rendered as a full table row.
+        $out | Should -Not -Match '\|\s*design\s*\|'
         # Auto-N/A count surfaces as a footnote line.
         $out | Should -Match '\(1 ports auto-N/A'
+        # No three-section headers.
+        $out | Should -Not -Match '### ✅ Covered'
         $out | Should -Not -Match '### ⚠️ Inconclusive'
         $out | Should -Not -Match '### 🚫 Not covered'
     }
 
-    It 'renders all three sections in canonical order when reports are mixed' {
+    It 'renders all port statuses in a single unified table (no section split)' {
         $reports = @(
             [pscustomobject]@{
                 PortName          = 'review'
@@ -452,24 +499,21 @@ Describe 'Compose-Comment' {
 
         $out = Compose-Comment -MarkerToken $script:Marker -PortReports $reports
 
-        $out | Should -Match '### ✅ Covered \(1\)'
-        $out | Should -Match '### ⚠️ Inconclusive \(1\)'
-        $out | Should -Match '### 🚫 Not covered \(1\)'
+        # All three ports appear in the unified table.
+        $out | Should -Match '\|\s*review\s*\|'
+        $out | Should -Match '\|\s*implement-test\s*\|'
+        $out | Should -Match '\|\s*plan\s*\|'
 
-        # Order: Covered must precede Inconclusive must precede Not covered.
-        $coveredIdx = $out.IndexOf('### ✅ Covered')
-        $inconclusiveIdx = $out.IndexOf('### ⚠️ Inconclusive')
-        $notCoveredIdx = $out.IndexOf('### 🚫 Not covered')
-
-        $coveredIdx     | Should -BeGreaterThan -1
-        $inconclusiveIdx | Should -BeGreaterThan $coveredIdx
-        $notCoveredIdx  | Should -BeGreaterThan $inconclusiveIdx
+        # No three-section headers.
+        $out | Should -Not -Match '### ✅ Covered'
+        $out | Should -Not -Match '### ⚠️ Inconclusive'
+        $out | Should -Not -Match '### 🚫 Not covered'
 
         # Warn-mode footer present.
         $out | Should -Match 'warn'
     }
 
-    It 'omits the Inconclusive section header entirely when there are no inconclusive ports' {
+    It 'renders a table with both Covered and NotCovered rows without section headers' {
         $reports = @(
             [pscustomobject]@{
                 PortName          = 'review'
@@ -492,31 +536,13 @@ Describe 'Compose-Comment' {
         $out = Compose-Comment -MarkerToken $script:Marker -PortReports $reports
 
         $out | Should -Not -Match '### ⚠️ Inconclusive'
-        $out | Should -Match '### ✅ Covered \(1\)'
-        $out | Should -Match '### 🚫 Not covered \(1\)'
+        $out | Should -Not -Match '### ✅ Covered'
+        $out | Should -Not -Match '### 🚫 Not covered'
+        $out | Should -Match '\|\s*review\s*\|'
+        $out | Should -Match '\|\s*plan\s*\|'
     }
 
-    It "omits the Suggested next step line when SuggestedNextStep is `$null" {
-        $reports = @(
-            [pscustomobject]@{
-                PortName          = 'plan'
-                Status            = 'NotCovered'
-                SubReason         = 'MissingAdapter'
-                AdapterName       = 'plan-adapter'
-                SuggestedNextStep = $null
-                Evidence          = ''
-            }
-        )
-
-        $out = Compose-Comment -MarkerToken $script:Marker -PortReports $reports
-
-        # The Not covered detail row is present, but no "Suggested next step" line.
-        $out | Should -Match '### 🚫 Not covered \(1\)'
-        $out | Should -Match 'plan'
-        $out | Should -Not -Match '(?i)suggested next step'
-    }
-
-    It 'includes the Suggested next step line when it is a non-none string' {
+    It "renders next-step in the Next step column when provided" {
         $reports = @(
             [pscustomobject]@{
                 PortName          = 'plan'
@@ -530,8 +556,50 @@ Describe 'Compose-Comment' {
 
         $out = Compose-Comment -MarkerToken $script:Marker -PortReports $reports
 
-        $out | Should -Match '(?i)suggested next step'
         $out | Should -Match 'Re-run /plan to regenerate'
+    }
+
+    It "renders empty next-step cell when SuggestedNextStep is null" {
+        $reports = @(
+            [pscustomobject]@{
+                PortName          = 'plan'
+                Status            = 'NotCovered'
+                SubReason         = 'MissingAdapter'
+                AdapterName       = 'plan-adapter'
+                SuggestedNextStep = $null
+                Evidence          = ''
+            }
+        )
+
+        $out = Compose-Comment -MarkerToken $script:Marker -PortReports $reports
+
+        # Table row for plan is present.
+        $out | Should -Match '\|\s*plan\s*\|'
+        # No "Suggested next step" label (old format) — just empty column.
+        $out | Should -Not -Match '(?i)suggested next step'
+    }
+
+    It 'renders AdapterParseError as a table row surfacing the 0-parseable-adapters evidence (Step 10)' {
+        $reports = @(
+            [pscustomobject]@{
+                PortName          = 'review'
+                Status            = 'Inconclusive'
+                SubReason         = 'AdapterParseError'
+                AdapterName       = ''
+                SuggestedNextStep = $null
+                Evidence          = '0 parseable adapters (parse error: malformed-frontmatter)'
+            }
+        )
+
+        $out = Compose-Comment -MarkerToken $script:Marker -PortReports $reports
+
+        # Port row appears in the unified table.
+        $out | Should -Match '\|\s*review\s*\|'
+        # Evidence text flows into the table row.
+        $out | Should -Match '0 parseable adapters'
+        # No separate section headers (D2 single-shape parity).
+        $out | Should -Not -Match '### ✅ Covered'
+        $out | Should -Not -Match '### 🚫 Not covered'
     }
 }
 
@@ -586,5 +654,346 @@ Describe 'Compose-MissingMetricsShortCircuitComment (C-Behavior-1: distinct bran
         # Suggested next step still points operators at the v4 schema.
         $out | Should -Match 'frame/pipeline-metrics-v4-schema.md'
         $out | Should -Match '(?i)warn'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #441 Step 3 — v4 extended schema parser tests (RED until GREEN lands)
+# Tests: status:not-persisted, per-port fields, run_index, mode.synthetic-backfill,
+#        and last-wins-by-run_index selection.
+# ---------------------------------------------------------------------------
+
+Describe 'Read-PRMetricsBlock v4 extended fields (issue #441)' {
+
+    BeforeAll {
+        $script:V4NotPersistedYaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: not-persisted
+    run_index: 1
+    evidence: "Sentinel present but no credit row written."
+'@
+
+        $script:V4PerPortFieldsYaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: passed
+    run_index: 1
+    evidence: "judge ruling: keep"
+  - port: release-hygiene
+    adapter: symmetric-bump
+    status: passed
+    run_index: 1
+    evidence: "all four manifest files bumped."
+  - port: post-fix-review
+    adapter: post-fix
+    status: not-applicable
+    run_index: 1
+    evidence: "trigger absent"
+'@
+
+        $script:V4SyntheticBackfillYaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: not-persisted
+    run_index: 1
+    evidence: "Backfill row."
+    mode_backfilled_at: "2026-05-01T00:00:00Z"
+    mode_original_pr_merged_at: "2025-03-15T12:34:56Z"
+'@
+
+        $script:V4MultiRunYaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: passed
+    run_index: 1
+    evidence: "first run"
+  - port: review
+    adapter: standard
+    status: failed
+    run_index: 2
+    evidence: "second run"
+  - port: release-hygiene
+    adapter: symmetric-bump
+    status: passed
+    run_index: 1
+    evidence: "only run"
+'@
+    }
+
+    It 'parses status:not-persisted as a valid credit status' {
+        $body = & $script:NewV4PrBody -Yaml $script:V4NotPersistedYaml
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        $result | Should -Not -BeNullOrEmpty
+        $result.MetricsVersion | Should -Be 4
+        $credit = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $credit | Should -Not -BeNullOrEmpty
+        $credit.Status | Should -Be 'not-persisted'
+    }
+
+    It 'parses the adapter field on credit rows' {
+        $body = & $script:NewV4PrBody -Yaml $script:V4PerPortFieldsYaml
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        $result | Should -Not -BeNullOrEmpty
+        $reviewCredit = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $reviewCredit | Should -Not -BeNullOrEmpty
+        $reviewCredit.Adapter | Should -Be 'standard'
+
+        $rhCredit = $result.Credits | Where-Object { $_.Port -eq 'release-hygiene' }
+        $rhCredit | Should -Not -BeNullOrEmpty
+        $rhCredit.Adapter | Should -Be 'symmetric-bump'
+    }
+
+    It 'parses run_index as an integer on credit rows' {
+        $body = & $script:NewV4PrBody -Yaml $script:V4PerPortFieldsYaml
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        $reviewCredit = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $reviewCredit | Should -Not -BeNullOrEmpty
+        $reviewCredit.RunIndex | Should -Be 1
+        $reviewCredit.RunIndex | Should -BeOfType [int]
+    }
+
+    It 'parses mode_backfilled_at and mode_original_pr_merged_at from credit rows' {
+        $body = & $script:NewV4PrBody -Yaml $script:V4SyntheticBackfillYaml
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        $credit = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $credit | Should -Not -BeNullOrEmpty
+        $credit.ModeBackfilledAt | Should -Be '2026-05-01T00:00:00Z'
+        $credit.ModeOriginalPrMergedAt | Should -Be '2025-03-15T12:34:56Z'
+    }
+
+    # -------------------------------------------------------------------------
+    # Nested-field parsing (issue #441 follow-up — Gemini findings 2 + 5)
+    # -------------------------------------------------------------------------
+    # Real PR bodies emit credit metadata using the nested form documented in
+    # frame/pipeline-metrics-v4-schema.md (e.g. mode.synthetic-backfill,
+    # judge-score, integrity-check, version-bump, symmetric-bump-verification).
+    # The flat-key fallback is kept for backward compatibility; the nested form
+    # must round-trip cleanly through Read-PRMetricsBlock.
+
+    It 'parses nested mode.synthetic-backfill keys (real-PR schema shape)' {
+        $nestedYaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: passed
+    run_index: 1
+    evidence: "review credit"
+    mode:
+      synthetic-backfill:
+        backfilled_at: 2026-05-01T00:00:00Z
+        original_pr_merged_at: 2026-04-25T00:26:35Z
+'@
+        $body = & $script:NewV4PrBody -Yaml $nestedYaml
+        $result = Read-PRMetricsBlock -PrBody $body
+        $credit = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $credit | Should -Not -BeNullOrEmpty
+        $credit.ModeBackfilledAt | Should -Be '2026-05-01T00:00:00Z'
+        $credit.ModeOriginalPrMergedAt | Should -Be '2026-04-25T00:26:35Z'
+    }
+
+    It 'parses judge-score sub-block on a credit row (Gemini Finding 2)' {
+        $yaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: passed
+    run_index: 1
+    evidence: "review credit"
+    judge-score:
+      findings_sustained: 3
+      prosecutor_points: 20
+      defense_points: 0
+'@
+        $body = & $script:NewV4PrBody -Yaml $yaml
+        $result = Read-PRMetricsBlock -PrBody $body
+        $credit = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $credit.JudgeScore | Should -Not -BeNullOrEmpty
+        $credit.JudgeScore.findings_sustained | Should -Be '3'
+        $credit.JudgeScore.prosecutor_points  | Should -Be '20'
+        $credit.JudgeScore.defense_points     | Should -Be '0'
+    }
+
+    It 'parses integrity-check scalar field on a credit row (Gemini Finding 2)' {
+        $yaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: passed
+    run_index: 1
+    evidence: "review credit"
+    integrity-check: pass
+'@
+        $body = & $script:NewV4PrBody -Yaml $yaml
+        $result = Read-PRMetricsBlock -PrBody $body
+        $credit = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $credit.IntegrityCheck | Should -Be 'pass'
+    }
+
+    It 'parses version-bump and symmetric-bump-verification fields on release-hygiene credit' {
+        $yaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: release-hygiene
+    adapter: symmetric-bump
+    status: passed
+    run_index: 1
+    evidence: "version bump 2.7.0 to 2.8.0"
+    version-bump: 2.7.0 to 2.8.0
+    symmetric-bump-verification: passed
+'@
+        $body = & $script:NewV4PrBody -Yaml $yaml
+        $result = Read-PRMetricsBlock -PrBody $body
+        $credit = $result.Credits | Where-Object { $_.Port -eq 'release-hygiene' }
+        $credit.VersionBump | Should -Be '2.7.0 to 2.8.0'
+        $credit.SymmetricBumpVerificationStatus | Should -Be 'passed'
+    }
+
+    It 'splits per-credit chunks correctly (each credit gets only its own nested fields)' {
+        $yaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+  - port: review
+    adapter: standard
+    status: passed
+    run_index: 1
+    evidence: "review credit"
+    judge-score:
+      findings_sustained: 1
+  - port: release-hygiene
+    adapter: symmetric-bump
+    status: passed
+    run_index: 1
+    evidence: "release-hygiene credit"
+    version-bump: 2.7.0 to 2.8.0
+'@
+        $body = & $script:NewV4PrBody -Yaml $yaml
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        $review = $result.Credits | Where-Object { $_.Port -eq 'review' }
+        $rh = $result.Credits | Where-Object { $_.Port -eq 'release-hygiene' }
+
+        # Review carries judge-score but NOT version-bump.
+        $review.JudgeScore | Should -Not -BeNullOrEmpty
+        $review.VersionBump | Should -BeNullOrEmpty
+
+        # Release-hygiene carries version-bump but NOT judge-score.
+        $rh.VersionBump | Should -Be '2.7.0 to 2.8.0'
+        $rh.JudgeScore | Should -BeNullOrEmpty
+    }
+
+    # -------------------------------------------------------------------------
+    # Defensive guard (Gemini Finding 1)
+    # -------------------------------------------------------------------------
+
+    It 'Resolve-NotPersistedSynthesis returns null when MetricsBlock is null' {
+        $result = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $null -Comments @(
+            [pscustomobject]@{ body = '<!-- review-judge-produced-99 -->' }
+        )
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'Resolve-NotPersistedSynthesis returns null when MetricsBlock is parse-error' {
+        $parseError = [pscustomobject]@{ MetricsVersion = 'parse-error'; Reason = 'malformed' }
+        $result = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $parseError -Comments @(
+            [pscustomobject]@{ body = '<!-- review-judge-produced-99 -->' }
+        )
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'Resolve-NotPersistedSynthesis returns null when MetricsBlock is pre-v4' {
+        $preV4 = [pscustomobject]@{ MetricsVersion = 'pre-v4' }
+        $result = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $preV4 -Comments @(
+            [pscustomobject]@{ body = '<!-- review-judge-produced-99 -->' }
+        )
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'Resolve-NotPersistedSynthesis tolerates MetricsBlock without a Credits property under strict mode' {
+        # A v4 metrics block missing the Credits property must not throw
+        # PropertyNotFoundException — instead, treat as no existing review credit.
+        $skinnyV4 = [pscustomobject]@{ MetricsVersion = 4; FrameVersion = 1 }  # No Credits
+        $comments = @(
+            [pscustomobject]@{ body = '<!-- review-judge-produced-99 -->'; url = 'https://example/c1' }
+        )
+        $result = Resolve-NotPersistedSynthesis -PrNumber 99 -MetricsBlock $skinnyV4 -Comments $comments
+        $result | Should -Not -BeNullOrEmpty
+        $result.Status | Should -Be 'not-persisted'
+    }
+
+    # -------------------------------------------------------------------------
+    # Markdown table newline escape (Gemini Finding 4)
+    # -------------------------------------------------------------------------
+
+    It 'Compose-Comment escapes literal newlines in evidence to <br> so table rows survive' {
+        $reports = @(
+            [pscustomobject]@{
+                PortName          = 'review'
+                Status            = 'NotApplicable'
+                SubReason         = 'PassedCredit'
+                Evidence          = "first line`nsecond line`r`nthird line"
+                SuggestedNextStep = $null
+            }
+        )
+        $output = Compose-Comment -MarkerToken 'frame-credit-ledger-99' -PortReports $reports
+        # Both \n and \r\n should be replaced with <br> so the row is a single Markdown line.
+        $output | Should -Match 'first line<br>second line<br>third line'
+        $output | Should -Not -Match "first line`nsecond line"
+    }
+
+    It 'Select-LastCreditByRunIndex: when multiple credits exist for same (port, adapter), returns the one with the highest run_index' {
+        $body = & $script:NewV4PrBody -Yaml $script:V4MultiRunYaml
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        # There are two review/standard entries; run_index 2 wins.
+        $reviewCredits = @($result.Credits | Where-Object { $_.Port -eq 'review' -and $_.Adapter -eq 'standard' })
+        $reviewCredits.Count | Should -BeGreaterThan 1
+
+        $latest = Select-LastCreditByRunIndex -Credits $result.Credits -Port 'review' -Adapter 'standard'
+        $latest | Should -Not -BeNullOrEmpty
+        $latest.RunIndex | Should -Be 2
+        $latest.Status | Should -Be 'failed'
+    }
+
+    It 'Select-LastCreditByRunIndex: returns the single entry when only one run exists' {
+        $body = & $script:NewV4PrBody -Yaml $script:V4PerPortFieldsYaml
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        $latest = Select-LastCreditByRunIndex -Credits $result.Credits -Port 'release-hygiene' -Adapter 'symmetric-bump'
+        $latest | Should -Not -BeNullOrEmpty
+        $latest.RunIndex | Should -Be 1
+        $latest.Status | Should -Be 'passed'
+    }
+
+    It 'Select-LastCreditByRunIndex: returns $null when no matching (port, adapter) entry exists' {
+        $body = & $script:NewV4PrBody -Yaml $script:V4PerPortFieldsYaml
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        $latest = Select-LastCreditByRunIndex -Credits $result.Credits -Port 'nonexistent' -Adapter 'none'
+        $latest | Should -BeNullOrEmpty
     }
 }

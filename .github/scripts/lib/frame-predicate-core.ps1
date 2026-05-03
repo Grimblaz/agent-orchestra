@@ -947,6 +947,10 @@ function Test-FVAnyPathMatchesPredicate {
     return $false
 }
 
+# Cross-reference (issue #442): changeset.isPipelineEntryTrivial is a binary axis-pass
+# for pipeline-entry phases (<50 lines + <=3 files + no source touch);
+# Get-FVChangesetComplexity is a 4-tier/size categorization with a <10-line cutoff.
+# They coexist by design and are not interchangeable for recalibration.
 function Get-FVChangesetComplexity {
     param([Parameter(Mandatory)]$Changeset)
 
@@ -980,6 +984,10 @@ function Get-FVSupportedChangesetIdentifiers {
         'changeset.touchesCanvasSurface',
         'changeset.touchesApiSurface',
         'changeset.touchesPluginEntryPoint',
+        'changeset.isPipelineEntryTrivial',
+        'changeset.touchesTestableCodeOrTests',
+        'changeset.touchedAreaHasDebt',
+        'changeset.touchesBehaviorOrInterfaceDocsExtended',
         'changeset.totalLines',
         'changeset.complexity',
         'scope.isReReview',
@@ -1033,6 +1041,36 @@ function Resolve-FVChangesetIdentifierBoolean {
         [Parameter(Mandatory)][string]$Name,
         [Parameter(Mandatory)]$Changeset
     )
+
+    # review.sustainedCriticalOrHigh: resolved from JudgeScore when present in
+    # the changeset; otherwise falls through to the deferred-unknown path.
+    # Introduced by issue #441 Step 4c/4d — D-new-3 runtime-resolver.
+    if ($Name -eq 'review.sustainedCriticalOrHigh') {
+        $judgeScore = $null
+        if ($null -ne $Changeset -and $Changeset -is [System.Collections.IDictionary] -and $Changeset.ContainsKey('JudgeScore')) {
+            $judgeScore = $Changeset['JudgeScore']
+        } elseif ($null -ne $Changeset -and $null -ne $Changeset.PSObject.Properties['JudgeScore']) {
+            $judgeScore = $Changeset.JudgeScore
+        }
+
+        if ($null -ne $judgeScore) {
+            $findings = @()
+            if ($judgeScore -is [System.Collections.IDictionary] -and $judgeScore.ContainsKey('Findings')) {
+                $findings = @($judgeScore['Findings'])
+            } elseif ($null -ne $judgeScore.PSObject.Properties['Findings']) {
+                $findings = @($judgeScore.Findings)
+            }
+            # Qualifying finding: severity in {Critical, High}, ruling = uphold.
+            $hasQualifying = @($findings | Where-Object {
+                $sev = [string]$_.Severity
+                $ruling = [string]$_.Ruling
+                ($sev -eq 'Critical' -or $sev -eq 'High') -and $ruling -eq 'uphold'
+            }).Count -gt 0
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hasQualifying))
+        }
+        # No JudgeScore: fall through to deferred-unknown.
+        return $null
+    }
 
     $paths = Get-FVChangedFiles -Changeset $Changeset
 
@@ -1112,10 +1150,179 @@ function Resolve-FVChangesetIdentifierBoolean {
             $bool = [bool]$value
             return (New-FVEvaluationResult -Result ([string]$bool.ToString().ToLowerInvariant()))
         }
+        'changeset.isPipelineEntryTrivial' {
+            $result = Resolve-FVChangesetIsPipelineEntryTrivial -Changeset $Changeset
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $result))
+        }
+        'changeset.touchesTestableCodeOrTests' {
+            $result = Resolve-FVChangesetTouchesTestableCodeOrTests -Changeset $Changeset
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $result))
+        }
+        'changeset.touchedAreaHasDebt' {
+            $result = Resolve-FVChangesetTouchedAreaHasDebt -Changeset $Changeset
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $result))
+        }
+        'changeset.touchesBehaviorOrInterfaceDocsExtended' {
+            $result = Resolve-FVChangesetTouchesBehaviorOrInterfaceDocsExtended -Changeset $Changeset
+            return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $result))
+        }
         default {
             return $null
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-FVChangesetIsPipelineEntryTrivial (issue #442, Step 3a)
+#
+# Runtime resolver for the changeset.isPipelineEntryTrivial predicate.
+# Identifies small, safe pipeline-entry changesets that do not touch production
+# source code.
+#
+# Returns $true when ALL conditions hold:
+# - TotalLines < 50
+# - Changed file count <= 3
+# - Changeset does not touch source (uses existing changeset.touchesSource semantics: docs/tests/temp artifacts are non-source, everything else including workflow YAML is source)
+#
+# Cross-reference: Get-FVChangesetComplexity uses a <10-line cutoff for 'trivial'
+# as part of a 4-tier size categorization. isPipelineEntryTrivial is a binary
+# axis-pass for pipeline-entry phases with a <50-line threshold.
+# They coexist by design and are not interchangeable for recalibration.
+# ---------------------------------------------------------------------------
+function Resolve-FVChangesetIsPipelineEntryTrivial {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    # Check TotalLines < 50
+    $totalLinesRaw = Get-FVChangesetField -Changeset $Changeset -Name 'TotalLines'
+    $totalLines = 0
+    if ($null -ne $totalLinesRaw) {
+        $totalLines = [int]$totalLinesRaw
+    }
+    if ($totalLines -ge 50) { return $false }
+
+    # Check file count <= 3
+    $changedFiles = Get-FVChangedFiles -Changeset $Changeset
+    if ($changedFiles.Count -gt 3) { return $false }
+
+    # Check NOT changeset.touchesSource
+    # Reuses the existing changeset.touchesSource semantics exactly.
+    $paths = $changedFiles
+    $touchesSource = Test-FVAnyPathMatchesPredicate -Paths $paths -Predicate {
+        param($p)
+        # Apply base changeset.touchesSource exclusions
+        if (Test-FVPathIsDoc -Path $p) { return $false }
+        if (Test-FVPathIsTest -Path $p) { return $false }
+        if (Test-FVPathIsTempArtifact -Path $p) { return $false }
+        return $true
+    }
+
+    if ($touchesSource) { return $false }
+
+    return $true
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-FVChangesetTouchesTestableCodeOrTests (issue #442, Step 3b)
+#
+# Returns $true when the changeset touches any *.ps1 file (source or test) OR
+# any file in a *Tests/* path. This is the union of testable-source and test-path
+# detection. Distinct from changeset.touchesTestableCode (shipped), which returns
+# true only for PS1 source files (excluding *Tests/* paths).
+# ---------------------------------------------------------------------------
+function Resolve-FVChangesetTouchesTestableCodeOrTests {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    $paths = Get-FVChangedFiles -Changeset $Changeset
+    foreach ($p in $paths) {
+        $s = [string]$p
+        if ($s -like '*.ps1') { return $true }
+        if (Test-FVPathIsTest -Path $s) { return $true }
+    }
+    return $false
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-FVChangesetTouchedAreaHasDebt (issue #442, Step 3c)
+#
+# Returns $true when the changeset touches a file whose lineCount exceeds the
+# threshold OR whose recorded cyclomatic complexity exceeds the threshold.
+# File-level metadata (lineCount, complexity) is supplied via the changeset's
+# FileMetadata field (an array of hashtables with Path, LineCount, MaxComplexity).
+# If FileMetadata is absent or empty, returns $false (no debt data = no debt
+# detected). Threshold defaults: lineCount=300, complexity=10.
+# ---------------------------------------------------------------------------
+function Resolve-FVChangesetTouchedAreaHasDebt {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]$Changeset,
+        [hashtable]$Threshold = @{ lineCount = 300; complexity = 10 }
+    )
+
+    $lineCountThreshold = if ($Threshold.ContainsKey('lineCount')) { [int]$Threshold['lineCount'] } else { 300 }
+    $complexityThreshold = if ($Threshold.ContainsKey('complexity')) { [int]$Threshold['complexity'] } else { 10 }
+
+    $fileMetadata = Get-FVChangesetField -Changeset $Changeset -Name 'FileMetadata'
+    if ($null -eq $fileMetadata) { return $false }
+
+    $metaArray = @($fileMetadata)
+    if ($metaArray.Count -eq 0) { return $false }
+
+    foreach ($meta in $metaArray) {
+        $lineCount = 0
+        $maxComplexity = 0
+
+        if ($meta -is [hashtable]) {
+            if ($meta.ContainsKey('LineCount')) { $lineCount = [int]$meta['LineCount'] }
+            if ($meta.ContainsKey('MaxComplexity')) { $maxComplexity = [int]$meta['MaxComplexity'] }
+        } else {
+            $lc = $meta.PSObject.Properties['LineCount']
+            if ($null -ne $lc) { $lineCount = [int]$lc.Value }
+            $mc = $meta.PSObject.Properties['MaxComplexity']
+            if ($null -ne $mc) { $maxComplexity = [int]$mc.Value }
+        }
+
+        if ($lineCount -gt $lineCountThreshold) { return $true }
+        if ($maxComplexity -gt $complexityThreshold) { return $true }
+    }
+    return $false
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-FVChangesetTouchesBehaviorOrInterfaceDocsExtended (issue #442, Step 3d)
+#
+# Returns $true when the changeset touches docs that carry behavioral or interface
+# intent: Documents/** design/decision docs, **/SKILL.md, **/*.agent.md,
+# commands/**/*.md, README.md, CLAUDE.md. Excludes other top-level *.md
+# (CHANGELOG.md, CONTRIBUTING.md, CUSTOMIZATION.md, etc.) and source *.ps1 files.
+# Distinct from changeset.changesBehaviorOrInterface (shipped — different semantics).
+# ---------------------------------------------------------------------------
+function Resolve-FVChangesetTouchesBehaviorOrInterfaceDocsExtended {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]$Changeset
+    )
+
+    $paths = Get-FVChangedFiles -Changeset $Changeset
+    foreach ($p in $paths) {
+        $s = [string]$p
+        if ($s -like 'Documents/*' -or $s -like 'Documents\*') { return $true }
+        if ($s -like '*/SKILL.md' -or $s -eq 'SKILL.md') { return $true }
+        if ($s -like '*.agent.md') { return $true }
+        if (($s -like 'commands/*' -or $s -like 'commands\*') -and $s -like '*.md') { return $true }
+        if ($s -eq 'README.md') { return $true }
+        if ($s -eq 'CLAUDE.md') { return $true }
+    }
+    return $false
 }
 
 function Resolve-FVCallNode {
@@ -1133,6 +1340,29 @@ function Resolve-FVCallNode {
         $glob = [string]$arguments[0].Value
         $paths = Get-FVChangedFiles -Changeset $Changeset
         $hit = Test-FVAnyPathLike -Paths $paths -Pattern $glob
+        return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hit))
+    }
+
+    # changeset.touchesAny(['glob1','glob2',...]) — true when any changed path
+    # matches any glob in the provided array. Introduced by issue #441 D-new-3.
+    if ($name -eq 'changeset.touchesAny') {
+        $arguments = @($Node.Arguments)
+        if ($arguments.Count -lt 1 -or $arguments[0].LiteralType -ne 'Array') {
+            return (New-FVEvaluationResult -Result 'unknown' -Reason "unsupported-identifier: changeset.touchesAny requires an array literal argument")
+        }
+        $arrayNode = $arguments[0]
+        $globs = @($arrayNode.Items | Where-Object { $_.LiteralType -eq 'String' } | ForEach-Object { [string]$_.Value })
+        if ($globs.Count -eq 0) {
+            return (New-FVEvaluationResult -Result 'false')
+        }
+        $paths = Get-FVChangedFiles -Changeset $Changeset
+        $hit = $false
+        foreach ($path in $paths) {
+            foreach ($glob in $globs) {
+                if ([string]$path -like $glob) { $hit = $true; break }
+            }
+            if ($hit) { break }
+        }
         return (New-FVEvaluationResult -Result (script:Format-FVBoolResult -Value $hit))
     }
 
@@ -1155,6 +1385,12 @@ function Resolve-FVIdentifierAsBoolean {
 
     $name = $Node.Name
 
+    # Attempt JudgeScore-based resolution before the deferred-unknown check.
+    # This allows review.sustainedCriticalOrHigh to resolve when JudgeScore
+    # is present in the changeset, suppressing the deferred-unknown warning.
+    $judgeResolved = Resolve-FVChangesetIdentifierBoolean -Name $name -Changeset $Changeset
+    if ($null -ne $judgeResolved) { return $judgeResolved }
+
     if ($name -in (Get-FVDeferredCreditReferenceIdentifiers)) {
         return (New-FVEvaluationResult -Result 'unknown' -Reason "deferred-credit-reference-identifier: '$name'")
     }
@@ -1162,9 +1398,6 @@ function Resolve-FVIdentifierAsBoolean {
     if ($name -in (Get-FVHeuristicDeferredIdentifiers)) {
         return (New-FVEvaluationResult -Result 'unknown' -Reason "heuristic-deferred: '$name'")
     }
-
-    $resolved = Resolve-FVChangesetIdentifierBoolean -Name $name -Changeset $Changeset
-    if ($null -ne $resolved) { return $resolved }
 
     return (New-FVEvaluationResult -Result 'unknown' -Reason "unsupported-identifier: '$name'")
 }
@@ -1176,6 +1409,14 @@ function Resolve-FVIdentifierForComparison {
     )
 
     $name = $Node.Name
+
+    # Attempt JudgeScore-based resolution before the deferred-unknown check.
+    # Handles review.sustainedCriticalOrHigh when JudgeScore present.
+    $judgeResolved = Resolve-FVChangesetIdentifierBoolean -Name $name -Changeset $Changeset
+    if ($null -ne $judgeResolved) {
+        $b = ($judgeResolved.Result -eq 'true')
+        return [PSCustomObject]@{ Status = 'value'; Reason = ''; Value = $b; ValueType = 'Boolean' }
+    }
 
     if ($name -in (Get-FVDeferredCreditReferenceIdentifiers)) {
         return [PSCustomObject]@{ Status = 'unknown'; Reason = "deferred-credit-reference-identifier: '$name'"; Value = $null }
@@ -1397,4 +1638,48 @@ function Test-FVPredicateAgainstChangeset {
     }
 
     return (Invoke-FVPredicateEvaluation -Node $Ast -Changeset $Changeset)
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-SustainedCriticalOrHigh (issue #441, Steps 4c/4d)
+#
+# Runtime resolver for the review.sustainedCriticalOrHigh predicate.
+# Operates on a findings array where each entry has:
+#   - Severity:    'Critical' | 'High' | 'Medium' | 'Low'
+#   - Ruling:      'uphold' | 'override' | 'inconclusive'
+#   - ExpressLane: [bool] (optional; default = not express-laned)
+#
+# Returns $true when at least one qualifying finding exists (severity in
+# {Critical, High}, ruling = uphold). When ApplyExpressLaneCarveOut is $true,
+# qualifying findings with ExpressLane=$true are excluded — if all remaining
+# qualifying findings are express-laned, returns $false.
+# ---------------------------------------------------------------------------
+function Resolve-SustainedCriticalOrHigh {
+    [CmdletBinding()]
+    param(
+        [AllowEmptyCollection()][object[]]$Findings = @(),
+        [bool]$ApplyExpressLaneCarveOut = $false
+    )
+
+    if ($null -eq $Findings -or $Findings.Count -eq 0) { return $false }
+
+    $qualifying = @($Findings | Where-Object {
+        $sev = [string]$_.Severity
+        $ruling = [string]$_.Ruling
+        ($sev -eq 'Critical' -or $sev -eq 'High') -and $ruling -eq 'uphold'
+    })
+
+    if ($qualifying.Count -eq 0) { return $false }
+
+    if ($ApplyExpressLaneCarveOut) {
+        # Remove express-laned findings; if none remain, return $false.
+        $nonExpressLaned = @($qualifying | Where-Object {
+            $el = $_.PSObject.Properties['ExpressLane']
+            if ($null -eq $el) { return $true }   # missing field = not express-laned
+            return -not [bool]$el.Value
+        })
+        return ($nonExpressLaned.Count -gt 0)
+    }
+
+    return $true
 }

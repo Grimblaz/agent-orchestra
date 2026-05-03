@@ -32,6 +32,8 @@ Reusable entryway for deterministic tooling, committed assets, and pipeline-metr
 - [references/metrics-schema.md](references/metrics-schema.md): canonical `## Pipeline Metrics` block shape, top-level field semantics, and the `write-calibration-entry.ps1` invocation contract
 - [references/verdict-mapping.md](references/verdict-mapping.md): judge verdict to metrics-field mapping for main and post-fix review
 - [references/findings-construction.md](references/findings-construction.md): findings-array construction, backward compatibility, malformed-entry handling, and rework-cycle population rules
+- [references/release-hygiene-credit-emission.md](references/release-hygiene-credit-emission.md): v4 release-hygiene credit row construction (state-file reading, YAML examples) and CE Gate S2 synthetic-PR test protocol (issue #441 Step 7b)
+- [references/review-credit-emission.md](references/review-credit-emission.md): v4 review credit row construction via `Build-ReviewCreditRow` — adapter selection, RunIndex semantics, cross-tool handoff, and CE Gate S3 coverage (issue #441 Step 8b)
 
 ## Boundary
 

@@ -95,10 +95,26 @@ Use `—` in the Pass column when the prosecution mode does not carry a pass num
 
 ## Structured Judge Output
 
-After the Markdown table, emit the completion marker and `judge-rulings` block in the same payload:
+### Sentinel emission (issue #441, D-new-4)
+
+**Immediately after the judge ruling is finalized** and before any pipeline-metrics persistence,
+write an idempotent sentinel PR comment for the PR being reviewed:
+
+```
+<!-- review-judge-produced-{PR} -->
+```
+
+This sentinel is separate from the judge-rulings comment. On GitHub, post it via `gh pr comment {PR} --body '<!-- review-judge-produced-{PR} -->'`. Use upsert semantics: if the comment already exists (idempotency check via `gh pr view {PR} --json comments`), skip the write.
+
+**Ordering rule**: sentinel comment → judge-rulings comment. The sentinel must be written first so that the warn-only hook can detect "review completed but credit not yet written" during the window between sentinel emission and PR-body update.
+
+**SMC-16 governance**: the sentinel marker `<!-- review-judge-produced-{PR} -->` is governed by SMC-16. See `Documents/Design/session-memory-contract.md`. Both Copilot and Claude judge runs write this sentinel; Code-Conductor reads it via the warn-only hook synthesis path.
+
+### Judge-rulings comment
+
+After the sentinel, emit the `judge-rulings` block in the same PR comment as the Markdown score summary:
 
 ```yaml
-<!-- code-review-complete-{PR} -->
 <!-- judge-rulings
 - id: F1
   judge_ruling: sustained
@@ -111,7 +127,7 @@ After the Markdown table, emit the completion marker and `judge-rulings` block i
 -->
 ```
 
-Keep the Markdown score summary, the `<!-- code-review-complete-{PR} -->` marker, and the `judge-rulings` block together in the same response payload. For GitHub-backed review flows, keep them in the same PR comment rather than splitting them across separate comments.
+Keep the Markdown score summary and the `judge-rulings` block together in the same response payload. On GitHub, keep them in the same PR comment rather than splitting them across separate comments. **This comment does not include `<!-- code-review-complete-{PR} -->`** — that marker is retired as of issue #441 Step 11; Code-Conductor reads `credits[]` from the `<!-- pipeline-metrics -->` PR body block directly. **This comment does not include pipeline-metrics body emission** — that is owned by Code-Conductor's `## Pipeline Metrics` emitter at PR creation time.
 
 Field values:
 
@@ -154,4 +170,4 @@ Judgment does not implement fixes. It produces the ruling and the evidence packa
 
 | Trigger                             | Gotcha                                                         | Fix                                                                |
 | ----------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
-| A ruling omits the completion marker or structured block | Downstream consumers can miss completion or fail to route cleanly | Emit `<!-- code-review-complete-{PR} -->` and the `judge-rulings` block immediately after the score summary in the same payload |
+| A ruling omits the `judge-rulings` block | Downstream consumers can miss completion or fail to route cleanly | Emit the `judge-rulings` block immediately after the score summary in the same payload; ensure the `<!-- review-judge-produced-{PR} -->` sentinel was written as a separate PR comment before |

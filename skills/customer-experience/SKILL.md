@@ -39,6 +39,18 @@ Keep customer framing and CE validation consistent across issues. Upstream, tran
 4. Do exploratory validation after scripted checks and treat it as discovery, not prosecution.
 5. Return an evidence-only summary with scenario results, named-decision verification, exploratory observations, and evidence references.
 
+## Per-Surface Terminal-Step Contract (D10 category 4, AC5)
+
+Each CE Gate surface is evaluated independently. For each surface (`cli`, `browser`, `canvas`, `api`):
+
+1. **Predicate evaluation**: evaluate the surface-touch predicate (`changeset.touches{Surface}Surface()`).
+2. **Surface exercise or N/A**: if the predicate is true, exercise the surface and capture evidence per the Downstream Evidence Capture steps above; if false, the status is `not-applicable`.
+3. **Credit emission**: call `Build-CeGateCreditRow -Surface {name}` with the evidence list and upsert the credit row into the PR-body `<!-- pipeline-metrics -->` block.
+
+**Orchestration-failure handling** *(planned — wrapper not yet implemented)*: when the orchestration wrapper is available, a CE Gate orchestration crash after completing some surfaces but before all four will cause the wrapper to emit the remaining surfaces as `status: inconclusive` with `block_kind: orchestration` and `evidence: "orchestration crashed before surface evaluated"`, ensuring no surface is silently absent. Until the wrapper ships, surfaces not reached before a crash must be emitted manually.
+
+Load `skills/frame-credit-emission/SKILL.md` for the full terminal-step emission contract and `Build-CeGateCreditRow` builder reference.
+
 ## Composite References
 
 - [references/orchestration-protocol.md](references/orchestration-protocol.md): CE Gate orchestration, surface routing, runner dispatch, intent rubric, PR body output, and prosecution-depth reporting.

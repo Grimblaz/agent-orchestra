@@ -33,7 +33,7 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 
 ## Persistence
 
-Return the Markdown score summary, `<!-- code-review-complete-{PR} -->` completion marker, and the `judge-rulings` block together in the same response payload. For chat-first review flows, emit that payload directly in chat. For GitHub-backed review flows, keep the score summary, `<!-- code-review-complete-{PR} -->`, and `judge-rulings` block in the same PR comment payload rather than splitting them across separate comments.
+Return the Markdown score summary and the `judge-rulings` block together in the same response payload. The `<!-- review-judge-produced-{PR} -->` sentinel is written first as a separate idempotent PR comment before the judge-rulings comment (per `skills/review-judgment/SKILL.md § Sentinel emission`). For chat-first review flows, emit the score summary and `judge-rulings` payload directly in chat. For GitHub-backed review flows, keep the score summary and `judge-rulings` block in the same PR comment payload rather than splitting them across separate comments. The `<!-- code-review-complete-{PR} -->` marker is retired as of issue #441 Step 11 — do not emit it.
 
 ## Invocation
 

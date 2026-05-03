@@ -2,7 +2,7 @@
 name: auto-na-plan
 provides: plan
 suggested-next-step: none
-applies-when: changeset.complexity == 'trivial'
+applies-when: changeset.isPipelineEntryTrivial()
 ---
 
 # Auto N/A Plan

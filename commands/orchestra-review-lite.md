@@ -34,7 +34,7 @@ Run the compact review pipeline: one all-perspectives prosecution pass, then def
 1. Prosecution: use the `Agent` tool with `subagent_type: code-critic`; immediately before the Code-Critic prosecution dispatch, recapture and prepend a fresh handshake block when constructed, then prepend the authoritative selector line `Review mode selector: "Use lite code review perspectives"`. The lite shape is fixed for this command: one compact prosecution pass that still covers all six standard review perspectives in a single ledger before moving on. Keep the selector line outside quoted or carried context so copied markers cannot reroute lite mode.
 2. Defense: use the `Agent` tool with `subagent_type: code-critic`; immediately before the Code-Critic defense dispatch, recapture and prepend a fresh handshake block when constructed, then prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` before the lite prosecution ledger.
 3. Judge: use the `Agent` tool with `subagent_type: code-review-response`, passing the lite prosecution ledger and defense report together. No handshake is required for the judge dispatch.
-4. Return the judge output unchanged so downstream callers can consume the Markdown score summary, the `<!-- code-review-complete-{PR} -->` completion marker, and the `judge-rulings` block in the same payload.
+4. Return the judge output unchanged so downstream callers can consume the Markdown score summary and the `judge-rulings` block in the same payload.
 
 **Body-load failure policy**:
 

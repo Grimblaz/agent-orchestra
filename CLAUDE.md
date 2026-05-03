@@ -54,7 +54,7 @@ Handshake disposition by command:
 | `/orchestra:review-defend` | Required |
 | `/orchestra:review-judge` | Optional |
 
-The judge result is designed for same-comment persistence: the completion marker `<!-- code-review-complete-{PR} -->` and the `<!-- judge-rulings ... -->` YAML block travel together in one PR comment so Copilot and Claude Code can consume the same durable artifact.
+The judge result is designed for same-comment persistence: the Markdown score summary and the `<!-- judge-rulings ... -->` YAML block travel together in one PR comment so Copilot and Claude Code can consume the same durable artifact. The `<!-- review-judge-produced-{PR} -->` sentinel is written as a separate PR comment before the judge-rulings comment. The legacy `<!-- code-review-complete-{PR} -->` marker was retired in issue #441 Step 11; Code-Conductor reads `credits[]` from the PR-body pipeline-metrics block instead.
 
 **Review-pipeline equivalence**: `/review-github` provides a deterministic entry point for GitHub review intake and proxy prosecution. It resolves the target PR (from arguments or via `gh pr view`), then routes through Code-Conductor's GitHub intake path and proxy prosecution flow, equivalent to prose triggers like `github review`, `review github`, or `cr review`. This command ensures explicit GitHub-review mode without requiring prose-based classification.
 
@@ -69,6 +69,8 @@ Handoffs between phases use durable GitHub issue comments rather than session-lo
 - `<!-- design-issue-{ID} -->` — durable design snapshot handoff used for D9 pause/resume and full-pipeline smart resume
 - `<!-- plan-issue-{ID} -->` — approved plan persisted
 - `<!-- frame-credit-ledger-{PR} -->` — warn-only frame credit-ledger comment posted by the pre-PR hook (sub-issue #429 of frame umbrella #425); idempotently upserted on every PR after `gh pr create`
+- `<!-- review-judge-produced-{PR} -->` — sentinel written by the judge (both Copilot and Claude) immediately after the ruling finalizes, before pipeline-metrics persistence; the warn-only hook detects this to synthesize a `not-persisted` review credit when the PR body carries no review credit yet (SMC-16)
+- `<!-- credit-input-{port}-{ID} -->` — deferred-emission marker written by pipeline-entry agents (Experience-Owner, Solution-Designer, Issue-Planner) immediately after their completion marker; payload is a `yaml` fenced block carrying `{ port, adapter, evidence }`; harvested by Code-Conductor at PR-creation time to emit the corresponding credit row (SMC-17)
 
 Because the markers live on the issue, you can start a feature in Copilot, pick it up in Claude Code, and vice versa without losing context.
 

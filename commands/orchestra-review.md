@@ -35,7 +35,7 @@ Run the standard review pipeline: Code-Critic prosecution -> Code-Critic defense
 2. Merge and deduplicate: after all available prosecution passes return, merge findings by same perspective target plus same failure mode, preserving earliest-pass credit. Emit a visible progress signal naming the merged finding count: `Merged prosecution ledger: {count} finding(s).`
 3. Defense: use the `Agent` tool with `subagent_type: code-critic`. Immediately before the Code-Critic defense dispatch, recapture and prepend a fresh handshake block when constructed, then prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` before the merged prosecution ledger.
 4. Judge: use the `Agent` tool with `subagent_type: code-review-response`, passing the merged prosecution ledger and defense report together. No handshake is required for the judge dispatch.
-5. Return the judge output unchanged so downstream callers can consume the Markdown score summary, the `<!-- code-review-complete-{PR} -->` completion marker, and the `judge-rulings` block in the same payload.
+5. Return the judge output unchanged so downstream callers can consume the Markdown score summary and the `judge-rulings` block in the same payload.
 
 **Body-load failure policy**:
 
