@@ -105,6 +105,14 @@ Describe 'Code-Conductor inline commands contract' {
             $content | Should -Match '(?is)ARGUMENTS:\s*\$ARGUMENTS' -Because '/review-github must pass $ARGUMENTS to the body'
         }
 
+        It 'documents all three AskUserQuestion fallback conditions' {
+            $content = Get-Content -Path $script:ReviewGithubCommandPath -Raw -ErrorAction Stop
+
+            $content | Should -Match '(?is)no PR for the current branch' -Because '/review-github must document the no-PR fallback condition'
+            $content | Should -Match '(?is)detached HEAD' -Because '/review-github must document the detached-HEAD fallback condition'
+            $content | Should -Match '(?is)fork branch has no upstream PR' -Because '/review-github must document the fork-without-upstream-PR fallback condition'
+        }
+
         It 'forbids subagent_type: code-conductor and Review mode selector' {
             $content = Get-Content -Path $script:ReviewGithubCommandPath -Raw -ErrorAction Stop
 
@@ -125,10 +133,11 @@ Describe 'Code-Conductor inline commands contract' {
             $content | Should -Match ([regex]::Escape($expectedSentence)) -Because 'Code-Conductor.agent.md must preserve the byte-equal GitHub-triggered review sentence'
         }
 
-        It 'contains the additive /review-github sentence' {
+        It 'preserves the byte-equal additive /review-github sentence' {
             $content = Get-Content -Path $script:CodeConductorAgentPath -Raw -ErrorAction Stop
 
-            $content | Should -Match '(?is)/review-github' -Because 'Code-Conductor.agent.md must mention /review-github command'
+            $expectedSlashSentence = 'On Claude Code, the deterministic slash-command equivalent of these prose triggers is /review-github (see commands/review-github.md).'
+            $content | Should -Match ([regex]::Escape($expectedSlashSentence)) -Because 'Code-Conductor.agent.md must preserve the byte-equal /review-github additive sentence (line 339)'
         }
     }
 
@@ -151,6 +160,19 @@ Describe 'Code-Conductor inline commands contract' {
 
             $match.Success | Should -BeTrue -Because 'Code-Conductor.agent.md must contain the skip-hub-mode sentence'
             $match.Value | Should -Match '/code-conductor' -Because 'The skip-hub-mode sentence must include /code-conductor in the examples list'
+        }
+
+        It 'Non-hub-mode subsection routes review tokens correctly (longest-phrase-first)' {
+            $content = Get-Content -Path $script:CodeConductorAgentPath -Raw -ErrorAction Stop
+
+            # Verify the Non-hub-mode subsection documents both routing branches
+            $subSectionPattern = '(?s)#### Non-hub-mode invocation \(slash-command path\).*?(?=\r?\n###|\r?\n##|\z)'
+            $match = [regex]::Match($content, $subSectionPattern)
+
+            $match.Success | Should -BeTrue -Because 'Code-Conductor.agent.md must contain the Non-hub-mode invocation subsection'
+            $match.Value | Should -Match '(?is)review github' -Because 'The Non-hub-mode subsection must route "review github" to GitHub intake'
+            $match.Value | Should -Match '(?is)Review Reconciliation Loop' -Because 'The Non-hub-mode subsection must route bare "review" to the Review Reconciliation Loop'
+            $match.Value | Should -Match '(?is)longest.phrase' -Because 'The Non-hub-mode subsection must specify longest-phrase-first match order'
         }
 
         It 'excludes /code-conductor from the /orchestrate exception clause' {

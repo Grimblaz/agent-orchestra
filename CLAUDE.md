@@ -58,6 +58,8 @@ The judge result is designed for same-comment persistence: the completion marker
 
 **Review-pipeline equivalence**: `/review-github` provides a deterministic entry point for GitHub review intake and proxy prosecution. It resolves the target PR (from arguments or via `gh pr view`), then routes through Code-Conductor's GitHub intake path and proxy prosecution flow, equivalent to prose triggers like `github review`, `review github`, or `cr review`. This command ensures explicit GitHub-review mode without requiring prose-based classification.
 
+**When to use which**: `/orchestra:review` and `/orchestra:review-lite` run adversarial prosecution → defense → judge on local code changes and return verdicts — no fix dispatch. `/review-github` ingests an existing GitHub PR review and runs proxy prosecution through Code-Conductor, which then dispatches fixes. Use `/orchestra:review*` for code quality verdict; use `/review-github` when you have a GitHub review to reconcile and want Conductor to handle the response.
+
 ## Cross-tool handoffs
 
 Handoffs between phases use durable GitHub issue comments rather than session-local state. Markers:

@@ -147,11 +147,11 @@ When the user invokes Code-Conductor without a specific slash command (e.g., `@c
 - `<!-- design-phase-complete-{ID} -->` found → technical design done; skip Solution-Designer
 - Plan found (session memory or `<!-- plan-issue-{ID} -->` comment) → skip upstream phases; in hub mode, D9 still applies unless the later tier-aware prior-session artifact rules suppress it
 
-Skip hub mode entirely when the user invokes a specific slash command (e.g., `/implement #N`, `/plan #N`, `/design #N`, `/code-conductor #N`) — these execute the named phase directly; smart resume applies at the phase level, not the hub level. Exception: `/orchestrate` is a slash command that explicitly triggers hub mode — treat it as equivalent to `@code-conductor issue #N` (single issue) or `@code-conductor issues #A #B #C` (multi-issue bundle, per the Multi-Issue Bundling section).
+Skip hub mode entirely when the user invokes a specific slash command (e.g., `/implement #N`, `/plan #N`, `/design #N`, `/code-conductor [text]`) — these execute the named phase directly; smart resume applies at the phase level, not the hub level. Exception: `/orchestrate` is a slash command that explicitly triggers hub mode — treat it as equivalent to `@code-conductor issue #N` (single issue) or `@code-conductor issues #A #B #C` (multi-issue bundle, per the Multi-Issue Bundling section).
 
 #### Non-hub-mode invocation (slash-command path)
 
-When Code-Conductor is invoked via a slash command that skips hub mode and carries `$ARGUMENTS` as a free-text task, such as `/code-conductor [text]`, classify the task using the existing prose-trigger and specialist-dispatch logic: `review` enters the Review Reconciliation Loop; `review github` enters the same GitHub intake path as `/review-github`; otherwise route via the specialist-dispatch table per `## Skill Mapping`.
+When Code-Conductor is invoked via a slash command that skips hub mode and carries `$ARGUMENTS` as a free-text task, such as `/code-conductor [text]`, classify the task using the existing prose-trigger and specialist-dispatch logic. Match in longest-phrase-first order: `review github` enters the GitHub intake path per `## Review Reconciliation Loop (Mandatory)`; bare `review` (when `review github` is not the leading phrase) enters the Review Reconciliation Loop for local code review; otherwise route via the specialist-dispatch table per `## Agent Selection`.
 
 ### Scope Classification Gate
 

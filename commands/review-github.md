@@ -14,7 +14,7 @@ Run the Code-Conductor role inline in this conversation for GitHub review intake
 **Pre-flight**:
 
 1. Resolve the pull request context from the arguments. If `$ARGUMENTS` contains a PR number, use it as `$PR_NUMBER`.
-2. If no PR number was supplied, run `gh pr view --json number,headRefName` to resolve the active PR for the current branch and use the returned `number` as `$PR_NUMBER`.
+2. If no PR number was supplied, run `gh pr view --json number --jq '.number'` to resolve the active PR for the current branch and use the returned value as `$PR_NUMBER`.
 3. If `gh pr view` exits non-zero because there is no PR for the current branch, the worktree is in detached HEAD, or a fork branch has no upstream PR, use the `AskUserQuestion` tool to ask the user for a PR number. Do not silently fall through to local code review.
 
 ## Pre-flight (session-startup)
