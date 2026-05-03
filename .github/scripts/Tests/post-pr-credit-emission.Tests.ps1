@@ -113,6 +113,54 @@ Describe 'Build-PostPrCreditRow emits failed when any checklist item is false' {
 }
 
 # ---------------------------------------------------------------------------
+# string value acceptance: 'passed' and 'skipped' per-key are non-failure
+# ---------------------------------------------------------------------------
+
+Describe "Build-PostPrCreditRow: string values 'passed' and 'skipped' are treated as non-failure" {
+
+    It "emits passed when all four keys are the string 'passed'" {
+        $row = Build-PostPrCreditRow -ChecklistOutcomes @{
+            archive    = 'passed'
+            docs       = 'passed'
+            version    = 'passed'
+            releaseTag = 'passed'
+        }
+        $row.status | Should -Be 'passed'
+    }
+
+    It "emits passed when keys mix bool `$true` and string 'passed'" {
+        $row = Build-PostPrCreditRow -ChecklistOutcomes @{
+            archive    = $true
+            docs       = 'passed'
+            version    = $true
+            releaseTag = 'passed'
+        }
+        $row.status | Should -Be 'passed'
+    }
+
+    It "emits passed when one key is 'skipped' and the rest are true — skipped is not a failure" {
+        $row = Build-PostPrCreditRow -ChecklistOutcomes @{
+            archive    = $true
+            docs       = $true
+            version    = 'skipped'
+            releaseTag = $true
+        }
+        $row.status | Should -Be 'passed'
+    }
+
+    It "emits failed when a key is the string 'failed'" {
+        $row = Build-PostPrCreditRow -ChecklistOutcomes @{
+            archive    = $true
+            docs       = 'failed'
+            version    = $true
+            releaseTag = $true
+        }
+        $row.status | Should -Be 'failed'
+        $row.evidence | Should -Match 'docs'
+    }
+}
+
+# ---------------------------------------------------------------------------
 # absent/empty ChecklistOutcomes → skipped
 # ---------------------------------------------------------------------------
 

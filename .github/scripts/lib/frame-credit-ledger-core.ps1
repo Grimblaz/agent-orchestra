@@ -1213,6 +1213,10 @@ function Build-CeGateCreditRow {
 
     $port = "ce-gate-$Surface"
 
+    if ($EnvironmentBlocked -and [string]::IsNullOrWhiteSpace($BlockKind)) {
+        throw "Build-CeGateCreditRow: -BlockKind is required when -EnvironmentBlocked is `$true (allowed values: environment, tooling, runtime, orchestration)"
+    }
+
     if ($EnvironmentBlocked) {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { "CE Gate for $Surface surface blocked — $BlockKind." }
@@ -1528,8 +1532,8 @@ function Build-PostPrCreditRow {
     foreach ($key in @('archive', 'docs', 'version', 'releaseTag')) {
         if ($ChecklistOutcomes.ContainsKey($key)) {
             $val = $ChecklistOutcomes[$key]
-            # Accept booleans directly; for strings, only 'passed' is a success value.
-            $isSuccess = if ($val -is [bool]) { $val } else { [string]$val -eq 'passed' }
+            # Accept booleans directly; for strings, 'passed' and 'skipped' are non-failure values.
+            $isSuccess = if ($val -is [bool]) { $val } else { [string]$val -in @('passed', 'skipped') }
             if (-not $isSuccess) { $failing += $key }
         }
     }
@@ -1679,10 +1683,13 @@ function Invoke-CreditInputHarvest {
         # Use in-memory marker when available (bypasses gh for this port)
         if ($inMemoryByPort.ContainsKey($port)) {
             $payload = $inMemoryByPort[$port]
-            $evidence = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
+            $evidence    = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
+            $adapterName = if ($payload.ContainsKey('adapter'))  { $payload['adapter']  } else { '' }
             $builderName = $script:BuilderByPort[$port]
             if (Get-Command $builderName -ErrorAction SilentlyContinue) {
-                $results += & $builderName -MarkerPresent $true -IssueNumber ([int]$IssueNumber) -Evidence $evidence
+                $buildParams = @{ MarkerPresent = $true; IssueNumber = [int]$IssueNumber; Evidence = $evidence }
+                if (-not [string]::IsNullOrWhiteSpace($adapterName)) { $buildParams['AdapterName'] = $adapterName }
+                $results += & $builderName @buildParams
             }
             continue
         }
@@ -1714,10 +1721,13 @@ function Invoke-CreditInputHarvest {
         }
 
         if ($null -ne $payload -and $null -ne $completionPresent) {
-            $evidence = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
+            $evidence    = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
+            $adapterName = if ($payload.ContainsKey('adapter'))  { $payload['adapter']  } else { '' }
             $builderName = $script:BuilderByPort[$port]
             if (Get-Command $builderName -ErrorAction SilentlyContinue) {
-                $results += & $builderName -MarkerPresent $true -IssueNumber ([int]$IssueNumber) -Evidence $evidence
+                $buildParams = @{ MarkerPresent = $true; IssueNumber = [int]$IssueNumber; Evidence = $evidence }
+                if (-not [string]::IsNullOrWhiteSpace($adapterName)) { $buildParams['AdapterName'] = $adapterName }
+                $results += & $builderName @buildParams
             }
         }
     }

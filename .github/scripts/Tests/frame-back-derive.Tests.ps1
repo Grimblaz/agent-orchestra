@@ -14,6 +14,7 @@ BeforeDiscovery {
         @{ FixtureKey = 'V4-review-only';                       FixtureFile = 'frame-pr-V4-review-only.json';                       PrNumber = 9001; Label = 'D9 additive-merge: review pre-populated, 11 ports back-derived' }
         @{ FixtureKey = 'docs-only-synthetic';                  FixtureFile = 'frame-pr-docs-only-synthetic.json';                  PrNumber = 9002; Label = 'docs-only PR: implement-code/test/refactor not-applicable, implement-docs passed, ce-gate-* not-applicable' }
         @{ FixtureKey = 'cegate-orchestration-crash-synthetic'; FixtureFile = 'frame-pr-cegate-orchestration-crash-synthetic.json'; PrNumber = 9003; Label = 'CE Gate orchestration crash: 2 surfaces passed/inconclusive, 2 surfaces block_kind:orchestration' }
+        @{ FixtureKey = 'synthetic-backfill-preloaded';         FixtureFile = 'frame-pr-synthetic-backfill-preloaded.json';         PrNumber = 9004; Label = 'D9 round-trip: pre-populated synthetic-backfill row with block_kind preserved as-is, remaining 15 ports back-derived' }
     )
 }
 

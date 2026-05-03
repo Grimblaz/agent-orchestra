@@ -574,7 +574,9 @@ Active aggregation issues: #441 (sub-A, closed 2026-05) covers rows 5, 6, and 10
 <!-- d14-reification-contract -->
 ## Sub-Issue Reification Contract (D14)
 
-Patterns established in sub-B (#442) are the canonical contract for any future port-reification sub-issue (sub-C: `process-review`, `process-retrospective`; sub-D+: any later ports). Each sub-issue inherits this contract unless it explicitly overrides a named pattern and records the override here.
+This section consolidates the named decisions governing port reification across all sub-issues. Decisions D7–D12 were first established during sub-A (#441) and the early sub-B (#442) design exploration; D13–D18 were named or reserved during sub-B. Together they form the canonical contract: any future port-reification sub-issue (sub-C: `process-review`, `process-retrospective`; sub-D+: any later ports) inherits this contract unless it explicitly overrides a named decision and records the override here.
+
+**Decision-numbering policy**: decisions are numbered sequentially starting from D7 (the first sub-A builder-shape decision). Numbers D13–D16 were reserved during sub-B to maintain forward continuity; they will be filled as patterns emerge. Do not re-use or re-assign a reserved slot without retiring its placeholder entry.
 
 ### D7 — Builder shape
 
@@ -604,10 +606,12 @@ Two distinct emission paths with structurally distinguishable row shapes:
 
 | Category | Ports | When credit is written | Who writes it |
 |---|---|---|---|
-| 1 — Agent-owned, post-PR | `implement-code`, `implement-test`, `implement-refactor`, `implement-docs` | Specialist's terminal step, after PR creation | Specialist agent, directly into PR-body pipeline-metrics block |
+| 1 — Agent-owned, post-PR | `implement-code`, `implement-test`, `implement-refactor`†, `implement-docs` | Specialist's terminal step, after PR creation | Specialist agent, directly into PR-body pipeline-metrics block |
 | 2 — Agent-owned, pre-PR (deferred emission) | `experience`, `design`, `plan` | Stage A: agent posts `<!-- credit-input-{port}-{ID} -->` YAML comment alongside its completion marker. Stage B: Code-Conductor harvests at `gh pr create` time | Pipeline-entry agent (stage A); Code-Conductor (stage B) |
 | 3 — Skill-only | `post-pr` | Post-merge cleanup phase | Code-Conductor, after reading `frame/ports/post-pr.yaml` and invoking the post-pr-review skill |
 | 4 — CE Gate surface | `ce-gate-{cli,browser,canvas,api}` | Per-surface terminal step; missing-surface credits emitted by orchestration wrapper on crash | Experience-Owner / CE Gate orchestration |
+
+† **`implement-refactor` — deferred-by-design (sub-B, #442)**: The `changeset.touchedAreaHasDebt(threshold)` predicate requires the changeset's `FileMetadata` field (per-file `LineCount` and `MaxComplexity`) to be populated by the changeset constructor. No production caller populates `FileMetadata` in sub-B. Until a `FileMetadata` populator is wired into the changeset construction path, `Resolve-FVChangesetTouchedAreaHasDebt` always returns `$false`, making `implement-refactor` structurally unreachable as a live (non-auto-N/A) port. Sub-issue #13 or a dedicated follow-up must wire the populator before this port can produce non-N/A credits.
 
 ### D11 — Adapter stub bodies
 
@@ -623,6 +627,26 @@ New predicate identifiers for new semantics; shipped predicates left untouched. 
 | `changeset.touchesTestableCodeOrTests` | Matches `*.ps1` source files **or** test paths — distinct from shipped `touchesTestableCode` (which excludes tests) | New in sub-B |
 | `changeset.touchedAreaHasDebt(threshold)` | File > 300 lines OR cyclomatic complexity > 10 in any touched function | New in sub-B |
 | `changeset.touchesBehaviorOrInterfaceDocsExtended` | Matches `Documents/**`, `**/SKILL.md`, `**/*.agent.md`, `commands/**/*.md`, `README.md`, `CLAUDE.md` — distinct from shipped `changesBehaviorOrInterface` | New in sub-B |
+
+### D13 — Plan port back-derivation inference
+
+When back-deriving the `plan` port, the presence of a linked resolved issue confirms that the issue lifecycle ran, but the audit does not read issue-body markers or completion-marker state. The back-deriver therefore emits `status: inconclusive` with evidence citing the inference limitation. This is the conservative default for all pipeline-entry ports (`design`, `plan`) when marker-level confirmation is unavailable. Referenced in the audit table as "D12/D13 decisions in body."
+
+### D14 — (Reserved for future reification decisions)
+
+Reserved for a named decision that emerges during sub-B (#442), sub-C (#443), or a future reification sub-issue. Will be numbered and described when the pattern solidifies. Do not assign this slot ad-hoc; open a discussion in the relevant sub-issue first.
+
+### D15 — (Reserved for future reification decisions)
+
+Reserved. Same policy as D14.
+
+### D16 — (Reserved for future reification decisions)
+
+Reserved. Same policy as D14.
+
+### D17 — Blocking-mode activation precondition
+
+Blocking-mode activation for sub-issue #13 requires ≥30-PR recalibration data as an explicit precondition. The warn-only hook must accumulate that dataset before the gate switches from `warn` to `enforce` mode. Sub-issue #13 owns the enforcement switch; this decision prevents premature enforcement before the credit-rate baseline is established.
 
 ### D18 — Skill-first methodology
 

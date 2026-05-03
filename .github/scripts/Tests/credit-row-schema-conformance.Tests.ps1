@@ -223,10 +223,56 @@ exit 99
 }
 
 # ---------------------------------------------------------------------------
-# (c) ValidateSet parity: Build-CeGateCreditRow surfaces vs adapter files
+# (d) Build-CeGateCreditRow schema conformance across all 4 resolution branches
 # ---------------------------------------------------------------------------
 
-Describe 'Build-CeGateCreditRow ValidateSet matches auto-na-ce-gate adapter files (Step 6c)' {
+Describe 'Build-CeGateCreditRow schema conformance for all resolution branches (Step 6d)' -ForEach @(
+    @{ Branch = 'env-blocked-inconclusive'; Params = @{ Surface = 'cli'; EnvironmentBlocked = $true; BlockKind = 'environment' }; ExpectedStatus = 'inconclusive' }
+    @{ Branch = 'surface-not-touched-na';   Params = @{ Surface = 'browser'; SurfaceTouchResult = $false };                         ExpectedStatus = 'not-applicable' }
+    @{ Branch = 'empty-evidence-inconclusive'; Params = @{ Surface = 'canvas'; EvidenceList = @() };                                ExpectedStatus = 'inconclusive' }
+    @{ Branch = 'evidence-passed';          Params = @{ Surface = 'api'; EvidenceList = @('S1: passed') };                          ExpectedStatus = 'passed' }
+) {
+    param($Branch, $Params, $ExpectedStatus)
+
+    BeforeAll {
+        if (-not (Get-Command Build-CeGateCreditRow -ErrorAction SilentlyContinue)) {
+            $script:BranchRow = $null
+            return
+        }
+        $script:BranchRow = Build-CeGateCreditRow @Params
+    }
+
+    It "branch '$Branch' returns a non-null row" {
+        if ($null -eq $script:BranchRow) { Set-ItResult -Skipped -Because 'Build-CeGateCreditRow not available'; return }
+        $script:BranchRow | Should -Not -BeNullOrEmpty
+    }
+
+    It "branch '$Branch' has required field 'port' with ce-gate prefix" {
+        if ($null -eq $script:BranchRow) { Set-ItResult -Skipped -Because 'Build-CeGateCreditRow not available'; return }
+        [string]$script:BranchRow.port | Should -BeLike 'ce-gate-*'
+    }
+
+    It "branch '$Branch' has expected status '$ExpectedStatus'" {
+        if ($null -eq $script:BranchRow) { Set-ItResult -Skipped -Because 'Build-CeGateCreditRow not available'; return }
+        [string]$script:BranchRow.status | Should -Be $ExpectedStatus
+    }
+
+    It "branch '$Branch' has required field 'evidence'" {
+        if ($null -eq $script:BranchRow) { Set-ItResult -Skipped -Because 'Build-CeGateCreditRow not available'; return }
+        $null -ne $script:BranchRow.PSObject.Properties['evidence'] | Should -Be $true
+    }
+
+    It "branch '$Branch' status is within ce-gate allowed enum" {
+        if ($null -eq $script:BranchRow) { Set-ItResult -Skipped -Because 'Build-CeGateCreditRow not available'; return }
+        @('passed', 'failed', 'skipped', 'not-applicable', 'inconclusive') | Should -Contain ([string]$script:BranchRow.status)
+    }
+}
+
+# ---------------------------------------------------------------------------
+# (e) ValidateSet parity: Build-CeGateCreditRow surfaces vs adapter files
+# ---------------------------------------------------------------------------
+
+Describe 'Build-CeGateCreditRow ValidateSet matches auto-na-ce-gate adapter files (Step 6e)' {
 
     It 'each auto-na-ce-gate-*.md adapter has a matching surface value in the ValidateSet' {
         $adapterFiles = @(Get-ChildItem -Path $script:CeGateAdaptersDir -Filter 'auto-na-ce-gate-*.md' -ErrorAction SilentlyContinue)

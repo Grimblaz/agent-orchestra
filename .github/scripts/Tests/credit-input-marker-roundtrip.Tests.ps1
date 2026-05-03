@@ -308,10 +308,41 @@ evidence: "issue #442; in-memory path"
 }
 
 # ---------------------------------------------------------------------------
-# (f) Absent-marker case: harvester emits nothing for that port
+# (f) Negative-path: credit-input present but completion marker absent → zero rows (gh-fetch path)
 # ---------------------------------------------------------------------------
 
-Describe 'Invoke-CreditInputHarvest: absent marker emits nothing (Step 9f)' {
+Describe 'Invoke-CreditInputHarvest: credit-input without completion marker emits nothing (Step 9f-neg)' {
+
+    It 'returns no credit row for a port when credit-input is present but completion marker is absent' {
+        if (-not (Get-Command Invoke-CreditInputHarvest -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Invoke-CreditInputHarvest not available'
+            return
+        }
+
+        # Credit-input comment present, but the required completion marker is absent.
+        # The gh-fetch path gates emission on the completion marker being present.
+        $creditInputOnly = @"
+<!-- credit-input-experience-$script:IssueId -->
+``````yaml
+port: experience
+adapter: work-adapter
+evidence: "issue #442; experience-owner-complete marker posted"
+``````
+"@
+
+        $mockPath = Join-Path $script:TempDir 'gh-no-completion.ps1'
+        script:Write-MockGh -ScriptPath $mockPath -CommentBodies @($creditInputOnly)
+
+        $result = Invoke-CreditInputHarvest -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath $mockPath -MaxRetries 0
+        $result.Count | Should -Be 0 -Because 'credit-input without its completion marker must not be harvested'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# (g) Absent-marker case: harvester emits nothing for that port
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-CreditInputHarvest: absent marker emits nothing (Step 9g)' {
 
     It 'returns no credit row for a port when no credit-input comment is present' {
         if (-not (Get-Command Invoke-CreditInputHarvest -ErrorAction SilentlyContinue)) {
