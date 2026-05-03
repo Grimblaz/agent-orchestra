@@ -47,7 +47,7 @@ Each CE Gate surface is evaluated independently. For each surface (`cli`, `brows
 2. **Surface exercise or N/A**: if the predicate is true, exercise the surface and capture evidence per the Downstream Evidence Capture steps above; if false, the status is `not-applicable`.
 3. **Credit emission**: call `Build-CeGateCreditRow -Surface {name}` with the evidence list and upsert the credit row into the PR-body `<!-- pipeline-metrics -->` block.
 
-**Orchestration-failure handling**: if the CE Gate orchestration crashes after completing some surfaces but before completing all four, the orchestration wrapper emits the remaining surfaces as `status: inconclusive` with `block_kind: orchestration` and `evidence: "orchestration crashed before surface evaluated"`. This ensures no surface is silently absent from the ledger.
+**Orchestration-failure handling** *(planned — wrapper not yet implemented)*: when the orchestration wrapper is available, a CE Gate orchestration crash after completing some surfaces but before all four will cause the wrapper to emit the remaining surfaces as `status: inconclusive` with `block_kind: orchestration` and `evidence: "orchestration crashed before surface evaluated"`, ensuring no surface is silently absent. Until the wrapper ships, surfaces not reached before a crash must be emitted manually.
 
 Load `skills/frame-credit-emission/SKILL.md` for the full terminal-step emission contract and `Build-CeGateCreditRow` builder reference.
 

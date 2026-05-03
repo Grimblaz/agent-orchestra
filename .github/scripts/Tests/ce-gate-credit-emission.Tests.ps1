@@ -114,7 +114,7 @@ Describe 'Build-CeGateCreditRow emits passed when evidence list is populated' {
 }
 
 # ---------------------------------------------------------------------------
-# no results → inconclusive (no block_kind)
+# no results → inconclusive (block_kind: tooling per F13)
 # ---------------------------------------------------------------------------
 
 Describe 'Build-CeGateCreditRow emits inconclusive when EvidenceList is empty and not blocked' {
@@ -124,10 +124,9 @@ Describe 'Build-CeGateCreditRow emits inconclusive when EvidenceList is empty an
         $row.status | Should -Be 'inconclusive'
     }
 
-    It 'does not emit block_kind when inconclusive due to empty evidence (not environment-blocked)' {
+    It 'emits block_kind tooling when inconclusive due to empty evidence (F13: all forward-emitted inconclusive rows carry block_kind)' {
         $row = Build-CeGateCreditRow -Surface cli -EvidenceList @()
-        $hasBk = $null -ne $row.PSObject.Properties['block_kind'] -and -not [string]::IsNullOrWhiteSpace([string]$row.block_kind)
-        $hasBk | Should -Be $false
+        $row.block_kind | Should -Be 'tooling'
     }
 }
 

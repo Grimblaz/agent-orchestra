@@ -1244,13 +1244,16 @@ function Build-CeGateCreditRow {
         }
     }
 
-    # No evidence list and not blocked — inconclusive without block_kind.
+    # No evidence list and not blocked — inconclusive. Forward-emitted CE Gate inconclusive rows
+    # must carry block_kind per F13/schema; 'tooling' is the appropriate value when the surface
+    # was reachable but no scenario evidence was produced (builder called without evidence).
     $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                         else { "CE Gate for $Surface surface inconclusive — no scenario evidence supplied." }
     return [pscustomobject]@{
-        port     = $port
-        status   = 'inconclusive'
-        evidence = $resolvedEvidence
+        port       = $port
+        status     = 'inconclusive'
+        block_kind = 'tooling'
+        evidence   = $resolvedEvidence
     }
 }
 
@@ -1268,7 +1271,9 @@ function script:Resolve-PipelineEntryCreditStatus {
     if ($AdapterName -eq 'explicit-skip') { return 'skipped' }
     if ($AutoNaResult) { return 'not-applicable' }
     if ($MarkerPresent) { return 'passed' }
-    return 'not-applicable'
+    # No marker and not auto-N/A: the agent did not post its completion marker — "no evidence"
+    # semantics per D5/AC9. Use 'skipped', not 'not-applicable' (which is predicate-derived only).
+    return 'skipped'
 }
 
 # ---------------------------------------------------------------------------
@@ -1521,8 +1526,11 @@ function Build-PostPrCreditRow {
 
     $failing = @()
     foreach ($key in @('archive', 'docs', 'version', 'releaseTag')) {
-        if ($ChecklistOutcomes.ContainsKey($key) -and -not [bool]$ChecklistOutcomes[$key]) {
-            $failing += $key
+        if ($ChecklistOutcomes.ContainsKey($key)) {
+            $val = $ChecklistOutcomes[$key]
+            # Accept booleans directly; for strings, only 'passed' is a success value.
+            $isSuccess = if ($val -is [bool]) { $val } else { [string]$val -eq 'passed' }
+            if (-not $isSuccess) { $failing += $key }
         }
     }
 
@@ -1705,7 +1713,7 @@ function Invoke-CreditInputHarvest {
             $attempt++
         }
 
-        if ($null -ne $payload) {
+        if ($null -ne $payload -and $null -ne $completionPresent) {
             $evidence = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
             $builderName = $script:BuilderByPort[$port]
             if (Get-Command $builderName -ErrorAction SilentlyContinue) {

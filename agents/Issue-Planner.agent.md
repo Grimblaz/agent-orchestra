@@ -116,7 +116,7 @@ ce_gate: { true|false }
 
 Add `escalation_recommended: true` and `escalation_reason` when scope exceeds the issue's stated scope.
 
-On the Claude Code inline path, after posting the `<!-- plan-issue-{ID} -->` GitHub issue comment, immediately post a credit-input marker comment (SMC-17 deferred-emission):
+After posting the `<!-- plan-issue-{ID} -->` GitHub issue comment, immediately post a credit-input marker comment (SMC-17 deferred-emission):
 
 ```markdown
 <!-- credit-input-plan-{ISSUE_NUMBER} -->

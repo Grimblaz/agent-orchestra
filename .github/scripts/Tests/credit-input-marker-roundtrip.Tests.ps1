@@ -97,8 +97,14 @@ adapter: work-adapter
 evidence: "$Evidence"
 ``````
 "@
+        $completionMarkerMap = @{
+            'experience' = "<!-- experience-owner-complete-$script:IssueId -->"
+            'design'     = "<!-- design-phase-complete-$script:IssueId -->"
+            'plan'       = "<!-- plan-issue-$script:IssueId -->"
+        }
+        $completionMarkerText = $completionMarkerMap[$Port]
         $mockPath = Join-Path $script:TempDir "gh-port-$Port.ps1"
-        script:Write-MockGh -ScriptPath $mockPath -CommentBodies @($markerComment)
+        script:Write-MockGh -ScriptPath $mockPath -CommentBodies @($completionMarkerText, $markerComment)
 
         $script:HarvestResult = Invoke-CreditInputHarvest `
             -IssueNumber $script:IssueId `
@@ -157,10 +163,11 @@ Describe 'Invoke-CreditInputHarvest: cross-tool YAML parity (Step 9b)' {
         # Claude style: tight YAML, CRLF
         $claudeMarker = "<!-- credit-input-experience-$script:IssueId -->`r`n``````yaml`r`nport: experience`r`nadapter: work-adapter`r`nevidence: `"$evidence`"`r`n``````"
 
+        $experienceComplete = "<!-- experience-owner-complete-$script:IssueId -->"
         $mockCopilot = Join-Path $script:TempDir 'gh-copilot.ps1'
         $mockClaude  = Join-Path $script:TempDir 'gh-claude.ps1'
-        script:Write-MockGh -ScriptPath $mockCopilot -CommentBodies @($copilotMarker)
-        script:Write-MockGh -ScriptPath $mockClaude  -CommentBodies @($claudeMarker)
+        script:Write-MockGh -ScriptPath $mockCopilot -CommentBodies @($experienceComplete, $copilotMarker)
+        script:Write-MockGh -ScriptPath $mockClaude  -CommentBodies @($experienceComplete, $claudeMarker)
 
         $copilotResult = Invoke-CreditInputHarvest -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath $mockCopilot -MaxRetries 0
         $claudeResult  = Invoke-CreditInputHarvest -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath $mockClaude  -MaxRetries 0
@@ -206,8 +213,9 @@ adapter: work-adapter
 evidence: "issue #442; plan-issue"
 ``````
 "@
-        # 110 comment bodies with the marker at position 105
+        # 111 comment bodies with the completion marker at position 105 and credit-input at 106
         $comments = @(1..104 | ForEach-Object { "Generic comment $_." })
+        $comments += "<!-- plan-issue-$script:IssueId -->"
         $comments += $targetMarker
         $comments += @(1..5 | ForEach-Object { "Trailing comment $_." })
 

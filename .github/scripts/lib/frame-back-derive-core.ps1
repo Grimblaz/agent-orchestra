@@ -191,6 +191,18 @@ function Get-FBDExistingCredits {
         }
         $credit['evidence'] = $evidence
 
+        $hasSyntheticBackfill = [regex]::IsMatch($part, '(?m)^\s*synthetic-backfill\s*:')
+        if ($hasSyntheticBackfill) {
+            $backfilledAtMatch = [regex]::Match($part, '(?m)^\s*backfilled_at\s*:\s*(\S+)')
+            $origMergedAtMatch = [regex]::Match($part, '(?m)^\s*original_pr_merged_at\s*:\s*(\S+)')
+            $credit['mode'] = [ordered]@{
+                'synthetic-backfill' = [ordered]@{
+                    backfilled_at         = if ($backfilledAtMatch.Success) { $backfilledAtMatch.Groups[1].Value.Trim() } else { $null }
+                    original_pr_merged_at = if ($origMergedAtMatch.Success) { $origMergedAtMatch.Groups[1].Value.Trim() } else { $null }
+                }
+            }
+        }
+
         $result[$port] = $credit
     }
 

@@ -64,20 +64,14 @@ Pre-PR agents (`agent-pre-pr` locus category) use credit-input markers for defer
 ```yaml
 port: {port}
 adapter: {adapter-name}
-evidence:
-  marker_present: {boolean}
-  issue_number: {integer}
-  other_port_specific_fields: {values}
+evidence: "{human-readable evidence string}"
 ```
 
 **Field requirements**:
 
 - `port`: The frame port identifier (e.g., `experience`, `design`, `plan`).
-- `adapter`: The adapter name that produced this credit (e.g., `manual-complete`, `auto-na`).
-- `evidence`: A hash containing the port-specific evidence the builder function needs. Common fields include:
-  - `marker_present`: Boolean indicating whether the agent's completion marker was detected.
-  - `issue_number`: The GitHub issue number this credit references.
-  - Additional fields as required by the port's `Build-*CreditRow` function.
+- `adapter`: The adapter name that produced this credit (e.g., `work-adapter`, `auto-na`).
+- `evidence`: A flat quoted string describing what the agent observed (e.g., `"issue #123; plan-issue marker posted"`). The harvester passes this string verbatim as the `-Evidence` parameter to the matching `Build-*CreditRow` function. Do **not** use a nested YAML mapping here — the harvester's flat key-value parser will silently drop nested fields.
 
 **Persistence rule**: Post the credit-input marker as a GitHub issue comment immediately after the agent's completion marker comment. Code-Conductor harvests all credit-input markers at PR-creation time by reading the issue's comments and calling the matching builder functions.
 
@@ -90,11 +84,7 @@ CE Gate surfaces are evaluated independently. Each surface's credit row is its o
 1. **Predicate evaluation**: For each surface (`cli`, `browser`, `canvas`, `api`), evaluate the surface-touch predicate (`changeset.touches{Surface}Surface()`).
 2. **Surface exercise or N/A**: If the predicate is true, exercise the surface and capture evidence. If false, emit `status: not-applicable`.
 3. **Credit emission**: Call `Build-CeGateCreditRow -Surface {name}` with the surface-specific evidence and upsert the credit row.
-4. **Orchestration-failure handling**: If the CE Gate orchestration crashes after evaluating some surfaces but before completing all four, the orchestration wrapper emits the missing-surface credits as `status: inconclusive` with:
-   - `reason: "orchestration crashed before surface evaluated"`
-   - `block_kind: orchestration`
-
-This ensures no surface is ever silently absent from the ledger, even under orchestration failure.
+4. **Orchestration-failure handling** *(planned — wrapper not yet implemented)*: when the orchestration wrapper ships, a crash after partial evaluation will cause it to emit the remaining-surface credits as `status: inconclusive` with `block_kind: orchestration` and `evidence: "orchestration crashed before surface evaluated"`. Until then, manually emit missing-surface rows on crash.
 
 ## Related
 
