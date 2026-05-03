@@ -1,25 +1,25 @@
 ---
 name: upstream-onboarding
-description: "Shared opening-phase protocol for upstream agents (Experience-Owner, Solution-Designer, Issue-Planner). Renders a scaled context brief and runs a standards check on inherited work at each phase boundary. Use after provenance-gate completes a non-stop outcome, when the agent is picking up work completed by a different upstream agent. DO NOT USE FOR: Code-Conductor orchestration (downstream); provenance-gate cold-pickup assessment (provenance-gate owns that); post-merge review (use post-pr-review); research or non-tree subagents."
+description: "Shared opening-phase protocol for upstream agents (Experience-Owner, Solution-Designer, Issue-Planner) and Code-Conductor when invoked on an existing GitHub issue. Renders a scaled context brief and runs a standards check on inherited work at each phase boundary. Use as the first skill loaded when a user-invocable agent receives a request referencing an existing GitHub issue. DO NOT USE FOR: subagent dispatches (which already operate within an assessed session context); post-merge review (use post-pr-review); research or non-tree subagents."
 ---
 
 <!-- markdownlint-disable-file MD041 MD003 -->
 
 # Upstream Onboarding
 
-Shared opening-phase protocol for the three upstream agents in the Agent Orchestra pipeline: Experience-Owner, Solution-Designer, and Issue-Planner. Two responsibilities: render a scaled context brief so the agent and developer share a common starting point, and run a standards check on any work inherited from the prior phase so concerns are surfaced and resolved before execution continues.
+Shared opening-phase protocol for the three upstream agents in the Agent Orchestra pipeline (Experience-Owner, Solution-Designer, Issue-Planner) and Code-Conductor when invoked on an existing GitHub issue. Two responsibilities: render a scaled context brief so the agent and developer share a common starting point, and run a standards check on any work inherited from the prior phase so concerns are surfaced and resolved before execution continues.
 
 ## When to Use
 
-Load this skill after `provenance-gate` completes a **non-stop outcome** (`I wrote this / I'm fully briefed`, `Assessment looks right — proceed`, or `Proceed but carry concerns forward`), when at least one upstream completion marker is present in the issue for the current agent to inherit.
+Load this skill as the first opening-phase action when a user-invocable upstream agent (Experience-Owner, Solution-Designer, Issue-Planner) or Code-Conductor receives a request referencing an existing GitHub issue, or when the developer is describing a brand-new idea (Greenfield Mode below).
 
 ## When to Skip
 
 - **Same-agent resume**: the most recent upstream completion marker on the issue belongs to the active agent's own role (e.g., Solution-Designer re-entering when `<!-- design-phase-complete-{ID} -->` is the latest marker). In this case the brief and standards check are skipped — the agent proceeds directly to its next phase action.
-- **Provenance-gate stop outcomes** (`Stop — needs rework first` or `Needs rework — stop here`): provenance-gate halts; this skill never fires.
-- **Issue exists but no upstream markers yet**: an issue ID is present but the issue carries no upstream completion markers (no inherited work to brief on or check against). Skip silently. This is **not** Greenfield Mode.
 - **No issue ID and not a Greenfield start**: if no issue ID can be determined and the developer is not describing a brand-new idea (i.e., the request is unrelated to issue work), skip silently.
 - **Greenfield Mode is the exception**: when the developer is describing a brand-new idea in plain language with no issue yet, the brief and issue-creation prompt **do** run — see Greenfield Mode below. Greenfield Mode takes precedence over the "No issue ID" skip rule above.
+
+When an issue ID is present but no upstream completion markers exist yet (a fresh, unframed issue), still render the brief — synthesized from the issue body — and skip the standards check (nothing to inherit). Surface any blocking questions before the agent begins phase-specific work.
 
 ## Trigger Rules
 
@@ -42,8 +42,7 @@ The standards check fires only when the active agent is picking up work complete
 
 ### Sequencing
 
-- Runs **after** `provenance-gate` completes a non-stop outcome.
-- Defers to provenance-gate stop outcomes — if provenance-gate halts, this skill does not fire.
+- Runs **first** when a user-invocable agent picks up an issue-referencing request (after the session-startup hook + drift check, which are platform-level concerns).
 - Runs **before** the agent loads its role-specific skills (design-exploration, plan-authoring, etc.) or takes any phase action.
 
 ### Subagent Self-Skip
@@ -197,7 +196,6 @@ This skill is **supporting methodology** — it does not fill a frame port and d
 
 ## Related
 
-- `skills/provenance-gate/SKILL.md` — runs immediately before this skill on cold pickups; this skill defers to its stop outcomes.
 - `skills/customer-experience/SKILL.md` — Experience-Owner lens anchor.
 - `skills/design-exploration/SKILL.md` — Solution-Designer lens anchor.
 - `skills/plan-authoring/SKILL.md` — Issue-Planner lens anchor.

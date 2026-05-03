@@ -995,26 +995,15 @@ function Invoke-SessionCleanupDetector {
                 }
             }
             else {
-                $out += '# Unknown issue ID — manually inspect and archive files in .copilot-tracking/'
+                # Unknown issue ID: emit -UntaggedTrackingFiles invocation
+                $relPaths = @($item.UnknownFiles | ForEach-Object {
+                    $rel = [System.IO.Path]::GetRelativePath((Get-Location).Path, $_).Replace('\', '/')
+                    "'" + (ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $rel) + "'"
+                })
+                if ($relPaths.Count -gt 0) {
+                    $out += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -UntaggedTrackingFiles @($($relPaths -join ','))"
+                }
             }
-        }
-        return $out
-    }
-
-    function Get-SiblingWorktreeCommands {
-        param([array]$Items)
-
-        $out = @()
-        foreach ($item in $Items) {
-            $safeWorktreePath = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $item.WorktreePath
-            $safeBranch = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $item.BranchName
-            if ($item.IsLocked) {
-                $out += "git worktree remove --force '$safeWorktreePath'"
-            }
-            else {
-                $out += "git worktree remove '$safeWorktreePath'"
-            }
-            $out += "git branch -D '$safeBranch'"
         }
         return $out
     }
@@ -1025,17 +1014,6 @@ function Invoke-SessionCleanupDetector {
         $out = @()
         foreach ($item in $Items) {
             $out += "- Orphan branch ``$($item.BranchName)`` — $($item.Reason)"
-        }
-        return $out
-    }
-
-    function Get-OrphanBranchCommands {
-        param([array]$Items)
-
-        $out = @()
-        foreach ($item in $Items) {
-            $safeBranch = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $item.BranchName
-            $out += "git branch -D '$safeBranch'"
         }
         return $out
     }
@@ -1133,23 +1111,58 @@ function Invoke-SessionCleanupDetector {
         $lines += 'To clean up, run:'
         $lines += '```powershell'
         $lines += '# Run in a PowerShell (pwsh) terminal:'
-        if ($null -ne $staleBranch) {
-            if ($staleBranch.IssueId) {
-                $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($staleBranch.IssueId) -FeatureBranch '$escaped'"
-            }
-            else {
-                $lines += "git checkout '$escapedDefault' && git pull && git branch -d '$escaped'  # use -D to force if already confirmed merged"
-            }
+
+        # Build composite invocation
+        $compositeArgs = @()
+        if ($null -ne $staleBranch -and $staleBranch.IssueId) {
+            $compositeArgs += "-IssueNumber $($staleBranch.IssueId)"
+            $compositeArgs += "-FeatureBranch '$escaped'"
         }
-        if ($cleanupNeeded.Count -gt 0) {
-            $trackingCommands = @(Get-TrackingCommands -Items $cleanupNeeded | Where-Object { $_ -ne '# Run in a PowerShell (pwsh) terminal:' })
-            $lines += $trackingCommands
+        # C1+G4+C6: Route no-issue-id stale-branch cleanup through the composite
+        # script via -FeatureBranch so the fenced block stays a single pwsh call
+        # and triggers exactly one permission prompt — not raw 'git checkout && git pull
+        # && git branch -d' lines that would re-introduce the multi-prompt problem.
+        if ($null -ne $staleBranch -and -not $staleBranch.IssueId) {
+            $compositeArgs += "-FeatureBranch '$escaped'"
         }
         if ($visibleSiblingWorktreeCleanups.Count -gt 0) {
-            $lines += (Get-SiblingWorktreeCommands -Items $visibleSiblingWorktreeCleanups)
+            $siblingPaths = $visibleSiblingWorktreeCleanups | ForEach-Object {
+                "'" + (ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $_.WorktreePath) + "'"
+            }
+            $compositeArgs += "-SiblingWorktrees @($($siblingPaths -join ','))"
         }
         if ($visibleOrphanBranchCleanups.Count -gt 0) {
-            $lines += (Get-OrphanBranchCommands -Items $visibleOrphanBranchCleanups)
+            $orphanNames = $visibleOrphanBranchCleanups | ForEach-Object {
+                "'" + (ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $_.BranchName) + "'"
+            }
+            $compositeArgs += "-OrphanBranches @($($orphanNames -join ','))"
+        }
+        # Untagged tracking files (unknown issue ID)
+        if ($cleanupNeeded.Count -gt 0) {
+            $untaggedItems = @($cleanupNeeded | Where-Object { $_.IssueId -eq 'unknown' })
+            if ($untaggedItems.Count -gt 0) {
+                $allUntaggedPaths = @($untaggedItems | ForEach-Object { $_.UnknownFiles } | ForEach-Object {
+                    $rel = [System.IO.Path]::GetRelativePath((Get-Location).Path, $_).Replace('\', '/')
+                    "'" + (ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value $rel) + "'"
+                })
+                if ($allUntaggedPaths.Count -gt 0) {
+                    $compositeArgs += "-UntaggedTrackingFiles @($($allUntaggedPaths -join ','))"
+                }
+            }
+            # Known-issue tracking files: emit separate invocations for issues not covered by staleBranch
+            $taggedCleanup = @($cleanupNeeded | Where-Object { $_.IssueId -ne 'unknown' })
+            $otherIssueCleanup = @($taggedCleanup | Where-Object { $null -eq $staleBranch -or $_.IssueId -ne $staleBranch.IssueId })
+            foreach ($item in $otherIssueCleanup) {
+                $safeB = ConvertTo-SCDPowerShellSingleQuoteEscapedText -Value ($item.BranchName ?? '')
+                if ($item.BranchName) {
+                    $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -FeatureBranch '$safeB'"
+                } else {
+                    $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber $($item.IssueId) -SkipRemoteDelete -SkipLocalDelete"
+                }
+            }
+        }
+        if ($compositeArgs.Count -gt 0) {
+            $lines += "pwsh '$safeRoot/skills/session-startup/scripts/post-merge-cleanup.ps1' $($compositeArgs -join ' ')"
         }
         $lines += '```'
         $lines += ''

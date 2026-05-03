@@ -48,6 +48,8 @@ Describe 'session startup wording contract' {
                 Path = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
             }
         )
+        # Issue #498 DRY pass: command files no longer duplicate Step 7b prose — owning skill and
+        # Claude platform companion are the only authoritative Step 7b documents after #498.
         $script:Step7bFreshnessDocuments = @(
             @{
                 Name = 'session-startup skill'
@@ -56,30 +58,8 @@ Describe 'session startup wording contract' {
             @{
                 Name = 'session-startup Claude companion'
                 Path = $script:SessionStartupClaudePlatform
-            },
-            @{
-                Name = 'experience command'
-                Path = Join-Path $script:RepoRoot 'commands\experience.md'
-            },
-            @{
-                Name = 'design command'
-                Path = Join-Path $script:RepoRoot 'commands\design.md'
-            },
-            @{
-                Name = 'plan command'
-                Path = Join-Path $script:RepoRoot 'commands\plan.md'
-            },
-            @{
-                Name = 'orchestrate command'
-                Path = Join-Path $script:RepoRoot 'commands\orchestrate.md'
-            },
-            @{
-                Name = 'polish command'
-                Path = Join-Path $script:RepoRoot 'commands\polish.md'
             }
         )
-        # Guard counter to ensure command documents are actually detected by the checks below
-        $script:Step7bFreshnessCommandDocsFound = 0
         $script:ExpectedContract = [ordered]@{
             sessionStartupMarkerPath                    = $script:CanonicalMarkerPath
             checkMarkerBeforeAutomaticDetectorRun       = $true
@@ -218,7 +198,7 @@ Describe 'session startup wording contract' {
             $content = $document.Content
             $processSectionMatch = [regex]::Match($content, '(?ms)^## Process\s*\r?\n(?<body>.*?)(?=^## |\z)')
 
-            $processSectionMatch.Success | Should -BeTrue -Because "$($agent.Name) must keep a bounded Process section for provenance-gate instructions"
+            $processSectionMatch.Success | Should -BeTrue -Because "$($agent.Name) must keep a bounded Process section for upstream-onboarding instructions"
 
             $processSection = $processSectionMatch.Groups['body'].Value
 
@@ -382,28 +362,12 @@ Describe 'session startup wording contract' {
             }
             $emitNearby | Should -BeTrue -Because "$($document.Name) Step 7b must include an emit instruction near the freshness failure phrase"
 
-            # Additional checks for the five command mirrors (commands: experience/design/plan/orchestrate/polish)
-            # Use a robust detection that tolerates both backslashes and forward-slashes
-            $docPathNormalized = $document.Path -replace '\\', '/'
-            if ($docPathNormalized -match '/commands/') {
-                $script:Step7bFreshnessCommandDocsFound = $script:Step7bFreshnessCommandDocsFound + 1
-                $sec | Should -Match '(?i)non-git' -Because "$($document.Name) must mention non-git local-path carve-out"
-                $sec | Should -Match '(?i)dirty' -Because "$($document.Name) must mention dirty working-tree local-path carve-out"
-                $sec | Should -Match '(?i)detached' -Because "$($document.Name) must mention detached HEAD local-path carve-out"
-                $sec | Should -Match '(?i)suppress' -Because "$($document.Name) must mention suppress/suppression local-path carve-out"
-
-                $sec | Should -Match $stopLabel -Because "$($document.Name) must preserve the 'Stop — I'll restart now' option label"
-                $sec | Should -Match $continueLabel -Because "$($document.Name) must preserve the 'Continue — run under old code' option label"
-            }
-
             # For the Claude platform companion, assert headless prompt-suppression wording in addition to fail-open phrase
             if ($document.Path -eq $script:SessionStartupClaudePlatform) {
                 $sec | Should -Match ([regex]::Escape($freshnessPhraseExact)) -Because 'Claude companion region must contain the exact freshness-failed phrase'
                 $sec | Should -Match '(?is)headless.*suppress|suppress.*prompt' -Because 'Claude companion region must include headless prompt-suppression wording'
             }
         }
-        # Structural guard: ensure all five command mirrors were detected.
-        $script:Step7bFreshnessCommandDocsFound | Should -Be 5 -Because 'There must be five command mirrors detected for Step 7b (experience/design/plan/orchestrate/polish) — guards against path-detection regressions'
     }
 
     It 'requires the session-startup skill to preserve the detector command and fail-open/manual semantics' {

@@ -45,7 +45,6 @@ This keeps prompts concise while preserving depth when needed.
 | `process-analysis` | Retrospective and process-analysis methodology for workflow review | ✅ Included |
 | `process-troubleshooting` | Five-scenario guide for diagnosing common orchestration failure patterns | ✅ Included |
 | `property-based-testing` | Incremental rollout policy for property-based testing | ✅ Included |
-| `provenance-gate` | First-contact issue-framing assessment for cold pickups | ✅ Included |
 | `refactoring-methodology` | Proportionate refactoring workflow for touched files and nearby debt | ✅ Included |
 | `research-methodology` | Evidence-driven technical research and recommendation workflow | ✅ Included |
 | `review-judgment` | Single-shot review judgment and scoring methodology | ✅ Included |

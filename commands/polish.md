@@ -9,29 +9,7 @@ Run the UI-Iterator role inline in this conversation for the provided component 
 
 ## Pre-flight (session-startup + paired-body load)
 
-### Step 4 — Run-once marker (D2 fail-open)
-
-The automatic startup guard records `/memories/session/session-startup-check-complete.md` after the first automatic startup check. SMC-07 governs this run-once startup-check marker. Claude Code inline currently lacks a session-memory write surface (SMC-07); the run-once marker is a no-op on this surface. The check still proceeds; the user-friction window is bounded to the first inline command of each new session because the SessionStart hook only injects `additionalContext` on session start.
-
-### Step 6 — Cleanup confirmation
-
-When the SessionStart hook injects `additionalContext`, present that context and ask via `AskUserQuestion` whether to continue with cleanup using these exact option labels:
-
-1. `Yes — run cleanup`
-2. `No — skip for now`
-
-If `additionalContext` is absent, emit a single line saying `no stale state detected` and continue.
-
-### Step 7b — Drift check
-
-Before checking drift, run `claude plugin marketplace update` (5-second timeout); if it fails or times out, emit `marketplace freshness check failed — using cached view` and continue with the cached view. When a local-path marketplace registration is classified as a non-git local directory or a dirty/detached tree, suppress that freshness emit because the existing local-path classification surfaces remediation.
-
-On Claude Code, run the plugin drift check after the cleanup path completes. If the installed plugin is behind the marketplace version, emit the update summary and ask via `AskUserQuestion` with these exact option labels:
-
-1. `Stop — I'll restart now`
-2. `Continue — run under old code`
-
-If Claude is running headless and cannot ask a structured question, emit the update result inline and continue.
+Load `skills/session-startup/SKILL.md` and follow Steps 4, 6, 7b, and 9 (paired body for Step 9: `agents/UI-Iterator.agent.md`).
 
 ### Step 9 — Paired-body halt-on-fail
 

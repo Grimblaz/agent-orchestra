@@ -714,8 +714,9 @@ exit $LASTEXITCODE
             $context | Should -Match 'Post-merge cleanup detected'
             $context | Should -Match ([regex]::Escape($branch))
             $context | Should -Match ([regex]::Escape($siblingPath))
-            $insideFence | Should -Match ([regex]::Escape("git worktree remove '$siblingPath'"))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$branch'"))
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match ([regex]::Escape("-SiblingWorktrees @('$siblingPath')")) -Because 'sibling worktree path must appear as -SiblingWorktrees argument'
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for sibling category'
         }
 
         It 'F2 fetches the remote default once while evaluating multiple sibling no-upstream candidates' {
@@ -873,8 +874,9 @@ exit $LASTEXITCODE
             $outsideFence | Should -Match ([regex]::Escape($currentBranch))
             $outsideFence | Should -Match '(?s)git worktree remove.*git branch -D'
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$currentBranch'"))
-            $insideFence | Should -Match ([regex]::Escape("git worktree remove '$siblingPath'"))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$siblingBranch'"))
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match ([regex]::Escape("-SiblingWorktrees @('$siblingPath')")) -Because 'sibling worktree path must appear as -SiblingWorktrees argument'
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for sibling category'
             $outsideFence | Should -Not -Match ([regex]::Escape("git worktree remove '$siblingPath'"))
             $outsideFence | Should -Not -Match ([regex]::Escape("git branch -D '$siblingBranch'"))
         }
@@ -932,11 +934,13 @@ exit $LASTEXITCODE
             $context | Should -Match ([regex]::Escape($prunableBranch))
             $context | Should -Match 'locked'
             $context | Should -Match 'checked out by maintainer'
-            $insideFence | Should -Match ([regex]::Escape("git worktree remove --force '$lockedPath'"))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$lockedBranch'"))
-            $insideFence | Should -Match ([regex]::Escape("git worktree remove '$prunablePath'"))
-            $insideFence | Should -Not -Match ([regex]::Escape("git worktree remove --force '$prunablePath'"))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$prunableBranch'"))
+            # After composite migration: locked vs prunable distinction moves into the script;
+            # fenced block contains a single composite -SiblingWorktrees invocation instead of
+            # individual git worktree remove + git branch -D lines.
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match ([regex]::Escape($lockedPath)) -Because 'locked worktree path must appear in -SiblingWorktrees list'
+            $insideFence | Should -Match ([regex]::Escape($prunablePath)) -Because 'prunable worktree path must appear in -SiblingWorktrees list'
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for sibling category'
             $context | Should -Not -Match ([regex]::Escape($bareBranch))
             $context | Should -Not -Match ([regex]::Escape($detachedPath))
         }
@@ -981,8 +985,9 @@ exit $LASTEXITCODE
             $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
 
             $result.ExitCode | Should -Be 0
-            $insideFence | Should -Match ([regex]::Escape("git worktree remove '$siblingPath'"))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$siblingBranch'"))
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match ([regex]::Escape($siblingPath)) -Because 'sibling path must appear in -SiblingWorktrees argument'
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for sibling category'
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$currentBranch'"))
         }
 
@@ -1024,8 +1029,9 @@ exit $LASTEXITCODE
             $result.ExitCode | Should -Be 0
             $context | Should -Match ([regex]::Escape($siblingBranch))
             $context | Should -Not -Match ([regex]::Escape($currentBranch))
-            $insideFence | Should -Match ([regex]::Escape("git worktree remove '$siblingPath'"))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$siblingBranch'"))
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match ([regex]::Escape($siblingPath)) -Because 'sibling path must appear in -SiblingWorktrees argument'
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for sibling category'
         }
 
         It 'F1 ignores non-issue upstream-deleted sibling branches while preserving feature issue positives' {
@@ -1069,7 +1075,9 @@ exit $LASTEXITCODE
 
             $result.ExitCode | Should -Be 0
             $context | Should -Match ([regex]::Escape($featureBranch))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$featureBranch'"))
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match ([regex]::Escape($featurePath)) -Because 'feature worktree path must appear in -SiblingWorktrees argument'
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for sibling category'
             $context | Should -Not -Match ([regex]::Escape($releaseBranch))
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$releaseBranch'"))
             $releaseRemoteCalls.Count | Should -Be 0 -Because 'remote-deleted sibling cleanup is documented as feature/issue-* scoped'
@@ -1100,8 +1108,9 @@ exit $LASTEXITCODE
             $result.ExitCode | Should -Be 0
             $context | Should -Match ([regex]::Escape($branch))
             $context | Should -Match 'prunable'
-            $insideFence | Should -Match ([regex]::Escape("git worktree remove '$missingPath'"))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$branch'"))
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match ([regex]::Escape($missingPath)) -Because 'prunable path must appear in -SiblingWorktrees argument'
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for sibling category'
         }
     }
 
@@ -1146,7 +1155,10 @@ exit $LASTEXITCODE
             $result.ExitCode | Should -Be 0
             $context | Should -Match 'Post-merge cleanup detected'
             $context | Should -Match ([regex]::Escape($mergedOrphan))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$mergedOrphan'"))
+            # After composite migration: orphan branches appear as -OrphanBranches parameter
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match ([regex]::Escape("-OrphanBranches @('$mergedOrphan')")) -Because 'merged orphan must appear in -OrphanBranches argument'
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for orphan category'
             $context | Should -Not -Match ([regex]::Escape($unmergedOrphan))
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$unmergedOrphan'"))
             $context | Should -Not -Match ([regex]::Escape($attachedBranch))
@@ -1186,7 +1198,10 @@ exit $LASTEXITCODE
             $context | Should -Match '^\*\*Post-merge cleanup detected\*\*'
             $context | Should -Not -Match '(?im)^\*\*Claude'
             $context | Should -Match ([regex]::Escape($orphanBranch))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$orphanBranch'"))
+            # After composite migration: orphan appears in -OrphanBranches parameter
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match ([regex]::Escape($orphanBranch)) -Because 'orphan branch must appear in -OrphanBranches argument'
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for orphan category'
         }
 
         It 'T12 D9 caps claude orphan output at 10 cleanup bullets and commands with a deterministic overflow hint' {
@@ -1209,12 +1224,16 @@ exit $LASTEXITCODE
             $context = & $script:GetAdditionalContext -Output $result.Output
             $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
             $concreteBulletCount = ([regex]::Matches($context, '(?m)^- .*claude/reclaimable-')).Count
-            $concreteCommandCount = ([regex]::Matches($insideFence, "(?m)^git branch -D 'claude/reclaimable-")).Count
+            # After composite migration: orphan entries appear in a single -OrphanBranches @(...) invocation
+            # Count entries in the -OrphanBranches array instead of individual git branch -D lines
+            $concreteOrphanEntryCount = ([regex]::Matches($insideFence, "(?m)'claude/reclaimable-")).Count
             $overflowCommandPattern = [regex]::Escape("git for-each-ref --format='%(refname:short)' refs/heads/claude/")
 
             $result.ExitCode | Should -Be 0
             $concreteBulletCount | Should -Be 10
-            $concreteCommandCount | Should -Be 10
+            $concreteOrphanEntryCount | Should -Be 10 -Because 'exactly 10 orphan branch entries must appear in the -OrphanBranches array'
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match '-OrphanBranches' -Because '-OrphanBranches parameter must appear in composite invocation'
             $context | Should -Match "\+2 more.*$overflowCommandPattern"
             $context | Should -Not -Match ([regex]::Escape($branches[10]))
             $context | Should -Not -Match ([regex]::Escape($branches[11]))
@@ -1247,16 +1266,19 @@ exit $LASTEXITCODE
             $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
             $concreteClaudeBulletCount = ([regex]::Matches($context, '(?m)^- .*(?:claude/current-overflow-abcde|claude/reclaimable-)')).Count
             $visibleOrphanBulletCount = ([regex]::Matches($context, '(?m)^- .*claude/reclaimable-')).Count
-            $visibleOrphanCommandCount = ([regex]::Matches($insideFence, "(?m)^git branch -D 'claude/reclaimable-")).Count
+            # After composite migration: count orphan entries in -OrphanBranches array instead of git branch -D lines
+            $visibleOrphanEntryCount = ([regex]::Matches($insideFence, "(?m)'claude/reclaimable-")).Count
             $overflowCommandPattern = [regex]::Escape("git for-each-ref --format='%(refname:short)' refs/heads/claude/")
 
             $result.ExitCode | Should -Be 0
             $outsideFence | Should -Match ([regex]::Escape($currentBranch))
             $outsideFence | Should -Match '(?s)Current-worktree cleanup must be run from another checkout:.*git worktree remove.*git branch -D'
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$currentBranch'"))
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match '-OrphanBranches' -Because '-OrphanBranches parameter must appear in composite invocation'
             $concreteClaudeBulletCount | Should -Be 10
             $visibleOrphanBulletCount | Should -Be 9
-            $visibleOrphanCommandCount | Should -Be 9
+            $visibleOrphanEntryCount | Should -Be 9 -Because 'exactly 9 orphan entries must appear in the -OrphanBranches array'
             $context | Should -Match "\+1 more.*$overflowCommandPattern"
             $context | Should -Not -Match ([regex]::Escape($orphanBranches[9]))
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$($orphanBranches[9])'"))
@@ -1284,7 +1306,9 @@ exit $LASTEXITCODE
 
             $result.ExitCode | Should -Be 0
             $context | Should -Match ([regex]::Escape($branch))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$branch'"))
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match ([regex]::Escape($branch)) -Because 'orphan feature branch must appear in -OrphanBranches argument'
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for orphan category'
         }
 
         It 'F1 ignores orphan upstream-deleted branches outside feature issue scope while preserving feature issue positives' {
@@ -1311,10 +1335,60 @@ exit $LASTEXITCODE
 
             $result.ExitCode | Should -Be 0
             $context | Should -Match ([regex]::Escape($featureBranch))
-            $insideFence | Should -Match ([regex]::Escape("git branch -D '$featureBranch'"))
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+            $insideFence | Should -Match ([regex]::Escape($featureBranch)) -Because 'feature orphan branch must appear in -OrphanBranches argument'
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'raw git branch -D must not appear in fenced block for orphan category'
             $context | Should -Not -Match ([regex]::Escape($scratchBranch))
             $insideFence | Should -Not -Match ([regex]::Escape("git branch -D '$scratchBranch'"))
             $scratchRemoteCalls.Count | Should -Be 0 -Because 'remote-deleted orphan cleanup is documented as feature/issue-* scoped'
+        }
+
+        It 'composite: fenced block contains no raw git branch -D lines when orphan category fires' {
+            $workDir = Join-Path $TestDrive 'orphan-no-raw-branch-d'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $mergedOrphan = 'claude/orphan-composite-abcde'
+            $unmergedOrphan = 'claude/orphan-unmerged-composite-abcde'
+            $worktreeList = & $script:NewWorktreeRecord -Path (& $script:ToPorcelainPath -Path $workDir) -Branch 'main'
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'                                 = 'main'
+                'symbolic-ref-origin-HEAD'                             = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'                              = $worktreeList
+                'show-ref-refs/remotes/origin/main'                    = 0
+                'fetch-exit'                                           = 0
+                'for-each-ref-refs/heads/claude/'                      = @($mergedOrphan, $unmergedOrphan)
+                "merge-base-$mergedOrphan-refs/remotes/origin/main"    = 0
+                "merge-base-$unmergedOrphan-refs/remotes/origin/main"  = 1
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $insideFence | Should -Not -Match 'git branch -D ' -Because 'composite: no raw git branch -D must appear in fenced block for orphan category'
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
+        }
+
+        It 'composite: unknown-issue-id tracking file becomes -UntaggedTrackingFiles parameter not a comment line' {
+            $workDir = Join-Path $TestDrive 'untagged-tracking-composite'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+            # Create an untagged tracking file (no issue_id frontmatter)
+            $trackingDir = Join-Path $workDir '.copilot-tracking\research'
+            New-Item -ItemType Directory -Path $trackingDir -Force | Out-Null
+            Set-Content -Path (Join-Path $trackingDir 'orphan-no-id.md') -Value "# No issue_id header`nSome content" -Encoding UTF8
+
+            $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+                'branch--show-current'     = 'main'
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+                'worktree-list-porcelain'  = (& $script:NewWorktreeRecord -Path (& $script:ToPorcelainPath -Path $workDir) -Branch 'main')
+            }
+            $context = & $script:GetAdditionalContext -Output $result.Output
+            $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+            $result.ExitCode | Should -Be 0
+            $insideFence | Should -Not -Match '# Unknown issue ID' -Because 'unknown-issue tracking files must not appear as comment lines in fenced block'
+            $insideFence | Should -Match ([regex]::Escape('-UntaggedTrackingFiles')) -Because 'untagged files must appear as -UntaggedTrackingFiles parameter'
+            $insideFence | Should -Match 'post-merge-cleanup\.ps1' -Because 'composite invocation must reference the cleanup script'
         }
     }
 

@@ -24,7 +24,7 @@ Three agents cover the journey from an issue on the board to an implementation-r
 
 Each agent reads a shared tool-agnostic body from `agents/*.agent.md` and follows the named skills for methodology. Claude-specific tool bindings (structured questions, subagent dispatch, `gh` CLI for GitHub work) are documented in each skill's `platforms/claude.md`.
 
-All three upstream agents share a common opening behavior — implemented in `skills/upstream-onboarding/SKILL.md`. After `provenance-gate` completes a non-stop outcome, each agent renders a scaled context brief (summarizing the issue, scope tier, inherited decisions, and any blocking questions) and runs a standards check on work inherited from the prior phase. When the standards check finds a concern, the agent cites the violated standard by anchor (skill path + rule name), quotes the offending text, and presents a corrective approach as a structured question with a strong recommendation. The brief and standards check are skipped on same-agent resumes (when the most recent upstream marker already belongs to the active agent's own role). When no issue exists yet (greenfield invocation), each agent synthesizes a brief from the user's prompt with all fields marked `(proposed)` and prompts for issue creation per its GitHub Setup step; the standards check is skipped until a real issue is established.
+All three upstream agents share a common opening behavior — implemented in `skills/upstream-onboarding/SKILL.md`. When a user-invocable agent receives a request referencing an existing GitHub issue, it loads `upstream-onboarding` and renders a scaled context brief (summarizing the issue, scope tier, inherited decisions, and any blocking questions) and runs a standards check on work inherited from the prior phase. When the standards check finds a concern, the agent cites the violated standard by anchor (skill path + rule name), quotes the offending text, and presents a corrective approach as a structured question with a strong recommendation. The brief and standards check are skipped on same-agent resumes (when the most recent upstream marker already belongs to the active agent's own role). When no issue exists yet (greenfield invocation), each agent synthesizes a brief from the user's prompt with all fields marked `(proposed)` and prompts for issue creation per its GitHub Setup step; the standards check is skipped until a real issue is established.
 
 ## Orchestration
 
@@ -64,7 +64,6 @@ Handoffs between phases use durable GitHub issue comments rather than session-lo
 - `<!-- design-phase-complete-{ID} -->` — technical design complete
 - `<!-- design-issue-{ID} -->` — durable design snapshot handoff used for D9 pause/resume and full-pipeline smart resume
 - `<!-- plan-issue-{ID} -->` — approved plan persisted
-- `<!-- first-contact-assessed-{ID} -->` — provenance-gate marker token for a completed fast-path or cold-path assessment; the optional human-readable second line in that issue comment is decorative only and is not part of skip-check or parser logic
 - `<!-- frame-credit-ledger-{PR} -->` — warn-only frame credit-ledger comment posted by the pre-PR hook (sub-issue #429 of frame umbrella #425); idempotently upserted on every PR after `gh pr create`
 - `<!-- review-judge-produced-{PR} -->` — sentinel written by the judge (both Copilot and Claude) immediately after the ruling finalizes, before pipeline-metrics persistence; the warn-only hook detects this to synthesize a `not-persisted` review credit when the PR body carries no review credit yet (SMC-16)
 
@@ -74,7 +73,7 @@ The row-level survival and fallback semantics are governed by [skills/session-me
 
 ## Session startup
 
-When a session begins, the plugin's `SessionStart` hook runs the cleanup detector and injects any findings into the agent's first turn. The `session-startup` skill describes how the agent handles that injected context, preserves the run-once marker, and reports current branch, tracking file, sibling worktree, orphan branch, fail-open, and opt-in cleanup behavior. Current-worktree cleanup commands stay as inline manual guidance outside the fenced block; sibling and orphan cleanup commands are fenced and run only after confirmation. Manual detector runs remain available after the automatic check fires.
+When a session begins, the plugin's `SessionStart` hook runs the cleanup detector and injects any findings into the agent's first turn. The `session-startup` skill describes how the agent handles that injected context, preserves the run-once marker, and reports current branch, tracking file, sibling worktree, orphan branch, fail-open, and opt-in cleanup behavior. Current-worktree cleanup commands stay as inline manual guidance outside the fenced block; sibling and orphan cleanup — including worktree removal and branch deletion — is passed as parameters to a single composite `pwsh ... post-merge-cleanup.ps1 -SiblingWorktrees @(...) -OrphanBranches @(...)` invocation, so confirming cleanup triggers exactly one permission prompt rather than one per branch. Manual detector runs remain available after the automatic check fires. See the `### Permission allowlist (recommended)` subsection in the session-startup skill for the opt-in `.claude/settings.json` allowlist entries that suppress that prompt entirely.
 
 ## Releases
 
@@ -82,7 +81,7 @@ Claude Code keys its plugin cache by the `version` declared in `.claude-plugin/p
 
 To prevent that, agent-assisted maintainer flows now route entry-point edits through the `plugin-release-hygiene` skill. Claude uses the plugin-distributed `PostToolUse` hook and Copilot uses the root `hooks.json` hook; both follow the same shared release-hygiene guidance. Per `SMC-12`, the silence decision is `session_id`-scoped for Claude when available and branch-scoped for Copilot, so it is shared across tools only when both resolve the same state key.
 
-The `session-startup` skill also owns a Claude-only active-assist drift check. When the installed `agent-orchestra@agent-orchestra` version is behind the resolved marketplace version, the startup pass runs `claude plugin update`, reports the old and new versions, and asks whether to restart now or continue the current session under the old code.
+The `session-startup` skill also owns a Claude-only active-assist drift check. When the installed `agent-orchestra@agent-orchestra` version is behind the resolved marketplace version, the startup pass runs `claude plugin update`, waits for the install to complete (success or announced failure), and only then presents the restart-vs-continue structured question. The install-then-prompt ordering is enforced by the explicit 6-step procedure in Step 7b of the skill.
 
 ### For maintainers
 

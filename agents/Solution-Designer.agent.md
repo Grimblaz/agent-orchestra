@@ -61,9 +61,7 @@ High-level design thinking — "what are we building and why?" Operates at conce
 
 ## Process
 
-When this user-invocable agent receives a request referencing an existing GitHub issue, load the `provenance-gate` skill and follow its protocol.
-
-After `provenance-gate` completes a non-stop outcome, load `skills/upstream-onboarding/SKILL.md` and follow its protocol.
+When this user-invocable agent receives a request referencing an existing GitHub issue, load `skills/upstream-onboarding/SKILL.md` and follow its protocol.
 
 ## Stage 1: GitHub Setup
 

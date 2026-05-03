@@ -1,6 +1,6 @@
 # Agent Orchestra
 
-[![Version](https://img.shields.io/badge/version-v2.8.0-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v2.9.0-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system that orchestrates AI-assisted software development across specialized agents in GitHub Copilot and Claude Code.
@@ -236,7 +236,6 @@ Skills are domain-specific knowledge packages in `skills/` (repo root) that agen
 | **post-pr-review** | Post-merge cleanup, archiving tracking files, strategic assessment |
 | **process-troubleshooting** | Diagnosing premature implementation, agent confusion, validation gaps, or terminal stalls |
 | **bdd-scenarios** | Structured Given/When/Then scenario authoring and CE Gate coverage checks |
-| **provenance-gate** | First-contact issue-framing assessment for cold pickups |
 | **session-memory-contract** | Session-state survival labels, canonical mechanisms, and cross-tool handoff rules |
 | **session-startup** | Automatic startup cleanup guard for new conversations |
 | **terminal-hygiene** | Terminal and test execution guardrails for Agent Orchestra workflows |

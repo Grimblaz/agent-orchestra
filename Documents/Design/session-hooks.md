@@ -72,7 +72,7 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 7. After that first automatic startup check, the `session-startup` skill records `/memories/session/session-startup-check-complete.md` regardless of whether cleanup will later be accepted, declined, or skipped.
 8. The `session-startup` skill surfaces `additionalContext` describing what needs cleanup (branch signal leads when both fire).
 9. Agent asks user via `vscode/askQuestions`: context reflects which signal(s) fired and asks whether to run the fenced cleanup block.
-10. If confirmed → runs only the fenced commands. These may call `post-merge-cleanup.ps1` for current/tracking-file cleanup or direct `git worktree remove` / `git branch -D` commands for sibling and orphan cleanup.
+10. If confirmed → runs only the fenced commands. All cleanup — including current/tracking-file, sibling worktree, and orphan branch cleanup — goes through `post-merge-cleanup.ps1`, invoked as a composite `pwsh ... post-merge-cleanup.ps1 -SiblingWorktrees @(...) -OrphanBranches @(...)` call (composite invocation eliminates per-command permission prompts; see issue #500).
 11. Cleanup remains opt-in. Current-worktree inline commands are manual instructions that must be run from another checkout.
 12. Claude Code then runs Step 7b under the same startup run-once marker. Before reading cached marketplace state, it attempts `claude plugin marketplace update` for up to 5 seconds.
 13. Freshness failures emit `marketplace freshness check failed — using cached view` and continue from cache without retrying freshness. Local-path non-git and dirty/detached classifications use their existing remediation text instead of the generic freshness emit.
@@ -125,16 +125,17 @@ Added alongside the portability fix to close a gap found in the post-PR review o
 
 ## Inline-Dispatch Contract
 
-The inline-dispatch contract added for issue #412 and updated by issue #437 enforces the same direct-command pre-flight surface across all three Claude command files: `commands/experience.md`, `commands/design.md`, and `commands/plan.md`. Each command file carries command-side enforcement for session-startup Steps 4, 6, and 7b, the canonical startup option labels, Step 9 paired-body halt-on-fail prose, and provenance-gate labels/prose. `.github/scripts/Tests/inline-dispatch-contract.Tests.ps1` asserts prose presence per command and per step using canonical option labels extracted from the fenced YAML blocks in `skills/session-startup/SKILL.md` and `skills/provenance-gate/SKILL.md`.
+The inline-dispatch contract was added for issue #412, updated by issue #437, re-shaped into a DRY load-reference contract by issue #498, and then simplified by the provenance-gate retirement. Each Claude command file now carries a single load reference to `skills/session-startup/SKILL.md` (Steps 4, 6, 7b, 9) plus a command-specific `### Step 9 — Paired-body halt-on-fail` D1 body-resolution cascade block immediately after the load reference. The opening-phase framing/orientation responsibility is now owned by `skills/upstream-onboarding/SKILL.md`, which the agent body itself loads from its Process section when an issue-referencing request arrives — not the command file. `.github/scripts/Tests/inline-dispatch-contract.Tests.ps1` asserts the DRY load-reference shape and a negative-shape guard that no command file references the retired provenance-gate skill. Canonical option labels extracted from the fenced YAML block in `skills/session-startup/SKILL.md` remain the single source of truth for label-drift tests.
 
-| Command file | Enforced here | Deferred elsewhere |
+| Command file | Pre-flight load reference | Per-command inline content |
 | --- | --- | --- |
-| `commands/experience.md` | Steps 4, 6, 7b, 9, provenance-gate | None |
-| `commands/design.md` | Steps 4, 6, 7b, 9, provenance-gate | None |
-| `commands/plan.md` | Steps 4, 6, 7b, 9, provenance-gate | None for direct `/plan` |
-| `commands/orchestrate.md` | Steps 4, 6, 7b, 9, provenance-gate | None for direct `/orchestrate` |
+| `commands/experience.md` | session-startup | Step 9 D1 cascade for `agents/Experience-Owner.agent.md` |
+| `commands/design.md` | session-startup | Step 9 D1 cascade for `agents/Solution-Designer.agent.md` |
+| `commands/plan.md` | session-startup | Step 9 D1 cascade for `agents/Issue-Planner.agent.md`; inline adversarial-pipeline dispatch section |
+| `commands/orchestrate.md` | session-startup | Step 9 D1 cascade for `agents/Code-Conductor.agent.md`; smart-resume marker handling; downstream Agent handshake guidance |
+| `commands/polish.md` | session-startup | Step 9 D1 cascade for `agents/UI-Iterator.agent.md` |
 
-Historical note: issue #412 originally treated direct `/plan` as a carve-out for Step 9 and provenance. Issue #437 removed that carve-out for the command file, so direct `/plan` now matches `/experience` and `/design`. Issue #465 extended the inline-dispatch contract to `/orchestrate` and supersedes the narrower #457 lift; `/orchestrate` now adopts Code-Conductor inline in the parent conversation, so all four user-invocable inline commands carry the same pre-flight prose. Parent-agent delegation may still dispatch the `issue-planner` subagent shell for non-`/orchestrate` flows.
+Historical note: issue #412 originally treated direct `/plan` as a carve-out for Step 9 and provenance. Issue #437 reversed that carve-out. Issue #465 extended the inline-dispatch contract to `/orchestrate`, and `/polish` joined the contract surface later. Issue #498 re-shaped all five command files into the DRY load-reference contract above. The provenance-gate retirement then removed the second load reference to the gate skill (and the gate skill itself), collapsing the cold-pickup self-classification flow into the simpler `upstream-onboarding` brief loaded from the agent body.
 
 Cross-tool asymmetry per D6 of #412: Copilot's `.github/prompts/*.prompt.md` files are thin one-line dispatchers without a parent-side prose surface. Copilot inline-dispatch enforcement is owned by the agent body (`agents/{Name}.agent.md`) and is tracked in #414.
 
