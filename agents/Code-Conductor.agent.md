@@ -423,6 +423,15 @@ Before emitting the `credits[]` block at PR creation, harvest deferred pipeline-
 4. Read-after-write retry: when a completion marker (e.g., `<!-- experience-owner-complete-{ID} -->`) is present but the matching credit-input comment is not yet visible, the harvester retries up to 3 times with exponential backoff. Do not block PR creation if all retries are exhausted — the back-deriver and warn-only hook flag absences.
 5. Merge the returned credit rows into the `credits[]` array alongside the review, release-hygiene, and other credits. Deduplicate by port: if a credit row for a port is already present in the array, skip the harvested row for that port (additive-merge rule, D9).
 
+### Post-PR Credit Row (D10 category 3)
+
+After the post-merge cleanup path completes (post-PR steps driven by `skills/post-pr-review/SKILL.md`), emit the `post-pr` credit row:
+
+1. Collect the structured outcome hashtable from the post-pr-review skill per its "Structured Outcome Contract" section: `@{ archive = '...'; docs = '...'; version = '...'; releaseTag = '...' }`.
+2. Call `Build-PostPrCreditRow -ChecklistOutcomes @{...}` with the outcome hashtable.
+3. Upsert the returned credit row into the PR-body `<!-- pipeline-metrics -->` block's `credits[]` array.
+4. Apply the additive-merge rule (D9): if a credit row for `post-pr` already exists in the block, skip the upsert.
+
 ---
 
 ## Refactoring Phase is MANDATORY
