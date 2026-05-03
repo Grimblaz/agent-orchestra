@@ -405,6 +405,12 @@ Load and follow these references:
 
 Code-Conductor keeps only the emission timing and ownership boundary: emit the `## Pipeline Metrics` section at PR creation time using the canonical schema, mappings, and findings-construction rules from those references.
 
+For v4 release-hygiene credit row construction (state-file reading, YAML examples) and the CE Gate S2 synthetic-PR test protocol, follow `skills/calibration-pipeline/references/release-hygiene-credit-emission.md`.
+
+<!-- TODO: remove legacy v3 pipeline-metrics fallback at v2.9.0 when pre-v4 back-catalog backfill is confirmed complete (issue #441). -->
+
+For v4 review credit row construction (parsing judge-rulings block, determining pass/fail status, building the credit row), follow `skills/calibration-pipeline/references/review-credit-emission.md`.
+
 ---
 
 ## Refactoring Phase is MANDATORY

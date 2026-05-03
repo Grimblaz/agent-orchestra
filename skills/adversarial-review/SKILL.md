@@ -316,3 +316,19 @@ When representing an external review ledger:
 | --- | --- | --- |
 | `review` | [agents/Code-Review-Response.agent.md](../../agents/Code-Review-Response.agent.md); [adapters/standard.md](adapters/standard.md); [adapters/lite.md](adapters/lite.md); [adapters/judge-only.md](adapters/judge-only.md); [adapters/proxy-github.md](adapters/proxy-github.md) | [adapters/explicit-skip-review.md](adapters/explicit-skip-review.md) |
 | `post-fix-review` | [adapters/post-fix.md](adapters/post-fix.md) | [adapters/explicit-skip-post-fix-review.md](adapters/explicit-skip-post-fix-review.md) |
+
+## Integrity Contract (Decision 6 — per-adapter exemptions)
+
+Each `review` adapter declares its expected prosecution pass-blocks in YAML frontmatter under the `integrity-contract:` key. The frame credit ledger uses this declaration to verify that the prosecution structure matches what the adapter promises.
+
+| Adapter | Pass-blocks expected | Exempt | Reason |
+| ------- | -------------------- | ------ | ------ |
+| `standard` | `[1, 2, 3]` | No | Runs full three-pass prosecution (design, prerequisites, product-alignment) |
+| `lite` | `[1]` | No | Runs one compact prosecution pass |
+| `judge-only` | `[]` | Yes | Re-review scope; prior prosecution and defense evidence already exists |
+| `proxy-github` | `[]` | Yes | External review intake; single proxy prosecution pass replaces the three-pass structure |
+
+Pass-block IDs correspond to the three Code-Critic prosecution modes:
+- **Pass 1**: design review perspectives (`Review mode selector: "Use design review perspectives"`)
+- **Pass 2**: implementation prerequisites, CE Gate, persistence, cross-tool (`Review mode selector: "Use design review perspectives"` second pass)
+- **Pass 3**: product-alignment perspectives (`Review mode selector: "Use product-alignment perspectives"`)

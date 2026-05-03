@@ -456,7 +456,7 @@ The `<!-- pipeline-metrics -->` format is extended from 18-field flat YAML (v1) 
 
 ### Code-Review-Response Structured Output
 
-CRR now emits the Markdown score summary, the `<!-- code-review-complete-{PR} -->` completion marker, and the `<!-- judge-rulings -->` YAML block in the same payload. For GitHub-backed review flows, the completion marker and `judge-rulings` block stay in the same PR comment rather than being split across separate comments. Code-Conductor reads this for per-finding data; falls back to parsing the Markdown table if the block is absent.
+CRR now emits the Markdown score summary and the `<!-- judge-rulings -->` YAML block in the same payload, preceded by the `<!-- review-judge-produced-{PR} -->` sentinel as a separate PR comment. For GitHub-backed review flows, the score summary and `judge-rulings` block stay in the same PR comment rather than being split across separate comments. Code-Conductor reads `credits[]` from the `<!-- pipeline-metrics -->` PR body block for per-finding data. The `<!-- code-review-complete-{PR} -->` marker is retired as of issue #441 Step 11.
 
 ### Calibration Profile
 

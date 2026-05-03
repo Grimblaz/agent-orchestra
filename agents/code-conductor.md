@@ -121,7 +121,7 @@ Claude Code keeps the same durable GitHub handoff model as the shared workflow, 
 - `<!-- design-phase-complete-{ID} -->` remains the durable GitHub issue-comment marker for completed technical design (`SMC-08`).
 - `<!-- design-issue-{ID} -->` remains the durable GitHub issue-comment handoff for the current design snapshot when D9 pause or smart-resume persistence needs design intent outside the live issue body (`SMC-03`, `SMC-08`).
 - `<!-- plan-issue-{ID} -->` remains the durable GitHub issue-comment handoff for a persisted implementation plan when the workflow takes the durable D9 pause path (`SMC-01`, `SMC-08`).
-- `<!-- code-review-complete-{PR} -->` remains the durable PR-comment marker paired with the judge payload for review completion; post-PR review-state resume reads that durable comment first, then PR-body `<!-- pipeline-metrics -->`, then any available session-memory fallback (`SMC-06`).
+- Review completion for post-PR resume reads `credits[]` within the PR-body `<!-- pipeline-metrics -->` block first; falls back to the legacy `<!-- code-review-complete-{PR} -->` PR-comment marker for PRs created before issue #441 Step 11 retired the marker. `SMC-06` governs this resume path.
 - CE Gate result markers such as `✅ CE Gate passed - intent match: strong`, `⚠️ CE Gate skipped - {reason}`, and `❌ CE Gate aborted - {reason}` remain durable PR artifacts emitted in the PR body alongside the rest of the CE Gate evidence.
 
 For paused Claude orchestration work, resume through `/orchestrate` with the issue number or issue URL. Smart resume reads the durable GitHub markers above with latest-comment-wins semantics; it does not depend on a Claude-only `/implement` surface.

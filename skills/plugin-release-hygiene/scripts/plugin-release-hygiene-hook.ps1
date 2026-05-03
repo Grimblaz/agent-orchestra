@@ -403,6 +403,31 @@ function Invoke-PRHHook {
     $relativePath = $entryPaths[0]
 
     if (Test-PRHVersionAlreadyBumped -RepoRoot $repoRoot) {
+        # Version is already bumped. Run the symmetric-bump verifier and persist
+        # the credit data to the state file (issue #441, Step 7a — D-new-5).
+        $keyingInfo    = Get-PRHKeyingInfo -Payload $Payload
+        $bumpStatePath = Get-PRHStatePath -RepoRoot $repoRoot -Slug $keyingInfo.slug
+
+        if (-not [string]::IsNullOrWhiteSpace($bumpStatePath)) {
+            $existingState = Get-PRHState -StatePath $bumpStatePath
+            $touchedSoFar  = @()
+            if ($null -ne $existingState -and $null -ne $existingState.touched_files) {
+                $touchedSoFar = @($existingState.touched_files)
+            }
+            if ($touchedSoFar -notcontains $relativePath) {
+                $touchedSoFar += $relativePath
+            }
+
+            $verifierScript = Join-Path $PSScriptRoot 'symmetric-bump-verifier.ps1'
+            if (Test-Path $verifierScript) {
+                . $verifierScript
+                [void](Invoke-SymmetricBumpVerifier `
+                    -RepoRoot    $repoRoot `
+                    -TouchedFiles $touchedSoFar `
+                    -StatePath   $bumpStatePath)
+            }
+        }
+
         return
     }
 

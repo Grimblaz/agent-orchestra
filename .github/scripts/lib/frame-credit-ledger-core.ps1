@@ -3,11 +3,18 @@
 .SYNOPSIS
     Pure-logic library for the frame credit-ledger pre-PR warn hook (issue #429).
 
-    Exposes six functions:
+    Exposes eleven functions:
       - Read-PRMetricsBlock               : parse a pipeline-metrics v4 marker out of a PR body
+      - Select-LastCreditByRunIndex       : pick the highest-run_index credit for (port, adapter)
+      - Test-ReviewSentinelPresent        : check for <!-- review-judge-produced-{PR} --> sentinel
+      - Resolve-NotPersistedSynthesis     : synthesize not-persisted credit when sentinel present
+      - Build-ReviewCreditRow             : construct a v4 review credit row from judge-rulings
+                                           comment + adapter integrity contract (issue #441, Step 8b)
+      - ConvertFrom-JudgeRulingsComment   : parse the <!-- judge-rulings --> YAML block from a
+                                           PR comment body into structured finding objects
       - Get-PortFiles                     : enumerate frame/ports/*.yaml as objects
       - Resolve-PortStatus                : classify a single port given adapters + credit
-      - Compose-Comment                   : render the warn-mode markdown report
+      - Compose-Comment                   : render the warn-mode unified per-port table report
       - Compose-CommentWithCostPattern    : wrapper around Compose-Comment that appends the
                                            cost telemetry section (issue #467) when non-empty
       - Compose-PreV4ShortCircuitComment  : render the literal pre-v4 short-circuit text
@@ -200,6 +207,145 @@ function script:ConvertFrom-FCLListSection {
     return $entries.ToArray()
 }
 
+# Split a list-of-mappings YAML section into per-entry raw line chunks.
+# Returns an array of strings, each containing the raw lines for one `- entry`.
+# Used for nested-field extraction (Findings 2 + 5: judge-score, integrity-check,
+# mode.synthetic-backfill that ConvertFrom-FCLListSection cannot represent).
+function script:Get-FCLEntryChunks {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Block,
+        [Parameter(Mandatory)][string]$SectionName
+    )
+
+    if ([string]::IsNullOrEmpty($Block)) { return @() }
+
+    $lines = script:ConvertTo-FCLNormalizedLines $Block
+    $chunks = [System.Collections.Generic.List[string]]::new()
+    $current = [System.Collections.Generic.List[string]]::new()
+    $inSection = $false
+    $sectionIndent = -1
+    $sectionPattern = '^(?<indent>\s*)' + [regex]::Escape($SectionName) + '\s*:\s*$'
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        if ($null -eq $line) { continue }
+
+        if (-not $inSection) {
+            $m = [regex]::Match($line, $sectionPattern)
+            if ($m.Success) {
+                $inSection = $true
+                $sectionIndent = $m.Groups['indent'].Value.Length
+            }
+            continue
+        }
+
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            if ($current.Count -gt 0) { [void]$current.Add($line) }
+            continue
+        }
+        $trimmed = $line.TrimStart()
+        $indent = $line.Length - $trimmed.Length
+
+        # End of section: same-or-lower indent non-list key.
+        if ($indent -le $sectionIndent -and -not $trimmed.StartsWith('-')) {
+            break
+        }
+
+        if ($trimmed.StartsWith('- ') -or $trimmed -eq '-') {
+            if ($current.Count -gt 0) {
+                [void]$chunks.Add(($current -join "`n"))
+                $current = [System.Collections.Generic.List[string]]::new()
+            }
+        }
+        [void]$current.Add($line)
+    }
+
+    if ($current.Count -gt 0) {
+        [void]$chunks.Add(($current -join "`n"))
+    }
+
+    # Return as a non-pipeline value to avoid PowerShell unwrapping the array
+    # to its individual elements (which @() at the call site would re-wrap into
+    # a flat array, not preserve the per-chunk structure).
+    return $chunks.ToArray()
+}
+
+# Build a dotted-key → scalar map from a single list-entry YAML chunk.
+# Handles arbitrary nesting depth driven by indentation. The leading "- " on
+# the first non-blank line is normalized so the entry-marker line aligns with
+# its sibling keys.
+#
+# Example chunk:
+#   - port: review
+#     mode:
+#       synthetic-backfill:
+#         backfilled_at: 2026-05-01T00:00:00Z
+#     judge-score:
+#       findings_sustained: 3
+#
+# Returns:
+#   @{
+#     'port' = 'review'
+#     'mode.synthetic-backfill.backfilled_at' = '2026-05-01T00:00:00Z'
+#     'judge-score.findings_sustained' = '3'
+#   }
+function script:Get-FCLChunkKeyMap {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Chunk)
+
+    $map = @{}
+    if ([string]::IsNullOrEmpty($Chunk)) { return $map }
+
+    $rawLines = $Chunk -split "`n"
+    # Normalize leading "- " entry marker to "  " so the first key aligns with siblings.
+    $lines = @($rawLines | ForEach-Object {
+            if ($_ -match '^(?<lead>\s*)-\s(?<rest>.*)$') {
+                "$($Matches['lead'])  $($Matches['rest'])"
+            }
+            else { $_ }
+        })
+
+    $stack = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($line in $lines) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $trimmed = $line.TrimStart()
+        if ($trimmed.StartsWith('#')) { continue }
+        $indent = $line.Length - $trimmed.Length
+
+        $kv = [regex]::Match($trimmed, '^(?<key>[A-Za-z0-9_-]+)\s*:\s*(?<value>.*)$')
+        if (-not $kv.Success) { continue }
+        $key = $kv.Groups['key'].Value
+        $val = $kv.Groups['value'].Value.Trim()
+
+        if ($val.Length -ge 2) {
+            $first = $val[0]; $last = $val[$val.Length - 1]
+            if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+                $val = $val.Substring(1, $val.Length - 2)
+            }
+        }
+
+        # Pop deeper-or-equal entries off the stack so we ascend back to the
+        # current indent's parent before recording the key.
+        while ($stack.Count -gt 0 -and $stack[$stack.Count - 1].Indent -ge $indent) {
+            $stack.RemoveAt($stack.Count - 1)
+        }
+
+        if ([string]::IsNullOrEmpty($val)) {
+            # Open a sub-block; push for descendants.
+            [void]$stack.Add(@{ Indent = $indent; Key = $key })
+        }
+        else {
+            $parts = @()
+            foreach ($s in $stack) { $parts += $s.Key }
+            $parts += $key
+            $dotted = $parts -join '.'
+            $map[$dotted] = $val
+        }
+    }
+
+    return $map
+}
+
 # endregion ---------------------------------------------------------------------
 
 # region: shared port-report helpers --------------------------------------------
@@ -262,14 +408,89 @@ function Read-PRMetricsBlock {
             }
         }
 
-        $creditsRaw = script:ConvertFrom-FCLListSection -Block $block -SectionName 'credits' -Fields @('port', 'status', 'evidence')
-        $credits = @($creditsRaw | ForEach-Object {
-                [pscustomobject]@{
-                    Port     = [string]$_.port
-                    Status   = [string]$_.status
-                    Evidence = [string]$_.evidence
+        $creditsRaw = script:ConvertFrom-FCLListSection -Block $block -SectionName 'credits' `
+            -Fields @('port', 'adapter', 'status', 'run_index', 'evidence',
+                      'mode_backfilled_at', 'mode_original_pr_merged_at')
+
+        # Findings 2 + 5 (issue #441 follow-up): the flat-key parser cannot
+        # represent nested credit fields. Extract per-credit raw chunks here so
+        # the credit objects can carry nested data (mode.synthetic-backfill,
+        # judge-score, integrity-check, version-bump, symmetric-bump-verification)
+        # that real PR bodies emit per the v4 schema.
+        # Cast to [string[]] so a single-credit return value stays an array
+        # (PowerShell would otherwise unwrap a 1-element array to its scalar,
+        # making indexed access return characters of the string instead).
+        [string[]]$creditChunks = script:Get-FCLEntryChunks -Block $block -SectionName 'credits'
+        if ($null -eq $creditChunks) { $creditChunks = [string[]]@() }
+
+        $creditsList = [System.Collections.Generic.List[object]]::new()
+        for ($idx = 0; $idx -lt $creditsRaw.Count; $idx++) {
+                $entry = $creditsRaw[$idx]
+                $chunk = if ($idx -lt $creditChunks.Count) { [string]$creditChunks[$idx] } else { '' }
+                $nestedMap = if (-not [string]::IsNullOrEmpty($chunk)) { script:Get-FCLChunkKeyMap -Chunk $chunk } else { @{} }
+
+                $runIndexRaw = [string]$entry.run_index
+                $runIndexInt = $null
+                if (-not [string]::IsNullOrWhiteSpace($runIndexRaw)) {
+                    $parsedRunIndex = 0
+                    if ([int]::TryParse($runIndexRaw, [ref]$parsedRunIndex)) {
+                        $runIndexInt = $parsedRunIndex
+                    }
                 }
-            })
+
+                # Resolve nested-or-flat backfill timestamps. Nested form
+                # (`mode.synthetic-backfill.backfilled_at`) matches the schema
+                # and real PR bodies; flat form (`mode_backfilled_at`) is kept
+                # for backward compatibility with older test fixtures.
+                $backfilledAt = $nestedMap['mode.synthetic-backfill.backfilled_at']
+                if ([string]::IsNullOrWhiteSpace([string]$backfilledAt)) { $backfilledAt = [string]$entry.mode_backfilled_at }
+                $originalMergedAt = $nestedMap['mode.synthetic-backfill.original_pr_merged_at']
+                if ([string]::IsNullOrWhiteSpace([string]$originalMergedAt)) { $originalMergedAt = [string]$entry.mode_original_pr_merged_at }
+
+                # Build judge-score sub-object when any judge-score.* key is present.
+                $judgeScoreKeys = @($nestedMap.Keys | Where-Object { $_ -like 'judge-score.*' })
+                $judgeScore = $null
+                if ($judgeScoreKeys.Count -gt 0) {
+                    $jsMap = [ordered]@{}
+                    foreach ($k in $judgeScoreKeys) {
+                        $leaf = $k.Substring('judge-score.'.Length)
+                        $jsMap[$leaf] = $nestedMap[$k]
+                    }
+                    $judgeScore = [pscustomobject]$jsMap
+                }
+
+                # integrity-check is a scalar in real PR bodies (e.g. `integrity-check: pass`).
+                $integrityCheck = $nestedMap['integrity-check']
+                if ([string]::IsNullOrWhiteSpace([string]$integrityCheck)) { $integrityCheck = $null }
+
+                # version-bump may be a scalar (`version-bump: "2.7.0 to 2.8.0"`) or
+                # nested (`version-bump.from`, `version-bump.to`). Surface whichever shape exists.
+                $versionBump = $nestedMap['version-bump']
+                $versionBumpFrom = $nestedMap['version-bump.from']
+                $versionBumpTo = $nestedMap['version-bump.to']
+
+                $sbvStatus = $nestedMap['symmetric-bump-verification']
+                if ([string]::IsNullOrWhiteSpace([string]$sbvStatus)) {
+                    $sbvStatus = $nestedMap['symmetric-bump-verification.status']
+                }
+
+                [void]$creditsList.Add([pscustomobject]@{
+                    Port                          = [string]$entry.port
+                    Adapter                       = [string]$entry.adapter
+                    Status                        = [string]$entry.status
+                    RunIndex                      = $runIndexInt
+                    Evidence                      = [string]$entry.evidence
+                    ModeBackfilledAt              = if ([string]::IsNullOrWhiteSpace([string]$backfilledAt)) { $null } else { [string]$backfilledAt }
+                    ModeOriginalPrMergedAt        = if ([string]::IsNullOrWhiteSpace([string]$originalMergedAt)) { $null } else { [string]$originalMergedAt }
+                    JudgeScore                    = $judgeScore
+                    IntegrityCheck                = $integrityCheck
+                    VersionBump                   = if ([string]::IsNullOrWhiteSpace([string]$versionBump)) { $null } else { [string]$versionBump }
+                    VersionBumpFrom               = if ([string]::IsNullOrWhiteSpace([string]$versionBumpFrom)) { $null } else { [string]$versionBumpFrom }
+                    VersionBumpTo                 = if ([string]::IsNullOrWhiteSpace([string]$versionBumpTo)) { $null } else { [string]$versionBumpTo }
+                    SymmetricBumpVerificationStatus = if ([string]::IsNullOrWhiteSpace([string]$sbvStatus)) { $null } else { [string]$sbvStatus }
+                })
+        }
+        $credits = @($creditsList.ToArray())
 
         # Integrity check entries may use either 'name' or 'check' as the identifier key.
         $integrityRaw = script:ConvertFrom-FCLListSection -Block $block -SectionName 'integrity_checks' -Fields @('name', 'check', 'status', 'evidence')
@@ -295,6 +516,258 @@ function Read-PRMetricsBlock {
             Reason         = $_.Exception.Message
         }
     }
+}
+
+# ---------------------------------------------------------------------------
+# Sentinel-based not-persisted synthesis (issue #441, Step 5a)
+# Sentinel marker token: <!-- review-judge-produced-{PR} -->
+# ---------------------------------------------------------------------------
+
+# Returns $true when any comment in the $Comments array contains the sentinel
+# token for the given PR number.
+function Test-ReviewSentinelPresent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$PrNumber,
+        [AllowEmptyCollection()][AllowNull()][object[]]$Comments
+    )
+
+    if ($null -eq $Comments -or $Comments.Count -eq 0) { return $false }
+
+    $token = "<!-- review-judge-produced-$PrNumber -->"
+    foreach ($c in $Comments) {
+        $body = ''
+        if ($null -ne $c.PSObject.Properties['body']) { $body = [string]$c.body }
+        elseif ($c -is [System.Collections.IDictionary] -and $c.ContainsKey('body')) { $body = [string]$c['body'] }
+        if ($body -like "*$token*") { return $true }
+    }
+    return $false
+}
+
+# Synthesizes a `review: not-persisted` credit row when:
+#   - The review-judge-produced-{PR} sentinel comment is present (Path A), AND
+#   - No review port credit already exists in the metrics block (Paths B/C guard).
+# Returns $null when synthesis is not applicable (no sentinel, or credit already exists).
+function Resolve-NotPersistedSynthesis {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$PrNumber,
+        [Parameter(Mandatory)][AllowNull()]$MetricsBlock,
+        [AllowEmptyCollection()][AllowNull()][object[]]$Comments
+    )
+
+    # Guard: only synthesize for valid v4 metrics blocks. Pre-v4, parse-error,
+    # or missing blocks do not have a Credits property and would throw
+    # PropertyNotFoundException under strict mode.
+    if ($null -eq $MetricsBlock) { return $null }
+    if ($null -ne $MetricsBlock.PSObject.Properties['MetricsVersion']) {
+        $mv = [string]$MetricsBlock.MetricsVersion
+        if ($mv -eq 'parse-error' -or $mv -eq 'pre-v4') { return $null }
+    }
+
+    # Guard: a review credit already exists — do not synthesize.
+    $existingCredits = if ($null -ne $MetricsBlock.PSObject.Properties['Credits']) { @($MetricsBlock.Credits) } else { @() }
+    $existingReviewCredit = @($existingCredits | Where-Object { [string]$_.Port -eq 'review' })
+    if ($existingReviewCredit.Count -gt 0) { return $null }
+
+    # Check sentinel presence.
+    if (-not (Test-ReviewSentinelPresent -PrNumber $PrNumber -Comments $Comments)) {
+        return $null
+    }
+
+    # Find the sentinel comment URL for evidence.
+    $sentinelUrl = ''
+    $token = "<!-- review-judge-produced-$PrNumber -->"
+    foreach ($c in @($Comments)) {
+        $body = ''
+        if ($null -ne $c.PSObject.Properties['body']) { $body = [string]$c.body }
+        if ($body -like "*$token*") {
+            if ($null -ne $c.PSObject.Properties['url']) { $sentinelUrl = [string]$c.url }
+            break
+        }
+    }
+
+    $evidence = if ([string]::IsNullOrWhiteSpace($sentinelUrl)) {
+        "sentinel $token present but no review credit row was written."
+    } else {
+        "sentinel $token present (comment: $sentinelUrl) but no review credit row was written."
+    }
+
+    return [pscustomobject]@{
+        Port    = 'review'
+        Status  = 'not-persisted'
+        Evidence = $evidence
+    }
+}
+
+# ---------------------------------------------------------------------------
+# ConvertFrom-JudgeRulingsComment (issue #441, Step 8b)
+# ---------------------------------------------------------------------------
+# Parse the <!-- judge-rulings --> YAML block from a PR comment body.
+# Returns an array of pscustomobject with: id, judge_ruling, judge_confidence,
+# points_awarded.  Returns an empty array when no valid block is found.
+
+function ConvertFrom-JudgeRulingsComment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CommentBody
+    )
+
+    $blockMatch = [regex]::Match($CommentBody, '(?ms)<!--\s*judge-rulings\s*\r?\n(?<body>.*?)\r?\n-->')
+    if (-not $blockMatch.Success) { return @() }
+
+    $rows    = [System.Collections.Generic.List[object]]::new()
+    $current = $null
+
+    foreach ($rawLine in ($blockMatch.Groups['body'].Value -split "`r?`n")) {
+        $line = $rawLine.Trim()
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+        if ($line -match '^-\s+(?<key>[a-z_]+):\s+(?<value>.+?)\s*$') {
+            if ($null -ne $current) { $rows.Add([pscustomobject]$current) }
+            $current = [ordered]@{}
+            $current[$matches['key']] = $matches['value']
+            continue
+        }
+
+        if ($line -match '^(?<key>[a-z_]+):\s+(?<value>.+?)\s*$') {
+            if ($null -ne $current) { $current[$matches['key']] = $matches['value'] }
+            continue
+        }
+    }
+
+    if ($null -ne $current) { $rows.Add([pscustomobject]$current) }
+    return @($rows)
+}
+
+# ---------------------------------------------------------------------------
+# Build-ReviewCreditRow (issue #441, Step 8b — Decision 2 + M1 emission)
+# ---------------------------------------------------------------------------
+# Construct a v4 review credit row from a judge-rulings PR comment + adapter
+# integrity contract.  Used by Code-Conductor's pipeline-metrics emitter at
+# PR creation time.
+#
+# Parameters:
+#   JudgeRulingsComment — full text of a PR comment containing <!-- judge-rulings -->
+#   AdapterName         — 'standard' | 'lite' | 'judge-only' | 'proxy-github' (default: 'standard')
+#   AdaptersDir         — path to skills/adversarial-review/adapters/ (optional; enables
+#                         live integrity-contract lookup from adapter frontmatter)
+#   RunIndex            — monotonically increasing integer per (port, adapter) (default: 1)
+#   Evidence            — custom evidence string; auto-generated when absent
+#
+# Returns a pscustomobject shaped for direct emission into credits[]:
+#   port, adapter, status, run_index, evidence, judge-score, integrity-check
+
+function Build-ReviewCreditRow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$JudgeRulingsComment,
+        [string]$AdapterName = 'standard',
+        [string]$AdaptersDir = '',
+        [int]$RunIndex = 1,
+        [string]$Evidence = ''
+    )
+
+    # Parse findings from the judge-rulings block.
+    $findings = @(ConvertFrom-JudgeRulingsComment -CommentBody $JudgeRulingsComment)
+
+    # Determine credit status.
+    # Presence of any sustained finding with P+10 (critical/high severity) → failed.
+    # All findings defense-sustained or only P+1/P+5 sustained → passed.
+    $hasSustainedHigh = $false
+    foreach ($f in $findings) {
+        if ([string]$f.judge_ruling -eq 'sustained' -and [string]$f.points_awarded -match 'P\+10\b') {
+            $hasSustainedHigh = $true
+            break
+        }
+    }
+    $status = if ($hasSustainedHigh) { 'failed' } else { 'passed' }
+
+    # Evidence string.
+    $sustainedCount = @($findings | Where-Object { [string]$_.judge_ruling -eq 'sustained' }).Count
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) {
+        $Evidence
+    }
+    else {
+        "Review completed; $sustainedCount finding(s) sustained, status: $status."
+    }
+
+    # Integrity contract from adapter frontmatter (optional live lookup).
+    $passBlocks      = @(1, 2, 3)   # default for standard
+    $integrityStatus = 'passed'
+
+    if (-not [string]::IsNullOrWhiteSpace($AdaptersDir)) {
+        $adapterMd = Join-Path $AdaptersDir "$AdapterName.md"
+        if (Test-Path $adapterMd) {
+            $content = Get-Content $adapterMd -Raw
+            if ($content -match '(?ms)integrity-contract:.*?exempt:\s*(?<val>true|false)') {
+                $isExempt = [System.Boolean]::Parse($matches['val'].Trim())
+                if ($isExempt) {
+                    $passBlocks      = @()
+                    $integrityStatus = 'not-applicable'
+                }
+                elseif ($content -match '(?ms)integrity-contract:.*?pass-blocks:\s*\[(?<blocks>[^\]]*)\]') {
+                    $blockStr  = $matches['blocks']
+                    $passBlocks = @(
+                        $blockStr -split '[,\s]+' |
+                        Where-Object { $_ -match '^\d+$' } |
+                        ForEach-Object { [int]$_ }
+                    )
+                }
+            }
+        }
+    }
+    elseif ($AdapterName -eq 'lite') {
+        $passBlocks = @(1)
+    }
+    elseif ($AdapterName -in @('judge-only', 'proxy-github')) {
+        $passBlocks      = @()
+        $integrityStatus = 'not-applicable'
+    }
+
+    return [pscustomobject]@{
+        port             = 'review'
+        adapter          = $AdapterName
+        status           = $status
+        run_index        = $RunIndex
+        evidence         = $resolvedEvidence
+        'judge-score'    = [pscustomobject]@{
+            ruling   = $status
+            findings = @($findings | ForEach-Object {
+                [pscustomobject]@{
+                    id     = [string]$_.id
+                    ruling = [string]$_.judge_ruling
+                }
+            })
+        }
+        'integrity-check' = [pscustomobject]@{
+            'pass-blocks' = $passBlocks
+            status        = $integrityStatus
+        }
+    }
+}
+
+# Return the credit row with the highest RunIndex for a given (Port, Adapter) pair.
+# When Adapter is omitted / empty, matches on Port alone.
+# Returns $null when no matching entry exists.
+function Select-LastCreditByRunIndex {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Credits,
+        [Parameter(Mandatory)][string]$Port,
+        [AllowEmptyString()][string]$Adapter = ''
+    )
+
+    $pool = @($Credits | Where-Object { [string]$_.Port -eq $Port })
+    if (-not [string]::IsNullOrWhiteSpace($Adapter)) {
+        $pool = @($pool | Where-Object { [string]$_.Adapter -eq $Adapter })
+    }
+
+    if ($pool.Count -eq 0) { return $null }
+    if ($pool.Count -eq 1) { return $pool[0] }
+
+    # Sort by RunIndex descending; treat $null RunIndex as 0.
+    return ($pool | Sort-Object -Property { if ($null -eq $_.RunIndex) { 0 } else { [int]$_.RunIndex } } -Descending | Select-Object -First 1)
 }
 
 function Get-PortFiles {
@@ -364,6 +837,39 @@ function Resolve-PortStatus {
 
     $adapters = @()
     if ($null -ne $WorkAdapters) { $adapters = @($WorkAdapters) }
+
+    # ---------------------------------------------------------------------------
+    # Step 10 (issue #441): adapter parse-failure reporting.
+    # Partition adapters into valid (no ParseError) and parse-error (ParseError
+    # field non-null/non-empty).  When ALL adapters are parse-error entries, surface
+    # Inconclusive/AdapterParseError instead of silently falling through to the
+    # NoEvidence or AdapterDiscoveryFailed paths.  When some adapters are valid,
+    # discard the parse-error entries and use only the valid ones.
+    # ---------------------------------------------------------------------------
+    $parseErrorAdapters = @($adapters | Where-Object {
+        $null -ne $_.PSObject.Properties['ParseError'] -and
+        -not [string]::IsNullOrWhiteSpace([string]$_.ParseError)
+    })
+    $validAdapters = @($adapters | Where-Object {
+        $null -eq $_.PSObject.Properties['ParseError'] -or
+        [string]::IsNullOrWhiteSpace([string]$_.ParseError)
+    })
+
+    if ($parseErrorAdapters.Count -gt 0 -and $validAdapters.Count -eq 0) {
+        $reasons = @($parseErrorAdapters | ForEach-Object { [string]$_.ParseError }) -join '; '
+        return [pscustomobject]@{
+            PortName          = $portName
+            Status            = 'Inconclusive'
+            SubReason         = 'AdapterParseError'
+            AdapterName       = ''
+            SuggestedNextStep = $null
+            Evidence          = "0 parseable adapters (parse error: $reasons)"
+        }
+    }
+
+    # Replace the working adapter set with valid-only adapters (non-goal: do not
+    # block discovery for other ports when one adapter parses badly).
+    $adapters = $validAdapters
 
     $map = @{}
     if ($null -ne $ApplicableMap) {
@@ -501,61 +1007,70 @@ function Compose-Comment {
     $autoNotApplicable = @($reports | Where-Object {
             [string]$_.Status -eq 'Covered' -and [string]$_.SubReason -eq 'AutoNotApplicable'
         })
-    $reports = @($reports | Where-Object {
+    $tableReports = @($reports | Where-Object {
             -not ([string]$_.Status -eq 'Covered' -and [string]$_.SubReason -eq 'AutoNotApplicable')
         })
-
-    $covered = @($reports | Where-Object { [string]$_.Status -eq 'Covered' })
-    $inconclusive = @($reports | Where-Object { [string]$_.Status -eq 'Inconclusive' })
-    $notCovered = @($reports | Where-Object { [string]$_.Status -eq 'NotCovered' })
 
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.AppendLine($MarkerToken)
     [void]$sb.AppendLine('## Frame credit ledger — port coverage report')
     [void]$sb.AppendLine('')
 
-    if ($covered.Count -gt 0) {
-        [void]$sb.AppendLine(("### ✅ Covered ({0})" -f $covered.Count))
-        foreach ($r in $covered) {
-            $reasonLabel = switch ([string]$r.SubReason) {
-                'PassedCredit' { 'passed credit' }
-                'NotApplicableCredit' { 'not applicable per credit' }
-                'SkippedCredit' { 'skipped credit' }
-                default { [string]$r.SubReason }
-            }
-            [void]$sb.AppendLine(("- {0} — {1}" -f [string]$r.PortName, $reasonLabel))
-        }
-        [void]$sb.AppendLine('')
-    }
+    # Unified per-port table (D2 single-shape parity — issue #441 Step 5b).
+    # All status values appear in the same table; no three-section split.
+    if ($tableReports.Count -gt 0) {
+        [void]$sb.AppendLine('| Port | Status | Evidence | Next step |')
+        [void]$sb.AppendLine('|------|--------|----------|-----------|')
 
-    if ($inconclusive.Count -gt 0) {
-        [void]$sb.AppendLine(("### ⚠️ Inconclusive ({0})" -f $inconclusive.Count))
-        foreach ($r in $inconclusive) {
-            [void]$sb.AppendLine(("- **{0}** — {1}" -f [string]$r.PortName, [string]$r.SubReason))
-            $adapterName = [string]$r.AdapterName
-            if (-not [string]::IsNullOrWhiteSpace($adapterName)) {
-                [void]$sb.AppendLine(("  - Adapter: {0}" -f $adapterName))
-            }
-            $step = $r.SuggestedNextStep
-            if ($null -ne $step -and -not [string]::IsNullOrWhiteSpace([string]$step)) {
-                [void]$sb.AppendLine(("  - Suggested next step: ``{0}``" -f [string]$step))
-            }
-        }
-        [void]$sb.AppendLine('')
-    }
+        foreach ($r in $tableReports) {
+            $portName = [string]$r.PortName
 
-    if ($notCovered.Count -gt 0) {
-        [void]$sb.AppendLine(("### 🚫 Not covered ({0})" -f $notCovered.Count))
-        foreach ($r in $notCovered) {
-            [void]$sb.AppendLine(("- **{0}** — {1}" -f [string]$r.PortName, [string]$r.SubReason))
-            $adapterName = [string]$r.AdapterName
-            if (-not [string]::IsNullOrWhiteSpace($adapterName)) {
-                [void]$sb.AppendLine(("  - Adapter: {0}" -f $adapterName))
+            # Determine the credit-status label and glyph.
+            $creditStatus = ''
+            if ($null -ne $r.PSObject.Properties['CreditStatus'] -and -not [string]::IsNullOrWhiteSpace([string]$r.CreditStatus)) {
+                $creditStatus = [string]$r.CreditStatus
+            } else {
+                # Derive from SubReason when CreditStatus is not provided.
+                $creditStatus = switch ([string]$r.SubReason) {
+                    'PassedCredit'        { 'passed' }
+                    'NotApplicableCredit' { 'not-applicable' }
+                    'SkippedCredit'       { 'skipped' }
+                    'AdapterFailed'       { 'failed' }
+                    'InconclusiveCredit'  { 'inconclusive' }
+                    'NotPersistedCredit'  { 'not-persisted' }
+                    'MissingAdapter'      { 'missing' }
+                    default               { [string]$r.SubReason }
+                }
             }
-            $step = $r.SuggestedNextStep
-            if ($null -ne $step -and -not [string]::IsNullOrWhiteSpace([string]$step)) {
-                [void]$sb.AppendLine(("  - Suggested next step: ``{0}``" -f [string]$step))
+
+            $glyph = switch ($creditStatus) {
+                'passed'        { '✅' }
+                'not-applicable'{ '➖' }
+                'skipped'       { '⏭️' }
+                'failed'        { '❌' }
+                'inconclusive'  { '⚠️' }
+                'not-persisted' { '🔇' }
+                default         { '❓' }
             }
+
+            $statusCell = "$glyph $creditStatus"
+
+            $evidence = ''
+            if ($null -ne $r.PSObject.Properties['Evidence']) { $evidence = [string]$r.Evidence }
+
+            $nextStep = ''
+            if ($null -ne $r.SuggestedNextStep -and -not [string]::IsNullOrWhiteSpace([string]$r.SuggestedNextStep)) {
+                $nextStep = [string]$r.SuggestedNextStep
+            }
+
+            # Escape pipe characters and convert newlines to <br> in cell content
+            # to avoid Markdown table row breakage. Multi-line evidence (e.g., from
+            # Build-ReviewCreditRow) would otherwise terminate the table prematurely.
+            $portName  = ($portName  -replace '\|', '\|') -replace "`r`n", '<br>' -replace "`n", '<br>' -replace "`r", '<br>'
+            $evidence  = ($evidence  -replace '\|', '\|') -replace "`r`n", '<br>' -replace "`n", '<br>' -replace "`r", '<br>'
+            $nextStep  = ($nextStep  -replace '\|', '\|') -replace "`r`n", '<br>' -replace "`n", '<br>' -replace "`r", '<br>'
+
+            [void]$sb.AppendLine("| $portName | $statusCell | $evidence | $nextStep |")
         }
         [void]$sb.AppendLine('')
     }

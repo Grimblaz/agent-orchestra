@@ -108,7 +108,7 @@ Describe 'orchestra-review command contract' {
                 )
                 ExpectedDispatchPatterns    = @(
                     '2\.\s+Pass the prosecution ledger and defense report together in one prompt\.',
-                    '3\.\s+Return the Markdown score summary, the `<!-- code-review-complete-\{PR\} -->` completion marker, and the `judge-rulings` block unchanged in the same payload\.'
+                    '3\.\s+Return the Markdown score summary and the `judge-rulings` block unchanged in the same payload\.'
                 )
             }
         )
