@@ -42,8 +42,8 @@ Describe '.claude-plugin/plugin.json agents array contract' {
         $declared = @($script:PluginJson.agents | Sort-Object)
         $discovered = @($script:DiscoveredShells | Sort-Object)
 
-        $missing = @($discovered | Where-Object { $declared -notcontains $_ })
-        $extra = @($declared | Where-Object { $discovered -notcontains $_ })
+        $missing = @($discovered | Where-Object { $declared -cnotcontains $_ })
+        $extra = @($declared | Where-Object { $discovered -cnotcontains $_ })
 
         $missing | Should -BeNullOrEmpty -Because "every Claude shell in agents/ must appear in the registration whitelist; missing: $($missing -join ', ')"
         $extra | Should -BeNullOrEmpty -Because "the registration whitelist must not reference shells that do not exist; extra: $($extra -join ', ')"

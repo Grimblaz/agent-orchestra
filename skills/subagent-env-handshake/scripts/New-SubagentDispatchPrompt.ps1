@@ -237,7 +237,7 @@ function Get-FreshHandshake {
     }
 
     if ($PSBoundParameters.ContainsKey('PorcelainOutput')) {
-        $fingerprint = Get-DirtyTreeFingerprint -PorcelainOutput $PorcelainOutput
+        $fingerprint = Get-DirtyTreeFingerprint -PorcelainOutput ($PorcelainOutput ?? '')
     }
     else {
         $porcelain = & git -C $RepoRoot status --porcelain 2>$null | Out-String
