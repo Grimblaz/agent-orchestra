@@ -157,13 +157,13 @@ Describe '90-day deferred-port tripwire' {
             $yaml | Should -Match 'trigger-deferred-since'
         }
 
-        It 'process-retrospective has not yet exceeded 90-day threshold (deferred 2026-05-03)' {
-            $old = [datetime]::UtcNow.Date.AddDays(-91).ToString('yyyy-MM-dd')
-            $portsDir = Join-Path $script:RepoRoot 'frame/ports'
+        It 'process-retrospective stays under 90-day threshold when deferred today' {
+            $today = [datetime]::UtcNow.Date.ToString('yyyy-MM-dd')
+            $dir = script:New-TempPortYaml -PortName 'process-retrospective' -DeferredSince $today
             $credit = [pscustomobject]@{ port = 'process-retrospective'; evidence = 'DEFERRED(#348): deferred.' }
-            # Since deferred-since is 2026-05-03 and today is 2026-05-03, age = 0 — no tripwire fires
-            $warnings = script:Invoke-DeferredPortTripwire -Credits @($credit) -PortsDir $portsDir -TripwireDays 90
+            $warnings = script:Invoke-DeferredPortTripwire -Credits @($credit) -PortsDir $dir -TripwireDays 90
             $warnings.Count | Should -Be 0
+            Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 }

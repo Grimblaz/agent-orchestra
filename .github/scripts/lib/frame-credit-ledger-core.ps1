@@ -757,7 +757,6 @@ function Build-ReviewCreditRow {
 # Parameters:
 #   DefectsFound        — integer count of CE Gate defects (from CeGate block)
 #   AdapterName         — adapter that filled the port (default: 'standard')
-#   IssueNumber         — issue number for evidence string interpolation
 #   Evidence            — custom evidence string; auto-generated when absent
 #
 # Status resolution:
@@ -770,7 +769,6 @@ function Build-ProcessReviewCreditRow {
     param(
         [AllowNull()][object]$DefectsFound = $null,
         [string]$AdapterName = 'standard',
-        [int]$IssueNumber = 0,
         [int]$RunIndex = 1,
         [string]$Evidence = ''
     )
