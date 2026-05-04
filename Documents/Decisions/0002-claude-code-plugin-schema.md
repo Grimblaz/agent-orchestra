@@ -6,6 +6,8 @@
 
 > **Note (v2.0.0 update)**: References to `.github/plugin.json` below describe the state at ADR authoring time. In v2.0.0 the Copilot manifest was relocated to repo-root `plugin.json` (D10 fallback pre-emptively applied so paths read as `./agents/` + `./skills/{name}/` with no `..` escapes). The schema decision for `.claude-plugin/plugin.json` is unaffected.
 
+> **Update (v2.11.0)**: The footgun called out in the Decision section for `agents` is now adopted intentionally. The `agents` field in `.claude-plugin/plugin.json` is set to an explicit array of the 14 lowercase Claude shell paths, which replaces the default directory scan and prevents Claude from auto-registering shared bodies (`*.agent.md`) alongside the shells. Shared bodies use Copilot-style tool names and do not persist edits to the parent worktree, so accidental dispatch causes silent failures. The `skills` field remains omitted (auto-discovery is safe for skills). See D10 in `Documents/Design/agent-body-architecture.md` and issue #468.
+
 ## Context
 
 Implementing issue #367 (cross-tool plugin support) requires authoritative knowledge of the `.claude-plugin/plugin.json` schema so Agent-Orchestra ships a correct Claude Code manifest alongside its existing `.github/plugin.json`. The plan prosecution pass 2 flagged F2.1 — schema was invented without citation. This ADR resolves that gap.
@@ -34,7 +36,9 @@ Source: <https://code.claude.com/docs/en/plugins-reference#metadata-fields>
 
 **Auto-discovered by default.** `skills/<name>/SKILL.md` and `agents/*.md` at the plugin root load automatically — no manifest declaration needed. The `skills` and `agents` manifest fields exist for **custom paths only** and **replace** the defaults when set. Paths must be relative and start with `./`. To add extra paths while keeping defaults, include the default explicitly: `"skills": ["./skills/", "./extras/"]`.
 
-This is a footgun: declaring `skills`/`agents` arrays in the Claude Code manifest would disable auto-discovery. We will omit them and rely on auto-discovery for the canonical `skills/` and `agents/` layout.
+This is a footgun: declaring `skills`/`agents` arrays in the Claude Code manifest would disable auto-discovery. ~~We will omit them and rely on auto-discovery for the canonical `skills/` and `agents/` layout.~~ *(Original 1.14.0 finding, superseded for `agents` by v2.11.0 — see Decision section and Update blockquote at the top of this ADR.)*
+
+> **v2.11.0**: Auto-discovery for `agents` is the worse footgun: it registers shared bodies (`*.agent.md`) as `subagent_type` targets alongside the shells. Bodies use Copilot-style tool names and do not persist edits to the parent worktree, so accidental dispatch fails silently. The explicit `agents` array in `.claude-plugin/plugin.json` was adopted to close that failure mode. `skills` remains omitted (auto-discovers safely — no Copilot-only `*.skill.md` siblings exist to accidentally register). See D10 in `Documents/Design/agent-body-architecture.md`.
 
 Source: <https://code.claude.com/docs/en/plugins-reference#component-path-fields>; <https://code.claude.com/docs/en/plugins-reference#path-behavior-rules>
 
@@ -73,7 +77,8 @@ For #367 step 7(b), `.claude-plugin/plugin.json` ships as metadata-only:
 }
 ```
 
-- `skills` and `agents` fields omitted — Claude Code auto-discovers `./skills/<name>/SKILL.md` and `./agents/*.md` at the plugin root. Setting them explicitly would *replace* the defaults and is the documented footgun.
+- `skills` field omitted — Claude Code auto-discovers `./skills/<name>/SKILL.md` at the plugin root. Setting it explicitly would replace the default and is the documented footgun.
+- `agents` field **explicitly declared** as a whitelist array of the 14 lowercase Claude shell paths (see Update (v2.11.0) above and D10 in `Documents/Design/agent-body-architecture.md`). This intentionally replaces auto-discovery to exclude shared bodies (`*.agent.md`) from `subagent_type` registration.
 - `version` starts at `1.14.0` (current `.github/plugin.json` is `1.13.0`; #367 bumps both in lockstep per step 7(d)).
 - `bump-version.ps1` must be updated (step 7(c)) to write both manifests so future releases stay in sync and Claude Code's cache invalidates correctly.
 

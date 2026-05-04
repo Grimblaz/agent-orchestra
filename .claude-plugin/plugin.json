@@ -1,6 +1,22 @@
 {
   "name": "agent-orchestra",
-  "version": "2.10.0",
+  "version": "2.11.0",
+  "agents": [
+    "./agents/code-conductor.md",
+    "./agents/code-critic.md",
+    "./agents/code-review-response.md",
+    "./agents/code-smith.md",
+    "./agents/doc-keeper.md",
+    "./agents/experience-owner.md",
+    "./agents/issue-planner.md",
+    "./agents/process-review.md",
+    "./agents/refactor-specialist.md",
+    "./agents/research-agent.md",
+    "./agents/solution-designer.md",
+    "./agents/specification.md",
+    "./agents/test-writer.md",
+    "./agents/ui-iterator.md"
+  ],
   "description": "Multi-agent workflow system for Claude Code. Pipeline-based agent orchestration: Issue → Design → Plan → Implement → Review → PR.",
   "author": {
     "name": "Grimblaz"

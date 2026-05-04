@@ -144,18 +144,33 @@ The error-path tag applies only to tree-grounded findings. The distinction:
 
 Subagent authors: if a finding would read the same whether the subagent was looking at the parent's tree or a stale snapshot, it is non-tree-grounded. Otherwise assume tree-grounded and tag accordingly in the error path.
 
-## Parent-side construction — two helper forms
+## Parent-side construction — three helper forms
 
-The SKILL exposes two equivalent carriers so both PowerShell and markdown callers can construct the block:
+The SKILL exposes three carriers for block construction. Choose the form that fits your caller:
 
-1. **PowerShell helper** (dot-sourceable): `skills/subagent-env-handshake/scripts/New-SubagentDispatchPrompt.ps1`. Use from PowerShell-driven dispatch sites. Deterministic output; unit-tested for fingerprint stability.
-2. **Inline prose template** (above): construct from Bash values in markdown command files. Field order must match the schema block.
+1. **`Get-FreshHandshake` (canonical capture-then-construct entry point)**: `skills/subagent-env-handshake/scripts/New-SubagentDispatchPrompt.ps1`. Dot-source and call `Get-FreshHandshake` to live-capture all four fields and produce a ready-to-prepend block in one call. Captures `parent_head`, `parent_branch`, and `parent_dirty_fingerprint` via `git -C $RepoRoot` invocations; captures `parent_cwd` via `bash -c 'pwd'` from the **caller's working directory** (not from RepoRoot). Override params (`-HeadShaOverride`, `-BranchOverride`, `-CwdOverride`, `-PorcelainOutput`) enable DI-based testing without Pester `Mock`. Use this form from PowerShell scripts that control their own dispatch flow.
 
-Both forms produce field-identical output for identical inputs. Scenario (f) validates field names and order.
+2. **`New-SubagentDispatchPrompt` (explicit-field form)**: dot-sourceable from the same file. Use when you have already captured the four values via Bash commands and want to pass them explicitly. Deterministic output given fixed inputs; unit-tested for fingerprint stability and field order.
+
+3. **Inline prose template** (above): construct from Bash values in markdown command files that cannot invoke PowerShell. Field order must match the schema block.
+
+All three forms produce field-identical output for identical inputs. Scenario (f) validates field names and order, and covers `Get-FreshHandshake` with DI override params.
 
 ### Per-dispatch recapture policy
 
 Before each downstream `Agent` dispatch that uses this handshake, the parent MUST construct a fresh block by live-recapturing HEAD (`parent_head`), branch (`parent_branch`), CWD (`parent_cwd` via `pwd`), and dirty fingerprint (`parent_dirty_fingerprint`) immediately before that dispatch. Mutable orchestration trees can change between prosecution, defense, judge, and specialist calls, so the parent MUST NOT reuse or carry forward a command-entry, entry-time, single, or earlier handshake for a later `Agent` dispatch.
+
+### Capture ordering
+
+<!-- capture-ordering-anchor begin -->
+
+**Rule**: Capture MUST occur AFTER all parent-side mutations and as close to the `Agent` dispatch as possible. Capturing before the final round of edits produces a stale dirty fingerprint that diverges from the live state the subagent will observe.
+
+**Non-atomicity**: The four capture invocations (`git rev-parse HEAD`, `git rev-parse --abbrev-ref HEAD`, `pwd`, `git status --porcelain | sha256sum`) are separate subprocess calls, not a single atomic snapshot. If the working tree changes between capture commands — for example because an edit tool fires in an interleaved async turn — the fingerprint will be inconsistent with the other fields. This is an inherent property of sequential captures; minimize the window by capturing all four immediately before the parallel emit (see Parallel-batch dispatch).
+
+**Counter-example (#429)**: In the pre-PR hook work (issue #429), the Code-Conductor captured a handshake at command-entry time and then wrote the credit-ledger comment to the branch. The post-write dirty fingerprint diverged from the pre-write fingerprint stored in the handshake, triggering a spurious ND-2 halt on every downstream specialist dispatch in that run. The fix was to move the capture to after the final write, immediately before the `Agent` call.
+
+<!-- /capture-ordering-anchor -->
 
 If a downstream shell does not yet implement Step 0 environment-handshake verification, the parent may pass freshly captured values only as contextual metadata. Do not label that metadata as a verified handshake.
 
@@ -198,6 +213,9 @@ Subagent shells that implement Step 0 environment-handshake verification use the
 - **sha256sum availability:** `sha256sum` is not available on macOS by default (use `shasum -a 256` instead) and may be absent in some CI images. The parent-side helper must guard against missing commands; on failure, skip dirty-fingerprint construction and dispatch without the field rather than halting the parent.
 - **Missing-handshake is not an error:** Subagents dispatched without a handshake block (research tasks, Copilot dispatch, pre-adoption callers) route to `missing-handshake` → `environment-unverified`, not to `error`. Do not conflate the two paths.
 - **Schema-parity test enforces byte identity:** The Pester contract test verifies that the `## Finding: environment-divergence (halting)` block in the verifier stub is byte-identical to the copy in this SKILL.md. If you edit the finding template here, you must update the fixture too (and vice versa), or the test will fail.
+
+<!-- gotcha-rev-parse-head -->
+- **Short-hash or log-based HEAD capture:** Using `git log -1 --format=%h` (short hash) or `git log -1 --format=%H` when git is configured with `log.abbrevCommit=true` can produce a short or abbreviated SHA rather than the required 40-char full hex. A short hash will never compare equal to a 40-char `parent_head` stored in the handshake, causing every dispatch to trigger a spurious mismatch halt. **Fix:** Always use `git rev-parse HEAD` (produces exactly 40 hex chars regardless of git config) to capture `parent_head`, and always compare against the full 40-char hex.
 
 ## Reproducer Evidence (from design phase)
 
