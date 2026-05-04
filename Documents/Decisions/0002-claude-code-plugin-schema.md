@@ -36,9 +36,9 @@ Source: <https://code.claude.com/docs/en/plugins-reference#metadata-fields>
 
 **Auto-discovered by default.** `skills/<name>/SKILL.md` and `agents/*.md` at the plugin root load automatically — no manifest declaration needed. The `skills` and `agents` manifest fields exist for **custom paths only** and **replace** the defaults when set. Paths must be relative and start with `./`. To add extra paths while keeping defaults, include the default explicitly: `"skills": ["./skills/", "./extras/"]`.
 
-This is a footgun: declaring `skills`/`agents` arrays in the Claude Code manifest would disable auto-discovery. We will omit them and rely on auto-discovery for the canonical `skills/` and `agents/` layout.
+This is a footgun: declaring `skills`/`agents` arrays in the Claude Code manifest would disable auto-discovery. ~~We will omit them and rely on auto-discovery for the canonical `skills/` and `agents/` layout.~~ *(Original 1.14.0 finding, superseded for `agents` by v2.11.0 — see Decision section and Update blockquote at the top of this ADR.)*
 
-> **v2.11.0 note**: The `agents` field is now explicitly declared as a registration whitelist to prevent shared body files from being auto-registered as subagent dispatch targets. See the Update (v2.11.0) blockquote at the top of this ADR and D10 in `Documents/Design/agent-body-architecture.md`.
+> **v2.11.0**: Auto-discovery for `agents` is the worse footgun: it registers shared bodies (`*.agent.md`) as `subagent_type` targets alongside the shells. Bodies use Copilot-style tool names and do not persist edits to the parent worktree, so accidental dispatch fails silently. The explicit `agents` array in `.claude-plugin/plugin.json` was adopted to close that failure mode. `skills` remains omitted (auto-discovers safely — no Copilot-only `*.skill.md` siblings exist to accidentally register). See D10 in `Documents/Design/agent-body-architecture.md`.
 
 Source: <https://code.claude.com/docs/en/plugins-reference#component-path-fields>; <https://code.claude.com/docs/en/plugins-reference#path-behavior-rules>
 

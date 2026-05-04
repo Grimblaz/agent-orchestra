@@ -33,14 +33,14 @@ A multi-agent workflow system that orchestrates AI-assisted software development
 
 ## Install as Plugin (Claude Code)
 
-Claude Code auto-discovers `agents/` and `skills/` at the repo root via `.claude-plugin/plugin.json` (metadata only). Install via the built-in marketplace commands:
+Claude Code loads agents and skills from `.claude-plugin/plugin.json`. Install via the built-in marketplace commands:
 
 ```text
 /plugin marketplace add Grimblaz/agent-orchestra
 /plugin install agent-orchestra@agent-orchestra
 ```
 
-All 14 agents and the shared skill library are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (metadata-only manifest preserves auto-discovery).
+All 14 agents and the shared skill library are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (`agents` uses an explicit registration whitelist; `skills` auto-discovers).
 
 This is zero-config for consumer repositories: after marketplace registration and plugin install, Claude Code loads the shared agent bodies and skills from its plugin cache. The repository using the plugin does not need a local `agents/` directory.
 
@@ -324,7 +324,7 @@ skills/                  # Skill definitions (repo root)
 plugin.json              # VS Code/Copilot plugin manifest at repo root (paths ./agents/ + ./skills/)
 
 .claude-plugin/
-├── plugin.json          # Claude Code plugin manifest (metadata-only; auto-discovers repo-root agents/ + skills/)
+├── plugin.json          # Claude Code plugin manifest (explicit agents whitelist + auto-discovered skills/)
 └── marketplace.json     # Claude Code marketplace catalog (enables /plugin marketplace add Grimblaz/agent-orchestra)
 
 examples/

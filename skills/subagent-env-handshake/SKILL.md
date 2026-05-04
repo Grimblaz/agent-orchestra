@@ -144,14 +144,17 @@ The error-path tag applies only to tree-grounded findings. The distinction:
 
 Subagent authors: if a finding would read the same whether the subagent was looking at the parent's tree or a stale snapshot, it is non-tree-grounded. Otherwise assume tree-grounded and tag accordingly in the error path.
 
-## Parent-side construction — two helper forms
+## Parent-side construction — three helper forms
 
-The SKILL exposes two equivalent carriers so both PowerShell and markdown callers can construct the block:
+The SKILL exposes three carriers for block construction. Choose the form that fits your caller:
 
-1. **PowerShell helper** (dot-sourceable): `skills/subagent-env-handshake/scripts/New-SubagentDispatchPrompt.ps1`. Use from PowerShell-driven dispatch sites. Deterministic output; unit-tested for fingerprint stability.
-2. **Inline prose template** (above): construct from Bash values in markdown command files. Field order must match the schema block.
+1. **`Get-FreshHandshake` (canonical capture-then-construct entry point)**: `skills/subagent-env-handshake/scripts/New-SubagentDispatchPrompt.ps1`. Dot-source and call `Get-FreshHandshake` to live-capture all four fields and produce a ready-to-prepend block in one call. Captures `parent_head`, `parent_branch`, and `parent_dirty_fingerprint` via `git -C $RepoRoot` invocations; captures `parent_cwd` via `bash -c 'pwd'` from the **caller's working directory** (not from RepoRoot). Override params (`-HeadShaOverride`, `-BranchOverride`, `-CwdOverride`, `-PorcelainOutput`) enable DI-based testing without Pester `Mock`. Use this form from PowerShell scripts that control their own dispatch flow.
 
-Both forms produce field-identical output for identical inputs. Scenario (f) validates field names and order.
+2. **`New-SubagentDispatchPrompt` (explicit-field form)**: dot-sourceable from the same file. Use when you have already captured the four values via Bash commands and want to pass them explicitly. Deterministic output given fixed inputs; unit-tested for fingerprint stability and field order.
+
+3. **Inline prose template** (above): construct from Bash values in markdown command files that cannot invoke PowerShell. Field order must match the schema block.
+
+All three forms produce field-identical output for identical inputs. Scenario (f) validates field names and order, and covers `Get-FreshHandshake` with DI override params.
 
 ### Per-dispatch recapture policy
 
