@@ -7,14 +7,16 @@
     Contract tests for the subagent-env-handshake v1 skill.
 
 .DESCRIPTION
-    Seven scenarios:
+    Nine scenarios:
       (a) construction      — New-SubagentDispatchPrompt produces the canonical schema block
       (b) fingerprint       — Get-DirtyTreeFingerprint is deterministic and input-sensitive
       (c) verifier match    — identical handshake + observed → outcome 'match'
       (d) verifier mismatch — divergent HEAD → outcome 'mismatch' with correct diverged_fields + ND-2 heading
       (e) verifier error    — missing handshake OR git-failed → outcome 'missing-handshake'/'error' with environment-unverified tag
-      (f) schema parity     — the six field names in SKILL.md (between the schema sentinels) match the helper's output and the verifier stub's required-field list
+      (f) schema parity     — the six field names in SKILL.md (between the schema sentinels) match the helper's output and the verifier stub's required-field list; Get-FreshHandshake with override params produces a canonical block
       (g) stub-vs-prose     — the verifier stub's decision-tree block matches the decision-tree anchor in agents/issue-planner.md Step 0
+      (h) orchestration policy — SKILL.md documents live per-dispatch recapture without weakening Windows CWD guidance
+      (i) anchor integrity  — capture-ordering-anchor paired sentinels and gotcha-rev-parse-head anchor are present and non-empty
 
     Scope: claude-only.
 #>
@@ -234,6 +236,28 @@ Describe 'subagent-env-handshake v1 contract' {
             $requiredPattern = "requiredFields = @\('parent_head', 'parent_branch', 'parent_cwd', 'parent_dirty_fingerprint', 'workspace_mode', 'handshake_issued_at'\)"
             $stubContent | Should -Match $requiredPattern -Because 'the verifier stub must require the same six fields in the canonical order'
         }
+
+        It 'Get-FreshHandshake with override params emits all six canonical fields in schema order' {
+            $block = Get-FreshHandshake `
+                -HeadShaOverride '1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b' `
+                -BranchOverride 'feature/test-branch' `
+                -CwdOverride '/c/Users/test/repo' `
+                -PorcelainOutput ''
+
+            $lines = $block -split "`n"
+            $lines[0] | Should -Be '<!-- subagent-env-handshake v1 -->'
+            $lines[-1] | Should -Be '<!-- /subagent-env-handshake -->'
+
+            for ($i = 0; $i -lt $script:CanonicalFields.Count; $i++) {
+                $expectedKey = $script:CanonicalFields[$i]
+                $lines[$i + 1] | Should -Match ('^' + [regex]::Escape($expectedKey) + ':\s') `
+                    -Because "Get-FreshHandshake must emit canonical field #$($i + 1) '$expectedKey' in schema order"
+            }
+
+            $block | Should -Match 'parent_head:\s+1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b'
+            $block | Should -Match 'parent_branch:\s+feature/test-branch'
+            $block | Should -Match 'parent_cwd:\s+/c/Users/test/repo'
+        }
     }
 
     Context 'Scenario (g) — stub-vs-prose decision-tree parity' {
@@ -275,6 +299,40 @@ Describe 'subagent-env-handshake v1 contract' {
             for ($i = 0; $i -lt 4; $i++) {
                 $stubOutcomes[$i] | Should -Be $expectedOrder[$i] -Because "outcome #$($i + 1) must be canonical v1 ordering"
             }
+        }
+    }
+
+    Context 'Scenario (i) — SKILL.md anchor integrity' {
+        It 'capture-ordering-anchor paired sentinels bound a non-empty capture-ordering subsection' {
+            $skillContent = Get-Content -Path $script:SkillMdPath -Raw
+            $captureOrderPattern = '(?ms)<!-- capture-ordering-anchor begin -->\s*\r?\n(?<body>.*?)\r?\n<!-- /capture-ordering-anchor -->'
+            $match = [regex]::Match($skillContent, $captureOrderPattern)
+            $match.Success | Should -BeTrue -Because 'SKILL.md must carry the paired capture-ordering-anchor begin and end sentinels'
+            $match.Groups['body'].Value.Trim() | Should -Not -BeNullOrEmpty -Because 'the capture-ordering body between the sentinels must not be empty'
+        }
+
+        It 'gotcha-rev-parse-head anchor is followed within five lines by a bullet referencing git rev-parse HEAD' {
+            $skillContent = Get-Content -Path $script:SkillMdPath -Raw
+            $lines = $skillContent -split "`r?\n"
+
+            $anchorIndex = -1
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                if ($lines[$i].Trim() -eq '<!-- gotcha-rev-parse-head -->') {
+                    $anchorIndex = $i
+                    break
+                }
+            }
+            $anchorIndex | Should -BeGreaterThan -1 -Because "SKILL.md must contain a '<!-- gotcha-rev-parse-head -->' anchor line"
+
+            $scanEnd = [Math]::Min($anchorIndex + 6, $lines.Count)
+            $foundReference = $false
+            for ($j = $anchorIndex + 1; $j -lt $scanEnd; $j++) {
+                if ($lines[$j] -match [regex]::Escape('git rev-parse HEAD')) {
+                    $foundReference = $true
+                    break
+                }
+            }
+            $foundReference | Should -BeTrue -Because "the content following the '<!-- gotcha-rev-parse-head -->' anchor must reference 'git rev-parse HEAD' within five lines"
         }
     }
 
