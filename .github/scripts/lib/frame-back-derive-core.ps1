@@ -717,10 +717,10 @@ function Get-FBDPortCredit {
             }
         }
         'process-review' {
-            return New-FBDCredit -Port $Port -Status 'not-applicable' -Evidence 'The fixture encodes no systemic-gap trigger for process-review follow-up.'
+            return New-FBDCredit -Port $Port -Status 'not-applicable' -Evidence 'ceGate.defectsFound = 0; process-review trigger predicate false — port not applicable.'
         }
         'process-retrospective' {
-            return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'Port pending decision per umbrella sub-issue #11.'
+            return New-FBDCredit -Port $Port -Status 'not-applicable' -Evidence "DEFERRED(#348): trigger predicate deferred to #348 (since 2026-05-03); port excluded from coverage denominator until trigger-status flips to live."
         }
         default {
             return New-FBDCredit -Port $Port -Status 'inconclusive' -Evidence 'No historical back-derivation rule exists for this port in the Step 3 audit-only implementation.'

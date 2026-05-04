@@ -747,6 +747,66 @@ function Build-ReviewCreditRow {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Build-ProcessReviewCreditRow (issue #443, Step 3)
+#
+# Canonical emitter for the process-review frame port (SMC-16 dedupe contract:
+# this builder is the only authoritative emitter; the SMC-16 fallback path
+# synthesizes a not-persisted row for legacy PRs that predate this builder).
+#
+# Parameters:
+#   DefectsFound        — integer count of CE Gate defects (from CeGate block)
+#   AdapterName         — adapter that filled the port (default: 'standard')
+#   IssueNumber         — issue number for evidence string interpolation
+#   Evidence            — custom evidence string; auto-generated when absent
+#
+# Status resolution:
+#   defectsFound > 0  → passed (process-review was triggered and ran)
+#   defectsFound == 0 → not-applicable (trigger predicate false; port excluded)
+#   no CeGate data    → skipped (data unavailable; warn-only)
+# ---------------------------------------------------------------------------
+function Build-ProcessReviewCreditRow {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$DefectsFound = $null,
+        [string]$AdapterName = 'standard',
+        [int]$IssueNumber = 0,
+        [string]$Evidence = ''
+    )
+
+    if ($null -eq $DefectsFound) {
+        $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                            else { 'ceGate.defectsFound not available; process-review trigger cannot be evaluated.' }
+        return [pscustomobject]@{
+            port     = 'process-review'
+            adapter  = $AdapterName
+            status   = 'skipped'
+            evidence = $resolvedEvidence
+        }
+    }
+
+    $count = [int]$DefectsFound
+    if ($count -gt 0) {
+        $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                            else { "ceGate.defectsFound = $count; process-review triggered and ran." }
+        return [pscustomobject]@{
+            port     = 'process-review'
+            adapter  = $AdapterName
+            status   = 'passed'
+            evidence = $resolvedEvidence
+        }
+    }
+
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        else { "ceGate.defectsFound = 0; process-review trigger predicate false — port not applicable." }
+    return [pscustomobject]@{
+        port     = 'process-review'
+        adapter  = $AdapterName
+        status   = 'not-applicable'
+        evidence = $resolvedEvidence
+    }
+}
+
 # Return the credit row with the highest RunIndex for a given (Port, Adapter) pair.
 # When Adapter is omitted / empty, matches on Port alone.
 # Returns $null when no matching entry exists.
@@ -1554,6 +1614,48 @@ function Build-PostPrCreditRow {
         port     = 'post-pr'
         status   = 'passed'
         evidence = $resolvedEvidence
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Build-DeferredPortCreditRow (issue #443, Step 4)
+#
+# Emitter for any port whose trigger predicate is formalized but deferred
+# to a future issue.  The evidence string always begins with the parseable
+# prefix DEFERRED(#NNN): so the 90-day tripwire and migration scripts can
+# detect deferred rows via the single regex ^DEFERRED\(#\d+\):.
+#
+# Parameters:
+#   Port              — frame port name (e.g. 'process-retrospective')
+#   AdapterName       — adapter that filled the port (default: 'explicit-skip')
+#   DeferredToIssue   — issue number that will ship the live producer (e.g. 348)
+#   DeferredSince     — ISO date string when the deferral was recorded
+#   Evidence          — suffix appended after the DEFERRED(#NNN): prefix;
+#                       auto-generated when absent
+# ---------------------------------------------------------------------------
+function Build-DeferredPortCreditRow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$Port,
+        [string]$AdapterName = 'explicit-skip',
+        [Parameter(Mandatory)][int]$DeferredToIssue,
+        [string]$DeferredSince = '',
+        [string]$Evidence = ''
+    )
+
+    $suffix = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+              elseif (-not [string]::IsNullOrWhiteSpace($DeferredSince)) {
+                  "trigger predicate deferred to #$DeferredToIssue (since $DeferredSince); port excluded from coverage denominator until trigger-status flips to live."
+              }
+              else {
+                  "trigger predicate deferred to #$DeferredToIssue; port excluded from coverage denominator until trigger-status flips to live."
+              }
+
+    return [pscustomobject]@{
+        port     = $Port
+        adapter  = $AdapterName
+        status   = 'not-applicable'
+        evidence = "DEFERRED(#$DeferredToIssue): $suffix"
     }
 }
 

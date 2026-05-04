@@ -1385,6 +1385,14 @@ function Resolve-FVIdentifierAsBoolean {
 
     $name = $Node.Name
 
+    # `never` — deterministic false; used by deferred trigger-conditional ports
+    # (e.g. process-retrospective) whose trigger predicate is not yet authored.
+    # The port is formalized but its applies-when condition resolves to $false
+    # until the producing issue (#348) ships a live resolver.
+    if ($name -eq 'never') {
+        return (New-FVEvaluationResult -Result 'false' -Reason 'never: deterministic false — deferred trigger-conditional port')
+    }
+
     # Attempt JudgeScore-based resolution before the deferred-unknown check.
     # This allows review.sustainedCriticalOrHigh to resolve when JudgeScore
     # is present in the changeset, suppressing the deferred-unknown warning.
@@ -1416,6 +1424,18 @@ function Resolve-FVIdentifierForComparison {
     if ($null -ne $judgeResolved) {
         $b = ($judgeResolved.Result -eq 'true')
         return [PSCustomObject]@{ Status = 'value'; Reason = ''; Value = $b; ValueType = 'Boolean' }
+    }
+
+    # ceGate.defectsFound: resolved from CeGate data when present in the
+    # changeset; otherwise falls through to the deferred-unknown path.
+    # Introduced by issue #443 Step 2 — numeric runtime resolver.
+    if ($name -eq 'ceGate.defectsFound') {
+        $defectsFound = Resolve-CeGateDefectsFound -Changeset $Changeset
+        if ($null -ne $defectsFound) {
+            return [PSCustomObject]@{ Status = 'value'; Reason = ''; Value = $defectsFound; ValueType = 'Number' }
+        }
+        # No CeGate data: fall through to deferred-unknown.
+        return [PSCustomObject]@{ Status = 'unknown'; Reason = "deferred-credit-reference-identifier: 'ceGate.defectsFound'"; Value = $null }
     }
 
     if ($name -in (Get-FVDeferredCreditReferenceIdentifiers)) {
@@ -1682,4 +1702,39 @@ function Resolve-SustainedCriticalOrHigh {
     }
 
     return $true
+}
+
+# ---------------------------------------------------------------------------
+# Resolve-CeGateDefectsFound (issue #443, Step 2)
+#
+# Runtime resolver for the ceGate.defectsFound numeric identifier.
+# Operates on a CeGate object in the changeset that carries:
+#   - DefectsFound:  integer count of defects found during the CE Gate pass
+#
+# Returns the integer when CeGate data is present; $null otherwise (callers
+# fall through to the existing deferred-unknown path).
+# ---------------------------------------------------------------------------
+function Resolve-CeGateDefectsFound {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Changeset)
+
+    $ceGate = $null
+    if ($Changeset -is [System.Collections.IDictionary]) {
+        if ($Changeset.ContainsKey('CeGate')) { $ceGate = $Changeset['CeGate'] }
+    } elseif ($null -ne $Changeset.PSObject.Properties['CeGate']) {
+        $ceGate = $Changeset.CeGate
+    }
+
+    if ($null -eq $ceGate) { return $null }
+
+    $defProp = $null
+    if ($ceGate -is [System.Collections.IDictionary]) {
+        if ($ceGate.ContainsKey('DefectsFound')) { $defProp = $ceGate['DefectsFound'] }
+    } elseif ($null -ne $ceGate.PSObject.Properties['DefectsFound']) {
+        $defProp = $ceGate.DefectsFound
+    }
+
+    if ($null -eq $defProp) { return $null }
+
+    return [int]$defProp
 }

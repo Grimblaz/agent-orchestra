@@ -222,6 +222,7 @@ None.
                     'skills/customer-experience/adapters/ce-gate-cli.md'     = 'ce-gate-cli'
                     'skills/plugin-release-hygiene/SKILL.md'                 = 'release-hygiene'
                     'skills/post-pr-review/SKILL.md'                         = 'post-pr'
+                    'skills/process-retrospective/SKILL.md'                  = 'process-retrospective'
                 }
                 'auto-na'       = [ordered]@{
                     'skills/customer-experience/adapters/auto-na-ce-gate-api.md'            = 'ce-gate-api'
@@ -250,9 +251,10 @@ None.
                     'skills/plan-authoring/adapters/explicit-skip-plan.md'                        = 'plan'
                     'skills/plugin-release-hygiene/adapters/explicit-skip-release-hygiene.md'     = 'release-hygiene'
                     'skills/post-pr-review/adapters/explicit-skip-post-pr.md'                     = 'post-pr'
-                    'skills/process-analysis/adapters/explicit-skip-process-review.md'            = 'process-review'
-                    'skills/refactoring-methodology/adapters/explicit-skip-implement-refactor.md' = 'implement-refactor'
-                    'skills/test-driven-development/adapters/explicit-skip-implement-test.md'     = 'implement-test'
+                    'skills/process-analysis/adapters/explicit-skip-process-review.md'                     = 'process-review'
+                    'skills/process-retrospective/adapters/explicit-skip-process-retrospective.md'        = 'process-retrospective'
+                    'skills/refactoring-methodology/adapters/explicit-skip-implement-refactor.md'         = 'implement-refactor'
+                    'skills/test-driven-development/adapters/explicit-skip-implement-test.md'             = 'implement-test'
                 }
             }
 
@@ -401,6 +403,11 @@ None.
                     'scope.isProxyGithub'
                     'review.sustainedCriticalOrHigh'
                     'ceGate.defectsFound'
+                    'never'
+                    'changeset.isPipelineEntryTrivial'
+                    'changeset.touchesBehaviorOrInterfaceDocsExtended'
+                    'changeset.touchedAreaHasDebt'
+                    'changeset.touchesTestableCodeOrTests'
                 ), [System.StringComparer]::Ordinal)
         }
 
@@ -727,7 +734,12 @@ applies-when: |+
             ($actualProviderDeclarations -join "`n") | Should -Be ($expectedProviderDeclarations -join "`n")
         }
 
-        It 'has zero providers for the deferred process-retrospective port' {
+        It 'has exactly the deferred-skeleton providers for process-retrospective' {
+            $expectedPaths = [string[]]@(
+                'skills/process-retrospective/SKILL.md'
+                'skills/process-retrospective/adapters/explicit-skip-process-retrospective.md'
+            ) | Sort-Object
+
             $processRetrospectiveProviders = [System.Collections.Generic.List[string]]::new()
             foreach ($adapter in @(Get-FVAdapterMetadata -RootPath $script:RepoRoot)) {
                 foreach ($providedPort in @($adapter.Provides)) {
@@ -738,7 +750,8 @@ applies-when: |+
                 }
             }
 
-            $processRetrospectiveProviders.ToArray() | Should -HaveCount 0
+            ($processRetrospectiveProviders.ToArray() | Sort-Object | ForEach-Object { $_ }) |
+                Should -Be $expectedPaths -Because 'deferred port has skeleton SKILL.md + explicit-skip adapter only'
         }
 
         It 'keeps supporting methodology skills free of provider declarations' {
@@ -777,7 +790,8 @@ applies-when: |+
         }
 
         It 'requires every explicit-skip adapter to declare the D9 reason-required line' {
-            $expectedExplicitSkipCount = @(& $script:GetFrameValidateLivePortNames -Root $script:RepoRoot).Count
+            $deferredPortsWithExplicitSkip = 1  # process-retrospective has a declared-but-deferred explicit-skip
+            $expectedExplicitSkipCount = @(& $script:GetFrameValidateLivePortNames -Root $script:RepoRoot).Count + $deferredPortsWithExplicitSkip
             $explicitSkipFiles = & $script:GetFrameValidateExplicitSkipFiles -Root $script:RepoRoot
             $violations = [System.Collections.Generic.List[string]]::new()
 

@@ -103,14 +103,14 @@ credits:
         original_pr_merged_at: 2026-04-01T12:00:00Z
   - port: process-review
     status: not-applicable
-    evidence: "The fixture encodes no systemic-gap trigger for process-review follow-up."
+    evidence: "ceGate.defectsFound = 0; process-review trigger predicate false — port not applicable."
     mode:
       synthetic-backfill:
         backfilled_at: 2026-05-02T00:00:00Z
         original_pr_merged_at: 2026-04-01T12:00:00Z
   - port: process-retrospective
-    status: inconclusive
-    evidence: "Port pending decision per umbrella sub-issue #11."
+    status: not-applicable
+    evidence: "DEFERRED(#348): trigger predicate deferred to #348 (since 2026-05-03); port excluded from coverage denominator until trigger-status flips to live."
     mode:
       synthetic-backfill:
         backfilled_at: 2026-05-02T00:00:00Z
