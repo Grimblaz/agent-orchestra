@@ -540,6 +540,20 @@ For the reusable root-cause questions, common root-cause taxonomy, report struct
 
 ---
 
+## Frame Credit Emission
+
+This agent provides the `process-review` frame port (declared in frontmatter: `provides: process-review`, `applies-when: ceGate.defectsFound > 0`).
+
+After completing the retrospective analysis and before handing off, emit a frame credit via `skills/frame-credit-emission/SKILL.md` using the `agent-post-pr` locus:
+
+- **Port**: `process-review`
+- **Adapter**: the adapter matched during this retrospective (default: `standard`)
+- **Evidence**: brief description of the analysis outcome (e.g., "Process-Review completed; 2 systemic gaps identified." or "Process-Review completed; no systemic gaps found.")
+
+**SMC-16 dedupe contract**: `Build-ProcessReviewCreditRow` is the canonical emitter. If a process-review credit row is already present in the pipeline-metrics block with `status: passed` or `status: not-applicable`, do not emit a duplicate.
+
+**Trigger-absent behavior**: when `ceGate.defectsFound == 0`, the trigger predicate is false and this agent is not invoked. The credit row for that PR is emitted by Code-Conductor as `status: not-applicable` (evidence: "ceGate.defectsFound = 0; process-review trigger predicate false — port not applicable.").
+
 ## Skills Reference
 
 **Reusable retrospective methodology:**

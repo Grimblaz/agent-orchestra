@@ -120,7 +120,7 @@ These ports activate when their trigger signal appears. If the trigger does not 
 
 | Port | Current status | Adapter family today |
 |---|---|---|
-| `process-retrospective` | `tbd-decision-pending`; no adapter declared | Step 11 retrospective practice (visible in #286 only) |
+| `process-retrospective` | `formalized-skeleton-deferred-to-348`; trigger predicate deferred to #348 | `skills/process-retrospective/SKILL.md` (deferred skeleton; live adapter authored by #348) |
 
 ### Revisions from V1 → V2 (driven by audit)
 
@@ -128,7 +128,7 @@ These ports activate when their trigger signal appears. If the trigger does not 
 - Added `release-hygiene` as a trigger-conditional port for plugin entry-point and distributed plugin file changes.
 - Added `post-fix-review` port. PR #286 ran it explicitly; today it lives inside `review`'s prose. It has a distinct trigger and scope, so it deserves its own credit.
 - Added `process-review` as a trigger-conditional port.
-- `process-retrospective` flagged as TBD — visible in pre-thin/fat #286 but absent in all three other PRs. The active decision work is tracked under #443: lift to first-class port, fold into `post-pr`, or retire the practice.
+- `process-retrospective` formalized as a trigger-conditional port with a deferred-skeleton pattern (issue #443). The port is declared in `frame/ports/process-retrospective.yaml` with `trigger-status: deferred` and `trigger-deferred-to: '#348'`. Skill skeleton at `skills/process-retrospective/SKILL.md`; trigger predicate and live adapter authored by #348. Until #348 ships, the port emits `not-applicable` via `Build-DeferredPortCreditRow` and is excluded from the coverage denominator.
 
 Notes:
 
@@ -187,7 +187,7 @@ Port-filling skills and agents declare `provides:`. Supporting skills loaded onl
 | **Auto-N/A adapter** | 0 or 1 | Fires when declarative rule matches "nothing to do." Trigger-conditional ports use trigger absence instead and do not declare auto-N/A files. |
 | **Explicit-skip adapter** | exactly 1 for each non-deferred port | Operator/agent invokes with `reason`. Writes `skipped` credit. Justification is visible in PR review and challengeable. |
 
-`process-retrospective` is the only deferred port and currently has no work, auto-N/A, or explicit-skip adapter.
+`process-retrospective` is the only deferred port. It has a formalized-skeleton adapter (`skills/process-retrospective/SKILL.md`) but no live work adapter or auto-N/A adapter. The explicit-skip adapter (`skills/process-retrospective/adapters/explicit-skip-process-retrospective.md`) is declared but inactive until the trigger flips to live in #348.
 
 ### Where to declare
 
@@ -224,7 +224,7 @@ Lowercase Claude shells and slash commands are dispatchers, not adapters; they d
 | `post-pr` | always | `skills/post-pr-review/SKILL.md` | (single adapter) | none — always applies | `skills/post-pr-review/adapters/explicit-skip-post-pr.md` |
 | `post-fix-review` | trigger-conditional | `skills/adversarial-review/adapters/post-fix.md` | `review.sustainedCriticalOrHigh == true` | none — N/A by trigger absence | `skills/adversarial-review/adapters/explicit-skip-post-fix-review.md` |
 | `process-review` | trigger-conditional | `agents/Process-Review.agent.md` | `ceGate.defectsFound > 0` | none — N/A by trigger absence | `skills/process-analysis/adapters/explicit-skip-process-review.md` |
-| `process-retrospective` | deferred | none | none | none | none |
+| `process-retrospective` | deferred | `skills/process-retrospective/SKILL.md` (skeleton; trigger deferred to #348) | `never` (DSL deterministic-false; live predicate authored by #348) | none — deferred skeleton; no auto-N/A adapter | `skills/process-retrospective/adapters/explicit-skip-process-retrospective.md` |
 
 ### Selection (where judgment lives)
 
@@ -290,7 +290,8 @@ Express-lane carve-out (`express_lane`) lives entirely in the runtime resolver a
 | `scope.isProxyGithub` | Bare boolean identifier for proxy-GitHub review intake | DSL |
 | `review.sustainedCriticalOrHigh` | Boolean credit-reference identifier for post-fix-review trigger predicates. **Resolved** (issue #441 Steps 4c/4d) by `Resolve-SustainedCriticalOrHigh` in `frame-predicate-core.ps1`: true iff any finding has severity in {Critical, High} AND ruling = uphold AND express_lane != true. | Runtime |
 | `express_lane` | Per-finding boolean field evaluated at credit-resolution time. Not a predicate-DSL token; evaluated by the runtime resolver alongside `review.sustainedCriticalOrHigh`. **Resolved** (issue #441 Step 4d) — a qualifying finding with `express_lane: true` is excluded from the sustained-critical-or-high count. | Runtime |
-| `ceGate.defectsFound` | Numeric credit-reference identifier for process-review trigger predicates | Runtime |
+| `ceGate.defectsFound` | Numeric credit-reference identifier for process-review trigger predicates. **Resolved** (issue #443 Step 2) by `Resolve-CeGateDefectsFound` in `frame-predicate-core.ps1`: reads `CeGate.DefectsFound` from the changeset object; returns `$null` when unavailable (unknown/deferred-credit path). | Runtime |
+| `never` | Bare boolean DSL identifier that always evaluates to `false`. Used as the `applies-when` predicate for deferred trigger-conditional ports (`process-retrospective`) to deterministically exclude the port from the coverage denominator until its live trigger ships. **Resolved** (issue #443 Step 1) in `Resolve-FVIdentifierAsBoolean` in `frame-predicate-core.ps1`. | DSL |
 
 ### Rejected alternative: all-in-adapters
 
@@ -506,7 +507,7 @@ Cheapest path to evidence: extend the existing pipeline-metrics block to v3 with
 | Diff touches `plugin.json`, `.claude-plugin/plugin.json`, `marketplace.json`, or version badge | `release-hygiene: passed` if version bumped, else `failed` | post-thin/fat (release-hygiene era) |
 | `## Adversarial Review Scores` shows "Post-fix Review" row with prosecutor pts | `post-fix-review: passed` | both |
 | PR body mentions "Process-Review: not triggered" or absent and `ce_gate_defects_found: 0` | `process-review: not-applicable` (trigger absent) | both |
-| PR body contains `## Process Retrospective` section | `process-retrospective: passed` | currently observed only on #286 |
+| PR body contains `## Process Retrospective` section | `process-retrospective: not-applicable` with `DEFERRED(#348):` prefix — trigger is deferred; back-deriver infers N/A for all historical PRs | issue #443 deferred-skeleton decision |
 | PR body has `## Validation Evidence` with passed Pester/lint/structural checks | adapter input-integrity for `implement-test`/`implement-code` | both |
 | Diff touches `docs/**` only | `implement-code/test/refactor: not-applicable`, `implement-docs: passed` | both |
 | No signal found and no auto-N/A rule matches | **missing** (the gap) | both |
@@ -632,9 +633,17 @@ New predicate identifiers for new semantics; shipped predicates left untouched. 
 
 When back-deriving the `plan` port, the presence of a linked resolved issue confirms that the issue lifecycle ran, but the audit does not read issue-body markers or completion-marker state. The back-deriver therefore emits `status: inconclusive` with evidence citing the inference limitation. This is the conservative default for all pipeline-entry ports (`design`, `plan`) when marker-level confirmation is unavailable. Referenced in the audit table as "D12/D13 decisions in body."
 
-### D14 — (Reserved for future reification decisions)
+### D14 — Deferred-trigger-conditional port pattern
 
-Reserved for a named decision that emerges during sub-B (#442), sub-C (#443), or a future reification sub-issue. Will be numbered and described when the pattern solidifies. Do not assign this slot ad-hoc; open a discussion in the relevant sub-issue first.
+When a trigger-conditional port's trigger predicate has not been designed yet (the triggering semantics are scoped to a future issue), the port is formalized with a **deferred-skeleton** rather than omitted or left as `tbd-decision-pending`. Three invariants hold:
+
+1. **`applies-when: never`** — the DSL bare identifier `never` evaluates to deterministic `false` in `Resolve-FVIdentifierAsBoolean`. The port's adapter fires on no PR while deferred, producing no false credits.
+2. **`Build-DeferredPortCreditRow`** — a dedicated builder in `frame-credit-ledger-core.ps1` emits `status: not-applicable` with evidence prefixed `DEFERRED(#NNN):`. This prefix is the migration-detection contract: when #NNN ships a live `Build-{Port}CreditRow`, the prefix regex `^DEFERRED\(#\d+\):` identifies rows to replace.
+3. **Coverage denominator exclusion** — deferred rows carry `trigger-status: deferred`; the audit and coverage dashboard exclude them from the denominator until the port's `trigger-status` flips to `live`.
+
+A 90-day tripwire in `frame-credit-ledger.ps1` warns (never blocks) when a deferred port has remained deferred longer than 90 days. The warn-only invariant ensures the tripwire cannot interfere with PR creation.
+
+First applied: `process-retrospective` (issue #443); trigger predicate and live adapter deferred to #348.
 
 ### D15 — (Reserved for future reification decisions)
 
@@ -667,7 +676,7 @@ Per-agent terminal-step methodology lives in `skills/frame-credit-emission/SKILL
 ## Open Questions Still Live (Resolve During Sub-Issue Work)
 
 - ~~The `<!-- code-review-complete-{PR} -->` marker is documented but absent from real PRs. Should we (a) retire the marker from documentation, (b) backfill it via a hook on PR creation, or (c) leave it as an alias for the v3 review credit?~~ **Resolved in issue #441 Step 11**: chose option (a) — marker retired from documentation and emission. Code-Conductor reads `credits[]` from the `<!-- pipeline-metrics -->` block directly; legacy fallback preserved for pre-Step-11 PRs.
-- `process-retrospective` was visible in only 1 of 4 audited PRs. Decide in sub-issue #11 whether to formalize as a port, fold into `post-pr`, or retire the practice.
+- ~~`process-retrospective` was visible in only 1 of 4 audited PRs. Decide in sub-issue #11 whether to formalize as a port, fold into `post-pr`, or retire the practice.~~ **Resolved in issue #443**: formalized as a trigger-conditional port with the deferred-skeleton pattern (D14). Port file at `frame/ports/process-retrospective.yaml`; skill skeleton at `skills/process-retrospective/SKILL.md`. Trigger predicate and live adapter are deferred to #348. Decision rationale and rejected alternatives in [`Documents/Decisions/0004-process-retrospective-deferred-skeleton.md`](Documents/Decisions/0004-process-retrospective-deferred-skeleton.md).
 - CE Gate surface tagging is currently single-credit (one `ce-gate` block per PR, not per surface). Decide in sub-issue #7 whether to require surface-tagged credits or accept the single-credit shape with a `surfaces: [cli, browser]` field.
 - For PRs that ran `review` in *both* main and proxy-GitHub modes (PR #415), do we emit one `review` credit or two? Decide in sub-issue #5 — probably one credit with a `mode: main+proxy` field, evidence linking both.
 
