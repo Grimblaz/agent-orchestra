@@ -1736,5 +1736,5 @@ function Resolve-CeGateDefectsFound {
 
     if ($null -eq $defProp) { return $null }
 
-    return [int]$defProp
+    try { return [int]$defProp } catch { return $null }
 }

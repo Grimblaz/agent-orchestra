@@ -47,3 +47,23 @@ The skill skeleton at `skills/process-retrospective/SKILL.md` uses `applies-when
 |---|---|
 | Retire the practice | Loses audit continuity; forecloses a practice that has observable precedent (#286). |
 | Fold into `post-pr` | Loses the distinct customer question; harder to separate if the practice is later formalized with its own trigger and evidence contract. |
+| Pick a trigger now and ship the live adapter in #443 | No producer for retrospective notes exists in the repo; #348 was already scoped to consume them. Authoring the trigger predicate and live `Build-ProcessRetrospectiveCreditRow` in #443 would bloat the scope, is blocked by the same absence of a producer, and risks over-constraining #348's design before the practice has more audit data. |
+
+## Captured Input Artifact
+
+The only audited PR with a real `## Process Retrospective` section is **PR #286** (Add per-category Fix Effectiveness measurement to the review aggregation pipeline). The Step 11 retrospective from that PR is captured here verbatim as the primary input artifact for #348's adapter author — it is the sole concrete precedent for what a process-retrospective credit represents.
+
+**Source**: [PR #286](https://github.com/Grimblaz/agent-orchestra/pull/286) — `## Process Retrospective (Step 11)` section in the PR body.  
+**Snapshot date**: 2026-05-03
+
+> ### Slowdowns
+> 1. **VS Code lockup** mid-session required full restart and smart resume from session memory
+> 2. **MF1 (Critical)**: `--json number, mergedAt` — PowerShell's comma operator silently creates an array argument. Mock tests couldn't catch this because they don't validate argument format against real `gh` CLI. Discovered only by adversarial prosecution.
+>
+> ### Late-Failing Checks
+> - None. All regressions caught at Tier 1. The 24 pre-existing test failures are on main and predate this PR.
+>
+> ### Workflow Guardrail Improvement
+> - **Requires-gh live argument format tests** (MF4 pattern): Any new `gh` CLI integration should include a `requires-gh` live test that validates argument syntax against the real CLI, since mock-based tests cannot detect PowerShell argument-expansion bugs like the comma-operator issue in MF1. This pattern is now established in the test file and should be replicated for future gh integrations.
+
+**S5 verification note**: To confirm this appendix is durable, a future maintainer can run `gh pr view 286 --repo Grimblaz/agent-orchestra --json body --jq '.body'` and compare the `## Process Retrospective (Step 11)` section against the verbatim quote above. If the live content diverges materially from the snapshot (e.g., the PR body was edited), flag it as a follow-up to #348 rather than failing the CE Gate.

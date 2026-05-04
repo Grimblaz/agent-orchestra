@@ -60,4 +60,14 @@ Describe 'Build-DeferredPortCreditRow' {
         $row.port | Should -Be 'some-other-port'
         $row.evidence | Should -Match '^DEFERRED\(#999\):'
     }
+
+    It 'emits run_index defaulting to 1' {
+        $row = Build-DeferredPortCreditRow -Port 'process-retrospective' -DeferredToIssue 348
+        $row.run_index | Should -Be 1
+    }
+
+    It 'accepts custom RunIndex' {
+        $row = Build-DeferredPortCreditRow -Port 'process-retrospective' -DeferredToIssue 348 -RunIndex 2
+        $row.run_index | Should -Be 2
+    }
 }

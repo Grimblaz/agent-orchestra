@@ -717,7 +717,7 @@ function Get-FBDPortCredit {
             }
         }
         'process-review' {
-            return New-FBDCredit -Port $Port -Status 'not-applicable' -Evidence 'ceGate.defectsFound = 0; process-review trigger predicate false — port not applicable.'
+            return New-FBDCredit -Port $Port -Status 'not-applicable' -Evidence 'inferred not-applicable: no CE Gate defect signals observed; process-review trigger predicate absent.'
         }
         'process-retrospective' {
             return New-FBDCredit -Port $Port -Status 'not-applicable' -Evidence "DEFERRED(#348): trigger predicate deferred to #348 (since 2026-05-03); port excluded from coverage denominator until trigger-status flips to live."

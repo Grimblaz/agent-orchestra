@@ -771,6 +771,7 @@ function Build-ProcessReviewCreditRow {
         [AllowNull()][object]$DefectsFound = $null,
         [string]$AdapterName = 'standard',
         [int]$IssueNumber = 0,
+        [int]$RunIndex = 1,
         [string]$Evidence = ''
     )
 
@@ -778,10 +779,11 @@ function Build-ProcessReviewCreditRow {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { 'ceGate.defectsFound not available; process-review trigger cannot be evaluated.' }
         return [pscustomobject]@{
-            port     = 'process-review'
-            adapter  = $AdapterName
-            status   = 'skipped'
-            evidence = $resolvedEvidence
+            port      = 'process-review'
+            adapter   = $AdapterName
+            status    = 'skipped'
+            run_index = $RunIndex
+            evidence  = $resolvedEvidence
         }
     }
 
@@ -790,20 +792,22 @@ function Build-ProcessReviewCreditRow {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { "ceGate.defectsFound = $count; process-review triggered and ran." }
         return [pscustomobject]@{
-            port     = 'process-review'
-            adapter  = $AdapterName
-            status   = 'passed'
-            evidence = $resolvedEvidence
+            port      = 'process-review'
+            adapter   = $AdapterName
+            status    = 'passed'
+            run_index = $RunIndex
+            evidence  = $resolvedEvidence
         }
     }
 
     $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
-                        else { "ceGate.defectsFound = 0; process-review trigger predicate false — port not applicable." }
+                        else { 'inferred not-applicable: no CE Gate defect signals observed; process-review trigger predicate absent.' }
     return [pscustomobject]@{
-        port     = 'process-review'
-        adapter  = $AdapterName
-        status   = 'not-applicable'
-        evidence = $resolvedEvidence
+        port      = 'process-review'
+        adapter   = $AdapterName
+        status    = 'not-applicable'
+        run_index = $RunIndex
+        evidence  = $resolvedEvidence
     }
 }
 
@@ -1640,6 +1644,7 @@ function Build-DeferredPortCreditRow {
         [string]$AdapterName = 'explicit-skip',
         [Parameter(Mandatory)][int]$DeferredToIssue,
         [string]$DeferredSince = '',
+        [int]$RunIndex = 1,
         [string]$Evidence = ''
     )
 
@@ -1652,10 +1657,11 @@ function Build-DeferredPortCreditRow {
               }
 
     return [pscustomobject]@{
-        port     = $Port
-        adapter  = $AdapterName
-        status   = 'not-applicable'
-        evidence = "DEFERRED(#$DeferredToIssue): $suffix"
+        port      = $Port
+        adapter   = $AdapterName
+        status    = 'not-applicable'
+        run_index = $RunIndex
+        evidence  = "DEFERRED(#$DeferredToIssue): $suffix"
     }
 }
 

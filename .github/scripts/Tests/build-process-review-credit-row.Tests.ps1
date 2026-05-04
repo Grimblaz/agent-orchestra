@@ -44,9 +44,9 @@ Describe 'Build-ProcessReviewCreditRow' {
             $row.status | Should -Be 'not-applicable'
         }
 
-        It 'evidence mentions trigger predicate false' {
+        It 'evidence uses inferred language for trigger predicate absent' {
             $row = Build-ProcessReviewCreditRow -DefectsFound 0
-            $row.evidence | Should -BeLike '*trigger predicate false*'
+            $row.evidence | Should -BeLike '*trigger predicate absent*'
         }
     }
 
@@ -70,5 +70,15 @@ Describe 'Build-ProcessReviewCreditRow' {
     It 'accepts custom AdapterName' {
         $row = Build-ProcessReviewCreditRow -DefectsFound 1 -AdapterName 'custom'
         $row.adapter | Should -Be 'custom'
+    }
+
+    It 'emits run_index defaulting to 1' {
+        $row = Build-ProcessReviewCreditRow -DefectsFound 0
+        $row.run_index | Should -Be 1
+    }
+
+    It 'accepts custom RunIndex' {
+        $row = Build-ProcessReviewCreditRow -DefectsFound 1 -RunIndex 3
+        $row.run_index | Should -Be 3
     }
 }

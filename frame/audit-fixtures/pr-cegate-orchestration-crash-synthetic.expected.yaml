@@ -94,7 +94,7 @@ credits:
         original_pr_merged_at: 2026-04-20T15:00:00Z
   - port: process-review
     status: not-applicable
-    evidence: "ceGate.defectsFound = 0; process-review trigger predicate false — port not applicable."
+    evidence: "inferred not-applicable: no CE Gate defect signals observed; process-review trigger predicate absent."
     mode:
       synthetic-backfill:
         backfilled_at: 2026-05-02T00:00:00Z

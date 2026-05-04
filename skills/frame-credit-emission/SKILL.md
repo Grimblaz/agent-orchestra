@@ -26,7 +26,7 @@ Ports owned by specialist agents whose terminal step occurs after PR creation. T
 
 **Terminal-step contract**: Read the port's adapter file from `frame/ports/{port}.yaml`, evaluate the `applies-when` predicate against the changeset, call the matching `Build-*CreditRow` function with port-specific evidence, and upsert the credit row into the PR-body pipeline-metrics block.
 
-**SMC-16 dedupe contract** (`process-review` only): `Build-ProcessReviewCreditRow` is the canonical emitter. If a `process-review` credit row already exists in the pipeline-metrics block with `status: passed` or `status: not-applicable`, Code-Conductor skips emission. The SMC-16 fallback path synthesizes a `status: not-persisted` row for legacy PRs that predate this builder and carry no process-review credit.
+**Dedupe contract** (`process-review` only): `Build-ProcessReviewCreditRow` is the canonical emitter. If a `process-review` credit row already exists in the pipeline-metrics block with `status: passed` or `status: not-applicable`, Code-Conductor skips emission (additive-merge rule, D9). Note: the SMC-16 `not-persisted` synthesis path covers only the `review` port (judge-sentinel-driven); it does not extend to `process-review` — no `process-review`-specific sentinel exists.
 
 ### `agent-pre-pr`
 

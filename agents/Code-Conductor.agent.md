@@ -430,6 +430,21 @@ Before emitting the `credits[]` block at PR creation, harvest deferred pipeline-
 4. Read-after-write retry: when a completion marker (e.g., `<!-- experience-owner-complete-{ID} -->`) is present but the matching credit-input comment is not yet visible, the harvester retries up to 3 times with exponential backoff. Do not block PR creation if all retries are exhausted — the back-deriver and warn-only hook flag absences.
 5. Merge the returned credit rows into the `credits[]` array alongside the review, release-hygiene, and other credits. Deduplicate by port: if a credit row for a port is already present in the array, skip the harvested row for that port (additive-merge rule, D9).
 
+### Deferred Port Credit Rows
+
+For any port whose `frame/ports/{port}.yaml` carries `trigger-status: deferred`, emit a deferred credit row at PR-creation time alongside the other credits:
+
+1. Identify all ports with `trigger-status: deferred` by scanning `frame/ports/*.yaml`.
+2. For each deferred port, call `Build-DeferredPortCreditRow -Port {name} -DeferredToIssue {N} -DeferredSince {date}` (parameters from the port YAML fields `trigger-deferred-to` and `trigger-deferred-since`).
+3. Upsert the returned credit row into the `credits[]` array. Apply the additive-merge rule (D9): if a credit row for the port already exists, skip the upsert.
+
+**`process-review` trigger-absent emission**: When `ceGate.defectsFound == 0` (CE Gate found no defects), emit the `process-review` trigger-absent credit at PR-creation time:
+
+1. Read the `defects_found` field from the CE Gate surface credits in the pipeline-metrics block (sum across all `ce-gate-*` rows).
+2. If the sum is 0, call `Build-ProcessReviewCreditRow -DefectsFound 0` and upsert the result (status: `not-applicable`) into `credits[]`.
+3. If the sum is > 0, the Process-Review agent emits its own credit after Track-2 analysis completes — do not pre-emit.
+4. If CE Gate data is unavailable, call `Build-ProcessReviewCreditRow -DefectsFound $null` (status: `skipped`) and upsert.
+
 ### Post-PR Credit Row (D10 category 3)
 
 After the post-merge cleanup path completes (post-PR steps driven by `skills/post-pr-review/SKILL.md`), emit the `post-pr` credit row:

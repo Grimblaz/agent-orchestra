@@ -72,6 +72,26 @@ Describe 'Resolve-CeGateDefectsFound' {
             $result = Resolve-CeGateDefectsFound -Changeset $cs
             $result | Should -Be 5
         }
+
+        It 'returns 0 when CeGate marks inconclusive-only surfaces (DefectsFound = 0)' {
+            # Inconclusive CE Gate surfaces do not count as defects per #443 owner decision.
+            # The caller (Code-Conductor) aggregates surface results before setting DefectsFound.
+            $cs = script:New-CS -CeGate @{ DefectsFound = 0; Inconclusive = $true }
+            $result = Resolve-CeGateDefectsFound -Changeset $cs
+            $result | Should -Be 0
+        }
+
+        It 'returns the defect count when mixed surfaces include at least one defect' {
+            $cs = script:New-CS -CeGate @{ DefectsFound = 2; Surfaces = @('cli', 'browser') }
+            $result = Resolve-CeGateDefectsFound -Changeset $cs
+            $result | Should -Be 2
+        }
+
+        It 'returns $null when DefectsFound is a non-numeric string (malformed credits — fail-open)' {
+            $cs = script:New-CS -CeGate @{ DefectsFound = 'bad-value' }
+            $result = Resolve-CeGateDefectsFound -Changeset $cs
+            $result | Should -BeNullOrEmpty
+        }
     }
 
     Context 'end-to-end predicate evaluation' {

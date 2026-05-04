@@ -507,7 +507,7 @@ Cheapest path to evidence: extend the existing pipeline-metrics block to v3 with
 | Diff touches `plugin.json`, `.claude-plugin/plugin.json`, `marketplace.json`, or version badge | `release-hygiene: passed` if version bumped, else `failed` | post-thin/fat (release-hygiene era) |
 | `## Adversarial Review Scores` shows "Post-fix Review" row with prosecutor pts | `post-fix-review: passed` | both |
 | PR body mentions "Process-Review: not triggered" or absent and `ce_gate_defects_found: 0` | `process-review: not-applicable` (trigger absent) | both |
-| PR body contains `## Process Retrospective` section | `process-retrospective: passed` | currently observed only on #286 |
+| PR body contains `## Process Retrospective` section | `process-retrospective: not-applicable` with `DEFERRED(#348):` prefix — trigger is deferred; back-deriver infers N/A for all historical PRs | issue #443 deferred-skeleton decision |
 | PR body has `## Validation Evidence` with passed Pester/lint/structural checks | adapter input-integrity for `implement-test`/`implement-code` | both |
 | Diff touches `docs/**` only | `implement-code/test/refactor: not-applicable`, `implement-docs: passed` | both |
 | No signal found and no auto-N/A rule matches | **missing** (the gap) | both |
@@ -676,7 +676,7 @@ Per-agent terminal-step methodology lives in `skills/frame-credit-emission/SKILL
 ## Open Questions Still Live (Resolve During Sub-Issue Work)
 
 - ~~The `<!-- code-review-complete-{PR} -->` marker is documented but absent from real PRs. Should we (a) retire the marker from documentation, (b) backfill it via a hook on PR creation, or (c) leave it as an alias for the v3 review credit?~~ **Resolved in issue #441 Step 11**: chose option (a) — marker retired from documentation and emission. Code-Conductor reads `credits[]` from the `<!-- pipeline-metrics -->` block directly; legacy fallback preserved for pre-Step-11 PRs.
-- ~~`process-retrospective` was visible in only 1 of 4 audited PRs. Decide in sub-issue #11 whether to formalize as a port, fold into `post-pr`, or retire the practice.~~ **Resolved in issue #443**: formalized as a trigger-conditional port with the deferred-skeleton pattern (D14). Port file at `frame/ports/process-retrospective.yaml`; skill skeleton at `skills/process-retrospective/SKILL.md`. Trigger predicate and live adapter are deferred to #348.
+- ~~`process-retrospective` was visible in only 1 of 4 audited PRs. Decide in sub-issue #11 whether to formalize as a port, fold into `post-pr`, or retire the practice.~~ **Resolved in issue #443**: formalized as a trigger-conditional port with the deferred-skeleton pattern (D14). Port file at `frame/ports/process-retrospective.yaml`; skill skeleton at `skills/process-retrospective/SKILL.md`. Trigger predicate and live adapter are deferred to #348. Decision rationale and rejected alternatives in [`Documents/Decisions/0004-process-retrospective-deferred-skeleton.md`](Documents/Decisions/0004-process-retrospective-deferred-skeleton.md).
 - CE Gate surface tagging is currently single-credit (one `ce-gate` block per PR, not per surface). Decide in sub-issue #7 whether to require surface-tagged credits or accept the single-credit shape with a `surfaces: [cli, browser]` field.
 - For PRs that ran `review` in *both* main and proxy-GitHub modes (PR #415), do we emit one `review` credit or two? Decide in sub-issue #5 — probably one credit with a `mode: main+proxy` field, evidence linking both.
 
