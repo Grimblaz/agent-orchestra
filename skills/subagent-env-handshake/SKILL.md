@@ -157,6 +157,18 @@ Both forms produce field-identical output for identical inputs. Scenario (f) val
 
 Before each downstream `Agent` dispatch that uses this handshake, the parent MUST construct a fresh block by live-recapturing HEAD (`parent_head`), branch (`parent_branch`), CWD (`parent_cwd` via `pwd`), and dirty fingerprint (`parent_dirty_fingerprint`) immediately before that dispatch. Mutable orchestration trees can change between prosecution, defense, judge, and specialist calls, so the parent MUST NOT reuse or carry forward a command-entry, entry-time, single, or earlier handshake for a later `Agent` dispatch.
 
+### Capture ordering
+
+<!-- capture-ordering-anchor begin -->
+
+**Rule**: Capture MUST occur AFTER all parent-side mutations and as close to the `Agent` dispatch as possible. Capturing before the final round of edits produces a stale dirty fingerprint that diverges from the live state the subagent will observe.
+
+**Non-atomicity**: The four capture invocations (`git rev-parse HEAD`, `git rev-parse --abbrev-ref HEAD`, `pwd`, `git status --porcelain | sha256sum`) are separate subprocess calls, not a single atomic snapshot. If the working tree changes between capture commands — for example because an edit tool fires in an interleaved async turn — the fingerprint will be inconsistent with the other fields. This is an inherent property of sequential captures; minimize the window by capturing all four immediately before the parallel emit (see Parallel-batch dispatch).
+
+**Counter-example (#429)**: In the pre-PR hook work (issue #429), the Code-Conductor captured a handshake at command-entry time and then wrote the credit-ledger comment to the branch. The post-write dirty fingerprint diverged from the pre-write fingerprint stored in the handshake, triggering a spurious ND-2 halt on every downstream specialist dispatch in that run. The fix was to move the capture to after the final write, immediately before the `Agent` call.
+
+<!-- /capture-ordering-anchor -->
+
 If a downstream shell does not yet implement Step 0 environment-handshake verification, the parent may pass freshly captured values only as contextual metadata. Do not label that metadata as a verified handshake.
 
 ### Parallel-batch dispatch
@@ -198,6 +210,9 @@ Subagent shells that implement Step 0 environment-handshake verification use the
 - **sha256sum availability:** `sha256sum` is not available on macOS by default (use `shasum -a 256` instead) and may be absent in some CI images. The parent-side helper must guard against missing commands; on failure, skip dirty-fingerprint construction and dispatch without the field rather than halting the parent.
 - **Missing-handshake is not an error:** Subagents dispatched without a handshake block (research tasks, Copilot dispatch, pre-adoption callers) route to `missing-handshake` → `environment-unverified`, not to `error`. Do not conflate the two paths.
 - **Schema-parity test enforces byte identity:** The Pester contract test verifies that the `## Finding: environment-divergence (halting)` block in the verifier stub is byte-identical to the copy in this SKILL.md. If you edit the finding template here, you must update the fixture too (and vice versa), or the test will fail.
+
+<!-- gotcha-rev-parse-head -->
+- **Short-hash or log-based HEAD capture:** Using `git log -1 --format=%h` (short hash) or `git log -1 --format=%H` when git is configured with `log.abbrevCommit=true` can produce a short or abbreviated SHA rather than the required 40-char full hex. A short hash will never compare equal to a 40-char `parent_head` stored in the handshake, causing every dispatch to trigger a spurious mismatch halt. **Fix:** Always use `git rev-parse HEAD` (produces exactly 40 hex chars regardless of git config) to capture `parent_head`, and always compare against the full 40-char hex.
 
 ## Reproducer Evidence (from design phase)
 

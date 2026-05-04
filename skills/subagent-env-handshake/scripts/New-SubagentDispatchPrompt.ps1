@@ -135,3 +135,108 @@ function New-SubagentDispatchPrompt {
 
     return ($lines -join "`n")
 }
+
+function Get-FreshHandshake {
+    <#
+    .SYNOPSIS
+        Live-capture all four handshake fields and return a ready-to-prepend handshake block.
+
+    .DESCRIPTION
+        Captures parent_head, parent_branch, parent_cwd, and parent_dirty_fingerprint from the
+        live working tree, then delegates to New-SubagentDispatchPrompt to produce the block.
+
+        parent_cwd is captured by invoking bash -c "pwd" so the path uses the Unix-style format
+        (/c/Users/...) produced by the Bash tool — not the Windows-style C:\Users\... produced by
+        (Get-Location).Path, which the SKILL.md CWD-format-mismatch gotcha explicitly forbids.
+
+        All git calls run inside Push-Location / Pop-Location against RepoRoot so the function
+        is safe to call from any PowerShell working directory.
+
+    .PARAMETER HeadShaOverride
+        When supplied, used instead of invoking git rev-parse HEAD. Intended for unit testing.
+
+    .PARAMETER BranchOverride
+        When supplied, used instead of invoking git rev-parse --abbrev-ref HEAD. Intended for
+        unit testing.
+
+    .PARAMETER CwdOverride
+        When supplied, used instead of invoking bash -c "pwd". Intended for unit testing.
+
+    .PARAMETER PorcelainOutput
+        When supplied, passed through to Get-DirtyTreeFingerprint instead of invoking git.
+        Intended for unit testing — same injection pattern as Get-DirtyTreeFingerprint.
+
+    .PARAMETER RepoRoot
+        Absolute path to the repository root. Defaults to the PowerShell provider path for
+        the current location. All git calls run from this directory.
+
+    .OUTPUTS
+        String — the full handshake block produced by New-SubagentDispatchPrompt.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $false)]
+        [string]$HeadShaOverride,
+
+        [Parameter(Mandatory = $false)]
+        [string]$BranchOverride,
+
+        [Parameter(Mandatory = $false)]
+        [string]$CwdOverride,
+
+        [Parameter(Mandatory = $false)]
+        [AllowEmptyString()]
+        [string]$PorcelainOutput,
+
+        [Parameter(Mandatory = $false)]
+        [string]$RepoRoot = $PWD.ProviderPath
+    )
+
+    Push-Location $RepoRoot
+    try {
+        if ($PSBoundParameters.ContainsKey('HeadShaOverride') -and -not [string]::IsNullOrWhiteSpace($HeadShaOverride)) {
+            $head = $HeadShaOverride
+        }
+        else {
+            $head = & git rev-parse HEAD 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                throw "git rev-parse HEAD returned non-zero exit code $LASTEXITCODE"
+            }
+            $head = $head.Trim()
+        }
+
+        if ($PSBoundParameters.ContainsKey('BranchOverride') -and -not [string]::IsNullOrWhiteSpace($BranchOverride)) {
+            $branch = $BranchOverride
+        }
+        else {
+            $branch = & git rev-parse --abbrev-ref HEAD 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                throw "git rev-parse --abbrev-ref HEAD returned non-zero exit code $LASTEXITCODE"
+            }
+            $branch = $branch.Trim()
+        }
+
+        if ($PSBoundParameters.ContainsKey('CwdOverride') -and -not [string]::IsNullOrWhiteSpace($CwdOverride)) {
+            $cwd = $CwdOverride
+        }
+        else {
+            $cwd = & bash -c 'pwd' 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                throw "bash -c 'pwd' returned non-zero exit code $LASTEXITCODE"
+            }
+            $cwd = $cwd.Trim()
+        }
+
+        if ($PSBoundParameters.ContainsKey('PorcelainOutput')) {
+            $fingerprint = Get-DirtyTreeFingerprint -PorcelainOutput $PorcelainOutput
+        }
+        else {
+            $fingerprint = Get-DirtyTreeFingerprint
+        }
+    }
+    finally {
+        Pop-Location
+    }
+
+    return New-SubagentDispatchPrompt -HeadSha $head -Branch $branch -Cwd $cwd -DirtyFingerprint $fingerprint
+}
