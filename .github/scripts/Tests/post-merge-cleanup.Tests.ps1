@@ -198,6 +198,25 @@ if ($a.Count -ge 1 -and $a[0] -eq 'fetch') {
 
 # git cherry <baseRef> <branch>
 # Empty stdout = merged; lines starting with - or + = unmerged commits present
+# git diff --quiet [--ignore-cr-at-eol] <baseRef> <branch>
+if ($a.Count -ge 4 -and $a[0] -eq 'diff' -and $a[1] -eq '--quiet') {
+    $argIndex = 2
+    $ignoreCrAtEol = $false
+    if ($a[$argIndex] -eq '--ignore-cr-at-eol') {
+        $ignoreCrAtEol = $true
+        $argIndex++
+    }
+    if ($argIndex + 1 -lt $a.Count) {
+        $baseRef = $a[$argIndex]
+        $targetBranch = $a[$argIndex + 1]
+        $diffExit = Get-ConfigValue "diff-quiet-exit-$targetBranch"
+        if ($null -eq $diffExit) { $diffExit = 1 }
+        "diff-quiet-called`t$baseRef`t$targetBranch`tignore-cr-at-eol=$ignoreCrAtEol" | Add-Content -Path $callLogPath -Encoding UTF8
+        exit ([int]$diffExit)
+    }
+    exit 1
+}
+
 if ($a.Count -ge 3 -and $a[0] -eq 'cherry') {
     $baseRef = $a[1]       # the base ref (should be origin/<defaultBranch>)
     $targetBranch = $a[2]  # the branch being checked
@@ -840,6 +859,28 @@ exit $LASTEXITCODE
             # Also confirm no error log entries (which the mock writes when origin/ prefix is missing)
             $errorCalls = @($result.GitCalls | Where-Object { $_ -match 'cherry-base-ref-error' })
             $errorCalls.Count | Should -Be 0 -Because 'mock must not have detected a missing origin/ prefix'
+        }
+
+        It 'TC-SquashOffline-S5: deletes a tree-equivalent squash-style orphan without gh on PATH' {
+            $workDir = Join-Path $TestDrive 'squash-offline-clean'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'pester-temp/issue-513-squash-offline-clean'
+
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                        = 0
+                "diff-quiet-exit-$branch"          = 0
+                "cherry-$branch"                    = '+ abc123 Squash-equivalent commit not patch-equivalent'
+                'branch-d-exit'                     = 0
+            } -ScriptParams @{
+                OrphanBranches = [string[]]@($branch)
+            }
+
+            $result.ExitCode | Should -Be 0
+            $deleteCalls = @($result.GitCalls | Where-Object { $_ -match "^branch-deleted\t.*$([regex]::Escape($branch))" })
+            $deleteCalls.Count | Should -BeGreaterThan 0 -Because 'tree-equivalent squash-merged orphan should be deleted once diff-first detection is implemented'
+            $result.GhCalls.Count | Should -Be 0 -Because 'offline-clean detection must not require gh invocations'
         }
     }
 

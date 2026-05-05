@@ -94,7 +94,7 @@ The `additionalContext` field is a Markdown-formatted description of what was fo
 
 **Multi-category example** (when sibling worktrees or orphan branches are also found, the cleanup command uses the composite form):
 
-```
+```powershell
 pwsh '/path/to/agent-orchestra/skills/session-startup/scripts/post-merge-cleanup.ps1' -IssueNumber 42 -FeatureBranch 'feature/issue-42-my-feature' -SiblingWorktrees @('/path/to/worktree') -OrphanBranches @('claude/old-feature')
 ```
 
@@ -105,7 +105,7 @@ Detector findings are reported in this order when present:
 - **Current branch**: flags the current branch when its upstream was merged/deleted, and flags a current `claude/*` no-upstream branch only when it is reachable from the resolved remote default branch. The current branch — whether it has an issue ID (`feature/issue-N-…`) or not — is rolled into the same composite `pwsh ... post-merge-cleanup.ps1 ... -FeatureBranch '<branch>'` invocation as the other categories, so confirming cleanup triggers exactly one permission prompt. The script switches to the default branch, pulls, and deletes the now-stale current branch on your behalf. (The `Documents/Design/session-hooks.md` note about running current-worktree cleanup from another checkout still applies if you choose to bypass the script and run the underlying git commands manually — but the recommended path is the composite invocation.)
 - **Tracking files**: flags issue-scoped `.copilot-tracking/` files whose remote `feature/issue-*` branch is gone; persistent calibration data remains excluded.
 - **Sibling worktrees**: flags sibling worktrees on merged `claude/*` no-upstream branches or upstream-deleted `feature/issue-*` branches. Their cleanup is rolled into the single composite `pwsh ... post-merge-cleanup.ps1 -SiblingWorktrees @(...) -OrphanBranches @(...)` invocation appearing inside the fenced PowerShell block — not as individual `git` commands.
-- **Orphan branches**: flags unattached merged `claude/*` no-upstream branches and unattached upstream-deleted `feature/issue-*` branches. Their cleanup is rolled into the single composite `pwsh ... post-merge-cleanup.ps1 -SiblingWorktrees @(...) -OrphanBranches @(...)` invocation appearing inside the fenced PowerShell block — not as individual `git` commands. Orphan branches with unmerged commits are reported as `Skipped — unmerged commits — review before deleting` and re-evaluated on the next session startup; they are never auto-deleted.
+- **Orphan branches**: flags unattached merged `claude/*` no-upstream branches and unattached upstream-deleted `feature/issue-*` branches. Their cleanup is rolled into the single composite `pwsh ... post-merge-cleanup.ps1 -SiblingWorktrees @(...) -OrphanBranches @(...)` invocation appearing inside the fenced PowerShell block — not as individual `git` commands. Squash-merged branches are automatically classified as merged via tree-equivalence (`git diff --quiet` exit 0) even when `git cherry` reports their commits as unique. Orphan branches whose content differs from the remote default are reported as `Skipped — unmerged commits — review before deleting` and re-evaluated on the next session startup; they are never auto-deleted.
 - **Fail-open behavior**: fetch, worktree-list, for-each-ref, per-candidate merge-base, and ref-lookup failures suppress only the unverifiable candidate and do not fail the startup session.
 - **Opt-in cleanup**: the detector only reports findings. Nothing is removed unless the user confirms, and explicit manual detector runs remain available after the automatic guard fires.
 
@@ -143,6 +143,7 @@ After the cleanup path completes, run this Claude-only sub-step before continuin
 **Silent skip conditions for this sub-step**: when `pwsh` is missing; when the `claude` CLI is missing or fails; when the marketplace registration points at a non-git local directory, dirty tree, or detached HEAD (the local-path classification already surfaces remediation).
 
 **Local-path marketplace classification** (run before step 4 when a local path is detected):
+
 - Clean git repo behind `origin/main`: surface that the marketplace path is behind and include `claude plugin marketplace remove agent-orchestra` and `claude plugin marketplace add Grimblaz/agent-orchestra` remediation commands
 - Non-git local directory: surface that the registration is a non-git local directory
 - Dirty tree or detached HEAD: surface that local marketplace remediation is skipped because the clone has local work
@@ -157,10 +158,12 @@ This sub-step shares the existing Step 4 run-once marker; do not introduce a sec
 The canonical `### Inline-Dispatch Option Labels` YAML block keeps exactly 4 keys (`cleanup_yes`, `cleanup_no`, `drift_stop`, `drift_continue`) — no additional keys are added for failure-mode labels.
 
 **On install success** (step 5 of Step 7b succeeded): present the structured question using the canonical `drift_stop` and `drift_continue` option labels verbatim:
+
 - `Stop — I'll restart now` (maps to `drift_stop`)
 - `Continue — run under old code` (maps to `drift_continue`)
 
 **On install failure** (step 5 of Step 7b failed, including post-retry): render a one-off failure-recovery prompt (not a canonical labeled option — these labels are session-ephemeral only):
+
 - `Stop — I'll restart and try the install again`
 - `Continue — under old code (install failed)`
 
@@ -233,6 +236,7 @@ These are normal conditions in repos that have not installed the agent-orchestra
 | Trigger                            | Gotcha                                                                                | Fix                                                                                         |
 | ---------------------------------- | ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
 | Session memory read or write fails | Suppressing the detector would hide cleanup warnings for the rest of the conversation | Fail open: still run or keep the existing detector result, and allow later automatic checks |
+| `git cherry` labels squash-merged branch commits as unique (patch-id false positive) | Squash-merged branches reported as "unmerged" and left behind instead of being cleaned up | Merge-detection uses `git diff --quiet` tree-equivalence as primary check; `git cherry` is retained as fallback only (issue #513) |
 
 | Trigger                                     | Gotcha                                                                              | Fix                                                                                   |
 | ------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |

@@ -2,6 +2,12 @@
 <#
 .SYNOPSIS
     Shared git helpers for session-startup automation.
+
+.NOTES
+    Detector-safe helpers only resolve refs or read local git state and may be
+    used by session-cleanup-detector-core.ps1. Cleanup-only decision helpers
+    feed deletion authorization in post-merge-cleanup.ps1; keep those
+    conservative and fail-open when their evidence is unavailable.
 #>
 
 function Get-SCDDefaultBranch {
@@ -28,4 +34,61 @@ function Get-SCDDefaultBranch {
     }
     if (-not $branch) { $branch = 'main' }
     return $branch
+}
+
+function Get-RemoteDefaultRef {
+    # G1: Resolve the remote-tracking ref dynamically rather than hardcoding 'origin/'.
+    # Handles users who configure the default branch's upstream as e.g. 'upstream/main'.
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch
+    )
+    $upstream = git rev-parse --abbrev-ref "${DefaultBranch}@{upstream}" 2>$null
+    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($upstream)) {
+        return $upstream.Trim()
+    }
+    return "origin/$DefaultBranch"
+}
+
+function Test-BranchMergedIntoDefault {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$BranchName,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch
+    )
+
+    # Primary: tree-equivalence check (AC1/AC6) — catches squash-merged branches
+    # whose tip content is identical to the remote default even when commit history differs.
+    $remoteDefault = Get-RemoteDefaultRef -DefaultBranch $DefaultBranch
+    git diff --quiet --ignore-cr-at-eol $remoteDefault $BranchName 2>$null
+    if ($LASTEXITCODE -eq 0) { return $true }
+
+    # Secondary: git cherry against the resolved remote default ref (G1)
+    $cherryOutput = git cherry $remoteDefault $BranchName 2>$null
+    if ($LASTEXITCODE -eq 0) {
+        # C4: cherry prefixes lines with '+' (not in upstream) or '-' (patch-equivalent
+        # already in upstream). Branch is merged when there are NO '+' lines.
+        # (Empty stdout is the trivial subset of "no '+' lines".)
+        $unmergedLines = @($cherryOutput | Where-Object { $_ -match '^\+\s' })
+        return ($unmergedLines.Count -eq 0)
+    }
+
+    # Fallback: gh pr list
+    if (Get-Command gh -ErrorAction SilentlyContinue) {
+        $prJson = gh pr list --head $BranchName --state merged --json number 2>$null
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prJson)) {
+            try {
+                $prs = $prJson | ConvertFrom-Json -ErrorAction Stop
+                return ($prs.Count -gt 0)
+            }
+            catch { }
+        }
+    }
+
+    # Conservative: treat as unmerged for safety
+    return $false
 }

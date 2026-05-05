@@ -67,58 +67,6 @@ if ($null -eq $IssueNumber -and
     exit 1
 }
 
-function Get-RemoteDefaultRef {
-    # G1: Resolve the remote-tracking ref dynamically rather than hardcoding 'origin/'.
-    # Handles users who configure the default branch's upstream as e.g. 'upstream/main'.
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$DefaultBranch
-    )
-    $upstream = git rev-parse --abbrev-ref "${DefaultBranch}@{upstream}" 2>$null
-    if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($upstream)) {
-        return $upstream.Trim()
-    }
-    return "origin/$DefaultBranch"
-}
-
-function Test-BranchMergedIntoDefault {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [string]$BranchName,
-
-        [Parameter(Mandatory)]
-        [string]$DefaultBranch
-    )
-
-    # Primary: git cherry against the resolved remote default ref (G1)
-    $remoteDefault = Get-RemoteDefaultRef -DefaultBranch $DefaultBranch
-    $cherryOutput = git cherry $remoteDefault $BranchName 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        # C4: cherry prefixes lines with '+' (not in upstream) or '-' (patch-equivalent
-        # already in upstream). Branch is merged when there are NO '+' lines.
-        # (Empty stdout is the trivial subset of "no '+' lines".)
-        $unmergedLines = @($cherryOutput | Where-Object { $_ -match '^\+\s' })
-        return ($unmergedLines.Count -eq 0)
-    }
-
-    # Fallback: gh pr list
-    if (Get-Command gh -ErrorAction SilentlyContinue) {
-        $prJson = gh pr list --head $BranchName --state merged --json number 2>$null
-        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prJson)) {
-            try {
-                $prs = $prJson | ConvertFrom-Json -ErrorAction Stop
-                return ($prs.Count -gt 0)
-            }
-            catch { }
-        }
-    }
-
-    # Conservative: treat as unmerged for safety
-    return $false
-}
-
 function Get-RepoFromOrigin {
     $originUrl = (git remote get-url origin) 2>$null
     if (-not $originUrl) { return $null }
@@ -287,6 +235,10 @@ function Remove-SiblingWorktree {
                 Write-Warning "Failed to delete branch '$worktreeBranch' after worktree removal"
                 return
             }
+        }
+        else {
+            Write-Output "Skipped '$worktreeBranch' — unmerged commits — review before deleting"
+            return
         }
     }
 
