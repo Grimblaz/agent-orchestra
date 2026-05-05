@@ -180,7 +180,7 @@ exit `$LASTEXITCODE
             return @{
                 ExitCode        = -1
                 Stdout          = (Test-Path $stdoutPath) ? (Get-Content $stdoutPath -Raw) : ''
-                Stderr          = (Test-Path $stderrPath) ? (Get-Content $stderrPath -Raw) : ''
+                'Stderr'        = (Test-Path $stderrPath) ? (Get-Content $stderrPath -Raw) : ''
                 DurationSeconds = $stopwatch.Elapsed.TotalSeconds
                 TimedOut        = $true
             }
@@ -190,7 +190,7 @@ exit `$LASTEXITCODE
         return @{
             ExitCode        = $proc.ExitCode
             Stdout          = (Test-Path $stdoutPath) ? (Get-Content $stdoutPath -Raw) : ''
-            Stderr          = (Test-Path $stderrPath) ? (Get-Content $stderrPath -Raw) : ''
+            'Stderr'        = (Test-Path $stderrPath) ? (Get-Content $stderrPath -Raw) : ''
             DurationSeconds = $stopwatch.Elapsed.TotalSeconds
             TimedOut        = $false
         }
@@ -224,7 +224,17 @@ exit `$LASTEXITCODE
 `$global:UpsertCalled = `$false
 `$global:UpsertBody = ''
 `$global:UpsertMarker = ''
+`$global:UpdatedPrBody = ''
 $ExtraDeclarations
+
+function global:Write-UpdatedPrBodyCapture {
+    param([AllowEmptyString()][string]`$Body)
+
+    `$global:UpdatedPrBody = `$Body
+    [Console]::Out.WriteLine('UPDATED_PR_BODY_BEGIN')
+    [Console]::Out.WriteLine(`$Body)
+    [Console]::Out.WriteLine('UPDATED_PR_BODY_END')
+}
 
 function global:gh {
     param([Parameter(ValueFromRemainingArguments = `$true)]`$Args)
@@ -247,6 +257,38 @@ function global:gh {
     if (`$joined -match 'pr view \d+ --json body') {
         `$global:LASTEXITCODE = 0
         return '$bodyDefault'
+    }
+
+    if (`$joined -match 'pr edit \d+ .*--body-file') {
+        `$idx = [Array]::IndexOf(`$Args, '--body-file')
+        if (`$idx -ge 0 -and `$idx + 1 -lt `$Args.Count) {
+            `$bodyFile = [string]`$Args[`$idx + 1]
+            `$bodyText = (Test-Path -LiteralPath `$bodyFile) ? (Get-Content -LiteralPath `$bodyFile -Raw) : ''
+            Write-UpdatedPrBodyCapture -Body `$bodyText
+        }
+        `$global:LASTEXITCODE = 0
+        return 'https://github.com/example/example/pull/429'
+    }
+
+    if (`$joined -match 'pr edit \d+ .*--body') {
+        `$idx = [Array]::IndexOf(`$Args, '--body')
+        if (`$idx -ge 0 -and `$idx + 1 -lt `$Args.Count) {
+            Write-UpdatedPrBodyCapture -Body ([string]`$Args[`$idx + 1])
+        }
+        `$global:LASTEXITCODE = 0
+        return 'https://github.com/example/example/pull/429'
+    }
+
+    if (`$joined -match 'api -X PATCH repos/[^/]+/[^/]+/pulls/\d+') {
+        foreach (`$arg in `$Args) {
+            `$argText = [string]`$arg
+            if (`$argText -like 'body=*') {
+                Write-UpdatedPrBodyCapture -Body (`$argText.Substring(5))
+                break
+            }
+        }
+        `$global:LASTEXITCODE = 0
+        return '{"html_url":"https://github.com/example/example/pull/429"}'
     }
 
     if (`$joined -match 'issue view \d+ --json comments') {
@@ -299,6 +341,39 @@ integrity_checks:
     status: passed
 -->
 "@
+    }
+
+    $script:NewV4PrBodyWithFallbackMetrics = {
+        param(
+            [Parameter(Mandatory)][AllowEmptyString()][string]$MetricsPrelude,
+            [Parameter(Mandatory)][string]$CreditRows
+        )
+
+        return @"
+## Summary
+
+Spine-backed PR body.
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+$MetricsPrelude
+credits:
+$CreditRows
+integrity_checks:
+  - check: marker-presence
+    status: passed
+-->
+"@
+    }
+
+    $script:GetUpdatedPrBody = {
+        param([AllowEmptyString()][string]$Output)
+
+        $match = [regex]::Match($Output, '(?s)UPDATED_PR_BODY_BEGIN\r?\n(?<body>.*?)\r?\nUPDATED_PR_BODY_END')
+        if (-not $match.Success) { return $null }
+
+        return (($match.Groups['body'].Value -replace "`r`n", "`n") -replace "`r", "`n")
     }
 
     $script:NewFrameSpineComment = {
@@ -601,8 +676,7 @@ body
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 0
-            $combined = "$($result.Stdout)`n$($result.Stderr)"
-            $combined | Should -Match '(?i)pre-v4 metrics detected'
+            (($result.Stdout, $result.Stderr) -join "`n") | Should -Match '(?i)pre-v4 metrics detected'
         }
 
         It 'enforce mode exits 1 when at least one port is NotCovered' {
@@ -759,6 +833,97 @@ body
             $incompleteRows = @($combined -split "`r?`n" | Where-Object { $_ -match 'incomplete-cycle' })
 
             $incompleteRows | Should -HaveCount 0
+        }
+    }
+
+    Context 'Issue #512 stale-spine fallback PR-body metrics' {
+
+        It 'leaves spine-stale-fallback-count absent when no stale-spine fallback event occurred' {
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics `
+                -MetricsPrelude '' `
+                -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $updatedBody = & $script:GetUpdatedPrBody -Output "$($result.Stdout)`n$($result.Stderr)"
+
+            $updatedBody | Should -Not -BeNullOrEmpty -Because 'the orchestrator must re-emit the PR body metrics block when applying additive fallback metrics'
+            $updatedBody | Should -Not -Match '(?m)^\s*spine-stale-fallback-count\s*:' `
+                -Because 'absence, not zero, is the default when no stale-spine fallback event has occurred'
+        }
+
+        It 'writes spine-stale-fallback-count with the event count when stale-spine fallback events occurred' {
+            $metricsPrelude = @'
+dispatch-fallback-events:
+  stale-spine:
+    - step: 10
+      reason: generated_at-mismatch
+    - step: 12
+      reason: missing-step-id
+'@
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics `
+                -MetricsPrelude $metricsPrelude `
+                -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $updatedBody = & $script:GetUpdatedPrBody -Output "$($result.Stdout)`n$($result.Stderr)"
+
+            $updatedBody | Should -Not -BeNullOrEmpty -Because 'stale-spine fallback events must be persisted back into PR-body pipeline metrics'
+            $updatedBody | Should -Match '(?m)^spine-stale-fallback-count:\s*2\s*$'
+        }
+
+        It 'never decrements spine-stale-fallback-count when additive metrics already contain a higher value' {
+            $metricsPrelude = @'
+spine-stale-fallback-count: 5
+dispatch-fallback-events:
+  stale-spine:
+    - step: 10
+      reason: generated_at-mismatch
+    - step: 12
+      reason: missing-step-id
+'@
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics `
+                -MetricsPrelude $metricsPrelude `
+                -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $updatedBody = & $script:GetUpdatedPrBody -Output "$($result.Stdout)`n$($result.Stderr)"
+
+            $updatedBody | Should -Not -BeNullOrEmpty -Because 'additive PR-body metrics updates must preserve previously observed stale-spine fallback counts'
+            $updatedBody | Should -Match '(?m)^spine-stale-fallback-count:\s*5\s*$'
+            $updatedBody | Should -Not -Match '(?m)^spine-stale-fallback-count:\s*[0-4]\s*$'
         }
     }
 

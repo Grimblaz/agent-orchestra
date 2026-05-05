@@ -630,6 +630,156 @@ function script:Resolve-FCLIncompleteCycleReports {
     return $reports.ToArray()
 }
 
+function script:Get-FCLTopLevelIntMetric {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$MetricsBlock,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $pattern = '(?m)^\s*' + [regex]::Escape($Name) + '\s*:\s*(?<value>\d+)\s*$'
+    $match = [regex]::Match($MetricsBlock, $pattern)
+    if (-not $match.Success) { return 0 }
+
+    $value = 0
+    if ([int]::TryParse($match.Groups['value'].Value, [ref]$value) -and $value -gt 0) {
+        return $value
+    }
+
+    return 0
+}
+
+function script:Get-FCLStaleSpineFallbackEventCount {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$MetricsBlock)
+
+    $normalized = $MetricsBlock -replace "`r`n", "`n" -replace "`r", "`n"
+    $lines = @($normalized -split "`n")
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $dispatchMatch = [regex]::Match($lines[$i], '^(?<indent>\s*)dispatch-fallback-events\s*:\s*$')
+        if (-not $dispatchMatch.Success) { continue }
+
+        $dispatchIndent = $dispatchMatch.Groups['indent'].Value.Length
+        for ($j = $i + 1; $j -lt $lines.Count; $j++) {
+            $line = $lines[$j]
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+            $trimmed = $line.TrimStart()
+            $indent = $line.Length - $trimmed.Length
+            if ($indent -le $dispatchIndent) { break }
+
+            if ($trimmed -notmatch '^stale-spine\s*:\s*$') { continue }
+
+            $staleIndent = $indent
+            $count = 0
+            for ($k = $j + 1; $k -lt $lines.Count; $k++) {
+                $eventLine = $lines[$k]
+                if ([string]::IsNullOrWhiteSpace($eventLine)) { continue }
+
+                $eventTrimmed = $eventLine.TrimStart()
+                $eventIndent = $eventLine.Length - $eventTrimmed.Length
+                if ($eventIndent -le $staleIndent) { break }
+                if ($eventTrimmed.StartsWith('-')) { $count++ }
+            }
+
+            return $count
+        }
+    }
+
+    return 0
+}
+
+function script:Set-FCLStaleSpineFallbackMetric {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$MetricsBlock)
+
+    $eventCount = script:Get-FCLStaleSpineFallbackEventCount -MetricsBlock $MetricsBlock
+    $existingCount = script:Get-FCLTopLevelIntMetric -MetricsBlock $MetricsBlock -Name 'spine-stale-fallback-count'
+    $targetCount = [Math]::Max($eventCount, $existingCount)
+
+    $eol = if ($MetricsBlock.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $normalized = $MetricsBlock -replace "`r`n", "`n" -replace "`r", "`n"
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in @($normalized -split "`n")) { $lines.Add($line) | Out-Null }
+
+    $existingIndex = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*spine-stale-fallback-count\s*:') {
+            $existingIndex = $i
+            break
+        }
+    }
+
+    if ($targetCount -le 0) {
+        if ($existingIndex -ge 0) { $lines.RemoveAt($existingIndex) }
+        return ($lines.ToArray() -join $eol)
+    }
+
+    $lineText = "spine-stale-fallback-count: $targetCount"
+    if ($existingIndex -ge 0) {
+        $lines[$existingIndex] = $lineText
+        return ($lines.ToArray() -join $eol)
+    }
+
+    $insertIndex = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*dispatch-fallback-events\s*:') { $insertIndex = $i; break }
+    }
+    if ($insertIndex -lt 0) {
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^\s*credits\s*:') { $insertIndex = $i; break }
+        }
+    }
+    if ($insertIndex -lt 0) { $insertIndex = $lines.Count }
+
+    $lines.Insert($insertIndex, $lineText)
+    return ($lines.ToArray() -join $eol)
+}
+
+function script:Update-FCLPrBodyStaleSpineFallbackMetric {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$PrBody)
+
+    $match = [regex]::Match($PrBody, '(?s)(?<open><!--\s*pipeline-metrics\s*)(?<block>.*?)(?<close>\s*-->)')
+    if (-not $match.Success) { return $PrBody }
+
+    $updatedBlock = script:Set-FCLStaleSpineFallbackMetric -MetricsBlock $match.Groups['block'].Value
+
+    $prefix = $PrBody.Substring(0, $match.Index)
+    $suffixStart = $match.Index + $match.Length
+    $suffix = $PrBody.Substring($suffixStart)
+    return $prefix + $match.Groups['open'].Value + $updatedBlock + $match.Groups['close'].Value + $suffix
+}
+
+function script:Update-FCLPrBodyMetricsBestEffort {
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody
+    )
+
+    $updatedPrBody = script:Update-FCLPrBodyStaleSpineFallbackMetric -PrBody $PrBody
+    $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("frame-credit-ledger-$Pr-$([System.Guid]::NewGuid().ToString('N')).md")
+
+    try {
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText($tempPath, $updatedPrBody, $utf8NoBom)
+        $null = & gh pr edit $Pr --body-file $tempPath 2>$null
+        if ($global:LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine("frame-credit-ledger: PR body metrics update failed via gh pr edit --body-file")
+        }
+    }
+    catch {
+        [Console]::Error.WriteLine("frame-credit-ledger: PR body metrics update failed: $($_.Exception.Message)")
+    }
+    finally {
+        try {
+            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+        catch {
+            [Console]::Error.WriteLine("frame-credit-ledger: temporary PR body file cleanup failed: $($_.Exception.Message)")
+        }
+    }
+}
+
 # ---------------------------------------------------------------------------
 # Invoke-FrameCreditLedger
 # ---------------------------------------------------------------------------
@@ -733,6 +883,8 @@ function Invoke-FrameCreditLedger {
             Comment       = $comment
         }
     }
+
+    script:Update-FCLPrBodyMetricsBestEffort -Pr $Pr -PrBody $prBody
 
     # 5. v4 path: discover adapters and classify ports.
     # Resolve repo root: prefer the script-scoped variable seeded by the
