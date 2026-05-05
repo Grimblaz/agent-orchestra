@@ -136,6 +136,21 @@ Describe '/orchestra:spine deterministic inspection command' -Tag 'contract' {
             )
         } | ConvertTo-Json -Depth 12
 
+        $script:LegacyPlanJson = @{
+            comments = @(
+                @{
+                    id        = 1005
+                    updatedAt = '2026-05-05T14:00:00Z'
+                    body      = @(
+                        '<!-- plan-issue-512 -->'
+                        ''
+                        '## Plan: Legacy approved plan'
+                        'This older approved plan predates frame-spine emission.'
+                    ) -join "`n"
+                }
+            )
+        } | ConvertTo-Json -Depth 12
+
         $unknownPortSpine = $script:RepresentativeSpine -replace '  review: \[s14#cycle:3#terminal\]', '  unregistered-port: [s14#cycle:3#terminal]'
         $script:UnknownPortJson = @{
             comments = @(
@@ -288,6 +303,19 @@ exit `$exitCode
         $result.Stdout | Should -Match '(?m)^\|\s*ce-gate-cli\s*\|[^\r\n]*s15[^\r\n]*(cycle\s*[:=]?\s*4|\|\s*4\s*\|)[^\r\n]*(terminal|true|yes)' -Because 'CE terminal markers must not be lost'
     }
 
+    It 'does not mark known canonical frame ports as unknown' {
+        Test-Path -LiteralPath $script:ScriptPath -PathType Leaf | Should -BeTrue -Because 'the /orchestra:spine command needs an offline-capable script surface'
+
+        $fixturePath = & $script:WriteFixture -Json $script:LatestCommentsJson
+        $result = & $script:InvokeCommand -IssueArgument '512' -CommentsJsonPath $fixturePath
+
+        $result.ExitCode | Should -Be 0
+        $result.Stdout | Should -Match 'implement-code' -Because 'the fixture includes a known implementation port'
+        $result.Stdout | Should -Match 'implement-test' -Because 'the fixture includes a known test port'
+        $result.Stdout | Should -Not -Match '\[unknown-port\].*implement-code' -Because 'known ports should be loaded as individual HashSet members'
+        $result.Stdout | Should -Not -Match '\[unknown-port\].*implement-test' -Because 'known ports should be loaded as individual HashSet members'
+    }
+
     It 'renders the plan-too-small fallback when the plan explicitly omits a spine' {
         Test-Path -LiteralPath $script:ScriptPath -PathType Leaf | Should -BeTrue -Because 'the /orchestra:spine command needs an offline-capable script surface'
 
@@ -297,6 +325,18 @@ exit `$exitCode
         $result.ExitCode | Should -Be 0
         $result.Stdout | Should -Match 'plan has no spine — see comment for prose plan'
         $result.Stdout | Should -Not -Match 'frame-spine|Port\s*\|\s*Step' -Because 'tiny-plan fallback should not fabricate a spine table'
+    }
+
+    It 'renders a legacy-plan-shape no-spine result for an existing plan comment without a frame spine' {
+        Test-Path -LiteralPath $script:ScriptPath -PathType Leaf | Should -BeTrue -Because 'the /orchestra:spine command needs an offline-capable script surface'
+
+        $fixturePath = & $script:WriteFixture -Json $script:LegacyPlanJson
+        $result = & $script:InvokeCommand -IssueArgument '512' -CommentsJsonPath $fixturePath
+
+        $result.ExitCode | Should -Be 0
+        $result.Stdout | Should -Match 'legacy-plan-shape' -Because 'operators need an intentional legacy/no-spine result, not a raw parse failure'
+        $result.Stdout | Should -Match 'no frame-spine block|no spine is available' -Because 'the message should explain why no table was rendered'
+        $result.Stdout | Should -Not -Match '(?m)^\|\s*Port\s*\|\s*Step' -Because 'legacy plans must not fabricate a spine table'
     }
 
     It 'fails gracefully when no plan comment exists and does not leak authentication tokens' {

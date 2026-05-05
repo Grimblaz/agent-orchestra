@@ -24,16 +24,16 @@ function Get-FramePortFileStem {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$PortsDir)
 
     if ([string]::IsNullOrWhiteSpace($PortsDir) -or -not (Test-Path -LiteralPath $PortsDir -PathType Container)) {
-        return , [string[]]@()
+        return [string[]]@()
     }
 
     try {
-        return , [string[]]@(Get-ChildItem -LiteralPath $PortsDir -Filter '*.yaml' -File -ErrorAction Stop |
+        return [string[]]@(Get-ChildItem -LiteralPath $PortsDir -Filter '*.yaml' -File -ErrorAction Stop |
             Sort-Object -Property BaseName |
             ForEach-Object { [string]$_.BaseName })
     }
     catch {
-        return , [string[]]@()
+        return [string[]]@()
     }
 }
 

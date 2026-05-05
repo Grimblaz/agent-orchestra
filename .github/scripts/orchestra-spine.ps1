@@ -334,7 +334,7 @@ function Invoke-OrchestraSpineRender {
 
     $spineBlock = Get-FSCSpineBlock -CommentBody $planComment.Body
     if ([string]::IsNullOrWhiteSpace($spineBlock)) {
-        throw "Latest plan-issue-$IssueNumber comment has no frame-spine block. $(Get-OrchestraSpineUsageText)"
+        return "legacy-plan-shape: latest plan-issue-$IssueNumber comment has no frame-spine block; no spine is available, see the plan comment for prose plan"
     }
 
     $spine = ConvertFrom-FSCSpineYaml -SpineBlock $spineBlock
