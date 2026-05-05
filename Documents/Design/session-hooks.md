@@ -66,7 +66,7 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
    - **Current branch**: detects an upstream-deleted current branch, plus a current `claude/*` no-upstream worktree branch only when its HEAD is reachable from the resolved remote default branch. Current-worktree cleanup commands are narrative inline text outside the fenced block so the auto-run path cannot remove its own checkout.
    - **Tracking files**: detects stale issue-scoped `.copilot-tracking/` files for issues whose remote `feature/issue-*` branch is gone; persistent calibration data is excluded.
    - **Sibling worktrees**: detects sibling worktrees on merged `claude/*` no-upstream branches and sibling `feature/issue-*` branches whose upstream branch was deleted; cleanup commands are inside the fenced block.
-   - **Orphan branches**: detects unattached merged `claude/*` no-upstream branches and unattached upstream-deleted `feature/issue-*` branches; cleanup commands are inside the fenced block.
+   - **Orphan branches**: detects unattached merged `claude/*` no-upstream branches and unattached upstream-deleted `feature/issue-*` branches (squash-merged branches recognized via `git diff` tree-equivalence since issue #513); cleanup commands are inside the fenced block.
    - **Fail-open behavior**: fetch, worktree-list, for-each-ref, per-candidate merge-base, and ref-lookup failures skip unverifiable candidates without failing the startup flow.
    - **Opt-in cleanup**: the detector reports findings only; cleanup runs only after user confirmation.
 7. After that first automatic startup check, the `session-startup` skill records `/memories/session/session-startup-check-complete.md` regardless of whether cleanup will later be accepted, declined, or skipped.
@@ -117,7 +117,7 @@ Added alongside the portability fix to close a gap found in the post-PR review o
 | `skills/session-startup/SKILL.md` | Current agent-side protocol for consuming hook-injected startup context; preserves run-once, fail-open, manual fallback, opt-in cleanup, and Claude-only Step 7b drift-check semantics | Active |
 | `skills/session-startup/platforms/claude.md` | Claude-specific startup invocation notes, including AskUserQuestion labels and marketplace freshness behavior | Active |
 | `skills/session-startup/scripts/session-cleanup-detector.ps1` | Startup cleanup detector for current branches, issue-scoped tracking files, sibling worktrees, and orphan branches; persistent calibration paths are excluded; emits cleanup commands without env-var requirements | Active — updated (issue #185, migrated to skill path in issue #360, expanded for Claude worktrees in issue #452) |
-| `skills/session-startup/scripts/post-merge-cleanup.ps1` | Archives tracking files, deletes local/remote branch, syncs default branch | Active — migrated to skill path in issue #360 |
+| `skills/session-startup/scripts/post-merge-cleanup.ps1` | Archives tracking files, deletes local/remote branch (squash-merge-aware via tree-equivalence detection), syncs default branch | Active — migrated to skill path in issue #360, squash-merge detection added in issue #513 |
 | `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1` | Plugin-distributed `PostToolUse` hook script for entry-point version-bump proposals | **Active** — moved from `.claude/hooks/` in issue #409 |
 | `.claude/settings.json` | Former maintainer-local `PostToolUse` hook configuration for release hygiene | **Deleted** — superseded by `hooks/hooks.json` in issue #409 |
 
