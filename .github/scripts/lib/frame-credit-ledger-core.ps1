@@ -1747,6 +1747,31 @@ function script:Resolve-ImplementCreditStatus {
     return @{ status = 'passed'; offending = $null }
 }
 
+function script:Build-FCLImplementCreditRow {
+    param(
+        [Parameter(Mandatory)][string]$Port,
+        [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
+        [bool]$AutoNaResult = $false,
+        [string]$AdapterName = 'work-adapter',
+        [string]$Evidence = '',
+        [int]$Step = 0
+    )
+
+    $resolution = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        elseif ($resolution.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
+                        elseif ($resolution.status -eq 'failed') { "Validator failed: $($resolution.offending)" }
+                        else { "$Port validation: $($resolution.status)." }
+
+    $row = [pscustomobject]@{
+        port     = $Port
+        adapter  = $AdapterName
+        status   = $resolution.status
+        evidence = $resolvedEvidence
+    }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
+}
+
 # ---------------------------------------------------------------------------
 # Build-ImplementCodeCreditRow (Step 4c)
 # ---------------------------------------------------------------------------
@@ -1760,19 +1785,7 @@ function Build-ImplementCodeCreditRow {
         [int]$Step = 0
     )
 
-    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
-    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
-                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
-                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
-                        else { "implement-code validation: $($r.status)." }
-
-    $row = [pscustomobject]@{
-        port     = 'implement-code'
-        adapter  = $AdapterName
-        status   = $r.status
-        evidence = $resolvedEvidence
-    }
-    return script:Add-FCLTerminalStepId -Row $row -Step $Step
+    return script:Build-FCLImplementCreditRow -Port 'implement-code' -ValidationEvidence $ValidationEvidence -AutoNaResult $AutoNaResult -AdapterName $AdapterName -Evidence $Evidence -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1788,19 +1801,7 @@ function Build-ImplementTestCreditRow {
         [int]$Step = 0
     )
 
-    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
-    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
-                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
-                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
-                        else { "implement-test validation: $($r.status)." }
-
-    $row = [pscustomobject]@{
-        port     = 'implement-test'
-        adapter  = $AdapterName
-        status   = $r.status
-        evidence = $resolvedEvidence
-    }
-    return script:Add-FCLTerminalStepId -Row $row -Step $Step
+    return script:Build-FCLImplementCreditRow -Port 'implement-test' -ValidationEvidence $ValidationEvidence -AutoNaResult $AutoNaResult -AdapterName $AdapterName -Evidence $Evidence -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1818,19 +1819,7 @@ function Build-ImplementRefactorCreditRow {
         [int]$Step = 0
     )
 
-    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
-    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
-                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
-                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
-                        else { "implement-refactor validation: $($r.status)." }
-
-    $row = [pscustomobject]@{
-        port     = 'implement-refactor'
-        adapter  = $AdapterName
-        status   = $r.status
-        evidence = $resolvedEvidence
-    }
-    return script:Add-FCLTerminalStepId -Row $row -Step $Step
+    return script:Build-FCLImplementCreditRow -Port 'implement-refactor' -ValidationEvidence $ValidationEvidence -AutoNaResult $AutoNaResult -AdapterName $AdapterName -Evidence $Evidence -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1846,19 +1835,7 @@ function Build-ImplementDocsCreditRow {
         [int]$Step = 0
     )
 
-    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
-    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
-                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
-                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
-                        else { "implement-docs validation: $($r.status)." }
-
-    $row = [pscustomobject]@{
-        port     = 'implement-docs'
-        adapter  = $AdapterName
-        status   = $r.status
-        evidence = $resolvedEvidence
-    }
-    return script:Add-FCLTerminalStepId -Row $row -Step $Step
+    return script:Build-FCLImplementCreditRow -Port 'implement-docs' -ValidationEvidence $ValidationEvidence -AutoNaResult $AutoNaResult -AdapterName $AdapterName -Evidence $Evidence -Step $Step
 }
 
 # ---------------------------------------------------------------------------

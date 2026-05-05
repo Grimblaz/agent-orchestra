@@ -91,6 +91,7 @@ Field notes:
   - `not-persisted` is synthesized by the warn-only hook when the sentinel `<!-- review-judge-produced-{PR} -->` is present but no credit row was written. It is never emitted directly as an inline credit.
 - `credits[].adapter` (optional on non-review ports) names the specific adapter that produced this credit row.
 - `credits[].run_index` is a monotonically increasing integer per `(port, adapter)` pair. Multiple entries for the same port and adapter are appended; the latest by `run_index` is the authoritative summary value. There is no `timestamp` field on credit rows — `run_index` provides re-run ordering without violating the audit-only framing.
+- `credits[].terminal-step-id` (optional) records the positive terminal implementation step that emitted a spine-backed credit. Omitted or `0` preserves the legacy/spine-omitted identity for plans without a terminal slice.
 - `credits[].judge-score` (review port only) carries the judge ruling and findings list used to produce the credit.
 - `credits[].integrity-check` (review port, standard/lite adapters) records the pass-blocks verified during prosecution.
 - `credits[].version-bump` (release-hygiene port) records the version range for which the bump was verified.
@@ -105,9 +106,9 @@ Field notes:
 
 When the back-deriver runs against a PR body that already contains a partial v4 `credits[]` block (i.e., some ports are present but not all twelve), the merge rule is:
 
-- **Back-deriver fills only absent ports.** If a port row already exists in the `credits[]` array, the back-deriver does not overwrite or duplicate it — that port's row is authoritative as written.
-- **Presence of a port row short-circuits back-derivation for that port only.** Other absent ports are still back-derived normally.
-- **No double-write.** The back-deriver never appends a second row for a port that already has at least one entry.
+- **Back-deriver fills only absent identities.** For legacy rows, the identity is `(port, 0)` whether `terminal-step-id` is omitted or explicitly `0`. For spine-backed terminal rows, the identity is `(port, terminal-step-id)` when `terminal-step-id` is positive.
+- **Presence of a row short-circuits back-derivation for that identity only.** Other absent ports, and other positive terminal-step identities for the same port, are still back-derived normally.
+- **No double-write.** The back-deriver never appends a second row for an identity that already exists in the `credits[]` array.
 
 This ensures forward-emitted rows (from specialist agents or pipeline-entry deferred emission) are preserved as-is while the back-deriver fills the gaps.
 
