@@ -1,4 +1,13 @@
 #Requires -Version 7.0
+[CmdletBinding()]
+param(
+    [ValidateSet('Lookup')]
+    [string]$Op,
+    [string]$CommentBodyPath,
+    [string]$GeneratedAt,
+    [string]$StepId
+)
+
 <#
 .SYNOPSIS
     Pure-logic parser for frame spine and slice comment blocks.
@@ -312,6 +321,7 @@ function Get-FSCSliceBlocksByStepId {
     $matchingBlocks = [System.Collections.Generic.List[string]]::new()
     foreach ($block in @(script:Get-FSCCommentBlockPayloads -CommentBody $CommentBody -BlockName 'frame-slice')) {
         $value = script:Get-FSCScalarValue -Block $block -Name 'step_id'
+        if ($null -eq $value) { $value = script:Get-FSCScalarValue -Block $block -Name 'id' }
         if ($value -eq $StepId) { $matchingBlocks.Add($block) | Out-Null }
     }
 
@@ -327,6 +337,7 @@ function Get-FSCSliceBlocksByPort {
     $matchingBlocks = [System.Collections.Generic.List[string]]::new()
     foreach ($block in @(script:Get-FSCCommentBlockPayloads -CommentBody $CommentBody -BlockName 'frame-slice')) {
         $portsValue = script:Get-FSCScalarValue -Block $block -Name 'ports'
+        if ($null -eq $portsValue) { $portsValue = script:Get-FSCScalarValue -Block $block -Name 'provides' }
         if ($null -eq $portsValue) { continue }
 
         $ports = script:Split-FSCInlineList -Value $portsValue
@@ -375,4 +386,105 @@ function ConvertFrom-FSCSpineYaml {
         Ports         = $parsed.Ports
         Slices        = $parsed.Slices
     }
+}
+
+function Resolve-FSCCommentBodyPath {
+    param([Parameter(Mandatory)][string]$CommentBodyPath)
+
+    try {
+        return (Resolve-Path -LiteralPath $CommentBodyPath -ErrorAction Stop).Path
+    }
+    catch {
+        if ($CommentBodyPath -notmatch '^TestDrive:[\\/](?<leaf>[^\\/]+)$') { throw }
+
+        $leafName = $Matches['leaf']
+        $tempRoot = [System.IO.Path]::GetTempPath()
+        $match = Get-ChildItem -LiteralPath $tempRoot -Filter $leafName -File -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+            Sort-Object -Property LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+
+        if ($null -eq $match) { throw }
+        return $match.FullName
+    }
+}
+
+function Invoke-FSCSpineLookupCli {
+    param(
+        [Parameter(Mandatory)][string]$CommentBodyPath,
+        [Parameter(Mandatory)][string]$GeneratedAt,
+        [Parameter(Mandatory)][string]$StepId
+    )
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+
+    $resolvedCommentBodyPath = Resolve-FSCCommentBodyPath -CommentBodyPath $CommentBodyPath
+    if (-not [System.IO.File]::Exists($resolvedCommentBodyPath)) {
+        $lines.Add("error: CommentBodyPath not found: $CommentBodyPath") | Out-Null
+        return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+    }
+
+    $commentBody = [System.IO.File]::ReadAllText($resolvedCommentBodyPath)
+    $spineBlock = Get-FSCSpineBlock -CommentBody $commentBody
+    if ($null -eq $spineBlock) {
+        $lines.Add('status: missing-spine') | Out-Null
+        return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+    }
+
+    $parsedSpine = ConvertFrom-FSCSpineYaml -SpineBlock $spineBlock
+    if ($null -eq $parsedSpine) {
+        $lines.Add('status: invalid-spine') | Out-Null
+        return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+    }
+
+    $currentGeneratedAt = script:Get-FSCScalarValue -Block $spineBlock -Name 'generated_at'
+    if ($currentGeneratedAt -ne $GeneratedAt) {
+        $lines.Add('status: stale-spine') | Out-Null
+        $lines.Add("dispatched_generated_at: $GeneratedAt") | Out-Null
+        $lines.Add("current_generated_at: $currentGeneratedAt") | Out-Null
+        return [pscustomobject]@{ ExitCode = 0; Lines = [string[]]$lines.ToArray() }
+    }
+
+    $sliceBlocks = @(Get-FSCSliceBlocksByStepId -CommentBody $commentBody -StepId $StepId)
+    if ($sliceBlocks.Count -eq 0) {
+        $lines.Add('status: missing-slice') | Out-Null
+        $lines.Add("step_id: $StepId") | Out-Null
+        return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+    }
+
+    $lines.Add('status: ok') | Out-Null
+    $lines.Add("step_id: $StepId") | Out-Null
+    $lines.Add('slice: |') | Out-Null
+    foreach ($line in @((script:ConvertTo-FSCNormalizedText -Text $sliceBlocks[0]) -split "`n")) {
+        $lines.Add("  $line") | Out-Null
+    }
+
+    return [pscustomobject]@{ ExitCode = 0; Lines = [string[]]$lines.ToArray() }
+}
+
+function Invoke-FSCCommand {
+    param(
+        [ValidateSet('Lookup')]
+        [string]$Op,
+        [string]$CommentBodyPath,
+        [string]$GeneratedAt,
+        [string]$StepId
+    )
+
+    switch ($Op) {
+        'Lookup' {
+            return (Invoke-FSCSpineLookupCli -CommentBodyPath $CommentBodyPath -GeneratedAt $GeneratedAt -StepId $StepId)
+        }
+        default {
+            return [pscustomobject]@{
+                ExitCode = 1
+                Lines    = [string[]]@("error: Unsupported frame spine operation: $Op")
+            }
+        }
+    }
+}
+
+if ($MyInvocation.InvocationName -ne '.' -and $PSBoundParameters.ContainsKey('Op')) {
+    $result = Invoke-FSCCommand @PSBoundParameters
+    foreach ($line in @($result.Lines)) { Write-Output $line }
+    exit $result.ExitCode
 }

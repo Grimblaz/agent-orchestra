@@ -74,7 +74,11 @@ Describe 'Frame validator plan mode CLI' -Tag 'unit' {
                 [string[]]$PortLines = @('  implement-test: [s4]'),
                 [string[]]$SpineSliceLines = @(
                     '  s4:',
-                    '    commit-index: 4'
+                    '    execution_mode: serial',
+                    '    rc: GREEN validation action',
+                    '    ac_refs: [AC4]',
+                    '    depends_on: []',
+                    '    cycle: 1'
                 ),
                 [string[]]$AcceptanceCriteria = @('- **AC4** Frame coverage validator catches missing routing coverage.'),
                 [string[]]$SliceBlocks = @()
@@ -180,6 +184,37 @@ Describe 'Frame validator plan mode CLI' -Tag 'unit' {
         $result.ExitCode | Should -Be 0
         $result.Output | Should -Match 'coverage-gap'
         $result.Output | Should -Match 'AC4'
+    }
+
+    It 'rejects a present frame-spine block when canonical parsing fails' {
+        $validSlice = & $script:NewFrameSliceBlock -StepId 's4' -CommitIndex '4'
+        $comment = & $script:NewPlanComment -SliceBlocks @($validSlice)
+        $comment = $comment -replace 'generated_at: 2026-05-04T15:00:00Z', 'generated_at: 05/04/2026 15:00'
+        $commentFile = & $script:WritePlanComment -Content $comment
+
+        $result = & $script:InvokeFrameValidateCli -Arguments @('-Mode', 'plan', '-CommentFile', $commentFile)
+
+        $result.ExitCode | Should -Not -Be 0
+        $result.Output | Should -Match 'Invalid canonical frame-spine block'
+    }
+
+    It 'accepts explicit plan-too-small spine omission without a frame-spine block' {
+        $comment = @(
+            '<!-- plan-issue-512 -->'
+            '---'
+            'status: approved'
+            'issue_id: 512'
+            'spine-omitted: plan-too-small'
+            '---'
+            ''
+            '## Plan: Tiny cleanup'
+            'Legacy plan body remains valid for fewer than three implementation steps.'
+        ) -join "`n"
+
+        $result = & $script:InvokeFrameValidateCli -Arguments @('-Mode', 'plan') -InputText $comment
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'spine-omitted: plan-too-small'
     }
 
     It 'keeps default frame validation behavior available when no mode is supplied' {

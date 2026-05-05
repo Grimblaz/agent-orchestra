@@ -3,9 +3,10 @@
 .SYNOPSIS
     Pure-logic library for the frame credit-ledger pre-PR warn hook (issue #429).
 
-    Exposes eleven functions:
+    Exposes these functions:
       - Read-PRMetricsBlock               : parse a pipeline-metrics v4 marker out of a PR body
       - Select-LastCreditByRunIndex       : pick the highest-run_index credit for (port, adapter)
+    - Select-AuthoritativeCreditForPort : pick the visible per-port credit, honoring terminal-step identities
       - Test-ReviewSentinelPresent        : check for <!-- review-judge-produced-{PR} --> sentinel
       - Resolve-NotPersistedSynthesis     : synthesize not-persisted credit when sentinel present
       - Build-ReviewCreditRow             : construct a v4 review credit row from judge-rulings
@@ -1100,6 +1101,100 @@ function Select-LastCreditByRunIndex {
 
     # Sort by RunIndex descending; treat $null RunIndex as 0.
     return ($pool | Sort-Object -Property { if ($null -eq $_.RunIndex) { 0 } else { [int]$_.RunIndex } } -Descending | Select-Object -First 1)
+}
+
+function script:Get-FCLTerminalStepIdFromCredit {
+    param([AllowNull()]$LedgerRow)
+
+    if ($null -eq $LedgerRow) { return 0 }
+
+    $raw = $null
+    if ($LedgerRow -is [System.Collections.IDictionary]) {
+        if ($LedgerRow.Contains('TerminalStepId')) { $raw = $LedgerRow['TerminalStepId'] }
+        elseif ($LedgerRow.Contains('terminal-step-id')) { $raw = $LedgerRow['terminal-step-id'] }
+    }
+    else {
+        if ($null -ne $LedgerRow.PSObject.Properties['TerminalStepId']) { $raw = $LedgerRow.TerminalStepId }
+        elseif ($null -ne $LedgerRow.PSObject.Properties['terminal-step-id']) { $raw = $LedgerRow.'terminal-step-id' }
+    }
+
+    $step = 0
+    if ($null -ne $raw -and [int]::TryParse([string]$raw, [ref]$step) -and $step -gt 0) {
+        return $step
+    }
+
+    return 0
+}
+
+function script:Get-FCLRunIndexFromCredit {
+    param([AllowNull()]$LedgerRow)
+
+    if ($null -eq $LedgerRow) { return 0 }
+
+    $raw = $null
+    if ($LedgerRow -is [System.Collections.IDictionary]) {
+        if ($LedgerRow.Contains('RunIndex')) { $raw = $LedgerRow['RunIndex'] }
+        elseif ($LedgerRow.Contains('run_index')) { $raw = $LedgerRow['run_index'] }
+    }
+    else {
+        if ($null -ne $LedgerRow.PSObject.Properties['RunIndex']) { $raw = $LedgerRow.RunIndex }
+        elseif ($null -ne $LedgerRow.PSObject.Properties['run_index']) { $raw = $LedgerRow.run_index }
+    }
+
+    $runIndex = 0
+    if ($null -ne $raw -and [int]::TryParse([string]$raw, [ref]$runIndex) -and $runIndex -gt 0) {
+        return $runIndex
+    }
+
+    return 0
+}
+
+function script:Get-FCLCreditStatusPrecedence {
+    param([AllowNull()]$LedgerRow)
+
+    $status = if ($null -eq $LedgerRow) { '' } else { [string]$LedgerRow.Status }
+    switch ($status) {
+        'failed' { return 60 }
+        'inconclusive' { return 50 }
+        'not-persisted' { return 40 }
+        'skipped' { return 30 }
+        'not-applicable' { return 20 }
+        'passed' { return 10 }
+        default { return 0 }
+    }
+}
+
+function script:Select-FCLCreditByStatusPrecedence {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$LedgerRows)
+
+    $rows = @($LedgerRows | Where-Object { $null -ne $_ })
+    if ($rows.Count -eq 0) { return $null }
+    if ($rows.Count -eq 1) { return $rows[0] }
+
+    return ($rows | Sort-Object -Property `
+            @{ Expression = { script:Get-FCLCreditStatusPrecedence -LedgerRow $_ }; Descending = $true }, `
+            @{ Expression = { script:Get-FCLRunIndexFromCredit -LedgerRow $_ }; Descending = $true } |
+        Select-Object -First 1)
+}
+
+function Select-AuthoritativeCreditForPort {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][Alias('Credits')][AllowEmptyCollection()][object[]]$LedgerRows,
+        [Parameter(Mandatory)][string]$Port
+    )
+
+    $pool = @($LedgerRows | Where-Object { [string]$_.Port -eq $Port })
+    if ($pool.Count -eq 0) { return $null }
+
+    $terminalRows = @($pool | Where-Object { (script:Get-FCLTerminalStepIdFromCredit -LedgerRow $_) -gt 0 })
+    if ($terminalRows.Count -gt 0) {
+        $latestTerminalStep = @($terminalRows | ForEach-Object { script:Get-FCLTerminalStepIdFromCredit -LedgerRow $_ } | Measure-Object -Maximum)[0].Maximum
+        $latestTerminalRows = @($terminalRows | Where-Object { (script:Get-FCLTerminalStepIdFromCredit -LedgerRow $_) -eq [int]$latestTerminalStep })
+        return script:Select-FCLCreditByStatusPrecedence -LedgerRows $latestTerminalRows
+    }
+
+    return Select-LastCreditByRunIndex -LedgerRows $pool -Port $Port
 }
 
 function Get-PortFiles {

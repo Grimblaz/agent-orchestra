@@ -167,6 +167,34 @@ issue_number: 447
         $credit.evidence | Should -Match 'does not encode enough review detail'
     }
 
+    It 'round-trips positive terminal-step-id through back-derived audit YAML' {
+        $surface = [ordered]@{
+            frame_version    = 1
+            credits          = @(
+                [ordered]@{
+                    port               = 'implement-test'
+                    status             = 'failed'
+                    'terminal-step-id' = 5
+                    evidence           = 'terminal cycle failed'
+                }
+            )
+            integrity_checks = @(
+                [ordered]@{
+                    name     = 'marker-presence'
+                    status   = 'passed'
+                    evidence = 'marker present'
+                }
+            )
+        }
+
+        $yaml = ConvertTo-FBDAuditYaml -AuditSurface $surface
+        $roundTripCredits = Get-FBDExistingCredits -MetricsBlock $yaml
+
+        $yaml | Should -Match '(?m)^    terminal-step-id:\s*5\s*$'
+        $roundTripCredits.Contains('implement-test|5') | Should -BeTrue
+        $roundTripCredits['implement-test|5']['terminal-step-id'] | Should -Be 5
+    }
+
     It 'replays metrics_version <MetricsVersion> fixture input for PR <PrNumber>' -ForEach $script:VersionFixtures {
         param($MetricsVersion, $PrNumber, $FixtureFile)
 

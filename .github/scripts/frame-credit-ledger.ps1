@@ -971,7 +971,7 @@ function Invoke-FrameCreditLedger {
             $portName = [string]$port.Name
             $matchingAdapters = @($adapters | Where-Object { [string]$_.Provides -eq $portName })
             $applicableMap = Resolve-FrameCreditLedgerApplicableMap -PortName $portName -Adapters $matchingAdapters -Changeset $changeset
-            $credit = $credits | Where-Object { [string]$_.Port -eq $portName } | Select-Object -First 1
+            $credit = Select-AuthoritativeCreditForPort -Credits $credits -Port $portName
 
             $report = Resolve-PortStatus -Port $port -WorkAdapters $matchingAdapters -ApplicableMap $applicableMap -Credit $credit
             $portReports.Add($report) | Out-Null
@@ -979,8 +979,9 @@ function Invoke-FrameCreditLedger {
     }
     else {
         # No port catalog available — synthesize port reports directly from credits so we can still emit a meaningful ledger.
-        foreach ($credit in $credits) {
-            $portName = [string]$credit.Port
+        $creditPortNames = @($credits | ForEach-Object { [string]$_.Port } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+        foreach ($portName in $creditPortNames) {
+            $credit = Select-AuthoritativeCreditForPort -Credits $credits -Port $portName
             $synthPort = [pscustomobject]@{ Name = $portName }
             $report = Resolve-PortStatus -Port $synthPort -WorkAdapters @() -ApplicableMap @{} -Credit $credit
             $portReports.Add($report) | Out-Null

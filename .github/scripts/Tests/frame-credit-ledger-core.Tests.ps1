@@ -285,6 +285,16 @@ integrity_checks:
                 $normalized | Should -Match '(?m)^credits:\s*$'
                 $normalized | Should -Match '(?m)^integrity_checks:\s*$'
         }
+
+        It 'leaves evaluation back-fill unchanged when no matching dispatch-cost sample exists' {
+                $command = Get-Command Update-DispatchCostSampleEvaluationInPrBody -ErrorAction SilentlyContinue
+                $command | Should -Not -BeNullOrEmpty
+
+                $body = & $script:NewV4PrBody -Yaml $script:V4FullYaml
+                $updated = & $command -PrBody $body -StepId 's99' -Mode 'spine' -RcConformance 'pass'
+
+                $updated | Should -Be $body -Because 'pre-PR lifecycle must create the placeholder sample before RC or judge back-fill can target it'
+        }
 }
 
 Describe 'Get-PortFiles' {
@@ -1162,4 +1172,32 @@ credits:
         $latest = Select-LastCreditByRunIndex -Credits $result.Credits -Port 'nonexistent' -Adapter 'none'
         $latest | Should -BeNullOrEmpty
     }
+
+        It 'Select-AuthoritativeCreditForPort: reports the latest terminal-step failed row over an earlier passed row for the same port' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+    - port: implement-test
+        status: passed
+        terminal-step-id: 3
+        evidence: "earlier terminal cycle passed"
+    - port: implement-test
+        status: failed
+        terminal-step-id: 5
+        evidence: "terminal cycle failed"
+integrity_checks:
+    - check: marker-presence
+        status: passed
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+
+                $credit = Select-AuthoritativeCreditForPort -Credits $result.Credits -Port 'implement-test'
+
+                $credit | Should -Not -BeNullOrEmpty
+                $credit.Status | Should -Be 'failed'
+                $credit.TerminalStepId | Should -Be 5
+                $credit.Evidence | Should -Be 'terminal cycle failed'
+        }
 }

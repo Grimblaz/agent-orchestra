@@ -93,7 +93,7 @@ Describe '/orchestra:spine deterministic inspection command' -Tag 'contract' {
             $script:RepresentativeSpine
             '-->'
             ''
-            '<!-- frame-slice-s11 -->'
+            '<!-- frame-slice -->'
             'id: s11'
             'provides: [implement-test]'
             'requirement-contract: |'
@@ -269,7 +269,7 @@ exit `$exitCode
         $result.Stdout | Should -Match 'generated_at:\s*2026-05-05T11:00:00Z' -Because 'the latest matching plan comment must win over older plan comments'
         $result.Stdout | Should -Match 'implement-test' -Because 'the rendered inspection output must include the latest spine ports'
         $result.Stdout | Should -Not -Match '2026-05-05T10:00:00Z|stale older plan comment' -Because 'older plan-issue comments must not leak into the inspection output'
-        $result.Stdout | Should -Not -Match 'This prose plan must not appear|frame-slice-s11|requirement-contract|RED test body' -Because 'the command renders just the spine inspection surface, not slices or prose plan content'
+        $result.Stdout | Should -Not -Match 'This prose plan must not appear|frame-slice|requirement-contract|RED test body' -Because 'the command renders just the spine inspection surface, not slices or prose plan content'
         $result.Stderr | Should -Match 'GH_CALLS=0' -Because 'fixture-backed tests must remain offline'
         $result.Stderr | Should -Not -Match 'LIVE_GH_BLOCKED'
     }

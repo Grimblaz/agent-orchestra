@@ -52,6 +52,14 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
             -StartPattern '## Ownership Principles' `
             -EndPattern '<critical_rules>' `
             -SectionName 'Ownership Principles'
+
+        $script:PipelineMetricsSection = & $script:GetBoundedSection `
+            -Content $script:Content `
+            -StartPattern '## Pipeline Metrics' `
+            -EndPattern '### Pipeline-Entry Credit Harvest' `
+            -SectionName 'Pipeline Metrics'
+
+        $script:DispatchMetricsLifecycleText = "$($script:ExecuteEachStepSection)`n$($script:PipelineMetricsSection)"
     }
 
     It 'requires spine-bearing specialist dispatch context to include spine, active slice, and depth-1 dependencies' {
@@ -78,6 +86,20 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
     It 'requires spine-bearing dispatch announcements to cite the frame-spine lookup skill' {
         $script:ExecuteEachStepSection | Should -Match '(?is)(ANNOUNCE|announcement|Calling @\{Agent-Name\}).{0,700}(spine-bearing|spine context|frame-spine).{0,700}skills/frame-spine-lookup/SKILL\.md|skills/frame-spine-lookup/SKILL\.md.{0,700}(ANNOUNCE|announcement|Calling @\{Agent-Name\})' `
             -Because 'when dispatch carries spine-bearing context, the visible specialist announcement must cite skills/frame-spine-lookup/SKILL.md'
+    }
+
+    It 'requires dispatch-cost samples to accumulate before PR creation and flush into the initial PR body' {
+        $script:DispatchMetricsLifecycleText | Should -Match '(?is)dispatch-cost-samples.{0,700}(session memory|PR-body draft|pre-PR accumulator).{0,500}(not a live PR body|before a PR exists)' `
+            -Because 'dispatch-time placeholders can occur before a PR exists, so Code-Conductor must use a pre-PR accumulator or draft PR body'
+
+        $script:DispatchMetricsLifecycleText | Should -Match '(?is)RC conformance.{0,240}back-fill.{0,420}accumulator.{0,420}PR creation' `
+            -Because 'RC conformance back-fill before PR creation must update the same accumulated sample that will be flushed later'
+
+        $script:DispatchMetricsLifecycleText | Should -Match '(?is)PR creation.{0,240}flush(?:es)?.{0,420}(initial PR body|emitted `<!-- pipeline-metrics -->` block)' `
+            -Because 'the initial PR body must receive accumulated dispatch-cost samples during PR creation'
+
+        $script:DispatchMetricsLifecycleText | Should -Match '(?is)After (?:the )?PR (?:exists|creation).{0,420}(RC conformance|judge disposition).{0,420}live PR body.{0,420}\(step-id, mode\)' `
+            -Because 'post-creation RC or judge updates must target the live PR body sample by composite key'
     }
 
     It 'preserves Code-Conductor ownership stance and ANNOUNCE-before-tool-call rule' {

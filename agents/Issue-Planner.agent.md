@@ -119,7 +119,7 @@ Add `escalation_recommended: true` and `escalation_reason` when scope exceeds th
 For any platform path that writes or re-emits the approved SMC-01 `<!-- plan-issue-{ID} -->` comment, keep the legacy plan frontmatter and step body readable by existing consumers, then append the frame routing blocks inside that same comment in this order:
 
 1. `<!-- frame-spine -->` with `spine_schema_version: 1` and a `generated_at` value set at plan creation time.
-2. One `<!-- frame-slice-s{N} -->` block for each implementation step.
+2. One bare `<!-- frame-slice -->` block for each implementation step, addressed by its `step_id: s{N}` field.
 3. A coverage manifest section with `ac-refs-by-slice:` mapping each slice ID to the acceptance criteria it covers.
 
 For plans with fewer than 3 implementation steps, emit `spine-omitted: plan-too-small` and do not emit any `<!-- frame-spine -->` frame-spine block.
@@ -127,8 +127,8 @@ For plans with fewer than 3 implementation steps, emit `spine-omitted: plan-too-
 Each frame-slice block carries the routing fields plus the step's Requirement Contract content:
 
 ```yaml
-<!-- frame-slice-s{N} -->
-id: s{N}
+<!-- frame-slice -->
+step_id: s{N}
 commit-index: {N}
 provides: [port, ...]
 cycle: N # optional

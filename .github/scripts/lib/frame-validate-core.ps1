@@ -273,50 +273,21 @@ function ConvertFrom-FVPlanSpineBlock {
     param([Parameter(Mandatory)][AllowEmptyString()][string]$SpineBlock)
 
     $canonical = ConvertFrom-FSCSpineYaml -SpineBlock $SpineBlock
-    if ($null -ne $canonical) {
-        $ports = [ordered]@{}
-        foreach ($portName in @($canonical.Ports.Keys)) {
-            $ports[$portName] = [string[]]@($canonical.Ports[$portName] | ForEach-Object { $_.StepId })
-        }
+    if ($null -eq $canonical) { return $null }
 
-        return [PSCustomObject]@{ Ports = $ports }
+    $ports = [ordered]@{}
+    foreach ($portName in @($canonical.Ports.Keys)) {
+        $ports[$portName] = [string[]]@($canonical.Ports[$portName] | ForEach-Object { $_.StepId })
     }
 
-    $normalized = ConvertTo-FVNormalizedText -Text $SpineBlock
-    $portsByName = [ordered]@{}
-    $section = ''
+    return [PSCustomObject]@{ Ports = $ports }
+}
 
-    foreach ($line in @($normalized -split "`n")) {
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+function Test-FVPlanSpineOmittedPlanTooSmall {
+    param([AllowNull()][string]$CommentBody)
 
-        if ($line -match '^ports:\s*$') {
-            $section = 'ports'
-            continue
-        }
-
-        if ($line -match '^slices:\s*$') {
-            $section = 'slices'
-            continue
-        }
-
-        if ($section -ne 'ports') { continue }
-
-        $portMatch = [regex]::Match($line, '^  (?<port>[A-Za-z0-9_-]+):\s*(?<value>\[.*\])\s*$')
-        if (-not $portMatch.Success) { continue }
-
-        $tokens = ConvertFrom-FVInlineList -Value $portMatch.Groups['value'].Value
-        if ($null -eq $tokens) { $tokens = [string[]]@() }
-
-        $stepIds = [System.Collections.Generic.List[string]]::new()
-        foreach ($token in @($tokens)) {
-            $tokenMatch = [regex]::Match($token, '^(?<step>s\d+)(?:#cycle:\d+(?:#terminal)?)?$')
-            if ($tokenMatch.Success) { $stepIds.Add($tokenMatch.Groups['step'].Value) | Out-Null }
-        }
-
-        $portsByName[$portMatch.Groups['port'].Value] = [string[]]$stepIds.ToArray()
-    }
-
-    return [PSCustomObject]@{ Ports = $portsByName }
+    $normalized = ConvertTo-FVNormalizedText -Text $CommentBody
+    return ($normalized -match '(?m)^\s*spine-omitted\s*:\s*plan-too-small\s*$')
 }
 
 function Get-FVPlanAcceptanceCriterionId {
@@ -391,10 +362,18 @@ function Invoke-FVPlanValidate {
     $commentBody = Get-FVPlanCommentText -CommentFile $CommentFile -CommentText $CommentText
     $spineBlock = Get-FSCSpineBlock -CommentBody $commentBody
     if ($null -eq $spineBlock) {
+        if (Test-FVPlanSpineOmittedPlanTooSmall -CommentBody $commentBody) {
+            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail 'spine-omitted: plan-too-small')))
+        }
+
         return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Missing frame-spine block.')))
     }
 
     $spine = ConvertFrom-FVPlanSpineBlock -SpineBlock $spineBlock
+    if ($null -eq $spine) {
+        return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Invalid canonical frame-spine block.')))
+    }
+
     $slices = @(
         foreach ($block in @(Get-FVPlanSliceBlock -CommentBody $commentBody)) {
             ConvertFrom-FVPlanSliceBlock -Block $block

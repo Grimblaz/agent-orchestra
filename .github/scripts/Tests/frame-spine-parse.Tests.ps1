@@ -58,6 +58,16 @@ Describe 'frame spine parser' -Tag 'unit' {
             'cycle: 1'
         ) -join "`n"
 
+        $script:S2ProvidesSliceBlock = @(
+            'id: s2'
+            'provides: [implement-code]'
+            'execution_mode: serial'
+            'rc: GREEN code action'
+            'ac_refs: [AC1, AC2]'
+            'depends_on: []'
+            'cycle: 1'
+        ) -join "`n"
+
         $script:S5SliceBlock = @(
             'step_id: s5'
             'ports: [implement-code]'
@@ -102,6 +112,18 @@ Describe 'frame spine parser' -Tag 'unit' {
             'Trailing issue comment prose.'
         ) -join "`n"
 
+        $script:LookupCommentBody = @(
+            'Issue discussion before the durable handoff.'
+            ''
+            '<!-- frame-spine'
+            $script:CanonicalSpineBlock
+            '-->'
+            ''
+            '<!-- frame-slice'
+            $script:S2ProvidesSliceBlock
+            '-->'
+        ) -join "`n"
+
         $script:GetPortEntries = {
             param(
                 [Parameter(Mandatory)]$ParsedSpine,
@@ -136,6 +158,28 @@ Describe 'frame spine parser' -Tag 'unit' {
             $Token.Cycle | Should -Be $Cycle
             $Token.Terminal | Should -Be $Terminal
         }
+
+        $script:WriteCommentBody = {
+            param([Parameter(Mandatory)][string]$Content)
+
+            $path = Join-Path -Path 'TestDrive:' -ChildPath "frame-spine-comment-$([System.Guid]::NewGuid().ToString('N')).md"
+            Set-Content -Path $path -Value $Content -Encoding utf8NoBOM
+            return $path
+        }
+
+        $script:InvokeLookupCli = {
+            param(
+                [Parameter(Mandatory)][string]$CommentBodyPath,
+                [Parameter(Mandatory)][string]$GeneratedAt,
+                [Parameter(Mandatory)][string]$StepId
+            )
+
+            $output = & pwsh -NoProfile -NonInteractive -File $script:LibFile -Op Lookup -CommentBodyPath $CommentBodyPath -GeneratedAt $GeneratedAt -StepId $StepId 2>&1
+            return [PSCustomObject]@{
+                ExitCode = $LASTEXITCODE
+                Output   = [string](@($output | ForEach-Object { [string]$_ }) -join "`n")
+            }
+        }
     }
 
     It 'ships the in-process frame spine parser library and public function surface' {
@@ -148,7 +192,9 @@ Describe 'frame spine parser' -Tag 'unit' {
                 'Test-FSCCanonicalForm'
                 'ConvertFrom-FSCSpineYaml'
             )) {
-            Get-Command $functionName -ErrorAction SilentlyContinue | Should -Not -BeNullOrEmpty
+            $result = Get-Command $functionName -ErrorAction SilentlyContinue
+            $result | Should -Not -BeNullOrEmpty
+            $null = $result
         }
     }
 
@@ -165,6 +211,22 @@ Describe 'frame spine parser' -Tag 'unit' {
         $sliceBlocks[0] | Should -BeExactly $script:S2SliceBlock
     }
 
+    It 'extracts a bare frame-slice block addressed by id and provides fields' {
+        $commentBody = @(
+            '<!-- frame-slice'
+            $script:S2ProvidesSliceBlock
+            '-->'
+        ) -join "`n"
+
+        $byStepId = @(Get-FSCSliceBlocksByStepId -CommentBody $commentBody -StepId 's2')
+        $byPort = @(Get-FSCSliceBlocksByPort -CommentBody $commentBody -PortName 'implement-code')
+
+        $byStepId | Should -HaveCount 1
+        $byPort | Should -HaveCount 1
+        $byStepId[0] | Should -BeExactly $script:S2ProvidesSliceBlock
+        $byPort[0] | Should -BeExactly $script:S2ProvidesSliceBlock
+    }
+
     It 'extracts every frame-slice block for a port name' {
         $sliceBlocks = @(Get-FSCSliceBlocksByPort -CommentBody $script:CommentBody -PortName 'implement-code')
 
@@ -179,6 +241,35 @@ Describe 'frame spine parser' -Tag 'unit' {
         $parsed | Should -Not -BeNullOrEmpty
         $parsed.CanonicalYaml | Should -BeExactly $script:CanonicalSpineBlock
         Test-FSCCanonicalForm -SpineBlock $script:CanonicalSpineBlock | Should -BeTrue
+    }
+
+    It 'executes the documented lookup CLI and returns the requested slice content' {
+        $commentFile = & $script:WriteCommentBody -Content $script:LookupCommentBody
+
+        $result = & $script:InvokeLookupCli -CommentBodyPath $commentFile -GeneratedAt '2026-05-04T14:30:00Z' -StepId 's2'
+        $lookupExitCode = $result.ExitCode
+        $lookupOutput = $result.Output
+
+        $lookupExitCode | Should -Be 0
+        $lookupOutput | Should -Not -BeNullOrEmpty
+        $lookupOutput | Should -Match 'status:\s*ok'
+        $lookupOutput | Should -Match 'step_id:\s*s2'
+        $lookupOutput | Should -Match 'provides:\s*\[implement-code\]'
+        $null = $result
+    }
+
+    It 'executes the documented lookup CLI and reports stale-spine on generated_at mismatch' {
+        $commentFile = & $script:WriteCommentBody -Content $script:LookupCommentBody
+
+        $result = & $script:InvokeLookupCli -CommentBodyPath $commentFile -GeneratedAt '2026-05-04T14:29:00Z' -StepId 's2'
+        $lookupExitCode = $result.ExitCode
+        $lookupOutput = $result.Output
+
+        $lookupExitCode | Should -Be 0
+        $lookupOutput | Should -Match 'stale-spine'
+        $lookupOutput | Should -Match '2026-05-04T14:29:00Z'
+        $lookupOutput | Should -Match '2026-05-04T14:30:00Z'
+        $null = $result
     }
 
     It 'parses generated_at as ISO-8601 UTC and rejects invalid generated_at gracefully' {
@@ -223,7 +314,9 @@ Describe 'frame spine parser' -Tag 'unit' {
             '    cycle: 1'
         ) -join "`n"
 
-        Test-FSCCanonicalForm -SpineBlock $nonCanonical | Should -BeFalse
+        $result = Test-FSCCanonicalForm -SpineBlock $nonCanonical
+        $result | Should -BeFalse
+        $null = $result
     }
 
     It 'enforces inline list-style syntax for port and slice reference lists' {
@@ -244,7 +337,9 @@ Describe 'frame spine parser' -Tag 'unit' {
             '    cycle: 1'
         ) -join "`n"
 
-        Test-FSCCanonicalForm -SpineBlock $blockListStyle | Should -BeFalse
+        $result = Test-FSCCanonicalForm -SpineBlock $blockListStyle
+        $result | Should -BeFalse
+        $null = $result
     }
 
     It 'returns null instead of throwing for malformed spine YAML' {

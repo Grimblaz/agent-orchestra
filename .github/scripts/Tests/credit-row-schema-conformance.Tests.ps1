@@ -85,15 +85,15 @@ BeforeAll {
 
     function script:Get-CreditField {
         param(
-            [Parameter(Mandatory)]$Credit,
+            [Parameter(Mandatory)]$LedgerRow,
             [Parameter(Mandatory)][string]$Name
         )
 
-        if ($Credit -is [System.Collections.IDictionary]) {
-            return $Credit[$Name]
+        if ($LedgerRow -is [System.Collections.IDictionary]) {
+            return $LedgerRow[$Name]
         }
 
-        $property = $Credit.PSObject.Properties[$Name]
+        $property = $LedgerRow.PSObject.Properties[$Name]
         if ($null -eq $property) {
             return $null
         }
@@ -261,6 +261,33 @@ Describe 'Cycle-aware credit-row builder contract (issue #512 Step 3 / AC7)' -Fo
     }
 }
 
+Describe 'Pipeline metrics v4 schema documentation (issue #512 fallback metrics)' {
+
+    BeforeAll {
+        $script:PipelineMetricsSchemaPath = Join-Path $script:RepoRoot 'frame/pipeline-metrics-v4-schema.md'
+        $script:PipelineMetricsSchema = (Get-Content -Path $script:PipelineMetricsSchemaPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
+    }
+
+    It 'documents optional dispatch fallback metrics and stale-spine count semantics' {
+        $script:PipelineMetricsSchema | Should -Match 'dispatch-fallback-events' `
+            -Because 'v4 schema must name the fallback event container'
+        $script:PipelineMetricsSchema | Should -Match 'spine-stale-fallback-count' `
+            -Because 'v4 schema must name the derived stale-spine counter'
+        $script:PipelineMetricsSchema | Should -Match '(?is)dispatch-fallback-events.{0,220}optional.{0,220}absent when no dispatch fallback' `
+            -Because 'absence is the default when no fallback occurred'
+        $script:PipelineMetricsSchema | Should -Match 'legacy-plan-shape:\s*true' `
+            -Because 'legacy plan fallback event key must be documented'
+        $script:PipelineMetricsSchema | Should -Match 'pre-load-budget-exceeded:\s*true' `
+            -Because 'budget fallback event key must be documented'
+        $script:PipelineMetricsSchema | Should -Match '(?is)stale-spine\[\].{0,260}step.{0,180}reason.{0,220}(generated_at-mismatch|missing-step-id)' `
+            -Because 'stale-spine events must document their event keys and allowed reasons'
+        $script:PipelineMetricsSchema | Should -Match '(?is)spine-stale-fallback-count.{0,420}max\(existing count, observed stale-spine event count\)' `
+            -Because 'the derived count must preserve higher existing values during additive updates'
+        $script:PipelineMetricsSchema | Should -Match '(?is)Dispatch fallback metrics follow the same preservation rule.{0,260}preserve unrelated metrics' `
+            -Because 'fallback metrics must document additive preservation behavior'
+    }
+}
+
 Describe 'Cycle-aware additive merge identity (issue #512 Step 3 / AC7)' {
     It 'preserves separate positive terminal-step rows for the same port' {
         $metricsBlock = @'
@@ -277,10 +304,10 @@ credits:
 '@
 
         $existingCredits = Get-FBDExistingCredits -MetricsBlock $metricsBlock
-        $implementCodeRows = @($existingCredits.Values | Where-Object { [string](script:Get-CreditField -Credit $_ -Name 'port') -eq 'implement-code' })
+        $implementCodeRows = @($existingCredits.Values | Where-Object { [string](script:Get-CreditField -LedgerRow $_ -Name 'port') -eq 'implement-code' })
 
         $implementCodeRows.Count | Should -Be 2 -Because 'additive merge identity is (port, terminal-step-id) for positive Step rows'
-        [int[]]$terminalStepIds = @($implementCodeRows | ForEach-Object { script:Get-CreditField -Credit $_ -Name 'terminal-step-id' })
+        [int[]]$terminalStepIds = @($implementCodeRows | ForEach-Object { script:Get-CreditField -LedgerRow $_ -Name 'terminal-step-id' })
         @($terminalStepIds | Sort-Object) | Should -Be @(1, 2)
     }
 
@@ -298,10 +325,10 @@ credits:
 '@
 
         $existingCredits = Get-FBDExistingCredits -MetricsBlock $metricsBlock
-        $implementTestRows = @($existingCredits.Values | Where-Object { [string](script:Get-CreditField -Credit $_ -Name 'port') -eq 'implement-test' })
+        $implementTestRows = @($existingCredits.Values | Where-Object { [string](script:Get-CreditField -LedgerRow $_ -Name 'port') -eq 'implement-test' })
 
         $implementTestRows.Count | Should -Be 1 -Because 'omitted Step and Step 0 share the legacy (port, 0) identity'
-        script:Get-CreditField -Credit $implementTestRows[0] -Name 'evidence' | Should -Be 'legacy first write' -Because 'legacy/Step 0 additive merge keeps the first writer and does not double-write the port'
+        script:Get-CreditField -LedgerRow $implementTestRows[0] -Name 'evidence' | Should -Be 'legacy first write' -Because 'legacy/Step 0 additive merge keeps the first writer and does not double-write the port'
     }
 }
 

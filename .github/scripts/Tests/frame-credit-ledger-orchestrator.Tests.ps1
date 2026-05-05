@@ -792,6 +792,59 @@ body
             $incompleteRows | Should -HaveCount 0
         }
 
+        It 'reports a matching failed terminal-step credit as the authoritative visible status instead of an earlier passed row' {
+            $spineBlock = @(
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T14:30:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-test: [s3, s5#cycle:2#terminal]'
+                'slices:'
+                '  s3:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: []'
+                '    cycle: 1'
+                '  s5:'
+                '    execution_mode: serial'
+                '    rc: terminal validation'
+                '    ac_refs: [AC7]'
+                '    depends_on: [s3]'
+                '    cycle: 2'
+                '    terminal: true'
+            ) -join "`n"
+            $spineComment = & $script:NewFrameSpineComment -SpineBlock $spineBlock
+            $issueCommentsJson = (@{ comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $prBody = & $script:NewV4PrBodyWithCredits -CreditRows @'
+  - port: implement-test
+    status: passed
+    terminal-step-id: 3
+    evidence: "earlier cycle passed"
+  - port: implement-test
+    status: failed
+    terminal-step-id: 5
+    evidence: "terminal cycle failed"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $combined = "$($result.Stdout)`n$($result.Stderr)"
+            $portRows = @($combined -split "`r?`n" | Where-Object { $_ -match '^\|\s*implement-test\s*\|' })
+
+            $portRows | Should -HaveCount 1
+            $portRows[0] | Should -Match 'failed'
+            $portRows[0] | Should -Match 'terminal cycle failed'
+            $portRows[0] | Should -Not -Match 'earlier cycle passed'
+            $combined | Should -Not -Match 'incomplete-cycle'
+        }
+
         It 'does not report incomplete-cycle rows when the spine has no terminal markers' {
             $spineBlock = @(
                 'spine_schema_version: 1'

@@ -857,6 +857,11 @@ function ConvertTo-FBDAuditYaml {
     foreach ($credit in $AuditSurface.credits) {
         $lines.Add(("  - port: {0}" -f $credit.port))
         $lines.Add(("    status: {0}" -f $credit.status))
+        $terminalStepRaw = Get-FBDPropertyValue -InputObject $credit -Name 'terminal-step-id'
+        $terminalStep = 0
+        if ($null -ne $terminalStepRaw -and [int]::TryParse([string]$terminalStepRaw, [ref]$terminalStep) -and $terminalStep -gt 0) {
+            $lines.Add(("    terminal-step-id: {0}" -f $terminalStep))
+        }
         if ($credit.Contains('block_kind') -and -not [string]::IsNullOrWhiteSpace([string]$credit.block_kind)) {
             $lines.Add(("    block_kind: {0}" -f $credit.block_kind))
         }

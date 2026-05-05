@@ -63,17 +63,18 @@ Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
                 '<!--\s*plan-issue-\{ID\}\s*-->',
                 '<!--\s*frame-spine\b',
                 'spine_schema_version:\s*1',
-                '<!--\s*frame-slice-s\{N\}(?=\s|-->)',
+                '<!--\s*frame-slice\s*-->.{0,160}step_id:\s*s\{N\}',
                 'coverage\s+manifest',
                 'ac-refs-by-slice:'
             ) `
             -Because 'Persist Plan must describe the durable plan comment shape as plan marker, frame-spine schema v1, per-step frame-slice blocks, then AC coverage manifest mapping'
 
-        $script:PersistPlanSection | Should -Match '(?is)(one|a)\s+`?<!--\s*frame-slice-s\{N\}`?.{0,220}(per|for each|each).{0,80}implementation step|(?:per|for each|each).{0,80}implementation step.{0,220}`?<!--\s*frame-slice-s\{N\}`?' -Because 'Issue-Planner must require one frame-slice-s{N} block per implementation step'
+        $script:PersistPlanSection | Should -Match '(?is)(one|a)\s+(?:bare\s+)?`?<!--\s*frame-slice\s*-->`?.{0,220}(per|for each|each).{0,80}implementation step|(?:per|for each|each).{0,80}implementation step.{0,220}`?<!--\s*frame-slice\s*-->`?' -Because 'Issue-Planner must require one bare frame-slice block per implementation step'
+        $script:PersistPlanSection | Should -Match '(?is)frame-slice.{0,180}step_id:\s*s\{N\}' -Because 'Issue-Planner must preserve slice addressability through the step_id field, not the marker suffix'
     }
 
     It 'requires frame-slice guidance to carry routing fields and the step Requirement Contract content' {
-        $sliceGuidancePattern = '(?is)<!--\s*frame-slice-s\{N\}(?=\s|-->).{0,260}id:\s*(?:s\{N\}|\{step-id\}|sN).{0,220}commit-index:\s*(?:\{N\}|N|\d+).{0,220}provides:\s*\[[^\]]*port[^\]]*\].{0,220}(?:cycle:\s*N)?.{0,220}(?:terminal:\s*true)?.{0,220}(?:depends-on:\s*\[[^\]]*step-ids?[^\]]*\])?.{0,260}ac-refs:\s*\[[^\]]*AC[^\]]*\].{0,260}Requirement Contract'
+        $sliceGuidancePattern = '(?is)<!--\s*frame-slice\s*-->.{0,260}step_id:\s*(?:s\{N\}|\{step-id\}|sN).{0,220}commit-index:\s*(?:\{N\}|N|\d+).{0,220}provides:\s*\[[^\]]*port[^\]]*\].{0,220}(?:cycle:\s*N)?.{0,220}(?:terminal:\s*true)?.{0,220}(?:depends-on:\s*\[[^\]]*step-ids?[^\]]*\])?.{0,260}ac-refs:\s*\[[^\]]*AC[^\]]*\].{0,260}Requirement Contract'
 
         $script:PersistPlanSection | Should -Match $sliceGuidancePattern -Because 'each frame-slice block must document id, commit-index, provides, optional cycle/terminal/depends-on, ac-refs, and the original step Requirement Contract content'
     }

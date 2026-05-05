@@ -23,6 +23,15 @@ dispatch-cost-samples:
     bytes: 7421
     rc-conformance: pass
     judge-disposition: accepted
+dispatch-fallback-events:
+  legacy-plan-shape: true
+  pre-load-budget-exceeded: true
+  stale-spine:
+    - step: 10
+      reason: generated_at-mismatch
+    - step: 12
+      reason: missing-step-id
+spine-stale-fallback-count: 2
 credits:
   - port: review
     adapter: standard
@@ -86,6 +95,11 @@ Field notes:
 
 - `frame_version` tracks the frame-specific additive schema independently from the inherited v1-v3 pipeline-metrics history.
 - `dispatch-cost-samples[]` is an additive best-effort instrumentation array for plan-spine dispatch analysis. Each row is keyed by `(step-id, mode)` and carries exactly `step-id`, `mode`, `bytes`, `rc-conformance`, and `judge-disposition`. Enum values: `mode = spine | legacy-fallback | budget-exceeded`; `rc-conformance = pass | fail | not-evaluated`; `judge-disposition = accepted | rejected | deferred | not-evaluated`.
+- `dispatch-fallback-events` is optional and absent when no dispatch fallback was observed. When present, it records additive fallback evidence without affecting enforcement:
+  - `legacy-plan-shape: true` means the plan had no `frame-spine` block, so Code-Conductor dispatched the full plan. Once observed, preserve the `true` flag.
+  - `pre-load-budget-exceeded: true` means the focused context (`frame-spine` + active slice + depth-1 dependencies) exceeded the configured pre-load budget, so Code-Conductor dispatched the full plan. Once observed, preserve the `true` flag.
+  - `stale-spine[]` records each user-approved stale-spine fallback to legacy-shape dispatch. Each event carries `step` (the implementation step identifier or index) and `reason` (`generated_at-mismatch` or `missing-step-id`). Additive updates append newly observed stale fallback events and preserve existing entries.
+- `spine-stale-fallback-count` is optional and absent when no stale-spine fallback event occurred. When present, it is a non-negative integer equal to the number of observed `dispatch-fallback-events.stale-spine[]` entries, except additive updates must never decrement an already-written higher value; use `max(existing count, observed stale-spine event count)`. The field gives report consumers a cheap count without requiring nested event parsing.
 - `credits[]` is the audit ledger. Each entry records a `port`, a frame credit `status`, and brief audit evidence.
 - `credits[].status` uses the explicit enum `passed | failed | skipped | not-applicable | inconclusive | not-persisted`.
   - `not-persisted` is synthesized by the warn-only hook when the sentinel `<!-- review-judge-produced-{PR} -->` is present but no credit row was written. It is never emitted directly as an inline credit.
@@ -111,6 +125,8 @@ When the back-deriver runs against a PR body that already contains a partial v4 
 - **No double-write.** The back-deriver never appends a second row for an identity that already exists in the `credits[]` array.
 
 This ensures forward-emitted rows (from specialist agents or pipeline-entry deferred emission) are preserved as-is while the back-deriver fills the gaps.
+
+Dispatch fallback metrics follow the same preservation rule: add missing fallback event keys or newly observed stale-spine events, preserve unrelated metrics, and never remove or downgrade previously observed fallback evidence.
 
 ## Forward Compatibility
 
