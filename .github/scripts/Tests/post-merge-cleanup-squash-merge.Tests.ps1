@@ -66,6 +66,26 @@ Describe 'post-merge-cleanup.ps1 - squash-merge orphan cleanup (Issue #513)' {
             Set-Content -Path $filePath -Value $Content -Encoding utf8NoBOM
         }
 
+        $script:SetRepoFileExact = {
+            param(
+                [Parameter(Mandatory)]
+                [string]$RepoPath,
+
+                [Parameter(Mandatory)]
+                [string]$RelativePath,
+
+                [Parameter(Mandatory)]
+                [string]$Content
+            )
+
+            $filePath = Join-Path $RepoPath $RelativePath
+            $parentPath = Split-Path -Parent $filePath
+            if (-not (Test-Path -LiteralPath $parentPath)) {
+                New-Item -ItemType Directory -Path $parentPath -Force | Out-Null
+            }
+            [System.IO.File]::WriteAllText($filePath, $Content, [System.Text.UTF8Encoding]::new($false))
+        }
+
         $script:CommitAll = {
             param(
                 [Parameter(Mandatory)]
@@ -149,7 +169,9 @@ exit 64
                 [string]$RepoPath,
 
                 [Parameter(Mandatory)]
-                [string]$BranchName
+                [string]$BranchName,
+
+                [switch]$UseNativeErrorPreference
             )
 
             $shimPath = & $script:NewFailingGhShim -ParentPath $RepoPath
@@ -159,7 +181,15 @@ exit 64
                 $env:PATH = "$shimPath$pathSeparator$script:SavedPath"
                 Push-Location -LiteralPath $RepoPath
                 try {
-                    $scriptOutput = pwsh -NoProfile -NonInteractive -File $script:ScriptFile -OrphanBranches $BranchName 2>&1
+                    if ($UseNativeErrorPreference) {
+                        $escapedScriptFile = $script:ScriptFile.Replace("'", "''")
+                        $escapedBranchName = $BranchName.Replace("'", "''")
+                        $command = "`$PSNativeCommandUseErrorActionPreference = `$true; & '$escapedScriptFile' -OrphanBranches '$escapedBranchName'"
+                        $scriptOutput = pwsh -NoProfile -NonInteractive -Command $command 2>&1
+                    }
+                    else {
+                        $scriptOutput = pwsh -NoProfile -NonInteractive -File $script:ScriptFile -OrphanBranches $BranchName 2>&1
+                    }
                     $exitCode = $LASTEXITCODE
                 }
                 finally {
@@ -214,7 +244,7 @@ exit 64
         $env:PATH = $script:SavedPath
     }
 
-    It 'deletes a squash-merged orphan branch whose branch commits are tree-equivalent to main' {
+    It 'deletes a squash-merged orphan branch through branch deletion fallback when native command error preference is enabled' {
         $repoPath = & $script:NewSyntheticRepo -Name 'squash-merged-orphan'
         $branch = 'pester-temp/issue-513-squash-merged'
 
@@ -232,13 +262,63 @@ exit 64
         & $script:PushMain -RepoPath $repoPath
 
         (& $script:TestTreeEquivalentToMain -RepoPath $repoPath -BranchName $branch) | Should -BeTrue -Because 'the squash fixture must model a branch whose final tree is already on main'
+        & git -C $repoPath merge-base --is-ancestor $branch main 2>$null
+        $LASTEXITCODE | Should -Not -Be 0 -Because 'the squash fixture must require git branch -d to fall back to forced deletion'
+
+        $result = & $script:InvokeCleanup -RepoPath $repoPath -BranchName $branch -UseNativeErrorPreference
+
+        $result.ExitCode | Should -Be 0 -Because 'expected git branch -d failure must not abort cleanup when the native command error preference is true'
+        (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'tree-equivalent squash-merged branches are safe orphans and should be deleted'
+        $result.Output | Should -Match ([regex]::Escape("Deleted 1 orphan branch(es): $branch"))
+        $result.GhCalls | Should -HaveCount 0 -Because 'squash detection must stay local and offline'
+    }
+
+    It 'deletes an accumulated squash-merged orphan after main advances' {
+        $repoPath = & $script:NewSyntheticRepo -Name 'advanced-main-squash-orphan'
+        $branch = 'pester-temp/issue-513-advanced-main-squash'
+
+        & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', '-b', $branch) | Out-Null
+        & $script:SetRepoFile -RepoPath $repoPath -RelativePath 'feature.txt' -Content "feature value`n"
+        & $script:CommitAll -RepoPath $repoPath -Message 'feature commit'
+
+        & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
+        & $script:InvokeGit -RepoPath $repoPath -Arguments @('merge', '--squash', $branch) | Out-Null
+        & $script:CommitAll -RepoPath $repoPath -Message 'squash feature'
+        & $script:SetRepoFile -RepoPath $repoPath -RelativePath 'unrelated.txt' -Content "main advanced`n"
+        & $script:CommitAll -RepoPath $repoPath -Message 'advance main after squash'
+        & $script:PushMain -RepoPath $repoPath
+
+        (& $script:TestTreeEquivalentToMain -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'the branch tree no longer equals the current remote default after main advances'
 
         $result = & $script:InvokeCleanup -RepoPath $repoPath -BranchName $branch
 
         $result.ExitCode | Should -Be 0
-        (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'tree-equivalent squash-merged branches are safe orphans and should be deleted'
+        (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'merge-tree no-op detection should delete accumulated squash branches after main advances'
         $result.Output | Should -Match ([regex]::Escape("Deleted 1 orphan branch(es): $branch"))
-        $result.GhCalls | Should -HaveCount 0 -Because 'squash detection must stay local and offline'
+        $result.GhCalls | Should -HaveCount 0 -Because 'advanced-main squash detection must stay local and offline'
+    }
+
+    It 'deletes a branch whose only difference from main is CR at EOL' {
+        $repoPath = & $script:NewSyntheticRepo -Name 'crlf-only-orphan'
+        $branch = 'pester-temp/issue-513-crlf-only'
+
+        & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', '-b', $branch) | Out-Null
+        & $script:SetRepoFileExact -RepoPath $repoPath -RelativePath 'line-endings.txt' -Content "one`r`ntwo`r`n"
+        & $script:CommitAll -RepoPath $repoPath -Message 'add CRLF content'
+
+        & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
+        & $script:SetRepoFileExact -RepoPath $repoPath -RelativePath 'line-endings.txt' -Content "one`ntwo`n"
+        & $script:CommitAll -RepoPath $repoPath -Message 'add LF equivalent content'
+        & $script:PushMain -RepoPath $repoPath
+
+        (& $script:TestTreeEquivalentToMain -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'the fixture must differ at the byte level without --ignore-cr-at-eol'
+
+        $result = & $script:InvokeCleanup -RepoPath $repoPath -BranchName $branch
+
+        $result.ExitCode | Should -Be 0
+        (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because '--ignore-cr-at-eol should classify CRLF-only differences as safe'
+        $result.Output | Should -Match ([regex]::Escape("Deleted 1 orphan branch(es): $branch"))
+        $result.GhCalls | Should -HaveCount 0 -Because 'CRLF-only detection should not require GitHub'
     }
 
     It 'skips a genuinely unmerged orphan branch with a non-empty tree diff' {
@@ -260,6 +340,26 @@ exit 64
         $result.Output | Should -Match ([regex]::Escape("Skipped '$branch'"))
         $result.Output | Should -Match 'unmerged commits'
         $result.GhCalls | Should -HaveCount 0 -Because 'unmerged detection should not require GitHub'
+    }
+
+    It 'skips a genuinely unmerged branch when native command error preference is enabled' {
+        $repoPath = & $script:NewSyntheticRepo -Name 'native-command-preference-unmerged'
+        $branch = 'pester-temp/issue-513-native-pref-unmerged'
+
+        & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', '-b', $branch) | Out-Null
+        & $script:SetRepoFile -RepoPath $repoPath -RelativePath 'native-pref-unmerged.txt' -Content "work not on main`n"
+        & $script:CommitAll -RepoPath $repoPath -Message 'native preference unmerged work'
+        & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
+        & $script:PushMain -RepoPath $repoPath
+
+        (& $script:TestTreeEquivalentToMain -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'git diff exit 1 is ordinary unmerged control flow in this fixture'
+
+        $result = & $script:InvokeCleanup -RepoPath $repoPath -BranchName $branch -UseNativeErrorPreference
+
+        $result.ExitCode | Should -Be 0 -Because 'expected non-zero native exits should not abort cleanup when the preference is true'
+        (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeTrue -Because 'genuinely unmerged work must still be preserved'
+        $result.Output | Should -Match ([regex]::Escape("Skipped '$branch'"))
+        $result.Output | Should -Match 'unmerged commits'
     }
 
     It 'deletes a rebase-merged orphan branch whose patches are already on main' {

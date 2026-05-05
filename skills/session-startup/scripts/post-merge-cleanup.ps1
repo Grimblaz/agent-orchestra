@@ -116,11 +116,11 @@ function Remove-OrphanBranch {
     }
 
     # Prefer -d (safe); escalate to -D only after re-confirming merged
-    git branch -d $Branch 2>$null
+    Invoke-SCDNativeCommand { git branch -d $Branch 2>$null }
     if ($LASTEXITCODE -ne 0) {
         # Re-confirm still merged before forcing
         if (Test-BranchMergedIntoDefault -BranchName $Branch -DefaultBranch $DefaultBranch) {
-            git branch -D $Branch 2>$null
+            Invoke-SCDNativeCommand { git branch -D $Branch 2>$null }
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "Failed to delete orphan branch '$Branch' (exit $LASTEXITCODE)"
                 return
@@ -152,9 +152,9 @@ function Remove-SiblingWorktree {
 
     # G2: Resolve branch name. Try the in-worktree query first; fall back to the
     # porcelain worktree list if the directory is missing or detached (prunable).
-    $worktreeBranch = git -C $WorktreePath branch --show-current 2>$null
+    $worktreeBranch = Invoke-SCDNativeCommand { git -C $WorktreePath branch --show-current 2>$null }
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($worktreeBranch)) {
-        $porcelain = git worktree list --porcelain 2>$null
+        $porcelain = Invoke-SCDNativeCommand { git worktree list --porcelain 2>$null }
         if ($LASTEXITCODE -eq 0 -and $porcelain) {
             $blocks = ($porcelain -join "`n") -split "`n`n+"
             foreach ($block in $blocks) {
@@ -189,14 +189,14 @@ function Remove-SiblingWorktree {
     # C5: Try non-force removal first. Only escalate to --force when the worktree
     # is prunable (directory deleted) or already gone — never silently --force
     # over a worktree with uncommitted changes.
-    git worktree remove $WorktreePath 2>$null
+    Invoke-SCDNativeCommand { git worktree remove $WorktreePath 2>$null }
     if ($LASTEXITCODE -ne 0) {
         $shouldForce = $false
         if (-not (Test-Path $WorktreePath)) {
             $shouldForce = $true  # directory missing => prunable
         } else {
             # Check porcelain output for 'prunable' or 'locked' markers
-            $porcelainCheck = git worktree list --porcelain 2>$null
+            $porcelainCheck = Invoke-SCDNativeCommand { git worktree list --porcelain 2>$null }
             if ($LASTEXITCODE -eq 0 -and $porcelainCheck) {
                 $blocks2 = ($porcelainCheck -join "`n") -split "`n`n+"
                 foreach ($block in $blocks2) {
@@ -216,7 +216,7 @@ function Remove-SiblingWorktree {
             }
         }
         if ($shouldForce) {
-            git worktree remove --force $WorktreePath 2>$null
+            Invoke-SCDNativeCommand { git worktree remove --force $WorktreePath 2>$null }
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "Failed to remove worktree '$WorktreePath' even with --force (exit $LASTEXITCODE)"
                 return
@@ -227,10 +227,10 @@ function Remove-SiblingWorktree {
         }
     }
 
-    git branch -d $worktreeBranch 2>$null
+    Invoke-SCDNativeCommand { git branch -d $worktreeBranch 2>$null }
     if ($LASTEXITCODE -ne 0) {
         if (Test-BranchMergedIntoDefault -BranchName $worktreeBranch -DefaultBranch $DefaultBranch) {
-            git branch -D $worktreeBranch 2>$null
+            Invoke-SCDNativeCommand { git branch -D $worktreeBranch 2>$null }
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "Failed to delete branch '$worktreeBranch' after worktree removal"
                 return
@@ -253,13 +253,22 @@ if ($null -ne $IssueNumber) {
 }
 
 # Fetch to refresh remote refs; fail-open on error
-git fetch origin --prune 2>$null
+Invoke-SCDNativeCommand { git fetch origin --prune 2>$null }
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "Fetch failed (exit $LASTEXITCODE) — proceeding with cached refs; some merged-status checks may be stale"
 }
 
 # Determine default branch defensively (try multiple strategies before assuming 'main')
 $defaultBranch = Get-SCDDefaultBranch
+$remoteDefaultRef = Get-RemoteDefaultRef -DefaultBranch $defaultBranch
+$remoteDefaultParts = $remoteDefaultRef -split '/', 2
+if ($remoteDefaultParts.Count -eq 2 -and $remoteDefaultParts[0] -ne 'origin') {
+    $upstreamRemote = $remoteDefaultParts[0]
+    Invoke-SCDNativeCommand { git fetch $upstreamRemote --prune 2>$null }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Fetch failed for remote '$upstreamRemote' (exit $LASTEXITCODE) — proceeding with cached refs; some merged-status checks may be stale"
+    }
+}
 
 # ── Orphan branch cleanup ──────────────────────────────────────────────────
 $deletedOrphanCount = 0
@@ -285,7 +294,7 @@ if ($deletedSiblingCount -gt 0) {
 $archivedUntaggedCount = 0
 if ($UntaggedTrackingFiles.Count -gt 0) {
     # G3: Anchor on the repo root so behavior is independent of the script's CWD.
-    $repoRoot = (git rev-parse --show-toplevel 2>$null)
+    $repoRoot = (Invoke-SCDNativeCommand { git rev-parse --show-toplevel 2>$null })
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoRoot)) {
         $repoRoot = (Get-Location).Path
     } else {
