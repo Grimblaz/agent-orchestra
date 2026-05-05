@@ -129,36 +129,36 @@ function Get-FrameCreditLedgerAdapters {
     if (Test-Path -LiteralPath $agentsDir -PathType Container) {
         try {
             Get-ChildItem -LiteralPath $agentsDir -Recurse -File -Filter '*.agent.md' -ErrorAction Stop |
-                ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
+            ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
         }
-        catch { }
+        catch { $null = $_ }
     }
 
     $skillsDir = Join-Path $RepoRoot 'skills'
     if (Test-Path -LiteralPath $skillsDir -PathType Container) {
         try {
             Get-ChildItem -LiteralPath $skillsDir -Recurse -File -Filter 'SKILL.md' -ErrorAction Stop |
-                ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
+            ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
         }
-        catch { }
+        catch { $null = $_ }
         try {
             # skills/**/adapters/*.md
             Get-ChildItem -LiteralPath $skillsDir -Recurse -Directory -Filter 'adapters' -ErrorAction Stop |
-                ForEach-Object {
-                    Get-ChildItem -LiteralPath $_.FullName -File -Filter '*.md' -ErrorAction SilentlyContinue |
-                        ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
-                    }
+            ForEach-Object {
+                Get-ChildItem -LiteralPath $_.FullName -File -Filter '*.md' -ErrorAction SilentlyContinue |
+                ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
+            }
         }
-        catch { }
+        catch { $null = $_ }
     }
 
     $commandsDir = Join-Path $RepoRoot 'commands'
     if (Test-Path -LiteralPath $commandsDir -PathType Container) {
         try {
             Get-ChildItem -LiteralPath $commandsDir -Recurse -File -Filter '*.md' -ErrorAction Stop |
-                ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
+            ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
         }
-        catch { }
+        catch { $null = $_ }
     }
 
     foreach ($path in $candidatePaths) {
@@ -183,13 +183,13 @@ function Get-FrameCreditLedgerAdapters {
             # so the entry carries the correct port name.
             if (-not (script:Test-FCLYamlSane -Text $fm)) {
                 $results.Add([pscustomobject]@{
-                    Path              = $path
-                    Name              = "<malformed:$([System.IO.Path]::GetFileNameWithoutExtension($path))>"
-                    Provides          = $providesValue
-                    AppliesWhen       = $null
-                    SuggestedNextStep = $null
-                    ParseError        = 'malformed-frontmatter'
-                }) | Out-Null
+                        Path              = $path
+                        Name              = "<malformed:$([System.IO.Path]::GetFileNameWithoutExtension($path))>"
+                        Provides          = $providesValue
+                        AppliesWhen       = $null
+                        SuggestedNextStep = $null
+                        ParseError        = 'malformed-frontmatter'
+                    }) | Out-Null
                 continue
             }
 
@@ -251,6 +251,7 @@ function Get-FrameCreditLedgerBaseRefOid {
                 }
             }
             catch {
+                $null = $_
                 # parse failure - fall through to next attempt
             }
         }
@@ -609,8 +610,8 @@ function script:Resolve-FCLIncompleteCycleReports {
             if ($seen.ContainsKey($key)) { continue }
             $seen[$key] = $true
 
-                    $matchingCredit = @($LedgerRows | Where-Object {
-                        [string]$_.Port -eq $portName -and (script:Get-FCLCreditTerminalStepId -LedgerRow $_) -eq $stepNumber
+            $matchingCredit = @($LedgerRows | Where-Object {
+                    [string]$_.Port -eq $portName -and (script:Get-FCLCreditTerminalStepId -LedgerRow $_) -eq $stepNumber
                 }) | Select-Object -First 1
 
             if ($null -ne $matchingCredit) { continue }
@@ -778,6 +779,27 @@ function script:Update-FCLPrBodyMetricsBestEffort {
             [Console]::Error.WriteLine("frame-credit-ledger: temporary PR body file cleanup failed: $($_.Exception.Message)")
         }
     }
+}
+
+function Update-FCLPrBodyDispatchCostSamples {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][string]$StepId,
+        [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
+        [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance,
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition
+    )
+
+    $updateParameters = @{
+        PrBody = $PrBody
+        StepId = $StepId
+        Mode   = $Mode
+    }
+    if ($PSBoundParameters.ContainsKey('RcConformance')) { $updateParameters['RcConformance'] = $RcConformance }
+    if ($PSBoundParameters.ContainsKey('JudgeDisposition')) { $updateParameters['JudgeDisposition'] = $JudgeDisposition }
+
+    return Update-DispatchCostSampleEvaluationInPrBody @updateParameters
 }
 
 # ---------------------------------------------------------------------------
@@ -1119,7 +1141,7 @@ if (-not $isDotSourced) {
                 $entry = New-Object System.Management.Automation.Runspaces.SessionStateFunctionEntry($fn.Name, $fn.Definition)
                 $iss.Commands.Add($entry)
             }
-            catch { }
+            catch { $null = $_ }
         }
 
         # Copy global variables (e.g. $global:GhCallLog used by the test mock).
@@ -1145,7 +1167,7 @@ if (-not $isDotSourced) {
                 $entry = New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry($v.Name, $v.Value, '')
                 $iss.Variables.Add($entry)
             }
-            catch { }
+            catch { $null = $_ }
         }
 
         $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
@@ -1183,12 +1205,12 @@ if (-not $isDotSourced) {
             }
             # Mirror stderr from the worker.
             foreach ($errRecord in $worker.Streams.Error) {
-                try { [Console]::Error.WriteLine([string]$errRecord) } catch { }
+                try { [Console]::Error.WriteLine([string]$errRecord) } catch { $null = $_ }
             }
         }
         else {
             # Budget exceeded — abort the worker and fail open.
-            try { $worker.Stop() } catch { }
+            try { $worker.Stop() } catch { $null = $_ }
             [Console]::Error.WriteLine("frame-credit-ledger: ${budgetSeconds}s budget exceeded; warn-mode fail-open (no comment posted)")
             # Warn-mode invariant: never block PR creation on timeout. In
             # enforce mode the test still expects exit 0 on timeout (warn
@@ -1197,8 +1219,8 @@ if (-not $isDotSourced) {
             $exitCode = 0
         }
 
-        try { $worker.Dispose() } catch { }
-        try { $rs.Close(); $rs.Dispose() } catch { }
+        try { $worker.Dispose() } catch { $null = $_ }
+        try { $rs.Close(); $rs.Dispose() } catch { $null = $_ }
 
         if ($null -ne $result) {
             $resultHash = $null

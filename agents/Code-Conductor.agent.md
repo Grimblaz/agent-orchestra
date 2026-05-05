@@ -273,6 +273,7 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
    - Identify applicable skills from the skill mapping table
    - Build the specialist dispatch context before the tool call:
      - For spine-bearing plans, dispatch context includes the `<!-- frame-spine ... -->` block, the active step's `<!-- frame-slice ... -->` block, and only depth-1 `depends-on` slices resolved against the spine.
+       - Best-effort instrumentation: at dispatch time, upsert one `dispatch-cost-samples` placeholder in the PR-body `pipeline-metrics` block keyed by `(step-id, mode)` with byte count and `not-evaluated` evaluation fields; after the RC conformance gate, back-fill that same sample's `rc-conformance` value without rewriting unrelated metrics.
        - For spine-bearing dispatches, stale spine evidence must not silently fall back. If `generated_at` is stale after F2.2 hash-elision, or a slice references a step id not present in the spine, use `#tool:vscode/askQuestions` with exactly these visible option labels: `Re-emit spine via /plan amendment` (recommended) / `Continue this dispatch under legacy-shape (full plan)`. If the user continues under legacy shape, dispatch the full plan and record the stale-spine fallback event in PR-body pipeline metrics.
    - For legacy plans without a frame-spine block, dispatch the full plan and record a visible PR-body pipeline metrics event under dispatch-fallback-events: legacy-plan-shape: true.
    - The focused context budget defaults to `8 KB` and may be tuned with `frame.dispatch.maxSliceContextKB`. When the frame-spine, active slice, and depth-1 depends-on slices exceed that context budget, dispatch the full plan and record dispatch-fallback-events: pre-load-budget-exceeded: true.
@@ -423,6 +424,8 @@ For v4 release-hygiene credit row construction (state-file reading, YAML example
 <!-- TODO: remove legacy v3 pipeline-metrics fallback at v2.9.0 when pre-v4 back-catalog backfill is confirmed complete (issue #441). -->
 
 For v4 review credit row construction (parsing judge-rulings block, determining pass/fail status, building the credit row), follow `skills/calibration-pipeline/references/review-credit-emission.md`.
+
+Dispatch-cost samples are additive v4 instrumentation owned by Code-Conductor: emit placeholders during specialist dispatch and back-fill RC conformance after the RC gate; judge disposition may be back-filled later by the judge only for the targeted `(step-id, mode)` sample.
 
 ### Pipeline-Entry Credit Harvest (SMC-17)
 

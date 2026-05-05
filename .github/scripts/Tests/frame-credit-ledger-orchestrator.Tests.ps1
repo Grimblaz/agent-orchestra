@@ -175,7 +175,7 @@ exit `$LASTEXITCODE
 
         $waited = $proc.WaitForExit($TimeoutSeconds * 1000)
         if (-not $waited) {
-            try { $proc.Kill($true) } catch {}
+            try { $proc.Kill($true) } catch { $null = $_ }
             $stopwatch.Stop()
             return @{
                 ExitCode        = -1
@@ -324,7 +324,7 @@ function global:gh {
     }
 
     $script:NewV4PrBodyWithCredits = {
-        param([Parameter(Mandatory)][string]$CreditRows)
+        param([Parameter(Mandatory)][Alias('CreditRows')][string]$LedgerRows)
 
         return @"
 ## Summary
@@ -335,7 +335,7 @@ Spine-backed PR body.
 metrics_version: 4
 frame_version: 1
 credits:
-$CreditRows
+$LedgerRows
 integrity_checks:
   - check: marker-presence
     status: passed
@@ -346,7 +346,7 @@ integrity_checks:
     $script:NewV4PrBodyWithFallbackMetrics = {
         param(
             [Parameter(Mandatory)][AllowEmptyString()][string]$MetricsPrelude,
-            [Parameter(Mandatory)][string]$CreditRows
+            [Parameter(Mandatory)][Alias('CreditRows')][string]$LedgerRows
         )
 
         return @"
@@ -359,7 +359,7 @@ metrics_version: 4
 frame_version: 1
 $MetricsPrelude
 credits:
-$CreditRows
+$LedgerRows
 integrity_checks:
   - check: marker-presence
     status: passed
@@ -924,6 +924,47 @@ dispatch-fallback-events:
             $updatedBody | Should -Not -BeNullOrEmpty -Because 'additive PR-body metrics updates must preserve previously observed stale-spine fallback counts'
             $updatedBody | Should -Match '(?m)^spine-stale-fallback-count:\s*5\s*$'
             $updatedBody | Should -Not -Match '(?m)^spine-stale-fallback-count:\s*[0-4]\s*$'
+        }
+    }
+
+    Context 'Issue #512 dispatch-cost-samples PR-body metrics' {
+
+        It 'back-fills dispatch-cost-samples during the best-effort PR-body metrics pass and preserves existing fields' {
+            if (-not (Test-Path $script:OrchestratorPath)) {
+                throw "RED: orchestrator not found at $script:OrchestratorPath"
+            }
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+
+            $body = & $script:NewV4PrBodyWithFallbackMetrics `
+                -MetricsPrelude @'
+dispatch-cost-samples:
+  - step-id: s12
+    mode: spine
+    bytes: 7421
+    rc-conformance: not-evaluated
+    judge-disposition: not-evaluated
+'@ `
+                -CreditRows @'
+  - port: implement-test
+    status: passed
+    terminal-step-id: 12
+    evidence: "RC conformance passed"
+  - port: review
+    status: passed
+    evidence: "judge accepted"
+'@
+
+            $command = Get-Command Update-FCLPrBodyDispatchCostSamples -ErrorAction SilentlyContinue
+            $command | Should -Not -BeNullOrEmpty
+
+            $updated = & $command -PrBody $body -StepId 's12' -Mode 'spine' -RcConformance 'pass' -JudgeDisposition 'accepted'
+            $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+
+            $normalized | Should -Match '(?ms)- step-id: s12\n    mode: spine\n    bytes: 7421\n    rc-conformance: pass\n    judge-disposition: accepted'
+            $normalized | Should -Match '(?m)^metrics_version:\s*4\s*$'
+            $normalized | Should -Match '(?m)^frame_version:\s*1\s*$'
+            $normalized | Should -Match '(?m)^credits:\s*$'
+            $normalized | Should -Match '(?m)^integrity_checks:\s*$'
         }
     }
 

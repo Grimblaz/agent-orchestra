@@ -17,6 +17,12 @@ The v4 extension adds these fields alongside the inherited v3 block:
 ```yaml
 metrics_version: 4
 frame_version: 1
+dispatch-cost-samples:
+  - step-id: s12
+    mode: spine
+    bytes: 7421
+    rc-conformance: pass
+    judge-disposition: accepted
 credits:
   - port: review
     adapter: standard
@@ -79,6 +85,7 @@ integrity_checks:
 Field notes:
 
 - `frame_version` tracks the frame-specific additive schema independently from the inherited v1-v3 pipeline-metrics history.
+- `dispatch-cost-samples[]` is an additive best-effort instrumentation array for plan-spine dispatch analysis. Each row is keyed by `(step-id, mode)` and carries exactly `step-id`, `mode`, `bytes`, `rc-conformance`, and `judge-disposition`. Enum values: `mode = spine | legacy-fallback | budget-exceeded`; `rc-conformance = pass | fail | not-evaluated`; `judge-disposition = accepted | rejected | deferred | not-evaluated`.
 - `credits[]` is the audit ledger. Each entry records a `port`, a frame credit `status`, and brief audit evidence.
 - `credits[].status` uses the explicit enum `passed | failed | skipped | not-applicable | inconclusive | not-persisted`.
   - `not-persisted` is synthesized by the warn-only hook when the sentinel `<!-- review-judge-produced-{PR} -->` is present but no credit row was written. It is never emitted directly as an inline credit.

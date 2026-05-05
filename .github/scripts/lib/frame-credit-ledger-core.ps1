@@ -14,8 +14,8 @@
                                            PR comment body into structured finding objects
       - Get-PortFiles                     : enumerate frame/ports/*.yaml as objects
       - Resolve-PortStatus                : classify a single port given adapters + credit
-      - Compose-Comment                   : render the warn-mode unified per-port table report
-      - Compose-CommentWithCostPattern    : wrapper around Compose-Comment that appends the
+    - Compose-Comment                   : render the warn-mode unified per-port table report
+    - Compose-CommentWithCostPattern    : wrapper around Compose-Comment that appends the
                                            cost telemetry section (issue #467) when non-empty
       - Compose-PreV4ShortCircuitComment  : render the literal pre-v4 short-circuit text
 
@@ -346,6 +346,191 @@ function script:Get-FCLChunkKeyMap {
     return $map
 }
 
+function script:ConvertTo-FCLScalarValue {
+    param([AllowEmptyString()][string]$Value)
+
+    $normalizedValue = $Value.Trim()
+    if ($normalizedValue.Length -ge 2) {
+        $first = $normalizedValue[0]
+        $last = $normalizedValue[$normalizedValue.Length - 1]
+        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+            $normalizedValue = $normalizedValue.Substring(1, $normalizedValue.Length - 2)
+        }
+    }
+
+    return $normalizedValue
+}
+
+function script:Get-FCLDispatchCostSampleKeysAndValues {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Chunk)
+
+    $keyOrder = [System.Collections.Generic.List[string]]::new()
+    $values = @{}
+
+    foreach ($line in @($Chunk -split "`n")) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+        $trimmed = $line.TrimStart()
+        if ($trimmed.StartsWith('#')) { continue }
+        if ($trimmed -eq '-') { continue }
+        if ($trimmed.StartsWith('- ')) {
+            $trimmed = $trimmed.Substring(2).TrimStart()
+        }
+
+        $keyValueMatch = [regex]::Match($trimmed, '^(?<key>[A-Za-z0-9_-]+)\s*:\s*(?<value>.*)$')
+        if (-not $keyValueMatch.Success) {
+            throw 'row contains a non key/value line'
+        }
+
+        $fieldName = $keyValueMatch.Groups['key'].Value
+        $fieldValue = script:ConvertTo-FCLScalarValue -Value $keyValueMatch.Groups['value'].Value
+        [void]$keyOrder.Add($fieldName)
+        $values[$fieldName] = $fieldValue
+    }
+
+    return [pscustomobject]@{
+        KeyOrder = $keyOrder.ToArray()
+        Values   = $values
+    }
+}
+
+function script:ConvertFrom-FCLDispatchCostSampleChunk {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Chunk)
+
+    $requiredKeys = @('step-id', 'mode', 'bytes', 'rc-conformance', 'judge-disposition')
+    $modeValues = @('spine', 'legacy-fallback', 'budget-exceeded')
+    $rcConformanceValues = @('pass', 'fail', 'not-evaluated')
+    $judgeDispositionValues = @('accepted', 'rejected', 'deferred', 'not-evaluated')
+
+    $parsed = script:Get-FCLDispatchCostSampleKeysAndValues -Chunk $Chunk
+    $keyOrder = @($parsed.KeyOrder)
+    if ($keyOrder.Count -ne $requiredKeys.Count) {
+        throw 'row must contain exactly step-id, mode, bytes, rc-conformance, judge-disposition'
+    }
+
+    for ($keyIndex = 0; $keyIndex -lt $requiredKeys.Count; $keyIndex++) {
+        if ($keyOrder[$keyIndex] -ne $requiredKeys[$keyIndex]) {
+            throw 'row keys must be exactly step-id, mode, bytes, rc-conformance, judge-disposition in that order'
+        }
+    }
+
+    $values = $parsed.Values
+    foreach ($requiredKey in $requiredKeys) {
+        if (-not $values.ContainsKey($requiredKey) -or [string]::IsNullOrWhiteSpace([string]$values[$requiredKey])) {
+            throw "row is missing $requiredKey"
+        }
+    }
+
+    if ($modeValues -notcontains [string]$values['mode']) {
+        throw 'mode must be spine, legacy-fallback, or budget-exceeded'
+    }
+    if ($rcConformanceValues -notcontains [string]$values['rc-conformance']) {
+        throw 'rc-conformance must be pass, fail, or not-evaluated'
+    }
+    if ($judgeDispositionValues -notcontains [string]$values['judge-disposition']) {
+        throw 'judge-disposition must be accepted, rejected, deferred, or not-evaluated'
+    }
+
+    $bytesValue = 0
+    if (-not [int]::TryParse([string]$values['bytes'], [ref]$bytesValue)) {
+        throw 'bytes must be an integer'
+    }
+
+    return New-DispatchCostSampleRow `
+        -StepId ([string]$values['step-id']) `
+        -Mode ([string]$values['mode']) `
+        -Bytes $bytesValue `
+        -RcConformance ([string]$values['rc-conformance']) `
+        -JudgeDisposition ([string]$values['judge-disposition'])
+}
+
+function script:Set-FCLDispatchCostSamplesSection {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$MetricsBlock,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Samples
+    )
+
+    $eol = if ($MetricsBlock.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $normalized = $MetricsBlock -replace "`r`n", "`n" -replace "`r", "`n"
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in @($normalized -split "`n")) { [void]$lines.Add($line) }
+
+    $sectionStart = -1
+    $sectionEnd = -1
+    $sectionIndent = 0
+    for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex++) {
+        $sectionMatch = [regex]::Match($lines[$lineIndex], '^(?<indent>\s*)dispatch-cost-samples\s*:\s*$')
+        if ($sectionMatch.Success) {
+            $sectionStart = $lineIndex
+            $sectionIndent = $sectionMatch.Groups['indent'].Value.Length
+            break
+        }
+    }
+
+    if ($sectionStart -ge 0) {
+        $sectionEnd = $lines.Count
+        for ($lineIndex = $sectionStart + 1; $lineIndex -lt $lines.Count; $lineIndex++) {
+            $line = $lines[$lineIndex]
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+            $trimmed = $line.TrimStart()
+            $indent = $line.Length - $trimmed.Length
+            if ($indent -le $sectionIndent -and -not $trimmed.StartsWith('#')) {
+                $sectionEnd = $lineIndex
+                break
+            }
+        }
+
+        for ($lineIndex = $sectionEnd - 1; $lineIndex -ge $sectionStart; $lineIndex--) {
+            $lines.RemoveAt($lineIndex)
+        }
+    }
+
+    if (@($Samples).Count -eq 0) {
+        return ($lines.ToArray() -join $eol)
+    }
+
+    $sectionLines = [System.Collections.Generic.List[string]]::new()
+    [void]$sectionLines.Add('dispatch-cost-samples:')
+    foreach ($sample in @($Samples)) {
+        [void]$sectionLines.Add("  - step-id: $($sample.'step-id')")
+        [void]$sectionLines.Add("    mode: $($sample.mode)")
+        [void]$sectionLines.Add("    bytes: $($sample.bytes)")
+        [void]$sectionLines.Add("    rc-conformance: $($sample.'rc-conformance')")
+        [void]$sectionLines.Add("    judge-disposition: $($sample.'judge-disposition')")
+    }
+
+    $insertIndex = if ($sectionStart -ge 0) { $sectionStart } else { $lines.Count }
+    if ($sectionStart -lt 0) {
+        while ($insertIndex -gt 0 -and [string]::IsNullOrWhiteSpace($lines[$insertIndex - 1])) {
+            $insertIndex--
+        }
+    }
+
+    for ($sectionLineIndex = 0; $sectionLineIndex -lt $sectionLines.Count; $sectionLineIndex++) {
+        $lines.Insert($insertIndex + $sectionLineIndex, $sectionLines[$sectionLineIndex])
+    }
+
+    return ($lines.ToArray() -join $eol)
+}
+
+function script:Set-FCLDispatchCostSamplesInPrBody {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Samples
+    )
+
+    $match = [regex]::Match($PrBody, '(?s)(?<open><!--\s*pipeline-metrics\s*)(?<block>.*?)(?<close>\s*-->)')
+    if (-not $match.Success) { return $PrBody }
+
+    $updatedBlock = script:Set-FCLDispatchCostSamplesSection -MetricsBlock $match.Groups['block'].Value -Samples $Samples
+    $prefix = $PrBody.Substring(0, $match.Index)
+    $suffixStart = $match.Index + $match.Length
+    $suffix = $PrBody.Substring($suffixStart)
+
+    return $prefix + $match.Groups['open'].Value + $updatedBlock + $match.Groups['close'].Value + $suffix
+}
+
 # endregion ---------------------------------------------------------------------
 
 # region: shared port-report helpers --------------------------------------------
@@ -513,11 +698,26 @@ function Read-PRMetricsBlock {
                 }
             })
 
+        [string[]]$dispatchCostSampleChunks = script:Get-FCLEntryChunks -Block $block -SectionName 'dispatch-cost-samples'
+        if ($null -eq $dispatchCostSampleChunks) { $dispatchCostSampleChunks = [string[]]@() }
+
+        $dispatchCostSampleList = [System.Collections.Generic.List[object]]::new()
+        foreach ($dispatchCostSampleChunk in @($dispatchCostSampleChunks)) {
+            try {
+                [void]$dispatchCostSampleList.Add((script:ConvertFrom-FCLDispatchCostSampleChunk -Chunk $dispatchCostSampleChunk))
+            }
+            catch {
+                throw "dispatch-cost-samples: $($_.Exception.Message)"
+            }
+        }
+        $dispatchCostSamples = @($dispatchCostSampleList.ToArray())
+
         return [pscustomobject]@{
-            MetricsVersion  = 4
-            FrameVersion    = $frameVersion
-            Credits         = $credits
-            IntegrityChecks = $integrityChecks
+            MetricsVersion      = 4
+            FrameVersion        = $frameVersion
+            Credits             = $credits
+            IntegrityChecks     = $integrityChecks
+            DispatchCostSamples = $dispatchCostSamples
         }
     }
     catch {
@@ -608,6 +808,112 @@ function Resolve-NotPersistedSynthesis {
         Status  = 'not-persisted'
         Evidence = $evidence
     }
+}
+
+function New-DispatchCostSampleRow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$StepId,
+        [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
+        [Parameter(Mandatory)][int]$Bytes,
+        [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance = 'not-evaluated',
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition = 'not-evaluated'
+    )
+
+    return [pscustomobject][ordered]@{
+        'step-id'           = $StepId
+        mode                = $Mode
+        bytes               = $Bytes
+        'rc-conformance'    = $RcConformance
+        'judge-disposition' = $JudgeDisposition
+    }
+}
+
+function Add-DispatchCostSampleToPrBody {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][string]$StepId,
+        [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
+        [Parameter(Mandatory)][int]$Bytes,
+        [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance = 'not-evaluated',
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition = 'not-evaluated'
+    )
+
+    $metrics = Read-PRMetricsBlock -PrBody $PrBody
+    if ($null -eq $metrics -or $metrics.MetricsVersion -ne 4) { return $PrBody }
+
+    $samples = [System.Collections.Generic.List[object]]::new()
+    foreach ($sample in @($metrics.DispatchCostSamples)) { [void]$samples.Add($sample) }
+
+    $existingIndex = -1
+    for ($sampleIndex = 0; $sampleIndex -lt $samples.Count; $sampleIndex++) {
+        $sample = $samples[$sampleIndex]
+        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode) {
+            $existingIndex = $sampleIndex
+            break
+        }
+    }
+
+    if ($existingIndex -ge 0) {
+        $existingSample = $samples[$existingIndex]
+        $samples[$existingIndex] = New-DispatchCostSampleRow `
+            -StepId $StepId `
+            -Mode $Mode `
+            -Bytes $Bytes `
+            -RcConformance ([string]$existingSample.'rc-conformance') `
+            -JudgeDisposition ([string]$existingSample.'judge-disposition')
+    }
+    else {
+        [void]$samples.Add((New-DispatchCostSampleRow `
+                    -StepId $StepId `
+                    -Mode $Mode `
+                    -Bytes $Bytes `
+                    -RcConformance $RcConformance `
+                    -JudgeDisposition $JudgeDisposition))
+    }
+
+    return script:Set-FCLDispatchCostSamplesInPrBody -PrBody $PrBody -Samples $samples.ToArray()
+}
+
+function Update-DispatchCostSampleEvaluationInPrBody {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][string]$StepId,
+        [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
+        [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance,
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition
+    )
+
+    $metrics = Read-PRMetricsBlock -PrBody $PrBody
+    if ($null -eq $metrics -or $metrics.MetricsVersion -ne 4) { return $PrBody }
+
+    $samples = [System.Collections.Generic.List[object]]::new()
+    $updated = $false
+    foreach ($sample in @($metrics.DispatchCostSamples)) {
+        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode) {
+            $updatedRcConformance = [string]$sample.'rc-conformance'
+            $updatedJudgeDisposition = [string]$sample.'judge-disposition'
+            if ($PSBoundParameters.ContainsKey('RcConformance')) { $updatedRcConformance = $RcConformance }
+            if ($PSBoundParameters.ContainsKey('JudgeDisposition')) { $updatedJudgeDisposition = $JudgeDisposition }
+
+            [void]$samples.Add((New-DispatchCostSampleRow `
+                        -StepId ([string]$sample.'step-id') `
+                        -Mode ([string]$sample.mode) `
+                        -Bytes ([int]$sample.bytes) `
+                        -RcConformance $updatedRcConformance `
+                        -JudgeDisposition $updatedJudgeDisposition))
+            $updated = $true
+        }
+        else {
+            [void]$samples.Add($sample)
+        }
+    }
+
+    if (-not $updated) { return $PrBody }
+
+    return script:Set-FCLDispatchCostSamplesInPrBody -PrBody $PrBody -Samples $samples.ToArray()
 }
 
 # ---------------------------------------------------------------------------
@@ -779,12 +1085,12 @@ function Build-ReviewCreditRow {
 function Select-LastCreditByRunIndex {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Credits,
+        [Parameter(Mandatory)][Alias('Credits')][AllowEmptyCollection()][object[]]$LedgerRows,
         [Parameter(Mandatory)][string]$Port,
         [AllowEmptyString()][string]$Adapter = ''
     )
 
-    $pool = @($Credits | Where-Object { [string]$_.Port -eq $Port })
+    $pool = @($LedgerRows | Where-Object { [string]$_.Port -eq $Port })
     if (-not [string]::IsNullOrWhiteSpace($Adapter)) {
         $pool = @($pool | Where-Object { [string]$_.Adapter -eq $Adapter })
     }
@@ -856,7 +1162,7 @@ function Resolve-PortStatus {
         [Parameter(Mandatory)]$Port,
         $WorkAdapters,
         $ApplicableMap,
-        $Credit
+        [Alias('Credit')]$LedgerRow
     )
 
     $portName = [string]$Port.Name
@@ -923,7 +1229,7 @@ function Resolve-PortStatus {
     }
 
     # 2) Adapter discovery failed: all-unknown AND no credit.
-    if ($adapters.Count -gt 0 -and $null -eq $Credit -and ($applicabilities | Where-Object { $_ -ne 'unknown' }).Count -eq 0) {
+    if ($adapters.Count -gt 0 -and $null -eq $LedgerRow -and ($applicabilities | Where-Object { $_ -ne 'unknown' }).Count -eq 0) {
         return [pscustomobject]@{
             PortName          = $portName
             Status            = 'Inconclusive'
@@ -944,11 +1250,11 @@ function Resolve-PortStatus {
     }
 
     # 3) Credit branch.
-    if ($null -ne $Credit) {
-        $creditStatus = [string]$Credit.Status
+    if ($null -ne $LedgerRow) {
+        $creditStatus = [string]$LedgerRow.Status
         $evidence = ''
-        if ($null -ne $Credit.PSObject.Properties['Evidence']) {
-            $evidence = [string]$Credit.Evidence
+        if ($null -ne $LedgerRow.PSObject.Properties['Evidence']) {
+            $evidence = [string]$LedgerRow.Evidence
         }
         $applicableAdapterName = if ($firstApplicableAdapter) { [string]$firstApplicableAdapter.Name } else { '' }
 
@@ -1018,6 +1324,7 @@ function Resolve-PortStatus {
 }
 
 function Compose-Comment {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MarkerToken,
@@ -1112,6 +1419,7 @@ function Compose-Comment {
 }
 
 function Compose-CommentWithCostPattern {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MarkerToken,
@@ -1128,6 +1436,7 @@ function Compose-CommentWithCostPattern {
 }
 
 function Compose-PreV4ShortCircuitComment {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$MarkerToken)
 
@@ -1150,6 +1459,7 @@ function Compose-PreV4ShortCircuitComment {
 # pre-v4 (block exists, version != 4) and missing-marker (no block at all);
 # emitted when Read-PRMetricsBlock returns MetricsVersion='parse-error'.
 function Compose-ParseErrorShortCircuitComment {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MarkerToken,
@@ -1183,6 +1493,7 @@ function Compose-ParseErrorShortCircuitComment {
 # pipeline-metrics marker block at all (Read-PRMetricsBlock returned $null).
 # Distinct from pre-v4 and parse-error.
 function Compose-MissingMetricsShortCircuitComment {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$MarkerToken)
 
@@ -1679,7 +1990,7 @@ function Invoke-CreditInputHarvest {
         'plan'       = 'Build-PlanCreditRow'
     }
 
-    function script:Parse-SingleCreditInputMarker {
+    function script:ConvertFrom-SingleCreditInputMarker {
         param([string]$Text)
 
         if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
@@ -1721,7 +2032,7 @@ function Invoke-CreditInputHarvest {
     # Build lookup from in-memory markers (port → payload hashtable)
     $inMemoryByPort = @{}
     foreach ($markerText in $InMemoryMarkers) {
-        $parsed = script:Parse-SingleCreditInputMarker -Text $markerText
+        $parsed = script:ConvertFrom-SingleCreditInputMarker -Text $markerText
         if ($null -ne $parsed -and $parsed.ContainsKey('port')) {
             $inMemoryByPort[$parsed['port']] = $parsed
         }
@@ -1758,7 +2069,7 @@ function Invoke-CreditInputHarvest {
             $creditComment = $comments | Where-Object { $_ -like "*$creditMarkerPrefix*" } | Select-Object -First 1
 
             if ($null -ne $creditComment) {
-                $payload = script:Parse-SingleCreditInputMarker -Text $creditComment
+                $payload = script:ConvertFrom-SingleCreditInputMarker -Text $creditComment
                 break
             }
 
