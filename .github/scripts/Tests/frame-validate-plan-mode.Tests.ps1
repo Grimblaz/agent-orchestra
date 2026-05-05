@@ -15,7 +15,11 @@ Describe 'Frame validator plan mode CLI' -Tag 'unit' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CliFile = Join-Path $script:RepoRoot '.github/scripts/frame-validate.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github/scripts/lib/frame-validate-core.ps1'
+
+        if (Test-Path $script:LibFile) {
+            . $script:LibFile
+        }
 
         $script:InvokeFrameValidateCli = {
             param(
@@ -23,16 +27,34 @@ Describe 'Frame validator plan mode CLI' -Tag 'unit' {
                 [AllowNull()][string]$InputText
             )
 
-            if ($PSBoundParameters.ContainsKey('InputText')) {
-                $output = $InputText | & pwsh -NoProfile -NonInteractive -File $script:CliFile @Arguments 2>&1
-            }
-            else {
-                $output = & pwsh -NoProfile -NonInteractive -File $script:CliFile @Arguments 2>&1
+            $invokeParameters = @{}
+            for ($index = 0; $index -lt @($Arguments).Count; $index += 2) {
+                $name = [string]$Arguments[$index]
+                $value = if (($index + 1) -lt @($Arguments).Count) { [string]$Arguments[$index + 1] } else { '' }
+                switch ($name) {
+                    '-Mode' { $invokeParameters['Mode'] = $value }
+                    '-CommentFile' { $invokeParameters['CommentFile'] = (Resolve-Path -LiteralPath $value).ProviderPath }
+                    '-RootPath' { $invokeParameters['RootPath'] = $value }
+                    default { throw "Unsupported frame-validate test argument '$name'." }
+                }
             }
 
+            if ($PSBoundParameters.ContainsKey('InputText')) {
+                $invokeParameters['CommentText'] = $InputText
+            }
+
+            $validateResult = Invoke-FrameValidate @invokeParameters
+            $outputLines = [System.Collections.Generic.List[string]]::new()
+            foreach ($check in @($validateResult.Results)) {
+                $prefix = if ($check.Passed) { '[PASS]' } else { '[FAIL]' }
+                $detail = if ($check.Detail) { " - $($check.Detail)" } else { '' }
+                $outputLines.Add("$prefix $($check.Name)$detail") | Out-Null
+            }
+            $outputLines.Add("Frame-validate: $($validateResult.PassCount)/$($validateResult.TotalCount) checks passed") | Out-Null
+
             return [PSCustomObject]@{
-                ExitCode = $LASTEXITCODE
-                Output   = [string](@($output | ForEach-Object { [string]$_ }) -join "`n")
+                ExitCode = [int]$validateResult.ExitCode
+                Output   = [string](@($outputLines.ToArray()) -join "`n")
             }
         }
 

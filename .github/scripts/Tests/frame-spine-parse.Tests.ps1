@@ -174,10 +174,11 @@ Describe 'frame spine parser' -Tag 'unit' {
                 [Parameter(Mandatory)][string]$StepId
             )
 
-            $output = & pwsh -NoProfile -NonInteractive -File $script:LibFile -Op Lookup -CommentBodyPath $CommentBodyPath -GeneratedAt $GeneratedAt -StepId $StepId 2>&1
+            $resolvedCommentBodyPath = (Resolve-Path -LiteralPath $CommentBodyPath).ProviderPath
+            $lookupResult = Invoke-FSCCommand -Op Lookup -CommentBodyPath $resolvedCommentBodyPath -GeneratedAt $GeneratedAt -StepId $StepId
             return [PSCustomObject]@{
-                ExitCode = $LASTEXITCODE
-                Output   = [string](@($output | ForEach-Object { [string]$_ }) -join "`n")
+                ExitCode = [int]$lookupResult.ExitCode
+                Output   = [string](@($lookupResult.Lines | ForEach-Object { [string]$_ }) -join "`n")
             }
         }
     }

@@ -356,7 +356,7 @@ function Test-FSCCanonicalForm {
     if ($null -eq $parsed) { return $false }
 
     $portKeys = [string[]]$parsed.Metadata.PortKeys
-    $sortedPortKeys = [string[]]$portKeys.Clone()
+    $sortedPortKeys = [string[]]@($portKeys)
     [array]::Sort($sortedPortKeys, [System.StringComparer]::Ordinal)
     if (-not (script:Test-FSCStringSequenceEqual -Left $portKeys -Right $sortedPortKeys)) {
         return $false
