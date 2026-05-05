@@ -1,8 +1,23 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Shared frame adapter discovery and lightweight frontmatter parsing helpers.
+    Shared frame adapter discovery, lightweight frontmatter parsing helpers, and predicate evaluator surface.
 #>
+
+$script:FrameSharedDiscoveryLibDir = if ($PSCommandPath) { Split-Path -Parent $PSCommandPath } else { $PSScriptRoot }
+$script:FrameSharedPredicateCorePath = Join-Path -Path $script:FrameSharedDiscoveryLibDir -ChildPath 'frame-predicate-core.ps1'
+$script:FrameSharedPredicateSurface = New-Module -Name 'FrameSharedPredicateSurface' -ArgumentList $script:FrameSharedPredicateCorePath -ScriptBlock {
+    param([Parameter(Mandatory)][string]$PredicateCorePath)
+
+    . $PredicateCorePath
+
+    Export-ModuleMember -Function @(
+        'ConvertTo-FVPredicate',
+        'Test-FVParseError',
+        'Test-FVPredicateAgainstChangeset'
+    )
+}
+Import-Module $script:FrameSharedPredicateSurface -Global -Force
 
 function Get-FrameAdapterFile {
     param([Parameter(Mandatory)][string]$RootPath)

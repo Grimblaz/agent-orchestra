@@ -6,7 +6,6 @@
 
 $script:FVLibDir = Split-Path -Parent $PSCommandPath
 . (Join-Path -Path $script:FVLibDir -ChildPath 'frame-shared-discovery.ps1')
-. (Join-Path -Path $script:FVLibDir -ChildPath 'frame-predicate-core.ps1')
 
 function New-FVCheckResult {
     param(

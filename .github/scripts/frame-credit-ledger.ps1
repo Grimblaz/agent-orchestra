@@ -46,7 +46,7 @@ $script:WarnModeOnly = ($Mode -eq 'warn')
 # fail-open semantics would be bypassed. We wrap here to preserve them.)
 # ---------------------------------------------------------------------------
 try {
-    . (Join-Path $PSScriptRoot 'lib/frame-predicate-core.ps1')
+    . (Join-Path $PSScriptRoot 'lib/frame-shared-discovery.ps1')
     . (Join-Path $PSScriptRoot 'lib/find-or-upsert-comment.ps1')
     . (Join-Path $PSScriptRoot 'lib/frame-credit-ledger-core.ps1')
 }
