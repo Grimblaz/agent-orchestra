@@ -147,6 +147,7 @@ After posting the `<!-- plan-issue-{ID} -->` GitHub issue comment, immediately p
 
 ````markdown
 <!-- credit-input-plan-{ISSUE_NUMBER} -->
+
 ```yaml
 port: plan
 adapter: work-adapter

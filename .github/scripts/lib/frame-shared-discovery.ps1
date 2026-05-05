@@ -19,6 +19,24 @@ $script:FrameSharedPredicateSurface = New-Module -Name 'FrameSharedPredicateSurf
 }
 Import-Module $script:FrameSharedPredicateSurface -Global -Force
 
+function Get-FramePortFileStem {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$PortsDir)
+
+    if ([string]::IsNullOrWhiteSpace($PortsDir) -or -not (Test-Path -LiteralPath $PortsDir -PathType Container)) {
+        return , [string[]]@()
+    }
+
+    try {
+        return , [string[]]@(Get-ChildItem -LiteralPath $PortsDir -Filter '*.yaml' -File -ErrorAction Stop |
+            Sort-Object -Property BaseName |
+            ForEach-Object { [string]$_.BaseName })
+    }
+    catch {
+        return , [string[]]@()
+    }
+}
+
 function Get-FrameAdapterFile {
     param([Parameter(Mandatory)][string]$RootPath)
 

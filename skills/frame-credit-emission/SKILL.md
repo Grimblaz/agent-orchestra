@@ -62,8 +62,8 @@ Pre-PR agents (`agent-pre-pr` locus category) use credit-input markers for defer
 ```
 
 ```yaml
-port: {port}
-adapter: {adapter-name}
+port: { port }
+adapter: { adapter-name }
 evidence: "{human-readable evidence string}"
 ```
 
@@ -84,7 +84,7 @@ CE Gate surfaces are evaluated independently. Each surface's credit row is its o
 1. **Predicate evaluation**: For each surface (`cli`, `browser`, `canvas`, `api`), evaluate the surface-touch predicate (`changeset.touches{Surface}Surface()`).
 2. **Surface exercise or N/A**: If the predicate is true, exercise the surface and capture evidence. If false, emit `status: not-applicable`.
 3. **Credit emission**: Call `Build-CeGateCreditRow -Surface {name} -Step {terminal-step-id}` with the surface-specific evidence and upsert the credit row.
-4. **Orchestration-failure handling** *(planned - wrapper not yet implemented)*: when the orchestration wrapper ships, a crash after partial evaluation will cause it to emit the remaining-surface credits as `status: inconclusive` with `block_kind: orchestration` and `evidence: "orchestration crashed before surface evaluated"`. Until then, manually emit missing-surface rows on crash.
+4. **Orchestration-failure handling** _(planned - wrapper not yet implemented)_: when the orchestration wrapper ships, a crash after partial evaluation will cause it to emit the remaining-surface credits as `status: inconclusive` with `block_kind: orchestration` and `evidence: "orchestration crashed before surface evaluated"`. Until then, manually emit missing-surface rows on crash.
 
 Cycle-aware emission uses `(port, terminal-step-id)` as the additive-merge identity for positive terminal steps. Every `Build-*CreditRow` function accepts optional `-Step`; omit it or pass `0` only for legacy plans and `spine-omitted: plan-too-small` plans, where the row keeps the legacy `(port, 0)` identity. For a spine-backed plan, pass the positive step number from the terminal slice marked for that port. Multiple rows for the same port may coexist only when their positive `terminal-step-id` values differ; an existing row with the same `(port, terminal-step-id)` wins and must not be overwritten.
 

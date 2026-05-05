@@ -128,7 +128,7 @@ Spine port values must use flow-style inline lists. Cycle tokens use `sN[#cycle:
 
 ```markdown
 ---
-spine-omitted: {omit unless plan-too-small}
+spine-omitted: { omit unless plan-too-small }
 ---
 
 ## Plan: {Title (2-10 words)}
@@ -155,21 +155,21 @@ slices:
 1. {Action with file path links and `symbol` refs}
    - Execution Mode: {serial | parallel}
    - Requirement Contract: acceptance-criteria slice; invariants/edge cases; non-goals.
-<!-- frame-slice
-id: s1
-provides: [{port}]
-depends-on: []
-ac-refs: [AC#]
--->
+   <!-- frame-slice
+   id: s1
+   provides: [{port}]
+   depends-on: []
+   ac-refs: [AC#]
+   -->
 2. {Next step}
    - Execution Mode: {serial | parallel}
    - Requirement Contract: ...
-<!-- frame-slice
-id: s2
-provides: [{port}]
-depends-on: [s1]
-ac-refs: [AC#]
--->
+   <!-- frame-slice
+   id: s2
+   provides: [{port}]
+   depends-on: [s1]
+   ac-refs: [AC#]
+   -->
 
 **Verification**
 {How to test: commands, tests, manual checks}
@@ -249,6 +249,6 @@ If discovery becomes long or tool-heavy, compact before drafting. Preserve the k
 
 ## Frame Ports Filled By This Skill
 
-| Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
-| --- | --- | --- | --- |
+| Port   | Work adapter                                                         | Auto-N/A adapter                                     | Explicit-skip adapter                                            |
+| ------ | -------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------- |
 | `plan` | [agents/Issue-Planner.agent.md](../../agents/Issue-Planner.agent.md) | [adapters/auto-na-plan.md](adapters/auto-na-plan.md) | [adapters/explicit-skip-plan.md](adapters/explicit-skip-plan.md) |

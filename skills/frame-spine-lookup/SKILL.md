@@ -110,7 +110,7 @@ contract unless a future test proves the grants drifted.
 
 ## Gotchas
 
-| Trigger | Gotcha | Fix |
-| --- | --- | --- |
-| Specialist sees a stale slice | Continuing from old context can apply the wrong requirement contract | Return control to Conductor for re-dispatch |
-| Comment id is available | Searching issue comments can select an older plan marker | Fetch `gh api repos/{owner}/{repo}/issues/comments/{id}` directly |
+| Trigger                       | Gotcha                                                               | Fix                                                               |
+| ----------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Specialist sees a stale slice | Continuing from old context can apply the wrong requirement contract | Return control to Conductor for re-dispatch                       |
+| Comment id is available       | Searching issue comments can select an older plan marker             | Fetch `gh api repos/{owner}/{repo}/issues/comments/{id}` directly |
