@@ -155,6 +155,8 @@ Skip hub mode entirely when the user invokes a specific slash command (e.g., `/i
 
 When Code-Conductor is invoked via a slash command that skips hub mode and carries `$ARGUMENTS` as a free-text task, such as `/code-conductor [text]`, classify the task using the existing prose-trigger and specialist-dispatch logic. Trigger phrases are matched against the leading-token group of `$ARGUMENTS` (not as arbitrary mid-string substrings) in longest-phrase-first order, consistent with the design D6 best-effort prose-trigger semantics: `github review`, `review github`, or `cr review` (any of the canonical line-338 GitHub-trigger phrases) enter the GitHub intake path per `## Review Reconciliation Loop (Mandatory)`; bare `review` (when no GitHub-trigger phrase is the leading token group) enters the Review Reconciliation Loop for local code review; otherwise route via the specialist-dispatch table per `## Agent Selection`.
 
+Direct `/code-conductor [prose task]` remains legacy/no-spine for #512 v1; prose-plan spine support is deferred to #516.
+
 ### Scope Classification Gate
 
 Before calling any upstream agent, classify the issue scope to determine the appropriate pipeline tier. Use `#tool:vscode/askQuestions` with your analysis and recommendation.
@@ -250,6 +252,8 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
 4. **Plan naming**: Use `plan-bundle-{primary}-{secondary1}-{secondaryN}` (e.g., `plan-bundle-163-164-165`), where primary is the first issue listed in the invocation and secondaries follow in invocation order. Save to session memory at `/memories/session/plan-bundle-{primary}-{secondary1}-{secondaryN}.md`. At bundle D9, "Continue implementation" stays session-memory-only; "Pause here — I'll resume with `/implement`" compares the current bundle plan and each issue's current design snapshot against the latest matching marker comments after normalizing away transport-only formatting drift (for example line-ending normalization and trailing newlines/whitespace), then appends `<!-- plan-issue-{ID} -->` / `<!-- design-issue-{ID} -->` comments only for issues whose durable handoff artifact is missing or whose normalized content changed.
 5. **Completion markers**: Track completion markers per-issue. When an issue's acceptance criteria are fully addressed, post its completion marker comment.
 6. **Single-issue flow is unaffected**: These rules apply only when multiple issues are bundled in a single invocation.
+
+Bundle-specific frame-spine semantics are deferred to #515; #512 v1 spine behavior is single-issue only.
 
 ### Hub Execution Workflow
 
