@@ -116,16 +116,43 @@ ce_gate: { true|false }
 
 Add `escalation_recommended: true` and `escalation_reason` when scope exceeds the issue's stated scope.
 
+For any platform path that writes or re-emits the approved SMC-01 `<!-- plan-issue-{ID} -->` comment, keep the legacy plan frontmatter and step body readable by existing consumers, then append the frame routing blocks inside that same comment in this order:
+
+1. `<!-- frame-spine -->` with `spine_schema_version: 1` and a `generated_at` value set at plan creation time.
+2. One `<!-- frame-slice-s{N} -->` block for each implementation step.
+3. A coverage manifest section with `ac-refs-by-slice:` mapping each slice ID to the acceptance criteria it covers.
+
+For plans with fewer than 3 implementation steps, emit `spine-omitted: plan-too-small` and do not emit any `<!-- frame-spine -->` frame-spine block.
+
+Each frame-slice block carries the routing fields plus the step's Requirement Contract content:
+
+```yaml
+<!-- frame-slice-s{N} -->
+id: s{N}
+commit-index: {N}
+provides: [port, ...]
+cycle: N # optional
+terminal: true # optional
+depends-on: [step-ids] # optional
+ac-refs: [AC, ...]
+requirement-contract: |
+  {Step Requirement Contract content}
+```
+
+Set `generated_at` when the spine is first created, preserve `generated_at` across same-content re-emissions, and treat it as transport metadata rather than substantive plan content. D9 normalized comparison hash-elides `generated_at`: it ignores `generated_at` when hashing so identical content does not append duplicate comments.
+
+The spine, slices, and coverage manifest are append-only guidance around the existing plan shape: legacy consumers can continue reading the YAML frontmatter and plan steps without understanding frame blocks.
+
 After posting the `<!-- plan-issue-{ID} -->` GitHub issue comment, immediately post a credit-input marker comment (SMC-17 deferred-emission):
 
-```markdown
+````markdown
 <!-- credit-input-plan-{ISSUE_NUMBER} -->
 ```yaml
 port: plan
 adapter: work-adapter
 evidence: "issue #{ISSUE_NUMBER}; plan-issue marker posted"
 ```
-```
+````
 
 Retain the comment text returned by the post call so Code-Conductor harvest can use the `-InMemoryMarkers` fallback. After the credit-input comment is posted, stop — do not take any further action in this turn.
 
