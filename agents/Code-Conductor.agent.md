@@ -271,6 +271,11 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
 3. **Execute Each Step**:
    - Identify appropriate specialist agent (see Agent Selection below)
    - Identify applicable skills from the skill mapping table
+   - Build the specialist dispatch context before the tool call:
+     - For spine-bearing plans, dispatch context includes the `<!-- frame-spine ... -->` block, the active step's `<!-- frame-slice ... -->` block, and only depth-1 `depends-on` slices resolved against the spine.
+   - For legacy plans without a frame-spine block, dispatch the full plan and record a visible PR-body pipeline metrics event under dispatch-fallback-events: legacy-plan-shape: true.
+   - The focused context budget defaults to `8 KB` and may be tuned with `frame.dispatch.maxSliceContextKB`. When the frame-spine, active slice, and depth-1 depends-on slices exceed that context budget, dispatch the full plan and record dispatch-fallback-events: pre-load-budget-exceeded: true.
+     - For spine-bearing dispatches, the visible announcement must explicitly cite `skills/frame-spine-lookup/SKILL.md` so the specialist knows the lookup contract is available for adjacent slices.
    - **ANNOUNCE**: "Calling @{Agent-Name} for {step}..." (BEFORE tool call)
    - Call specialist with focused instructions for the current step only (not the entire plan)
    - **Spot-check**: Use grep_search or read_file to verify key changes
