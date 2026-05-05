@@ -49,6 +49,7 @@ try {
     . (Join-Path $PSScriptRoot 'lib/frame-shared-discovery.ps1')
     . (Join-Path $PSScriptRoot 'lib/find-or-upsert-comment.ps1')
     . (Join-Path $PSScriptRoot 'lib/frame-credit-ledger-core.ps1')
+    . (Join-Path $PSScriptRoot 'lib/frame-spine-core.ps1')
 }
 catch {
     [Console]::Error.WriteLine("frame-credit-ledger: library load failed: $($_.Exception.Message)")
@@ -441,6 +442,194 @@ function Resolve-FrameCreditLedgerApplicableMap {
     return $map
 }
 
+function script:Get-FCLCommentBody {
+    param([AllowNull()]$Comment)
+
+    if ($null -eq $Comment) { return '' }
+    if ($Comment -is [System.Collections.IDictionary] -and $Comment.ContainsKey('body')) { return [string]$Comment['body'] }
+    if ($null -ne $Comment.PSObject.Properties['body']) { return [string]$Comment.body }
+    return ''
+}
+
+function script:Get-FCLFrameSpineComments {
+    param([AllowEmptyCollection()][AllowNull()][object[]]$Comments)
+
+    if ($null -eq $Comments) { return @() }
+    return @($Comments | Where-Object { (script:Get-FCLCommentBody -Comment $_) -match '<!--\s*frame-spine' })
+}
+
+function script:Resolve-FCLLinkedIssueNumber {
+    param(
+        [AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][int]$Pr
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($PrBody)) {
+        $patterns = @(
+            '(?im)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|ref(?:s|erences)?|issue)\s+(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#(?<issue>\d+)\b',
+            '(?im)^\s*issue_id\s*:\s*(?<issue>\d+)\s*$',
+            '(?im)<!--\s*(?:plan|design)-issue-(?<issue>\d+)\s*-->'
+        )
+
+        foreach ($pattern in $patterns) {
+            $match = [regex]::Match($PrBody, $pattern)
+            if (-not $match.Success) { continue }
+
+            $issue = 0
+            if ([int]::TryParse($match.Groups['issue'].Value, [ref]$issue) -and $issue -gt 0) {
+                return $issue
+            }
+        }
+    }
+
+    return $Pr
+}
+
+function script:Get-FCLIssueCommentsForSpine {
+    param([Parameter(Mandatory)][int]$IssueNumber)
+
+    $raw = $null
+    try {
+        $raw = & gh issue view $IssueNumber --json comments 2>$null
+    }
+    catch {
+        return @()
+    }
+
+    if ($null -eq $raw -or $raw -eq '') { return @() }
+
+    try {
+        $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
+        if ($null -ne $parsed -and $null -ne $parsed.comments) {
+            return @($parsed.comments)
+        }
+    }
+    catch {
+        return @()
+    }
+
+    return @()
+}
+
+function script:Get-FCLFrameSpineSourceComments {
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [AllowEmptyString()][string]$PrBody,
+        [AllowEmptyCollection()][AllowNull()][object[]]$PrComments
+    )
+
+    $prSpineComments = @(script:Get-FCLFrameSpineComments -Comments $PrComments)
+    if ($prSpineComments.Count -gt 0) { return $prSpineComments }
+
+    $issueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $PrBody -Pr $Pr
+    $issueComments = @(script:Get-FCLIssueCommentsForSpine -IssueNumber $issueNumber)
+    return @(script:Get-FCLFrameSpineComments -Comments $issueComments)
+}
+
+function script:Get-FCLLatestParsedFrameSpine {
+    param([AllowEmptyCollection()][AllowNull()][object[]]$Comments)
+
+    $spineComments = @(script:Get-FCLFrameSpineComments -Comments $Comments)
+    for ($index = $spineComments.Count - 1; $index -ge 0; $index--) {
+        $body = script:Get-FCLCommentBody -Comment $spineComments[$index]
+        $block = Get-FSCSpineBlock -CommentBody $body
+        if ([string]::IsNullOrWhiteSpace($block)) { continue }
+
+        $parsed = ConvertFrom-FSCSpineYaml -SpineBlock $block
+        if ($null -ne $parsed) { return $parsed }
+    }
+
+    return $null
+}
+
+function script:Get-FCLCreditTerminalStepId {
+    param([AllowNull()]$LedgerRow)
+
+    if ($null -eq $LedgerRow) { return 0 }
+
+    $raw = $null
+    if ($LedgerRow -is [System.Collections.IDictionary]) {
+        if ($LedgerRow.ContainsKey('TerminalStepId')) { $raw = $LedgerRow['TerminalStepId'] }
+        elseif ($LedgerRow.ContainsKey('terminal-step-id')) { $raw = $LedgerRow['terminal-step-id'] }
+    }
+    else {
+        if ($null -ne $LedgerRow.PSObject.Properties['TerminalStepId']) { $raw = $LedgerRow.TerminalStepId }
+        elseif ($null -ne $LedgerRow.PSObject.Properties['terminal-step-id']) { $raw = $LedgerRow.'terminal-step-id' }
+    }
+
+    $step = 0
+    if ($null -ne $raw -and [int]::TryParse([string]$raw, [ref]$step) -and $step -gt 0) {
+        return $step
+    }
+
+    return 0
+}
+
+function script:Resolve-FCLIncompleteCycleReports {
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [AllowEmptyString()][string]$PrBody,
+        [AllowEmptyCollection()][AllowNull()][object[]]$PrComments,
+        [AllowEmptyCollection()][AllowNull()][object[]]$LedgerRows
+    )
+
+    $sourceComments = @(script:Get-FCLFrameSpineSourceComments -Pr $Pr -PrBody $PrBody -PrComments $PrComments)
+    if ($sourceComments.Count -eq 0) { return @() }
+
+    $spine = script:Get-FCLLatestParsedFrameSpine -Comments $sourceComments
+    if ($null -eq $spine -or $null -eq $spine.Ports) { return @() }
+
+    $reports = [System.Collections.Generic.List[object]]::new()
+    $seen = @{}
+
+    $portNames = @()
+    if ($spine.Ports -is [System.Collections.IDictionary]) {
+        $portNames = @($spine.Ports.Keys)
+    }
+    else {
+        $portNames = @($spine.Ports.PSObject.Properties.Name)
+    }
+
+    foreach ($portNameRaw in $portNames) {
+        $portName = [string]$portNameRaw
+        if ([string]::IsNullOrWhiteSpace($portName)) { continue }
+
+        $tokens = if ($spine.Ports -is [System.Collections.IDictionary]) { @($spine.Ports[$portName]) } else { @($spine.Ports.$portName) }
+        foreach ($token in $tokens) {
+            if ($null -eq $token -or $token.Terminal -ne $true) { continue }
+
+            $stepId = [string]$token.StepId
+            $stepMatch = [regex]::Match($stepId, '^s(?<step>\d+)$')
+            if (-not $stepMatch.Success) { continue }
+
+            $stepNumber = [int]$stepMatch.Groups['step'].Value
+            if ($stepNumber -le 0) { continue }
+
+            $key = "$portName::$stepNumber"
+            if ($seen.ContainsKey($key)) { continue }
+            $seen[$key] = $true
+
+                    $matchingCredit = @($LedgerRows | Where-Object {
+                        [string]$_.Port -eq $portName -and (script:Get-FCLCreditTerminalStepId -LedgerRow $_) -eq $stepNumber
+                }) | Select-Object -First 1
+
+            if ($null -ne $matchingCredit) { continue }
+
+            [void]$reports.Add([pscustomobject]@{
+                    PortName          = $portName
+                    Status            = 'NotCovered'
+                    SubReason         = 'IncompleteCycle'
+                    CreditStatus      = 'incomplete-cycle'
+                    AdapterName       = ''
+                    SuggestedNextStep = "Emit the terminal-cycle credit for $portName with terminal-step-id: $stepNumber."
+                    Evidence          = "Frame spine marks terminal step $stepId for $portName, but no credit row with terminal-step-id: $stepNumber is present."
+                })
+        }
+    }
+
+    return $reports.ToArray()
+}
+
 # ---------------------------------------------------------------------------
 # Invoke-FrameCreditLedger
 # ---------------------------------------------------------------------------
@@ -622,6 +811,10 @@ function Invoke-FrameCreditLedger {
             $report = Resolve-PortStatus -Port $synthPort -WorkAdapters @() -ApplicableMap @{} -Credit $credit
             $portReports.Add($report) | Out-Null
         }
+    }
+
+    foreach ($incompleteCycleReport in @(script:Resolve-FCLIncompleteCycleReports -Pr $Pr -PrBody $prBody -PrComments $script:PrComments -LedgerRows $credits)) {
+        $portReports.Add($incompleteCycleReport) | Out-Null
     }
 
     $reportsArray = $portReports.ToArray()

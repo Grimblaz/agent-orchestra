@@ -203,6 +203,7 @@ exit `$LASTEXITCODE
         param(
             [string]$BaseRefOidJson = '{"baseRefOid":"abc123"}',
             [string]$BodyJson = $null,
+            [string]$IssueCommentsJson = '{"comments":[]}',
             [int]$BaseRefAttemptsBeforeSuccess = 0,
             [bool]$HangOnBaseRef = $false,
             [string]$ExtraDeclarations = ''
@@ -250,7 +251,7 @@ function global:gh {
 
     if (`$joined -match 'issue view \d+ --json comments') {
         `$global:LASTEXITCODE = 0
-        return '{"comments":[]}'
+        return '$IssueCommentsJson'
     }
 
     if (`$joined -match '(issue|pr) comment \d+ --body') {
@@ -278,6 +279,41 @@ function global:gh {
     return ''
 }
 "@
+    }
+
+    $script:NewV4PrBodyWithCredits = {
+        param([Parameter(Mandatory)][string]$CreditRows)
+
+        return @"
+## Summary
+
+Spine-backed PR body.
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits:
+$CreditRows
+integrity_checks:
+  - check: marker-presence
+    status: passed
+-->
+"@
+    }
+
+    $script:NewFrameSpineComment = {
+        param([Parameter(Mandatory)][string]$SpineBlock)
+
+        $commentBody = @(
+            '<!-- frame-spine'
+            $SpineBlock
+            '-->'
+        ) -join "`n"
+
+        return [pscustomobject]@{
+            body = $commentBody
+            url  = 'https://github.com/example/example/issues/512#issuecomment-spine'
+        }
     }
 }
 
@@ -594,6 +630,138 @@ body
         }
     }
 
+    Context 'Issue #512 incomplete cycle detection from terminal spine markers' {
+
+        It 'reports an incomplete-cycle row when a terminal-marked spine port has no matching terminal credit' {
+            $spineBlock = @(
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T14:30:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-test: [s4#cycle:2#terminal]'
+                'slices:'
+                '  s4:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: []'
+                '    cycle: 2'
+                '    terminal: true'
+            ) -join "`n"
+            $spineComment = & $script:NewFrameSpineComment -SpineBlock $spineBlock
+            $issueCommentsJson = (@{ comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $prBody = & $script:NewV4PrBodyWithCredits -CreditRows @'
+  - port: review
+    status: passed
+    evidence: "review complete"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $combined = "$($result.Stdout)`n$($result.Stderr)"
+            $incompleteRows = @($combined -split "`r?`n" | Where-Object {
+                    $_ -match '^\|\s*implement-test\s*\|' -and $_ -match 'incomplete-cycle'
+                })
+
+            $incompleteRows | Should -HaveCount 1
+            $incompleteRows[0] | Should -Match 's4|terminal-step-id\s*:?\s*4'
+        }
+
+        It 'does not report incomplete-cycle when a later terminal cycle has a matching terminal-step-id credit' {
+            $spineBlock = @(
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T14:30:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-test: [s2, s5#cycle:2#terminal]'
+                'slices:'
+                '  s2:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: []'
+                '    cycle: 1'
+                '  s5:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: [s2]'
+                '    cycle: 2'
+                '    terminal: true'
+            ) -join "`n"
+            $spineComment = & $script:NewFrameSpineComment -SpineBlock $spineBlock
+            $issueCommentsJson = (@{ comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $prBody = & $script:NewV4PrBodyWithCredits -CreditRows @'
+  - port: implement-test
+    status: passed
+    terminal-step-id: 5
+    evidence: "tests passed for terminal cycle"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $combined = "$($result.Stdout)`n$($result.Stderr)"
+            $incompleteRows = @($combined -split "`r?`n" | Where-Object { $_ -match 'incomplete-cycle' })
+
+            $incompleteRows | Should -HaveCount 0
+        }
+
+        It 'does not report incomplete-cycle rows when the spine has no terminal markers' {
+            $spineBlock = @(
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T14:30:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-test: [s2, s5#cycle:2]'
+                'slices:'
+                '  s2:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: []'
+                '    cycle: 1'
+                '  s5:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: [s2]'
+                '    cycle: 2'
+            ) -join "`n"
+            $spineComment = & $script:NewFrameSpineComment -SpineBlock $spineBlock
+            $issueCommentsJson = (@{ comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $prBody = & $script:NewV4PrBodyWithCredits -CreditRows @'
+  - port: review
+    status: passed
+    evidence: "review complete"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $combined = "$($result.Stdout)`n$($result.Stderr)"
+            $incompleteRows = @($combined -split "`r?`n" | Where-Object { $_ -match 'incomplete-cycle' })
+
+            $incompleteRows | Should -HaveCount 0
+        }
+    }
+
     Context 'C-Risk-1 fix: predicate evaluator is wired into per-adapter applicability' {
 
         It 'Resolve-FrameCreditLedgerApplicableMap evaluates `applies-when` against the changeset and returns true/false (not "unknown") for supported identifiers' {
@@ -678,8 +846,6 @@ body
                 IsProxyGithub = $false
             }
             $script:DeferredNotedPairs = @{}
-            # Capture stderr via the standard PowerShell redirection.
-            $stderr = $null
             $map = Resolve-FrameCreditLedgerApplicableMap -PortName 'review' -Adapters @($adapter) -Changeset $changeset 2>&1
             # Map result is the only return; stderr writes go to [Console]::Error which is hard
             # to capture in-process. Validate behaviorally: result is 'unknown' for the deferred id.

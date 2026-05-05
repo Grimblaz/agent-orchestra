@@ -410,7 +410,7 @@ function Read-PRMetricsBlock {
 
         $creditsRaw = script:ConvertFrom-FCLListSection -Block $block -SectionName 'credits' `
             -Fields @('port', 'adapter', 'status', 'run_index', 'evidence',
-                      'mode_backfilled_at', 'mode_original_pr_merged_at')
+                      'terminal-step-id', 'mode_backfilled_at', 'mode_original_pr_merged_at')
 
         # Findings 2 + 5 (issue #441 follow-up): the flat-key parser cannot
         # represent nested credit fields. Extract per-credit raw chunks here so
@@ -435,6 +435,15 @@ function Read-PRMetricsBlock {
                     $parsedRunIndex = 0
                     if ([int]::TryParse($runIndexRaw, [ref]$parsedRunIndex)) {
                         $runIndexInt = $parsedRunIndex
+                    }
+                }
+
+                $terminalStepIdRaw = [string]$entry.'terminal-step-id'
+                $terminalStepIdInt = $null
+                if (-not [string]::IsNullOrWhiteSpace($terminalStepIdRaw)) {
+                    $parsedTerminalStepId = 0
+                    if ([int]::TryParse($terminalStepIdRaw, [ref]$parsedTerminalStepId)) {
+                        $terminalStepIdInt = $parsedTerminalStepId
                     }
                 }
 
@@ -479,6 +488,7 @@ function Read-PRMetricsBlock {
                     Adapter                       = [string]$entry.adapter
                     Status                        = [string]$entry.status
                     RunIndex                      = $runIndexInt
+                    TerminalStepId                = $terminalStepIdInt
                     Evidence                      = [string]$entry.evidence
                     ModeBackfilledAt              = if ([string]::IsNullOrWhiteSpace([string]$backfilledAt)) { $null } else { [string]$backfilledAt }
                     ModeOriginalPrMergedAt        = if ([string]::IsNullOrWhiteSpace([string]$originalMergedAt)) { $null } else { [string]$originalMergedAt }
