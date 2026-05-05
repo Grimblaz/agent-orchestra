@@ -1,12 +1,20 @@
 #Requires -Version 7.0
 [CmdletBinding()]
 param(
-    [string]$RootPath
+    [string]$RootPath,
+    [ValidateSet('default', 'plan')]
+    [string]$Mode = 'default',
+    [string]$CommentFile
 )
 
 . "$PSScriptRoot/lib/frame-validate-core.ps1"
 
-$result = Invoke-FrameValidate @PSBoundParameters
+$invokeParameters = @{} + $PSBoundParameters
+if ($Mode -eq 'plan' -and -not $CommentFile) {
+    $invokeParameters['CommentText'] = [Console]::In.ReadToEnd()
+}
+
+$result = Invoke-FrameValidate @invokeParameters
 
 foreach ($check in @($result.Results)) {
     $prefix = if ($check.Passed) { '[PASS]' } else { '[FAIL]' }
