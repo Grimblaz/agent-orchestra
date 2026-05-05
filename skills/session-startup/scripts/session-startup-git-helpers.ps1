@@ -107,7 +107,7 @@ function Test-BranchMergedIntoDefault {
 
     # Fallback: gh pr list
     if (Get-Command gh -ErrorAction SilentlyContinue) {
-        $prJson = Invoke-SCDNativeCommand { gh pr list --head $BranchName --state merged --json number 2>$null }
+        $prJson = Invoke-SCDNativeCommand { gh pr list --head $BranchName --base $DefaultBranch --state merged --json number 2>$null }
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($prJson)) {
             try {
                 $prs = $prJson | ConvertFrom-Json -ErrorAction Stop

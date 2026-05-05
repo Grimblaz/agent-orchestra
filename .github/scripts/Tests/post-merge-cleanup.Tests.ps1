@@ -94,6 +94,16 @@ function Get-ConfigValueForPath {
     return Get-ConfigValue $Name
 }
 
+function Get-SequenceConfigValue {
+    param([string]$Name, [int]$Index)
+    $sequence = Get-ConfigValue $Name
+    if ($null -eq $sequence) { return $null }
+    $items = @($sequence)
+    if ($items.Count -eq 0) { return $null }
+    if ($Index -lt $items.Count) { return $items[$Index] }
+    return $items[-1]
+}
+
 # Strip -C <path> prefix so subcommand handlers work uniformly
 $gitWorkDir = $null
 if ($a.Count -ge 3 -and $a[0] -eq '-C') {
@@ -235,7 +245,9 @@ if ($a.Count -ge 4 -and $a[0] -eq 'diff' -and $a[1] -eq '--quiet') {
     if ($argIndex + 1 -lt $a.Count) {
         $baseRef = $a[$argIndex]
         $targetBranch = $a[$argIndex + 1]
-        $diffExit = Get-ConfigValue "diff-quiet-exit-$targetBranch"
+        $priorDiffCalls = @(Get-Content -Path $callLogPath -ErrorAction SilentlyContinue | Where-Object { $_ -match "^diff-quiet-called\t.+\t$([regex]::Escape($targetBranch))\t" })
+        $diffExit = Get-SequenceConfigValue -Name "diff-quiet-exit-sequence-$targetBranch" -Index $priorDiffCalls.Count
+        if ($null -eq $diffExit) { $diffExit = Get-ConfigValue "diff-quiet-exit-$targetBranch" }
         if ($null -eq $diffExit) { $diffExit = 1 }
         "diff-quiet-called`t$baseRef`t$targetBranch`tignore-cr-at-eol=$ignoreCrAtEol" | Add-Content -Path $callLogPath -Encoding UTF8
         exit ([int]$diffExit)
@@ -329,7 +341,7 @@ function Get-GhConfigValue {
     return $null
 }
 
-# gh pr list --head <branch> --state merged --json number
+# gh pr list --head <branch> --base <defaultBranch> --state merged --json number
 if ($a.Count -ge 6 -and $a[0] -eq 'pr' -and $a[1] -eq 'list') {
     $headIdx = [Array]::IndexOf([string[]]$a, '--head')
     $branch = if ($headIdx -ge 0 -and $headIdx + 1 -lt $a.Count) { $a[$headIdx + 1] } else { '' }
@@ -647,6 +659,39 @@ exit $LASTEXITCODE
             $result.ExitCode | Should -Be 0
             $ghCalls = @($result.GhCalls | Where-Object { $_ -match '^pr\tlist' })
             $ghCalls.Count | Should -BeGreaterThan 0 -Because 'gh pr list must be called as fallback when git cherry fails'
+            $ghCalls | Should -Contain "pr`tlist`t--head`t$branch`t--base`tmain`t--state`tmerged`t--json`tnumber" -Because 'GitHub fallback must constrain the PR lookup to the resolved default branch'
+        }
+
+        It 'TC-Sibling-4: counts removed worktree when branch deletion is skipped after merged re-check fails' {
+            $workDir = Join-Path $TestDrive 'sibling-removed-branch-skip'
+            $siblingPath = Join-Path $TestDrive 'sibling-removed-branch-skip-other'
+            New-Item -ItemType Directory -Path $workDir, $siblingPath -Force | Out-Null
+            $branch = 'pester-temp/issue-500-sibling-recheck-unmerged'
+            $siblingFwdPath = $siblingPath -replace '\\', '/'
+
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                        = 0
+                "diff-quiet-exit-sequence-$branch" = @(0, 1)
+                "cherry-$branch"                    = '+ abc123 Commit that appears unmerged during re-check'
+                'worktree-remove-exit'              = 0
+                'branch-d-exit'                     = 1
+                'path-configs'                      = @{
+                    $siblingFwdPath = @{ 'branch--show-current' = $branch }
+                }
+            } -ScriptParams @{
+                SiblingWorktrees = [string[]]@($siblingFwdPath)
+            }
+
+            $result.ExitCode | Should -Be 0
+            $branchSkipPattern = [regex]::Escape("Removed worktree '$siblingFwdPath', but skipped branch '$branch'") + ' (?:—|-) ' + [regex]::Escape('unmerged commits') + ' (?:—|-) ' + [regex]::Escape('review before deleting')
+            $result.Output | Should -Match $branchSkipPattern
+            $result.Output | Should -Match ([regex]::Escape("Deleted 1 sibling worktree(s): $siblingFwdPath")) -Because 'the summary must include a worktree that was already successfully removed'
+            $worktreeRemovals = @($result.GitCalls | Where-Object { $_ -eq "worktree-removed`t$siblingFwdPath" })
+            $worktreeRemovals.Count | Should -Be 1 -Because 'the worktree removal itself must have succeeded before the branch skip'
+            $successfulForcedBranchDeletes = @($result.GitCalls | Where-Object { $_ -eq "branch-deleted`t-D`t$branch" })
+            $successfulForcedBranchDeletes.Count | Should -Be 0 -Because 'branch deletion must remain skipped after the second merged check fails'
         }
     }
 
@@ -821,6 +866,7 @@ exit $LASTEXITCODE
             $result.ExitCode | Should -Be 0
             $ghCalls = @($result.GhCalls | Where-Object { $_ -match '^pr\tlist' })
             $ghCalls.Count | Should -BeGreaterThan 0 -Because 'gh pr list must be called when git cherry fails'
+            $ghCalls | Should -Contain "pr`tlist`t--head`t$branch`t--base`tmain`t--state`tmerged`t--json`tnumber" -Because 'GitHub fallback must constrain the PR lookup to the resolved default branch'
         }
 
         It 'TC-Cherry-3: when gh is unavailable, treats branch as unmerged (returns false for safety)' {

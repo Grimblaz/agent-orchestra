@@ -237,7 +237,9 @@ function Remove-SiblingWorktree {
             }
         }
         else {
-            Write-Output "Skipped '$worktreeBranch' — unmerged commits — review before deleting"
+            Write-Output "Removed worktree '$WorktreePath', but skipped branch '$worktreeBranch' — unmerged commits — review before deleting"
+            $DeletedCount.Value++
+            $DeletedPaths.Add($WorktreePath)
             return
         }
     }
