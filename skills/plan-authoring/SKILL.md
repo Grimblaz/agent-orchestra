@@ -106,21 +106,70 @@ Update the `Plan Stress-Test` summary block by replacing the `Judge: pending` pl
 
 ## Plan Style Guide
 
+### Spine and Slice Discipline
+
+Plans with three or more implementation steps must be authored as a first-class frame-spine deliverable. Put one `<!-- frame-spine ... -->` block in the approved plan comment and one `<!-- frame-slice ... -->` block per implementation step. The spine is the port-to-step routing index; each slice is the addressable contract that Code-Conductor can pass to a specialist without the full plan.
+
+Omit the spine only when the plan has fewer than three implementation steps. In that case, emit `spine-omitted: plan-too-small` in the plan metadata and keep the plan in the legacy shape. An implementation step means a numbered step whose `Execution Mode` is `serial` or `parallel` and whose Requirement Contract contains a GREEN code or test action. Adversarial review, CE Gate, and post-retrospective steps do not count toward this threshold.
+
+Legacy plans stay legacy when amended. Do not retrofit a frame spine into an older approved plan during amendment; preserve its original routing model unless a new planning pass explicitly replaces the plan.
+
+Each implementation slice must declare `provides:` unless it uses the exploratory escape hatch. Allowed `provides:` values are the `frame/ports/*.yaml` filename stems except the deferred `process-retrospective` port: `ce-gate-api`, `ce-gate-browser`, `ce-gate-canvas`, `ce-gate-cli`, `design`, `experience`, `implement-code`, `implement-docs`, `implement-refactor`, `implement-test`, `plan`, `post-fix-review`, `post-pr`, `process-review`, `release-hygiene`, `review`. Use a flow-style list, for example `provides: [implement-test]`. The spine and slice must agree: every port reference in the spine must have a matching slice anchor.
+
+Use `coverage: exploratory - {reason}` only for a true exploratory step that cannot honestly fill a deterministic frame port. The reason is required. This produces a warn-only coverage-gap ledger row and is not permission to skip real port coverage for implementation work.
+
+Use `ac-refs:` for D11 traceability from every implementation slice to acceptance criteria in the current `design-issue-{ID}` snapshot. Empty or missing AC coverage is treated as a coverage gap, so cite concrete IDs such as `ac-refs: [AC2, AC7]`.
+
+Use `depends-on:` for explicit depth-1 dependencies only. A slice may name the immediate step IDs it needs for local context, such as `depends-on: [s2]`; it must not pull a dependency chain recursively. The depth-1 cap keeps specialist prompts bounded and prevents the spine from becoming a second full plan.
+
+Spine port values must use flow-style inline lists. Cycle tokens use `sN[#cycle:N][#terminal]`: omit `#cycle:1` for the first cycle, add `#cycle:N` when a later step continues the same port in another implementation cycle, and add `#terminal` only to the last step that must produce the terminal credit for that port. In the matching slice metadata, use `cycle: N` and `terminal: true`. Append monotonic follow-up work after earlier tokens; use non-monotonic insertion only when an amendment inserts a new step between existing steps, and preserve list order as the execution order even when step numbers are not monotonic.
+
 ### Plan-markdown template
 
 ```markdown
+---
+spine-omitted: {omit unless plan-too-small}
+---
+
 ## Plan: {Title (2-10 words)}
 
-{TL;DR — what, how, why. Reference key decisions. (30-200 words)}
+{TL;DR - what, how, why. Reference key decisions. (30-200 words)}
+
+<!-- frame-spine
+spine_schema_version: 1
+generated_at: {ISO-8601 UTC}
+coverage: complete
+ports:
+   {port}: [sN, sM#cycle:2#terminal]
+slices:
+   sN:
+      execution_mode: {serial | parallel}
+      rc: {GREEN code/test action summary}
+      ac_refs: [AC#]
+      depends_on: []
+      cycle: 1
+-->
 
 **Steps**
 
 1. {Action with file path links and `symbol` refs}
    - Execution Mode: {serial | parallel}
    - Requirement Contract: acceptance-criteria slice; invariants/edge cases; non-goals.
+<!-- frame-slice
+id: s1
+provides: [{port}]
+depends-on: []
+ac-refs: [AC#]
+-->
 2. {Next step}
    - Execution Mode: {serial | parallel}
-   - Requirement Contract: …
+   - Requirement Contract: ...
+<!-- frame-slice
+id: s2
+provides: [{port}]
+depends-on: [s1]
+ac-refs: [AC#]
+-->
 
 **Verification**
 {How to test: commands, tests, manual checks}
@@ -131,18 +180,19 @@ Update the `Plan Stress-Test` summary block by replacing the `Judge: pending` pl
 
 **Plan Stress-Test** (summary of Code-Critic review)
 
-- Challenge: {finding} — Prosecution: {incorporated | dismissed with rationale | escalated+confirmed | escalated+rejected} — Judge: {pending → replaced with: sustained | rejected | judge-rejected/user-confirmed}
-- Overall confidence: {high | medium | low} — {one-sentence rationale}
+- Challenge: {finding} - Prosecution: {incorporated | dismissed with rationale | escalated+confirmed | escalated+rejected} - Judge: {pending -> replaced with: sustained | rejected | judge-rejected/user-confirmed}
+- Overall confidence: {high | medium | low} - {one-sentence rationale}
 ```
 
 ### Base rules
 
-- No code blocks — describe changes, link to files and symbols.
-- No questions at the end — ask via the platform's structured-question tool during the workflow.
+- No code blocks for implementation details - describe changes, link to files and symbols. Frame-spine and frame-slice metadata comments are the routing exception.
+- No questions at the end - ask via the platform's structured-question tool during the workflow.
 - Include execution metadata (mode + requirement contract expectations) so implementers can execute without re-deriving process rules.
+- Treat the frame spine and slices as required plan output, not optional documentation, whenever the D8 size threshold is met.
 - When a step crosses a layer boundary (as defined in `.github/architecture-rules.md`), note the dependency direction and verify it aligns with documented architecture rules. Scope steps to a single layer where feasible.
-- Insert a dedicated **`[CE GATE]`** numbered step as the final implementation step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Format: `N. [CE GATE] — Surface: {type} — Design Intent: {link or one-line summary} — Scenarios: {functional + intent} — Method: {how each scenario is exercised}`. When BDD is enabled, list each scenario by concrete ID with classification, e.g., `S1: {description} [auto/manual]` or placeholder `S{N}: {description} [auto/manual]`. The `[CE GATE]` step is blocking — advancement past it requires either completion or the documented skip marker. Omit only when `ce_gate: false`.
-- For backend/non-UI/CLI projects, the CE Gate surface is the API or CLI — identify appropriate scenarios for customer-perspective verification.
+- Insert a dedicated **`[CE GATE]`** numbered step as the final implementation step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Format: `N. [CE GATE] - Surface: {type} - Design Intent: {link or one-line summary} - Scenarios: {functional + intent} - Method: {how each scenario is exercised}`. When BDD is enabled, list each scenario by concrete ID with classification, e.g., `S1: {description} [auto/manual]` or placeholder `S{N}: {description} [auto/manual]`. The `[CE GATE]` step is blocking - advancement past it requires either completion or the documented skip marker. Omit only when `ce_gate: false`.
+- For backend/non-UI/CLI projects, the CE Gate surface is the API or CLI - identify appropriate scenarios for customer-perspective verification.
 - Keep the plan scannable.
 
 ### Specialized rules

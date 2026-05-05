@@ -51,7 +51,7 @@ CE Gate surface ports, where each surface (CLI, browser, canvas, API) is evaluat
 
 **Ports in this category**: `ce-gate-cli`, `ce-gate-browser`, `ce-gate-canvas`, `ce-gate-api`
 
-**Terminal-step contract**: Each `Build-CeGateCreditRow -Surface {name}` call is its own terminal step with its own integrity check. See "Per-Surface Terminal-Step Contract" below for orchestration-failure handling.
+**Terminal-step contract**: Each `Build-CeGateCreditRow -Surface {name} -Step {terminal-step-id}` call is its own terminal step with its own integrity check. See "Per-Surface Terminal-Step Contract" below for orchestration-failure handling.
 
 ## Credit-Input Marker Schema
 
@@ -71,7 +71,7 @@ evidence: "{human-readable evidence string}"
 
 - `port`: The frame port identifier (e.g., `experience`, `design`, `plan`).
 - `adapter`: The adapter name that produced this credit (e.g., `work-adapter`, `auto-na`).
-- `evidence`: A flat quoted string describing what the agent observed (e.g., `"issue #123; plan-issue marker posted"`). The harvester passes this string verbatim as the `-Evidence` parameter to the matching `Build-*CreditRow` function. Do **not** use a nested YAML mapping here — the harvester's flat key-value parser will silently drop nested fields.
+- `evidence`: A flat quoted string describing what the agent observed (e.g., `"issue #123; plan-issue marker posted"`). The harvester passes this string verbatim as the `-Evidence` parameter to the matching `Build-*CreditRow` function. Do **not** use a nested YAML mapping here - the harvester's flat key-value parser will silently drop nested fields.
 
 **Persistence rule**: Post the credit-input marker as a GitHub issue comment immediately after the agent's completion marker comment. Code-Conductor harvests all credit-input markers at PR-creation time by reading the issue's comments and calling the matching builder functions.
 
@@ -83,15 +83,17 @@ CE Gate surfaces are evaluated independently. Each surface's credit row is its o
 
 1. **Predicate evaluation**: For each surface (`cli`, `browser`, `canvas`, `api`), evaluate the surface-touch predicate (`changeset.touches{Surface}Surface()`).
 2. **Surface exercise or N/A**: If the predicate is true, exercise the surface and capture evidence. If false, emit `status: not-applicable`.
-3. **Credit emission**: Call `Build-CeGateCreditRow -Surface {name}` with the surface-specific evidence and upsert the credit row.
-4. **Orchestration-failure handling** *(planned — wrapper not yet implemented)*: when the orchestration wrapper ships, a crash after partial evaluation will cause it to emit the remaining-surface credits as `status: inconclusive` with `block_kind: orchestration` and `evidence: "orchestration crashed before surface evaluated"`. Until then, manually emit missing-surface rows on crash.
+3. **Credit emission**: Call `Build-CeGateCreditRow -Surface {name} -Step {terminal-step-id}` with the surface-specific evidence and upsert the credit row.
+4. **Orchestration-failure handling** *(planned - wrapper not yet implemented)*: when the orchestration wrapper ships, a crash after partial evaluation will cause it to emit the remaining-surface credits as `status: inconclusive` with `block_kind: orchestration` and `evidence: "orchestration crashed before surface evaluated"`. Until then, manually emit missing-surface rows on crash.
+
+Cycle-aware emission uses `(port, terminal-step-id)` as the additive-merge identity for positive terminal steps. Every `Build-*CreditRow` function accepts optional `-Step`; omit it or pass `0` only for legacy plans and `spine-omitted: plan-too-small` plans, where the row keeps the legacy `(port, 0)` identity. For a spine-backed plan, pass the positive step number from the terminal slice marked for that port. Multiple rows for the same port may coexist only when their positive `terminal-step-id` values differ; an existing row with the same `(port, terminal-step-id)` wins and must not be overwritten.
 
 ## Related
 
-- [frame/pipeline-metrics-v4-schema.md](../../frame/pipeline-metrics-v4-schema.md) — Credit row schema
-- [skills/session-memory-contract/SKILL.md](../session-memory-contract/SKILL.md) — SMC-17 credit-input marker persistence
-- [Documents/Design/frame-architecture.md](../../Documents/Design/frame-architecture.md) — Frame port declarations and predicate DSL
-- `.github/scripts/lib/frame-credit-ledger-core.ps1` — Builder functions (`Build-*CreditRow`)
+- [frame/pipeline-metrics-v4-schema.md](../../frame/pipeline-metrics-v4-schema.md) - Credit row schema
+- [skills/session-memory-contract/SKILL.md](../session-memory-contract/SKILL.md) - SMC-17 credit-input marker persistence
+- [Documents/Design/frame-architecture.md](../../Documents/Design/frame-architecture.md) - Frame port declarations and predicate DSL
+- `.github/scripts/lib/frame-credit-ledger-core.ps1` - Builder functions (`Build-*CreditRow`)
 
 ## Gotchas
 
