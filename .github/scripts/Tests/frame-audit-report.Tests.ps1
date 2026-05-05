@@ -506,7 +506,7 @@ exit 99
         $report['selection']['pr_count'] | Should -Be 4
         (($report['selection']['pr_numbers']) -join ',') | Should -Be '286,338,415,411'
 
-        (($report['recommendations'] | ForEach-Object { $_['port'] }) -join ',') | Should -Be 'design,implement-code,implement-docs'
+        (($report['recommendations'] | ForEach-Object { $_['port'] }) -join ',') | Should -Be 'design,plan,review'
         (($report['recommendations'] | ForEach-Object { [string]$_['score'] }) -join ',') | Should -Be '20,20,20'
         $report['tbd_ports'].Count | Should -Be 1
         $report['tbd_ports'][0]['port'] | Should -Be 'process-retrospective'
@@ -521,8 +521,8 @@ exit 99
         $textOutput | Should -Match '(?m)^review \| 2 \| 0 \| 0 \| 0 \| 0 \| 0\r?$'
         $textOutput | Should -Match '(?m)^- process-retrospective \(tbd-decision-pending\)\r?$'
         $textOutput | Should -Match '(?m)^- design: score=20; missing=0; inconclusive=2; skipped=0\r?$'
-        $textOutput | Should -Match '(?m)^- implement-code: score=20; missing=0; inconclusive=2; skipped=0\r?$'
-        $textOutput | Should -Match '(?m)^- implement-docs: score=20; missing=0; inconclusive=2; skipped=0\r?$'
+        $textOutput | Should -Match '(?m)^- plan: score=20; missing=0; inconclusive=2; skipped=0\r?$'
+        $textOutput | Should -Match '(?m)^- review: score=20; missing=0; inconclusive=2; skipped=0\r?$'
 
         $markdownOutput = ConvertTo-FARMarkdown -Report $report
         $markdownOutput | Should -Match '(?m)^# Frame Audit Report\r?$'
