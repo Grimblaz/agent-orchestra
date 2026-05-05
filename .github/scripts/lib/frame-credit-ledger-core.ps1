@@ -658,6 +658,19 @@ function ConvertFrom-JudgeRulingsComment {
 # Returns a pscustomobject shaped for direct emission into credits[]:
 #   port, adapter, status, run_index, evidence, judge-score, integrity-check
 
+function script:Add-FCLTerminalStepId {
+    param(
+        [Parameter(Mandatory)]$Row,
+        [int]$Step = 0
+    )
+
+    if ($Step -gt 0) {
+        $Row | Add-Member -NotePropertyName 'terminal-step-id' -NotePropertyValue $Step
+    }
+
+    return $Row
+}
+
 function Build-ReviewCreditRow {
     [CmdletBinding()]
     param(
@@ -665,7 +678,8 @@ function Build-ReviewCreditRow {
         [string]$AdapterName = 'standard',
         [string]$AdaptersDir = '',
         [int]$RunIndex = 1,
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     # Parse findings from the judge-rulings block.
@@ -725,7 +739,7 @@ function Build-ReviewCreditRow {
         $integrityStatus = 'not-applicable'
     }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port             = 'review'
         adapter          = $AdapterName
         status           = $status
@@ -745,6 +759,8 @@ function Build-ReviewCreditRow {
             status        = $integrityStatus
         }
     }
+
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # Return the credit row with the highest RunIndex for a given (Port, Adapter) pair.
@@ -1208,7 +1224,9 @@ function Build-CeGateCreditRow {
 
         [AllowEmptyCollection()][object[]]$EvidenceList = @(),
 
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+
+        [int]$Step = 0
     )
 
     $port = "ce-gate-$Surface"
@@ -1220,32 +1238,35 @@ function Build-CeGateCreditRow {
     if ($EnvironmentBlocked) {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { "CE Gate for $Surface surface blocked — $BlockKind." }
-        return [pscustomobject]@{
+        $row = [pscustomobject]@{
             port       = $port
             status     = 'inconclusive'
             block_kind = $BlockKind
             evidence   = $resolvedEvidence
         }
+        return script:Add-FCLTerminalStepId -Row $row -Step $Step
     }
 
     if (-not $SurfaceTouchResult) {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { "CE Gate not applicable — $Surface surface not touched." }
-        return [pscustomobject]@{
+        $row = [pscustomobject]@{
             port     = $port
             status   = 'not-applicable'
             evidence = $resolvedEvidence
         }
+        return script:Add-FCLTerminalStepId -Row $row -Step $Step
     }
 
     if ($EvidenceList.Count -gt 0) {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { $EvidenceList -join '; ' }
-        return [pscustomobject]@{
+        $row = [pscustomobject]@{
             port     = $port
             status   = 'passed'
             evidence = $resolvedEvidence
         }
+        return script:Add-FCLTerminalStepId -Row $row -Step $Step
     }
 
     # No evidence list and not blocked — inconclusive. Forward-emitted CE Gate inconclusive rows
@@ -1253,12 +1274,13 @@ function Build-CeGateCreditRow {
     # was reachable but no scenario evidence was produced (builder called without evidence).
     $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                         else { "CE Gate for $Surface surface inconclusive — no scenario evidence supplied." }
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port       = $port
         status     = 'inconclusive'
         block_kind = 'tooling'
         evidence   = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1290,7 +1312,8 @@ function Build-ExperienceCreditRow {
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
         [int]$IssueNumber = 0,
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     $status = script:Resolve-PipelineEntryCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -MarkerPresent $MarkerPresent
@@ -1299,12 +1322,13 @@ function Build-ExperienceCreditRow {
                         elseif ($status -eq 'not-applicable') { "changeset.isPipelineEntryTrivial == true; experience port not applicable." }
                         else { "$AdapterName adapter; status: $status." }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'experience'
         adapter  = $AdapterName
         status   = $status
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1317,7 +1341,8 @@ function Build-DesignCreditRow {
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
         [int]$IssueNumber = 0,
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     $status = script:Resolve-PipelineEntryCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -MarkerPresent $MarkerPresent
@@ -1326,12 +1351,13 @@ function Build-DesignCreditRow {
                         elseif ($status -eq 'not-applicable') { "changeset.isPipelineEntryTrivial == true; design port not applicable." }
                         else { "$AdapterName adapter; status: $status." }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'design'
         adapter  = $AdapterName
         status   = $status
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1344,7 +1370,8 @@ function Build-PlanCreditRow {
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
         [int]$IssueNumber = 0,
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     $status = script:Resolve-PipelineEntryCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -MarkerPresent $MarkerPresent
@@ -1353,12 +1380,13 @@ function Build-PlanCreditRow {
                         elseif ($status -eq 'not-applicable') { "changeset.isPipelineEntryTrivial == true; plan port not applicable." }
                         else { "$AdapterName adapter; status: $status." }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'plan'
         adapter  = $AdapterName
         status   = $status
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1407,7 +1435,8 @@ function Build-ImplementCodeCreditRow {
         [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
@@ -1416,12 +1445,13 @@ function Build-ImplementCodeCreditRow {
                         elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
                         else { "implement-code validation: $($r.status)." }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'implement-code'
         adapter  = $AdapterName
         status   = $r.status
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1433,7 +1463,8 @@ function Build-ImplementTestCreditRow {
         [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
@@ -1442,12 +1473,13 @@ function Build-ImplementTestCreditRow {
                         elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
                         else { "implement-test validation: $($r.status)." }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'implement-test'
         adapter  = $AdapterName
         status   = $r.status
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1461,7 +1493,8 @@ function Build-ImplementRefactorCreditRow {
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
         [hashtable]$DebtThreshold = @{ lineCount = 300; complexity = 10 },
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
@@ -1470,12 +1503,13 @@ function Build-ImplementRefactorCreditRow {
                         elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
                         else { "implement-refactor validation: $($r.status)." }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'implement-refactor'
         adapter  = $AdapterName
         status   = $r.status
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1487,7 +1521,8 @@ function Build-ImplementDocsCreditRow {
         [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
@@ -1496,12 +1531,13 @@ function Build-ImplementDocsCreditRow {
                         elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
                         else { "implement-docs validation: $($r.status)." }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'implement-docs'
         adapter  = $AdapterName
         status   = $r.status
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1515,17 +1551,19 @@ function Build-PostPrCreditRow {
     [CmdletBinding()]
     param(
         [hashtable]$ChecklistOutcomes = $null,
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     if ($null -eq $ChecklistOutcomes -or $ChecklistOutcomes.Count -eq 0) {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { 'no checklist outcomes supplied to the credit-row builder' }
-        return [pscustomobject]@{
+        $row = [pscustomobject]@{
             port     = 'post-pr'
             status   = 'skipped'
             evidence = $resolvedEvidence
         }
+        return script:Add-FCLTerminalStepId -Row $row -Step $Step
     }
 
     $failing = @()
@@ -1541,20 +1579,22 @@ function Build-PostPrCreditRow {
     if ($failing.Count -gt 0) {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { "Post-PR checklist failed: $($failing -join ', ')." }
-        return [pscustomobject]@{
+        $row = [pscustomobject]@{
             port     = 'post-pr'
             status   = 'failed'
             evidence = $resolvedEvidence
         }
+        return script:Add-FCLTerminalStepId -Row $row -Step $Step
     }
 
     $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                         else { 'Post-PR checklist passed: archive, docs, version, releaseTag.' }
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'post-pr'
         status   = 'passed'
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 function Invoke-CreditInputHarvest {

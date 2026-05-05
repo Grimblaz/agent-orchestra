@@ -141,7 +141,7 @@ function Test-FBDReviewFindingDetail {
 
 function Get-FBDExistingCredits {
     # D9 additive-merge: parse the credits: section from the pipeline-metrics block.
-    # Returns an ordered hashtable of port → credit-row for all ports already present.
+    # Returns an ordered hashtable of credit identity → credit-row for all rows already present.
     # Callers skip back-derivation for any port found here and preserve the row as-is.
     param([Parameter(Mandatory)][AllowEmptyString()][string]$MetricsBlock)
 
@@ -171,6 +171,7 @@ function Get-FBDExistingCredits {
 
         $statusMatch   = [regex]::Match($part, '(?m)^\s*status\s*:\s*(\S+)')
         $blockKindMatch = [regex]::Match($part, '(?m)^\s*block_kind\s*:\s*(\S+)')
+        $terminalStepMatch = [regex]::Match($part, '(?m)^\s*terminal-step-id\s*:\s*(-?\d+)\s*$')
         $evidenceMatchQ = [regex]::Match($part, '(?m)^\s*evidence\s*:\s*"((?:[^"\\]|\\.)*)"\s*$')
         $evidenceMatchU = [regex]::Match($part, '(?m)^\s*evidence\s*:\s*(.+)')
 
@@ -189,6 +190,11 @@ function Get-FBDExistingCredits {
         if ($blockKindMatch.Success) {
             $credit['block_kind'] = $blockKindMatch.Groups[1].Value.Trim()
         }
+        $terminalStepId = 0
+        if ($terminalStepMatch.Success) {
+            $terminalStepId = [int]$terminalStepMatch.Groups[1].Value.Trim()
+            $credit['terminal-step-id'] = $terminalStepId
+        }
         $credit['evidence'] = $evidence
 
         $hasSyntheticBackfill = [regex]::IsMatch($part, '(?m)^\s*synthetic-backfill\s*:')
@@ -203,7 +209,11 @@ function Get-FBDExistingCredits {
             }
         }
 
-        $result[$port] = $credit
+        $identityStep = if ($terminalStepId -gt 0) { $terminalStepId } else { 0 }
+        $identityKey = if ($identityStep -gt 0) { "$port|$identityStep" } else { $port }
+        if (-not $result.Contains($identityKey)) {
+            $result[$identityKey] = $credit
+        }
     }
 
     return $result
@@ -787,15 +797,17 @@ function Get-FBDAuditSurface {
         } else { [string]$rawMergedAt }
     } else { $null }
 
-    # D9 additive-merge: parse ports already present in the v4 credits block.
-    # Present ports are preserved as-is (no synthetic-backfill); absent ports are back-derived.
+    # D9 additive-merge: parse rows already present in the v4 credits block.
+    # Present rows are preserved as-is (no synthetic-backfill); absent ports are back-derived.
     $existingCredits = Get-FBDExistingCredits -MetricsBlock $MetricsBlock
 
     $credits = [System.Collections.Generic.List[object]]::new()
     foreach ($port in $Ports) {
-        if ($existingCredits.Contains($port)) {
-            # Port already present — preserve as-is (D9: no double-write, no overwrite)
-            $credits.Add($existingCredits[$port])
+        $existingRows = @($existingCredits.Values | Where-Object { [string](Get-FBDPropertyValue -InputObject $_ -Name 'port') -eq $port })
+        if ($existingRows.Count -gt 0) {
+            foreach ($existingRow in $existingRows) {
+                $credits.Add($existingRow)
+            }
         } else {
             # Port absent — back-derive and decorate with mode.synthetic-backfill
             $derived = Get-FBDPortCredit -Port $port -MetricsVersion $MetricsVersion -LinkedIssue $LinkedIssue -MetricsBlock $MetricsBlock -IsMerged:$isMerged
