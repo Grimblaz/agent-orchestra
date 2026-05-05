@@ -29,7 +29,8 @@ function script:Get-FSCCommentBlockPayloads {
     $normalized = script:ConvertTo-FSCNormalizedText -Text $CommentBody
     if ([string]::IsNullOrEmpty($normalized)) { return @() }
 
-    $pattern = '<!--\s*' + [regex]::Escape($BlockName) + '(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->'
+    $escapedBlockName = [regex]::Escape($BlockName)
+    $pattern = '<!--\s*' + $escapedBlockName + '\s*-->\s*\n(?<payload>.*?)\n\s*-->|<!--\s*' + $escapedBlockName + '(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->'
     $regexMatches = [regex]::Matches($normalized, $pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
     $payloads = [System.Collections.Generic.List[string]]::new()
 

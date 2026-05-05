@@ -225,7 +225,8 @@ function Get-FVPlanSliceBlock {
     $normalized = ConvertTo-FVNormalizedText -Text $CommentBody
     if ([string]::IsNullOrEmpty($normalized)) { return @() }
 
-    $regexMatches = [regex]::Matches($normalized, '<!--\s*frame-slice(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->', [System.Text.RegularExpressions.RegexOptions]::Singleline)
+    $pattern = '<!--\s*frame-slice\s*-->\s*\n(?<payload>.*?)\n\s*-->|<!--\s*frame-slice(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->'
+    $regexMatches = [regex]::Matches($normalized, $pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
     $blocks = [System.Collections.Generic.List[string]]::new()
 
     foreach ($match in $regexMatches) {

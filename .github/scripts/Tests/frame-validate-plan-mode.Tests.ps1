@@ -52,11 +52,14 @@ Describe 'Frame validator plan mode CLI' -Tag 'unit' {
                     'provides: [implement-test]',
                     'depends-on: []',
                     'ac-refs: [AC4]'
-                )
+                ),
+                [switch]$DocumentedBareMarker
             )
 
+            $openingMarker = if ($DocumentedBareMarker) { '<!-- frame-slice -->' } else { '<!-- frame-slice' }
+
             return [string](@(
-                    '<!-- frame-slice'
+                    $openingMarker
                     "id: $StepId"
                     "commit-index: $CommitIndex"
                 ) + $FieldLines + @(
@@ -165,6 +168,17 @@ Describe 'Frame validator plan mode CLI' -Tag 'unit' {
         $result.Output | Should -Match 'implement-test'
         $result.Output | Should -Match 'implement-code'
         $result.Output | Should -Match '(?s)implement-test.*implement-code|implement-code.*implement-test'
+    }
+
+    It 'validates a documented plan with a bare frame-slice marker followed by YAML' {
+        $documentedSlice = & $script:NewFrameSliceBlock -StepId 's4' -CommitIndex '4' -DocumentedBareMarker
+        $comment = & $script:NewPlanComment -PortLines @('  implement-test: [s4]') -SliceBlocks @($documentedSlice)
+
+        $result = & $script:InvokeFrameValidateCli -Arguments @('-Mode', 'plan') -InputText $comment
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'PlanStructuralCoverage'
+        $result.Output | Should -Not -Match '\(missing-id\)'
     }
 
     It 'warns when an acceptance criterion has no slice ac-refs coverage' {

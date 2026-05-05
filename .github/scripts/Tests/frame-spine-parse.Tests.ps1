@@ -227,6 +227,22 @@ Describe 'frame spine parser' -Tag 'unit' {
         $byPort[0] | Should -BeExactly $script:S2ProvidesSliceBlock
     }
 
+    It 'extracts a documented bare frame-slice marker followed by a YAML payload' {
+        $commentBody = @(
+            '<!-- frame-slice -->'
+            $script:S2ProvidesSliceBlock
+            '-->'
+        ) -join "`n"
+
+        $byStepId = @(Get-FSCSliceBlocksByStepId -CommentBody $commentBody -StepId 's2')
+        $byPort = @(Get-FSCSliceBlocksByPort -CommentBody $commentBody -PortName 'implement-code')
+
+        $byStepId | Should -HaveCount 1
+        $byPort | Should -HaveCount 1
+        $byStepId[0] | Should -BeExactly $script:S2ProvidesSliceBlock
+        $byPort[0] | Should -BeExactly $script:S2ProvidesSliceBlock
+    }
+
     It 'extracts every frame-slice block for a port name' {
         $sliceBlocks = @(Get-FSCSliceBlocksByPort -CommentBody $script:CommentBody -PortName 'implement-code')
 
@@ -255,6 +271,29 @@ Describe 'frame spine parser' -Tag 'unit' {
         $lookupOutput | Should -Match 'status:\s*ok'
         $lookupOutput | Should -Match 'step_id:\s*s2'
         $lookupOutput | Should -Match 'provides:\s*\[implement-code\]'
+        $null = $result
+    }
+
+    It 'executes lookup against a documented bare frame-slice marker followed by YAML' {
+        $commentBody = @(
+            'Issue discussion before the durable handoff.'
+            ''
+            '<!-- frame-spine'
+            $script:CanonicalSpineBlock
+            '-->'
+            ''
+            '<!-- frame-slice -->'
+            $script:S2ProvidesSliceBlock
+            '-->'
+        ) -join "`n"
+        $commentFile = & $script:WriteCommentBody -Content $commentBody
+
+        $result = & $script:InvokeLookupCli -CommentBodyPath $commentFile -GeneratedAt '2026-05-04T14:30:00Z' -StepId 's2'
+
+        $result.ExitCode | Should -Be 0
+        $result.Output | Should -Match 'status:\s*ok'
+        $result.Output | Should -Match 'step_id:\s*s2'
+        $result.Output | Should -Match 'provides:\s*\[implement-code\]'
         $null = $result
     }
 
