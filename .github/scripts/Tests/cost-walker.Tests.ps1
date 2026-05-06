@@ -180,11 +180,11 @@ Describe 'Invoke-CostTranscriptWalk' {
             )
             script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events $events
 
-            $warnings = [System.Collections.Generic.List[string]]::new()
-            $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp -WarningVariable wv)
-            $result.Count | Should -Be 0
+            $outputAndWarnings = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp -WarningAction Continue 3>&1)
+            @($outputAndWarnings | Where-Object { $_ -isnot [System.Management.Automation.WarningRecord] }).Count | Should -Be 0
             # Verify a warning was emitted for the unknown type
-            ($wv | Where-Object { $_ -match 'unknown' -or $_ -match 'unknown-future-type' }) | Should -Not -BeNullOrEmpty
+            $warningRecords = @($outputAndWarnings | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+            ($warningRecords | Where-Object { $_ -match 'unknown' -or $_ -match 'unknown-future-type' }) | Should -Not -BeNullOrEmpty
             Remove-Item -Recurse -Force $tmp
         }
     }
@@ -290,10 +290,8 @@ Describe 'Invoke-CostTranscriptWalk' {
             script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events @($parentEvent)
             # Note: no subagents/ dir and no subagent transcript file created
 
-            { $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp) } | Should -Not -Throw
-            $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp)
             # Only the parent assistant event; no subagent events
-            $result.Count | Should -Be 1
+            @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp).Count | Should -Be 1
             Remove-Item -Recurse -Force $tmp
         }
     }
@@ -321,7 +319,7 @@ Describe 'Invoke-CostTranscriptWalk' {
             script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events @($parentEvent)
             # subagents/ dir deliberately absent
 
-            { $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp) } | Should -Not -Throw
+            @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp).Count | Should -Be 1
             Remove-Item -Recurse -Force $tmp
         }
 
@@ -393,4 +391,182 @@ Describe 'Invoke-CostTranscriptWalk' {
             Remove-Item -Recurse -Force $tmp
         }
     }
+
+        Context 'phase-marker windowing' {
+            It 'admits only assistant events inside a phase-marker /plan 529 window (fixture-driven)' {
+                $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
+                $slug = 'phase-marker-test'
+                $slugDir = Join-Path $tmp $slug
+                $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+                # Copy committed fixtures into the temp slug dir
+                $fixtureDir = Join-Path $PSScriptRoot 'fixtures\phase-marker-sessions'
+                Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529.jsonl') -Destination (Join-Path $slugDir 'session.jsonl')
+                Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529b.jsonl') -Destination (Join-Path $slugDir 'session2.jsonl')
+
+                $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp -IssueNumber 529)
+
+                # Expected: only assistant events admitted by target phase-marker windows
+                $uuids = $result | ForEach-Object { $_.uuid } | Where-Object { $_ -ne $null }
+                $uuids | Should -BeExactly @(
+                    '11111111-1111-1111-1111-111111111111',
+                    '22222222-2222-2222-2222-222222222222',
+                    '44444444-4444-4444-4444-444444444444',
+                    '55555555-5555-5555-5555-555555555555',
+                    '66666666-6666-6666-6666-666666666666'
+                )
+                @($result | Where-Object { $_.uuid -eq '11111111-1111-1111-1111-111111111111' })[0]['_phase_marker_port'] | Should -Be 'plan'
+                @($result | Where-Object { $_.uuid -eq '44444444-4444-4444-4444-444444444444' })[0]['_phase_marker_port'] | Should -Be 'experience'
+                @($result | Where-Object { $_.uuid -eq '55555555-5555-5555-5555-555555555555' })[0]['_phase_marker_port'] | Should -Be 'design'
+
+                # Command markers live on user events; assert marker parsing there, not on assistant content.
+                $acceptedCommands = @(
+                    '/experience', '/design', '/plan', '/orchestrate', '/code-conductor',
+                    '/agent-orchestra:experience', '/agent-orchestra:design', '/agent-orchestra:plan',
+                    '/agent-orchestra:orchestrate', '/agent-orchestra:code-conductor'
+                )
+                $acceptedArgs = @('529', '#529', 'issue 529')
+                foreach ($command in $acceptedCommands) {
+                    foreach ($argument in $acceptedArgs) {
+                        $markerEvent = @{
+                            type    = 'user'
+                            message = @{ content = "<command-name>$command</command-name>`n<command-args>$argument</command-args>" }
+                        }
+                        $phaseMarker = script:Get-CostWalkerPhaseMarker -Event $markerEvent
+                        $phaseMarker.IssueId | Should -Be 529
+                        $phaseMarker.PortHint | Should -Be $command.Replace('/agent-orchestra:', '').Replace('/', '')
+                    }
+                }
+
+                $rejectedMarkers = @(
+                    @{ type = 'user'; message = @{ content = '<command-name>experience</command-name><command-args>529</command-args>' } }
+                    @{ type = 'user'; message = @{ content = '<command-name>/Experience</command-name><command-args>529</command-args>' } }
+                    @{ type = 'user'; message = @{ content = '<command>/plan</command><command-args>529</command-args>' } }
+                    @{ type = 'user'; message = @{ content = '<command-name>/plan</command-name><command-args>plan-#529</command-args>' } }
+                    @{ type = 'user'; message = @{ content = 'please run /plan for issue 529' } }
+                    @{ type = 'user'; message = @{ content = @(@{ some = 'object' }) } }
+                )
+                foreach ($markerEvent in $rejectedMarkers) {
+                    script:Get-CostWalkerPhaseMarker -Event $markerEvent | Should -BeNullOrEmpty
+                }
+
+                # Object[] user content must be rejected — ensure no user-content arrays appear
+                ($result | Where-Object { $_.type -eq 'user' -and $_.message -and ($_.message.content -is [System.Array]) }).Count | Should -Be 0
+
+                # Non-phase-marker user events should not emit 'unknown event type' warnings
+                $warnings = $null
+                $null = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp -IssueNumber 529 -WarningVariable warnings)
+                ($warnings | Where-Object { $_ -match 'unknown event type' }).Count | Should -Be 0
+
+                Remove-Item -Recurse -Force $tmp
+            }
+
+            It 'does not bleed window state across multiple JSONL files in same slug dir' {
+                $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
+                $slug = 'phase-marker-test'
+                $slugDir = Join-Path $tmp $slug
+                $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+                $events1 = @(
+                    @{
+                        type      = 'user'
+                        message   = @{ role = 'user'; content = '<command-name>/plan</command-name><command-args>529</command-args>' }
+                        cwd       = $script:TestCwd
+                        gitBranch = 'main'
+                        timestamp = '2026-01-03T00:00:00Z'
+                    }
+                    script:New-AssistantEvent -Uuid '77777777-7777-7777-7777-777777777777' -Branch 'main'
+                )
+                $events2 = @(
+                    script:New-AssistantEvent -Uuid '88888888-8888-8888-8888-888888888888' -Branch 'main'
+                )
+                script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events $events1
+                script:Write-TestJsonl -Path (Join-Path $slugDir 'session2.jsonl') -Events $events2
+
+                $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp -IssueNumber 529)
+
+                # Expectation: windows are per-file; session2 has no marker and must not inherit session1's open window.
+                @($result | Where-Object { $_.uuid -eq '77777777-7777-7777-7777-777777777777' }).Count | Should -Be 1
+                @($result | Where-Object { $_.uuid -eq '88888888-8888-8888-8888-888888888888' }).Count | Should -Be 0
+
+                Remove-Item -Recurse -Force $tmp
+            }
+
+            It 'loads subagent transcript for admitted Agent tool_use once admitted by phase-marker' {
+                $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
+                $slug = 'phase-marker-test'
+                $slugDir = Join-Path $tmp $slug
+                $subagDir = Join-Path $slugDir 'subagents'
+                $null = New-Item -ItemType Directory -Path $subagDir -Force
+
+                $fixtureDir = Join-Path $PSScriptRoot 'fixtures\phase-marker-sessions'
+                Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529.jsonl') -Destination (Join-Path $slugDir 'session.jsonl')
+                Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529b.jsonl') -Destination (Join-Path $slugDir 'session2.jsonl')
+
+                # Create a subagent transcript for the Agent tool_use id in fixture b
+                $subEvent = @{
+                    type = 'assistant'
+                    uuid = 'subagent-0000-0000-0000-000000000000'
+                    timestamp = '2026-01-02T00:10:00Z'
+                    message = @{ usage = @{ input_tokens = 1; output_tokens = 1 }; content = @() }
+                }
+                script:Write-TestJsonl -Path (Join-Path $subagDir 'agent-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.jsonl') -Events @($subEvent)
+
+                $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp -IssueNumber 529)
+
+                # Expectation: subagent event appears in results when its parent assistant is admitted by the phase-marker
+                @($result | Where-Object { $_.uuid -eq 'subagent-0000-0000-0000-000000000000' }).Count | Should -Be 1
+
+                Remove-Item -Recurse -Force $tmp
+            }
+
+            It 'omitting -IssueNumber preserves strict branch behavior' {
+                $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
+                $slug = 'phase-marker-test'
+                $slugDir = Join-Path $tmp $slug
+                $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+                $fixtureDir = Join-Path $PSScriptRoot 'fixtures\phase-marker-sessions'
+                Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529.jsonl') -Destination (Join-Path $slugDir 'session.jsonl')
+                Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529b.jsonl') -Destination (Join-Path $slugDir 'session2.jsonl')
+
+                # Call without -IssueNumber but target the feature branch in fixture
+                $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch 'feature/issue-529' -ParentCwd $script:TestCwd -ProjectsRoot $tmp)
+
+                # Strict branch behavior: no assistant events on feature/issue-529 exist (admitted ones are on main), expect zero
+                $result.Count | Should -Be 0
+
+                Remove-Item -Recurse -Force $tmp
+            }
+
+            It 'supplying -IssueNumber preserves strict feature-branch assistant events without phase-marker tag' {
+                $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
+                $slug = 'phase-marker-test'
+                $slugDir = Join-Path $tmp $slug
+                $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+                $strictUuid = '99999999-9999-9999-9999-999999999999'
+                $events = @(
+                    @{
+                        type      = 'user'
+                        message   = @{ role = 'user'; content = '<command-name>/plan</command-name><command-args>529</command-args>' }
+                        cwd       = $script:TestCwd
+                        gitBranch = 'main'
+                        timestamp = '2026-01-04T00:00:00Z'
+                    }
+                    script:New-AssistantEvent -Uuid $strictUuid -Branch 'feature/issue-529'
+                    script:New-AssistantEvent -Uuid 'aaaaaaaa-0000-0000-0000-000000000000' -Branch 'main'
+                )
+                script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events $events
+
+                $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch 'feature/issue-529' -ParentCwd $script:TestCwd -ProjectsRoot $tmp -IssueNumber 529)
+                $strictEvent = @($result | Where-Object { $_.uuid -eq $strictUuid })
+
+                $strictEvent.Count | Should -Be 1
+                $strictEvent[0]['gitBranch'] | Should -Be 'feature/issue-529'
+                $strictEvent[0].ContainsKey('_phase_marker_port') | Should -BeFalse
+
+                Remove-Item -Recurse -Force $tmp
+            }
+        }
 }
