@@ -462,8 +462,18 @@ function script:Get-FCLFrameSpineComments {
 function script:Resolve-FCLLinkedIssueNumber {
     param(
         [AllowEmptyString()][string]$PrBody,
-        [Parameter(Mandatory)][int]$Pr
+        [AllowEmptyString()][string]$Branch
     )
+
+    if (-not [string]::IsNullOrWhiteSpace($Branch)) {
+        $branchMatch = [regex]::Match($Branch, '^feature/issue-(?<issue>\d+)-')
+        if ($branchMatch.Success) {
+            $branchIssue = 0
+            if ([int]::TryParse($branchMatch.Groups['issue'].Value, [ref]$branchIssue) -and $branchIssue -gt 0) {
+                return $branchIssue
+            }
+        }
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($PrBody)) {
         $patterns = @(
@@ -483,7 +493,7 @@ function script:Resolve-FCLLinkedIssueNumber {
         }
     }
 
-    return $Pr
+    return $null
 }
 
 function script:Get-FCLIssueCommentsForSpine {
@@ -522,7 +532,9 @@ function script:Get-FCLFrameSpineSourceComments {
     $prSpineComments = @(script:Get-FCLFrameSpineComments -Comments $PrComments)
     if ($prSpineComments.Count -gt 0) { return $prSpineComments }
 
-    $issueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $PrBody -Pr $Pr
+    $issueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $PrBody
+    if ($null -eq $issueNumber) { return @() }
+
     $issueComments = @(script:Get-FCLIssueCommentsForSpine -IssueNumber $issueNumber)
     return @(script:Get-FCLFrameSpineComments -Comments $issueComments)
 }
@@ -1061,7 +1073,17 @@ function Invoke-FrameCreditLedger {
             $costBranch = & git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null
             $costEvents = @()
             if (-not [string]::IsNullOrWhiteSpace($slug) -and -not [string]::IsNullOrWhiteSpace($costBranch)) {
-                $costEvents = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $costBranch -ParentCwd $repoRoot)
+                $resolvedIssueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $prBody -Branch ([string]$costBranch)
+                $walkParameters = @{
+                    Slug      = $slug
+                    Branch    = $costBranch
+                    ParentCwd = $repoRoot
+                }
+                if ($null -ne $resolvedIssueNumber) {
+                    $walkParameters['IssueNumber'] = [int]$resolvedIssueNumber
+                }
+
+                $costEvents = @(Invoke-CostTranscriptWalk @walkParameters)
             }
 
             # 6b. Attribution
@@ -1093,7 +1115,11 @@ function Invoke-FrameCreditLedger {
             }
 
             # 6e. Completeness + preservation
-            $completeness = Get-SessionCompleteness -Events $costEvents
+            $completenessParameters = @{ Events = $costEvents }
+            if (-not [string]::IsNullOrWhiteSpace($costBranch)) {
+                $completenessParameters['Branch'] = [string]$costBranch
+            }
+            $completeness = Get-SessionCompleteness @completenessParameters
             $priorCostData = $null
             if ($null -ne $script:PrComments) {
                 $priorComment = @($script:PrComments | Where-Object { $_.body -match '<!-- cost-pattern-data' }) | Select-Object -Last 1

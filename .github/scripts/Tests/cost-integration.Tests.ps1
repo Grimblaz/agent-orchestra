@@ -131,6 +131,8 @@ exit `$LASTEXITCODE
             [string]$CommentsJson = '[]',
             # When $true, the harness poisons one cost lib file so dot-source fails
             [bool]$PoisonCostLib = $false,
+            # Branch returned by the git mock for cost-walker attribution
+            [string]$CostBranch = 'feature/test-cost-integration',
             # CostMarkdown is returned by the Format-CostPatternMarkdown mock
             [string]$CostMarkdown = '## Cost Pattern',
             # CostYaml is returned by the Format-CostPatternYaml mock
@@ -143,6 +145,7 @@ exit `$LASTEXITCODE
 
         $escapedCostMarkdown = $CostMarkdown -replace "'", "''"
         $escapedCostYaml = $CostYaml -replace "'", "''"
+        $escapedCostBranch = $CostBranch -replace "'", "''"
 
         $poisonBlock = if ($PoisonCostLib) {
             # Write a broken syntax file over cost-walker.ps1 path reference that the
@@ -162,6 +165,24 @@ exit `$LASTEXITCODE
 `$global:UpsertBody = ''
 `$global:UpsertMarker = ''
 $poisonBlock
+
+function global:git {
+    param([Parameter(ValueFromRemainingArguments = `$true)]`$Args)
+    `$joined = `$Args -join ' '
+
+    if (`$joined -match 'config --get remote\.origin\.url') {
+        `$global:LASTEXITCODE = 0
+        return 'https://github.com/example/example.git'
+    }
+
+    if (`$joined -match 'rev-parse --abbrev-ref HEAD') {
+        `$global:LASTEXITCODE = 0
+        return '$escapedCostBranch'
+    }
+
+    `$global:LASTEXITCODE = 0
+    return ''
+}
 
 function global:gh {
     param([Parameter(ValueFromRemainingArguments = `$true)]`$Args)
@@ -210,7 +231,10 @@ function global:gh {
 
 # Override cost functions so tests run without real transcript files
 function global:Get-CostTranscriptSlug { param([string]`$CwdPath) return 'test-slug' }
-function global:Invoke-CostTranscriptWalk { param([string]`$Slug, [string]`$Branch, [string]`$ParentCwd) return @() }
+function global:Invoke-CostTranscriptWalk {
+    param([string]`$Slug, [string]`$Branch, [string]`$ParentCwd, [Nullable[int]]`$IssueNumber = `$null)
+    return @()
+}
 function global:Get-CostAttribution {
     param([object[]]`$Events, [string]`$RateTablePath = '')
     return @{ ports = @{}; orchestrator_overhead = @{}; dispatches = @{}; totals = @{ total_cost_usd = 0.0 } }
@@ -229,6 +253,99 @@ function global:Format-CostPatternYaml {
     return '$escapedCostYaml'
 }
 "@
+    }
+
+    $script:InvokeOrchestratorInProcessWithWalkerCapture = {
+        param(
+            [Parameter(Mandatory)][string]$PrBody,
+            [Parameter(Mandatory)][string]$CostBranch
+        )
+
+        . $script:OrchestratorPath -Pr 467 -Mode 'warn'
+
+        $captured = @{
+            HadIssueNumber = $false
+            IssueNumber    = $null
+        }
+        $bodyJson = (@{ body = $PrBody; comments = @() } | ConvertTo-Json -Compress)
+
+        function git {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+
+            if ($joined -match 'config --get remote\.origin\.url') {
+                $global:LASTEXITCODE = 0
+                return 'https://github.com/example/example.git'
+            }
+
+            if ($joined -match 'rev-parse --abbrev-ref HEAD') {
+                $global:LASTEXITCODE = 0
+                return $CostBranch
+            }
+
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+
+        function gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+
+            if ($joined -match 'pr view \d+ --json baseRefOid') {
+                $global:LASTEXITCODE = 0
+                return '{"baseRefOid":"abc123"}'
+            }
+
+            if ($joined -match 'pr view \d+ --json body') {
+                $global:LASTEXITCODE = 0
+                return $bodyJson
+            }
+
+            if ($joined -match 'issue view \d+ --json comments') {
+                $global:LASTEXITCODE = 0
+                return '{"comments":[]}'
+            }
+
+            if ($joined -match '(issue|pr) comment \d+ --body') {
+                $global:LASTEXITCODE = 0
+                return 'https://github.com/example/example/pull/467#issuecomment-1'
+            }
+
+            if ($joined -match 'api repos/[^/]+/[^/]+ ') {
+                $global:LASTEXITCODE = 0
+                return '{"owner":{"login":"example"},"name":"example"}'
+            }
+
+            if ($joined -match 'pr edit \d+ --body-file') {
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+
+        function Get-CostTranscriptSlug { param([string]$CwdPath) return 'test-slug' }
+        function Invoke-CostTranscriptWalk {
+            param([string]$Slug, [string]$Branch, [string]$ParentCwd, [Nullable[int]]$IssueNumber = $null)
+            $captured.HadIssueNumber = $PSBoundParameters.ContainsKey('IssueNumber')
+            $captured.IssueNumber = $IssueNumber
+            return @()
+        }
+        function Get-CostAttribution {
+            param([object[]]$Events, [string]$RateTablePath = '')
+            return @{ ports = @{}; orchestrator_overhead = @{}; dispatches = @{}; totals = @{ total_cost_usd = 0.0 } }
+        }
+        function Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
+        function Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
+        function Get-SessionCompleteness { param([object[]]$Events, [string]$ExcludeReason = '', [string]$Branch = '') return @{ completeness = 'unknown'; excluded_from_rolling_baseline = $true; exclude_reason = 'no-events' } }
+        function Resolve-CostDataPreservation { param($Current, $Prior) return @{ action = 'emit'; reason = 'no-prior' } }
+        function Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
+        function Format-CostPatternMarkdown { param($Attribution, $Completeness, [object[]]$AnomalyFlags, $RollingMeta, [int]$Pr, [string]$Branch) return '## Cost Pattern' }
+        function Format-CostPatternYaml { param($Attribution, $Completeness, [object[]]$AnomalyFlags, [int]$Pr, [string]$Branch) return "<!-- cost-pattern-data`npr: $Pr`n-->" }
+
+        $result = Invoke-FrameCreditLedger -Pr 467 -Mode 'warn'
+        return @{ Result = $result; Captured = $captured }
     }
 }
 
@@ -288,6 +405,32 @@ Describe 'frame-credit-ledger cost integration' {
     }
 
     Context 'Orchestrator wiring: cost section appended for v4 PR (integration)' {
+
+        It 'passes branch-slug issue number to cost walker before body-linked issue' {
+            $body = $script:V4AllCoveredBody + "`nCloses #467`n"
+            $result = & $script:InvokeOrchestratorInProcessWithWalkerCapture -PrBody $body -CostBranch 'feature/issue-529-step-4'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Captured.HadIssueNumber | Should -Be $true
+            $result.Captured.IssueNumber | Should -Be 529
+        }
+
+        It 'passes body-linked issue number to cost walker when branch slug is absent' {
+            $body = $script:V4AllCoveredBody + "`nFixes #467`n"
+            $result = & $script:InvokeOrchestratorInProcessWithWalkerCapture -PrBody $body -CostBranch 'topic/no-issue-slug'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Captured.HadIssueNumber | Should -Be $true
+            $result.Captured.IssueNumber | Should -Be 467
+        }
+
+        It 'omits cost walker issue number when neither branch nor body resolves an issue' {
+            $result = & $script:InvokeOrchestratorInProcessWithWalkerCapture -PrBody $script:V4AllCoveredBody -CostBranch 'topic/no-issue-slug'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Captured.HadIssueNumber | Should -Be $false
+            $result.Captured.IssueNumber | Should -BeNullOrEmpty
+        }
 
         It 'comment body contains Cost Pattern section when cost lib available' {
             $bodyJson = (@{ body = $script:V4AllCoveredBody; comments = @() } | ConvertTo-Json -Compress)
