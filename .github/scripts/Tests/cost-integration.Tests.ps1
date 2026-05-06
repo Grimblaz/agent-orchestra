@@ -146,6 +146,7 @@ exit `$LASTEXITCODE
         $escapedCostMarkdown = $CostMarkdown -replace "'", "''"
         $escapedCostYaml = $CostYaml -replace "'", "''"
         $escapedCostBranch = $CostBranch -replace "'", "''"
+        $escapedRepoRoot = $script:RepoRoot -replace "'", "''"
 
         $poisonBlock = if ($PoisonCostLib) {
             # Write a broken syntax file over cost-walker.ps1 path reference that the
@@ -169,6 +170,11 @@ $poisonBlock
 function global:git {
     param([Parameter(ValueFromRemainingArguments = `$true)]`$Args)
     `$joined = `$Args -join ' '
+
+    if (`$joined -match 'rev-parse --show-toplevel') {
+        `$global:LASTEXITCODE = 0
+        return '$escapedRepoRoot'
+    }
 
     if (`$joined -match 'config --get remote\.origin\.url') {
         `$global:LASTEXITCODE = 0
@@ -266,6 +272,8 @@ function global:Format-CostPatternYaml {
         $captured = @{
             HadIssueNumber = $false
             IssueNumber    = $null
+            SlugCwd        = $null
+            ParentCwd      = $null
         }
         $bodyJson = (@{ body = $PrBody; comments = @() } | ConvertTo-Json -Compress)
 
@@ -325,9 +333,14 @@ function global:Format-CostPatternYaml {
             return ''
         }
 
-        function Get-CostTranscriptSlug { param([string]$CwdPath) return 'test-slug' }
+        function Get-CostTranscriptSlug {
+            param([string]$CwdPath)
+            $captured.SlugCwd = $CwdPath
+            return 'test-slug'
+        }
         function Invoke-CostTranscriptWalk {
             param([string]$Slug, [string]$Branch, [string]$ParentCwd, [Nullable[int]]$IssueNumber = $null)
+            $captured.ParentCwd = $ParentCwd
             $captured.HadIssueNumber = $PSBoundParameters.ContainsKey('IssueNumber')
             $captured.IssueNumber = $IssueNumber
             return @()
@@ -438,6 +451,25 @@ Describe 'frame-credit-ledger cost integration' {
             $result.Result.ExitCode | Should -Be 0
             $result.Captured.HadIssueNumber | Should -Be $false
             $result.Captured.IssueNumber | Should -BeNullOrEmpty
+        }
+
+        It 'resolves repository root from script path for entry-point worker seeding' {
+            . $script:OrchestratorPath -Pr 467 -Mode 'warn'
+            $script:FrameCreditLedgerRepoRoot = $null
+
+            $resolvedRoot = script:Resolve-FCLRepoRoot -ScriptPath $script:OrchestratorPath
+
+            $resolvedRoot | Should -Be $script:RepoRoot
+            $resolvedRoot | Should -Not -Be (Join-Path $script:RepoRoot '.github')
+        }
+
+        It 'passes repository root to cost walker through Invoke-FrameCreditLedger' {
+            $result = & $script:InvokeOrchestratorInProcessWithWalkerCapture -PrBody $script:V4AllCoveredBody -CostBranch 'feature/issue-529-cost-telemetry-attribution'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Captured.SlugCwd | Should -Be $script:RepoRoot
+            $result.Captured.ParentCwd | Should -Be $script:RepoRoot
+            $result.Captured.ParentCwd | Should -Not -Be (Join-Path $script:RepoRoot '.github')
         }
 
         It 'comment body contains Cost Pattern section when cost lib available' {

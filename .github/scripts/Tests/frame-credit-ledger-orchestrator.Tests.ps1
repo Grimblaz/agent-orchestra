@@ -63,12 +63,54 @@ A v4 PR body where every credit is passed.
 metrics_version: 4
 frame_version: 1
 credits:
+    - port: ce-gate-api
+        status: passed
+        evidence: "API CE Gate not required for this fixture"
+    - port: ce-gate-browser
+        status: passed
+        evidence: "browser CE Gate not required for this fixture"
+    - port: ce-gate-canvas
+        status: passed
+        evidence: "canvas CE Gate not required for this fixture"
   - port: review
     status: passed
     evidence: "judge ruling: keep"
+    - port: implement-code
+        status: passed
+        evidence: "implementation complete"
   - port: implement-test
     status: passed
     evidence: "tests GREEN at HEAD"
+    - port: implement-refactor
+        status: passed
+        evidence: "refactor review complete"
+    - port: implement-docs
+        status: passed
+        evidence: "docs complete"
+    - port: design
+        status: passed
+        evidence: "design complete"
+    - port: experience
+        status: passed
+        evidence: "experience complete"
+    - port: plan
+        status: passed
+        evidence: "plan complete"
+    - port: post-fix-review
+        status: passed
+        evidence: "post-fix review complete"
+    - port: post-pr
+        status: passed
+        evidence: "post-pr complete"
+    - port: process-retrospective
+        status: passed
+        evidence: "process retrospective complete"
+    - port: process-review
+        status: passed
+        evidence: "process review complete"
+    - port: release-hygiene
+        status: passed
+        evidence: "release hygiene complete"
   - port: ce-gate-cli
     status: not-applicable
     evidence: "no CLI surface touched"
@@ -836,7 +878,8 @@ body
 
             $result.ExitCode | Should -Be 0
             $combined = "$($result.Stdout)`n$($result.Stderr)"
-            $portRows = @($combined -split "`r?`n" | Where-Object { $_ -match '^\|\s*implement-test\s*\|' })
+            $coverageText = ($combined -split '(?m)^## Cost Pattern', 2)[0]
+            $portRows = @($coverageText -split "`r?`n" | Where-Object { $_ -match '^\|\s*implement-test\s*\|' })
 
             $portRows | Should -HaveCount 1
             $portRows[0] | Should -Match 'failed'
