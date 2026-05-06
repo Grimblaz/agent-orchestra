@@ -6,8 +6,7 @@
     Contract tests for terminal-hygiene guardrails introduced by issue #524.
 
 .DESCRIPTION
-    RED coverage for issue #524 until the two new sections are written into
-    skills/terminal-hygiene/SKILL.md. Tests use section-scoped extraction so
+    Non-regression contract for the two terminal-hygiene H2 sections added by issue #524 (`## Multiline Continuation-Prompt Hazard`, `## Non-Fatal Diagnostic Wrapper Pattern`) in skills/terminal-hygiene/SKILL.md. Tests use section-scoped extraction so
     that tokens already present in the existing '## Terminal Retry Hygiene'
     section (kill_terminal, fresh terminal) cannot false-GREEN assertions
     intended to target the new '## Multiline Continuation-Prompt Hazard' section.

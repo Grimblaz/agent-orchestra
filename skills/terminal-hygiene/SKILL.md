@@ -145,7 +145,7 @@ exit 0
 
 | Trigger                                                          | Gotcha                                                                                        | Fix                                                                                                            |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Terminal sits silently after a multi-line command                | The shell entered a continuation prompt (`>>` or `>`); the terminal is not frozen             | Intervene immediately — the shell waits indefinitely; use `kill_terminal` and open a fresh terminal — do not send `^C` |
+| Terminal sits silently after a multiline command                | The shell entered a continuation prompt (`>>` or `>`); the terminal is not frozen             | Intervene immediately — the shell waits indefinitely; use `kill_terminal` and open a fresh terminal — do not send `^C` |
 
 | Trigger                                                          | Gotcha                                                                                        | Fix                                                                                                            |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
