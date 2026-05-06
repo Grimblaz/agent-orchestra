@@ -5,7 +5,8 @@
 #>
 
 $script:FVLibDir = Split-Path -Parent $PSCommandPath
-. (Join-Path -Path $script:FVLibDir -ChildPath 'frame-predicate-core.ps1')
+. (Join-Path -Path $script:FVLibDir -ChildPath 'frame-shared-discovery.ps1')
+. (Join-Path -Path $script:FVLibDir -ChildPath 'frame-spine-core.ps1')
 
 function New-FVCheckResult {
     param(
@@ -86,314 +87,21 @@ function Get-FVPortCatalog {
 function Get-FVAdapterFiles {
     param([Parameter(Mandatory)][string]$RootPath)
 
-    $files = [System.Collections.Generic.List[System.IO.FileInfo]]::new()
-
-    $agentsPath = Join-Path -Path $RootPath -ChildPath 'agents'
-    if (Test-Path -LiteralPath $agentsPath) {
-        foreach ($file in @(Get-ChildItem -LiteralPath $agentsPath -Filter '*.agent.md' -File)) {
-            $files.Add($file)
-        }
-
-        foreach ($file in @(Get-ChildItem -LiteralPath $agentsPath -Filter '*.md' -File | Where-Object { $_.Name -notlike '*.agent.md' })) {
-            $files.Add($file)
-        }
-    }
-
-    $skillsPath = Join-Path -Path $RootPath -ChildPath 'skills'
-    if (Test-Path -LiteralPath $skillsPath) {
-        foreach ($directory in @(Get-ChildItem -LiteralPath $skillsPath -Directory)) {
-            $skillFile = Join-Path -Path $directory.FullName -ChildPath 'SKILL.md'
-            if (Test-Path -LiteralPath $skillFile) {
-                $files.Add((Get-Item -LiteralPath $skillFile))
-            }
-
-            $adaptersPath = Join-Path -Path $directory.FullName -ChildPath 'adapters'
-            if (Test-Path -LiteralPath $adaptersPath) {
-                foreach ($file in @(Get-ChildItem -LiteralPath $adaptersPath -Filter '*.md' -File)) {
-                    $files.Add($file)
-                }
-            }
-        }
-    }
-
-    $commandsPath = Join-Path -Path $RootPath -ChildPath 'commands'
-    if (Test-Path -LiteralPath $commandsPath) {
-        foreach ($file in @(Get-ChildItem -LiteralPath $commandsPath -Filter '*.md' -File)) {
-            $files.Add($file)
-        }
-    }
-
-    return @($files.ToArray() | Sort-Object -Property FullName)
-}
-
-function Remove-FVYamlTrailingComment {
-    param([AllowNull()][string]$Value)
-
-    if ($null -eq $Value) { return '' }
-
-    $quote = [char]0
-    for ($index = 0; $index -lt $Value.Length; $index++) {
-        $character = $Value[$index]
-
-        if ($quote -ne [char]0) {
-            if ($quote -eq [char]34 -and $character -eq [char]92) {
-                $index++
-                continue
-            }
-
-            if ($character -eq $quote) {
-                if ($quote -eq [char]39 -and $index + 1 -lt $Value.Length -and $Value[$index + 1] -eq [char]39) {
-                    $index++
-                    continue
-                }
-
-                $quote = [char]0
-            }
-
-            continue
-        }
-
-        if ($character -eq [char]34 -or $character -eq [char]39) {
-            $quote = $character
-            continue
-        }
-
-        if ($character -eq [char]'#' -and ($index -eq 0 -or [char]::IsWhiteSpace($Value[$index - 1]))) {
-            return $Value.Substring(0, $index).TrimEnd()
-        }
-    }
-
-    return $Value.TrimEnd()
-}
-
-function ConvertFrom-FVYamlDoubleQuotedScalar {
-    param([Parameter(Mandatory)][string]$Value)
-
-    $builder = [System.Text.StringBuilder]::new()
-    $index = 0
-    while ($index -lt $Value.Length) {
-        $character = $Value[$index]
-        if ($character -eq [char]92 -and $index + 1 -lt $Value.Length) {
-            $next = $Value[$index + 1]
-            switch ([string]$next) {
-                '"' { [void]$builder.Append([char]34) }
-                '\' { [void]$builder.Append([char]92) }
-                '/' { [void]$builder.Append('/') }
-                'n' { [void]$builder.Append("`n") }
-                'r' { [void]$builder.Append("`r") }
-                't' { [void]$builder.Append("`t") }
-                default { [void]$builder.Append($next) }
-            }
-
-            $index += 2
-            continue
-        }
-
-        [void]$builder.Append($character)
-        $index++
-    }
-
-    return $builder.ToString()
-}
-
-function Test-FVYamlBlockScalarIndicator {
-    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
-
-    return [regex]::IsMatch($Value, '^[|>][+-]?$')
-}
-
-function ConvertFrom-FVYamlScalar {
-    param([AllowNull()][string]$Value)
-
-    if ($null -eq $Value) { return '' }
-
-    $trimmed = (Remove-FVYamlTrailingComment -Value $Value).Trim()
-    if ($trimmed.Length -lt 2) { return $trimmed }
-
-    if ($trimmed.StartsWith("'") -and $trimmed.EndsWith("'")) {
-        return $trimmed.Substring(1, $trimmed.Length - 2).Replace("''", "'")
-    }
-
-    if ($trimmed.StartsWith('"') -and $trimmed.EndsWith('"')) {
-        return (ConvertFrom-FVYamlDoubleQuotedScalar -Value $trimmed.Substring(1, $trimmed.Length - 2))
-    }
-
-    return $trimmed
-}
-
-function Split-FVInlineValues {
-    param([Parameter(Mandatory)][string]$Value)
-
-    $trimmed = (Remove-FVYamlTrailingComment -Value $Value).Trim()
-    if ($trimmed -eq '[]') { return [string[]]@() }
-
-    if (-not ($trimmed.StartsWith('[') -and $trimmed.EndsWith(']'))) {
-        return [string[]]@((ConvertFrom-FVYamlScalar -Value $trimmed))
-    }
-
-    $inner = $trimmed.Substring(1, $trimmed.Length - 2)
-    $values = [System.Collections.Generic.List[string]]::new()
-    $builder = [System.Text.StringBuilder]::new()
-    $quote = [char]0
-
-    foreach ($character in $inner.ToCharArray()) {
-        if ($quote -ne [char]0) {
-            [void]$builder.Append($character)
-            if ($character -eq $quote) { $quote = [char]0 }
-            continue
-        }
-
-        if ($character -eq [char]34 -or $character -eq [char]39) {
-            $quote = $character
-            [void]$builder.Append($character)
-            continue
-        }
-
-        if ($character -eq [char]',') {
-            $item = ConvertFrom-FVYamlScalar -Value $builder.ToString()
-            if ($item.Length -gt 0) { $values.Add($item) }
-            $null = $builder.Clear()
-            continue
-        }
-
-        [void]$builder.Append($character)
-    }
-
-    $lastItem = ConvertFrom-FVYamlScalar -Value $builder.ToString()
-    if ($lastItem.Length -gt 0) { $values.Add($lastItem) }
-
-    return $values.ToArray()
-}
-
-function Test-FVTopLevelFrontmatterKey {
-    param([Parameter(Mandatory)][string]$Line)
-
-    return [regex]::IsMatch($Line, '^[A-Za-z0-9_-]+:\s*')
-}
-
-function Get-FVIndentedListValues {
-    param(
-        [Parameter(Mandatory)][string[]]$Lines,
-        [Parameter(Mandatory)][int]$StartIndex
-    )
-
-    $values = [System.Collections.Generic.List[string]]::new()
-    for ($lineIndex = $StartIndex; $lineIndex -lt $Lines.Count; $lineIndex++) {
-        $line = $Lines[$lineIndex]
-        if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith('#')) { continue }
-        if (Test-FVTopLevelFrontmatterKey -Line $line) { break }
-
-        $match = [regex]::Match($line, '^\s*-\s*(?<value>.*?)\s*$')
-        if ($match.Success) {
-            $value = ConvertFrom-FVYamlScalar -Value $match.Groups['value'].Value
-            if ($value.Length -gt 0) { $values.Add($value) }
-        }
-    }
-
-    return $values.ToArray()
-}
-
-function Get-FVIndentedScalarValue {
-    param(
-        [Parameter(Mandatory)][string[]]$Lines,
-        [Parameter(Mandatory)][int]$StartIndex
-    )
-
-    $parts = [System.Collections.Generic.List[string]]::new()
-    for ($lineIndex = $StartIndex; $lineIndex -lt $Lines.Count; $lineIndex++) {
-        $line = $Lines[$lineIndex]
-        if ([string]::IsNullOrWhiteSpace($line)) { continue }
-        if (Test-FVTopLevelFrontmatterKey -Line $line) { break }
-
-        $part = $line.Trim()
-        if ($part.Length -gt 0) { $parts.Add($part) }
-    }
-
-    return ($parts -join ' ').Trim()
-}
-
-function Get-FVProvidesDeclarationValues {
-    param(
-        [Parameter(Mandatory)][string[]]$Lines,
-        [Parameter(Mandatory)][int]$LineIndex,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
-    )
-
-    $normalizedValue = (Remove-FVYamlTrailingComment -Value $Value).Trim()
-    if ($normalizedValue.Length -gt 0) {
-        return [string[]]@(Split-FVInlineValues -Value $normalizedValue)
-    }
-
-    return [string[]]@(Get-FVIndentedListValues -Lines $Lines -StartIndex ($LineIndex + 1))
-}
-
-function Get-FVAppliesWhenDeclarationValue {
-    param(
-        [Parameter(Mandatory)][string[]]$Lines,
-        [Parameter(Mandatory)][int]$LineIndex,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$Value
-    )
-
-    $normalizedValue = (Remove-FVYamlTrailingComment -Value $Value).Trim()
-    if (Test-FVYamlBlockScalarIndicator -Value $normalizedValue) {
-        return (Get-FVIndentedScalarValue -Lines $Lines -StartIndex ($LineIndex + 1))
-    }
-
-    return (ConvertFrom-FVYamlScalar -Value $normalizedValue)
+    return (Get-FrameAdapterFile -RootPath $RootPath)
 }
 
 function Get-FVAdapterFrontmatter {
     param([Parameter(Mandatory)][System.IO.FileInfo]$File)
 
-    $metadata = [PSCustomObject]@{
-        File        = $File
-        Provides    = [string[]]@()
-        AppliesWhen = [string[]]@()
-    }
-
-    $content = Get-Content -LiteralPath $File.FullName -Raw
-    $match = [regex]::Match($content, '(?ms)\A---\r?\n(?<yaml>.*?)\r?\n---(?:\r?\n|\z)')
-    if (-not $match.Success) { return $metadata }
-
-    $lines = [string[]]($match.Groups['yaml'].Value -split "`r?`n")
-    $provides = [System.Collections.Generic.List[string]]::new()
-    $appliesWhen = [System.Collections.Generic.List[string]]::new()
-
-    for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex++) {
-        $line = $lines[$lineIndex]
-        if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith('#')) { continue }
-
-        $keyMatch = [regex]::Match($line, '^(?<key>[A-Za-z0-9_-]+):(?<value>.*)$')
-        if (-not $keyMatch.Success) { continue }
-
-        $key = $keyMatch.Groups['key'].Value
-        $value = $keyMatch.Groups['value'].Value.Trim()
-
-        if ($key -eq 'provides') {
-            foreach ($providedPort in @(Get-FVProvidesDeclarationValues -Lines $lines -LineIndex $lineIndex -Value $value)) {
-                if ($providedPort.Length -gt 0) { $provides.Add($providedPort) }
-            }
-
-            continue
-        }
-
-        if ($key -eq 'applies-when') {
-            $appliesWhen.Add((Get-FVAppliesWhenDeclarationValue -Lines $lines -LineIndex $lineIndex -Value $value))
-        }
-    }
-
-    $metadata.Provides = [string[]]$provides.ToArray()
-    $metadata.AppliesWhen = [string[]]$appliesWhen.ToArray()
-
-    return $metadata
+    return (Get-FrameAdapterFrontmatter -File $File)
 }
 
 function Get-FVAdapterMetadata {
     param([Parameter(Mandatory)][string]$RootPath)
 
     return @(
-        foreach ($file in @(Get-FVAdapterFiles -RootPath $RootPath)) {
-            Get-FVAdapterFrontmatter -File $file
+        foreach ($file in @(Get-FrameAdapterFile -RootPath $RootPath)) {
+            Get-FrameAdapterFrontmatter -File $file
         }
     )
 }
@@ -468,14 +176,297 @@ function Test-FVPredicateParse {
     return (New-FVCheckResult -Name 'PredicateParse' -Passed $false -Detail "$($violations.Count) applies-when parse error(s): $($violations -join '; ')")
 }
 
+function ConvertTo-FVNormalizedText {
+    param([AllowNull()][string]$Text)
+
+    if ($null -eq $Text) { return '' }
+    return $Text -replace "`r`n", "`n" -replace "`r", "`n"
+}
+
+function ConvertFrom-FVInlineList {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Value)
+
+    $trimmed = $Value.Trim()
+    if (-not ($trimmed.StartsWith('[') -and $trimmed.EndsWith(']'))) {
+        return $null
+    }
+
+    $inner = $trimmed.Substring(1, $trimmed.Length - 2).Trim()
+    if ($inner.Length -eq 0) { return , ([string[]]@()) }
+
+    $items = [System.Collections.Generic.List[string]]::new()
+    foreach ($item in $inner -split ',') {
+        $clean = $item.Trim()
+        if ($clean.Length -eq 0) { return $null }
+        $items.Add($clean) | Out-Null
+    }
+
+    return , ([string[]]$items.ToArray())
+}
+
+function Get-FVPlanScalarField {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Block,
+        [Parameter(Mandatory)][string[]]$Names
+    )
+
+    foreach ($name in $Names) {
+        $pattern = '(?m)^\s*' + [regex]::Escape($name) + '\s*:\s*(?<value>.*?)\s*$'
+        $match = [regex]::Match($Block, $pattern)
+        if ($match.Success) { return $match.Groups['value'].Value.Trim() }
+    }
+
+    return $null
+}
+
+function Get-FVPlanSliceBlock {
+    param([AllowNull()][string]$CommentBody)
+
+    $normalized = ConvertTo-FVNormalizedText -Text $CommentBody
+    if ([string]::IsNullOrEmpty($normalized)) { return @() }
+
+    $pattern = '<!--\s*frame-slice\s*-->\s*\n(?<payload>.*?)\n\s*-->|<!--\s*frame-slice(?:\s*\n|\s+)(?<payload>.*?)\n?\s*-->'
+    $regexMatches = [regex]::Matches($normalized, $pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
+    $blocks = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($match in $regexMatches) {
+        $payload = $match.Groups['payload'].Value
+        if ($payload.StartsWith("`n")) { $payload = $payload.Substring(1) }
+        if ($payload.EndsWith("`n")) { $payload = $payload.Substring(0, $payload.Length - 1) }
+        $blocks.Add($payload) | Out-Null
+    }
+
+    return $blocks.ToArray()
+}
+
+function ConvertFrom-FVPlanSliceBlock {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Block)
+
+    $stepId = Get-FVPlanScalarField -Block $Block -Names @('id', 'step_id')
+    $providesRaw = Get-FVPlanScalarField -Block $Block -Names @('provides', 'ports')
+    $acRefsRaw = Get-FVPlanScalarField -Block $Block -Names @('ac-refs', 'ac_refs')
+    $coverage = Get-FVPlanScalarField -Block $Block -Names @('coverage')
+
+    $provides = if ($null -eq $providesRaw) { [string[]]@() } else { ConvertFrom-FVInlineList -Value $providesRaw }
+    if ($null -eq $provides) { $provides = [string[]]@() }
+
+    $acRefs = if ($null -eq $acRefsRaw) { [string[]]@() } else { ConvertFrom-FVInlineList -Value $acRefsRaw }
+    if ($null -eq $acRefs) { $acRefs = [string[]]@() }
+
+    $isExploratory = $false
+    $exploratoryReason = ''
+    if ($coverage -match '^exploratory\s*-\s*(?<reason>.+)$') {
+        $isExploratory = $true
+        $exploratoryReason = $Matches['reason'].Trim()
+    }
+
+    return [PSCustomObject]@{
+        StepId            = if ($stepId) { $stepId } else { '(missing-id)' }
+        Provides          = [string[]]$provides
+        AcRefs            = [string[]]$acRefs
+        Coverage          = if ($null -eq $coverage) { '' } else { $coverage }
+        IsExploratory     = [bool]$isExploratory
+        ExploratoryReason = [string]$exploratoryReason
+    }
+}
+
+function ConvertFrom-FVPlanSpineBlock {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$SpineBlock)
+
+    $canonical = ConvertFrom-FSCSpineYaml -SpineBlock $SpineBlock
+    if ($null -eq $canonical) { return $null }
+
+    $ports = [ordered]@{}
+    foreach ($portName in @($canonical.Ports.Keys)) {
+        $ports[$portName] = [string[]]@($canonical.Ports[$portName] | ForEach-Object { $_.StepId })
+    }
+
+    return [PSCustomObject]@{ Ports = $ports }
+}
+
+function Test-FVPlanSpineOmittedPlanTooSmall {
+    param([AllowNull()][string]$CommentBody)
+
+    $normalized = ConvertTo-FVNormalizedText -Text $CommentBody
+    return ($normalized -match '(?m)^\s*spine-omitted\s*:\s*plan-too-small\s*$')
+}
+
+function Get-FVPlanAcceptanceCriterionId {
+    param([AllowNull()][string]$CommentBody)
+
+    $normalized = ConvertTo-FVNormalizedText -Text $CommentBody
+    $ids = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    $inAcceptanceCriteria = $false
+
+    foreach ($line in @($normalized -split "`n")) {
+        if ($line -match '^##\s+Acceptance Criteria\s*$') {
+            $inAcceptanceCriteria = $true
+            continue
+        }
+
+        if ($inAcceptanceCriteria -and $line -match '^##\s+') { break }
+
+        if (-not $inAcceptanceCriteria) { continue }
+
+        $match = [regex]::Match($line, '^\s*-\s+\*\*(?<id>AC\d+)\*\*')
+        if ($match.Success -and $seen.Add($match.Groups['id'].Value)) {
+            $ids.Add($match.Groups['id'].Value) | Out-Null
+        }
+    }
+
+    return $ids.ToArray()
+}
+
+function Resolve-FVCommentFilePath {
+    param([Parameter(Mandatory)][string]$CommentFile)
+
+    try {
+        return (Resolve-Path -LiteralPath $CommentFile).Path
+    }
+    catch {
+        if ($CommentFile -notmatch '^TestDrive:[\\/](?<leaf>[^\\/]+)$') { throw }
+
+        $leafName = $Matches['leaf']
+        $tempRoot = [System.IO.Path]::GetTempPath()
+        $match = Get-ChildItem -LiteralPath $tempRoot -Filter $leafName -File -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+            Sort-Object -Property LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+
+        if ($null -eq $match) { throw }
+        return $match.FullName
+    }
+}
+
+function Get-FVPlanCommentText {
+    param(
+        [AllowNull()][string]$CommentFile,
+        [AllowNull()][string]$CommentText
+    )
+
+    if ($CommentFile) {
+        $resolvedCommentFile = Resolve-FVCommentFilePath -CommentFile $CommentFile
+        return [System.IO.File]::ReadAllText($resolvedCommentFile)
+    }
+
+    if ($null -ne $CommentText) { return $CommentText }
+    return ''
+}
+
+function Invoke-FVPlanValidate {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][string]$CommentFile,
+        [AllowNull()][string]$CommentText
+    )
+
+    $commentBody = Get-FVPlanCommentText -CommentFile $CommentFile -CommentText $CommentText
+    $spineBlock = Get-FSCSpineBlock -CommentBody $commentBody
+    if ($null -eq $spineBlock) {
+        if (Test-FVPlanSpineOmittedPlanTooSmall -CommentBody $commentBody) {
+            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail 'spine-omitted: plan-too-small')))
+        }
+
+        return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Missing frame-spine block.')))
+    }
+
+    $spine = ConvertFrom-FVPlanSpineBlock -SpineBlock $spineBlock
+    if ($null -eq $spine) {
+        return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Invalid canonical frame-spine block.')))
+    }
+
+    $slices = @(
+        foreach ($block in @(Get-FVPlanSliceBlock -CommentBody $commentBody)) {
+            ConvertFrom-FVPlanSliceBlock -Block $block
+        }
+    )
+
+    $sliceByStepId = @{}
+    foreach ($slice in $slices) {
+        if (-not $sliceByStepId.ContainsKey($slice.StepId)) { $sliceByStepId[$slice.StepId] = $slice }
+    }
+
+    $structuralViolations = [System.Collections.Generic.List[string]]::new()
+    $coverageGaps = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($slice in $slices) {
+        if (@($slice.Provides).Count -gt 0) { continue }
+
+        if ($slice.IsExploratory) {
+            $coverageGaps.Add("coverage-gap: step $($slice.StepId) is exploratory - $($slice.ExploratoryReason)") | Out-Null
+            continue
+        }
+
+        $structuralViolations.Add("step $($slice.StepId) has no provides: declaration; add provides: [port-name] or coverage: exploratory - <reason>.") | Out-Null
+    }
+
+    foreach ($portName in $spine.Ports.Keys) {
+        foreach ($stepId in @($spine.Ports[$portName])) {
+            if (-not $sliceByStepId.ContainsKey($stepId)) {
+                $structuralViolations.Add("port $portName references step $stepId, but no frame-slice provides: anchor exists; add slice provides: [$portName].") | Out-Null
+                continue
+            }
+
+            $slice = $sliceByStepId[$stepId]
+            if (@($slice.Provides).Count -eq 0) {
+                $structuralViolations.Add("port $portName references step $stepId, but that slice has no slice provides: [$portName] anchor.") | Out-Null
+                continue
+            }
+
+            if ($slice.Provides -notcontains $portName) {
+                $slicePorts = @($slice.Provides) -join ', '
+                $structuralViolations.Add("step $stepId conflict: spine port $portName, slice port $slicePorts; update the spine or slice provides: anchor.") | Out-Null
+            }
+        }
+    }
+
+    $coveredAcIds = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($slice in $slices) {
+        foreach ($acRef in @($slice.AcRefs)) { $coveredAcIds.Add($acRef) | Out-Null }
+    }
+
+    foreach ($acId in @(Get-FVPlanAcceptanceCriterionId -CommentBody $commentBody)) {
+        if (-not $coveredAcIds.Contains($acId)) {
+            $coverageGaps.Add("coverage-gap: acceptance criterion $acId has no slice ac-refs: coverage.") | Out-Null
+        }
+    }
+
+    $results = [System.Collections.Generic.List[PSCustomObject]]::new()
+    if ($structuralViolations.Count -eq 0) {
+        $results.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail '')) | Out-Null
+    }
+    else {
+        $results.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail "$($structuralViolations.Count) structural violation(s): $($structuralViolations -join '; ')")) | Out-Null
+    }
+
+    if ($coverageGaps.Count -eq 0) {
+        $results.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail '')) | Out-Null
+    }
+    else {
+        $results.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail "$($coverageGaps.Count) warn-only coverage gap(s): $($coverageGaps -join '; ')")) | Out-Null
+    }
+
+    return (New-FVAggregateResult -Results $results.ToArray())
+}
+
 function Invoke-FrameValidate {
     [CmdletBinding()]
-    param([string]$RootPath)
+    param(
+        [string]$RootPath,
+        [ValidateSet('default', 'plan')]
+        [string]$Mode = 'default',
+        [AllowNull()][string]$CommentFile,
+        [AllowNull()][string]$CommentText
+    )
 
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Version Latest
 
     try {
+        if ($Mode -eq 'plan') {
+            return (Invoke-FVPlanValidate -CommentFile $CommentFile -CommentText $CommentText)
+        }
+
         $resolvedRoot = Resolve-FVRootPath -RootPath $RootPath
         $results = [System.Collections.Generic.List[PSCustomObject]]::new()
         $adapterMetadataCache = [PSCustomObject]@{

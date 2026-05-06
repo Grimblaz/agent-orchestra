@@ -64,6 +64,9 @@ Detailed CE scenarios are deferred until the audit-only sub-issue produces a con
 | Term | Definition |
 |---|---|
 | **Frame** | The contract — "what a complete change looks like." Encoded as a directory of port files. |
+| **spine** | The durable plan-routing index written with an implementation plan. It maps frame ports to implementation slices and gives Code-Conductor a compact handoff surface for specialist dispatch. |
+| **slice** | One addressable implementation-plan step or dependency shard referenced by the spine. A slice carries the step's execution mode, requirement contract summary, dependencies, AC references, and terminal/cycle markers needed for dispatch without loading the whole plan. |
+| **coverage-manifest** | The spine's declaration of whether port-to-slice coverage is complete or intentionally exploratory, including the required reason when coverage uses the exploratory escape hatch. |
 | **Port** | A required slot in the frame, corresponding to a question a customer would ask about a PR (e.g., "was this reviewed?"). |
 | **Adapter** | A skill, sub-skill, or agent step that can fill a port (e.g., `review-standard`, `review-lite`). |
 | **Selector** | The agent's judgment about which adapter to plug in for this change, based on adapter `applies-when` predicates. |
@@ -81,6 +84,54 @@ Detailed CE scenarios are deferred until the audit-only sub-issue produces a con
 A port corresponds to **a question a customer would ask about a PR**. Stages internal to an adapter (e.g., review's prosecute → defend → judge) are *not* separate ports because they don't answer separate customer questions — the judge ruling *is the answer* to "was this reviewed?".
 
 This is the test for whether to split or merge a port.
+
+---
+
+## Spine schema (v1)
+
+The frame spine is a plan-routing and context-sharing block, not a replacement for the PR body's pipeline metrics block.
+
+1. **Field name**: spine blocks use `spine_schema_version: 1`. They do not use `frame_version`; the existing pipeline metrics `frame_version: 1.0` field remains unrelated.
+2. **Canonical form**: port keys are sorted alphabetically. Port values use inline lists such as `[s2, s5]`. Flow-style bracket entries may carry cycle markers such as `s8#cycle:3#terminal`; block-scalar slice metadata uses the alternate `cycle: N` field. Canonical blocks have no trailing whitespace and use ISO-8601 UTC timestamps in `generated_at`.
+3. **Cycle marker grammar**: inline slice tokens use `sN[#cycle:N][#terminal]`. `cycle:N` is omitted when `N=1`. Block-form slice metadata uses explicit `terminal: true` for terminal steps. Ordering is the list position, not the numeric slice ID.
+4. **Exploratory coverage escape hatch**: `coverage: exploratory — {reason}` is allowed only when the reason is present. That reason is surfaced as a ledger row so reviewers can challenge incomplete routing coverage.
+5. **Plan-size threshold D8**: an implementation step means a step whose Execution Mode is `serial` or `parallel` and whose RC contains a GREEN code or test action. Adversarial review, CE Gate, and post-retrospective steps do not count toward the threshold.
+6. **Metrics version bump policy**: adding `spine-stale-fallback-count`, `dispatch-fallback-events[]`, and `dispatch-cost-samples[]` does not bump `metrics_version` because they are additive optional v4 fields.
+7. **D9 normalized-diff `generated_at` elision**: for D9 model-switch diff comparison, hash-elide the `generated_at:` line inside frame-spine blocks so identical content does not append duplicate durable handoff comments.
+
+Example canonical shape:
+
+```yaml
+<!-- frame-spine
+spine_schema_version: 1
+generated_at: 2026-05-04T14:30:00Z
+coverage: complete
+ports:
+  ce-gate-api: [s8#cycle:3#terminal]
+  implement-code: [s2, s5]
+  implement-test: [s3]
+slices:
+  s2:
+    execution_mode: serial
+    rc: GREEN code action
+    ac_refs: [AC1, AC2]
+    depends_on: []
+    cycle: 1
+  s5:
+    execution_mode: parallel
+    rc: GREEN code/test action
+    ac_refs: [AC4]
+    depends_on: [s2]
+    cycle: 2
+  s8:
+    execution_mode: serial
+    rc: CE Gate evidence capture
+    ac_refs: [AC9]
+    depends_on: [s5]
+    cycle: 3
+    terminal: true
+-->
+```
 
 ---
 
@@ -183,7 +234,7 @@ Port-filling skills and agents declare `provides:`. Supporting skills loaded onl
 
 | Type | Count per port | Purpose |
 |---|---|---|
-| **Work adapter** | ≥1 for live ports | Does the actual thing. Has positive `applies-when` when the port is conditional or variant-bearing. |
+| **Work adapter** | >=1 for live ports | Does the actual thing. Has positive `applies-when` when the port is conditional or variant-bearing. |
 | **Auto-N/A adapter** | 0 or 1 | Fires when declarative rule matches "nothing to do." Trigger-conditional ports use trigger absence instead and do not declare auto-N/A files. |
 | **Explicit-skip adapter** | exactly 1 for each non-deferred port | Operator/agent invokes with `reason`. Writes `skipped` credit. Justification is visible in PR review and challengeable. |
 
@@ -564,11 +615,11 @@ Order is intentional but flexible — actual priority will shift based on audit-
 | 8 | #433 (closed) | Reify `experience`, `design`, `plan` ports | Pipeline-entry agents emit credits with `applies-when` based on `changeset.complexity`. | row 3 |
 | 9 | #434 (closed) | Reify `implement-*` ports | Specialist agents emit credits; Validation Evidence table consumed as input-integrity inputs. | row 3 |
 | 10 | #435 (closed) | Reify `post-pr` and `post-fix-review` ports | Trigger-conditional logic for post-fix-review; explicit credit for post-pr cleanup. | row 5 |
-| 11 | #436 (closed; bundled into #443) | Decision: `process-retrospective` port or retire | Audit shows usage rate; decide formalize-as-port or remove from practice. | row 1 |
+| 11 | #436 (closed) | Decision: `process-retrospective` port or retire | Audit usage feeds the ADR-0004 D14 deferred-skeleton pattern until the practice is formalized as a port, folded into `post-pr`, or retired. | row 1 |
 | 12 | #438 (closed) | Reify `process-review` port | Trigger-conditional on CE Gate defects. | row 7 |
-| 13 | #439 | Pre-PR hook switches to **blocking mode** | After all 17 ports have adapters and audit shows acceptable credit-rate, hook upgrades from warn → block. **The actual rails turn on.** Per D17 (#442), blocking-mode activation requires ≥30-PR recalibration data as an explicit precondition. | all preceding |
+| 13 | #439 | Pre-PR hook switches to **blocking mode** | After all 17 ports have adapters and audit shows acceptable credit-rate, hook upgrades from warn → block. **The actual rails turn on.** Per D17 (#442), blocking-mode activation requires ≥30-PR recalibration data, all post-spine. | all preceding |
 
-Active aggregation issues: #441 (sub-A, closed 2026-05) covers rows 5, 6, and 10; **#442** (sub-B, active) covers rows 7, 8, and 9; #443 (sub-C) covers rows 11 and 12.
+Active aggregation issues: #441 (sub-A, closed 2026-05) covers rows 5, 6, and 10; **#442** (sub-B, active) covers rows 7, 8, and 9.
 
 ---
 
@@ -655,7 +706,7 @@ Reserved. Same policy as D14.
 
 ### D17 — Blocking-mode activation precondition
 
-Blocking-mode activation for sub-issue #13 requires ≥30-PR recalibration data as an explicit precondition. The warn-only hook must accumulate that dataset before the gate switches from `warn` to `enforce` mode. Sub-issue #13 owns the enforcement switch; this decision prevents premature enforcement before the credit-rate baseline is established.
+Blocking-mode activation for sub-issue #13 requires ≥30-PR recalibration data, all post-spine. The first PR with spine semantics merging restarts the counter for #439. The warn-only hook must accumulate that dataset before the gate switches from `warn` to `enforce` mode. Sub-issue #13 owns the enforcement switch; this decision prevents premature enforcement before the credit-rate baseline is established.
 
 ### D18 — Skill-first methodology
 

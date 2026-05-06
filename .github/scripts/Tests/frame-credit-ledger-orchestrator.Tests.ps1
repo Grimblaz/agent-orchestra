@@ -175,12 +175,12 @@ exit `$LASTEXITCODE
 
         $waited = $proc.WaitForExit($TimeoutSeconds * 1000)
         if (-not $waited) {
-            try { $proc.Kill($true) } catch {}
+            try { $proc.Kill($true) } catch { $null = $_ }
             $stopwatch.Stop()
             return @{
                 ExitCode        = -1
                 Stdout          = (Test-Path $stdoutPath) ? (Get-Content $stdoutPath -Raw) : ''
-                Stderr          = (Test-Path $stderrPath) ? (Get-Content $stderrPath -Raw) : ''
+                'Stderr'        = (Test-Path $stderrPath) ? (Get-Content $stderrPath -Raw) : ''
                 DurationSeconds = $stopwatch.Elapsed.TotalSeconds
                 TimedOut        = $true
             }
@@ -190,7 +190,7 @@ exit `$LASTEXITCODE
         return @{
             ExitCode        = $proc.ExitCode
             Stdout          = (Test-Path $stdoutPath) ? (Get-Content $stdoutPath -Raw) : ''
-            Stderr          = (Test-Path $stderrPath) ? (Get-Content $stderrPath -Raw) : ''
+            'Stderr'        = (Test-Path $stderrPath) ? (Get-Content $stderrPath -Raw) : ''
             DurationSeconds = $stopwatch.Elapsed.TotalSeconds
             TimedOut        = $false
         }
@@ -203,6 +203,7 @@ exit `$LASTEXITCODE
         param(
             [string]$BaseRefOidJson = '{"baseRefOid":"abc123"}',
             [string]$BodyJson = $null,
+            [string]$IssueCommentsJson = '{"comments":[]}',
             [int]$BaseRefAttemptsBeforeSuccess = 0,
             [bool]$HangOnBaseRef = $false,
             [string]$ExtraDeclarations = ''
@@ -223,7 +224,17 @@ exit `$LASTEXITCODE
 `$global:UpsertCalled = `$false
 `$global:UpsertBody = ''
 `$global:UpsertMarker = ''
+`$global:UpdatedPrBody = ''
 $ExtraDeclarations
+
+function global:Write-UpdatedPrBodyCapture {
+    param([AllowEmptyString()][string]`$Body)
+
+    `$global:UpdatedPrBody = `$Body
+    [Console]::Out.WriteLine('UPDATED_PR_BODY_BEGIN')
+    [Console]::Out.WriteLine(`$Body)
+    [Console]::Out.WriteLine('UPDATED_PR_BODY_END')
+}
 
 function global:gh {
     param([Parameter(ValueFromRemainingArguments = `$true)]`$Args)
@@ -248,9 +259,41 @@ function global:gh {
         return '$bodyDefault'
     }
 
+    if (`$joined -match 'pr edit \d+ .*--body-file') {
+        `$idx = [Array]::IndexOf(`$Args, '--body-file')
+        if (`$idx -ge 0 -and `$idx + 1 -lt `$Args.Count) {
+            `$bodyFile = [string]`$Args[`$idx + 1]
+            `$bodyText = (Test-Path -LiteralPath `$bodyFile) ? (Get-Content -LiteralPath `$bodyFile -Raw) : ''
+            Write-UpdatedPrBodyCapture -Body `$bodyText
+        }
+        `$global:LASTEXITCODE = 0
+        return 'https://github.com/example/example/pull/429'
+    }
+
+    if (`$joined -match 'pr edit \d+ .*--body') {
+        `$idx = [Array]::IndexOf(`$Args, '--body')
+        if (`$idx -ge 0 -and `$idx + 1 -lt `$Args.Count) {
+            Write-UpdatedPrBodyCapture -Body ([string]`$Args[`$idx + 1])
+        }
+        `$global:LASTEXITCODE = 0
+        return 'https://github.com/example/example/pull/429'
+    }
+
+    if (`$joined -match 'api -X PATCH repos/[^/]+/[^/]+/pulls/\d+') {
+        foreach (`$arg in `$Args) {
+            `$argText = [string]`$arg
+            if (`$argText -like 'body=*') {
+                Write-UpdatedPrBodyCapture -Body (`$argText.Substring(5))
+                break
+            }
+        }
+        `$global:LASTEXITCODE = 0
+        return '{"html_url":"https://github.com/example/example/pull/429"}'
+    }
+
     if (`$joined -match 'issue view \d+ --json comments') {
         `$global:LASTEXITCODE = 0
-        return '{"comments":[]}'
+        return '$IssueCommentsJson'
     }
 
     if (`$joined -match '(issue|pr) comment \d+ --body') {
@@ -278,6 +321,74 @@ function global:gh {
     return ''
 }
 "@
+    }
+
+    $script:NewV4PrBodyWithCredits = {
+        param([Parameter(Mandatory)][Alias('CreditRows')][string]$LedgerRows)
+
+        return @"
+## Summary
+
+Spine-backed PR body.
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+credits:
+$LedgerRows
+integrity_checks:
+  - check: marker-presence
+    status: passed
+-->
+"@
+    }
+
+    $script:NewV4PrBodyWithFallbackMetrics = {
+        param(
+            [Parameter(Mandatory)][AllowEmptyString()][string]$MetricsPrelude,
+            [Parameter(Mandatory)][Alias('CreditRows')][string]$LedgerRows
+        )
+
+        return @"
+## Summary
+
+Spine-backed PR body.
+
+<!-- pipeline-metrics
+metrics_version: 4
+frame_version: 1
+$MetricsPrelude
+credits:
+$LedgerRows
+integrity_checks:
+  - check: marker-presence
+    status: passed
+-->
+"@
+    }
+
+    $script:GetUpdatedPrBody = {
+        param([AllowEmptyString()][string]$Output)
+
+        $match = [regex]::Match($Output, '(?s)UPDATED_PR_BODY_BEGIN\r?\n(?<body>.*?)\r?\nUPDATED_PR_BODY_END')
+        if (-not $match.Success) { return $null }
+
+        return (($match.Groups['body'].Value -replace "`r`n", "`n") -replace "`r", "`n")
+    }
+
+    $script:NewFrameSpineComment = {
+        param([Parameter(Mandatory)][string]$SpineBlock)
+
+        $commentBody = @(
+            '<!-- frame-spine'
+            $SpineBlock
+            '-->'
+        ) -join "`n"
+
+        return [pscustomobject]@{
+            body = $commentBody
+            url  = 'https://github.com/example/example/issues/512#issuecomment-spine'
+        }
     }
 }
 
@@ -565,8 +676,7 @@ body
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 0
-            $combined = "$($result.Stdout)`n$($result.Stderr)"
-            $combined | Should -Match '(?i)pre-v4 metrics detected'
+            (($result.Stdout, $result.Stderr) -join "`n") | Should -Match '(?i)pre-v4 metrics detected'
         }
 
         It 'enforce mode exits 1 when at least one port is NotCovered' {
@@ -591,6 +701,323 @@ body
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 0
+        }
+    }
+
+    Context 'Issue #512 incomplete cycle detection from terminal spine markers' {
+
+        It 'reports an incomplete-cycle row when a terminal-marked spine port has no matching terminal credit' {
+            $spineBlock = @(
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T14:30:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-test: [s4#cycle:2#terminal]'
+                'slices:'
+                '  s4:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: []'
+                '    cycle: 2'
+                '    terminal: true'
+            ) -join "`n"
+            $spineComment = & $script:NewFrameSpineComment -SpineBlock $spineBlock
+            $issueCommentsJson = (@{ comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $prBody = & $script:NewV4PrBodyWithCredits -CreditRows @'
+  - port: review
+    status: passed
+    evidence: "review complete"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $combined = "$($result.Stdout)`n$($result.Stderr)"
+            $incompleteRows = @($combined -split "`r?`n" | Where-Object {
+                    $_ -match '^\|\s*implement-test\s*\|' -and $_ -match 'incomplete-cycle'
+                })
+
+            $incompleteRows | Should -HaveCount 1
+            $incompleteRows[0] | Should -Match 's4|terminal-step-id\s*:?\s*4'
+        }
+
+        It 'does not report incomplete-cycle when a later terminal cycle has a matching terminal-step-id credit' {
+            $spineBlock = @(
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T14:30:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-test: [s2, s5#cycle:2#terminal]'
+                'slices:'
+                '  s2:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: []'
+                '    cycle: 1'
+                '  s5:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: [s2]'
+                '    cycle: 2'
+                '    terminal: true'
+            ) -join "`n"
+            $spineComment = & $script:NewFrameSpineComment -SpineBlock $spineBlock
+            $issueCommentsJson = (@{ comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $prBody = & $script:NewV4PrBodyWithCredits -CreditRows @'
+  - port: implement-test
+    status: passed
+    terminal-step-id: 5
+    evidence: "tests passed for terminal cycle"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $combined = "$($result.Stdout)`n$($result.Stderr)"
+            $incompleteRows = @($combined -split "`r?`n" | Where-Object { $_ -match 'incomplete-cycle' })
+
+            $incompleteRows | Should -HaveCount 0
+        }
+
+        It 'reports a matching failed terminal-step credit as the authoritative visible status instead of an earlier passed row' {
+            $spineBlock = @(
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T14:30:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-test: [s3, s5#cycle:2#terminal]'
+                'slices:'
+                '  s3:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: []'
+                '    cycle: 1'
+                '  s5:'
+                '    execution_mode: serial'
+                '    rc: terminal validation'
+                '    ac_refs: [AC7]'
+                '    depends_on: [s3]'
+                '    cycle: 2'
+                '    terminal: true'
+            ) -join "`n"
+            $spineComment = & $script:NewFrameSpineComment -SpineBlock $spineBlock
+            $issueCommentsJson = (@{ comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $prBody = & $script:NewV4PrBodyWithCredits -CreditRows @'
+  - port: implement-test
+    status: passed
+    terminal-step-id: 3
+    evidence: "earlier cycle passed"
+  - port: implement-test
+    status: failed
+    terminal-step-id: 5
+    evidence: "terminal cycle failed"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $combined = "$($result.Stdout)`n$($result.Stderr)"
+            $portRows = @($combined -split "`r?`n" | Where-Object { $_ -match '^\|\s*implement-test\s*\|' })
+
+            $portRows | Should -HaveCount 1
+            $portRows[0] | Should -Match 'failed'
+            $portRows[0] | Should -Match 'terminal cycle failed'
+            $portRows[0] | Should -Not -Match 'earlier cycle passed'
+            $combined | Should -Not -Match 'incomplete-cycle'
+        }
+
+        It 'does not report incomplete-cycle rows when the spine has no terminal markers' {
+            $spineBlock = @(
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T14:30:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-test: [s2, s5#cycle:2]'
+                'slices:'
+                '  s2:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: []'
+                '    cycle: 1'
+                '  s5:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: [s2]'
+                '    cycle: 2'
+            ) -join "`n"
+            $spineComment = & $script:NewFrameSpineComment -SpineBlock $spineBlock
+            $issueCommentsJson = (@{ comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $prBody = & $script:NewV4PrBodyWithCredits -CreditRows @'
+  - port: review
+    status: passed
+    evidence: "review complete"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $combined = "$($result.Stdout)`n$($result.Stderr)"
+            $incompleteRows = @($combined -split "`r?`n" | Where-Object { $_ -match 'incomplete-cycle' })
+
+            $incompleteRows | Should -HaveCount 0
+        }
+    }
+
+    Context 'Issue #512 stale-spine fallback PR-body metrics' {
+
+        It 'leaves spine-stale-fallback-count absent when no stale-spine fallback event occurred' {
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics `
+                -MetricsPrelude '' `
+                -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $updatedBody = & $script:GetUpdatedPrBody -Output "$($result.Stdout)`n$($result.Stderr)"
+
+            $updatedBody | Should -Not -BeNullOrEmpty -Because 'the orchestrator must re-emit the PR body metrics block when applying additive fallback metrics'
+            $updatedBody | Should -Not -Match '(?m)^\s*spine-stale-fallback-count\s*:' `
+                -Because 'absence, not zero, is the default when no stale-spine fallback event has occurred'
+        }
+
+        It 'writes spine-stale-fallback-count with the event count when stale-spine fallback events occurred' {
+            $metricsPrelude = @'
+dispatch-fallback-events:
+  stale-spine:
+    - step: 10
+      reason: generated_at-mismatch
+    - step: 12
+      reason: missing-step-id
+'@
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics `
+                -MetricsPrelude $metricsPrelude `
+                -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $updatedBody = & $script:GetUpdatedPrBody -Output "$($result.Stdout)`n$($result.Stderr)"
+
+            $updatedBody | Should -Not -BeNullOrEmpty -Because 'stale-spine fallback events must be persisted back into PR-body pipeline metrics'
+            $updatedBody | Should -Match '(?m)^spine-stale-fallback-count:\s*2\s*$'
+        }
+
+        It 'never decrements spine-stale-fallback-count when additive metrics already contain a higher value' {
+            $metricsPrelude = @'
+spine-stale-fallback-count: 5
+dispatch-fallback-events:
+  stale-spine:
+    - step: 10
+      reason: generated_at-mismatch
+    - step: 12
+      reason: missing-step-id
+'@
+            $prBody = & $script:NewV4PrBodyWithFallbackMetrics `
+                -MetricsPrelude $metricsPrelude `
+                -CreditRows @'
+  - port: implement-test
+    status: passed
+    evidence: "tests passed"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $updatedBody = & $script:GetUpdatedPrBody -Output "$($result.Stdout)`n$($result.Stderr)"
+
+            $updatedBody | Should -Not -BeNullOrEmpty -Because 'additive PR-body metrics updates must preserve previously observed stale-spine fallback counts'
+            $updatedBody | Should -Match '(?m)^spine-stale-fallback-count:\s*5\s*$'
+            $updatedBody | Should -Not -Match '(?m)^spine-stale-fallback-count:\s*[0-4]\s*$'
+        }
+    }
+
+    Context 'Issue #512 dispatch-cost-samples PR-body metrics' {
+
+        It 'back-fills dispatch-cost-samples during the best-effort PR-body metrics pass and preserves existing fields' {
+            if (-not (Test-Path $script:OrchestratorPath)) {
+                throw "RED: orchestrator not found at $script:OrchestratorPath"
+            }
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+
+            $body = & $script:NewV4PrBodyWithFallbackMetrics `
+                -MetricsPrelude @'
+dispatch-cost-samples:
+  - step-id: s12
+    mode: spine
+    bytes: 7421
+    rc-conformance: not-evaluated
+    judge-disposition: not-evaluated
+'@ `
+                -CreditRows @'
+  - port: implement-test
+    status: passed
+    terminal-step-id: 12
+    evidence: "RC conformance passed"
+  - port: review
+    status: passed
+    evidence: "judge accepted"
+'@
+
+            $command = Get-Command Update-FCLPrBodyDispatchCostSamples -ErrorAction SilentlyContinue
+            $command | Should -Not -BeNullOrEmpty
+
+            $updated = & $command -PrBody $body -StepId 's12' -Mode 'spine' -RcConformance 'pass' -JudgeDisposition 'accepted'
+            $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+
+            $normalized | Should -Match '(?ms)- step-id: s12\n    mode: spine\n    bytes: 7421\n    rc-conformance: pass\n    judge-disposition: accepted'
+            $normalized | Should -Match '(?m)^metrics_version:\s*4\s*$'
+            $normalized | Should -Match '(?m)^frame_version:\s*1\s*$'
+            $normalized | Should -Match '(?m)^credits:\s*$'
+            $normalized | Should -Match '(?m)^integrity_checks:\s*$'
         }
     }
 
@@ -678,8 +1105,6 @@ body
                 IsProxyGithub = $false
             }
             $script:DeferredNotedPairs = @{}
-            # Capture stderr via the standard PowerShell redirection.
-            $stderr = $null
             $map = Resolve-FrameCreditLedgerApplicableMap -PortName 'review' -Adapters @($adapter) -Changeset $changeset 2>&1
             # Map result is the only return; stderr writes go to [Console]::Error which is hard
             # to capture in-process. Validate behaviorally: result is 'unknown' for the deferred id.

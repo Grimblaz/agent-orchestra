@@ -1,6 +1,6 @@
 ---
 name: process-retrospective
-description: "Formalized skeleton for the process-retrospective frame port — trigger predicate deferred to issue #348. DO NOT USE directly: this port's applies-when condition is 'never' until #348 ships the live producer. See trigger-deferred-to and trigger-deferred-since below."
+description: "Formalized skeleton for the process-retrospective frame port. Use when #348 ships the live producer and replaces this skeleton. DO NOT USE FOR: any current PR — applies-when is 'never' until #348 ships. See trigger-deferred-to and trigger-deferred-since below."
 provides: process-retrospective
 applies-when: never
 trigger-status: deferred
@@ -52,6 +52,11 @@ Artifacts that are **scaffolding** (will be replaced by #348):
 - The `applies-when: never` frontmatter line
 - The `trigger-status: deferred` + `trigger-deferred-to` + `trigger-deferred-since` metadata
 - The deferred skeleton body text in this file
+
+## Gotchas
+
+- **Never invoke this skeleton directly.** The `applies-when: never` frontmatter guarantees the port never fires. Any code that bypasses the predicate evaluator and calls this skill directly will get an empty skeleton, not a real retrospective.
+- **Do not copy this skeleton's frontmatter into a live skill.** When #348 ships, the `applies-when`, `trigger-status`, `trigger-deferred-to`, and `trigger-deferred-since` fields must all change. Copying them verbatim would silently defer the live port.
 
 ## Frame Ports Filled By This Skill
 

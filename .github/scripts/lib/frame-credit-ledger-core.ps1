@@ -3,9 +3,10 @@
 .SYNOPSIS
     Pure-logic library for the frame credit-ledger pre-PR warn hook (issue #429).
 
-    Exposes eleven functions:
+    Exposes these functions:
       - Read-PRMetricsBlock               : parse a pipeline-metrics v4 marker out of a PR body
       - Select-LastCreditByRunIndex       : pick the highest-run_index credit for (port, adapter)
+    - Select-AuthoritativeCreditForPort : pick the visible per-port credit, honoring terminal-step identities
       - Test-ReviewSentinelPresent        : check for <!-- review-judge-produced-{PR} --> sentinel
       - Resolve-NotPersistedSynthesis     : synthesize not-persisted credit when sentinel present
       - Build-ReviewCreditRow             : construct a v4 review credit row from judge-rulings
@@ -14,8 +15,8 @@
                                            PR comment body into structured finding objects
       - Get-PortFiles                     : enumerate frame/ports/*.yaml as objects
       - Resolve-PortStatus                : classify a single port given adapters + credit
-      - Compose-Comment                   : render the warn-mode unified per-port table report
-      - Compose-CommentWithCostPattern    : wrapper around Compose-Comment that appends the
+    - Compose-Comment                   : render the warn-mode unified per-port table report
+    - Compose-CommentWithCostPattern    : wrapper around Compose-Comment that appends the
                                            cost telemetry section (issue #467) when non-empty
       - Compose-PreV4ShortCircuitComment  : render the literal pre-v4 short-circuit text
 
@@ -346,6 +347,191 @@ function script:Get-FCLChunkKeyMap {
     return $map
 }
 
+function script:ConvertTo-FCLScalarValue {
+    param([AllowEmptyString()][string]$Value)
+
+    $normalizedValue = $Value.Trim()
+    if ($normalizedValue.Length -ge 2) {
+        $first = $normalizedValue[0]
+        $last = $normalizedValue[$normalizedValue.Length - 1]
+        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+            $normalizedValue = $normalizedValue.Substring(1, $normalizedValue.Length - 2)
+        }
+    }
+
+    return $normalizedValue
+}
+
+function script:Get-FCLDispatchCostSampleKeysAndValues {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Chunk)
+
+    $keyOrder = [System.Collections.Generic.List[string]]::new()
+    $values = @{}
+
+    foreach ($line in @($Chunk -split "`n")) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+        $trimmed = $line.TrimStart()
+        if ($trimmed.StartsWith('#')) { continue }
+        if ($trimmed -eq '-') { continue }
+        if ($trimmed.StartsWith('- ')) {
+            $trimmed = $trimmed.Substring(2).TrimStart()
+        }
+
+        $keyValueMatch = [regex]::Match($trimmed, '^(?<key>[A-Za-z0-9_-]+)\s*:\s*(?<value>.*)$')
+        if (-not $keyValueMatch.Success) {
+            throw 'row contains a non key/value line'
+        }
+
+        $fieldName = $keyValueMatch.Groups['key'].Value
+        $fieldValue = script:ConvertTo-FCLScalarValue -Value $keyValueMatch.Groups['value'].Value
+        [void]$keyOrder.Add($fieldName)
+        $values[$fieldName] = $fieldValue
+    }
+
+    return [pscustomobject]@{
+        KeyOrder = $keyOrder.ToArray()
+        Values   = $values
+    }
+}
+
+function script:ConvertFrom-FCLDispatchCostSampleChunk {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Chunk)
+
+    $requiredKeys = @('step-id', 'mode', 'bytes', 'rc-conformance', 'judge-disposition')
+    $modeValues = @('spine', 'legacy-fallback', 'budget-exceeded')
+    $rcConformanceValues = @('pass', 'fail', 'not-evaluated')
+    $judgeDispositionValues = @('accepted', 'rejected', 'deferred', 'not-evaluated')
+
+    $parsed = script:Get-FCLDispatchCostSampleKeysAndValues -Chunk $Chunk
+    $keyOrder = @($parsed.KeyOrder)
+    if ($keyOrder.Count -ne $requiredKeys.Count) {
+        throw 'row must contain exactly step-id, mode, bytes, rc-conformance, judge-disposition'
+    }
+
+    for ($keyIndex = 0; $keyIndex -lt $requiredKeys.Count; $keyIndex++) {
+        if ($keyOrder[$keyIndex] -ne $requiredKeys[$keyIndex]) {
+            throw 'row keys must be exactly step-id, mode, bytes, rc-conformance, judge-disposition in that order'
+        }
+    }
+
+    $values = $parsed.Values
+    foreach ($requiredKey in $requiredKeys) {
+        if (-not $values.ContainsKey($requiredKey) -or [string]::IsNullOrWhiteSpace([string]$values[$requiredKey])) {
+            throw "row is missing $requiredKey"
+        }
+    }
+
+    if ($modeValues -notcontains [string]$values['mode']) {
+        throw 'mode must be spine, legacy-fallback, or budget-exceeded'
+    }
+    if ($rcConformanceValues -notcontains [string]$values['rc-conformance']) {
+        throw 'rc-conformance must be pass, fail, or not-evaluated'
+    }
+    if ($judgeDispositionValues -notcontains [string]$values['judge-disposition']) {
+        throw 'judge-disposition must be accepted, rejected, deferred, or not-evaluated'
+    }
+
+    $bytesValue = 0
+    if (-not [int]::TryParse([string]$values['bytes'], [ref]$bytesValue)) {
+        throw 'bytes must be an integer'
+    }
+
+    return New-DispatchCostSampleRow `
+        -StepId ([string]$values['step-id']) `
+        -Mode ([string]$values['mode']) `
+        -Bytes $bytesValue `
+        -RcConformance ([string]$values['rc-conformance']) `
+        -JudgeDisposition ([string]$values['judge-disposition'])
+}
+
+function script:Set-FCLDispatchCostSamplesSection {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$MetricsBlock,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Samples
+    )
+
+    $eol = if ($MetricsBlock.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $normalized = $MetricsBlock -replace "`r`n", "`n" -replace "`r", "`n"
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in @($normalized -split "`n")) { [void]$lines.Add($line) }
+
+    $sectionStart = -1
+    $sectionEnd = -1
+    $sectionIndent = 0
+    for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex++) {
+        $sectionMatch = [regex]::Match($lines[$lineIndex], '^(?<indent>\s*)dispatch-cost-samples\s*:\s*$')
+        if ($sectionMatch.Success) {
+            $sectionStart = $lineIndex
+            $sectionIndent = $sectionMatch.Groups['indent'].Value.Length
+            break
+        }
+    }
+
+    if ($sectionStart -ge 0) {
+        $sectionEnd = $lines.Count
+        for ($lineIndex = $sectionStart + 1; $lineIndex -lt $lines.Count; $lineIndex++) {
+            $line = $lines[$lineIndex]
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+            $trimmed = $line.TrimStart()
+            $indent = $line.Length - $trimmed.Length
+            if ($indent -le $sectionIndent -and -not $trimmed.StartsWith('#')) {
+                $sectionEnd = $lineIndex
+                break
+            }
+        }
+
+        for ($lineIndex = $sectionEnd - 1; $lineIndex -ge $sectionStart; $lineIndex--) {
+            $lines.RemoveAt($lineIndex)
+        }
+    }
+
+    if (@($Samples).Count -eq 0) {
+        return ($lines.ToArray() -join $eol)
+    }
+
+    $sectionLines = [System.Collections.Generic.List[string]]::new()
+    [void]$sectionLines.Add('dispatch-cost-samples:')
+    foreach ($sample in @($Samples)) {
+        [void]$sectionLines.Add("  - step-id: $($sample.'step-id')")
+        [void]$sectionLines.Add("    mode: $($sample.mode)")
+        [void]$sectionLines.Add("    bytes: $($sample.bytes)")
+        [void]$sectionLines.Add("    rc-conformance: $($sample.'rc-conformance')")
+        [void]$sectionLines.Add("    judge-disposition: $($sample.'judge-disposition')")
+    }
+
+    $insertIndex = if ($sectionStart -ge 0) { $sectionStart } else { $lines.Count }
+    if ($sectionStart -lt 0) {
+        while ($insertIndex -gt 0 -and [string]::IsNullOrWhiteSpace($lines[$insertIndex - 1])) {
+            $insertIndex--
+        }
+    }
+
+    for ($sectionLineIndex = 0; $sectionLineIndex -lt $sectionLines.Count; $sectionLineIndex++) {
+        $lines.Insert($insertIndex + $sectionLineIndex, $sectionLines[$sectionLineIndex])
+    }
+
+    return ($lines.ToArray() -join $eol)
+}
+
+function script:Set-FCLDispatchCostSamplesInPrBody {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Samples
+    )
+
+    $match = [regex]::Match($PrBody, '(?s)(?<open><!--\s*pipeline-metrics\s*)(?<block>.*?)(?<close>\s*-->)')
+    if (-not $match.Success) { return $PrBody }
+
+    $updatedBlock = script:Set-FCLDispatchCostSamplesSection -MetricsBlock $match.Groups['block'].Value -Samples $Samples
+    $prefix = $PrBody.Substring(0, $match.Index)
+    $suffixStart = $match.Index + $match.Length
+    $suffix = $PrBody.Substring($suffixStart)
+
+    return $prefix + $match.Groups['open'].Value + $updatedBlock + $match.Groups['close'].Value + $suffix
+}
+
 # endregion ---------------------------------------------------------------------
 
 # region: shared port-report helpers --------------------------------------------
@@ -410,7 +596,7 @@ function Read-PRMetricsBlock {
 
         $creditsRaw = script:ConvertFrom-FCLListSection -Block $block -SectionName 'credits' `
             -Fields @('port', 'adapter', 'status', 'run_index', 'evidence',
-                      'mode_backfilled_at', 'mode_original_pr_merged_at')
+                      'terminal-step-id', 'mode_backfilled_at', 'mode_original_pr_merged_at')
 
         # Findings 2 + 5 (issue #441 follow-up): the flat-key parser cannot
         # represent nested credit fields. Extract per-credit raw chunks here so
@@ -435,6 +621,15 @@ function Read-PRMetricsBlock {
                     $parsedRunIndex = 0
                     if ([int]::TryParse($runIndexRaw, [ref]$parsedRunIndex)) {
                         $runIndexInt = $parsedRunIndex
+                    }
+                }
+
+                $terminalStepIdRaw = [string]$entry.'terminal-step-id'
+                $terminalStepIdInt = $null
+                if (-not [string]::IsNullOrWhiteSpace($terminalStepIdRaw)) {
+                    $parsedTerminalStepId = 0
+                    if ([int]::TryParse($terminalStepIdRaw, [ref]$parsedTerminalStepId)) {
+                        $terminalStepIdInt = $parsedTerminalStepId
                     }
                 }
 
@@ -479,6 +674,7 @@ function Read-PRMetricsBlock {
                     Adapter                       = [string]$entry.adapter
                     Status                        = [string]$entry.status
                     RunIndex                      = $runIndexInt
+                    TerminalStepId                = $terminalStepIdInt
                     Evidence                      = [string]$entry.evidence
                     ModeBackfilledAt              = if ([string]::IsNullOrWhiteSpace([string]$backfilledAt)) { $null } else { [string]$backfilledAt }
                     ModeOriginalPrMergedAt        = if ([string]::IsNullOrWhiteSpace([string]$originalMergedAt)) { $null } else { [string]$originalMergedAt }
@@ -503,11 +699,26 @@ function Read-PRMetricsBlock {
                 }
             })
 
+        [string[]]$dispatchCostSampleChunks = script:Get-FCLEntryChunks -Block $block -SectionName 'dispatch-cost-samples'
+        if ($null -eq $dispatchCostSampleChunks) { $dispatchCostSampleChunks = [string[]]@() }
+
+        $dispatchCostSampleList = [System.Collections.Generic.List[object]]::new()
+        foreach ($dispatchCostSampleChunk in @($dispatchCostSampleChunks)) {
+            try {
+                [void]$dispatchCostSampleList.Add((script:ConvertFrom-FCLDispatchCostSampleChunk -Chunk $dispatchCostSampleChunk))
+            }
+            catch {
+                throw "dispatch-cost-samples: $($_.Exception.Message)"
+            }
+        }
+        $dispatchCostSamples = @($dispatchCostSampleList.ToArray())
+
         return [pscustomobject]@{
-            MetricsVersion  = 4
-            FrameVersion    = $frameVersion
-            Credits         = $credits
-            IntegrityChecks = $integrityChecks
+            MetricsVersion      = 4
+            FrameVersion        = $frameVersion
+            Credits             = $credits
+            IntegrityChecks     = $integrityChecks
+            DispatchCostSamples = $dispatchCostSamples
         }
     }
     catch {
@@ -600,6 +811,112 @@ function Resolve-NotPersistedSynthesis {
     }
 }
 
+function New-DispatchCostSampleRow {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$StepId,
+        [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
+        [Parameter(Mandatory)][int]$Bytes,
+        [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance = 'not-evaluated',
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition = 'not-evaluated'
+    )
+
+    return [pscustomobject][ordered]@{
+        'step-id'           = $StepId
+        mode                = $Mode
+        bytes               = $Bytes
+        'rc-conformance'    = $RcConformance
+        'judge-disposition' = $JudgeDisposition
+    }
+}
+
+function Add-DispatchCostSampleToPrBody {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][string]$StepId,
+        [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
+        [Parameter(Mandatory)][int]$Bytes,
+        [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance = 'not-evaluated',
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition = 'not-evaluated'
+    )
+
+    $metrics = Read-PRMetricsBlock -PrBody $PrBody
+    if ($null -eq $metrics -or $metrics.MetricsVersion -ne 4) { return $PrBody }
+
+    $samples = [System.Collections.Generic.List[object]]::new()
+    foreach ($sample in @($metrics.DispatchCostSamples)) { [void]$samples.Add($sample) }
+
+    $existingIndex = -1
+    for ($sampleIndex = 0; $sampleIndex -lt $samples.Count; $sampleIndex++) {
+        $sample = $samples[$sampleIndex]
+        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode) {
+            $existingIndex = $sampleIndex
+            break
+        }
+    }
+
+    if ($existingIndex -ge 0) {
+        $existingSample = $samples[$existingIndex]
+        $samples[$existingIndex] = New-DispatchCostSampleRow `
+            -StepId $StepId `
+            -Mode $Mode `
+            -Bytes $Bytes `
+            -RcConformance ([string]$existingSample.'rc-conformance') `
+            -JudgeDisposition ([string]$existingSample.'judge-disposition')
+    }
+    else {
+        [void]$samples.Add((New-DispatchCostSampleRow `
+                    -StepId $StepId `
+                    -Mode $Mode `
+                    -Bytes $Bytes `
+                    -RcConformance $RcConformance `
+                    -JudgeDisposition $JudgeDisposition))
+    }
+
+    return script:Set-FCLDispatchCostSamplesInPrBody -PrBody $PrBody -Samples $samples.ToArray()
+}
+
+function Update-DispatchCostSampleEvaluationInPrBody {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][string]$StepId,
+        [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
+        [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance,
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition
+    )
+
+    $metrics = Read-PRMetricsBlock -PrBody $PrBody
+    if ($null -eq $metrics -or $metrics.MetricsVersion -ne 4) { return $PrBody }
+
+    $samples = [System.Collections.Generic.List[object]]::new()
+    $updated = $false
+    foreach ($sample in @($metrics.DispatchCostSamples)) {
+        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode) {
+            $updatedRcConformance = [string]$sample.'rc-conformance'
+            $updatedJudgeDisposition = [string]$sample.'judge-disposition'
+            if ($PSBoundParameters.ContainsKey('RcConformance')) { $updatedRcConformance = $RcConformance }
+            if ($PSBoundParameters.ContainsKey('JudgeDisposition')) { $updatedJudgeDisposition = $JudgeDisposition }
+
+            [void]$samples.Add((New-DispatchCostSampleRow `
+                        -StepId ([string]$sample.'step-id') `
+                        -Mode ([string]$sample.mode) `
+                        -Bytes ([int]$sample.bytes) `
+                        -RcConformance $updatedRcConformance `
+                        -JudgeDisposition $updatedJudgeDisposition))
+            $updated = $true
+        }
+        else {
+            [void]$samples.Add($sample)
+        }
+    }
+
+    if (-not $updated) { return $PrBody }
+
+    return script:Set-FCLDispatchCostSamplesInPrBody -PrBody $PrBody -Samples $samples.ToArray()
+}
+
 # ---------------------------------------------------------------------------
 # ConvertFrom-JudgeRulingsComment (issue #441, Step 8b)
 # ---------------------------------------------------------------------------
@@ -658,6 +975,19 @@ function ConvertFrom-JudgeRulingsComment {
 # Returns a pscustomobject shaped for direct emission into credits[]:
 #   port, adapter, status, run_index, evidence, judge-score, integrity-check
 
+function script:Add-FCLTerminalStepId {
+    param(
+        [Parameter(Mandatory)]$Row,
+        [int]$Step = 0
+    )
+
+    if ($Step -gt 0) {
+        $Row | Add-Member -NotePropertyName 'terminal-step-id' -NotePropertyValue $Step
+    }
+
+    return $Row
+}
+
 function Build-ReviewCreditRow {
     [CmdletBinding()]
     param(
@@ -665,7 +995,8 @@ function Build-ReviewCreditRow {
         [string]$AdapterName = 'standard',
         [string]$AdaptersDir = '',
         [int]$RunIndex = 1,
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     # Parse findings from the judge-rulings block.
@@ -725,7 +1056,7 @@ function Build-ReviewCreditRow {
         $integrityStatus = 'not-applicable'
     }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port             = 'review'
         adapter          = $AdapterName
         status           = $status
@@ -745,6 +1076,8 @@ function Build-ReviewCreditRow {
             status        = $integrityStatus
         }
     }
+
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -815,12 +1148,12 @@ function Build-ProcessReviewCreditRow {
 function Select-LastCreditByRunIndex {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Credits,
+        [Parameter(Mandatory)][Alias('Credits')][AllowEmptyCollection()][object[]]$LedgerRows,
         [Parameter(Mandatory)][string]$Port,
         [AllowEmptyString()][string]$Adapter = ''
     )
 
-    $pool = @($Credits | Where-Object { [string]$_.Port -eq $Port })
+    $pool = @($LedgerRows | Where-Object { [string]$_.Port -eq $Port })
     if (-not [string]::IsNullOrWhiteSpace($Adapter)) {
         $pool = @($pool | Where-Object { [string]$_.Adapter -eq $Adapter })
     }
@@ -830,6 +1163,100 @@ function Select-LastCreditByRunIndex {
 
     # Sort by RunIndex descending; treat $null RunIndex as 0.
     return ($pool | Sort-Object -Property { if ($null -eq $_.RunIndex) { 0 } else { [int]$_.RunIndex } } -Descending | Select-Object -First 1)
+}
+
+function script:Get-FCLTerminalStepIdFromCredit {
+    param([AllowNull()]$LedgerRow)
+
+    if ($null -eq $LedgerRow) { return 0 }
+
+    $raw = $null
+    if ($LedgerRow -is [System.Collections.IDictionary]) {
+        if ($LedgerRow.Contains('TerminalStepId')) { $raw = $LedgerRow['TerminalStepId'] }
+        elseif ($LedgerRow.Contains('terminal-step-id')) { $raw = $LedgerRow['terminal-step-id'] }
+    }
+    else {
+        if ($null -ne $LedgerRow.PSObject.Properties['TerminalStepId']) { $raw = $LedgerRow.TerminalStepId }
+        elseif ($null -ne $LedgerRow.PSObject.Properties['terminal-step-id']) { $raw = $LedgerRow.'terminal-step-id' }
+    }
+
+    $step = 0
+    if ($null -ne $raw -and [int]::TryParse([string]$raw, [ref]$step) -and $step -gt 0) {
+        return $step
+    }
+
+    return 0
+}
+
+function script:Get-FCLRunIndexFromCredit {
+    param([AllowNull()]$LedgerRow)
+
+    if ($null -eq $LedgerRow) { return 0 }
+
+    $raw = $null
+    if ($LedgerRow -is [System.Collections.IDictionary]) {
+        if ($LedgerRow.Contains('RunIndex')) { $raw = $LedgerRow['RunIndex'] }
+        elseif ($LedgerRow.Contains('run_index')) { $raw = $LedgerRow['run_index'] }
+    }
+    else {
+        if ($null -ne $LedgerRow.PSObject.Properties['RunIndex']) { $raw = $LedgerRow.RunIndex }
+        elseif ($null -ne $LedgerRow.PSObject.Properties['run_index']) { $raw = $LedgerRow.run_index }
+    }
+
+    $runIndex = 0
+    if ($null -ne $raw -and [int]::TryParse([string]$raw, [ref]$runIndex) -and $runIndex -gt 0) {
+        return $runIndex
+    }
+
+    return 0
+}
+
+function script:Get-FCLCreditStatusPrecedence {
+    param([AllowNull()]$LedgerRow)
+
+    $status = if ($null -eq $LedgerRow) { '' } else { [string]$LedgerRow.Status }
+    switch ($status) {
+        'failed' { return 60 }
+        'inconclusive' { return 50 }
+        'not-persisted' { return 40 }
+        'skipped' { return 30 }
+        'not-applicable' { return 20 }
+        'passed' { return 10 }
+        default { return 0 }
+    }
+}
+
+function script:Select-FCLCreditByStatusPrecedence {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][object[]]$LedgerRows)
+
+    $rows = @($LedgerRows | Where-Object { $null -ne $_ })
+    if ($rows.Count -eq 0) { return $null }
+    if ($rows.Count -eq 1) { return $rows[0] }
+
+    return ($rows | Sort-Object -Property `
+            @{ Expression = { script:Get-FCLCreditStatusPrecedence -LedgerRow $_ }; Descending = $true }, `
+            @{ Expression = { script:Get-FCLRunIndexFromCredit -LedgerRow $_ }; Descending = $true } |
+        Select-Object -First 1)
+}
+
+function Select-AuthoritativeCreditForPort {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][Alias('Credits')][AllowEmptyCollection()][object[]]$LedgerRows,
+        [Parameter(Mandatory)][string]$Port
+    )
+
+    $pool = @($LedgerRows | Where-Object { [string]$_.Port -eq $Port })
+    if ($pool.Count -eq 0) { return $null }
+
+    $terminalRows = @($pool | Where-Object { (script:Get-FCLTerminalStepIdFromCredit -LedgerRow $_) -gt 0 })
+    if ($terminalRows.Count -gt 0) {
+        $latestTerminalStep = @($terminalRows | ForEach-Object { script:Get-FCLTerminalStepIdFromCredit -LedgerRow $_ } | Measure-Object -Maximum)[0].Maximum
+        $latestTerminalRows = @($terminalRows | Where-Object { (script:Get-FCLTerminalStepIdFromCredit -LedgerRow $_) -eq [int]$latestTerminalStep })
+        return script:Select-FCLCreditByStatusPrecedence -LedgerRows $latestTerminalRows
+    }
+
+    return Select-LastCreditByRunIndex -LedgerRows $pool -Port $Port
 }
 
 function Get-PortFiles {
@@ -892,7 +1319,7 @@ function Resolve-PortStatus {
         [Parameter(Mandatory)]$Port,
         $WorkAdapters,
         $ApplicableMap,
-        $Credit
+        [Alias('Credit')]$LedgerRow
     )
 
     $portName = [string]$Port.Name
@@ -959,7 +1386,7 @@ function Resolve-PortStatus {
     }
 
     # 2) Adapter discovery failed: all-unknown AND no credit.
-    if ($adapters.Count -gt 0 -and $null -eq $Credit -and ($applicabilities | Where-Object { $_ -ne 'unknown' }).Count -eq 0) {
+    if ($adapters.Count -gt 0 -and $null -eq $LedgerRow -and ($applicabilities | Where-Object { $_ -ne 'unknown' }).Count -eq 0) {
         return [pscustomobject]@{
             PortName          = $portName
             Status            = 'Inconclusive'
@@ -980,11 +1407,11 @@ function Resolve-PortStatus {
     }
 
     # 3) Credit branch.
-    if ($null -ne $Credit) {
-        $creditStatus = [string]$Credit.Status
+    if ($null -ne $LedgerRow) {
+        $creditStatus = [string]$LedgerRow.Status
         $evidence = ''
-        if ($null -ne $Credit.PSObject.Properties['Evidence']) {
-            $evidence = [string]$Credit.Evidence
+        if ($null -ne $LedgerRow.PSObject.Properties['Evidence']) {
+            $evidence = [string]$LedgerRow.Evidence
         }
         $applicableAdapterName = if ($firstApplicableAdapter) { [string]$firstApplicableAdapter.Name } else { '' }
 
@@ -1054,6 +1481,7 @@ function Resolve-PortStatus {
 }
 
 function Compose-Comment {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MarkerToken,
@@ -1148,6 +1576,7 @@ function Compose-Comment {
 }
 
 function Compose-CommentWithCostPattern {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MarkerToken,
@@ -1164,6 +1593,7 @@ function Compose-CommentWithCostPattern {
 }
 
 function Compose-PreV4ShortCircuitComment {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$MarkerToken)
 
@@ -1186,6 +1616,7 @@ function Compose-PreV4ShortCircuitComment {
 # pre-v4 (block exists, version != 4) and missing-marker (no block at all);
 # emitted when Read-PRMetricsBlock returns MetricsVersion='parse-error'.
 function Compose-ParseErrorShortCircuitComment {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MarkerToken,
@@ -1219,6 +1650,7 @@ function Compose-ParseErrorShortCircuitComment {
 # pipeline-metrics marker block at all (Read-PRMetricsBlock returned $null).
 # Distinct from pre-v4 and parse-error.
 function Compose-MissingMetricsShortCircuitComment {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$MarkerToken)
 
@@ -1270,7 +1702,9 @@ function Build-CeGateCreditRow {
 
         [AllowEmptyCollection()][object[]]$EvidenceList = @(),
 
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+
+        [int]$Step = 0
     )
 
     $port = "ce-gate-$Surface"
@@ -1282,32 +1716,35 @@ function Build-CeGateCreditRow {
     if ($EnvironmentBlocked) {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { "CE Gate for $Surface surface blocked — $BlockKind." }
-        return [pscustomobject]@{
+        $row = [pscustomobject]@{
             port       = $port
             status     = 'inconclusive'
             block_kind = $BlockKind
             evidence   = $resolvedEvidence
         }
+        return script:Add-FCLTerminalStepId -Row $row -Step $Step
     }
 
     if (-not $SurfaceTouchResult) {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { "CE Gate not applicable — $Surface surface not touched." }
-        return [pscustomobject]@{
+        $row = [pscustomobject]@{
             port     = $port
             status   = 'not-applicable'
             evidence = $resolvedEvidence
         }
+        return script:Add-FCLTerminalStepId -Row $row -Step $Step
     }
 
     if ($EvidenceList.Count -gt 0) {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { $EvidenceList -join '; ' }
-        return [pscustomobject]@{
+        $row = [pscustomobject]@{
             port     = $port
             status   = 'passed'
             evidence = $resolvedEvidence
         }
+        return script:Add-FCLTerminalStepId -Row $row -Step $Step
     }
 
     # No evidence list and not blocked — inconclusive. Forward-emitted CE Gate inconclusive rows
@@ -1315,12 +1752,13 @@ function Build-CeGateCreditRow {
     # was reachable but no scenario evidence was produced (builder called without evidence).
     $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                         else { "CE Gate for $Surface surface inconclusive — no scenario evidence supplied." }
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port       = $port
         status     = 'inconclusive'
         block_kind = 'tooling'
         evidence   = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1352,7 +1790,8 @@ function Build-ExperienceCreditRow {
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
         [int]$IssueNumber = 0,
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     $status = script:Resolve-PipelineEntryCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -MarkerPresent $MarkerPresent
@@ -1361,12 +1800,13 @@ function Build-ExperienceCreditRow {
                         elseif ($status -eq 'not-applicable') { "changeset.isPipelineEntryTrivial == true; experience port not applicable." }
                         else { "$AdapterName adapter; status: $status." }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'experience'
         adapter  = $AdapterName
         status   = $status
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1379,7 +1819,8 @@ function Build-DesignCreditRow {
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
         [int]$IssueNumber = 0,
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     $status = script:Resolve-PipelineEntryCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -MarkerPresent $MarkerPresent
@@ -1388,12 +1829,13 @@ function Build-DesignCreditRow {
                         elseif ($status -eq 'not-applicable') { "changeset.isPipelineEntryTrivial == true; design port not applicable." }
                         else { "$AdapterName adapter; status: $status." }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'design'
         adapter  = $AdapterName
         status   = $status
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1406,7 +1848,8 @@ function Build-PlanCreditRow {
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
         [int]$IssueNumber = 0,
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     $status = script:Resolve-PipelineEntryCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -MarkerPresent $MarkerPresent
@@ -1415,12 +1858,13 @@ function Build-PlanCreditRow {
                         elseif ($status -eq 'not-applicable') { "changeset.isPipelineEntryTrivial == true; plan port not applicable." }
                         else { "$AdapterName adapter; status: $status." }
 
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'plan'
         adapter  = $AdapterName
         status   = $status
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1460,6 +1904,31 @@ function script:Resolve-ImplementCreditStatus {
     return @{ status = 'passed'; offending = $null }
 }
 
+function script:Build-FCLImplementCreditRow {
+    param(
+        [Parameter(Mandatory)][string]$Port,
+        [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
+        [bool]$AutoNaResult = $false,
+        [string]$AdapterName = 'work-adapter',
+        [string]$Evidence = '',
+        [int]$Step = 0
+    )
+
+    $resolution = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        elseif ($resolution.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
+                        elseif ($resolution.status -eq 'failed') { "Validator failed: $($resolution.offending)" }
+                        else { "$Port validation: $($resolution.status)." }
+
+    $row = [pscustomobject]@{
+        port     = $Port
+        adapter  = $AdapterName
+        status   = $resolution.status
+        evidence = $resolvedEvidence
+    }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
+}
+
 # ---------------------------------------------------------------------------
 # Build-ImplementCodeCreditRow (Step 4c)
 # ---------------------------------------------------------------------------
@@ -1469,21 +1938,11 @@ function Build-ImplementCodeCreditRow {
         [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
-    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
-    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
-                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
-                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
-                        else { "implement-code validation: $($r.status)." }
-
-    return [pscustomobject]@{
-        port     = 'implement-code'
-        adapter  = $AdapterName
-        status   = $r.status
-        evidence = $resolvedEvidence
-    }
+    return script:Build-FCLImplementCreditRow -Port 'implement-code' -ValidationEvidence $ValidationEvidence -AutoNaResult $AutoNaResult -AdapterName $AdapterName -Evidence $Evidence -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1495,21 +1954,11 @@ function Build-ImplementTestCreditRow {
         [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
-    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
-    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
-                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
-                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
-                        else { "implement-test validation: $($r.status)." }
-
-    return [pscustomobject]@{
-        port     = 'implement-test'
-        adapter  = $AdapterName
-        status   = $r.status
-        evidence = $resolvedEvidence
-    }
+    return script:Build-FCLImplementCreditRow -Port 'implement-test' -ValidationEvidence $ValidationEvidence -AutoNaResult $AutoNaResult -AdapterName $AdapterName -Evidence $Evidence -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1523,21 +1972,11 @@ function Build-ImplementRefactorCreditRow {
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
         [hashtable]$DebtThreshold = @{ lineCount = 300; complexity = 10 },
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
-    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
-    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
-                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
-                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
-                        else { "implement-refactor validation: $($r.status)." }
-
-    return [pscustomobject]@{
-        port     = 'implement-refactor'
-        adapter  = $AdapterName
-        status   = $r.status
-        evidence = $resolvedEvidence
-    }
+    return script:Build-FCLImplementCreditRow -Port 'implement-refactor' -ValidationEvidence $ValidationEvidence -AutoNaResult $AutoNaResult -AdapterName $AdapterName -Evidence $Evidence -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1549,21 +1988,11 @@ function Build-ImplementDocsCreditRow {
         [AllowEmptyCollection()][object[]]$ValidationEvidence = @(),
         [bool]$AutoNaResult = $false,
         [string]$AdapterName = 'work-adapter',
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
-    $r = script:Resolve-ImplementCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -ValidationEvidence $ValidationEvidence
-    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
-                        elseif ($r.status -eq 'skipped') { 'no validator evidence supplied to the credit-row builder' }
-                        elseif ($r.status -eq 'failed') { "Validator failed: $($r.offending)" }
-                        else { "implement-docs validation: $($r.status)." }
-
-    return [pscustomobject]@{
-        port     = 'implement-docs'
-        adapter  = $AdapterName
-        status   = $r.status
-        evidence = $resolvedEvidence
-    }
+    return script:Build-FCLImplementCreditRow -Port 'implement-docs' -ValidationEvidence $ValidationEvidence -AutoNaResult $AutoNaResult -AdapterName $AdapterName -Evidence $Evidence -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1577,17 +2006,19 @@ function Build-PostPrCreditRow {
     [CmdletBinding()]
     param(
         [hashtable]$ChecklistOutcomes = $null,
-        [string]$Evidence = ''
+        [string]$Evidence = '',
+        [int]$Step = 0
     )
 
     if ($null -eq $ChecklistOutcomes -or $ChecklistOutcomes.Count -eq 0) {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { 'no checklist outcomes supplied to the credit-row builder' }
-        return [pscustomobject]@{
+        $row = [pscustomobject]@{
             port     = 'post-pr'
             status   = 'skipped'
             evidence = $resolvedEvidence
         }
+        return script:Add-FCLTerminalStepId -Row $row -Step $Step
     }
 
     $failing = @()
@@ -1603,20 +2034,22 @@ function Build-PostPrCreditRow {
     if ($failing.Count -gt 0) {
         $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                             else { "Post-PR checklist failed: $($failing -join ', ')." }
-        return [pscustomobject]@{
+        $row = [pscustomobject]@{
             port     = 'post-pr'
             status   = 'failed'
             evidence = $resolvedEvidence
         }
+        return script:Add-FCLTerminalStepId -Row $row -Step $Step
     }
 
     $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
                         else { 'Post-PR checklist passed: archive, docs, version, releaseTag.' }
-    return [pscustomobject]@{
+    $row = [pscustomobject]@{
         port     = 'post-pr'
         status   = 'passed'
         evidence = $resolvedEvidence
     }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
 }
 
 # ---------------------------------------------------------------------------
@@ -1735,7 +2168,7 @@ function Invoke-CreditInputHarvest {
         'plan'       = 'Build-PlanCreditRow'
     }
 
-    function script:Parse-SingleCreditInputMarker {
+    function script:ConvertFrom-SingleCreditInputMarker {
         param([string]$Text)
 
         if ([string]::IsNullOrWhiteSpace($Text)) { return $null }
@@ -1777,7 +2210,7 @@ function Invoke-CreditInputHarvest {
     # Build lookup from in-memory markers (port → payload hashtable)
     $inMemoryByPort = @{}
     foreach ($markerText in $InMemoryMarkers) {
-        $parsed = script:Parse-SingleCreditInputMarker -Text $markerText
+        $parsed = script:ConvertFrom-SingleCreditInputMarker -Text $markerText
         if ($null -ne $parsed -and $parsed.ContainsKey('port')) {
             $inMemoryByPort[$parsed['port']] = $parsed
         }
@@ -1814,7 +2247,7 @@ function Invoke-CreditInputHarvest {
             $creditComment = $comments | Where-Object { $_ -like "*$creditMarkerPrefix*" } | Select-Object -First 1
 
             if ($null -ne $creditComment) {
-                $payload = script:Parse-SingleCreditInputMarker -Text $creditComment
+                $payload = script:ConvertFrom-SingleCreditInputMarker -Text $creditComment
                 break
             }
 

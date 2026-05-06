@@ -46,9 +46,10 @@ $script:WarnModeOnly = ($Mode -eq 'warn')
 # fail-open semantics would be bypassed. We wrap here to preserve them.)
 # ---------------------------------------------------------------------------
 try {
-    . (Join-Path $PSScriptRoot 'lib/frame-predicate-core.ps1')
+    . (Join-Path $PSScriptRoot 'lib/frame-shared-discovery.ps1')
     . (Join-Path $PSScriptRoot 'lib/find-or-upsert-comment.ps1')
     . (Join-Path $PSScriptRoot 'lib/frame-credit-ledger-core.ps1')
+    . (Join-Path $PSScriptRoot 'lib/frame-spine-core.ps1')
 }
 catch {
     [Console]::Error.WriteLine("frame-credit-ledger: library load failed: $($_.Exception.Message)")
@@ -128,36 +129,36 @@ function Get-FrameCreditLedgerAdapters {
     if (Test-Path -LiteralPath $agentsDir -PathType Container) {
         try {
             Get-ChildItem -LiteralPath $agentsDir -Recurse -File -Filter '*.agent.md' -ErrorAction Stop |
-                ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
+            ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
         }
-        catch { }
+        catch { $null = $_ }
     }
 
     $skillsDir = Join-Path $RepoRoot 'skills'
     if (Test-Path -LiteralPath $skillsDir -PathType Container) {
         try {
             Get-ChildItem -LiteralPath $skillsDir -Recurse -File -Filter 'SKILL.md' -ErrorAction Stop |
-                ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
+            ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
         }
-        catch { }
+        catch { $null = $_ }
         try {
             # skills/**/adapters/*.md
             Get-ChildItem -LiteralPath $skillsDir -Recurse -Directory -Filter 'adapters' -ErrorAction Stop |
-                ForEach-Object {
-                    Get-ChildItem -LiteralPath $_.FullName -File -Filter '*.md' -ErrorAction SilentlyContinue |
-                        ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
-                    }
+            ForEach-Object {
+                Get-ChildItem -LiteralPath $_.FullName -File -Filter '*.md' -ErrorAction SilentlyContinue |
+                ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
+            }
         }
-        catch { }
+        catch { $null = $_ }
     }
 
     $commandsDir = Join-Path $RepoRoot 'commands'
     if (Test-Path -LiteralPath $commandsDir -PathType Container) {
         try {
             Get-ChildItem -LiteralPath $commandsDir -Recurse -File -Filter '*.md' -ErrorAction Stop |
-                ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
+            ForEach-Object { $candidatePaths.Add($_.FullName) | Out-Null }
         }
-        catch { }
+        catch { $null = $_ }
     }
 
     foreach ($path in $candidatePaths) {
@@ -182,13 +183,13 @@ function Get-FrameCreditLedgerAdapters {
             # so the entry carries the correct port name.
             if (-not (script:Test-FCLYamlSane -Text $fm)) {
                 $results.Add([pscustomobject]@{
-                    Path              = $path
-                    Name              = "<malformed:$([System.IO.Path]::GetFileNameWithoutExtension($path))>"
-                    Provides          = $providesValue
-                    AppliesWhen       = $null
-                    SuggestedNextStep = $null
-                    ParseError        = 'malformed-frontmatter'
-                }) | Out-Null
+                        Path              = $path
+                        Name              = "<malformed:$([System.IO.Path]::GetFileNameWithoutExtension($path))>"
+                        Provides          = $providesValue
+                        AppliesWhen       = $null
+                        SuggestedNextStep = $null
+                        ParseError        = 'malformed-frontmatter'
+                    }) | Out-Null
                 continue
             }
 
@@ -250,6 +251,7 @@ function Get-FrameCreditLedgerBaseRefOid {
                 }
             }
             catch {
+                $null = $_
                 # parse failure - fall through to next attempt
             }
         }
@@ -441,6 +443,365 @@ function Resolve-FrameCreditLedgerApplicableMap {
     return $map
 }
 
+function script:Get-FCLCommentBody {
+    param([AllowNull()]$Comment)
+
+    if ($null -eq $Comment) { return '' }
+    if ($Comment -is [System.Collections.IDictionary] -and $Comment.ContainsKey('body')) { return [string]$Comment['body'] }
+    if ($null -ne $Comment.PSObject.Properties['body']) { return [string]$Comment.body }
+    return ''
+}
+
+function script:Get-FCLFrameSpineComments {
+    param([AllowEmptyCollection()][AllowNull()][object[]]$Comments)
+
+    if ($null -eq $Comments) { return @() }
+    return @($Comments | Where-Object { (script:Get-FCLCommentBody -Comment $_) -match '<!--\s*frame-spine' })
+}
+
+function script:Resolve-FCLLinkedIssueNumber {
+    param(
+        [AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][int]$Pr
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($PrBody)) {
+        $patterns = @(
+            '(?im)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|ref(?:s|erences)?|issue)\s+(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#(?<issue>\d+)\b',
+            '(?im)^\s*issue_id\s*:\s*(?<issue>\d+)\s*$',
+            '(?im)<!--\s*(?:plan|design)-issue-(?<issue>\d+)\s*-->'
+        )
+
+        foreach ($pattern in $patterns) {
+            $match = [regex]::Match($PrBody, $pattern)
+            if (-not $match.Success) { continue }
+
+            $issue = 0
+            if ([int]::TryParse($match.Groups['issue'].Value, [ref]$issue) -and $issue -gt 0) {
+                return $issue
+            }
+        }
+    }
+
+    return $Pr
+}
+
+function script:Get-FCLIssueCommentsForSpine {
+    param([Parameter(Mandatory)][int]$IssueNumber)
+
+    $raw = $null
+    try {
+        $raw = & gh issue view $IssueNumber --json comments 2>$null
+    }
+    catch {
+        return @()
+    }
+
+    if ($null -eq $raw -or $raw -eq '') { return @() }
+
+    try {
+        $parsed = $raw | ConvertFrom-Json -ErrorAction Stop
+        if ($null -ne $parsed -and $null -ne $parsed.comments) {
+            return @($parsed.comments)
+        }
+    }
+    catch {
+        return @()
+    }
+
+    return @()
+}
+
+function script:Get-FCLFrameSpineSourceComments {
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [AllowEmptyString()][string]$PrBody,
+        [AllowEmptyCollection()][AllowNull()][object[]]$PrComments
+    )
+
+    $prSpineComments = @(script:Get-FCLFrameSpineComments -Comments $PrComments)
+    if ($prSpineComments.Count -gt 0) { return $prSpineComments }
+
+    $issueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $PrBody -Pr $Pr
+    $issueComments = @(script:Get-FCLIssueCommentsForSpine -IssueNumber $issueNumber)
+    return @(script:Get-FCLFrameSpineComments -Comments $issueComments)
+}
+
+function script:Get-FCLLatestParsedFrameSpine {
+    param([AllowEmptyCollection()][AllowNull()][object[]]$Comments)
+
+    $spineComments = @(script:Get-FCLFrameSpineComments -Comments $Comments)
+    for ($index = $spineComments.Count - 1; $index -ge 0; $index--) {
+        $body = script:Get-FCLCommentBody -Comment $spineComments[$index]
+        $block = Get-FSCSpineBlock -CommentBody $body
+        if ([string]::IsNullOrWhiteSpace($block)) { continue }
+
+        $parsed = ConvertFrom-FSCSpineYaml -SpineBlock $block
+        if ($null -ne $parsed) { return $parsed }
+    }
+
+    return $null
+}
+
+function script:Get-FCLCreditTerminalStepId {
+    param([AllowNull()]$LedgerRow)
+
+    if ($null -eq $LedgerRow) { return 0 }
+
+    $raw = $null
+    if ($LedgerRow -is [System.Collections.IDictionary]) {
+        if ($LedgerRow.ContainsKey('TerminalStepId')) { $raw = $LedgerRow['TerminalStepId'] }
+        elseif ($LedgerRow.ContainsKey('terminal-step-id')) { $raw = $LedgerRow['terminal-step-id'] }
+    }
+    else {
+        if ($null -ne $LedgerRow.PSObject.Properties['TerminalStepId']) { $raw = $LedgerRow.TerminalStepId }
+        elseif ($null -ne $LedgerRow.PSObject.Properties['terminal-step-id']) { $raw = $LedgerRow.'terminal-step-id' }
+    }
+
+    $step = 0
+    if ($null -ne $raw -and [int]::TryParse([string]$raw, [ref]$step) -and $step -gt 0) {
+        return $step
+    }
+
+    return 0
+}
+
+function script:Resolve-FCLIncompleteCycleReports {
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [AllowEmptyString()][string]$PrBody,
+        [AllowEmptyCollection()][AllowNull()][object[]]$PrComments,
+        [AllowEmptyCollection()][AllowNull()][object[]]$LedgerRows
+    )
+
+    $sourceComments = @(script:Get-FCLFrameSpineSourceComments -Pr $Pr -PrBody $PrBody -PrComments $PrComments)
+    if ($sourceComments.Count -eq 0) { return @() }
+
+    $spine = script:Get-FCLLatestParsedFrameSpine -Comments $sourceComments
+    if ($null -eq $spine -or $null -eq $spine.Ports) { return @() }
+
+    $reports = [System.Collections.Generic.List[object]]::new()
+    $seen = @{}
+
+    $portNames = @()
+    if ($spine.Ports -is [System.Collections.IDictionary]) {
+        $portNames = @($spine.Ports.Keys)
+    }
+    else {
+        $portNames = @($spine.Ports.PSObject.Properties.Name)
+    }
+
+    foreach ($portNameRaw in $portNames) {
+        $portName = [string]$portNameRaw
+        if ([string]::IsNullOrWhiteSpace($portName)) { continue }
+
+        $tokens = if ($spine.Ports -is [System.Collections.IDictionary]) { @($spine.Ports[$portName]) } else { @($spine.Ports.$portName) }
+        foreach ($token in $tokens) {
+            if ($null -eq $token -or $token.Terminal -ne $true) { continue }
+
+            $stepId = [string]$token.StepId
+            $stepMatch = [regex]::Match($stepId, '^s(?<step>\d+)$')
+            if (-not $stepMatch.Success) { continue }
+
+            $stepNumber = [int]$stepMatch.Groups['step'].Value
+            if ($stepNumber -le 0) { continue }
+
+            $key = "$portName::$stepNumber"
+            if ($seen.ContainsKey($key)) { continue }
+            $seen[$key] = $true
+
+            $matchingCredit = @($LedgerRows | Where-Object {
+                    [string]$_.Port -eq $portName -and (script:Get-FCLCreditTerminalStepId -LedgerRow $_) -eq $stepNumber
+                }) | Select-Object -First 1
+
+            if ($null -ne $matchingCredit) { continue }
+
+            [void]$reports.Add([pscustomobject]@{
+                    PortName          = $portName
+                    Status            = 'NotCovered'
+                    SubReason         = 'IncompleteCycle'
+                    CreditStatus      = 'incomplete-cycle'
+                    AdapterName       = ''
+                    SuggestedNextStep = "Emit the terminal-cycle credit for $portName with terminal-step-id: $stepNumber."
+                    Evidence          = "Frame spine marks terminal step $stepId for $portName, but no credit row with terminal-step-id: $stepNumber is present."
+                })
+        }
+    }
+
+    return $reports.ToArray()
+}
+
+function script:Get-FCLTopLevelIntMetric {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$MetricsBlock,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $pattern = '(?m)^\s*' + [regex]::Escape($Name) + '\s*:\s*(?<value>\d+)\s*$'
+    $match = [regex]::Match($MetricsBlock, $pattern)
+    if (-not $match.Success) { return 0 }
+
+    $value = 0
+    if ([int]::TryParse($match.Groups['value'].Value, [ref]$value) -and $value -gt 0) {
+        return $value
+    }
+
+    return 0
+}
+
+function script:Get-FCLStaleSpineFallbackEventCount {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$MetricsBlock)
+
+    $normalized = $MetricsBlock -replace "`r`n", "`n" -replace "`r", "`n"
+    $lines = @($normalized -split "`n")
+
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        $dispatchMatch = [regex]::Match($lines[$i], '^(?<indent>\s*)dispatch-fallback-events\s*:\s*$')
+        if (-not $dispatchMatch.Success) { continue }
+
+        $dispatchIndent = $dispatchMatch.Groups['indent'].Value.Length
+        for ($j = $i + 1; $j -lt $lines.Count; $j++) {
+            $line = $lines[$j]
+            if ([string]::IsNullOrWhiteSpace($line)) { continue }
+
+            $trimmed = $line.TrimStart()
+            $indent = $line.Length - $trimmed.Length
+            if ($indent -le $dispatchIndent) { break }
+
+            if ($trimmed -notmatch '^stale-spine\s*:\s*$') { continue }
+
+            $staleIndent = $indent
+            $count = 0
+            for ($k = $j + 1; $k -lt $lines.Count; $k++) {
+                $eventLine = $lines[$k]
+                if ([string]::IsNullOrWhiteSpace($eventLine)) { continue }
+
+                $eventTrimmed = $eventLine.TrimStart()
+                $eventIndent = $eventLine.Length - $eventTrimmed.Length
+                if ($eventIndent -le $staleIndent) { break }
+                if ($eventTrimmed.StartsWith('-')) { $count++ }
+            }
+
+            return $count
+        }
+    }
+
+    return 0
+}
+
+function script:Set-FCLStaleSpineFallbackMetric {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$MetricsBlock)
+
+    $eventCount = script:Get-FCLStaleSpineFallbackEventCount -MetricsBlock $MetricsBlock
+    $existingCount = script:Get-FCLTopLevelIntMetric -MetricsBlock $MetricsBlock -Name 'spine-stale-fallback-count'
+    $targetCount = [Math]::Max($eventCount, $existingCount)
+
+    $eol = if ($MetricsBlock.Contains("`r`n")) { "`r`n" } else { "`n" }
+    $normalized = $MetricsBlock -replace "`r`n", "`n" -replace "`r", "`n"
+    $lines = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in @($normalized -split "`n")) { $lines.Add($line) | Out-Null }
+
+    $existingIndex = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*spine-stale-fallback-count\s*:') {
+            $existingIndex = $i
+            break
+        }
+    }
+
+    if ($targetCount -le 0) {
+        if ($existingIndex -ge 0) { $lines.RemoveAt($existingIndex) }
+        return ($lines.ToArray() -join $eol)
+    }
+
+    $lineText = "spine-stale-fallback-count: $targetCount"
+    if ($existingIndex -ge 0) {
+        $lines[$existingIndex] = $lineText
+        return ($lines.ToArray() -join $eol)
+    }
+
+    $insertIndex = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match '^\s*dispatch-fallback-events\s*:') { $insertIndex = $i; break }
+    }
+    if ($insertIndex -lt 0) {
+        for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match '^\s*credits\s*:') { $insertIndex = $i; break }
+        }
+    }
+    if ($insertIndex -lt 0) { $insertIndex = $lines.Count }
+
+    $lines.Insert($insertIndex, $lineText)
+    return ($lines.ToArray() -join $eol)
+}
+
+function script:Update-FCLPrBodyStaleSpineFallbackMetric {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$PrBody)
+
+    $match = [regex]::Match($PrBody, '(?s)(?<open><!--\s*pipeline-metrics\s*)(?<block>.*?)(?<close>\s*-->)')
+    if (-not $match.Success) { return $PrBody }
+
+    $updatedBlock = script:Set-FCLStaleSpineFallbackMetric -MetricsBlock $match.Groups['block'].Value
+
+    $prefix = $PrBody.Substring(0, $match.Index)
+    $suffixStart = $match.Index + $match.Length
+    $suffix = $PrBody.Substring($suffixStart)
+    return $prefix + $match.Groups['open'].Value + $updatedBlock + $match.Groups['close'].Value + $suffix
+}
+
+function script:Update-FCLPrBodyMetricsBestEffort {
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody
+    )
+
+    $updatedPrBody = script:Update-FCLPrBodyStaleSpineFallbackMetric -PrBody $PrBody
+    $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) ("frame-credit-ledger-$Pr-$([System.Guid]::NewGuid().ToString('N')).md")
+
+    try {
+        $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::WriteAllText($tempPath, $updatedPrBody, $utf8NoBom)
+        $null = & gh pr edit $Pr --body-file $tempPath 2>$null
+        if ($global:LASTEXITCODE -ne 0) {
+            [Console]::Error.WriteLine("frame-credit-ledger: PR body metrics update failed via gh pr edit --body-file")
+        }
+    }
+    catch {
+        [Console]::Error.WriteLine("frame-credit-ledger: PR body metrics update failed: $($_.Exception.Message)")
+    }
+    finally {
+        try {
+            if (Test-Path -LiteralPath $tempPath -PathType Leaf) {
+                Remove-Item -LiteralPath $tempPath -Force -ErrorAction SilentlyContinue
+            }
+        }
+        catch {
+            [Console]::Error.WriteLine("frame-credit-ledger: temporary PR body file cleanup failed: $($_.Exception.Message)")
+        }
+    }
+}
+
+function Update-FCLPrBodyDispatchCostSamples {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$PrBody,
+        [Parameter(Mandatory)][string]$StepId,
+        [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
+        [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance,
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition
+    )
+
+    $updateParameters = @{
+        PrBody = $PrBody
+        StepId = $StepId
+        Mode   = $Mode
+    }
+    if ($PSBoundParameters.ContainsKey('RcConformance')) { $updateParameters['RcConformance'] = $RcConformance }
+    if ($PSBoundParameters.ContainsKey('JudgeDisposition')) { $updateParameters['JudgeDisposition'] = $JudgeDisposition }
+
+    return Update-DispatchCostSampleEvaluationInPrBody @updateParameters
+}
+
 # ---------------------------------------------------------------------------
 # Invoke-FrameCreditLedger
 # ---------------------------------------------------------------------------
@@ -545,6 +906,8 @@ function Invoke-FrameCreditLedger {
         }
     }
 
+    script:Update-FCLPrBodyMetricsBestEffort -Pr $Pr -PrBody $prBody
+
     # 5. v4 path: discover adapters and classify ports.
     # Resolve repo root: prefer the script-scoped variable seeded by the
     # entry-point block (so this works inside child runspaces where
@@ -608,7 +971,7 @@ function Invoke-FrameCreditLedger {
             $portName = [string]$port.Name
             $matchingAdapters = @($adapters | Where-Object { [string]$_.Provides -eq $portName })
             $applicableMap = Resolve-FrameCreditLedgerApplicableMap -PortName $portName -Adapters $matchingAdapters -Changeset $changeset
-            $credit = $credits | Where-Object { [string]$_.Port -eq $portName } | Select-Object -First 1
+            $credit = Select-AuthoritativeCreditForPort -Credits $credits -Port $portName
 
             $report = Resolve-PortStatus -Port $port -WorkAdapters $matchingAdapters -ApplicableMap $applicableMap -Credit $credit
             $portReports.Add($report) | Out-Null
@@ -616,12 +979,17 @@ function Invoke-FrameCreditLedger {
     }
     else {
         # No port catalog available — synthesize port reports directly from credits so we can still emit a meaningful ledger.
-        foreach ($credit in $credits) {
-            $portName = [string]$credit.Port
+        $creditPortNames = @($credits | ForEach-Object { [string]$_.Port } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique)
+        foreach ($portName in $creditPortNames) {
+            $credit = Select-AuthoritativeCreditForPort -Credits $credits -Port $portName
             $synthPort = [pscustomobject]@{ Name = $portName }
             $report = Resolve-PortStatus -Port $synthPort -WorkAdapters @() -ApplicableMap @{} -Credit $credit
             $portReports.Add($report) | Out-Null
         }
+    }
+
+    foreach ($incompleteCycleReport in @(script:Resolve-FCLIncompleteCycleReports -Pr $Pr -PrBody $prBody -PrComments $script:PrComments -LedgerRows $credits)) {
+        $portReports.Add($incompleteCycleReport) | Out-Null
     }
 
     $reportsArray = $portReports.ToArray()
@@ -824,7 +1192,7 @@ if (-not $isDotSourced) {
                 $entry = New-Object System.Management.Automation.Runspaces.SessionStateFunctionEntry($fn.Name, $fn.Definition)
                 $iss.Commands.Add($entry)
             }
-            catch { }
+            catch { $null = $_ }
         }
 
         # Copy global variables (e.g. $global:GhCallLog used by the test mock).
@@ -850,7 +1218,7 @@ if (-not $isDotSourced) {
                 $entry = New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry($v.Name, $v.Value, '')
                 $iss.Variables.Add($entry)
             }
-            catch { }
+            catch { $null = $_ }
         }
 
         $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
@@ -888,12 +1256,12 @@ if (-not $isDotSourced) {
             }
             # Mirror stderr from the worker.
             foreach ($errRecord in $worker.Streams.Error) {
-                try { [Console]::Error.WriteLine([string]$errRecord) } catch { }
+                try { [Console]::Error.WriteLine([string]$errRecord) } catch { $null = $_ }
             }
         }
         else {
             # Budget exceeded — abort the worker and fail open.
-            try { $worker.Stop() } catch { }
+            try { $worker.Stop() } catch { $null = $_ }
             [Console]::Error.WriteLine("frame-credit-ledger: ${budgetSeconds}s budget exceeded; warn-mode fail-open (no comment posted)")
             # Warn-mode invariant: never block PR creation on timeout. In
             # enforce mode the test still expects exit 0 on timeout (warn
@@ -902,8 +1270,8 @@ if (-not $isDotSourced) {
             $exitCode = 0
         }
 
-        try { $worker.Dispose() } catch { }
-        try { $rs.Close(); $rs.Dispose() } catch { }
+        try { $worker.Dispose() } catch { $null = $_ }
+        try { $rs.Close(); $rs.Dispose() } catch { $null = $_ }
 
         if ($null -ne $result) {
             $resultHash = $null

@@ -121,6 +121,182 @@ Describe 'Read-PRMetricsBlock' {
     }
 }
 
+Describe 'dispatch-cost-samples v4 metrics contract (issue #512 Step 12)' {
+
+        BeforeAll {
+                $script:V4DispatchCostSamplesYaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 7421
+        rc-conformance: pass
+        judge-disposition: accepted
+    - step-id: s13
+        mode: budget-exceeded
+        bytes: 9216
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+integrity_checks:
+    - check: marker-presence
+        status: passed
+'@
+        }
+
+        It 'parses dispatch-cost-samples rows with the exact required key set' {
+                $body = & $script:NewV4PrBody -Yaml $script:V4DispatchCostSamplesYaml
+                $result = Read-PRMetricsBlock -PrBody $body
+
+                $result.MetricsVersion | Should -Be 4
+                $result.DispatchCostSamples | Should -Not -BeNullOrEmpty
+                @($result.DispatchCostSamples).Count | Should -Be 2
+
+                $sample = @($result.DispatchCostSamples)[0]
+                (@($sample.PSObject.Properties.Name) -join ',') | Should -Be 'step-id,mode,bytes,rc-conformance,judge-disposition'
+                $sample.'step-id' | Should -Be 's12'
+                $sample.mode | Should -Be 'spine'
+                $sample.bytes | Should -Be 7421
+                $sample.'rc-conformance' | Should -Be 'pass'
+                $sample.'judge-disposition' | Should -Be 'accepted'
+        }
+
+        It 'rejects dispatch-cost-samples rows with missing or extra keys' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 7421
+        rc-conformance: pass
+        extra: "must not be accepted"
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+
+                $result.MetricsVersion | Should -Be 'parse-error'
+                $result.Reason | Should -Match 'dispatch-cost-samples'
+        }
+
+        It 'rejects dispatch-cost-samples rows with values outside the allowed enums' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: partial-spine
+        bytes: 7421
+        rc-conformance: unknown
+        judge-disposition: maybe
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+
+                $result.MetricsVersion | Should -Be 'parse-error'
+                $result.Reason | Should -Match 'dispatch-cost-samples'
+        }
+}
+
+Describe 'dispatch-cost-samples PR-body mutation helpers (issue #512 Step 12)' {
+
+        It 'creates dispatch-time placeholder rows with both evaluation fields not-evaluated' {
+                $command = Get-Command New-DispatchCostSampleRow -ErrorAction SilentlyContinue
+                $command | Should -Not -BeNullOrEmpty
+
+                $row = & $command -StepId 's12' -Mode 'spine' -Bytes 7421
+
+                (@($row.PSObject.Properties.Name) -join ',') | Should -Be 'step-id,mode,bytes,rc-conformance,judge-disposition'
+                $row.'step-id' | Should -Be 's12'
+                $row.mode | Should -Be 'spine'
+                $row.bytes | Should -Be 7421
+                $row.'rc-conformance' | Should -Be 'not-evaluated'
+                $row.'judge-disposition' | Should -Be 'not-evaluated'
+        }
+
+        It 'validates mode, rc-conformance, and judge-disposition enums when building rows' {
+                $command = Get-Command New-DispatchCostSampleRow -ErrorAction SilentlyContinue
+                $command | Should -Not -BeNullOrEmpty
+
+                { & $command -StepId 's12' -Mode 'partial-spine' -Bytes 1 } | Should -Throw
+                { & $command -StepId 's12' -Mode 'spine' -Bytes 1 -RcConformance 'unknown' } | Should -Throw
+                { & $command -StepId 's12' -Mode 'spine' -Bytes 1 -JudgeDisposition 'maybe' } | Should -Throw
+        }
+
+        It 'inserts placeholder rows into a v4 PR-body metrics block without regressing existing fields' {
+                $command = Get-Command Add-DispatchCostSampleToPrBody -ErrorAction SilentlyContinue
+                $command | Should -Not -BeNullOrEmpty
+
+                $body = & $script:NewV4PrBody -Yaml $script:V4FullYaml
+                $updated = & $command -PrBody $body -StepId 's12' -Mode 'spine' -Bytes 7421
+                $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+
+                $normalized | Should -Match '(?m)^metrics_version:\s*4\s*$'
+                $normalized | Should -Match '(?m)^frame_version:\s*1\s*$'
+                $normalized | Should -Match '(?m)^credits:\s*$'
+                $normalized | Should -Match '(?m)^integrity_checks:\s*$'
+                $normalized | Should -Match '(?ms)^dispatch-cost-samples:\n  - step-id: s12\n    mode: spine\n    bytes: 7421\n    rc-conformance: not-evaluated\n    judge-disposition: not-evaluated\s*$'
+        }
+
+        It 'back-fills a dispatch-cost-samples row by composite step-id and mode only' {
+                $command = Get-Command Update-DispatchCostSampleEvaluationInPrBody -ErrorAction SilentlyContinue
+                $command | Should -Not -BeNullOrEmpty
+
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 7421
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+    - step-id: s12
+        mode: legacy-fallback
+        bytes: 20531
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+integrity_checks:
+    - check: marker-presence
+        status: passed
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $updated = & $command -PrBody $body -StepId 's12' -Mode 'spine' -RcConformance 'pass' -JudgeDisposition 'accepted'
+                $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+
+                $normalized | Should -Match '(?ms)- step-id: s12\n    mode: spine\n    bytes: 7421\n    rc-conformance: pass\n    judge-disposition: accepted'
+                $normalized | Should -Match '(?ms)- step-id: s12\n    mode: legacy-fallback\n    bytes: 20531\n    rc-conformance: not-evaluated\n    judge-disposition: not-evaluated'
+                $normalized | Should -Match '(?m)^credits:\s*$'
+                $normalized | Should -Match '(?m)^integrity_checks:\s*$'
+        }
+
+        It 'leaves evaluation back-fill unchanged when no matching dispatch-cost sample exists' {
+                $command = Get-Command Update-DispatchCostSampleEvaluationInPrBody -ErrorAction SilentlyContinue
+                $command | Should -Not -BeNullOrEmpty
+
+                $body = & $script:NewV4PrBody -Yaml $script:V4FullYaml
+                $updated = & $command -PrBody $body -StepId 's99' -Mode 'spine' -RcConformance 'pass'
+
+                $updated | Should -Be $body -Because 'pre-PR lifecycle must create the placeholder sample before RC or judge back-fill can target it'
+        }
+}
+
 Describe 'Get-PortFiles' {
 
     It 'reads valid port files from the live frame/ports directory and returns objects with Name/Description/Applies/Status' {
@@ -996,4 +1172,32 @@ credits:
         $latest = Select-LastCreditByRunIndex -Credits $result.Credits -Port 'nonexistent' -Adapter 'none'
         $latest | Should -BeNullOrEmpty
     }
+
+        It 'Select-AuthoritativeCreditForPort: reports the latest terminal-step failed row over an earlier passed row for the same port' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+    - port: implement-test
+        status: passed
+        terminal-step-id: 3
+        evidence: "earlier terminal cycle passed"
+    - port: implement-test
+        status: failed
+        terminal-step-id: 5
+        evidence: "terminal cycle failed"
+integrity_checks:
+    - check: marker-presence
+        status: passed
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+
+                $credit = Select-AuthoritativeCreditForPort -Credits $result.Credits -Port 'implement-test'
+
+                $credit | Should -Not -BeNullOrEmpty
+                $credit.Status | Should -Be 'failed'
+                $credit.TerminalStepId | Should -Be 5
+                $credit.Evidence | Should -Be 'terminal cycle failed'
+        }
 }

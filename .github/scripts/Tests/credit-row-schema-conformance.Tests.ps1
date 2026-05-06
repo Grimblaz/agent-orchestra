@@ -23,6 +23,15 @@ BeforeAll {
         . $script:LedgerCoreLib
     }
 
+    $ledgerCoreTokens = $null
+    $ledgerCoreParseErrors = $null
+    $script:LedgerCoreAst = [System.Management.Automation.Language.Parser]::ParseFile(
+        $script:LedgerCoreLib,
+        [ref]$ledgerCoreTokens,
+        [ref]$ledgerCoreParseErrors
+    )
+    $script:LedgerCoreParseErrors = @($ledgerCoreParseErrors)
+
     $script:BackDeriveLib = Join-Path $script:RepoRoot '.github/scripts/lib/frame-back-derive-core.ps1'
     if (Test-Path $script:BackDeriveLib) {
         . $script:BackDeriveLib
@@ -55,8 +64,54 @@ BeforeAll {
         return @('passed', 'failed', 'skipped', 'not-applicable', 'inconclusive', 'not-persisted')
     }
 
+    function script:Get-CreditBuilderFunctionAst {
+        param([Parameter(Mandatory)][string]$Name)
+
+        return $script:LedgerCoreAst.Find({
+            $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+            $args[0].Name -eq $Name
+        }, $true)
+    }
+
+    function script:Copy-BuilderInputs {
+        param([Parameter(Mandatory)][hashtable]$InputMap)
+
+        $copy = @{}
+        foreach ($key in $InputMap.Keys) {
+            $copy[$key] = $InputMap[$key]
+        }
+        return $copy
+    }
+
+    function script:Get-CreditField {
+        param(
+            [Parameter(Mandatory)]$LedgerRow,
+            [Parameter(Mandatory)][string]$Name
+        )
+
+        if ($LedgerRow -is [System.Collections.IDictionary]) {
+            return $LedgerRow[$Name]
+        }
+
+        $property = $LedgerRow.PSObject.Properties[$Name]
+        if ($null -eq $property) {
+            return $null
+        }
+        return $property.Value
+    }
+
     # Canonical inputs for each builder.
     $script:BuilderInputs = @{
+        'Build-ReviewCreditRow'           = @{
+            JudgeRulingsComment = @'
+<!-- judge-rulings
+- id: F1
+  judge_ruling: defense-sustained
+  judge_confidence: high
+  points_awarded: D+1
+-->
+'@
+        }
         'Build-CeGateCreditRow'           = @{ Surface = 'cli'; EvidenceList = @('S1: passed') }
         'Build-ExperienceCreditRow'        = @{ MarkerPresent = $true; IssueNumber = 1 }
         'Build-DesignCreditRow'            = @{ MarkerPresent = $true; IssueNumber = 1 }
@@ -90,6 +145,7 @@ AfterAll {
 # ---------------------------------------------------------------------------
 
 Describe 'Builder credit-row schema conformance (Step 6a)' -ForEach @(
+    @{ Name = 'Build-ReviewCreditRow' }
     @{ Name = 'Build-CeGateCreditRow' }
     @{ Name = 'Build-ExperienceCreditRow' }
     @{ Name = 'Build-DesignCreditRow' }
@@ -137,6 +193,142 @@ Describe 'Builder credit-row schema conformance (Step 6a)' -ForEach @(
         $status = [string]$script:Row.status
         $allowed = script:Get-AllowedStatuses -Port $port
         $allowed | Should -Contain $status -Because "port '$port' allows: $($allowed -join ', ')"
+    }
+}
+
+# ---------------------------------------------------------------------------
+# (a2) Cycle-aware credit-row builder contract (issue #512 Step 3 / AC7)
+# ---------------------------------------------------------------------------
+
+Describe 'Cycle-aware credit-row builder contract (issue #512 Step 3 / AC7)' -ForEach @(
+    @{ Name = 'Build-ReviewCreditRow' }
+    @{ Name = 'Build-CeGateCreditRow' }
+    @{ Name = 'Build-ExperienceCreditRow' }
+    @{ Name = 'Build-DesignCreditRow' }
+    @{ Name = 'Build-PlanCreditRow' }
+    @{ Name = 'Build-ImplementCodeCreditRow' }
+    @{ Name = 'Build-ImplementTestCreditRow' }
+    @{ Name = 'Build-ImplementRefactorCreditRow' }
+    @{ Name = 'Build-ImplementDocsCreditRow' }
+    @{ Name = 'Build-PostPrCreditRow' }
+) {
+    param($Name)
+
+    It "$Name exposes appended optional [int]`$Step = 0" {
+        $script:LedgerCoreParseErrors | Should -BeNullOrEmpty -Because 'credit-row builder source must parse before AST contract checks can run'
+
+        $functionAst = script:Get-CreditBuilderFunctionAst -Name $Name
+        $functionAst | Should -Not -BeNullOrEmpty -Because "$Name must exist in frame-credit-ledger-core.ps1"
+        if ($null -eq $functionAst) { return }
+
+        $parameters = @($functionAst.Body.ParamBlock.Parameters)
+        $stepParam = @($parameters | Where-Object { $_.Name.VariablePath.UserPath -eq 'Step' })
+        $stepParam.Count | Should -Be 1 -Because "$Name must expose exactly one Step parameter"
+        if ($stepParam.Count -ne 1) { return }
+
+        $parameters[-1].Name.VariablePath.UserPath | Should -Be 'Step' -Because '-Step is appended so existing call sites keep their parameter order contract'
+        $stepParam[0].StaticType.Name | Should -Be 'Int32' -Because '-Step is an integer commit-index/sentinel value'
+        $stepParam[0].DefaultValue.Extent.Text | Should -Be '0' -Because 'omitted -Step must preserve legacy/spine-omitted behavior'
+    }
+
+    It "$Name omits terminal-step-id when -Step is omitted" {
+        $inputs = script:Copy-BuilderInputs -InputMap $script:BuilderInputs[$Name]
+        $row = & $Name @inputs
+
+        $row | Should -Not -BeNullOrEmpty
+        $row.PSObject.Properties.Name | Should -Not -Contain 'terminal-step-id' -Because 'omitting -Step must preserve the existing row shape for legacy emitters'
+    }
+
+    It "$Name treats -Step 0 as the legacy sentinel identity" {
+        $legacyInputs = script:Copy-BuilderInputs -InputMap $script:BuilderInputs[$Name]
+        $legacyRow = & $Name @legacyInputs
+
+        $stepZeroInputs = script:Copy-BuilderInputs -InputMap $script:BuilderInputs[$Name]
+        $stepZeroInputs['Step'] = 0
+        $stepZeroRow = & $Name @stepZeroInputs
+
+        ($stepZeroRow | ConvertTo-Json -Depth 20) | Should -Be ($legacyRow | ConvertTo-Json -Depth 20) -Because 'Step 0 is the spine-omitted any-step sentinel and must not split legacy row identity'
+    }
+
+    It "$Name records positive -Step as terminal-step-id" {
+        $inputs = script:Copy-BuilderInputs -InputMap $script:BuilderInputs[$Name]
+        $inputs['Step'] = 3
+
+        $row = & $Name @inputs
+
+        $row.PSObject.Properties.Name | Should -Contain 'terminal-step-id' -Because 'cycle-aware additive merge needs a terminal step identifier on positive Step rows'
+        $row.'terminal-step-id' | Should -Be 3
+    }
+}
+
+Describe 'Pipeline metrics v4 schema documentation (issue #512 fallback metrics)' {
+
+    BeforeAll {
+        $script:PipelineMetricsSchemaPath = Join-Path $script:RepoRoot 'frame/pipeline-metrics-v4-schema.md'
+        $script:PipelineMetricsSchema = (Get-Content -Path $script:PipelineMetricsSchemaPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
+    }
+
+    It 'documents optional dispatch fallback metrics and stale-spine count semantics' {
+        $script:PipelineMetricsSchema | Should -Match 'dispatch-fallback-events' `
+            -Because 'v4 schema must name the fallback event container'
+        $script:PipelineMetricsSchema | Should -Match 'spine-stale-fallback-count' `
+            -Because 'v4 schema must name the derived stale-spine counter'
+        $script:PipelineMetricsSchema | Should -Match '(?is)dispatch-fallback-events.{0,220}optional.{0,220}absent when no dispatch fallback' `
+            -Because 'absence is the default when no fallback occurred'
+        $script:PipelineMetricsSchema | Should -Match 'legacy-plan-shape:\s*true' `
+            -Because 'legacy plan fallback event key must be documented'
+        $script:PipelineMetricsSchema | Should -Match 'pre-load-budget-exceeded:\s*true' `
+            -Because 'budget fallback event key must be documented'
+        $script:PipelineMetricsSchema | Should -Match '(?is)stale-spine\[\].{0,260}step.{0,180}reason.{0,220}(generated_at-mismatch|missing-step-id)' `
+            -Because 'stale-spine events must document their event keys and allowed reasons'
+        $script:PipelineMetricsSchema | Should -Match '(?is)spine-stale-fallback-count.{0,420}max\(existing count, observed stale-spine event count\)' `
+            -Because 'the derived count must preserve higher existing values during additive updates'
+        $script:PipelineMetricsSchema | Should -Match '(?is)Dispatch fallback metrics follow the same preservation rule.{0,260}preserve unrelated metrics' `
+            -Because 'fallback metrics must document additive preservation behavior'
+    }
+}
+
+Describe 'Cycle-aware additive merge identity (issue #512 Step 3 / AC7)' {
+    It 'preserves separate positive terminal-step rows for the same port' {
+        $metricsBlock = @'
+metrics_version: 4
+credits:
+  - port: implement-code
+    terminal-step-id: 1
+    status: passed
+    evidence: "step 1 implementation credit"
+  - port: implement-code
+    terminal-step-id: 2
+    status: passed
+    evidence: "step 2 implementation credit"
+'@
+
+        $existingCredits = Get-FBDExistingCredits -MetricsBlock $metricsBlock
+        $implementCodeRows = @($existingCredits.Values | Where-Object { [string](script:Get-CreditField -LedgerRow $_ -Name 'port') -eq 'implement-code' })
+
+        $implementCodeRows.Count | Should -Be 2 -Because 'additive merge identity is (port, terminal-step-id) for positive Step rows'
+        [int[]]$terminalStepIds = @($implementCodeRows | ForEach-Object { script:Get-CreditField -LedgerRow $_ -Name 'terminal-step-id' })
+        @($terminalStepIds | Sort-Object) | Should -Be @(1, 2)
+    }
+
+    It 'collapses omitted and zero terminal-step rows to the legacy first-write identity' {
+        $metricsBlock = @'
+metrics_version: 4
+credits:
+  - port: implement-test
+    status: passed
+    evidence: "legacy first write"
+  - port: implement-test
+    terminal-step-id: 0
+    status: failed
+    evidence: "duplicate zero-step write"
+'@
+
+        $existingCredits = Get-FBDExistingCredits -MetricsBlock $metricsBlock
+        $implementTestRows = @($existingCredits.Values | Where-Object { [string](script:Get-CreditField -LedgerRow $_ -Name 'port') -eq 'implement-test' })
+
+        $implementTestRows.Count | Should -Be 1 -Because 'omitted Step and Step 0 share the legacy (port, 0) identity'
+        script:Get-CreditField -LedgerRow $implementTestRows[0] -Name 'evidence' | Should -Be 'legacy first write' -Because 'legacy/Step 0 additive merge keeps the first writer and does not double-write the port'
     }
 }
 

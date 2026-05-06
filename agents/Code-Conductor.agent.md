@@ -155,6 +155,8 @@ Skip hub mode entirely when the user invokes a specific slash command (e.g., `/i
 
 When Code-Conductor is invoked via a slash command that skips hub mode and carries `$ARGUMENTS` as a free-text task, such as `/code-conductor [text]`, classify the task using the existing prose-trigger and specialist-dispatch logic. Trigger phrases are matched against the leading-token group of `$ARGUMENTS` (not as arbitrary mid-string substrings) in longest-phrase-first order, consistent with the design D6 best-effort prose-trigger semantics: `github review`, `review github`, or `cr review` (any of the canonical line-338 GitHub-trigger phrases) enter the GitHub intake path per `## Review Reconciliation Loop (Mandatory)`; bare `review` (when no GitHub-trigger phrase is the leading token group) enters the Review Reconciliation Loop for local code review; otherwise route via the specialist-dispatch table per `## Agent Selection`.
 
+Direct `/code-conductor [prose task]` remains legacy/no-spine for #512 v1; prose-plan spine support is deferred to #516.
+
 ### Scope Classification Gate
 
 Before calling any upstream agent, classify the issue scope to determine the appropriate pipeline tier. Use `#tool:vscode/askQuestions` with your analysis and recommendation.
@@ -251,6 +253,8 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
 5. **Completion markers**: Track completion markers per-issue. When an issue's acceptance criteria are fully addressed, post its completion marker comment.
 6. **Single-issue flow is unaffected**: These rules apply only when multiple issues are bundled in a single invocation.
 
+Bundle-specific frame-spine semantics are deferred to #515; #512 v1 spine behavior is single-issue only.
+
 ### Hub Execution Workflow
 
 1. **Locate Plan & Context**:
@@ -271,6 +275,13 @@ When the user invokes hub mode for multiple issues at once (e.g., `@code-conduct
 3. **Execute Each Step**:
    - Identify appropriate specialist agent (see Agent Selection below)
    - Identify applicable skills from the skill mapping table
+   - Build the specialist dispatch context before the tool call:
+     - For spine-bearing plans, dispatch context includes the `<!-- frame-spine ... -->` block, the active step's `<!-- frame-slice ... -->` block, and only depth-1 `depends-on` slices resolved against the spine.
+   - Best-effort instrumentation lifecycle: before a PR exists, accumulate `dispatch-cost-samples` in session memory or the PR-body draft metrics accumulator, not a live PR body. At dispatch time, upsert one placeholder keyed by `(step-id, mode)` with byte count and `not-evaluated` evaluation fields; before PR creation, RC conformance back-fill updates that same accumulator sample. At PR creation, flush the accumulated samples into the initial PR body `pipeline-metrics` block. After the PR exists, later RC or judge back-fill updates target the live PR body for the same `(step-id, mode)` sample without rewriting unrelated metrics.
+   - For spine-bearing dispatches, stale spine evidence must not silently fall back. If `generated_at` is stale after F2.2 hash-elision, or a slice references a step id not present in the spine, use `#tool:vscode/askQuestions` with exactly these visible option labels: `Re-emit spine via /plan amendment` (recommended) / `Continue this dispatch under legacy-shape (full plan)`. If the user continues under legacy shape, dispatch the full plan and record the stale-spine fallback event in PR-body pipeline metrics.
+   - For legacy plans without a frame-spine block, dispatch the full plan and record a visible PR-body pipeline metrics event under dispatch-fallback-events: legacy-plan-shape: true.
+   - The focused context budget defaults to `8 KB` and may be tuned with `frame.dispatch.maxSliceContextKB`. When the frame-spine, active slice, and depth-1 depends-on slices exceed that context budget, dispatch the full plan and record dispatch-fallback-events: pre-load-budget-exceeded: true.
+     - For spine-bearing dispatches, the visible announcement must explicitly cite `skills/frame-spine-lookup/SKILL.md` so the specialist knows the lookup contract is available for adjacent slices.
    - **ANNOUNCE**: "Calling @{Agent-Name} for {step}..." (BEFORE tool call)
    - Call specialist with focused instructions for the current step only (not the entire plan)
    - **Spot-check**: Use grep_search or read_file to verify key changes
@@ -417,6 +428,8 @@ For v4 release-hygiene credit row construction (state-file reading, YAML example
 <!-- TODO: remove legacy v3 pipeline-metrics fallback at v2.9.0 when pre-v4 back-catalog backfill is confirmed complete (issue #441). -->
 
 For v4 review credit row construction (parsing judge-rulings block, determining pass/fail status, building the credit row), follow `skills/calibration-pipeline/references/review-credit-emission.md`.
+
+Dispatch-cost samples are additive v4 instrumentation owned by Code-Conductor. During implementation, placeholders and pre-PR RC/judge updates live in the same session-memory or PR-body draft accumulator used to build the initial PR body. PR creation flushes that accumulator into the emitted `<!-- pipeline-metrics -->` block. After PR creation, RC conformance and judge disposition back-fills update the live PR body only for the targeted `(step-id, mode)` sample.
 
 ### Pipeline-Entry Credit Harvest (SMC-17)
 

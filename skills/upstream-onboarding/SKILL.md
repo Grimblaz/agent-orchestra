@@ -1,6 +1,6 @@
 ---
 name: upstream-onboarding
-description: "Shared opening-phase protocol for upstream agents (Experience-Owner, Solution-Designer, Issue-Planner) and Code-Conductor when invoked on an existing GitHub issue. Renders a scaled context brief and runs a standards check on inherited work at each phase boundary. Use as the first skill loaded when a user-invocable agent receives a request referencing an existing GitHub issue. DO NOT USE FOR: subagent dispatches (which already operate within an assessed session context); post-merge review (use post-pr-review); research or non-tree subagents."
+description: "Shared opening-phase protocol for upstream agents (Experience-Owner, Solution-Designer, Issue-Planner) and Code-Conductor when invoked on an existing GitHub issue. Renders a scaled context brief and runs a standards check on inherited work at each phase boundary. Use when a user-invocable agent receives a request referencing an existing GitHub issue and must load the first opening-phase skill. DO NOT USE FOR: subagent dispatches (which already operate within an assessed session context); post-merge review (use post-pr-review); research or non-tree subagents."
 ---
 
 <!-- markdownlint-disable-file MD041 MD003 -->
@@ -193,6 +193,16 @@ This skill's methodology is tool-agnostic. Platform-specific routing for structu
 ## Frame Ports Filled By This Skill
 
 This skill is **supporting methodology** — it does not fill a frame port and declares no `provides:` field. Classification per `Documents/Design/frame-architecture.md` Adapter Model: the credit-author test confirms this skill adds no frame credit row because it provides no customer-experience, design, or plan output.
+
+## Gotchas
+
+| Trigger | Gotcha | Fix |
+| --- | --- | --- |
+| Re-entering the same upstream phase | Running the brief again can make a same-agent resume look like inherited work | Check the latest upstream completion marker first and skip when it belongs to the active role |
+
+| Trigger | Gotcha | Fix |
+| --- | --- | --- |
+| Starting from a brand-new idea with no issue ID | Treating the missing issue as a silent skip loses the greenfield brief and issue-creation prompt | Apply Greenfield Mode when the developer is describing new issue work |
 
 ## Related
 
