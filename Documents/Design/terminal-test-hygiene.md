@@ -28,6 +28,9 @@ addressing the within-step retry gap that the Terminal Lifecycle Protocol does n
 | `.github/skills/terminal-hygiene/scripts/check-port-core.ps1` | Port-availability check library — `Invoke-CheckPort` (TD7) |
 | `.github/skills/terminal-hygiene/scripts/check-port.ps1` | Port-check CLI wrapper (TD7) |
 | `.github/scripts/Tests/check-port.Tests.ps1` | Pester tests for check-port (TD7) |
+| `skills/terminal-hygiene/SKILL.md` | `## Multiline Continuation-Prompt Hazard` and `## Non-Fatal Diagnostic Wrapper Pattern` sections (D12) |
+| `agents/Code-Conductor.agent.md` | Pointer extension naming both new sections (D12) |
+| `.github/scripts/Tests/terminal-hygiene-guardrails.Tests.ps1` | Contract tests for both new sections (D12) |
 
 ## Design Decisions
 
@@ -183,6 +186,24 @@ from "not currently in the VS Code deferred tools inventory" to "is a deferred t
 `tool_search_tool_regex`". Forward-compatible: agents try to load the tool and degrade to
 preserve-all when unavailable (version regression or restricted tool surface). The degradation
 behavior specification is preserved.
+
+### D12 — Multiline continuation-prompt hazard and non-fatal diagnostic wrapper (issue #524)
+
+**Status**: working hypothesis — both failure modes are observed in practice but the root-cause list is not exhaustive. Revisit if new stall patterns emerge after rollout.
+
+**Implementation approach**: docs-only. No helper script was added (compare D10's `check-port.ps1` library). Rationale: the continuation-prompt failure occurs inside a blocked shell where a script cannot be invoked anyway; recovery requires a terminal-level operation (`kill_terminal`), not a library call. For the diagnostic-wrapper pattern, docs-only prevents future agents from using `exit 1` by reading the skill — no runtime enforcement is needed because the pattern author is an agent following skill guidance, not an untrusted caller. Adding a `Wrap-Diagnostic.ps1` library would add maintenance overhead and a Script Library Convention surface without providing enforcement benefit.
+
+**`VALIDATION_STATUS` token rationale**: the token is kept despite having no automated consumer. It serves the operator reading the terminal buffer (structured evidence at a glance) and is future-greppable as `^VALIDATION_STATUS=` for an automated parser. Alternatives considered: JSON envelope (too verbose for a one-line status signal), exit-code mirroring (defeats the wrapper's non-zero-exit-suppression purpose), prefixed marker like `[PASS]`/`[FAIL]` (less greppable and harder to parse programmatically).
+
+**`^C` working hypothesis** (per design challenge Cluster C / R6 disposition): sending `^C` as literal text from the agent side in VS Code persistent shells appends to the buffered input rather than interrupting the shell — the interrupt signal cannot be injected directly. This was observed during design investigation but not exhaustively verified across every shell variant. The skill body states this unconditionally; this note records the open uncertainty.
+
+Issue #524 extends `skills/terminal-hygiene/SKILL.md` with two new sections that cover failure modes observed during subagent orchestration.
+
+The **Multiline Continuation-Prompt Hazard** section addresses the case where an agent sends a syntactically incomplete command — unclosed here-strings, parentheses, braces, or backtick continuations in PowerShell; unclosed heredocs, quotes, or backslash continuations in bash — causing the shell to enter a continuation prompt (`>>` in PowerShell, `>` in bash). The terminal appears frozen but is waiting for more input. Recovery requires identifying the unclosed construct (input-shape detection) and, when the buffer is inspectable, confirming the `>>` or `>` marker before using `kill_terminal` on the stalled terminal ID and opening a fresh terminal. Sending `^C` as literal text is not effective from the agent side (see `^C` working hypothesis above). This extends the existing kill-before-retry pattern from `## Terminal Retry Hygiene` to cover the continuation-prompt scenario specifically.
+
+The **Non-Fatal Diagnostic Wrapper Pattern** section addresses the case where a subagent diagnostic check (linting, structural validation, schema inspection) exits non-zero and causes the orchestrator to halt unexpectedly. The pattern requires the wrapper script to emit `VALIDATION_STATUS=pass` or `VALIDATION_STATUS=fail` as any readable line in stdout (last line recommended for unambiguous parsing) and always exit 0, so the orchestrator continues regardless of findings. Real validation gates (Pester, PSScriptAnalyzer, markdownlint) retain their non-zero exits — the pattern is scoped to diagnostic wrappers only.
+
+Both sections are accompanied by new rows in the `## Gotchas` table in the skill file, and `agents/Code-Conductor.agent.md` was updated to reference both section names explicitly. A contract Pester test was added at `.github/scripts/Tests/terminal-hygiene-guardrails.Tests.ps1`.
 
 ## Rejected Alternatives
 

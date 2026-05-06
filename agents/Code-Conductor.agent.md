@@ -125,7 +125,7 @@ Quick checklist before declaring mode for a step:
 
 When this user-invocable agent receives a request referencing an existing GitHub issue, load `skills/upstream-onboarding/SKILL.md` and follow its protocol.
 
-For terminal and validation execution guardrails, load `skills/terminal-hygiene/SKILL.md`.
+For terminal and validation execution guardrails, load `skills/terminal-hygiene/SKILL.md` — especially the **Multiline Continuation-Prompt Hazard** and **Non-Fatal Diagnostic Wrapper Pattern** sections when dispatching subagent diagnostics.
 
 ## Core Workflow
 

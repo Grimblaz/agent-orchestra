@@ -1,6 +1,6 @@
 ---
 name: terminal-hygiene
-description: "Terminal and test execution guardrails for Agent Orchestra workflows. Use when choosing sync versus async terminal mode, scoping Pester runs, retrying background commands, or avoiding terminal and subagent batching mistakes. DO NOT USE FOR: application-level debugging root-cause analysis (use systematic-debugging) or post-merge archival workflow steps (use post-pr-review)."
+description: "Terminal and test execution guardrails for Agent Orchestra workflows. Use when choosing sync versus async terminal mode, scoping Pester runs, retrying background commands, detecting or recovering from multiline-prompt continuation stalls, wrapping subagent diagnostics to avoid non-zero-exit halts, or avoiding terminal and subagent batching mistakes. DO NOT USE FOR: application-level debugging root-cause analysis (use systematic-debugging) or post-merge archival workflow steps (use post-pr-review)."
 ---
 
 # Terminal Hygiene
@@ -79,6 +79,60 @@ Scope notes:
 - Kill-before-retry and Terminal Cleanup are complementary, not substitutes. If both target the same terminal ID, the first successful kill wins and later attempts are harmless no-ops.
 - Both `kill_terminal` failures and `check-port.ps1` errors are non-blocking. Degrade gracefully to retry-without-kill when necessary.
 
+## Multiline Continuation-Prompt Hazard
+
+PowerShell enters a continuation prompt (`>>`) and bash enters a `>` prompt when a command is syntactically incomplete: unclosed here-strings (`@'`/`@"`), parentheses, braces, or backtick line continuations in PowerShell; unclosed heredocs, quotes, or backslash continuations in bash.
+
+**Symptom**: the terminal appears to hang — no output, no PS prompt. The buffer tail shows `>>` or `>` rather than a prompt.
+
+**Agent-side detection**: if the prior command contained an unclosed multiline construct (a here-string, unclosed parenthesis, or continuation backslash) and the terminal returns no new output, presume a continuation prompt rather than a frozen process. When the terminal buffer is inspectable, a trailing `>>` or `>` line with no surrounding command output confirms this.
+
+**Recovery**: do not attempt `^C` — from the agent side, sending literal `"^C"` adds more input to the here-string rather than interrupting the shell. Use `kill_terminal` on the stalled terminal ID, then open a fresh terminal. This extends the existing kill-before-retry pattern from `## Terminal Retry Hygiene`.
+
+**Prevention**: prefer one-line commands. When a multiline construct is genuinely required, write it to a temporary `.ps1` or `.sh` file and invoke the file, rather than passing the block inline to the terminal.
+
+## Non-Fatal Diagnostic Wrapper Pattern
+
+When a subagent needs to run a diagnostic check (linting, structural validation, schema inspection) without risking an orchestration halt on a non-zero exit code, the wrapper script should emit a structured status line as its final stdout output and always exit 0.
+
+**Shape**:
+
+- Readable line: `VALIDATION_STATUS=pass` or `VALIDATION_STATUS=fail` as any line in stdout; emit it last for unambiguous parsing
+- Optional preceding lines: evidence such as diff output, line counts, or error messages
+- Exit code: always `exit 0` so the orchestrator continues regardless of findings
+
+**Worked examples**:
+
+PowerShell:
+
+```powershell
+if ($findings.Count -eq 0) {
+    Write-Output 'VALIDATION_STATUS=pass'
+} else {
+    $findings | ForEach-Object { Write-Output $_ }
+    Write-Output 'VALIDATION_STATUS=fail'
+}
+exit 0
+```
+
+Bash:
+
+```bash
+if [ "$finding_count" -eq 0 ]; then
+  echo 'VALIDATION_STATUS=pass'
+else
+  echo "$error_details"
+  echo 'VALIDATION_STATUS=fail'
+fi
+exit 0
+```
+
+**Scope**: this pattern applies to diagnostic wrappers only. Real validation gates (Pester, PSScriptAnalyzer, markdownlint) retain their non-zero exits — do not apply `exit 0` to gates that must halt on failure. Criterion: if the orchestrator should stop when this tool reports failure, it is a gate; if it should continue and log findings, it is a diagnostic.
+
+**Residual non-zero sources**: existing third-party tools (e.g., `grep -q`) exit non-zero on no-match by design. Wrap calls to such tools explicitly if their exit codes would be misread as failures.
+
+**Consumer**: the `VALIDATION_STATUS` token is readable by the operator in the terminal buffer and future-greppable as `^VALIDATION_STATUS=` in stdout. No automated consumer exists today — the value is operator-facing structured evidence at a glance.
+
 ## Gotchas
 
 | Trigger                                               | Gotcha                                                                          | Fix                                                                            |
@@ -88,3 +142,11 @@ Scope notes:
 | Trigger                                                         | Gotcha                                                             | Fix                                                                                                |
 | --------------------------------------------------------------- | ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
 | Retrying a failed async server without killing the old terminal | The old shell or port can stay alive and make the retry look flaky | Kill the prior terminal ID first, check the port for dev servers, then restart in a fresh terminal |
+
+| Trigger                                                          | Gotcha                                                                                        | Fix                                                                                                            |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Terminal sits silently after a multi-line command                | The shell entered a continuation prompt (`>>` or `>`); the terminal is not frozen             | Intervene immediately — the shell waits indefinitely; use `kill_terminal` and open a fresh terminal — do not send `^C` |
+
+| Trigger                                                          | Gotcha                                                                                        | Fix                                                                                                            |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Subagent diagnostic check causes orchestration to halt unexpectedly | The diagnostic script exited non-zero and the orchestrator treated it as a blocking failure | Wrap the diagnostic in the Non-Fatal Diagnostic Wrapper Pattern: emit `VALIDATION_STATUS=pass/fail`, exit 0    |
