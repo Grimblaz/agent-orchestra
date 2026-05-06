@@ -94,6 +94,16 @@ function Get-ConfigValueForPath {
     return Get-ConfigValue $Name
 }
 
+function Get-SequenceConfigValue {
+    param([string]$Name, [int]$Index)
+    $sequence = Get-ConfigValue $Name
+    if ($null -eq $sequence) { return $null }
+    $items = @($sequence)
+    if ($items.Count -eq 0) { return $null }
+    if ($Index -lt $items.Count) { return $items[$Index] }
+    return $items[-1]
+}
+
 # Strip -C <path> prefix so subcommand handlers work uniformly
 $gitWorkDir = $null
 if ($a.Count -ge 3 -and $a[0] -eq '-C') {
@@ -112,6 +122,18 @@ if ($a.Count -ge 2 -and $a[0] -eq 'symbolic-ref' -and $a[1] -eq 'refs/remotes/or
 if ($a.Count -ge 2 -and $a[0] -eq 'symbolic-ref' -and $a[1] -eq 'HEAD') {
     $val = Get-ConfigValueForPath -Name 'symbolic-ref-HEAD' -Path $gitWorkDir
     if ($null -ne $val) { Write-Output $val; exit 0 }
+    exit 128
+}
+
+# git rev-parse --abbrev-ref "main@{upstream}"
+if ($a.Count -ge 3 -and $a[0] -eq 'rev-parse' -and $a[1] -eq '--abbrev-ref') {
+    $refSpec = $a[2]
+    if ($refSpec -match '^(?<branch>.+)@\{upstream\}$') {
+        $key = "upstream-ref-$($Matches.branch)"
+        $val = Get-ConfigValue $key
+        if ($null -ne $val) { Write-Output $val }
+        exit 0
+    }
     exit 128
 }
 
@@ -190,14 +212,49 @@ if ($a.Count -ge 3 -and $a[0] -eq 'remote' -and $a[1] -eq 'get-url') {
 
 # git fetch origin --prune
 if ($a.Count -ge 1 -and $a[0] -eq 'fetch') {
-    $exitVal = Get-ConfigValue 'fetch-exit'
+    $remoteName = if ($a.Count -ge 2) { $a[1] } else { '' }
+    $exitVal = Get-ConfigValue "fetch-exit-$remoteName"
+    if ($null -eq $exitVal) { $exitVal = Get-ConfigValue 'fetch-exit' }
     if ($null -eq $exitVal) { $exitVal = 0 }
-    "fetch-called" | Add-Content -Path $callLogPath -Encoding UTF8
+    "fetch-called`t$remoteName" | Add-Content -Path $callLogPath -Encoding UTF8
     exit ([int]$exitVal)
 }
 
 # git cherry <baseRef> <branch>
 # Empty stdout = merged; lines starting with - or + = unmerged commits present
+# git merge-tree --write-tree <baseRef> <branch>
+if ($a.Count -ge 4 -and $a[0] -eq 'merge-tree' -and $a[1] -eq '--write-tree') {
+    $baseRef = $a[2]
+    $targetBranch = $a[3]
+    $mergeTreeOutput = Get-ConfigValue "merge-tree-output-$targetBranch"
+    $mergeTreeExit = Get-ConfigValue "merge-tree-exit-$targetBranch"
+    if ($null -eq $mergeTreeExit) { $mergeTreeExit = 1 }
+    "merge-tree-called`t$baseRef`t$targetBranch" | Add-Content -Path $callLogPath -Encoding UTF8
+    if ($null -ne $mergeTreeOutput -and $mergeTreeOutput -ne '') { Write-Output $mergeTreeOutput }
+    exit ([int]$mergeTreeExit)
+}
+
+# git diff --quiet [--ignore-cr-at-eol] <baseRef> <branch>
+if ($a.Count -ge 4 -and $a[0] -eq 'diff' -and $a[1] -eq '--quiet') {
+    $argIndex = 2
+    $ignoreCrAtEol = $false
+    if ($a[$argIndex] -eq '--ignore-cr-at-eol') {
+        $ignoreCrAtEol = $true
+        $argIndex++
+    }
+    if ($argIndex + 1 -lt $a.Count) {
+        $baseRef = $a[$argIndex]
+        $targetBranch = $a[$argIndex + 1]
+        $priorDiffCalls = @(Get-Content -Path $callLogPath -ErrorAction SilentlyContinue | Where-Object { $_ -match "^diff-quiet-called\t.+\t$([regex]::Escape($targetBranch))\t" })
+        $diffExit = Get-SequenceConfigValue -Name "diff-quiet-exit-sequence-$targetBranch" -Index $priorDiffCalls.Count
+        if ($null -eq $diffExit) { $diffExit = Get-ConfigValue "diff-quiet-exit-$targetBranch" }
+        if ($null -eq $diffExit) { $diffExit = 1 }
+        "diff-quiet-called`t$baseRef`t$targetBranch`tignore-cr-at-eol=$ignoreCrAtEol" | Add-Content -Path $callLogPath -Encoding UTF8
+        exit ([int]$diffExit)
+    }
+    exit 1
+}
+
 if ($a.Count -ge 3 -and $a[0] -eq 'cherry') {
     $baseRef = $a[1]       # the base ref (should be origin/<defaultBranch>)
     $targetBranch = $a[2]  # the branch being checked
@@ -284,7 +341,7 @@ function Get-GhConfigValue {
     return $null
 }
 
-# gh pr list --head <branch> --state merged --json number
+# gh pr list --head <branch> --base <defaultBranch> --state merged --json number
 if ($a.Count -ge 6 -and $a[0] -eq 'pr' -and $a[1] -eq 'list') {
     $headIdx = [Array]::IndexOf([string[]]$a, '--head')
     $branch = if ($headIdx -ge 0 -and $headIdx + 1 -lt $a.Count) { $a[$headIdx + 1] } else { '' }
@@ -501,19 +558,9 @@ exit $LASTEXITCODE
             $workDir = Join-Path $TestDrive 'orphan-empty'
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 
-            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
-                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
-                'show-ref-refs/remotes/origin/main' = 0
-                'fetch-exit' = 0
-            } -ScriptParams @{
-                OrphanBranches = [string[]]@()
-                SiblingWorktrees = [string[]]@()  # need at least something to pass guard
-            }
-
             # When all params are empty arrays, guard should fire — but if only OrphanBranches
             # is empty and something else is provided, zero-count suppression applies
-            # For this test, provide a token SiblingWorktrees that doesn't exist to isolate
-            # the zero-count suppression behavior
+            # For this test, provide IssueNumber to isolate the zero-count suppression behavior.
 
             # Re-invoke with at least one non-empty array to bypass guard
             $result2 = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
@@ -612,6 +659,39 @@ exit $LASTEXITCODE
             $result.ExitCode | Should -Be 0
             $ghCalls = @($result.GhCalls | Where-Object { $_ -match '^pr\tlist' })
             $ghCalls.Count | Should -BeGreaterThan 0 -Because 'gh pr list must be called as fallback when git cherry fails'
+            $ghCalls | Should -Contain "pr`tlist`t--head`t$branch`t--base`tmain`t--state`tmerged`t--json`tnumber" -Because 'GitHub fallback must constrain the PR lookup to the resolved default branch'
+        }
+
+        It 'TC-Sibling-4: counts removed worktree when branch deletion is skipped after merged re-check fails' {
+            $workDir = Join-Path $TestDrive 'sibling-removed-branch-skip'
+            $siblingPath = Join-Path $TestDrive 'sibling-removed-branch-skip-other'
+            New-Item -ItemType Directory -Path $workDir, $siblingPath -Force | Out-Null
+            $branch = 'pester-temp/issue-500-sibling-recheck-unmerged'
+            $siblingFwdPath = $siblingPath -replace '\\', '/'
+
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                        = 0
+                "diff-quiet-exit-sequence-$branch" = @(0, 1)
+                "cherry-$branch"                    = '+ abc123 Commit that appears unmerged during re-check'
+                'worktree-remove-exit'              = 0
+                'branch-d-exit'                     = 1
+                'path-configs'                      = @{
+                    $siblingFwdPath = @{ 'branch--show-current' = $branch }
+                }
+            } -ScriptParams @{
+                SiblingWorktrees = [string[]]@($siblingFwdPath)
+            }
+
+            $result.ExitCode | Should -Be 0
+            $branchSkipPattern = [regex]::Escape("Removed worktree '$siblingFwdPath', but skipped branch '$branch'") + ' (?:—|-) ' + [regex]::Escape('unmerged commits') + ' (?:—|-) ' + [regex]::Escape('review before deleting')
+            $result.Output | Should -Match $branchSkipPattern
+            $result.Output | Should -Match ([regex]::Escape("Deleted 1 sibling worktree(s): $siblingFwdPath")) -Because 'the summary must include a worktree that was already successfully removed'
+            $worktreeRemovals = @($result.GitCalls | Where-Object { $_ -eq "worktree-removed`t$siblingFwdPath" })
+            $worktreeRemovals.Count | Should -Be 1 -Because 'the worktree removal itself must have succeeded before the branch skip'
+            $successfulForcedBranchDeletes = @($result.GitCalls | Where-Object { $_ -eq "branch-deleted`t-D`t$branch" })
+            $successfulForcedBranchDeletes.Count | Should -Be 0 -Because 'branch deletion must remain skipped after the second merged check fails'
         }
     }
 
@@ -629,8 +709,6 @@ exit $LASTEXITCODE
             New-Item -ItemType Directory -Path $trackingDir -Force | Out-Null
             $trackingFile = Join-Path $trackingDir 'unknown-tracking.md'
             Set-Content -Path $trackingFile -Value "# No issue_id header`nSome content" -Encoding UTF8
-
-            $relTrackingPath = 'unknown-tracking.md'
 
             $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
                 'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
@@ -788,6 +866,7 @@ exit $LASTEXITCODE
             $result.ExitCode | Should -Be 0
             $ghCalls = @($result.GhCalls | Where-Object { $_ -match '^pr\tlist' })
             $ghCalls.Count | Should -BeGreaterThan 0 -Because 'gh pr list must be called when git cherry fails'
+            $ghCalls | Should -Contain "pr`tlist`t--head`t$branch`t--base`tmain`t--state`tmerged`t--json`tnumber" -Because 'GitHub fallback must constrain the PR lookup to the resolved default branch'
         }
 
         It 'TC-Cherry-3: when gh is unavailable, treats branch as unmerged (returns false for safety)' {
@@ -840,6 +919,84 @@ exit $LASTEXITCODE
             # Also confirm no error log entries (which the mock writes when origin/ prefix is missing)
             $errorCalls = @($result.GitCalls | Where-Object { $_ -match 'cherry-base-ref-error' })
             $errorCalls.Count | Should -Be 0 -Because 'mock must not have detected a missing origin/ prefix'
+        }
+
+        It 'TC-SquashOffline-S5: deletes a tree-equivalent squash-style orphan without gh on PATH' {
+            $workDir = Join-Path $TestDrive 'squash-offline-clean'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'pester-temp/issue-513-squash-offline-clean'
+
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                        = 0
+                "diff-quiet-exit-$branch"          = 0
+                "cherry-$branch"                    = '+ abc123 Squash-equivalent commit not patch-equivalent'
+                'branch-d-exit'                     = 0
+            } -ScriptParams @{
+                OrphanBranches = [string[]]@($branch)
+            }
+
+            $result.ExitCode | Should -Be 0
+            $deleteCalls = @($result.GitCalls | Where-Object { $_ -match "^branch-deleted\t.*$([regex]::Escape($branch))" })
+            $deleteCalls.Count | Should -BeGreaterThan 0 -Because 'tree-equivalent squash-merged orphan should be deleted once diff-first detection is implemented'
+            $result.GhCalls.Count | Should -Be 0 -Because 'offline-clean detection must not require gh invocations'
+            $diffCalls = @($result.GitCalls | Where-Object { $_ -match '^diff-quiet-called\t' })
+            $diffCalls | Should -Contain "diff-quiet-called`torigin/main`t$branch`tignore-cr-at-eol=True" -Because 'tree-equivalence diff must ignore CR at EOL for Windows-safe cleanup'
+        }
+
+        It 'TC-MergeTreeNoOp: deletes an accumulated squash branch when merge-tree result matches default' {
+            $workDir = Join-Path $TestDrive 'merge-tree-noop'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'pester-temp/issue-513-merge-tree-noop'
+            $mergedTreeOid = 'tree-merge-noop-oid'
+
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                        = 0
+                "diff-quiet-exit-$branch"          = 1
+                "merge-tree-output-$branch"         = $mergedTreeOid
+                "merge-tree-exit-$branch"           = 0
+                "diff-quiet-exit-$mergedTreeOid"    = 0
+                "cherry-$branch"                    = '+ abc123 Squash-equivalent commit not patch-equivalent'
+                'branch-d-exit'                     = 0
+            } -ScriptParams @{
+                OrphanBranches = [string[]]@($branch)
+            }
+
+            $result.ExitCode | Should -Be 0
+            $deleteCalls = @($result.GitCalls | Where-Object { $_ -match "^branch-deleted\t.*$([regex]::Escape($branch))" })
+            $deleteCalls.Count | Should -BeGreaterThan 0 -Because 'merge-tree no-op detection should authorize cleanup before cherry fallback'
+            $mergeTreeCalls = @($result.GitCalls | Where-Object { $_ -match "^merge-tree-called\torigin/main\t$([regex]::Escape($branch))$" })
+            $mergeTreeCalls.Count | Should -Be 1 -Because 'direct diff mismatch should fall through to merge-tree no-op detection'
+            $mergeTreeDiff = @($result.GitCalls | Where-Object { $_ -eq "diff-quiet-called`torigin/main`t$mergedTreeOid`tignore-cr-at-eol=True" })
+            $mergeTreeDiff.Count | Should -Be 1 -Because 'merge-tree result must be compared to the remote default tree with CR-at-EOL ignored'
+            $cherryCalls = @($result.GitCalls | Where-Object { $_ -match '^cherry-called\t' })
+            $cherryCalls.Count | Should -Be 0 -Because 'successful merge-tree no-op detection should not need cherry fallback'
+        }
+
+        It 'TC-NonOriginUpstream: fetches and checks a configured non-origin default upstream' {
+            $workDir = Join-Path $TestDrive 'non-origin-upstream'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $branch = 'pester-temp/issue-513-non-origin-upstream'
+
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'upstream-ref-main'                 = 'upstream/main'
+                'fetch-exit'                        = 0
+                "cherry-$branch"                   = ''
+                'branch-d-exit'                     = 0
+            } -ScriptParams @{
+                OrphanBranches = [string[]]@($branch)
+            }
+
+            $result.ExitCode | Should -Be 0
+            $result.GitCalls | Should -Contain "fetch-called`torigin" -Because 'cleanup should keep the existing origin fetch'
+            $result.GitCalls | Should -Contain "fetch-called`tupstream" -Because 'cleanup should refresh a non-origin configured upstream remote'
+            $result.GitCalls | Should -Contain "diff-quiet-called`tupstream/main`t$branch`tignore-cr-at-eol=True" -Because 'direct diff should use the configured upstream ref'
+            $result.GitCalls | Should -Contain "cherry-called`tupstream/main`t$branch" -Because 'cherry fallback should use the configured upstream ref'
         }
     }
 

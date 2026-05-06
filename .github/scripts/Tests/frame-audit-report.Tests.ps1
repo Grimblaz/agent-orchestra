@@ -510,7 +510,7 @@ exit 99
         (($report['recommendations'] | ForEach-Object { [string]$_['score'] }) -join ',') | Should -Be '20,20,20'
         $report['tbd_ports'].Count | Should -Be 1
         $report['tbd_ports'][0]['port'] | Should -Be 'process-retrospective'
-        $report['tbd_ports'][0]['port_status'] | Should -Be 'tbd-decision-pending'
+        $report['tbd_ports'][0]['port_status'] | Should -Be 'formalized-skeleton-deferred-to-348'
         $report['tbd_ports'][0]['pre_pivot_total'] | Should -Be 2
         $report['tbd_ports'][0]['post_pivot_total'] | Should -Be 2
 
@@ -519,7 +519,7 @@ exit 99
         $textOutput | Should -Match '(?m)^PRs < 356 \(2 PRs\)\r?$'
         $textOutput | Should -Match '(?m)^design \| 0 \| 0 \| 0 \| 0 \| 2 \| 0\r?$'
         $textOutput | Should -Match '(?m)^review \| 2 \| 0 \| 0 \| 0 \| 0 \| 0\r?$'
-        $textOutput | Should -Match '(?m)^- process-retrospective \(tbd-decision-pending\)\r?$'
+        $textOutput | Should -Match '(?m)^- process-retrospective \(formalized-skeleton-deferred-to-348\)\r?$'
         $textOutput | Should -Match '(?m)^- design: score=20; missing=0; inconclusive=2; skipped=0\r?$'
         $textOutput | Should -Match '(?m)^- plan: score=20; missing=0; inconclusive=2; skipped=0\r?$'
         $textOutput | Should -Match '(?m)^- review: score=20; missing=0; inconclusive=2; skipped=0\r?$'
@@ -528,7 +528,7 @@ exit 99
         $markdownOutput | Should -Match '(?m)^# Frame Audit Report\r?$'
         $markdownOutput | Should -Match '(?m)^## PRs >= 356 \(2 PRs\)\r?$'
         $markdownOutput | Should -Match '(?m)^\| design \| 0 \| 0 \| 0 \| 0 \| 2 \| 0 \|\r?$'
-        $markdownOutput | Should -Match '(?m)^- process-retrospective \(tbd-decision-pending\)\r?$'
+        $markdownOutput | Should -Match '(?m)^- process-retrospective \(formalized-skeleton-deferred-to-348\)\r?$'
         $markdownOutput | Should -Match '(?m)^- design: score=20; missing=0; inconclusive=2; skipped=0\r?$'
     }
 

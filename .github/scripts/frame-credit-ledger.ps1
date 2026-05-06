@@ -996,6 +996,56 @@ function Invoke-FrameCreditLedger {
     $hasNotCovered = @($reportsArray | Where-Object { [string]$_.Status -eq 'NotCovered' }).Count -gt 0
 
     # ---------------------------------------------------------------------------
+    # Step 5b: 90-day deferred-port tripwire (issue #443, Step 11)
+    #
+    # Scan credits for DEFERRED(#NNN): evidence rows.  For each, read the
+    # matching port YAML to extract trigger-deferred-since.  If the date is
+    # older than 90 days, emit a non-blocking stderr warning.  This is
+    # tripwire-only — it never gates a PR merge.
+    # ---------------------------------------------------------------------------
+    try {
+        $tripwireDays = 90
+        $today = [datetime]::UtcNow.Date
+        foreach ($credit in $credits) {
+            $evidenceProp = $credit.PSObject.Properties['evidence']
+            if ($null -eq $evidenceProp) { continue }
+            $evidence = [string]$evidenceProp.Value
+            if ([string]::IsNullOrWhiteSpace($evidence)) { continue }
+            if ($evidence -notmatch '^DEFERRED\(#(\d+)\):') { continue }
+
+            $portProp = $credit.PSObject.Properties['port']
+            if ($null -eq $portProp) { continue }
+            $portName = [string]$portProp.Value
+            if ([string]::IsNullOrWhiteSpace($portName)) { continue }
+
+            # Read trigger-deferred-since from the port YAML file.
+            $portYaml = Join-Path $portsDir "$portName.yaml"
+            if (-not (Test-Path -LiteralPath $portYaml -PathType Leaf)) { continue }
+
+            $portRaw = ''
+            try { $portRaw = Get-Content -LiteralPath $portYaml -Raw -ErrorAction Stop } catch { continue }
+
+            $sincePattern = '(?m)^\s*trigger-deferred-since\s*:\s*[''"]?(?<val>[0-9]{4}-[0-9]{2}-[0-9]{2})[''"]?\s*$'
+            $sinceMatch = [regex]::Match($portRaw, $sincePattern)
+            if (-not $sinceMatch.Success) { continue }
+
+            $sinceDate = $null
+            try {
+                $sinceDate = [datetime]::ParseExact($sinceMatch.Groups['val'].Value, 'yyyy-MM-dd',
+                    [System.Globalization.CultureInfo]::InvariantCulture)
+            } catch { continue }
+
+            $age = ($today - $sinceDate.Date).Days
+            if ($age -gt $tripwireDays) {
+                [Console]::Error.WriteLine("frame-credit-ledger: ⚠️ deferred-port tripwire: port '$portName' has been deferred for $age days (threshold: $tripwireDays). trigger-deferred-since: $($sinceMatch.Groups['val'].Value). Consider prioritizing the producing issue.")
+            }
+        }
+    }
+    catch {
+        # Tripwire is warn-only; never block on failure.
+    }
+
+    # ---------------------------------------------------------------------------
     # Step 6: Cost Pattern composition (issue #467)
     # Sub-budgets total: 19s within the 30s outer budget.
     # On any sub-step failure, graceful degradation applies (cost section is empty string).

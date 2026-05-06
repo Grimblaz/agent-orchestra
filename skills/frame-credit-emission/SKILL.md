@@ -22,9 +22,11 @@ Frame credit emission follows one of four locus categories based on the port's l
 
 Ports owned by specialist agents whose terminal step occurs after PR creation. The agent writes its credit row directly into the `<!-- pipeline-metrics -->` block on the PR body via the appropriate `Build-*CreditRow` function.
 
-**Ports in this category**: `implement-code`, `implement-test`, `implement-refactor`, `implement-docs`
+**Ports in this category**: `implement-code`, `implement-test`, `implement-refactor`, `implement-docs`, `process-review`
 
 **Terminal-step contract**: Read the port's adapter file from `frame/ports/{port}.yaml`, evaluate the `applies-when` predicate against the changeset, call the matching `Build-*CreditRow` function with port-specific evidence, and upsert the credit row into the PR-body pipeline-metrics block.
+
+**Dedupe contract** (`process-review` only): `Build-ProcessReviewCreditRow` is the canonical emitter. If a `process-review` credit row already exists in the pipeline-metrics block with `status: passed` or `status: not-applicable`, Code-Conductor skips emission (additive-merge rule, D9). Note: the SMC-16 `not-persisted` synthesis path covers only the `review` port (judge-sentinel-driven); it does not extend to `process-review` — no `process-review`-specific sentinel exists.
 
 ### `agent-pre-pr`
 
@@ -87,6 +89,23 @@ CE Gate surfaces are evaluated independently. Each surface's credit row is its o
 4. **Orchestration-failure handling** _(planned - wrapper not yet implemented)_: when the orchestration wrapper ships, a crash after partial evaluation will cause it to emit the remaining-surface credits as `status: inconclusive` with `block_kind: orchestration` and `evidence: "orchestration crashed before surface evaluated"`. Until then, manually emit missing-surface rows on crash.
 
 Cycle-aware emission uses `(port, terminal-step-id)` as the additive-merge identity for positive terminal steps. Every `Build-*CreditRow` function accepts optional `-Step`; omit it or pass `0` only for legacy plans and `spine-omitted: plan-too-small` plans, where the row keeps the legacy `(port, 0)` identity. For a spine-backed plan, pass the positive step number from the terminal slice marked for that port. Multiple rows for the same port may coexist only when their positive `terminal-step-id` values differ; an existing row with the same `(port, terminal-step-id)` wins and must not be overwritten.
+
+## Deferred-Port Emission Convention
+
+Ports whose trigger predicate is formalized but deferred to a future issue use `Build-DeferredPortCreditRow` instead of the port-specific builder. The evidence string always begins with `DEFERRED(#NNN):` — this prefix is the migration-detection contract (regex `^DEFERRED\(#\d+\):`).
+
+**When to use**: the port's YAML declares `trigger-status: deferred` and `applies-when: never`. The port is excluded from the coverage denominator until `trigger-status` flips to `live` in the producing issue.
+
+**Example** (`process-retrospective`, deferred to #348):
+
+```yaml
+port: process-retrospective
+adapter: explicit-skip
+status: not-applicable
+evidence: "DEFERRED(#348): trigger predicate deferred to #348 (since 2026-05-03); port excluded from coverage denominator until trigger-status flips to live."
+```
+
+**Pre- vs post-#348 distinction**: rows with the `DEFERRED(#NNN):` prefix are visually distinguishable from post-cutover rows (which will carry real trigger evidence). Migration scripts detect the prefix and convert deferred rows to live rows when #348 ships its producer.
 
 ## Related
 

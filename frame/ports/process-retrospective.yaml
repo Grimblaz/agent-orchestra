@@ -1,5 +1,8 @@
 name: process-retrospective
 description: "Should this change contribute to a broader process retrospective signal?"
-applies: always
-status: tbd-decision-pending
-notes: "No adapter declared yet - resolution tracked under umbrella #425, with active sibling #443 (sub-C: process-review + process-retrospective decision)."
+applies: trigger-conditional
+status: formalized-skeleton-deferred-to-348
+trigger-status: deferred
+trigger-deferred-to: '#348'
+trigger-deferred-since: '2026-05-03'
+notes: "Trigger predicate authored by #348 (Thin Harness E — Close the learning loop). Until then, applies-when: never resolves to false on every PR; port excluded from coverage denominator. Adapter: skills/process-retrospective/SKILL.md (skeleton) + skills/process-retrospective/adapters/explicit-skip-process-retrospective.md."
