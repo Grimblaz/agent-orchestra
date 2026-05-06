@@ -415,6 +415,14 @@ Describe 'frame-credit-ledger cost integration' {
             $result.Captured.IssueNumber | Should -Be 529
         }
 
+        It 'passes exact branch-slug issue number to cost walker' {
+            $result = & $script:InvokeOrchestratorInProcessWithWalkerCapture -PrBody $script:V4AllCoveredBody -CostBranch 'feature/issue-529'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Captured.HadIssueNumber | Should -Be $true
+            $result.Captured.IssueNumber | Should -Be 529
+        }
+
         It 'passes body-linked issue number to cost walker when branch slug is absent' {
             $body = $script:V4AllCoveredBody + "`nFixes #467`n"
             $result = & $script:InvokeOrchestratorInProcessWithWalkerCapture -PrBody $body -CostBranch 'topic/no-issue-slug'

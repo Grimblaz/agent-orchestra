@@ -443,6 +443,7 @@ Describe 'Invoke-CostTranscriptWalk' {
                     @{ type = 'user'; message = @{ content = '<command-name>/Experience</command-name><command-args>529</command-args>' } }
                     @{ type = 'user'; message = @{ content = '<command>/plan</command><command-args>529</command-args>' } }
                     @{ type = 'user'; message = @{ content = '<command-name>/plan</command-name><command-args>plan-#529</command-args>' } }
+                    @{ type = 'user'; message = @{ content = 'debug: <command-name>/plan</command-name><command-args>529</command-args>' } }
                     @{ type = 'user'; message = @{ content = 'please run /plan for issue 529' } }
                     @{ type = 'user'; message = @{ content = @(@{ some = 'object' }) } }
                 )

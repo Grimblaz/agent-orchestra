@@ -29,7 +29,7 @@ function script:Get-CostWalkerPhaseMarker {
     $content = $Event['message']?['content']
     if ($content -isnot [string]) { return $null }
 
-    $markerPattern = '<command-name>/(?<command>(?:agent-orchestra:)?(?:experience|design|plan|orchestrate|code-conductor))</command-name>\s*<command-args>(?<args>[^<]*)</command-args>'
+    $markerPattern = '\A\s*<command-name>/(?<command>(?:agent-orchestra:)?(?:experience|design|plan|orchestrate|code-conductor))</command-name>\s*<command-args>(?<args>[^<]*)</command-args>\s*\z'
     $markerMatch = [regex]::Match($content, $markerPattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
     if (-not $markerMatch.Success) { return $null }
 

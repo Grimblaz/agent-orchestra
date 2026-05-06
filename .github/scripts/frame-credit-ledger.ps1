@@ -466,7 +466,7 @@ function script:Resolve-FCLLinkedIssueNumber {
     )
 
     if (-not [string]::IsNullOrWhiteSpace($Branch)) {
-        $branchMatch = [regex]::Match($Branch, '^feature/issue-(?<issue>\d+)-')
+        $branchMatch = [regex]::Match($Branch, '^feature/issue-(?<issue>\d+)(?:-|$)')
         if ($branchMatch.Success) {
             $branchIssue = 0
             if ([int]::TryParse($branchMatch.Groups['issue'].Value, [ref]$branchIssue) -and $branchIssue -gt 0) {

@@ -145,6 +145,8 @@ Describe 'Format-CostPatternMarkdown' {
             $completeness = script:New-Completeness -Excluded $true -ExcludeReason 'phase-marker-only attribution; rolling-history excluded'
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
             $result | Should -Match 'phase-marker-only attribution; rolling-history excluded'
+            $result | Should -Match 'Claude-side phase-marker attribution'
+            $result | Should -Match 'Copilot-side collection remains tracked by \[#488\]\(https://github\.com/Grimblaz/agent-orchestra/issues/488\)'
             $result | Should -Not -Match 'session not found'
         }
     }
