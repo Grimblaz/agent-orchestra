@@ -227,6 +227,29 @@ function Set-CacheHitRatio {
     }
 }
 
+function Get-PhaseMarkerAttributionTarget {
+    <#
+    .SYNOPSIS
+        Maps a phase-marker port hint to its no-dispatch attribution target.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][object]$Evt
+    )
+
+    $markerPort = $Evt['_phase_marker_port']
+    if ($null -eq $markerPort -or $markerPort -eq '') { return $null }
+
+    $markerPortName = ([string]$markerPort).ToLowerInvariant()
+    switch ($markerPortName) {
+        { $_ -in @('experience', 'design', 'plan') } { return $markerPortName }
+        'orchestrate' { return 'orchestrator-overhead' }
+        'code-conductor' { return 'orchestrator-overhead' }
+        default { return $null }
+    }
+}
+
 function Get-CostAttribution {
     <#
     .SYNOPSIS
@@ -342,10 +365,21 @@ function Get-CostAttribution {
             }
 
             if ($agentDispatches.Count -eq 0) {
-                # No dispatch — orchestrator-overhead
-                Add-TokensToAccumulator -Accumulator $overhead['tokens'] -Usage $usage
-                Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -RatesByModel $ratesByModel
-                $currentSubagentBuckets = @($overhead)
+                $phaseMarkerTarget = Get-PhaseMarkerAttributionTarget -Evt $evt
+                if ($phaseMarkerTarget -in @('experience', 'design', 'plan')) {
+                    if (-not $ports.ContainsKey($phaseMarkerTarget)) {
+                        $ports[$phaseMarkerTarget] = New-PortBucket
+                    }
+                    Add-TokensToAccumulator -Accumulator $ports[$phaseMarkerTarget]['tokens'] -Usage $usage
+                    Add-CostToBucket -Bucket $ports[$phaseMarkerTarget] -Usage $usage -Model $model -RatesByModel $ratesByModel
+                    $currentSubagentBuckets = @($ports[$phaseMarkerTarget])
+                }
+                else {
+                    # No dispatch — orchestrator-overhead unless a phase marker maps elsewhere
+                    Add-TokensToAccumulator -Accumulator $overhead['tokens'] -Usage $usage
+                    Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -RatesByModel $ratesByModel
+                    $currentSubagentBuckets = @($overhead)
+                }
             }
             else {
                 # Map each dispatch to its port and increment dispatch_count

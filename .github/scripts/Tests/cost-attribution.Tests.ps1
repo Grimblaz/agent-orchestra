@@ -270,6 +270,70 @@ Describe 'Get-CostAttribution' {
             $result.orchestrator_overhead.tokens.output | Should -Be 20
         }
 
+        It 'routes inline no-dispatch phase-marker <MarkerPort> tokens to the <ExpectedPort> port' -TestCases @(
+            @{ MarkerPort = 'experience'; ExpectedPort = 'experience' }
+            @{ MarkerPort = 'design'; ExpectedPort = 'design' }
+            @{ MarkerPort = 'plan'; ExpectedPort = 'plan' }
+        ) {
+            param([string]$MarkerPort, [string]$ExpectedPort)
+
+            $noDispatchEvent = script:New-AssistantEvent -Content @() -InputTokens 50 -OutputTokens 20
+            $noDispatchEvent['_phase_marker_port'] = $MarkerPort
+
+            $result = Get-CostAttribution -Events @($noDispatchEvent) -RateTablePath $script:RateTablePath
+
+            $result.ports.ContainsKey($ExpectedPort) | Should -BeTrue
+            $result.ports[$ExpectedPort].tokens.input | Should -Be 50
+            $result.ports[$ExpectedPort].tokens.output | Should -Be 20
+            $result.orchestrator_overhead.tokens.input | Should -Be 0
+        }
+
+        It 'routes inline no-dispatch phase-marker <MarkerPort> tokens to orchestrator-overhead' -TestCases @(
+            @{ MarkerPort = 'orchestrate' }
+            @{ MarkerPort = 'code-conductor' }
+        ) {
+            param([string]$MarkerPort)
+
+            $noDispatchEvent = script:New-AssistantEvent -Content @() -InputTokens 40 -OutputTokens 15
+            $noDispatchEvent['_phase_marker_port'] = $MarkerPort
+
+            $result = Get-CostAttribution -Events @($noDispatchEvent) -RateTablePath $script:RateTablePath
+
+            $result.orchestrator_overhead.tokens.input | Should -Be 40
+            $result.orchestrator_overhead.tokens.output | Should -Be 15
+            $result.ports.ContainsKey('orchestrator-overhead') | Should -BeFalse
+        }
+
+        It 'lets Agent dispatch attribution win over phase-marker <MarkerPort> defaults' -TestCases @(
+            @{ MarkerPort = 'experience' }
+            @{ MarkerPort = 'design' }
+            @{ MarkerPort = 'plan' }
+        ) {
+            param([string]$MarkerPort)
+
+            $dispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $parentEvent = script:New-AssistantEvent -Content @($dispatch) -InputTokens 70 -OutputTokens 25
+            $parentEvent['_phase_marker_port'] = $MarkerPort
+
+            $result = Get-CostAttribution -Events @($parentEvent) -RateTablePath $script:RateTablePath
+
+            $result.ports.ContainsKey($MarkerPort) | Should -BeFalse
+            $result.ports['implement-code'].dispatch_count | Should -Be 1
+            $result.ports['implement-code'].tokens.input | Should -Be 70
+            $result.ports['implement-code'].tokens.output | Should -Be 25
+            $result.orchestrator_overhead.tokens.input | Should -Be 0
+        }
+
+        It 'keeps unmarked no-dispatch parent turns as orchestrator-overhead' {
+            $noDispatchEvent = script:New-AssistantEvent -Content @() -InputTokens 35 -OutputTokens 12
+
+            $result = Get-CostAttribution -Events @($noDispatchEvent) -RateTablePath $script:RateTablePath
+
+            $result.orchestrator_overhead.tokens.input | Should -Be 35
+            $result.orchestrator_overhead.tokens.output | Should -Be 12
+            $result.ports.Count | Should -Be 0
+        }
+
         It 'attributes parent turn tokens to dispatched port, not overhead' {
             $dispatch = script:New-AgentDispatch -SubagentType 'issue-planner'
             $parentEvent = script:New-AssistantEvent -Content @($dispatch) -InputTokens 80 -OutputTokens 30
