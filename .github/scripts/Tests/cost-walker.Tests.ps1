@@ -102,6 +102,28 @@ Describe 'Invoke-CostTranscriptWalk' {
             Remove-Item -Recurse -Force $tmp
         }
 
+        It 'discovers uppercase primary slug directory when lowercase slug exact path is absent' {
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
+            $slug = 'c--Users-Micah-Code-Copilot-Orchestra'
+            $upperSlugDirName = 'C--Users-Micah-Code-Copilot-Orchestra'
+            $slugDir = Join-Path $tmp $upperSlugDirName
+            $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+            $eventId = [System.Guid]::NewGuid().ToString()
+            script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events @(
+                script:New-AssistantEvent -Uuid $eventId -Cwd $script:TestCwd -Branch $script:TestBranch
+            )
+
+            $exactLowercasePath = Join-Path $tmp $slug
+            Mock Test-Path { return $false } -ParameterFilter { $LiteralPath -eq $exactLowercasePath }
+
+            $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp)
+            $result.Count | Should -Be 1
+            $result[0].uuid | Should -Be $eventId
+            $result[0].type | Should -Be 'assistant'
+            Remove-Item -Recurse -Force $tmp
+        }
+
         It 'excludes assistant events with non-matching branch' {
             $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
             $slug = 'test--repo'

@@ -198,6 +198,29 @@ function Get-CostTranscriptSlug {
     return "$driveSegment--$remainingJoined"
 }
 
+function script:Resolve-CostWalkerPrimarySlugDir {
+    param(
+        [Parameter(Mandatory)][string]$ProjectsRoot,
+        [Parameter(Mandatory)][string]$Slug
+    )
+
+    $primaryDir = Join-Path $ProjectsRoot $Slug
+    if (Test-Path -LiteralPath $primaryDir) {
+        return $primaryDir
+    }
+
+    $matchingDir = Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { [string]::Equals($_.Name, $Slug, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Select-Object -First 1
+
+    if ($null -ne $matchingDir) {
+        return $matchingDir.FullName
+    }
+
+    Write-Warning "cost-walker: slug directory not found: $primaryDir"
+    return $null
+}
+
 function Invoke-CostTranscriptWalk {
     <#
     .SYNOPSIS
@@ -246,12 +269,9 @@ function Invoke-CostTranscriptWalk {
     # Collect all slug directories to search
     $slugDirs = [System.Collections.Generic.List[string]]::new()
 
-    $primaryDir = Join-Path $ProjectsRoot $Slug
-    if (Test-Path -LiteralPath $primaryDir) {
+    $primaryDir = script:Resolve-CostWalkerPrimarySlugDir -ProjectsRoot $ProjectsRoot -Slug $Slug
+    if ($null -ne $primaryDir) {
         $slugDirs.Add($primaryDir)
-    }
-    else {
-        Write-Warning "cost-walker: slug directory not found: $primaryDir"
     }
 
     # Worktree slug directories: {Slug}--claude-worktrees-*
