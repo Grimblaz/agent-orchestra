@@ -617,7 +617,7 @@ Order is intentional but flexible — actual priority will shift based on audit-
 | 10 | #435 (closed) | Reify `post-pr` and `post-fix-review` ports | Trigger-conditional logic for post-fix-review; explicit credit for post-pr cleanup. | row 5 |
 | 11 | #436 (closed) | Decision: `process-retrospective` port or retire | Audit usage feeds the ADR-0004 D14 deferred-skeleton pattern until the practice is formalized as a port, folded into `post-pr`, or retired. | row 1 |
 | 12 | #438 (closed) | Reify `process-review` port | Trigger-conditional on CE Gate defects. | row 7 |
-| 13 | #439 | Pre-PR hook switches to **blocking mode** | After all 17 ports have adapters and audit shows acceptable credit-rate, hook upgrades from warn → block. **The actual rails turn on.** Per D17 (#442), blocking-mode activation requires >=30 PRs of recalibration data, all post-spine. | all preceding |
+| 13 | #439 | Pre-PR hook switches to **blocking mode** | After all 17 ports have adapters and audit shows acceptable credit-rate, hook upgrades from warn → block. **The actual rails turn on.** Per D17 (#442), blocking-mode activation requires ≥30-PR recalibration data, all post-spine. | all preceding |
 
 Active aggregation issues: #441 (sub-A, closed 2026-05) covers rows 5, 6, and 10; **#442** (sub-B, active) covers rows 7, 8, and 9.
 
@@ -706,7 +706,7 @@ Reserved. Same policy as D14.
 
 ### D17 — Blocking-mode activation precondition
 
-Blocking-mode activation for sub-issue #13 requires >=30 PRs of recalibration data, all post-spine. The first PR with spine semantics merging restarts the counter for #439. The warn-only hook must accumulate that dataset before the gate switches from `warn` to `enforce` mode. Sub-issue #13 owns the enforcement switch; this decision prevents premature enforcement before the credit-rate baseline is established.
+Blocking-mode activation for sub-issue #13 requires ≥30-PR recalibration data, all post-spine. The first PR with spine semantics merging restarts the counter for #439. The warn-only hook must accumulate that dataset before the gate switches from `warn` to `enforce` mode. Sub-issue #13 owns the enforcement switch; this decision prevents premature enforcement before the credit-rate baseline is established.
 
 ### D18 — Skill-first methodology
 
