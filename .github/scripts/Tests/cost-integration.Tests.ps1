@@ -99,7 +99,7 @@ exit `$LASTEXITCODE
 
         $waited = $proc.WaitForExit($TimeoutSeconds * 1000)
         if (-not $waited) {
-            try { $proc.Kill($true) } catch {}
+            try { $proc.Kill($true) } catch { $null = $_ }
             $stopwatch.Stop()
             return @{
                 ExitCode        = -1

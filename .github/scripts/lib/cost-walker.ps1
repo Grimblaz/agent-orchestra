@@ -21,12 +21,12 @@ $script:CostWalkerSilentTypes = [System.Collections.Generic.HashSet[string]]@(
 
 function script:Get-CostWalkerPhaseMarker {
     param(
-        [AllowNull()][object]$Event
+        [AllowNull()][object]$TranscriptEvent
     )
 
-    if ($null -eq $Event -or $Event['type'] -ne 'user') { return $null }
+    if ($null -eq $TranscriptEvent -or $TranscriptEvent['type'] -ne 'user') { return $null }
 
-    $content = $Event['message']?['content']
+    $content = $TranscriptEvent['message']?['content']
     if ($content -isnot [string]) { return $null }
 
     $markerPattern = '\A\s*<command-name>/(?<command>(?:agent-orchestra:)?(?:experience|design|plan|orchestrate|code-conductor))</command-name>\s*<command-args>(?<args>[^<]*)</command-args>\s*\z'
@@ -72,11 +72,11 @@ function script:Get-CostWalkerPhaseMarker {
 
 function script:Test-CostWalkerEventCwdMatchesParent {
     param(
-        [Parameter(Mandatory)]$Event,
+        [Parameter(Mandatory)]$TranscriptEvent,
         [Parameter(Mandatory)][string]$NormalizedParentCwd
     )
 
-    $eventCwd = $Event['cwd']
+    $eventCwd = $TranscriptEvent['cwd']
     if ($null -eq $eventCwd) { return $false }
 
     $normalizedEventCwd = Get-NormalizedPath -Path ([string]$eventCwd)
@@ -93,14 +93,14 @@ function script:Test-CostWalkerPhaseMarkerBranchAllowed {
 
 function script:Test-CostWalkerAssistantMatchesStrictFilter {
     param(
-        [Parameter(Mandatory)]$Event,
+        [Parameter(Mandatory)]$TranscriptEvent,
         [Parameter(Mandatory)][string]$NormalizedParentCwd,
         [Parameter(Mandatory)][string]$Branch
     )
 
-    $eventBranch = $Event['gitBranch']
+    $eventBranch = $TranscriptEvent['gitBranch']
     if ($null -eq $eventBranch) { return $false }
-    if (-not (script:Test-CostWalkerEventCwdMatchesParent -Event $Event -NormalizedParentCwd $NormalizedParentCwd)) { return $false }
+    if (-not (script:Test-CostWalkerEventCwdMatchesParent -TranscriptEvent $TranscriptEvent -NormalizedParentCwd $NormalizedParentCwd)) { return $false }
 
     return [string]$eventBranch -eq $Branch
 }
@@ -108,14 +108,14 @@ function script:Test-CostWalkerAssistantMatchesStrictFilter {
 function script:Add-CostWalkerAssistantEventAndSubagents {
     param(
         [Parameter(Mandatory)]$Included,
-        [Parameter(Mandatory)]$Event,
+        [Parameter(Mandatory)]$TranscriptEvent,
         [Parameter(Mandatory)][string]$SlugDir
     )
 
-    $Included.Add($Event)
+    $Included.Add($TranscriptEvent)
 
     # Traverse subagent transcripts for included Agent tool_use dispatches.
-    $messageContent = $Event['message']?['content']
+    $messageContent = $TranscriptEvent['message']?['content']
     if ($null -eq $messageContent) { return }
 
     foreach ($contentItem in $messageContent) {
@@ -295,24 +295,24 @@ function Invoke-CostTranscriptWalk {
                         $currentWindowPortHint = $null
                     }
 
-                    $phaseMarker = script:Get-CostWalkerPhaseMarker -Event $parsedEvent
+                    $phaseMarker = script:Get-CostWalkerPhaseMarker -TranscriptEvent $parsedEvent
                     if ($null -ne $phaseMarker) {
                         $currentWindowIssue = $phaseMarker.IssueId
                         $currentWindowPortHint = $phaseMarker.PortHint
                     }
 
                     if ($eventType -eq 'assistant') {
-                        if (script:Test-CostWalkerAssistantMatchesStrictFilter -Event $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch) {
-                            script:Add-CostWalkerAssistantEventAndSubagents -Included $included -Event $parsedEvent -SlugDir $slugDir
+                        if (script:Test-CostWalkerAssistantMatchesStrictFilter -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch) {
+                            script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir
                             continue
                         }
 
                         if ($currentWindowIssue -ne $targetIssueNumber) { continue }
-                        if (-not (script:Test-CostWalkerEventCwdMatchesParent -Event $parsedEvent -NormalizedParentCwd $normalizedParentCwd)) { continue }
+                        if (-not (script:Test-CostWalkerEventCwdMatchesParent -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd)) { continue }
                         if (-not (script:Test-CostWalkerPhaseMarkerBranchAllowed -Branch $parsedEvent['gitBranch'])) { continue }
 
                         $parsedEvent['_phase_marker_port'] = $currentWindowPortHint
-                        script:Add-CostWalkerAssistantEventAndSubagents -Included $included -Event $parsedEvent -SlugDir $slugDir
+                        script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir
                     }
                     elseif ($null -eq $eventType) {
                         Write-Warning "cost-walker: event with null type in $($file.FullName) — skipping"
@@ -328,10 +328,10 @@ function Invoke-CostTranscriptWalk {
                 }
 
                 if ($eventType -eq 'assistant') {
-                    if (-not (script:Test-CostWalkerAssistantMatchesStrictFilter -Event $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch)) { continue }
+                    if (-not (script:Test-CostWalkerAssistantMatchesStrictFilter -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch)) { continue }
 
                     # Event passes filter — include it and traverse Agent subagents.
-                    script:Add-CostWalkerAssistantEventAndSubagents -Included $included -Event $parsedEvent -SlugDir $slugDir
+                    script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir
                 }
                 elseif ($null -eq $eventType) {
                     Write-Warning "cost-walker: event with null type in $($file.FullName) — skipping"

@@ -432,7 +432,7 @@ Describe 'Invoke-CostTranscriptWalk' {
                             type    = 'user'
                             message = @{ content = "<command-name>$command</command-name>`n<command-args>$argument</command-args>" }
                         }
-                        $phaseMarker = script:Get-CostWalkerPhaseMarker -Event $markerEvent
+                        $phaseMarker = script:Get-CostWalkerPhaseMarker -TranscriptEvent $markerEvent
                         $phaseMarker.IssueId | Should -Be 529
                         $phaseMarker.PortHint | Should -Be $command.Replace('/agent-orchestra:', '').Replace('/', '')
                     }
@@ -448,7 +448,7 @@ Describe 'Invoke-CostTranscriptWalk' {
                     @{ type = 'user'; message = @{ content = @(@{ some = 'object' }) } }
                 )
                 foreach ($markerEvent in $rejectedMarkers) {
-                    script:Get-CostWalkerPhaseMarker -Event $markerEvent | Should -BeNullOrEmpty
+                    script:Get-CostWalkerPhaseMarker -TranscriptEvent $markerEvent | Should -BeNullOrEmpty
                 }
 
                 # Object[] user content must be rejected — ensure no user-content arrays appear

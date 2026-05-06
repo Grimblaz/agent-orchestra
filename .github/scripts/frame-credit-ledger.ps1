@@ -1055,6 +1055,7 @@ function Invoke-FrameCreditLedger {
     }
     catch {
         # Tripwire is warn-only; never block on failure.
+        $null = $_
     }
 
     # ---------------------------------------------------------------------------
