@@ -185,6 +185,22 @@ Describe 'Get-CostAttribution' {
 
             $result.ports.ContainsKey('experience') | Should -BeTrue
         }
+
+        It 'maps observed Copilot chat agent name to orchestrator-overhead case-insensitively' -TestCases @(
+            @{ AgentType = 'GitHub Copilot Chat' }
+            @{ AgentType = 'github copilot chat' }
+            @{ AgentType = 'GITHUB COPILOT CHAT' }
+        ) {
+            param([string]$AgentType)
+
+            Get-AgentTypePort -AgentType $AgentType | Should -Be 'orchestrator-overhead'
+        }
+
+        It 'maps unknown Copilot agent names to unattributed-dispatch without changing existing Claude mappings' {
+            Get-AgentTypePort -AgentType 'GitHub Copilot Future Specialist' | Should -Be 'unattributed-dispatch'
+            Get-AgentTypePort -AgentType 'code-smith' | Should -Be 'implement-code'
+            Get-AgentTypePort -AgentType 'Explore' | Should -Be 'orchestrator-overhead'
+        }
     }
 
     Context 'token aggregation' {
