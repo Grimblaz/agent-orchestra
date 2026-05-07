@@ -596,6 +596,7 @@ function script:Get-FCLFrameSpineSourceComments {
     if ($prSpineComments.Count -gt 0) { return $prSpineComments }
 
     $issueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $PrBody
+    if ($null -eq $issueNumber -and $Pr -gt 0) { $issueNumber = $Pr }
     if ($null -eq $issueNumber) { return @() }
 
     $issueComments = @(script:Get-FCLIssueCommentsForSpine -IssueNumber $issueNumber)

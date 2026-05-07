@@ -748,6 +748,47 @@ body
 
     Context 'Issue #512 incomplete cycle detection from terminal spine markers' {
 
+        It 'falls back to PR number for issue spine lookup when body and PR comments do not identify an issue' {
+            $spineBlock = @(
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T14:30:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-test: [s4#cycle:2#terminal]'
+                'slices:'
+                '  s4:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: []'
+                '    cycle: 2'
+                '    terminal: true'
+            ) -join "`n"
+            $spineComment = & $script:NewFrameSpineComment -SpineBlock $spineBlock
+            $issueCommentsJson = (@{ comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $prBody = & $script:NewV4PrBodyWithCredits -CreditRows @'
+  - port: review
+    status: passed
+    evidence: "review complete"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $combined = "$($result.Stdout)`n$($result.Stderr)"
+            $incompleteRows = @($combined -split "`r?`n" | Where-Object {
+                    $_ -match '^\|\s*implement-test\s*\|' -and $_ -match 'incomplete-cycle'
+                })
+
+            $incompleteRows | Should -HaveCount 1
+            $incompleteRows[0] | Should -Match 's4|terminal-step-id\s*:?\s*4'
+        }
+
         It 'reports an incomplete-cycle row when a terminal-marked spine port has no matching terminal credit' {
             $spineBlock = @(
                 'spine_schema_version: 1'

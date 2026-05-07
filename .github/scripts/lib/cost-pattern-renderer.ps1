@@ -408,6 +408,9 @@ function Format-CostPatternMarkdown {
     if ($nullEventTotal -gt 0) {
         $body += "`n`n> **Note**: $nullEventTotal cost event(s) had unknown models not present in ``cost-rate-table.json`` and contributed null to the cost estimate. Update the rate table to include the missing model(s) for accurate attribution."
     }
+    if ($Completeness['completeness'] -eq 'unknown') {
+        $body += "`n`n> **Note**: No Claude-side cost data was found for this run; Copilot-side collection remains tracked by [#488](https://github.com/Grimblaz/agent-orchestra/issues/488)."
+    }
     if ($Completeness['exclude_reason'] -eq 'phase-marker-only attribution; rolling-history excluded') {
         $body += "`n`n> **Note**: This Cost Pattern shows Claude-side phase-marker attribution. Copilot-side collection remains tracked by [#488](https://github.com/Grimblaz/agent-orchestra/issues/488)."
     }
