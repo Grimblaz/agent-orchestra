@@ -63,12 +63,54 @@ A v4 PR body where every credit is passed.
 metrics_version: 4
 frame_version: 1
 credits:
+    - port: ce-gate-api
+        status: passed
+        evidence: "API CE Gate not required for this fixture"
+    - port: ce-gate-browser
+        status: passed
+        evidence: "browser CE Gate not required for this fixture"
+    - port: ce-gate-canvas
+        status: passed
+        evidence: "canvas CE Gate not required for this fixture"
   - port: review
     status: passed
     evidence: "judge ruling: keep"
+    - port: implement-code
+        status: passed
+        evidence: "implementation complete"
   - port: implement-test
     status: passed
     evidence: "tests GREEN at HEAD"
+    - port: implement-refactor
+        status: passed
+        evidence: "refactor review complete"
+    - port: implement-docs
+        status: passed
+        evidence: "docs complete"
+    - port: design
+        status: passed
+        evidence: "design complete"
+    - port: experience
+        status: passed
+        evidence: "experience complete"
+    - port: plan
+        status: passed
+        evidence: "plan complete"
+    - port: post-fix-review
+        status: passed
+        evidence: "post-fix review complete"
+    - port: post-pr
+        status: passed
+        evidence: "post-pr complete"
+    - port: process-retrospective
+        status: passed
+        evidence: "process retrospective complete"
+    - port: process-review
+        status: passed
+        evidence: "process review complete"
+    - port: release-hygiene
+        status: passed
+        evidence: "release hygiene complete"
   - port: ce-gate-cli
     status: not-applicable
     evidence: "no CLI surface touched"
@@ -706,6 +748,47 @@ body
 
     Context 'Issue #512 incomplete cycle detection from terminal spine markers' {
 
+        It 'falls back to PR number for issue spine lookup when body and PR comments do not identify an issue' {
+            $spineBlock = @(
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T14:30:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-test: [s4#cycle:2#terminal]'
+                'slices:'
+                '  s4:'
+                '    execution_mode: serial'
+                '    rc: RED test action'
+                '    ac_refs: [AC7]'
+                '    depends_on: []'
+                '    cycle: 2'
+                '    terminal: true'
+            ) -join "`n"
+            $spineComment = & $script:NewFrameSpineComment -SpineBlock $spineBlock
+            $issueCommentsJson = (@{ comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
+            $prBody = & $script:NewV4PrBodyWithCredits -CreditRows @'
+  - port: review
+    status: passed
+    evidence: "review complete"
+'@
+            $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'warn' `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -MockBootstrap $bootstrap
+
+            $result.ExitCode | Should -Be 0
+            $combined = "$($result.Stdout)`n$($result.Stderr)"
+            $incompleteRows = @($combined -split "`r?`n" | Where-Object {
+                    $_ -match '^\|\s*implement-test\s*\|' -and $_ -match 'incomplete-cycle'
+                })
+
+            $incompleteRows | Should -HaveCount 1
+            $incompleteRows[0] | Should -Match 's4|terminal-step-id\s*:?\s*4'
+        }
+
         It 'reports an incomplete-cycle row when a terminal-marked spine port has no matching terminal credit' {
             $spineBlock = @(
                 'spine_schema_version: 1'
@@ -836,7 +919,8 @@ body
 
             $result.ExitCode | Should -Be 0
             $combined = "$($result.Stdout)`n$($result.Stderr)"
-            $portRows = @($combined -split "`r?`n" | Where-Object { $_ -match '^\|\s*implement-test\s*\|' })
+            $coverageText = ($combined -split '(?m)^## Cost Pattern', 2)[0]
+            $portRows = @($coverageText -split "`r?`n" | Where-Object { $_ -match '^\|\s*implement-test\s*\|' })
 
             $portRows | Should -HaveCount 1
             $portRows[0] | Should -Match 'failed'

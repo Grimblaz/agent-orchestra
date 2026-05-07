@@ -13,6 +13,7 @@ Describe 'Get-SessionCompleteness' {
             param(
                 [string]$Uuid = [System.Guid]::NewGuid().ToString(),
                 [string]$StopReason = $null,
+                [string]$Branch = 'feature/test-branch',
                 [object[]]$Content = @()
             )
             $msg = @{
@@ -27,7 +28,7 @@ Describe 'Get-SessionCompleteness' {
                 uuid      = $Uuid
                 timestamp = '2026-01-01T00:00:00Z'
                 cwd       = '/c/test/repo'
-                gitBranch = 'feature/test-branch'
+                gitBranch = $Branch
                 message   = $msg
             }
         }
@@ -157,6 +158,22 @@ Describe 'Get-SessionCompleteness' {
             $result = Get-SessionCompleteness -Events $events -ExcludeReason 'foundational PR #467 — ~10x typical cost'
             $result.excluded_from_rolling_baseline | Should -Be $true
             $result.exclude_reason | Should -Be 'foundational PR #467 — ~10x typical cost'
+        }
+
+        It 'complete phase-marker-only session preserves completeness but excludes rolling baseline with reason' {
+            $events = @(script:New-AssistantEvent -StopReason 'end_turn' -Branch 'main')
+            $result = Get-SessionCompleteness -Events $events -Branch 'feature/issue-529-step-4'
+            $result.completeness | Should -Be 'complete'
+            $result.excluded_from_rolling_baseline | Should -Be $true
+            $result.exclude_reason | Should -Be 'phase-marker-only attribution; rolling-history excluded'
+        }
+
+        It 'complete strict-branch session remains eligible for rolling baseline' {
+            $events = @(script:New-AssistantEvent -StopReason 'end_turn' -Branch 'feature/issue-529-step-4')
+            $result = Get-SessionCompleteness -Events $events -Branch 'feature/issue-529-step-4'
+            $result.completeness | Should -Be 'complete'
+            $result.excluded_from_rolling_baseline | Should -Be $false
+            $result.exclude_reason | Should -BeNullOrEmpty
         }
     }
 }

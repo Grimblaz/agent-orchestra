@@ -15,6 +15,35 @@ $script:CostCompletenessPartialReasons = [System.Collections.Generic.HashSet[str
     'refusal', 'pause_turn', 'max_tokens', 'stop_sequence'
 )
 
+function script:Test-CostPhaseMarkerOnlySession {
+    param(
+        [AllowEmptyCollection()][object[]]$Events,
+        [string]$Branch = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Branch) -or $null -eq $Events -or $Events.Count -eq 0) {
+        return $false
+    }
+
+    $hasAssistantEvents = $false
+    $hasCurrentBranchEvents = $false
+
+    foreach ($evt in $Events) {
+        if ($null -eq $evt) { continue }
+
+        if ($evt['type'] -eq 'assistant') {
+            $hasAssistantEvents = $true
+        }
+
+        $evtBranch = $evt['gitBranch']
+        if ($null -ne $evtBranch -and [string]$evtBranch -eq $Branch) {
+            $hasCurrentBranchEvents = $true
+        }
+    }
+
+    return ($hasAssistantEvents -and -not $hasCurrentBranchEvents)
+}
+
 function Get-SessionCompleteness {
     <#
     .SYNOPSIS
@@ -31,12 +60,17 @@ function Get-SessionCompleteness {
 
         excluded_from_rolling_baseline is true for:
           - partial or unknown sessions (always)
+          - phase-marker-only sessions with assistant events but no events on -Branch
           - complete sessions when -ExcludeReason is provided (outlier-PR annotation)
     .PARAMETER Events
         Array of event hashtables (as returned by Invoke-CostTranscriptWalk or similar).
     .PARAMETER ExcludeReason
         When set, marks excluded_from_rolling_baseline: true with this reason even for
         complete sessions (used to annotate outlier PRs such as the foundational #467).
+    .PARAMETER Branch
+        Current git branch. When supplied, complete sessions with assistant events but no
+        event whose gitBranch matches this branch are treated as phase-marker-only and
+        excluded from rolling-baseline aggregation while preserving completeness.
     .OUTPUTS
         [hashtable] @{
             completeness:                   'complete' | 'partial' | 'unknown'
@@ -49,7 +83,8 @@ function Get-SessionCompleteness {
     [OutputType([hashtable])]
     param(
         [AllowEmptyCollection()][object[]]$Events,
-        [string]$ExcludeReason = ''
+        [string]$ExcludeReason = '',
+        [string]$Branch = ''
     )
 
     # Default result
@@ -147,10 +182,19 @@ function Get-SessionCompleteness {
     # Determine excluded_from_rolling_baseline
     $excluded = $false
     $reason = $null
+    $phaseMarkerOnly = $false
+
+    if ($completeness -eq 'complete') {
+        $phaseMarkerOnly = script:Test-CostPhaseMarkerOnlySession -Events $Events -Branch $Branch
+    }
 
     if ($completeness -eq 'partial' -or $completeness -eq 'unknown') {
         $excluded = $true
         $reason = "session completeness: $completeness"
+    }
+    elseif ($phaseMarkerOnly) {
+        $excluded = $true
+        $reason = 'phase-marker-only attribution; rolling-history excluded'
     }
     elseif ($ExcludeReason -ne '') {
         $excluded = $true

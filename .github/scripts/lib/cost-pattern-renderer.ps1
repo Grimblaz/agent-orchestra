@@ -164,6 +164,34 @@ function script:Get-PortAnomalyNames {
     return (' ' + ($names -join ', ') + ' ').TrimEnd()
 }
 
+function script:Get-CostRendererIntValue {
+    param(
+        [AllowNull()][object]$Bucket,
+        [Parameter(Mandatory)][string]$Key
+    )
+
+    if ($Bucket -is [hashtable] -and $Bucket.ContainsKey($Key)) {
+        return [int]$Bucket[$Key]
+    }
+
+    return 0
+}
+
+function script:Get-CostRendererNullEventTotal {
+    param([Parameter(Mandatory)][hashtable]$Attribution)
+
+    $nullEventTotal = 0
+    $ports = $Attribution['ports']
+    if ($ports -is [hashtable]) {
+        foreach ($portName in $ports.Keys) {
+            $nullEventTotal += script:Get-CostRendererIntValue -Bucket $ports[$portName] -Key 'null_cost_events'
+        }
+    }
+
+    $nullEventTotal += script:Get-CostRendererIntValue -Bucket $Attribution['orchestrator_overhead'] -Key 'null_cost_events'
+    return $nullEventTotal
+}
+
 function script:Build-CostPatternTable {
     <#
     .SYNOPSIS Builds the markdown table for the cost pattern section. #>
@@ -374,24 +402,17 @@ function Format-CostPatternMarkdown {
     # Fix Pass3-F4: surface null_cost_events when nonzero so unknown-model
     # cost undercounting is visible in the rendered markdown, not just buried
     # in the embedded YAML. Sums across ports and orchestrator overhead.
-    $nullEventTotal = 0
-    $ports = $Attribution['ports']
-    if ($ports -is [hashtable]) {
-        foreach ($pName in $ports.Keys) {
-            $b = $ports[$pName]
-            if ($b -is [hashtable] -and $b.ContainsKey('null_cost_events')) {
-                $nullEventTotal += [int]$b['null_cost_events']
-            }
-        }
-    }
-    $oh = $Attribution['orchestrator_overhead']
-    if ($oh -is [hashtable] -and $oh.ContainsKey('null_cost_events')) {
-        $nullEventTotal += [int]$oh['null_cost_events']
-    }
+    $nullEventTotal = script:Get-CostRendererNullEventTotal -Attribution $Attribution
 
     $body = "$header`n`n$table"
     if ($nullEventTotal -gt 0) {
         $body += "`n`n> **Note**: $nullEventTotal cost event(s) had unknown models not present in ``cost-rate-table.json`` and contributed null to the cost estimate. Update the rate table to include the missing model(s) for accurate attribution."
+    }
+    if ($Completeness['completeness'] -eq 'unknown') {
+        $body += "`n`n> **Note**: No Claude-side cost data was found for this run; Copilot-side collection remains tracked by [#488](https://github.com/Grimblaz/agent-orchestra/issues/488)."
+    }
+    if ($Completeness['exclude_reason'] -eq 'phase-marker-only attribution; rolling-history excluded') {
+        $body += "`n`n> **Note**: This Cost Pattern shows Claude-side phase-marker attribution. Copilot-side collection remains tracked by [#488](https://github.com/Grimblaz/agent-orchestra/issues/488)."
     }
     return $body
 }
@@ -477,7 +498,7 @@ function Format-CostPatternYaml {
         # port had unknown-model cost events that produced no rate-table match.
         # Silent zero would mask cost undercounting whenever a new model variant
         # is introduced before cost-rate-table.json is updated.
-        $nullEvents = if ($bucket.ContainsKey('null_cost_events')) { [int]$bucket['null_cost_events'] } else { 0 }
+        $nullEvents = script:Get-CostRendererIntValue -Bucket $bucket -Key 'null_cost_events'
         $null = $sb.AppendLine("    null_cost_events: $nullEvents")
         $null = $sb.AppendLine("    mixed_regime: $mixed")
     }
@@ -495,7 +516,7 @@ function Format-CostPatternYaml {
     $null = $sb.AppendLine("  cost_estimate_usd: $ohCost")
     $null = $sb.AppendLine("  cache_read_hit_ratio: $ohRatio")
     # Fix Pass3-F4: same null_cost_events surface for orchestrator overhead.
-    $ohNullEvents = if ($overhead.ContainsKey('null_cost_events')) { [int]$overhead['null_cost_events'] } else { 0 }
+    $ohNullEvents = script:Get-CostRendererIntValue -Bucket $overhead -Key 'null_cost_events'
     $null = $sb.AppendLine("  null_cost_events: $ohNullEvents")
 
     # dispatches

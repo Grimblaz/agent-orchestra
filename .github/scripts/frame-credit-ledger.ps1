@@ -462,8 +462,18 @@ function script:Get-FCLFrameSpineComments {
 function script:Resolve-FCLLinkedIssueNumber {
     param(
         [AllowEmptyString()][string]$PrBody,
-        [Parameter(Mandatory)][int]$Pr
+        [AllowEmptyString()][string]$Branch
     )
+
+    if (-not [string]::IsNullOrWhiteSpace($Branch)) {
+        $branchMatch = [regex]::Match($Branch, '^feature/issue-(?<issue>\d+)(?:-|$)')
+        if ($branchMatch.Success) {
+            $branchIssue = 0
+            if ([int]::TryParse($branchMatch.Groups['issue'].Value, [ref]$branchIssue) -and $branchIssue -gt 0) {
+                return $branchIssue
+            }
+        }
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($PrBody)) {
         $patterns = @(
@@ -483,7 +493,70 @@ function script:Resolve-FCLLinkedIssueNumber {
         }
     }
 
-    return $Pr
+    return $null
+}
+
+function script:Resolve-FCLRepoRoot {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string]$ScriptPath = $PSCommandPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($script:FrameCreditLedgerRepoRoot)) {
+        $seededRoot = [string]$script:FrameCreditLedgerRepoRoot
+        try {
+            if (Test-Path -LiteralPath $seededRoot -PathType Container) {
+                return (Resolve-Path -LiteralPath $seededRoot -ErrorAction Stop).Path
+            }
+        }
+        catch { $null = $_ }
+
+        return $seededRoot
+    }
+
+    $startDir = $null
+    if (-not [string]::IsNullOrWhiteSpace($ScriptPath)) {
+        try {
+            $scriptPathValue = [string]$ScriptPath
+            if (Test-Path -LiteralPath $scriptPathValue -PathType Leaf) {
+                $scriptPathValue = (Resolve-Path -LiteralPath $scriptPathValue -ErrorAction Stop).Path
+            }
+            $startDir = Split-Path -Parent $scriptPathValue
+        }
+        catch { $startDir = $null }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($startDir)) {
+        try {
+            $topLevelRaw = @(& git -C $startDir rev-parse --show-toplevel 2>$null)
+            $topLevel = @($topLevelRaw | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -First 1)
+            if ($global:LASTEXITCODE -eq 0 -and $topLevel.Count -gt 0) {
+                $topLevelPath = [string]$topLevel[0]
+                if (Test-Path -LiteralPath $topLevelPath -PathType Container) {
+                    return (Resolve-Path -LiteralPath $topLevelPath -ErrorAction Stop).Path
+                }
+                return $topLevelPath
+            }
+        }
+        catch { $null = $_ }
+
+        $walkDir = $startDir
+        while (-not [string]::IsNullOrWhiteSpace($walkDir)) {
+            $gitDir = Join-Path $walkDir '.git'
+            $manifestPath = Join-Path $walkDir 'plugin.json'
+            $ledgerPath = Join-Path $walkDir '.github/scripts/frame-credit-ledger.ps1'
+            if ((Test-Path -LiteralPath $gitDir) -or
+                ((Test-Path -LiteralPath $manifestPath -PathType Leaf) -and (Test-Path -LiteralPath $ledgerPath -PathType Leaf))) {
+                try { return (Resolve-Path -LiteralPath $walkDir -ErrorAction Stop).Path }
+                catch { return $walkDir }
+            }
+
+            $parent = Split-Path -Parent $walkDir
+            if ([string]::IsNullOrWhiteSpace($parent) -or $parent -eq $walkDir) { break }
+            $walkDir = $parent
+        }
+    }
+
+    try { return (Get-Location).Path }
+    catch { return '.' }
 }
 
 function script:Get-FCLIssueCommentsForSpine {
@@ -522,7 +595,10 @@ function script:Get-FCLFrameSpineSourceComments {
     $prSpineComments = @(script:Get-FCLFrameSpineComments -Comments $PrComments)
     if ($prSpineComments.Count -gt 0) { return $prSpineComments }
 
-    $issueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $PrBody -Pr $Pr
+    $issueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $PrBody
+    if ($null -eq $issueNumber -and $Pr -gt 0) { $issueNumber = $Pr }
+    if ($null -eq $issueNumber) { return @() }
+
     $issueComments = @(script:Get-FCLIssueCommentsForSpine -IssueNumber $issueNumber)
     return @(script:Get-FCLFrameSpineComments -Comments $issueComments)
 }
@@ -909,20 +985,7 @@ function Invoke-FrameCreditLedger {
     script:Update-FCLPrBodyMetricsBestEffort -Pr $Pr -PrBody $prBody
 
     # 5. v4 path: discover adapters and classify ports.
-    # Resolve repo root: prefer the script-scoped variable seeded by the
-    # entry-point block (so this works inside child runspaces where
-    # $PSCommandPath is null), else fall back to walking up from
-    # $PSCommandPath, else use the current working directory.
-    $repoRoot = $null
-    if (-not [string]::IsNullOrWhiteSpace($script:FrameCreditLedgerRepoRoot)) {
-        $repoRoot = $script:FrameCreditLedgerRepoRoot
-    }
-    elseif (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
-        $repoRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-    }
-    else {
-        $repoRoot = (Get-Location).Path
-    }
+    $repoRoot = script:Resolve-FCLRepoRoot -ScriptPath $PSCommandPath
     $adapters = Get-FrameCreditLedgerAdapters -RepoRoot $repoRoot
 
     $portsDir = Join-Path $repoRoot 'frame/ports'
@@ -1043,6 +1106,7 @@ function Invoke-FrameCreditLedger {
     }
     catch {
         # Tripwire is warn-only; never block on failure.
+        $null = $_
     }
 
     # ---------------------------------------------------------------------------
@@ -1061,7 +1125,17 @@ function Invoke-FrameCreditLedger {
             $costBranch = & git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null
             $costEvents = @()
             if (-not [string]::IsNullOrWhiteSpace($slug) -and -not [string]::IsNullOrWhiteSpace($costBranch)) {
-                $costEvents = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $costBranch -ParentCwd $repoRoot)
+                $resolvedIssueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $prBody -Branch ([string]$costBranch)
+                $walkParameters = @{
+                    Slug      = $slug
+                    Branch    = $costBranch
+                    ParentCwd = $repoRoot
+                }
+                if ($null -ne $resolvedIssueNumber) {
+                    $walkParameters['IssueNumber'] = [int]$resolvedIssueNumber
+                }
+
+                $costEvents = @(Invoke-CostTranscriptWalk @walkParameters)
             }
 
             # 6b. Attribution
@@ -1093,7 +1167,11 @@ function Invoke-FrameCreditLedger {
             }
 
             # 6e. Completeness + preservation
-            $completeness = Get-SessionCompleteness -Events $costEvents
+            $completenessParameters = @{ Events = $costEvents }
+            if (-not [string]::IsNullOrWhiteSpace($costBranch)) {
+                $completenessParameters['Branch'] = [string]$costBranch
+            }
+            $completeness = Get-SessionCompleteness @completenessParameters
             $priorCostData = $null
             if ($null -ne $script:PrComments) {
                 $priorComment = @($script:PrComments | Where-Object { $_.body -match '<!-- cost-pattern-data' }) | Select-Object -Last 1
@@ -1228,19 +1306,30 @@ if (-not $isDotSourced) {
 
         # Resolve repo root in the parent scope (where $PSCommandPath is set)
         # and pass it through so the worker doesn't need to re-derive it.
-        $resolvedRepoRoot = $null
-        if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
-            $resolvedRepoRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
-        }
-        else {
-            $resolvedRepoRoot = (Get-Location).Path
+        $resolvedRepoRoot = script:Resolve-FCLRepoRoot -ScriptPath $PSCommandPath
+
+        $costScriptState = @{}
+        foreach ($costStateName in @(
+                'CostWalkerSilentTypes',
+                'CostAttributionPortMap',
+                'CostCompletenessPartialReasons',
+                'CostRendererPortOrder',
+                'CostRendererSkillDrivenPorts'
+            )) {
+            try {
+                $costScriptState[$costStateName] = Get-Variable -Scope Script -Name $costStateName -ValueOnly -ErrorAction Stop
+            }
+            catch { $null = $_ }
         }
 
         $null = $worker.AddScript({
-                param($PrArg, $ModeArg, $RepoRootArg)
+                param($PrArg, $ModeArg, $RepoRootArg, $CostScriptStateArg)
+                foreach ($costStateName in @($CostScriptStateArg.Keys)) {
+                    Set-Variable -Scope Script -Name $costStateName -Value $CostScriptStateArg[$costStateName]
+                }
                 $script:FrameCreditLedgerRepoRoot = $RepoRootArg
                 Invoke-FrameCreditLedger -Pr $PrArg -Mode $ModeArg
-            }).AddArgument($Pr).AddArgument($Mode).AddArgument($resolvedRepoRoot)
+            }).AddArgument($Pr).AddArgument($Mode).AddArgument($resolvedRepoRoot).AddArgument($costScriptState)
 
         $async = $worker.BeginInvoke()
         $waited = $async.AsyncWaitHandle.WaitOne([int]($budgetSeconds * 1000))

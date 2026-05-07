@@ -19,6 +19,134 @@ $script:CostWalkerSilentTypes = [System.Collections.Generic.HashSet[string]]@(
     'tool_use', 'tool_result'
 )
 
+function script:Get-CostWalkerPhaseMarker {
+    param(
+        [AllowNull()][object]$TranscriptEvent
+    )
+
+    if ($null -eq $TranscriptEvent -or $TranscriptEvent['type'] -ne 'user') { return $null }
+
+    $content = $TranscriptEvent['message']?['content']
+    if ($content -isnot [string]) { return $null }
+
+    $markerPattern = '\A\s*<command-name>/(?<command>(?:agent-orchestra:)?(?:experience|design|plan|orchestrate|code-conductor))</command-name>\s*<command-args>(?<args>[^<]*)</command-args>\s*\z'
+    $markerMatch = [regex]::Match($content, $markerPattern, [System.Text.RegularExpressions.RegexOptions]::Singleline)
+    if (-not $markerMatch.Success) { return $null }
+
+    $portHint = $markerMatch.Groups['command'].Value
+    if ($portHint.StartsWith('agent-orchestra:', [System.StringComparison]::Ordinal)) {
+        $portHint = $portHint.Substring('agent-orchestra:'.Length)
+    }
+
+    $argumentText = $markerMatch.Groups['args'].Value.Trim()
+    $issueText = $null
+
+    if ([regex]::IsMatch($argumentText, '^\d+$')) {
+        $issueText = $argumentText
+    }
+    else {
+        $hashMatch = [regex]::Match($argumentText, '^#(?<issue>\d+)$')
+        if ($hashMatch.Success) {
+            $issueText = $hashMatch.Groups['issue'].Value
+        }
+        else {
+            $issueMatch = [regex]::Match($argumentText, '^issue\s+(?<issue>\d+)$')
+            if ($issueMatch.Success) {
+                $issueText = $issueMatch.Groups['issue'].Value
+            }
+        }
+    }
+
+    if ([string]::IsNullOrWhiteSpace($issueText)) { return $null }
+
+    $issueNumber = 0
+    if ([int]::TryParse($issueText, [ref]$issueNumber)) {
+        return @{
+            IssueId  = $issueNumber
+            PortHint = $portHint
+        }
+    }
+
+    return $null
+}
+
+function script:Test-CostWalkerEventCwdMatchesParent {
+    param(
+        [Parameter(Mandatory)]$TranscriptEvent,
+        [Parameter(Mandatory)][string]$NormalizedParentCwd
+    )
+
+    $eventCwd = $TranscriptEvent['cwd']
+    if ($null -eq $eventCwd) { return $false }
+
+    $normalizedEventCwd = Get-NormalizedPath -Path ([string]$eventCwd)
+    return $normalizedEventCwd -eq $NormalizedParentCwd
+}
+
+function script:Test-CostWalkerPhaseMarkerBranchAllowed {
+    param(
+        [AllowNull()][object]$Branch
+    )
+
+    return $null -eq $Branch -or [string]::IsNullOrEmpty([string]$Branch) -or [string]$Branch -eq 'main'
+}
+
+function script:Test-CostWalkerAssistantMatchesStrictFilter {
+    param(
+        [Parameter(Mandatory)]$TranscriptEvent,
+        [Parameter(Mandatory)][string]$NormalizedParentCwd,
+        [Parameter(Mandatory)][string]$Branch
+    )
+
+    $eventBranch = $TranscriptEvent['gitBranch']
+    if ($null -eq $eventBranch) { return $false }
+    if (-not (script:Test-CostWalkerEventCwdMatchesParent -TranscriptEvent $TranscriptEvent -NormalizedParentCwd $NormalizedParentCwd)) { return $false }
+
+    return [string]$eventBranch -eq $Branch
+}
+
+function script:Add-CostWalkerAssistantEventAndSubagents {
+    param(
+        [Parameter(Mandatory)]$Included,
+        [Parameter(Mandatory)]$TranscriptEvent,
+        [Parameter(Mandatory)][string]$SlugDir
+    )
+
+    $Included.Add($TranscriptEvent)
+
+    # Traverse subagent transcripts for included Agent tool_use dispatches.
+    $messageContent = $TranscriptEvent['message']?['content']
+    if ($null -eq $messageContent) { return }
+
+    foreach ($contentItem in $messageContent) {
+        if ($null -eq $contentItem) { continue }
+        $itemType = $contentItem['type']
+        $itemName = $contentItem['name']
+        if ($itemType -eq 'tool_use' -and $itemName -eq 'Agent') {
+            $toolUseId = $contentItem['id']
+            if ($null -ne $toolUseId) {
+                $subagPath = Join-Path $SlugDir 'subagents' "agent-$toolUseId.jsonl"
+                if (Test-Path -LiteralPath $subagPath) {
+                    $subLines = @(Get-Content -Path $subagPath -Encoding utf8 -ErrorAction SilentlyContinue)
+                    foreach ($subLine in $subLines) {
+                        $subTrimmed = $subLine.Trim()
+                        if ([string]::IsNullOrEmpty($subTrimmed)) { continue }
+                        try {
+                            $subagEvent = $subTrimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+                            $Included.Add($subagEvent)
+                        }
+                        catch {
+                            $subagPathForMsg = $subagPath
+                            Write-Warning "cost-walker: failed to parse subagent JSON line in ${subagPathForMsg}: $_"
+                        }
+                    }
+                }
+                # Absent subagent transcript is silently tolerated.
+            }
+        }
+    }
+}
+
 function Get-CostTranscriptSlug {
     <#
     .SYNOPSIS
@@ -70,6 +198,29 @@ function Get-CostTranscriptSlug {
     return "$driveSegment--$remainingJoined"
 }
 
+function script:Resolve-CostWalkerPrimarySlugDir {
+    param(
+        [Parameter(Mandatory)][string]$ProjectsRoot,
+        [Parameter(Mandatory)][string]$Slug
+    )
+
+    $primaryDir = Join-Path $ProjectsRoot $Slug
+    if (Test-Path -LiteralPath $primaryDir) {
+        return $primaryDir
+    }
+
+    $matchingDir = Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { [string]::Equals($_.Name, $Slug, [System.StringComparison]::OrdinalIgnoreCase) } |
+        Select-Object -First 1
+
+    if ($null -ne $matchingDir) {
+        return $matchingDir.FullName
+    }
+
+    Write-Warning "cost-walker: slug directory not found: $primaryDir"
+    return $null
+}
+
 function Invoke-CostTranscriptWalk {
     <#
     .SYNOPSIS
@@ -91,13 +242,17 @@ function Invoke-CostTranscriptWalk {
         Working directory path; normalized before comparison.
     .PARAMETER ProjectsRoot
         Root directory containing project slug directories. Defaults to ~/.claude/projects.
+    .PARAMETER IssueNumber
+        Optional GitHub issue number. When supplied, enables upstream phase-marker windowing
+        and admits only assistant events inside matching issue windows on main/empty branches.
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Slug,
         [Parameter(Mandatory)][string]$Branch,
         [Parameter(Mandatory)][string]$ParentCwd,
-        [string]$ProjectsRoot = ''
+        [string]$ProjectsRoot = '',
+        [Nullable[int]]$IssueNumber = $null
     )
 
     if (-not $ProjectsRoot) {
@@ -106,18 +261,17 @@ function Invoke-CostTranscriptWalk {
 
     # Normalize the caller's CWD once for all comparisons
     $normalizedParentCwd = Get-NormalizedPath -Path $ParentCwd
+    $phaseMarkerMode = $null -ne $IssueNumber -and [int]$IssueNumber -gt 0
+    $targetIssueNumber = if ($phaseMarkerMode) { [int]$IssueNumber } else { $null }
 
     $included = [System.Collections.Generic.List[object]]::new()
 
     # Collect all slug directories to search
     $slugDirs = [System.Collections.Generic.List[string]]::new()
 
-    $primaryDir = Join-Path $ProjectsRoot $Slug
-    if (Test-Path -LiteralPath $primaryDir) {
+    $primaryDir = script:Resolve-CostWalkerPrimarySlugDir -ProjectsRoot $ProjectsRoot -Slug $Slug
+    if ($null -ne $primaryDir) {
         $slugDirs.Add($primaryDir)
-    }
-    else {
-        Write-Warning "cost-walker: slug directory not found: $primaryDir"
     }
 
     # Worktree slug directories: {Slug}--claude-worktrees-*
@@ -137,6 +291,8 @@ function Invoke-CostTranscriptWalk {
 
         foreach ($file in $jsonlFiles) {
             $lines = @(Get-Content -Path $file.FullName -Encoding utf8 -ErrorAction SilentlyContinue)
+            $currentWindowIssue = $null
+            $currentWindowPortHint = $null
             foreach ($line in $lines) {
                 $trimmed = $line.Trim()
                 if ([string]::IsNullOrEmpty($trimmed)) { continue }
@@ -152,53 +308,50 @@ function Invoke-CostTranscriptWalk {
 
                 $eventType = $parsedEvent['type']
 
-                if ($eventType -eq 'assistant') {
-                    # Apply per-event D1 filter — absent cwd or gitBranch means non-matching
-                    $eventCwd = $parsedEvent['cwd']
+                if ($phaseMarkerMode) {
                     $eventBranch = $parsedEvent['gitBranch']
+                    if (-not (script:Test-CostWalkerPhaseMarkerBranchAllowed -Branch $eventBranch)) {
+                        $currentWindowIssue = $null
+                        $currentWindowPortHint = $null
+                    }
 
-                    if ($null -eq $eventCwd -or $null -eq $eventBranch) {
+                    $phaseMarker = script:Get-CostWalkerPhaseMarker -TranscriptEvent $parsedEvent
+                    if ($null -ne $phaseMarker) {
+                        $currentWindowIssue = $phaseMarker.IssueId
+                        $currentWindowPortHint = $phaseMarker.PortHint
+                    }
+
+                    if ($eventType -eq 'assistant') {
+                        if (script:Test-CostWalkerAssistantMatchesStrictFilter -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch) {
+                            script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir
+                            continue
+                        }
+
+                        if ($currentWindowIssue -ne $targetIssueNumber) { continue }
+                        if (-not (script:Test-CostWalkerEventCwdMatchesParent -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd)) { continue }
+                        if (-not (script:Test-CostWalkerPhaseMarkerBranchAllowed -Branch $parsedEvent['gitBranch'])) { continue }
+
+                        $parsedEvent['_phase_marker_port'] = $currentWindowPortHint
+                        script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir
+                    }
+                    elseif ($null -eq $eventType) {
+                        Write-Warning "cost-walker: event with null type in $($file.FullName) — skipping"
+                    }
+                    elseif ($script:CostWalkerSilentTypes.Contains($eventType)) {
                         continue
                     }
-
-                    $normalizedEventCwd = Get-NormalizedPath -Path ([string]$eventCwd)
-                    if ($normalizedEventCwd -ne $normalizedParentCwd) { continue }
-                    if ([string]$eventBranch -ne $Branch) { continue }
-
-                    # Event passes filter — include it
-                    $included.Add($parsedEvent)
-
-                    # Traverse subagent transcripts for included Agent tool_use dispatches
-                    $messageContent = $parsedEvent['message']?['content']
-                    if ($null -ne $messageContent) {
-                        foreach ($contentItem in $messageContent) {
-                            if ($null -eq $contentItem) { continue }
-                            $itemType = $contentItem['type']
-                            $itemName = $contentItem['name']
-                            if ($itemType -eq 'tool_use' -and $itemName -eq 'Agent') {
-                                $toolUseId = $contentItem['id']
-                                if ($null -ne $toolUseId) {
-                                    $subagPath = Join-Path $slugDir 'subagents' "agent-$toolUseId.jsonl"
-                                    if (Test-Path -LiteralPath $subagPath) {
-                                        $subLines = @(Get-Content -Path $subagPath -Encoding utf8 -ErrorAction SilentlyContinue)
-                                        foreach ($subLine in $subLines) {
-                                            $subTrimmed = $subLine.Trim()
-                                            if ([string]::IsNullOrEmpty($subTrimmed)) { continue }
-                                            try {
-                                                $subagEvent = $subTrimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop
-                                                $included.Add($subagEvent)
-                                            }
-                                            catch {
-                                                $subagPathForMsg = $subagPath
-                                                Write-Warning "cost-walker: failed to parse subagent JSON line in ${subagPathForMsg}: $_"
-                                            }
-                                        }
-                                    }
-                                    # Absent subagent transcript is silently tolerated
-                                }
-                            }
-                        }
+                    else {
+                        Write-Warning "cost-walker: unknown event type '$eventType' in $($file.FullName) — skipping"
                     }
+
+                    continue
+                }
+
+                if ($eventType -eq 'assistant') {
+                    if (-not (script:Test-CostWalkerAssistantMatchesStrictFilter -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch)) { continue }
+
+                    # Event passes filter — include it and traverse Agent subagents.
+                    script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir
                 }
                 elseif ($null -eq $eventType) {
                     Write-Warning "cost-walker: event with null type in $($file.FullName) — skipping"

@@ -122,6 +122,9 @@ Describe 'Format-CostPatternMarkdown' {
             $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
             $result | Should -Match 'session not found or unrecognized'
+            $result | Should -Match 'cost-fields unavailable'
+            $result | Should -Match 'No Claude-side cost data was found'
+            $result | Should -Match 'Copilot-side collection remains tracked by \[#488\]\(https://github\.com/Grimblaz/agent-orchestra/issues/488\)'
         }
 
         It 'timeout: header contains "rolling-history fetch timed out"' {
@@ -138,6 +141,16 @@ Describe 'Format-CostPatternMarkdown' {
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
             $result | Should -Match 'foundational PR #467'
             $result | Should -Match 'excluded from rolling-history aggregation'
+        }
+
+        It 'phase-marker-only complete path does not render session-not-found header' {
+            $attribution = script:New-MinimalAttribution
+            $completeness = script:New-Completeness -Excluded $true -ExcludeReason 'phase-marker-only attribution; rolling-history excluded'
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+            $result | Should -Match 'phase-marker-only attribution; rolling-history excluded'
+            $result | Should -Match 'Claude-side phase-marker attribution'
+            $result | Should -Match 'Copilot-side collection remains tracked by \[#488\]\(https://github\.com/Grimblaz/agent-orchestra/issues/488\)'
+            $result | Should -Not -Match 'session not found'
         }
     }
 
