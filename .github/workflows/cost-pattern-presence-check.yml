@@ -27,8 +27,33 @@ jobs:
         run: |
           PR_NUM="${{ github.event.pull_request.number || github.event.issue.number }}"
           for i in 1 2 3 4 5; do
-            if gh pr view "$PR_NUM" -R "$GH_REPO" --json comments --jq '.comments[].body' | grep -q '<!-- cost-pattern-data'; then
+            COMMENTS="$(gh pr view "$PR_NUM" -R "$GH_REPO" --json comments --jq '.comments[].body')"
+            if printf '%s\n' "$COMMENTS" | grep -q '<!-- cost-pattern-data'; then
               echo "Cost Pattern marker found on attempt $i"
+
+              COVERAGE="$(printf '%s\n' "$COMMENTS" | awk '
+                /<!-- cost-pattern-data/ { in_block=1; next }
+                in_block && /^coverage:[[:space:]]*/ { sub(/^coverage:[[:space:]]*/, "", $0); print $0; exit }
+                in_block && /-->/ { in_block=0 }
+              ')"
+
+              case "$COVERAGE" in
+                "claude+copilot")
+                  echo "Cost Pattern coverage is claude+copilot"
+                  ;;
+                "claude-only"|"claude-only-with-copilot-fallback-warning")
+                  echo "::warning::Cost Pattern coverage is $COVERAGE; Copilot telemetry was not merged for this run"
+                  ;;
+                "")
+                  echo "::error::cost-pattern-data marker is missing a coverage line"
+                  exit 1
+                  ;;
+                *)
+                  echo "::error::cost-pattern-data marker has unexpected coverage '$COVERAGE'"
+                  exit 1
+                  ;;
+              esac
+
               exit 0
             fi
             echo "Marker not found, attempt $i/5; sleeping 30s"

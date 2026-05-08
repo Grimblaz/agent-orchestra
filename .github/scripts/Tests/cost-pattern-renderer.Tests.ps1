@@ -207,6 +207,10 @@ Describe 'Format-CostPatternMarkdown' {
 
             return @($Markdown -split "`n" | Where-Object { $_ -like "| $PortLabel |*" })[0]
         }
+
+        function script:Get-LegacyUnknownSessionWarningText {
+            return ('session not found or ' + 'unrecognized')
+        }
     }
 
     Context 'header paths (golden assertions per M20/M21/M22)' {
@@ -243,7 +247,7 @@ Describe 'Format-CostPatternMarkdown' {
                 -ProviderSupport @('claude')
             $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
-            $result | Should -Not -Match 'session not found or unrecognized'
+            $result | Should -Not -Match ([regex]::Escape((script:Get-LegacyUnknownSessionWarningText)))
             $result | Should -Match 'cost-fields unavailable'
             $result | Should -Match 'no Claude or Copilot session activity recorded for this PR''s branch; cross-tool collection is enabled — see `Initialize-CopilotCostCollection` if Copilot is installed but data is missing, or #488 for diagnostics\.'
         }
@@ -364,9 +368,9 @@ Describe 'Format-CostPatternMarkdown' {
             $completeness = script:New-Completeness
 
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
-            $matches = [regex]::Matches($result, 'Copilot cache metrics are unavailable from Copilot telemetry; cache cells marked n/a \* are excluded from cache-hit baselines\.')
+            $cacheFootnoteMatches = [regex]::Matches($result, 'Copilot cache metrics are unavailable from Copilot telemetry; cache cells marked n/a \* are excluded from cache-hit baselines\.')
 
-            $matches.Count | Should -Be 1
+            $cacheFootnoteMatches.Count | Should -Be 1
         }
 
         It 'renders the transition notice when matching-coverage rolling history is below five entries' {
@@ -389,7 +393,7 @@ Describe 'Format-CostPatternMarkdown' {
 
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
 
-            $result | Should -Not -Match 'session not found or unrecognized'
+            $result | Should -Not -Match ([regex]::Escape((script:Get-LegacyUnknownSessionWarningText)))
             $result | Should -Match 'no Claude or Copilot session activity recorded for this PR''s branch; cross-tool collection is enabled — see `Initialize-CopilotCostCollection` if Copilot is installed but data is missing, or #488 for diagnostics\.'
         }
 

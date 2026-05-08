@@ -267,6 +267,9 @@ function global:Format-CostPatternYaml {
             [Parameter(Mandatory)][string]$CostBranch
         )
 
+        $previousInline = $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
+        $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = '1'
+
         . $script:OrchestratorPath -Pr 467 -Mode 'warn'
 
         $captured = @{
@@ -345,6 +348,10 @@ function global:Format-CostPatternYaml {
             $captured.IssueNumber = $IssueNumber
             return @()
         }
+        function Invoke-CostCopilotWalk {
+            param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+            return @()
+        }
         function Get-CostAttribution {
             param([object[]]$Events, [string]$RateTablePath = '')
             return @{ ports = @{}; orchestrator_overhead = @{}; dispatches = @{}; totals = @{ total_cost_usd = 0.0 } }
@@ -357,8 +364,13 @@ function global:Format-CostPatternYaml {
         function Format-CostPatternMarkdown { param($Attribution, $Completeness, [object[]]$AnomalyFlags, $RollingMeta, [int]$Pr, [string]$Branch) return '## Cost Pattern' }
         function Format-CostPatternYaml { param($Attribution, $Completeness, [object[]]$AnomalyFlags, [int]$Pr, [string]$Branch) return "<!-- cost-pattern-data`npr: $Pr`n-->" }
 
-        $result = Invoke-FrameCreditLedger -Pr 467 -Mode 'warn'
-        return @{ Result = $result; Captured = $captured }
+        try {
+            $result = Invoke-FrameCreditLedger -Pr 467 -Mode 'warn'
+            return @{ Result = $result; Captured = $captured }
+        }
+        finally {
+            $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = $previousInline
+        }
     }
 }
 
