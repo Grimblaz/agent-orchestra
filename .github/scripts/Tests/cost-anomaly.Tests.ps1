@@ -17,7 +17,9 @@ Describe 'Get-CostAnomalyFlags' {
                 [int]$OutputTok = 500,
                 [int]$CacheRead = 200,
                 [int]$CacheCreate = 100,
-                [double]$TotalCost = 0.01
+                [double]$TotalCost = 0.01,
+                [string]$Coverage = 'claude-only',
+                [string]$InstallStatus = 'ok'
             )
             return @{
                 ports                 = @{
@@ -38,6 +40,8 @@ Describe 'Get-CostAnomalyFlags' {
                     tokens            = @{ input = $InputTok; output = $OutputTok; cache_creation = $CacheCreate; cache_read = $CacheRead }
                     cost_estimate_usd = $TotalCost
                 }
+                coverage              = $Coverage
+                install_status        = $InstallStatus
             }
         }
 
@@ -357,6 +361,102 @@ Describe 'Get-CostAnomalyFlags' {
 
             $outputFlag = $flags | Where-Object { $_.metric -eq 'tokens.per_dispatch.avg.output[review]' }
             $outputFlag | Should -Not -BeNullOrEmpty
+        }
+    }
+
+    Context 'coverage-class filtering' {
+        It 'filters absolute metrics by effective coverage while leaving dispatch counts and ratios pooled' {
+            $history = @()
+            for ($i = 0; $i -lt 15; $i++) {
+                $entry = script:New-MinimalAttribution -PortName 'implement-test' `
+                    -DispatchCount 1 -InputTok 100 -OutputTok 50 -CacheRead 800 `
+                    -CacheCreate 100 -TotalCost 1.00 -Coverage 'claude+copilot'
+                $entry['orchestrator_overhead']['tokens']['input'] = 500
+                $entry['orchestrator_overhead']['cache_read_hit_ratio'] = 0.15
+                $history += $entry
+            }
+            for ($i = 0; $i -lt 15; $i++) {
+                $entry = script:New-MinimalAttribution -PortName 'implement-test' `
+                    -DispatchCount 1 -InputTok 1000 -OutputTok 500 -CacheRead 800 `
+                    -CacheCreate 100 -TotalCost 0.01 -Coverage 'claude-only'
+                $entry['orchestrator_overhead']['tokens']['input'] = 5000
+                $entry['orchestrator_overhead']['cache_read_hit_ratio'] = 0.80
+                $history += $entry
+            }
+
+            $thisRun = script:New-MinimalAttribution -PortName 'implement-test' `
+                -DispatchCount 20 -InputTok 100 -OutputTok 50 -CacheRead 10 `
+                -CacheCreate 100 -TotalCost 1.00 -Coverage 'claude+copilot'
+            $thisRun['orchestrator_overhead']['tokens']['input'] = 500
+            $thisRun['orchestrator_overhead']['cache_read_hit_ratio'] = 0.15
+
+            $flags = Get-CostAnomalyFlags -ThisRun $thisRun -RollingHistory $history
+
+            foreach ($metric in @(
+                    'ports[implement-test].tokens.input',
+                    'ports[implement-test].tokens.output',
+                    'orchestrator_overhead.tokens.input',
+                    'orchestrator_overhead.cache_read.hit_ratio',
+                    'cost_estimate_usd.total'
+                )) {
+                ($flags | Where-Object { $_.metric -eq $metric }) | Should -BeNullOrEmpty `
+                    -Because "$metric is an absolute coverage-sensitive metric and should compare only against claude+copilot history"
+            }
+
+            $dispatchFlag = $flags | Where-Object { $_.metric -eq 'dispatches.per_port[implement-test]' }
+            $dispatchFlag | Should -Not -BeNullOrEmpty -Because 'dispatch counts remain pooled across coverage classes'
+            $dispatchFlag.baseline_n | Should -Be 30
+
+            $ratioFlag = $flags | Where-Object { $_.metric -eq 'cache_read.hit_ratio[implement-test]' }
+            $ratioFlag | Should -Not -BeNullOrEmpty -Because 'per-port cache ratios remain pooled across coverage classes'
+            $ratioFlag.baseline_n | Should -Be 30
+        }
+
+        It 'flags per-port absolute input and output tokens against matching coverage history' {
+            $history = @()
+            for ($i = 0; $i -lt 15; $i++) {
+                $history += script:New-MinimalAttribution -PortName 'implement-test' `
+                    -InputTok 100 -OutputTok 50 -TotalCost 0.01 -Coverage 'claude+copilot'
+            }
+
+            $thisRun = script:New-MinimalAttribution -PortName 'implement-test' `
+                -InputTok 1000 -OutputTok 500 -TotalCost 0.01 -Coverage 'claude+copilot'
+
+            $flags = Get-CostAnomalyFlags -ThisRun $thisRun -RollingHistory $history
+
+            ($flags | Where-Object { $_.metric -eq 'ports[implement-test].tokens.input' }) |
+                Should -Not -BeNullOrEmpty -Because 'per-port absolute input tokens are part of the coverage-filtered anomaly metric set'
+            ($flags | Where-Object { $_.metric -eq 'ports[implement-test].tokens.output' }) |
+                Should -Not -BeNullOrEmpty -Because 'per-port absolute output tokens are part of the coverage-filtered anomaly metric set'
+        }
+
+        It 'treats missing-or-fallback entries as claude-only even when their coverage tag carries a fallback warning' {
+            $history = @()
+            for ($i = 0; $i -lt 15; $i++) {
+                $entry = script:New-MinimalAttribution -PortName 'implement-test' `
+                    -InputTok 100 -OutputTok 50 -TotalCost 1.00 -Coverage 'claude+copilot'
+                $entry['orchestrator_overhead']['tokens']['input'] = 500
+                $history += $entry
+            }
+            for ($i = 0; $i -lt 15; $i++) {
+                $entry = script:New-MinimalAttribution -PortName 'implement-test' `
+                    -InputTok 100 -OutputTok 50 -TotalCost 0.10 `
+                    -Coverage 'claude-only-with-copilot-fallback-warning' `
+                    -InstallStatus 'missing-or-fallback'
+                $entry['orchestrator_overhead']['tokens']['input'] = 50
+                $history += $entry
+            }
+
+            $thisRun = script:New-MinimalAttribution -PortName 'implement-test' `
+                -InputTok 100 -OutputTok 50 -TotalCost 1.00 -Coverage 'claude+copilot'
+            $thisRun['orchestrator_overhead']['tokens']['input'] = 500
+
+            $flags = Get-CostAnomalyFlags -ThisRun $thisRun -RollingHistory $history
+
+            ($flags | Where-Object { $_.metric -eq 'cost_estimate_usd.total' }) | Should -BeNullOrEmpty `
+                -Because 'missing-or-fallback rows are effectively claude-only and must not contaminate claude+copilot cost baselines'
+            ($flags | Where-Object { $_.metric -eq 'orchestrator_overhead.tokens.input' }) | Should -BeNullOrEmpty `
+                -Because 'missing-or-fallback rows are effectively claude-only for absolute overhead token baselines'
         }
     }
 

@@ -151,6 +151,41 @@ checkpoints:
         $result | Should -Not -BeNullOrEmpty
         $result.id | Should -Be 'cp-001'
     }
+
+        It 'returns the most recent checkpoint matching coverage and treats legacy entries as claude-only' {
+                $tmpPath = Join-Path $TestDrive "coverage-$([System.Guid]::NewGuid().ToString('N')).yaml"
+                @"
+schema_version: 1
+checkpoints:
+    - id: "cp-copilot"
+        timestamp: "2026-05-01T00:00:00Z"
+        coverage: "claude+copilot"
+        reason: "cross-tool baseline"
+        metrics: {}
+        exclusions: {}
+    - id: "cp-legacy-claude"
+        timestamp: "2026-05-02T00:00:00Z"
+        reason: "legacy claude baseline"
+        metrics: {}
+        exclusions: {}
+    - id: "cp-claude-explicit"
+        timestamp: "2026-04-30T00:00:00Z"
+        coverage: "claude-only"
+        reason: "older explicit claude baseline"
+        metrics: {}
+        exclusions: {}
+"@ | Set-Content -Path $tmpPath -Encoding UTF8
+
+                $copilotCheckpoint = Get-MostRecentRegimeCheckpoint -Path $tmpPath -Coverage 'claude+copilot'
+                $copilotCheckpoint | Should -Not -BeNullOrEmpty
+                $copilotCheckpoint.id | Should -Be 'cp-copilot'
+                $copilotCheckpoint.coverage | Should -Be 'claude+copilot'
+
+                $claudeCheckpoint = Get-MostRecentRegimeCheckpoint -Path $tmpPath -Coverage 'claude-only'
+                $claudeCheckpoint | Should -Not -BeNullOrEmpty
+                $claudeCheckpoint.id | Should -Be 'cp-legacy-claude' -Because 'entries without coverage are legacy claude-only checkpoints'
+                $claudeCheckpoint.coverage | Should -Be 'claude-only'
+        }
 }
 
 # ---------------------------------------------------------------------------
@@ -244,6 +279,25 @@ Describe 'Add-RegimeCheckpoint' {
         $idx2 = $content.IndexOf('cp-entry-2')
         $idx0 | Should -BeLessThan $idx1 -Because 'entries should appear in append order'
         $idx1 | Should -BeLessThan $idx2 -Because 'entries should appear in append order'
+    }
+
+    It 'persists optional coverage when adding a checkpoint' {
+        $tmpPath = Join-Path $TestDrive "add-coverage-$([System.Guid]::NewGuid().ToString('N')).yaml"
+        $entry = @{
+            id         = 'cp-coverage-001'
+            timestamp  = '2026-05-07T00:00:00Z'
+            reason     = 'cross-tool checkpoint'
+            metrics    = @{}
+            exclusions = @{}
+        }
+
+        Add-RegimeCheckpoint -Path $tmpPath -Entry $entry -Coverage 'claude+copilot'
+
+        $content = Get-Content -Path $tmpPath -Raw
+        $content | Should -Match '(?m)^    coverage: "claude\+copilot"$'
+        $roundTrip = Get-MostRecentRegimeCheckpoint -Path $tmpPath -Coverage 'claude+copilot'
+        $roundTrip | Should -Not -BeNullOrEmpty
+        $roundTrip.coverage | Should -Be 'claude+copilot'
     }
 }
 
