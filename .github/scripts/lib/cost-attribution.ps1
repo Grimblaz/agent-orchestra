@@ -45,6 +45,21 @@ $script:CostAttributionPortMap.Add('GitHub Copilot Chat', 'orchestrator-overhead
 $script:CostAttributionPortMap.Add('general-purpose', 'dispatches.general_purpose')
 $script:CostAttributionPortMap.Add('claude-code-guide', 'orchestrator-overhead')
 
+function Get-NormalizedCostProvider {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowNull()][object]$Provider,
+        [string]$Default = 'claude'
+    )
+
+    if ($null -eq $Provider -or [string]::IsNullOrWhiteSpace([string]$Provider)) {
+        return $Default.ToLowerInvariant()
+    }
+
+    return ([string]$Provider).ToLowerInvariant()
+}
+
 function Get-AgentTypePort {
     <#
     .SYNOPSIS
@@ -159,6 +174,98 @@ function Get-EventModel {
     return $null
 }
 
+function Get-EventProvider {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][object]$Evt
+    )
+
+    $provider = $Evt['provider']
+    if ($null -ne $provider -and -not [string]::IsNullOrWhiteSpace([string]$provider)) {
+        return Get-NormalizedCostProvider -Provider $provider
+    }
+
+    $cwd = $Evt['cwd']
+    if ($null -ne $cwd -and [string]$cwd -like 'copilot-otel://*') {
+        return 'copilot'
+    }
+
+    $agentType = $Evt['agentType']
+    if ($null -ne $agentType -and [string]$agentType -eq 'GitHub Copilot Chat') {
+        return 'copilot'
+    }
+
+    return 'claude'
+}
+
+function Get-CostRateLookupKey {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][string]$Provider,
+        [Parameter(Mandatory)][string]$Model
+    )
+
+    return "$((Get-NormalizedCostProvider -Provider $Provider))`n$Model"
+}
+
+function New-CostRateTableEntry {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)][string]$ModelKey,
+        [Parameter(Mandatory)][hashtable]$RateEntry,
+        [Parameter(Mandatory)][hashtable]$TableJson
+    )
+
+    $entryProvider = Get-NormalizedCostProvider -Provider $RateEntry['provider']
+    $entryModel = if ($RateEntry.ContainsKey('model') -and -not [string]::IsNullOrWhiteSpace([string]$RateEntry['model'])) { [string]$RateEntry['model'] } else { $ModelKey }
+
+    return @{
+        provider                 = $entryProvider
+        model                    = $entryModel
+        input_per_mtok           = ConvertTo-NullableRateValue -Value $RateEntry['input_per_mtok']
+        output_per_mtok          = ConvertTo-NullableRateValue -Value $RateEntry['output_per_mtok']
+        cache_creation_per_mtok  = ConvertTo-NullableRateValue -Value $RateEntry['cache_creation_per_mtok']
+        cache_read_per_mtok      = ConvertTo-NullableRateValue -Value $RateEntry['cache_read_per_mtok']
+        rate_source_url          = if ($RateEntry.ContainsKey('rate_source_url')) { $RateEntry['rate_source_url'] } else { $TableJson['rate_source_url'] }
+    }
+}
+
+function ConvertTo-NullableRateValue {
+    [OutputType([object])]
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string] -and [string]::IsNullOrWhiteSpace($Value)) { return $null }
+    return [double]$Value
+}
+
+function Get-CostRateTableFreshness {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)][string]$RatesAsOf,
+        [string]$Provider = 'claude',
+        [string]$Now = ''
+    )
+
+    $providerName = Get-NormalizedCostProvider -Provider $Provider
+    $staleAfterDays = if ($providerName -eq 'copilot') { 30 } else { 90 }
+    $nowValue = if ([string]::IsNullOrWhiteSpace($Now)) { (Get-Date).ToUniversalTime() } else { ([datetime]$Now).ToUniversalTime() }
+    $ratesDate = ([datetime]$RatesAsOf).ToUniversalTime()
+    $ageDays = [int][Math]::Floor(($nowValue - $ratesDate).TotalDays)
+
+    return @{
+        provider         = $providerName
+        rates_as_of      = $RatesAsOf
+        age_days         = $ageDays
+        stale_after_days = $staleAfterDays
+        is_stale         = ($ageDays -gt $staleAfterDays)
+    }
+}
+
 function Add-TokensToAccumulator {
     <#
     .SYNOPSIS
@@ -182,11 +289,15 @@ function Get-CostEstimateFromUsage {
         Computes the USD cost estimate for one usage/rate pair.
     #>
     [CmdletBinding()]
-    [OutputType([double])]
+    [OutputType([object])]
     param(
         [Parameter(Mandatory)][hashtable]$Usage,
         [Parameter(Mandatory)][hashtable]$Rates
     )
+
+    foreach ($field in @('input_per_mtok', 'output_per_mtok', 'cache_creation_per_mtok', 'cache_read_per_mtok')) {
+        if ($null -eq $Rates[$field]) { return $null }
+    }
 
     return (
         $Usage['input'] * $Rates['input_per_mtok'] +
@@ -194,6 +305,65 @@ function Get-CostEstimateFromUsage {
         $Usage['cache_creation'] * $Rates['cache_creation_per_mtok'] +
         $Usage['cache_read'] * $Rates['cache_read_per_mtok']
     ) / 1000000.0
+}
+
+function Add-CostAttributionWarning {
+    param(
+        [Parameter(Mandatory)][string]$Message,
+        [AllowNull()][System.Collections.Generic.List[string]]$WarningMessages = $null
+    )
+
+    if ($null -ne $WarningMessages) {
+        $WarningMessages.Add($Message)
+        return
+    }
+
+    Write-Warning $Message
+}
+
+function Add-NullCostEventToBucket {
+    param(
+        [Parameter(Mandatory)][hashtable]$Bucket,
+        [Parameter(Mandatory)][string]$Message,
+        [AllowNull()][System.Collections.Generic.List[string]]$WarningMessages = $null
+    )
+
+    Add-CostAttributionWarning -Message $Message -WarningMessages $WarningMessages
+    $Bucket['null_cost_events'] += 1
+    if ($Bucket['cost_estimate_usd'] -eq 0.0) { $Bucket['cost_estimate_usd'] = $null }
+}
+
+function Write-CostAttributionWarningRecord {
+    param(
+        [AllowEmptyCollection()][System.Collections.Generic.List[string]]$WarningMessages,
+        [AllowNull()][string]$WarningVariableName = $null
+    )
+
+    foreach ($warningMessage in $WarningMessages) {
+        Write-Warning $warningMessage
+    }
+
+    if ([string]::IsNullOrWhiteSpace($WarningVariableName)) { return }
+
+    $append = $WarningVariableName.StartsWith('+')
+    $variableName = $WarningVariableName.TrimStart('+')
+    if ([string]::IsNullOrWhiteSpace($variableName)) { return }
+
+    $warningValues = @($WarningMessages.ToArray())
+    foreach ($scope in @(1, 2)) {
+        try {
+            if ($append) {
+                $existing = @(Get-Variable -Name $variableName -Scope $scope -ValueOnly -ErrorAction SilentlyContinue)
+                Set-Variable -Name $variableName -Value @($existing + $warningValues) -Scope $scope -ErrorAction SilentlyContinue
+            }
+            else {
+                Set-Variable -Name $variableName -Value $warningValues -Scope $scope -ErrorAction SilentlyContinue
+            }
+        }
+        catch {
+            Write-Verbose "cost-attribution: warning variable scope mirror failed: $_"
+        }
+    }
 }
 
 function Add-CostToBucket {
@@ -207,17 +377,31 @@ function Add-CostToBucket {
         [Parameter(Mandatory)][hashtable]$Bucket,
         [Parameter(Mandatory)][hashtable]$Usage,
         [AllowNull()][string]$Model,
-        [Parameter(Mandatory)][hashtable]$RatesByModel
+        [string]$Provider = 'claude',
+        [Parameter(Mandatory)][hashtable]$RatesByProviderModel,
+        [AllowNull()][System.Collections.Generic.List[string]]$WarningMessages = $null
     )
 
-    if ($null -eq $Model -or -not $RatesByModel.ContainsKey($Model)) {
-        Write-Warning "cost-attribution: unknown model '$Model' — cost contribution is null; incrementing null_cost_events"
-        $Bucket['null_cost_events'] += 1
+    if ($null -eq $Model -or [string]::IsNullOrWhiteSpace($Model)) {
+        Add-NullCostEventToBucket -Bucket $Bucket -Message "cost-attribution: unknown model '$Model' for provider '$Provider' — cost contribution is null; incrementing null_cost_events" -WarningMessages $WarningMessages
         return
     }
 
-    $rates = $RatesByModel[$Model]
-    $Bucket['cost_estimate_usd'] += Get-CostEstimateFromUsage -Usage $Usage -Rates $rates
+    $lookupKey = Get-CostRateLookupKey -Provider $Provider -Model $Model
+    if (-not $RatesByProviderModel.ContainsKey($lookupKey)) {
+        Add-NullCostEventToBucket -Bucket $Bucket -Message "cost-attribution: unknown model '$Model' for provider '$Provider' — cost contribution is null; incrementing null_cost_events" -WarningMessages $WarningMessages
+        return
+    }
+
+    $rates = $RatesByProviderModel[$lookupKey]
+    $costEstimate = Get-CostEstimateFromUsage -Usage $Usage -Rates $rates
+    if ($null -eq $costEstimate) {
+        Add-NullCostEventToBucket -Bucket $Bucket -Message "cost-attribution: rate unavailable for provider '$Provider' model '$Model' — cost contribution is null; incrementing null_cost_events" -WarningMessages $WarningMessages
+        return
+    }
+
+    if ($null -eq $Bucket['cost_estimate_usd']) { $Bucket['cost_estimate_usd'] = 0.0 }
+    $Bucket['cost_estimate_usd'] += $costEstimate
 }
 
 function Set-CacheHitRatio {
@@ -292,7 +476,7 @@ function Get-CostAttribution {
     }
 
     # Load rate table
-    $ratesByModel = @{}
+    $ratesByProviderModel = @{}
     if (Test-Path -LiteralPath $RateTablePath) {
         try {
             $tableJson = Get-Content -Path $RateTablePath -Raw | ConvertFrom-Json -AsHashtable
@@ -300,12 +484,9 @@ function Get-CostAttribution {
             if ($null -ne $rawRates) {
                 foreach ($modelKey in $rawRates.Keys) {
                     $rateEntry = $rawRates[$modelKey]
-                    $ratesByModel[$modelKey] = @{
-                        input_per_mtok          = [double]$rateEntry['input_per_mtok']
-                        output_per_mtok         = [double]$rateEntry['output_per_mtok']
-                        cache_creation_per_mtok = [double]$rateEntry['cache_creation_per_mtok']
-                        cache_read_per_mtok     = [double]$rateEntry['cache_read_per_mtok']
-                    }
+                    $normalizedEntry = New-CostRateTableEntry -ModelKey ([string]$modelKey) -RateEntry $rateEntry -TableJson $tableJson
+                    $lookupKey = Get-CostRateLookupKey -Provider $normalizedEntry['provider'] -Model $normalizedEntry['model']
+                    $ratesByProviderModel[$lookupKey] = $normalizedEntry
                 }
             }
         }
@@ -325,6 +506,7 @@ function Get-CostAttribution {
         tokens            = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
         cost_estimate_usd = 0.0
     }
+    $costAttributionWarnings = [System.Collections.Generic.List[string]]::new()
 
     # The cost-walker inserts subagent events immediately after the parent event that
     # triggered them. We track the "current context bucket" as we iterate: after a parent
@@ -338,6 +520,7 @@ function Get-CostAttribution {
 
         $usage = Get-EventUsage -Evt $evt
         $model = Get-EventModel -Evt $evt
+        $provider = Get-EventProvider -Evt $evt
 
         # Determine if this is a parent (has cwd) or subagent (no cwd) event.
         # Subagent events are loaded from subagent transcripts and have no cwd/gitBranch.
@@ -385,13 +568,13 @@ function Get-CostAttribution {
                         $ports[$phaseMarkerTarget] = New-PortBucket
                     }
                     Add-TokensToAccumulator -Accumulator $ports[$phaseMarkerTarget]['tokens'] -Usage $usage
-                    Add-CostToBucket -Bucket $ports[$phaseMarkerTarget] -Usage $usage -Model $model -RatesByModel $ratesByModel
+                    Add-CostToBucket -Bucket $ports[$phaseMarkerTarget] -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
                     $currentSubagentBuckets = @($ports[$phaseMarkerTarget])
                 }
                 else {
                     # No dispatch — orchestrator-overhead unless a phase marker maps elsewhere
                     Add-TokensToAccumulator -Accumulator $overhead['tokens'] -Usage $usage
-                    Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -RatesByModel $ratesByModel
+                    Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
                     $currentSubagentBuckets = @($overhead)
                 }
             }
@@ -467,7 +650,7 @@ function Get-CostAttribution {
                         $ports[$primaryPort] = New-PortBucket
                     }
                     Add-TokensToAccumulator -Accumulator $ports[$primaryPort]['tokens'] -Usage $usage
-                    Add-CostToBucket -Bucket $ports[$primaryPort] -Usage $usage -Model $model -RatesByModel $ratesByModel
+                    Add-CostToBucket -Bucket $ports[$primaryPort] -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
                     $currentSubagentBuckets = @($ports[$primaryPort])
                 }
                 elseif ($generalPurposeCount -gt 0) {
@@ -476,13 +659,13 @@ function Get-CostAttribution {
                         $ports['dispatches.general_purpose'] = New-PortBucket
                     }
                     Add-TokensToAccumulator -Accumulator $ports['dispatches.general_purpose']['tokens'] -Usage $usage
-                    Add-CostToBucket -Bucket $ports['dispatches.general_purpose'] -Usage $usage -Model $model -RatesByModel $ratesByModel
+                    Add-CostToBucket -Bucket $ports['dispatches.general_purpose'] -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
                     $currentSubagentBuckets = @($ports['dispatches.general_purpose'])
                 }
                 else {
                     # All dispatches were to unattributed-dispatch — use overhead for parent tokens
                     Add-TokensToAccumulator -Accumulator $overhead['tokens'] -Usage $usage
-                    Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -RatesByModel $ratesByModel
+                    Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
                     $currentSubagentBuckets = @($overhead)
                 }
             }
@@ -493,20 +676,30 @@ function Get-CostAttribution {
                 # Attribute subagent tokens to the primary port bucket from parent's context
                 $targetBucket = $currentSubagentBuckets[0]
                 Add-TokensToAccumulator -Accumulator $targetBucket['tokens'] -Usage $usage
-                Add-CostToBucket -Bucket $targetBucket -Usage $usage -Model $model -RatesByModel $ratesByModel
+                Add-CostToBucket -Bucket $targetBucket -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
             }
             else {
                 # No context established — attribute to overhead
                 Add-TokensToAccumulator -Accumulator $overhead['tokens'] -Usage $usage
-                Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -RatesByModel $ratesByModel
+                Add-CostToBucket -Bucket $overhead -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
             }
         }
 
         # Accumulate into totals regardless of bucket
         Add-TokensToAccumulator -Accumulator $totals['tokens'] -Usage $usage
-        if ($null -ne $model -and $ratesByModel.ContainsKey($model)) {
-            $rates = $ratesByModel[$model]
-            $totals['cost_estimate_usd'] += Get-CostEstimateFromUsage -Usage $usage -Rates $rates
+        if ($null -ne $model -and -not [string]::IsNullOrWhiteSpace($model)) {
+            $lookupKey = Get-CostRateLookupKey -Provider $provider -Model $model
+            if ($ratesByProviderModel.ContainsKey($lookupKey)) {
+                $rates = $ratesByProviderModel[$lookupKey]
+                $costEstimate = Get-CostEstimateFromUsage -Usage $usage -Rates $rates
+                if ($null -eq $costEstimate) {
+                    if ($totals['cost_estimate_usd'] -eq 0.0) { $totals['cost_estimate_usd'] = $null }
+                }
+                else {
+                    if ($null -eq $totals['cost_estimate_usd']) { $totals['cost_estimate_usd'] = 0.0 }
+                    $totals['cost_estimate_usd'] += $costEstimate
+                }
+            }
         }
     }
 
@@ -515,6 +708,9 @@ function Get-CostAttribution {
         Set-CacheHitRatio -Bucket $portBucket
     }
     Set-CacheHitRatio -Bucket $overhead
+
+    $warningVariableName = if ($PSBoundParameters.ContainsKey('WarningVariable')) { [string]$PSBoundParameters['WarningVariable'] } else { $null }
+    Write-CostAttributionWarningRecord -WarningMessages $costAttributionWarnings -WarningVariableName $warningVariableName
 
     return @{
         ports                 = $ports
