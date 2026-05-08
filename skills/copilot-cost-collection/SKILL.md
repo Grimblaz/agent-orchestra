@@ -62,11 +62,11 @@ This skill's methodology is tool-agnostic. Platform-specific setup notes live al
 
 ## Gotchas
 
-| Trigger | Gotcha | Fix |
-| --- | --- | --- |
+| Trigger                                                                                       | Gotcha                                                                                                | Fix                                                                         |
+| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | Writing `${userHome}` or `${workspaceFolderBasename}` into `github.copilot.chat.otel.outfile` | Copilot Chat file export may treat the template as a literal and never create the expected JSONL file | Run the installer so the workspace setting receives a literal resolved path |
-| Opening the repo in VS Code Insiders, a profile, or a portable user-data dir | The default user settings path may update stable VS Code instead of the active profile | Re-run with `-UserSettingsPath` pointing at the active `settings.json` |
-| Treating `.copilot-cost-collection-installed` as workflow memory | The sentinel is local and uncommitted, so other machines and agents cannot rely on it | Use SMC durable markers or PR-body metrics for cross-session handoff |
+| Opening the repo in VS Code Insiders, a profile, or a portable user-data dir                  | The default user settings path may update stable VS Code instead of the active profile                | Re-run with `-UserSettingsPath` pointing at the active `settings.json`      |
+| Treating `.copilot-cost-collection-installed` as workflow memory                              | The sentinel is local and uncommitted, so other machines and agents cannot rely on it                 | Use SMC durable markers or PR-body metrics for cross-session handoff        |
 
 ## Frame Ports Filled By This Skill
 

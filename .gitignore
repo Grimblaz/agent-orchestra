@@ -11,3 +11,4 @@ pester-*.txt
 testResults.xml
 .issue-*-progress.md
 .copilot-cost-collection-installed
+.vscode/settings.json

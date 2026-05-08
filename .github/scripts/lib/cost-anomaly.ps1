@@ -120,7 +120,7 @@ function script:Get-MetricValue {
     }
     elseif ($baseKey -eq 'cache_read.hit_ratio') {
         if (-not $Port -or -not $Entry.ports.ContainsKey($Port)) { return $null }
-        return [double]$Entry.ports[$Port].cache_read_hit_ratio
+        return script:ConvertTo-NullableMetricDouble -Value $Entry.ports[$Port].cache_read_hit_ratio
     }
     elseif ($baseKey -eq 'cost_estimate_usd' -and $Port) {
         if (-not $Entry.ports.ContainsKey($Port)) { return $null }
@@ -130,7 +130,7 @@ function script:Get-MetricValue {
         return [double]$Entry.orchestrator_overhead.tokens.input
     }
     elseif ($MetricKey -eq 'orchestrator_overhead.cache_read.hit_ratio') {
-        return [double]$Entry.orchestrator_overhead.cache_read_hit_ratio
+        return script:ConvertTo-NullableMetricDouble -Value $Entry.orchestrator_overhead.cache_read_hit_ratio
     }
     elseif ($MetricKey -eq 'dispatches.general_purpose.count') {
         return [double]$Entry.dispatches.general_purpose_count

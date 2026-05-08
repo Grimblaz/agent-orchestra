@@ -601,6 +601,28 @@ Describe 'Get-CostAnomalyFlags' {
     }
 
     Context 'empty/missing data' {
+        It 'skips null cache hit ratios instead of treating them as zero' {
+            # Build history with normal cache hit ratios (e.g., 0.8)
+            $history = @()
+            for ($i = 0; $i -lt 15; $i++) {
+                $entry = script:New-MinimalAttribution -PortName 'experience' -CacheRead 800 -InputTok 100 -CacheCreate 100
+                # Override orchestrator_overhead cache_read_hit_ratio to a known value
+                $entry['orchestrator_overhead']['cache_read_hit_ratio'] = 0.75
+                $history += $entry
+            }
+
+            # Create thisRun with null cache hit ratios (both port-level and orchestrator)
+            $thisRun = script:New-MinimalAttribution -PortName 'experience' -CacheRead 0 -InputTok 100 -CacheCreate 0
+            $thisRun['ports']['experience']['cache_read_hit_ratio'] = $null
+            $thisRun['orchestrator_overhead']['cache_read_hit_ratio'] = $null
+
+            $flags = Get-CostAnomalyFlags -ThisRun $thisRun -RollingHistory $history
+
+            # Both cache ratio metrics should be skipped (not flagged as anomalous zero values)
+            ($flags | Where-Object { $_.metric -eq 'cache_read.hit_ratio[experience]' }) | Should -BeNullOrEmpty -Because 'null port-level cache hit ratio should be skipped, not treated as 0.0'
+            ($flags | Where-Object { $_.metric -eq 'orchestrator_overhead.cache_read.hit_ratio' }) | Should -BeNullOrEmpty -Because 'null orchestrator cache hit ratio should be skipped, not treated as 0.0'
+        }
+
         It 'skips null total and port cost metrics instead of treating them as zero' {
             $history = @()
             for ($i = 0; $i -lt 15; $i++) {
