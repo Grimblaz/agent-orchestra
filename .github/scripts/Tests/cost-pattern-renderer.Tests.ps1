@@ -89,6 +89,124 @@ Describe 'Format-CostPatternMarkdown' {
                 confidence = 'medium'
             }
         }
+
+        function script:Add-CoverageMetadata {
+            param(
+                [Parameter(Mandatory)][hashtable]$Attribution,
+                [Parameter(Mandatory)][string]$Coverage,
+                [string]$InstallStatus = 'ok',
+                [int]$UnmappedSessionCount = 0,
+                [string[]]$ProviderSupport = @('claude')
+            )
+
+            $Attribution['coverage'] = $Coverage
+            $Attribution['install_status'] = $InstallStatus
+            $Attribution['unmapped_session_count'] = $UnmappedSessionCount
+            $Attribution['provider_support'] = $ProviderSupport
+            return $Attribution
+        }
+
+        function script:New-CrossToolAttribution {
+            $attribution = script:New-MinimalAttribution `
+                -PortNames @('implement-code') `
+                -DispatchCount 2 `
+                -InputTok 1500 `
+                -OutputTok 350 `
+                -CacheCreate 125 `
+                -CacheRead 625 `
+                -PortCost 0.0200
+
+            $attribution = script:Add-CoverageMetadata `
+                -Attribution $attribution `
+                -Coverage 'claude+copilot' `
+                -InstallStatus 'ok' `
+                -ProviderSupport @('claude', 'copilot')
+
+            $attribution['ports']['implement-code']['provider_support'] = @('claude', 'copilot')
+            $attribution['ports']['implement-code']['providers'] = @{
+                claude  = @{
+                    tokens               = @{ input = 1000; output = 250; cache_creation = 125; cache_read = 625 }
+                    dispatch_count       = 1
+                    cost_estimate_usd    = 0.0200
+                    cache_read_hit_ratio = 0.357
+                }
+                copilot = @{
+                    tokens                     = @{ input = 500; output = 100; cache_creation = $null; cache_read = $null }
+                    dispatch_count             = 1
+                    cost_estimate_usd          = $null
+                    cache_metric_unavailable   = $true
+                    rate_unavailable           = $true
+                    per_token_rates_published  = $false
+                }
+            }
+            return $attribution
+        }
+
+        function script:New-CopilotOnlyAttribution {
+            return @{
+                provider_support       = @('copilot')
+                coverage               = 'copilot-only'
+                install_status         = 'ok'
+                unmapped_session_count = 0
+                ports                  = @{
+                    'implement-test' = @{
+                        tokens                     = @{ input = 750; output = 120; cache_creation = $null; cache_read = $null }
+                        dispatch_count             = 1
+                        cost_estimate_usd          = $null
+                        cache_read_hit_ratio       = $null
+                        mixed_regime               = $false
+                        provider_support           = @('copilot')
+                        providers                  = @{
+                            copilot = @{
+                                tokens                    = @{ input = 750; output = 120; cache_creation = $null; cache_read = $null }
+                                dispatch_count            = 1
+                                cost_estimate_usd         = $null
+                                cache_metric_unavailable  = $true
+                                rate_unavailable          = $true
+                                per_token_rates_published = $false
+                            }
+                        }
+                    }
+                    plan             = @{
+                        tokens                     = @{ input = 900; output = 150; cache_creation = $null; cache_read = $null }
+                        dispatch_count             = 1
+                        cost_estimate_usd          = $null
+                        cache_read_hit_ratio       = $null
+                        mixed_regime               = $false
+                        provider_support           = @('copilot')
+                        providers                  = @{
+                            copilot = @{
+                                tokens                    = @{ input = 900; output = 150; cache_creation = $null; cache_read = $null }
+                                dispatch_count            = 1
+                                cost_estimate_usd         = $null
+                                cache_metric_unavailable  = $true
+                                rate_unavailable          = $true
+                                per_token_rates_published = $false
+                            }
+                        }
+                    }
+                }
+                orchestrator_overhead = @{
+                    tokens               = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
+                    cost_estimate_usd    = 0.0
+                    cache_read_hit_ratio = 0.0
+                }
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{
+                    tokens            = @{ input = 1650; output = 270; cache_creation = 0; cache_read = 0 }
+                    cost_estimate_usd = $null
+                }
+            }
+        }
+
+        function script:Get-RenderedTableRow {
+            param(
+                [Parameter(Mandatory)][string]$Markdown,
+                [Parameter(Mandatory)][string]$PortLabel
+            )
+
+            return @($Markdown -split "`n" | Where-Object { $_ -like "| $PortLabel |*" })[0]
+        }
     }
 
     Context 'header paths (golden assertions per M20/M21/M22)' {
@@ -117,14 +235,17 @@ Describe 'Format-CostPatternMarkdown' {
             $result | Should -Match 'max_tokens'
         }
 
-        It 'unknown: header contains "session not found or unrecognized"' {
-            $attribution = script:New-MinimalAttribution
+        It 'unknown: header renders cross-tool diagnostic and unavailable cost fields' {
+            $attribution = script:Add-CoverageMetadata `
+                -Attribution (script:New-MinimalAttribution) `
+                -Coverage 'claude-only-with-copilot-fallback-warning' `
+                -InstallStatus 'missing-or-fallback' `
+                -ProviderSupport @('claude')
             $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
             $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
-            $result | Should -Match 'session not found or unrecognized'
+            $result | Should -Not -Match 'session not found or unrecognized'
             $result | Should -Match 'cost-fields unavailable'
-            $result | Should -Match 'No Claude-side cost data was found'
-            $result | Should -Match 'Copilot-side collection remains tracked by \[#488\]\(https://github\.com/Grimblaz/agent-orchestra/issues/488\)'
+            $result | Should -Match 'no Claude or Copilot session activity recorded for this PR''s branch; cross-tool collection is enabled — see `Initialize-CopilotCostCollection` if Copilot is installed but data is missing, or #488 for diagnostics\.'
         }
 
         It 'timeout: header contains "rolling-history fetch timed out"' {
@@ -195,6 +316,99 @@ Describe 'Format-CostPatternMarkdown' {
         }
     }
 
+    Context 'cross-tool coverage rendering (#488 Step 4 RED)' {
+        It 'renders a top-level coverage line for each coverage mode' -TestCases @(
+            @{ Coverage = 'claude+copilot'; InstallStatus = 'ok'; ProviderSupport = @('claude', 'copilot') }
+            @{ Coverage = 'claude-only'; InstallStatus = 'ok'; ProviderSupport = @('claude') }
+            @{ Coverage = 'copilot-only'; InstallStatus = 'ok'; ProviderSupport = @('copilot') }
+            @{ Coverage = 'claude-only-with-copilot-fallback-warning'; InstallStatus = 'missing-or-fallback'; ProviderSupport = @('claude') }
+        ) {
+            param([string]$Coverage, [string]$InstallStatus, [string[]]$ProviderSupport)
+
+            $attribution = script:New-MinimalAttribution
+            $attribution = script:Add-CoverageMetadata `
+                -Attribution $attribution `
+                -Coverage $Coverage `
+                -InstallStatus $InstallStatus `
+                -ProviderSupport $ProviderSupport
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Match "(?m)^coverage: $([regex]::Escape($Coverage))$"
+        }
+
+        It 'annotates a multi-provider port row as merged' {
+            $attribution = script:New-CrossToolAttribution
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Match '\| implement-code \(merged\) \|'
+        }
+
+        It 'renders Copilot cache cells as n/a footnoted cells and cost as an empty USD cell' {
+            $attribution = script:New-CopilotOnlyAttribution
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+            $row = script:Get-RenderedTableRow -Markdown $result -PortLabel 'implement-test'
+
+            $row | Should -Not -BeNullOrEmpty
+            $row | Should -Match '\| n/a \* \| n/a \* \| n/a \* \|  \|'
+            $result | Should -Match 'Copilot per-token rates not published; cost figures excluded for Copilot rows\.'
+        }
+
+        It 'renders the Copilot cache footnote once for a section with multiple Copilot rows' {
+            $attribution = script:New-CopilotOnlyAttribution
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+            $matches = [regex]::Matches($result, 'Copilot cache metrics are unavailable from Copilot telemetry; cache cells marked n/a \* are excluded from cache-hit baselines\.')
+
+            $matches.Count | Should -Be 1
+        }
+
+        It 'renders the transition notice when matching-coverage rolling history is below five entries' {
+            $attribution = script:New-CrossToolAttribution
+            $completeness = script:New-Completeness
+            $rollingMeta = @{ matching_coverage_history_count = 4 }
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness -RollingMeta $rollingMeta
+
+            $result | Should -Match '⚠ building cross-tool baseline — matching-coverage history < 5 entries'
+        }
+
+        It 'replaces the legacy unknown-session warning with the cross-tool diagnostic text' {
+            $attribution = script:Add-CoverageMetadata `
+                -Attribution (script:New-MinimalAttribution) `
+                -Coverage 'claude-only-with-copilot-fallback-warning' `
+                -InstallStatus 'missing-or-fallback' `
+                -ProviderSupport @('claude')
+            $completeness = script:New-Completeness -Completeness 'unknown' -StopReason $null -Excluded $true -ExcludeReason 'session completeness: unknown'
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            $result | Should -Not -Match 'session not found or unrecognized'
+            $result | Should -Match 'no Claude or Copilot session activity recorded for this PR''s branch; cross-tool collection is enabled — see `Initialize-CopilotCostCollection` if Copilot is installed but data is missing, or #488 for diagnostics\.'
+        }
+
+        It 'renders the inline coverage-tag legend once when fallback-warning coverage appears' {
+            $attribution = script:Add-CoverageMetadata `
+                -Attribution (script:New-MinimalAttribution) `
+                -Coverage 'claude-only-with-copilot-fallback-warning' `
+                -InstallStatus 'missing-or-fallback' `
+                -ProviderSupport @('claude')
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+            $legendMatches = [regex]::Matches($result, 'Coverage tags:')
+
+            $legendMatches.Count | Should -Be 1
+            $result | Should -Match 'Coverage tags:.*claude\+copilot.*claude-only.*copilot-only.*claude-only-with-copilot-fallback-warning'
+        }
+    }
+
     Context 'anomaly annotations' {
         It 'shows anomaly metric names in Anomalies column' {
             $attribution = script:New-MinimalAttribution -PortNames @('experience')
@@ -262,6 +476,54 @@ Describe 'Format-CostPatternYaml' {
                 exclude_reason                 = $ExcludeReason
             }
         }
+
+        function script:Add-YamlCoverageMetadata {
+            param(
+                [Parameter(Mandatory)][hashtable]$Attribution,
+                [Parameter(Mandatory)][string]$Coverage,
+                [string]$InstallStatus = 'ok',
+                [int]$UnmappedSessionCount = 0,
+                [string[]]$ProviderSupport = @('claude')
+            )
+
+            $Attribution['coverage'] = $Coverage
+            $Attribution['install_status'] = $InstallStatus
+            $Attribution['unmapped_session_count'] = $UnmappedSessionCount
+            $Attribution['provider_support'] = $ProviderSupport
+            return $Attribution
+        }
+
+        function script:New-YamlCrossToolAttribution {
+            $attribution = script:New-YamlAttribution
+            $attribution = script:Add-YamlCoverageMetadata `
+                -Attribution $attribution `
+                -Coverage 'claude+copilot' `
+                -InstallStatus 'ok' `
+                -ProviderSupport @('claude', 'copilot')
+
+            $attribution['ports']['experience']['provider_support'] = @('claude', 'copilot')
+            $attribution['ports']['experience']['providers'] = @{
+                claude  = @{
+                    tokens               = @{ input = 1000; output = 500; cache_creation = 89; cache_read = 456 }
+                    dispatch_count       = 1
+                    prompt_size_chars    = 2200
+                    cost_estimate_usd    = 0.0123
+                    cache_read_hit_ratio = 0.295
+                    null_cost_events     = 0
+                    mixed_regime         = $false
+                }
+                copilot = @{
+                    tokens                    = @{ input = 234; output = 67; cache_creation = $null; cache_read = $null }
+                    dispatch_count            = 1
+                    prompt_size_chars         = 800
+                    cost_estimate_usd         = $null
+                    cache_metric_unavailable  = $true
+                    rate_unavailable          = $true
+                    per_token_rates_published = $false
+                }
+            }
+            return $attribution
+        }
     }
 
     It 'emits <!-- cost-pattern-data block with version: 1' {
@@ -310,5 +572,57 @@ Describe 'Format-CostPatternYaml' {
         $result = Format-CostPatternYaml -Attribution $attribution -Completeness $completeness -AnomalyFlags $flags
         $result | Should -Match 'anomaly_flags:'
         $result | Should -Match 'dispatches\.per_port'
+    }
+
+    Context 'cross-tool YAML contract (#488 Step 4 RED)' {
+        It 'emits additive cross-tool fields only when cross-tool data is present' {
+            $crossTool = Format-CostPatternYaml `
+                -Attribution (script:New-YamlCrossToolAttribution) `
+                -Completeness (script:New-YamlCompleteness) `
+                -Pr 488 `
+                -Branch 'feature/issue-488-copilot-cost-collection'
+
+            $claudeOnlyAttribution = script:Add-YamlCoverageMetadata `
+                -Attribution (script:New-YamlAttribution) `
+                -Coverage 'claude-only' `
+                -InstallStatus 'ok' `
+                -ProviderSupport @('claude')
+            $claudeOnly = Format-CostPatternYaml -Attribution $claudeOnlyAttribution -Completeness (script:New-YamlCompleteness)
+
+            $crossTool | Should -Match 'provider_support: \["claude", "copilot"\]'
+            $crossTool | Should -Match '(?m)^coverage: claude\+copilot$'
+            $crossTool | Should -Match '(?m)^install_status: ok$'
+            $crossTool | Should -Match '(?m)^unmapped_session_count: 0$'
+            $crossTool | Should -Match '(?m)^    providers:$'
+            $crossTool | Should -Match '(?m)^      claude:$'
+            $crossTool | Should -Match '(?m)^      copilot:$'
+            $crossTool | Should -Match '(?m)^        cache_metric_unavailable: true$'
+            $claudeOnly | Should -Not -Match 'provider_support: \["claude"\]'
+        }
+
+        It 'emits missing-or-fallback install status when Copilot install sentinel is absent' {
+            $attribution = script:Add-YamlCoverageMetadata `
+                -Attribution (script:New-YamlAttribution) `
+                -Coverage 'claude-only-with-copilot-fallback-warning' `
+                -InstallStatus 'missing-or-fallback' `
+                -ProviderSupport @('claude')
+
+            $result = Format-CostPatternYaml -Attribution $attribution -Completeness (script:New-YamlCompleteness)
+
+            $result | Should -Match '(?m)^coverage: claude-only-with-copilot-fallback-warning$'
+            $result | Should -Match '(?m)^install_status: missing-or-fallback$'
+        }
+    }
+}
+
+Describe 'cost-pattern-data schema documentation' {
+    It 'documents the post-#488 additive YAML fields' {
+        $schemaPath = Join-Path $PSScriptRoot '..\lib\cost-pattern-data-schema.md'
+        $schemaPath | Should -Exist
+        $schema = Get-Content -LiteralPath $schemaPath -Raw
+
+        foreach ($field in @('provider_support', 'coverage', 'install_status', 'providers', 'unmapped_session_count')) {
+            $schema | Should -Match "``$field``"
+        }
     }
 }
