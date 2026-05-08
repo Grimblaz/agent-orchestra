@@ -87,6 +87,14 @@ function script:Format-CostYaml {
     return $Value.ToString('0.0000', [System.Globalization.CultureInfo]::InvariantCulture)
 }
 
+function script:Format-CostRendererNullableCostYaml {
+    [OutputType([string])]
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return 'null' }
+    return script:Format-CostYaml -Value ([double]$Value)
+}
+
 function script:Format-Ratio {
     <#
     .SYNOPSIS Formats a ratio (0.0-1.0) as a percentage string. #>
@@ -683,7 +691,7 @@ function Format-CostPatternYaml {
     foreach ($portName in $portKeys) {
         $bucket = $ports[$portName]
         $tok = $bucket['tokens']
-        $cost = if ($null -ne $bucket['cost_estimate_usd']) { script:Format-CostYaml -Value ([double]$bucket['cost_estimate_usd']) } else { 'null' }
+        $cost = script:Format-CostRendererNullableCostYaml -Value $bucket['cost_estimate_usd']
         $ratio = if ($null -ne $bucket['cache_read_hit_ratio']) { script:Format-RatioYaml -Value ([double]$bucket['cache_read_hit_ratio']) } else { 'null' }
         $mixed = if ($bucket['mixed_regime']) { 'true' } else { 'false' }
         $null = $sb.AppendLine("  - name: $portName")
@@ -746,7 +754,7 @@ function Format-CostPatternYaml {
 
     # orchestrator_overhead
     $ohTok = $overhead['tokens']
-    $ohCost = script:Format-CostYaml -Value ([double]$overhead['cost_estimate_usd'])
+    $ohCost = script:Format-CostRendererNullableCostYaml -Value $overhead['cost_estimate_usd']
     $ohRatio = script:Format-RatioYaml -Value ([double]$overhead['cache_read_hit_ratio'])
     $null = $sb.AppendLine('orchestrator_overhead:')
     $null = $sb.AppendLine('  tokens:')
@@ -767,7 +775,7 @@ function Format-CostPatternYaml {
 
     # totals
     $totTok = $totals['tokens']
-    $totCost = script:Format-CostYaml -Value ([double]$totals['cost_estimate_usd'])
+    $totCost = script:Format-CostRendererNullableCostYaml -Value $totals['cost_estimate_usd']
     $null = $sb.AppendLine('totals:')
     $null = $sb.AppendLine('  tokens:')
     $null = $sb.AppendLine("    input: $($totTok['input'])")

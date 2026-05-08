@@ -64,6 +64,7 @@ Describe 'cost-pattern-presence-check workflow logic' {
             switch ($coverage) {
                 'claude+copilot' { return @{ ExitCode = 0; Annotation = ''; Coverage = $coverage } }
                 'claude-only' { return @{ ExitCode = 0; Annotation = 'warning'; Coverage = $coverage } }
+                'copilot-only' { return @{ ExitCode = 0; Annotation = 'warning'; Coverage = $coverage } }
                 'claude-only-with-copilot-fallback-warning' { return @{ ExitCode = 0; Annotation = 'warning'; Coverage = $coverage } }
                 '' { return @{ ExitCode = 1; Annotation = 'error'; Coverage = $coverage } }
                 default { return @{ ExitCode = 1; Annotation = 'error'; Coverage = $coverage } }
@@ -128,6 +129,7 @@ Describe 'cost-pattern-presence-check workflow logic' {
 
         It 'exits 0 with a warning annotation for <Coverage> coverage' -TestCases @(
             @{ Coverage = 'claude-only' }
+            @{ Coverage = 'copilot-only' }
             @{ Coverage = 'claude-only-with-copilot-fallback-warning' }
         ) {
             param([string]$Coverage)
@@ -221,6 +223,7 @@ Describe 'cost-pattern-presence-check workflow logic' {
             $content = Get-Content -Path $script:WorkflowPath -Raw
             $content | Should -Match 'coverage:'
             $content | Should -Match 'claude\+copilot'
+            $content | Should -Match 'copilot-only'
             $content | Should -Match 'claude-only-with-copilot-fallback-warning'
             $content | Should -Match '::warning::Cost Pattern coverage is'
         }

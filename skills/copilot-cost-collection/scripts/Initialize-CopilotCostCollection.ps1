@@ -25,6 +25,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $script:SentinelFileName = '.copilot-cost-collection-installed'
 $script:SentinelVersion = 'v1'
+$script:WorkspaceSettingsGitignoreEntry = '.vscode/settings.json'
 
 function Resolve-CopilotCostDefaultUserSettingsPath {
     [CmdletBinding()]
@@ -135,32 +136,75 @@ function Test-CopilotCostGitignoreContainsSentinel {
         [Parameter(Mandatory)][string]$Path
     )
 
+    return Test-CopilotCostGitignoreContainsEntry -Path $Path -Entry $script:SentinelFileName
+}
+
+function Test-CopilotCostGitignoreContainsEntry {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Entry
+    )
+
     if (-not [System.IO.File]::Exists($Path)) { return $false }
 
     $lines = [System.IO.File]::ReadAllLines($Path)
-    return @($lines | Where-Object { $_.Trim() -eq $script:SentinelFileName }).Count -gt 0
+    return @($lines | Where-Object { $_.Trim() -eq $Entry }).Count -gt 0
+}
+
+function Join-CopilotCostGitignoreEntryBlock {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Entries
+    )
+
+    $linesToAdd = @($Entries | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($linesToAdd.Count -eq 0) { return '' }
+
+    return ($linesToAdd -join "`n") + "`n"
 }
 
 function Add-CopilotCostGitignoreEntry {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$Path
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Entries
     )
 
     $encoding = [System.Text.UTF8Encoding]::new($false)
+    $entryBlock = Join-CopilotCostGitignoreEntryBlock -Entries $Entries
+    if ([string]::IsNullOrEmpty($entryBlock)) { return }
+
     if (-not [System.IO.File]::Exists($Path)) {
-        [System.IO.File]::WriteAllText($Path, $script:SentinelFileName + "`n", $encoding)
+        [System.IO.File]::WriteAllText($Path, $entryBlock, $encoding)
         return
     }
 
     $raw = [System.IO.File]::ReadAllText($Path, [System.Text.Encoding]::UTF8)
     if ([string]::IsNullOrEmpty($raw)) {
-        [System.IO.File]::WriteAllText($Path, $script:SentinelFileName + "`n", $encoding)
+        [System.IO.File]::WriteAllText($Path, $entryBlock, $encoding)
         return
     }
 
     $separator = if ($raw.EndsWith("`n")) { '' } else { "`n" }
-    [System.IO.File]::WriteAllText($Path, $raw + $separator + $script:SentinelFileName + "`n", $encoding)
+    [System.IO.File]::WriteAllText($Path, $raw + $separator + $entryBlock, $encoding)
+}
+
+function Test-CopilotCostGitPathTracked {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string]$WorkspacePath,
+        [Parameter(Mandatory)][string]$RelativePath
+    )
+
+    $gitCommand = Get-Command git -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -eq $gitCommand) { return $false }
+
+    $null = & $gitCommand.Source -C $WorkspacePath ls-files --error-unmatch -- $RelativePath 2>$null
+    return ($LASTEXITCODE -eq 0)
 }
 
 function New-CopilotCostSentinelContent {
@@ -257,6 +301,13 @@ if ($otelParentNeedsCreate) { $actions.Add("create OTel output directory: $otelP
 $gitignoreNeedsSentinel = -not (Test-CopilotCostGitignoreContainsSentinel -Path $gitignorePath)
 if ($gitignoreNeedsSentinel) { $actions.Add("ensure sentinel is gitignored: $gitignorePath") }
 
+$workspaceSettingsTracked = Test-CopilotCostGitPathTracked -WorkspacePath $resolvedWorkspacePath -RelativePath $script:WorkspaceSettingsGitignoreEntry
+if ($workspaceSettingsTracked) {
+    Write-Warning "Workspace settings file '$script:WorkspaceSettingsGitignoreEntry' is already tracked by git; .gitignore cannot protect the machine-local Copilot OTel outfile path until the file is untracked."
+}
+$gitignoreNeedsWorkspaceSettings = -not (Test-CopilotCostGitignoreContainsEntry -Path $gitignorePath -Entry $script:WorkspaceSettingsGitignoreEntry)
+if ($gitignoreNeedsWorkspaceSettings) { $actions.Add("ensure workspace settings are gitignored: $gitignorePath") }
+
 $sentinelNeedsWrite = -not (Test-CopilotCostSentinelCurrent -Path $sentinelPath -WorkspacePath $resolvedWorkspacePath -OtelOutfilePath $otelOutfilePath)
 if ($sentinelNeedsWrite) { $actions.Add("write sentinel: $sentinelPath") }
 
@@ -267,7 +318,10 @@ if ($actions.Count -gt 0 -and $PSCmdlet.ShouldProcess($resolvedWorkspacePath, 'I
     if ($userSettingsNeedsWrite) { Write-CopilotCostJsonObject -Path $resolvedUserSettingsPath -Settings $userSettings }
     if ($workspaceSettingsNeedsWrite) { Write-CopilotCostJsonObject -Path $workspaceSettingsPath -Settings $workspaceSettings }
     if ($otelParentNeedsCreate) { $null = [System.IO.Directory]::CreateDirectory($otelParentPath) }
-    if ($gitignoreNeedsSentinel) { Add-CopilotCostGitignoreEntry -Path $gitignorePath }
+    $gitignoreEntriesToAdd = @()
+    if ($gitignoreNeedsSentinel) { $gitignoreEntriesToAdd += $script:SentinelFileName }
+    if ($gitignoreNeedsWorkspaceSettings) { $gitignoreEntriesToAdd += $script:WorkspaceSettingsGitignoreEntry }
+    if ($gitignoreEntriesToAdd.Count -gt 0) { Add-CopilotCostGitignoreEntry -Path $gitignorePath -Entries $gitignoreEntriesToAdd }
 
     if ($sentinelNeedsWrite) {
         $sentinelContent = New-CopilotCostSentinelContent -WorkspacePath $resolvedWorkspacePath -OtelOutfilePath $otelOutfilePath

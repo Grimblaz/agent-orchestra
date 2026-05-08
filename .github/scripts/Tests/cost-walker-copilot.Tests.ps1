@@ -140,7 +140,7 @@ Describe 'Invoke-CostCopilotWalk' {
             }
         }
 
-        function script:Invoke-CopilotWalkForRecords {
+        function script:Invoke-CopilotWalkForRecordSet {
             param(
                 [Parameter(Mandatory)][object[]]$Records,
                 [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ReflogLines,
@@ -152,9 +152,10 @@ Describe 'Invoke-CostCopilotWalk' {
             $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-copilot-test-$([System.Guid]::NewGuid())"
             $otelPath = Join-Path $tmp 'copilot-chat.jsonl'
             script:Write-TestJsonl -Path $otelPath -Records $Records
+            $capturedReflogLines = $ReflogLines
 
             try {
-                Mock Get-CostCopilotReflog { return $ReflogLines } -ParameterFilter { $RepoRoot -eq $script:RepoRoot }
+                Mock Get-CostCopilotReflog { return $capturedReflogLines } -ParameterFilter { $RepoRoot -eq $script:RepoRoot }
 
                 $result = @(Invoke-CostCopilotWalk `
                     -Branch $Branch `
@@ -196,8 +197,8 @@ Describe 'Invoke-CostCopilotWalk' {
             script:Get-ObjectValue -Object $costRecord -Name 'sessionId' | Should -Be 'session-001'
 
             $usage = script:Get-NormalizedUsage -Record $costRecord
-            script:Get-ObjectValue -Object $usage -Name 'input_tokens' | Should -BeGreaterThan 0
-            script:Get-ObjectValue -Object $usage -Name 'output_tokens' | Should -BeGreaterThan 0
+            script:Get-ObjectValue -Object $usage -Name 'input_tokens' | Should -Be 63257
+            script:Get-ObjectValue -Object $usage -Name 'output_tokens' | Should -Be 153
             script:Get-ObjectValue -Object $usage -Name 'cache_creation_input_tokens' | Should -BeNullOrEmpty
             script:Get-ObjectValue -Object $usage -Name 'cache_read_input_tokens' | Should -BeNullOrEmpty
 
@@ -217,7 +218,7 @@ Describe 'Invoke-CostCopilotWalk' {
                 script:New-CopilotOtelRecord -SessionId 'session-b' -Timestamp '2026-01-01T00:05:00Z' -InputTokens 40 -OutputTokens 9
             )
 
-            $walkOutput = script:Invoke-CopilotWalkForRecords -Records $records -ReflogLines (Get-Content -Path $script:SyntheticReflog -Encoding utf8)
+            $walkOutput = @(script:Invoke-CopilotWalkForRecordSet -Records $records -ReflogLines (Get-Content -Path $script:SyntheticReflog -Encoding utf8))
             $sessionIds = @($walkOutput | ForEach-Object { script:Get-ObjectValue -Object $_ -Name 'sessionId' })
 
             $sessionIds | Should -BeExactly @('session-a', 'session-b')
@@ -230,6 +231,35 @@ Describe 'Invoke-CostCopilotWalk' {
             }
         }
 
+        It 'counts inference detail records instead of duplicate agent-turn summaries when both shapes exist' {
+            $records = @(
+                script:New-CopilotOtelRecord -SessionId 'session-duplicate-summary' -Timestamp '2026-01-01T00:00:02Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
+                script:New-CopilotOtelRecord -SessionId 'session-duplicate-summary' -Timestamp '2026-01-01T00:00:03Z' -OtelRecordName 'gen_ai.client.inference.operation.details' -InputTokens 100 -OutputTokens 30
+                script:New-CopilotOtelRecord -SessionId 'session-duplicate-summary' -Timestamp '2026-01-01T00:00:04Z' -OtelRecordName 'copilot_chat.agent.turn' -InputTokens 100 -OutputTokens 30
+            )
+
+            $walkOutput = @(script:Invoke-CopilotWalkForRecordSet -Records $records -ReflogLines (Get-Content -Path $script:SyntheticReflog -Encoding utf8))
+
+            $walkOutput.Count | Should -Be 1
+            $usage = script:Get-NormalizedUsage -Record $walkOutput[0]
+            script:Get-ObjectValue -Object $usage -Name 'input_tokens' | Should -Be 100
+            script:Get-ObjectValue -Object $usage -Name 'output_tokens' | Should -Be 30
+        }
+
+        It 'counts agent-turn token records when inference details are absent' {
+            $records = @(
+                script:New-CopilotOtelRecord -SessionId 'session-agent-turn-only' -Timestamp '2026-01-01T00:00:02Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
+                script:New-CopilotOtelRecord -SessionId 'session-agent-turn-only' -Timestamp '2026-01-01T00:00:03Z' -OtelRecordName 'copilot_chat.agent.turn' -InputTokens 88 -OutputTokens 22
+            )
+
+            $walkOutput = @(script:Invoke-CopilotWalkForRecordSet -Records $records -ReflogLines (Get-Content -Path $script:SyntheticReflog -Encoding utf8))
+
+            $walkOutput.Count | Should -Be 1
+            $usage = script:Get-NormalizedUsage -Record $walkOutput[0]
+            script:Get-ObjectValue -Object $usage -Name 'input_tokens' | Should -Be 88
+            script:Get-ObjectValue -Object $usage -Name 'output_tokens' | Should -Be 22
+        }
+
         It 'attributes a session by its start timestamp when later token events straddle a branch switch' {
             $records = @(
                 script:New-CopilotOtelRecord -SessionId 'session-before-switch' -Timestamp '2025-12-31T23:59:54Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
@@ -238,7 +268,7 @@ Describe 'Invoke-CostCopilotWalk' {
                 script:New-CopilotOtelRecord -SessionId 'session-clock-skew' -Timestamp '2026-01-01T00:00:01Z' -InputTokens 60 -OutputTokens 12
             )
 
-            $walkOutput = script:Invoke-CopilotWalkForRecords -Records $records -ReflogLines (Get-Content -Path $script:SyntheticReflog -Encoding utf8)
+            $walkOutput = script:Invoke-CopilotWalkForRecordSet -Records $records -ReflogLines (Get-Content -Path $script:SyntheticReflog -Encoding utf8)
             $sessionIds = @($walkOutput | ForEach-Object { script:Get-ObjectValue -Object $_ -Name 'sessionId' })
 
             $sessionIds | Should -Contain 'session-clock-skew'
@@ -258,7 +288,7 @@ Describe 'Invoke-CostCopilotWalk' {
                 'ccccccc HEAD@{2026-01-01T00:01:20+00:00}: rebase (pick): step(1): capture fixture'
             )
 
-            $walkOutput = script:Invoke-CopilotWalkForRecords -Records $records -ReflogLines $reflogLines
+            $walkOutput = script:Invoke-CopilotWalkForRecordSet -Records $records -ReflogLines $reflogLines
 
             @($walkOutput | ForEach-Object { script:Get-ObjectValue -Object $_ -Name 'sessionId' }) | Should -Be @('session-after-rebase-noise')
         }
@@ -273,7 +303,7 @@ Describe 'Invoke-CostCopilotWalk' {
                 'bbbbbbb HEAD@{2026-01-01T00:03:00+00:00}: Branch: renamed refs/heads/old/issue-488-cost to refs/heads/feature/issue-488-copilot-cost-collection'
             )
 
-            $walkOutput = script:Invoke-CopilotWalkForRecords -Records $records -ReflogLines $reflogLines
+            $walkOutput = script:Invoke-CopilotWalkForRecordSet -Records $records -ReflogLines $reflogLines
 
             @($walkOutput | ForEach-Object { script:Get-ObjectValue -Object $_ -Name 'sessionId' }) | Should -Be @('session-after-rename')
         }
@@ -289,7 +319,7 @@ Describe 'Invoke-CostCopilotWalk' {
             )
             $warnings = @()
 
-            $walkOutput = script:Invoke-CopilotWalkForRecords -Records $records -ReflogLines $reflogLines -Warnings ([ref]$warnings)
+            $walkOutput = script:Invoke-CopilotWalkForRecordSet -Records $records -ReflogLines $reflogLines -Warnings ([ref]$warnings)
 
             $walkOutput.Count | Should -Be 0
             $warnings | Where-Object { $_ -match 'copilot-reflog-detached-head' -or $_ -match 'detached HEAD' } | Should -Not -BeNullOrEmpty
@@ -302,7 +332,7 @@ Describe 'Invoke-CostCopilotWalk' {
             )
             $warnings = @()
 
-            $walkOutput = script:Invoke-CopilotWalkForRecords -Records $records -ReflogLines @() -Warnings ([ref]$warnings)
+            $walkOutput = script:Invoke-CopilotWalkForRecordSet -Records $records -ReflogLines @() -Warnings ([ref]$warnings)
 
             $walkOutput.Count | Should -Be 0
             $warnings | Where-Object { $_ -match 'copilot-reflog-empty' -or $_ -match 'empty reflog' } | Should -Not -BeNullOrEmpty
@@ -318,7 +348,7 @@ Describe 'Invoke-CostCopilotWalk' {
             )
             $warnings = @()
 
-            $walkOutput = script:Invoke-CopilotWalkForRecords -Records $records -ReflogLines $reflogLines -Warnings ([ref]$warnings)
+            $walkOutput = script:Invoke-CopilotWalkForRecordSet -Records $records -ReflogLines $reflogLines -Warnings ([ref]$warnings)
 
             $walkOutput.Count | Should -Be 0
             $warnings | Where-Object {

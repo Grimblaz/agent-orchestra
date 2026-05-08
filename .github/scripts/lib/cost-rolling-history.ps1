@@ -325,10 +325,13 @@ function script:ConvertFrom-CostPatternYaml {
                     if ($subLine -match '^\s*$') { $j++; continue }
                     if (-not ($subLine -match '^\s')) { break }
                     if ($subLine -match '^\s+cost_estimate_usd\s*:\s*(.+)$') {
-                        $oo['cost_estimate_usd'] = [double]$Matches[1].Trim()
+                        script:Set-CostPatternNumericField -Bucket $oo -Field 'cost_estimate_usd' -Value $Matches[1]
                     }
                     if ($subLine -match '^\s+cache_read_hit_ratio\s*:\s*(.+)$') {
-                        $oo['cache_read_hit_ratio'] = [double]$Matches[1].Trim()
+                        script:Set-CostPatternNumericField -Bucket $oo -Field 'cache_read_hit_ratio' -Value $Matches[1]
+                    }
+                    if ($subLine -match '^\s+null_cost_events\s*:\s*(.+)$') {
+                        $oo['null_cost_events'] = [int](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
                     }
                     # tokens sub-block (Fix Pass1-F10)
                     if ($subLine -match '^\s{4,}(input|output|cache_creation|cache_read)\s*:\s*(.+)$') {
@@ -371,7 +374,7 @@ function script:ConvertFrom-CostPatternYaml {
                     if ($subLine -match '^\s*$') { $j++; continue }
                     if (-not ($subLine -match '^\s')) { break }
                     if ($subLine -match '^\s+cost_estimate_usd\s*:\s*(.+)$') {
-                        $tot['cost_estimate_usd'] = [double]$Matches[1].Trim()
+                        script:Set-CostPatternNumericField -Bucket $tot -Field 'cost_estimate_usd' -Value $Matches[1]
                     }
                     $j++
                 }

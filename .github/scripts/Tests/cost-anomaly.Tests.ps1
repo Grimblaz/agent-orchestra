@@ -601,6 +601,21 @@ Describe 'Get-CostAnomalyFlags' {
     }
 
     Context 'empty/missing data' {
+        It 'skips null total and port cost metrics instead of treating them as zero' {
+            $history = @()
+            for ($i = 0; $i -lt 15; $i++) {
+                $history += script:New-MinimalAttribution -PortName 'experience' -TotalCost 1.00
+            }
+            $thisRun = script:New-MinimalAttribution -PortName 'experience' -TotalCost 0.01
+            $thisRun['ports']['experience']['cost_estimate_usd'] = $null
+            $thisRun['totals']['cost_estimate_usd'] = $null
+
+            $flags = Get-CostAnomalyFlags -ThisRun $thisRun -RollingHistory $history
+
+            ($flags | Where-Object { $_.metric -eq 'cost_estimate_usd[experience]' }) | Should -BeNullOrEmpty
+            ($flags | Where-Object { $_.metric -eq 'cost_estimate_usd.total' }) | Should -BeNullOrEmpty
+        }
+
         It 'returns empty array when rolling history is empty' {
             $thisRun = script:New-MinimalAttribution -PortName 'experience' -DispatchCount 5
 

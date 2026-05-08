@@ -63,6 +63,15 @@ function script:Get-MetricBaseKey {
     return $MetricKey
 }
 
+function script:ConvertTo-NullableMetricDouble {
+    [OutputType([object])]
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string] -and ([string]::IsNullOrWhiteSpace($Value) -or [string]$Value -eq 'null')) { return $null }
+    return [double]$Value
+}
+
 function script:Get-MetricValue {
     <#
     .SYNOPSIS
@@ -115,7 +124,7 @@ function script:Get-MetricValue {
     }
     elseif ($baseKey -eq 'cost_estimate_usd' -and $Port) {
         if (-not $Entry.ports.ContainsKey($Port)) { return $null }
-        return [double]$Entry.ports[$Port].cost_estimate_usd
+        return script:ConvertTo-NullableMetricDouble -Value $Entry.ports[$Port].cost_estimate_usd
     }
     elseif ($MetricKey -eq 'orchestrator_overhead.tokens.input') {
         return [double]$Entry.orchestrator_overhead.tokens.input
@@ -127,7 +136,7 @@ function script:Get-MetricValue {
         return [double]$Entry.dispatches.general_purpose_count
     }
     elseif ($MetricKey -eq 'cost_estimate_usd.total') {
-        return [double]$Entry.totals.cost_estimate_usd
+        return script:ConvertTo-NullableMetricDouble -Value $Entry.totals.cost_estimate_usd
     }
 
     return $null

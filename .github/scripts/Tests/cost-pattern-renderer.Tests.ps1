@@ -567,6 +567,18 @@ Describe 'Format-CostPatternYaml' {
         $result | Should -Match 'cost_estimate_usd: 0\.0123'
     }
 
+    It 'preserves null port, overhead, and total cost estimates in YAML' {
+        $attribution = script:New-YamlAttribution
+        $attribution['ports']['experience']['cost_estimate_usd'] = $null
+        $attribution['orchestrator_overhead']['cost_estimate_usd'] = $null
+        $attribution['totals']['cost_estimate_usd'] = $null
+
+        $result = Format-CostPatternYaml -Attribution $attribution -Completeness (script:New-YamlCompleteness)
+
+        $result | Should -Match '(?m)^    cost_estimate_usd: null$'
+        $result | Should -Match '(?m)^  cost_estimate_usd: null$'
+    }
+
     It 'emits anomaly_flags array' {
         $attribution = script:New-YamlAttribution
         $completeness = script:New-YamlCompleteness

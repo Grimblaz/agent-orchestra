@@ -182,6 +182,21 @@ function script:Get-CostCopilotTokenCount {
     return 0
 }
 
+function script:Get-CostCopilotRecordEventName {
+    param([AllowNull()][object]$Record)
+
+    $eventName = script:Get-CostCopilotNonBlankString -Value (script:Get-CostCopilotAttributeValue -Record $Record -Name 'event.name')
+    if ($null -ne $eventName) { return $eventName }
+
+    $body = script:Get-CostCopilotNonBlankString -Value (script:Get-CostCopilotObjectValue -Object $Record -Name '_body')
+    if ($null -eq $body) { return $null }
+
+    $colonIndex = $body.IndexOf(':')
+    if ($colonIndex -gt 0) { return $body.Substring(0, $colonIndex).Trim() }
+
+    return $body
+}
+
 function script:New-CostCopilotSessionBucket {
     param(
         [Parameter(Mandatory)][string]$SessionId,
@@ -189,12 +204,16 @@ function script:New-CostCopilotSessionBucket {
     )
 
     return [ordered]@{
-        SessionId    = $SessionId
-        Start        = $Timestamp
-        InputTokens  = 0
-        OutputTokens = 0
-        AgentType    = $null
-        Model        = $null
+        SessionId             = $SessionId
+        Start                 = $Timestamp
+        InputTokens           = 0
+        OutputTokens          = 0
+        InferenceInputTokens  = 0
+        InferenceOutputTokens = 0
+        AgentTurnInputTokens  = 0
+        AgentTurnOutputTokens = 0
+        AgentType             = $null
+        Model                 = $null
     }
 }
 
@@ -215,8 +234,32 @@ function script:Update-CostCopilotSessionBucket {
     $model = if ($null -ne $responseModel) { $responseModel } else { $requestModel }
     if ($null -ne $model) { $Bucket['Model'] = $model }
 
-    $Bucket['InputTokens'] += script:Get-CostCopilotTokenCount -Record $Record -Name 'gen_ai.usage.input_tokens'
-    $Bucket['OutputTokens'] += script:Get-CostCopilotTokenCount -Record $Record -Name 'gen_ai.usage.output_tokens'
+    $inputTokens = script:Get-CostCopilotTokenCount -Record $Record -Name 'gen_ai.usage.input_tokens'
+    $outputTokens = script:Get-CostCopilotTokenCount -Record $Record -Name 'gen_ai.usage.output_tokens'
+    if (($inputTokens + $outputTokens) -le 0) { return }
+
+    $eventName = script:Get-CostCopilotRecordEventName -Record $Record
+    if ($eventName -eq 'copilot_chat.agent.turn') {
+        $Bucket['AgentTurnInputTokens'] += $inputTokens
+        $Bucket['AgentTurnOutputTokens'] += $outputTokens
+        return
+    }
+
+    $Bucket['InferenceInputTokens'] += $inputTokens
+    $Bucket['InferenceOutputTokens'] += $outputTokens
+}
+
+function script:Resolve-CostCopilotSessionToken {
+    param([Parameter(Mandatory)][System.Collections.IDictionary]$Bucket)
+
+    if (([int]$Bucket['InferenceInputTokens'] + [int]$Bucket['InferenceOutputTokens']) -gt 0) {
+        $Bucket['InputTokens'] = [int]$Bucket['InferenceInputTokens']
+        $Bucket['OutputTokens'] = [int]$Bucket['InferenceOutputTokens']
+        return
+    }
+
+    $Bucket['InputTokens'] = [int]$Bucket['AgentTurnInputTokens']
+    $Bucket['OutputTokens'] = [int]$Bucket['AgentTurnOutputTokens']
 }
 
 function script:Read-CostCopilotSessions {
@@ -251,6 +294,10 @@ function script:Read-CostCopilotSessions {
         }
 
         script:Update-CostCopilotSessionBucket -Bucket $sessions[$sessionId] -Record $record -Timestamp $timestamp
+    }
+
+    foreach ($session in $sessions.Values) {
+        script:Resolve-CostCopilotSessionToken -Bucket $session
     }
 
     return @($sessions.Values | Where-Object { ([int]$_['InputTokens'] + [int]$_['OutputTokens']) -gt 0 })

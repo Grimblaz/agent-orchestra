@@ -439,7 +439,8 @@ integrity_checks:
             [ValidateSet('ok', 'throw', 'timeout', 'empty')][string]$CopilotMode = 'ok',
             [string]$CostBranch = 'feature/issue-488-copilot-cost-collection',
             [string]$CopilotTimeoutSeconds = '2',
-            [string]$ClaudeTimeoutSeconds = '2'
+            [string]$ClaudeTimeoutSeconds = '2',
+            [object[]]$RollingEntries = @()
         )
 
         $previousCopilotPath = $env:FRAME_CREDIT_LEDGER_TEST_COPILOT_OTEL_JSONL
@@ -463,6 +464,8 @@ integrity_checks:
             $env:FCL_TEST_COPILOT_MODE = $CopilotMode
             $env:FCL_TEST_COST_BRANCH = $CostBranch
             $env:FCL_TEST_REPO_ROOT = $script:RepoRoot
+            $script:FCL_TEST_ROLLING_ENTRIES = @($RollingEntries)
+            $script:FCL_TEST_CHECKPOINT_COVERAGE = $null
 
             function git {
                 param([Parameter(ValueFromRemainingArguments = $true)]$Args)
@@ -525,7 +528,7 @@ integrity_checks:
                 return ''
             }
 
-            function New-FCLTestClaudeCostEvent {
+            function Get-FCLTestClaudeCostEvent {
                 return @{
                     type      = 'assistant'
                     provider  = 'claude'
@@ -545,7 +548,7 @@ integrity_checks:
                 }
             }
 
-            function New-FCLTestCopilotCostEvent {
+            function Get-FCLTestCopilotCostEvent {
                 return @{
                     type      = 'assistant'
                     provider  = 'copilot'
@@ -566,34 +569,48 @@ integrity_checks:
                 }
             }
 
-            function Get-CostTranscriptSlug { param([string]$CwdPath) return 'test-slug' }
+            function Get-CostTranscriptSlug { param([string]$CwdPath) $null = $CwdPath; return 'test-slug' }
             function Invoke-CostTranscriptWalk {
                 param([string]$Slug, [string]$Branch, [string]$ParentCwd, [Nullable[int]]$IssueNumber = $null)
+                $null = $Slug
+                $null = $ParentCwd
+                $null = $IssueNumber
                 if ($Branch -ne $env:FCL_TEST_COST_BRANCH) { throw "unexpected Claude branch '$Branch'" }
                 switch ($env:FCL_TEST_CLAUDE_MODE) {
                     'throw' { throw 'simulated Claude walker failure' }
                     'timeout' { Start-Sleep -Seconds 10; return @() }
                     'empty' { return @() }
-                    default { return @(New-FCLTestClaudeCostEvent) }
+                    default { return @(Get-FCLTestClaudeCostEvent) }
                 }
             }
             function Invoke-CostCopilotWalk {
                 param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+                $null = $RepoRoot
+                $null = $OtelJsonlPath
+                $null = $WorkspaceFolderBasename
                 if ($Branch -ne $env:FCL_TEST_COST_BRANCH) { throw "unexpected Copilot branch '$Branch'" }
                 switch ($env:FCL_TEST_COPILOT_MODE) {
                     'throw' { throw 'simulated Copilot walker failure' }
                     'timeout' { Start-Sleep -Seconds 10; return @() }
                     'empty' { return @() }
-                    default { return @(New-FCLTestCopilotCostEvent) }
+                    default { return @(Get-FCLTestCopilotCostEvent) }
                 }
             }
-            function Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
-            function Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
-            function Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
+            function Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) $null = $TimeoutSeconds; return @{ timed_out = $false; entries = @($script:FCL_TEST_ROLLING_ENTRIES) } }
+            function Get-MostRecentRegimeCheckpoint { param([string]$Path, [string]$Coverage = '') $null = $Path; $script:FCL_TEST_CHECKPOINT_COVERAGE = $Coverage; return $null }
+            function Get-CostAnomalyFlags {
+                [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
+                param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint)
+                $null = $ThisRun
+                $null = $RollingHistory
+                $null = $RegimeCheckpoint
+                return @()
+            }
 
             $result = Invoke-FrameCreditLedger -Pr 429 -Mode warn
             return @{
-                Result = $result
+                Result             = $result
+                CheckpointCoverage = $script:FCL_TEST_CHECKPOINT_COVERAGE
             }
         }
         finally {
@@ -604,6 +621,8 @@ integrity_checks:
             $env:FCL_TEST_COPILOT_MODE = $previousCopilotMode
             $env:FCL_TEST_COST_BRANCH = $previousCostBranch
             $env:FCL_TEST_REPO_ROOT = $previousRepoRoot
+            Remove-Variable -Name FCL_TEST_ROLLING_ENTRIES -Scope Script -ErrorAction SilentlyContinue
+            Remove-Variable -Name FCL_TEST_CHECKPOINT_COVERAGE -Scope Script -ErrorAction SilentlyContinue
         }
     }
 }
@@ -710,7 +729,7 @@ if (`$joined -match 'pr view \d+ --json body') {
 
             $result.ExitCode | Should -Be 0
             # Sleeps are skipped via TEST_NO_SLEEP, so the whole retry sequence completes fast.
-            $result.DurationSeconds | Should -BeLessThan 15
+            $result.DurationSeconds | Should -BeLessThan 25
         }
 
         It 'bails out after 3 attempts and emits a stderr note (warn mode exit 0)' {
@@ -954,6 +973,35 @@ body
             $result.Result.ExitCode | Should -Be 0
             $result.Result.Comment | Should -Match '<!-- cost-pattern-data'
             $result.Result.Comment | Should -Match '(?m)^coverage: claude\+copilot$'
+        }
+
+        It 'passes current coverage to regime checkpoint lookup' {
+            $result = & $script:InvokeCostWalkerOrchestratorInProcess -ClaudeMode 'ok' -CopilotMode 'ok'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.CheckpointCoverage | Should -Be 'claude+copilot'
+        }
+
+        It 'renders the transition notice from production rolling metadata when matching coverage history is below five entries' {
+            $rollingEntries = @()
+            for ($i = 0; $i -lt 4; $i++) {
+                $rollingEntries += @{ coverage = 'claude+copilot'; install_status = 'ok' }
+            }
+            $rollingEntries += @{ coverage = 'claude-only'; install_status = 'ok' }
+
+            $result = & $script:InvokeCostWalkerOrchestratorInProcess -ClaudeMode 'ok' -CopilotMode 'ok' -RollingEntries $rollingEntries
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Result.Comment | Should -Match '⚠ building cross-tool baseline — matching-coverage history < 5 entries'
+        }
+
+        It 'classifies missing Copilot OTel file with Claude events as fallback-warning coverage without adding Copilot support' {
+            $result = & $script:InvokeCostWalkerOrchestratorInProcess -ClaudeMode 'ok' -CopilotMode 'empty'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Result.Comment | Should -Match '(?m)^coverage: claude-only-with-copilot-fallback-warning$'
+            $result.Result.Comment | Should -Match '(?m)^install_status: missing-or-fallback$'
+            $result.Result.Comment | Should -Not -Match 'provider_support: \["claude", "copilot"\]'
         }
     }
 

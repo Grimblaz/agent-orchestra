@@ -41,8 +41,8 @@ jobs:
                 "claude+copilot")
                   echo "Cost Pattern coverage is claude+copilot"
                   ;;
-                "claude-only"|"claude-only-with-copilot-fallback-warning")
-                  echo "::warning::Cost Pattern coverage is $COVERAGE; Copilot telemetry was not merged for this run"
+                "claude-only"|"copilot-only"|"claude-only-with-copilot-fallback-warning")
+                  echo "::warning::Cost Pattern coverage is $COVERAGE; full cross-tool telemetry was not merged for this run"
                   ;;
                 "")
                   echo "::error::cost-pattern-data marker is missing a coverage line"

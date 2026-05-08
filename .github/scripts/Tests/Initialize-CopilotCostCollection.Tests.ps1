@@ -70,6 +70,7 @@ Describe 'Initialize-CopilotCostCollection' {
         $gitignoreLines = @(Get-Content -Path $gitignorePath)
         $gitignoreLines | Should -Contain 'existing.log'
         @($gitignoreLines | Where-Object { $_ -eq $script:SentinelName }).Count | Should -Be 1
+        @($gitignoreLines | Where-Object { $_ -eq '.vscode/settings.json' }).Count | Should -Be 1
 
         $sentinelPath = Join-Path -Path $paths.Workspace -ChildPath $script:SentinelName
         Test-Path $sentinelPath | Should -BeTrue
@@ -154,6 +155,52 @@ Describe 'Initialize-CopilotCostCollection' {
         Get-Content -Path $gitignorePath -Raw | Should -Be $before.Gitignore
         Get-Content -Path $sentinelPath -Raw | Should -Be $before.Sentinel
         @((Get-Content -Path $gitignorePath) | Where-Object { $_ -eq $script:SentinelName }).Count | Should -Be 1
+        @((Get-Content -Path $gitignorePath) | Where-Object { $_ -eq '.vscode/settings.json' }).Count | Should -Be 1
+    }
+
+    It 'additively gitignores workspace settings when writing the literal OTel outfile path' {
+        $paths = script:New-IsolatedPaths
+        $gitignorePath = Join-Path -Path $paths.Workspace -ChildPath '.gitignore'
+
+        $result = & $script:ScriptPath `
+            -UserSettingsPath $paths.UserSettings `
+            -WorkspacePath $paths.Workspace `
+            -UserHome $paths.UserHome `
+            -Yes `
+            -NonInteractive
+
+        $result.Changed | Should -BeTrue
+        $gitignoreLines = @(Get-Content -Path $gitignorePath)
+        $gitignoreLines | Should -Contain '.vscode/settings.json'
+    }
+
+    It 'warns when workspace settings are already tracked because gitignore cannot protect the literal path' {
+        $paths = script:New-IsolatedPaths
+        $workspaceSettingsDir = Join-Path -Path $paths.Workspace -ChildPath '.vscode'
+        $workspaceSettingsPath = Join-Path -Path $workspaceSettingsDir -ChildPath 'settings.json'
+        $null = New-Item -ItemType Directory -Path $workspaceSettingsDir -Force
+        @{ 'files.trimTrailingWhitespace' = $true } | ConvertTo-Json | Set-Content -Path $workspaceSettingsPath -Encoding utf8NoBOM
+
+        $resolvedWorkspace = (Resolve-Path -Path $paths.Workspace).ProviderPath
+        $gitPath = (Get-Command git -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+        $null = & $gitPath -C $resolvedWorkspace init 2>$null
+        $null = & $gitPath -C $resolvedWorkspace add -f .vscode/settings.json 2>$null
+        $null = & $gitPath -C $resolvedWorkspace ls-files --error-unmatch -- .vscode/settings.json 2>$null
+        $LASTEXITCODE | Should -Be 0 -Because 'the fixture must make workspace settings tracked before installer runs'
+
+        $result = & $script:ScriptPath `
+            -UserSettingsPath $paths.UserSettings `
+            -WorkspacePath $paths.Workspace `
+            -UserHome $paths.UserHome `
+            -Yes `
+            -NonInteractive `
+            -WarningVariable warnings
+
+        $result.Changed | Should -BeTrue
+        $warnings | Where-Object { [string]$_ -match '\.vscode/settings\.json' -and [string]$_ -match 'already tracked' -and [string]$_ -match '\.gitignore cannot protect' } | Should -Not -BeNullOrEmpty
+
+        $gitignorePath = Join-Path -Path $paths.Workspace -ChildPath '.gitignore'
+        @(Get-Content -Path $gitignorePath) | Should -Contain '.vscode/settings.json'
     }
 
     It 'fails clearly in non-interactive mode when install changes need confirmation and -Yes is absent' {

@@ -1103,6 +1103,50 @@ function script:Get-FCLCostUnmappedSessionCount {
     return $total
 }
 
+function script:Get-FCLCostMetadataValue {
+    param(
+        [AllowNull()][object]$Entry,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $Entry) { return $null }
+    if ($Entry -is [System.Collections.IDictionary]) { return $Entry[$Name] }
+    $property = $Entry.PSObject.Properties[$Name]
+    if ($null -ne $property) { return $property.Value }
+    return $null
+}
+
+function script:Get-FCLEffectiveCostCoverageClass {
+    param([AllowNull()][object]$Entry)
+
+    $installStatus = script:Get-FCLCostMetadataValue -Entry $Entry -Name 'install_status'
+    if ([string]$installStatus -eq 'missing-or-fallback') { return 'claude-only' }
+
+    $coverage = script:Get-FCLCostMetadataValue -Entry $Entry -Name 'coverage'
+    if (-not [string]::IsNullOrWhiteSpace([string]$coverage)) { return [string]$coverage }
+
+    return 'claude-only'
+}
+
+function script:Set-FCLRollingMetaCoverageCount {
+    param(
+        [Parameter(Mandatory)][hashtable]$RollingResult,
+        [Parameter(Mandatory)][hashtable]$Attribution
+    )
+
+    if ($RollingResult['timed_out'] -eq $true) { return }
+
+    $currentCoverage = script:Get-FCLEffectiveCostCoverageClass -Entry $Attribution
+    $matchingCount = 0
+    foreach ($entry in @($RollingResult['entries'])) {
+        if ((script:Get-FCLEffectiveCostCoverageClass -Entry $entry) -eq $currentCoverage) {
+            $matchingCount++
+        }
+    }
+
+    $RollingResult['matching_coverage_history_count'] = $matchingCount
+}
+
 function script:Set-FCLCostCoverageMetadata {
     param(
         [Parameter(Mandatory)][hashtable]$Attribution,
@@ -1120,15 +1164,15 @@ function script:Set-FCLCostCoverageMetadata {
     $copilotTimedOut = ($null -ne $CopilotWalk -and $CopilotWalk.TimedOut -eq $true)
     $copilotFailed = ($null -ne $CopilotWalk -and $CopilotWalk.Failed -eq $true)
 
-    $coverage = 'claude-only'
-    if ($hasClaude -and $hasCopilot) { $coverage = 'claude+copilot' }
-    elseif ($hasCopilot) { $coverage = 'copilot-only' }
-    elseif ($hasClaude -and ($copilotTimedOut -or $copilotFailed -or $unmappedSessionCount -gt 0)) { $coverage = 'claude-only-with-copilot-fallback-warning' }
-
     $installStatus = 'ok'
     if ([string]::IsNullOrWhiteSpace($CopilotOtelJsonlPath) -or -not (Test-Path -LiteralPath $CopilotOtelJsonlPath -PathType Leaf)) {
         $installStatus = 'missing-or-fallback'
     }
+
+    $coverage = 'claude-only'
+    if ($hasClaude -and $hasCopilot) { $coverage = 'claude+copilot' }
+    elseif ($hasCopilot) { $coverage = 'copilot-only' }
+    elseif ($hasClaude -and ($copilotTimedOut -or $copilotFailed -or $unmappedSessionCount -gt 0 -or $installStatus -eq 'missing-or-fallback')) { $coverage = 'claude-only-with-copilot-fallback-warning' }
 
     if ($providers.Count -eq 0) { $providers = @('claude') }
 
@@ -1458,13 +1502,14 @@ function Invoke-FrameCreditLedger {
                 try { $rollingResult = Get-CostRollingHistory -TimeoutSeconds ([Math]::Min(10, $remainingCostBudgetSeconds)) }
                 catch { $rollingResult = @{ timed_out = $true; entries = @() } }
             }
+            script:Set-FCLRollingMetaCoverageCount -RollingResult $rollingResult -Attribution $costAttribution
 
             # 6d. Regime checkpoint
             $checkpoint = $null
             if ((script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
                 try {
                     $cpPath = Join-Path $repoRoot '.github/scripts/cost-regime-checkpoints.yaml'
-                    if (Test-Path $cpPath) { $checkpoint = Get-MostRecentRegimeCheckpoint -Path $cpPath }
+                    if (Test-Path $cpPath) { $checkpoint = Get-MostRecentRegimeCheckpoint -Path $cpPath -Coverage ([string]$costAttribution['coverage']) }
                 }
                 catch { $checkpoint = $null }
             }
