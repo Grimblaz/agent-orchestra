@@ -41,6 +41,44 @@ function script:Format-Cost {
     return "`$$formatted"
 }
 
+function script:Format-CostRendererTokenCell {
+    [OutputType([string])]
+    param([AllowNull()][object]$Value)
+
+    if ($null -ne $Value -and [int]$Value -gt 0) {
+        return script:Format-TokenCount -Value ([int]$Value)
+    }
+
+    return '—'
+}
+
+function script:Format-CostRendererCostCell {
+    [OutputType([string])]
+    param([AllowNull()][object]$Value)
+
+    if ($null -ne $Value -and [double]$Value -gt 0) {
+        return script:Format-Cost -Value ([double]$Value)
+    }
+
+    return '—'
+}
+
+function script:Format-CostRendererRatioCell {
+    [OutputType([string])]
+    param(
+        [int]$InputTokens,
+        [int]$CacheCreationTokens,
+        [int]$CacheReadTokens,
+        [double]$Ratio
+    )
+
+    if (($InputTokens + $CacheCreationTokens + $CacheReadTokens) -gt 0) {
+        return script:Format-Ratio -Value $Ratio
+    }
+
+    return '—'
+}
+
 function script:Format-CostYaml {
     <#
     .SYNOPSIS Formats a USD cost as a bare double string for YAML (invariant culture, 4 decimal places). #>
@@ -64,6 +102,121 @@ function script:Format-RatioYaml {
     [OutputType([string])]
     param([double]$Value)
     return $Value.ToString('0.000', [System.Globalization.CultureInfo]::InvariantCulture)
+}
+
+function script:Test-CostRendererHasKey {
+    param(
+        [AllowNull()][object]$Bucket,
+        [Parameter(Mandatory)][string]$Key
+    )
+
+    return ($Bucket -is [hashtable] -and $Bucket.ContainsKey($Key))
+}
+
+function script:Format-CostRendererYamlArray {
+    [OutputType([string])]
+    param([AllowEmptyCollection()][object[]]$Values)
+
+    $items = @($Values | Where-Object { $null -ne $_ -and [string]$_ -ne '' } | ForEach-Object { '"' + [string]$_ + '"' })
+    return '[' + ($items -join ', ') + ']'
+}
+
+function script:Format-CostRendererYamlScalar {
+    [OutputType([string])]
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return 'null' }
+    if ($Value -is [bool]) { return ($Value ? 'true' : 'false') }
+    if ($Value -is [double] -or $Value -is [float] -or $Value -is [decimal]) {
+        return ([double]$Value).ToString('0.0000', [System.Globalization.CultureInfo]::InvariantCulture)
+    }
+    return [string]$Value
+}
+
+function script:Get-CostRendererProviderBucket {
+    param(
+        [AllowNull()][hashtable]$Bucket,
+        [Parameter(Mandatory)][string]$Provider
+    )
+
+    if (script:Test-CostRendererHasKey -Bucket $Bucket -Key 'providers') {
+        $providers = $Bucket['providers']
+        if ($providers -is [hashtable] -and $providers.ContainsKey($Provider)) {
+            return $providers[$Provider]
+        }
+    }
+
+    return $null
+}
+
+function script:Test-CostRendererSupportsProvider {
+    param(
+        [AllowNull()][hashtable]$Bucket,
+        [Parameter(Mandatory)][string]$Provider
+    )
+
+    if (script:Test-CostRendererHasKey -Bucket $Bucket -Key 'provider_support') {
+        if (@($Bucket['provider_support']) -contains $Provider) { return $true }
+    }
+
+    if (script:Test-CostRendererHasKey -Bucket $Bucket -Key 'providers') {
+        $providers = $Bucket['providers']
+        if ($providers -is [hashtable] -and $providers.ContainsKey($Provider)) { return $true }
+    }
+
+    return $false
+}
+
+function script:Test-CostRendererMergedPort {
+    param([AllowNull()][hashtable]$Bucket)
+
+    return ((script:Test-CostRendererSupportsProvider -Bucket $Bucket -Provider 'claude') -and
+        (script:Test-CostRendererSupportsProvider -Bucket $Bucket -Provider 'copilot'))
+}
+
+function script:Test-CostRendererCopilotOnlyRow {
+    param([AllowNull()][hashtable]$Bucket)
+
+    return ((script:Test-CostRendererSupportsProvider -Bucket $Bucket -Provider 'copilot') -and
+        -not (script:Test-CostRendererSupportsProvider -Bucket $Bucket -Provider 'claude'))
+}
+
+function script:Test-CostRendererCopilotCacheUnavailable {
+    param([AllowNull()][hashtable]$Bucket)
+
+    if ((script:Test-CostRendererHasKey -Bucket $Bucket -Key 'cache_metric_unavailable') -and $Bucket['cache_metric_unavailable'] -eq $true) {
+        return $true
+    }
+
+    $copilot = script:Get-CostRendererProviderBucket -Bucket $Bucket -Provider 'copilot'
+    return ((script:Test-CostRendererHasKey -Bucket $copilot -Key 'cache_metric_unavailable') -and $copilot['cache_metric_unavailable'] -eq $true)
+}
+
+function script:Test-CostRendererCopilotRateUnavailable {
+    param([AllowNull()][hashtable]$Bucket)
+
+    if ((script:Test-CostRendererHasKey -Bucket $Bucket -Key 'rate_unavailable') -and $Bucket['rate_unavailable'] -eq $true) {
+        return $true
+    }
+
+    $copilot = script:Get-CostRendererProviderBucket -Bucket $Bucket -Provider 'copilot'
+    return ((script:Test-CostRendererHasKey -Bucket $copilot -Key 'rate_unavailable') -and $copilot['rate_unavailable'] -eq $true)
+}
+
+function script:Get-CostRendererCoverage {
+    param([Parameter(Mandatory)][hashtable]$Attribution)
+
+    if ($Attribution.ContainsKey('coverage') -and -not [string]::IsNullOrWhiteSpace([string]$Attribution['coverage'])) {
+        return [string]$Attribution['coverage']
+    }
+
+    return ''
+}
+
+function script:Test-CostRendererCrossToolCoverage {
+    param([AllowEmptyString()][string]$Coverage)
+
+    return @('claude+copilot', 'copilot-only', 'claude-only-with-copilot-fallback-warning') -contains $Coverage
 }
 
 #endregion
@@ -95,8 +248,7 @@ function script:Build-CostPatternHeader {
 
     # unknown session
     if ($completenessValue -eq 'unknown') {
-        $reason = if ($stopReason) { $stopReason } else { 'no assistant events' }
-        return "## Cost Pattern `u{26A0} session not found or unrecognized ($reason); cost-fields unavailable; this run is excluded from rolling-history aggregation"
+        return "## Cost Pattern `u{26A0} no Claude or Copilot session activity recorded for this PR's branch; cross-tool collection is enabled — see ``Initialize-CopilotCostCollection`` if Copilot is installed but data is missing, or #488 for diagnostics. cost-fields unavailable; this run is excluded from rolling-history aggregation"
     }
 
     # rolling-history timed out
@@ -202,6 +354,8 @@ function script:Build-CostPatternTable {
     )
 
     $lines = [System.Collections.Generic.List[string]]::new()
+    $hasCopilotCacheMetricFootnote = $false
+    $hasCopilotRateFootnote = $false
 
     # Header row
     $lines.Add('| Port | Dispatches | Input Tokens | Output Tokens | Cache Creation | Cache Read | Cache Hit% | Cost (USD) | Anomalies |')
@@ -249,16 +403,23 @@ function script:Build-CostPatternTable {
             $cr = $tok['cache_read']
             $ratio = $bucket['cache_read_hit_ratio']
             $cost = $bucket['cost_estimate_usd']
+            $displayPortName = if (script:Test-CostRendererMergedPort -Bucket $bucket) { "$portName (merged)" } else { $portName }
+            $copilotOnlyRow = script:Test-CostRendererCopilotOnlyRow -Bucket $bucket
+            $copilotCacheUnavailable = $copilotOnlyRow -and (script:Test-CostRendererCopilotCacheUnavailable -Bucket $bucket)
+            $copilotRateUnavailable = $copilotOnlyRow -and (script:Test-CostRendererCopilotRateUnavailable -Bucket $bucket)
 
-            $inputStr = if ($inputTok -gt 0) { script:Format-TokenCount -Value $inputTok } else { '—' }
-            $outputStr = if ($outputTok -gt 0) { script:Format-TokenCount -Value $outputTok } else { '—' }
-            $ccStr = if ($cc -gt 0) { script:Format-TokenCount -Value $cc } else { '—' }
-            $crStr = if ($cr -gt 0) { script:Format-TokenCount -Value $cr } else { '—' }
-            $ratioStr = if (($inputTok + $cc + $cr) -gt 0) { script:Format-Ratio -Value $ratio } else { '—' }
-            $costStr = if ($cost -gt 0) { script:Format-Cost -Value $cost } else { '—' }
+            $inputStr = script:Format-CostRendererTokenCell -Value $inputTok
+            $outputStr = script:Format-CostRendererTokenCell -Value $outputTok
+            $ccStr = if ($copilotCacheUnavailable) { 'n/a *' } else { script:Format-CostRendererTokenCell -Value $cc }
+            $crStr = if ($copilotCacheUnavailable) { 'n/a *' } else { script:Format-CostRendererTokenCell -Value $cr }
+            $ratioStr = if ($copilotCacheUnavailable) { 'n/a *' } else { script:Format-CostRendererRatioCell -InputTokens $inputTok -CacheCreationTokens $cc -CacheReadTokens $cr -Ratio $ratio }
+            $costStr = if ($copilotRateUnavailable) { '' } else { script:Format-CostRendererCostCell -Value $cost }
             $anomStr = script:Get-PortAnomalyNames -AnomalyFlags $AnomalyFlags -PortName $portName
 
-            $lines.Add("| $portName | $dc | $inputStr | $outputStr | $ccStr | $crStr | $ratioStr | $costStr |$anomStr|")
+            if ($copilotCacheUnavailable) { $hasCopilotCacheMetricFootnote = $true }
+            if ($copilotRateUnavailable) { $hasCopilotRateFootnote = $true }
+
+            $lines.Add("| $displayPortName | $dc | $inputStr | $outputStr | $ccStr | $crStr | $ratioStr | $costStr |$anomStr|")
         }
         else {
             # Port not in attribution — zero dispatches, dashes for everything
@@ -279,12 +440,12 @@ function script:Build-CostPatternTable {
         $ratio = $bucket['cache_read_hit_ratio']
         $cost = $bucket['cost_estimate_usd']
 
-        $inputStr = if ($inputTok -gt 0) { script:Format-TokenCount -Value $inputTok } else { '—' }
-        $outputStr = if ($outputTok -gt 0) { script:Format-TokenCount -Value $outputTok } else { '—' }
-        $ccStr = if ($cc -gt 0) { script:Format-TokenCount -Value $cc } else { '—' }
-        $crStr = if ($cr -gt 0) { script:Format-TokenCount -Value $cr } else { '—' }
-        $ratioStr = if (($inputTok + $cc + $cr) -gt 0) { script:Format-Ratio -Value $ratio } else { '—' }
-        $costStr = if ($cost -gt 0) { script:Format-Cost -Value $cost } else { '—' }
+        $inputStr = script:Format-CostRendererTokenCell -Value $inputTok
+        $outputStr = script:Format-CostRendererTokenCell -Value $outputTok
+        $ccStr = script:Format-CostRendererTokenCell -Value $cc
+        $crStr = script:Format-CostRendererTokenCell -Value $cr
+        $ratioStr = script:Format-CostRendererRatioCell -InputTokens $inputTok -CacheCreationTokens $cc -CacheReadTokens $cr -Ratio $ratio
+        $costStr = script:Format-CostRendererCostCell -Value $cost
         $lines.Add("| dispatches.general_purpose | $dc | $inputStr | $outputStr | $ccStr | $crStr | $ratioStr | $costStr | — |")
     }
     else {
@@ -298,11 +459,11 @@ function script:Build-CostPatternTable {
         $bucket = $ports['unattributed-dispatch']
         $dc = $uaCount
         $tok = $bucket['tokens']
-        $inputStr = if ($tok['input'] -gt 0) { script:Format-TokenCount -Value $tok['input'] } else { '—' }
-        $outputStr = if ($tok['output'] -gt 0) { script:Format-TokenCount -Value $tok['output'] } else { '—' }
-        $ccStr = if ($tok['cache_creation'] -gt 0) { script:Format-TokenCount -Value $tok['cache_creation'] } else { '—' }
-        $crStr = if ($tok['cache_read'] -gt 0) { script:Format-TokenCount -Value $tok['cache_read'] } else { '—' }
-        $costStr = if ($bucket['cost_estimate_usd'] -gt 0) { script:Format-Cost -Value $bucket['cost_estimate_usd'] } else { '—' }
+        $inputStr = script:Format-CostRendererTokenCell -Value $tok['input']
+        $outputStr = script:Format-CostRendererTokenCell -Value $tok['output']
+        $ccStr = script:Format-CostRendererTokenCell -Value $tok['cache_creation']
+        $crStr = script:Format-CostRendererTokenCell -Value $tok['cache_read']
+        $costStr = script:Format-CostRendererCostCell -Value $bucket['cost_estimate_usd']
         $lines.Add("| unattributed-dispatch | $dc | $inputStr | $outputStr | $ccStr | $crStr | — | $costStr | — |")
     }
     else {
@@ -318,12 +479,12 @@ function script:Build-CostPatternTable {
     $ohRatio = $overhead['cache_read_hit_ratio']
     $ohCost = $overhead['cost_estimate_usd']
 
-    $ohInputStr = if ($ohInput -gt 0) { script:Format-TokenCount -Value $ohInput } else { '—' }
-    $ohOutputStr = if ($ohOutput -gt 0) { script:Format-TokenCount -Value $ohOutput } else { '—' }
-    $ohCCStr = if ($ohCC -gt 0) { script:Format-TokenCount -Value $ohCC } else { '—' }
-    $ohCRStr = if ($ohCR -gt 0) { script:Format-TokenCount -Value $ohCR } else { '—' }
-    $ohRatioStr = if (($ohInput + $ohCC + $ohCR) -gt 0) { script:Format-Ratio -Value $ohRatio } else { '—' }
-    $ohCostStr = if ($ohCost -gt 0) { script:Format-Cost -Value $ohCost } else { '—' }
+    $ohInputStr = script:Format-CostRendererTokenCell -Value $ohInput
+    $ohOutputStr = script:Format-CostRendererTokenCell -Value $ohOutput
+    $ohCCStr = script:Format-CostRendererTokenCell -Value $ohCC
+    $ohCRStr = script:Format-CostRendererTokenCell -Value $ohCR
+    $ohRatioStr = script:Format-CostRendererRatioCell -InputTokens $ohInput -CacheCreationTokens $ohCC -CacheReadTokens $ohCR -Ratio $ohRatio
+    $ohCostStr = script:Format-CostRendererCostCell -Value $ohCost
     $ohFootnote = if ($hasSkillDriven) { ' *' } else { '' }
     $lines.Add("| orchestrator-overhead$ohFootnote | — | $ohInputStr | $ohOutputStr | $ohCCStr | $ohCRStr | $ohRatioStr | $ohCostStr | — |")
 
@@ -344,17 +505,27 @@ function script:Build-CostPatternTable {
     $totCR = $totTok['cache_read']
     $totCost = $totals['cost_estimate_usd']
 
-    $totInputStr = if ($totInput -gt 0) { script:Format-TokenCount -Value $totInput } else { '—' }
-    $totOutputStr = if ($totOutput -gt 0) { script:Format-TokenCount -Value $totOutput } else { '—' }
-    $totCCStr = if ($totCC -gt 0) { script:Format-TokenCount -Value $totCC } else { '—' }
-    $totCRStr = if ($totCR -gt 0) { script:Format-TokenCount -Value $totCR } else { '—' }
-    $totCostStr = if ($totCost -gt 0) { script:Format-Cost -Value $totCost } else { '—' }
+    $totInputStr = script:Format-CostRendererTokenCell -Value $totInput
+    $totOutputStr = script:Format-CostRendererTokenCell -Value $totOutput
+    $totCCStr = script:Format-CostRendererTokenCell -Value $totCC
+    $totCRStr = script:Format-CostRendererTokenCell -Value $totCR
+    $totCostStr = script:Format-CostRendererCostCell -Value $totCost
 
     $lines.Add("| **TOTAL** | **$totDisp** | **$totInputStr** | **$totOutputStr** | **$totCCStr** | **$totCRStr** | — | **$totCostStr** | |")
 
     if ($hasSkillDriven) {
         $lines.Add('')
         $lines.Add('*rolled into orchestrator-overhead')
+    }
+
+    if ($hasCopilotCacheMetricFootnote) {
+        $lines.Add('')
+        $lines.Add('Copilot cache metrics are unavailable from Copilot telemetry; cache cells marked n/a * are excluded from cache-hit baselines.')
+    }
+
+    if ($hasCopilotRateFootnote) {
+        $lines.Add('')
+        $lines.Add('Copilot per-token rates not published; cost figures excluded for Copilot rows.')
     }
 
     return $lines -join "`n"
@@ -398,18 +569,34 @@ function Format-CostPatternMarkdown {
 
     $header = script:Build-CostPatternHeader -Completeness $Completeness -AnomalyFlags $AnomalyFlags -RollingMeta $RollingMeta
     $table = script:Build-CostPatternTable  -Attribution $Attribution -AnomalyFlags $AnomalyFlags
+    $coverage = script:Get-CostRendererCoverage -Attribution $Attribution
+
+    $metadataLines = [System.Collections.Generic.List[string]]::new()
+    if ($coverage) {
+        $metadataLines.Add("coverage: $coverage")
+    }
+    if ((script:Test-CostRendererCrossToolCoverage -Coverage $coverage) -and
+        $null -ne $RollingMeta -and
+        $RollingMeta.ContainsKey('matching_coverage_history_count') -and
+        [int]$RollingMeta['matching_coverage_history_count'] -lt 5) {
+        $metadataLines.Add('⚠ building cross-tool baseline — matching-coverage history < 5 entries')
+    }
+    if ($coverage -eq 'claude-only-with-copilot-fallback-warning') {
+        $metadataLines.Add('Coverage tags: claude+copilot = Claude and Copilot telemetry merged; claude-only = Claude telemetry only; copilot-only = Copilot telemetry only; claude-only-with-copilot-fallback-warning = Claude telemetry only while Copilot collection is missing or unmapped.')
+    }
 
     # Fix Pass3-F4: surface null_cost_events when nonzero so unknown-model
     # cost undercounting is visible in the rendered markdown, not just buried
     # in the embedded YAML. Sums across ports and orchestrator overhead.
     $nullEventTotal = script:Get-CostRendererNullEventTotal -Attribution $Attribution
 
-    $body = "$header`n`n$table"
+    $body = $header
+    if ($metadataLines.Count -gt 0) {
+        $body += "`n`n" + ($metadataLines -join "`n")
+    }
+    $body += "`n`n$table"
     if ($nullEventTotal -gt 0) {
         $body += "`n`n> **Note**: $nullEventTotal cost event(s) had unknown models not present in ``cost-rate-table.json`` and contributed null to the cost estimate. Update the rate table to include the missing model(s) for accurate attribution."
-    }
-    if ($Completeness['completeness'] -eq 'unknown') {
-        $body += "`n`n> **Note**: No Claude-side cost data was found for this run; Copilot-side collection remains tracked by [#488](https://github.com/Grimblaz/agent-orchestra/issues/488)."
     }
     if ($Completeness['exclude_reason'] -eq 'phase-marker-only attribution; rolling-history excluded') {
         $body += "`n`n> **Note**: This Cost Pattern shows Claude-side phase-marker attribution. Copilot-side collection remains tracked by [#488](https://github.com/Grimblaz/agent-orchestra/issues/488)."
@@ -458,10 +645,25 @@ function Format-CostPatternYaml {
     $overhead = $Attribution['orchestrator_overhead']
     $dispatches = $Attribution['dispatches']
     $totals = $Attribution['totals']
+    $coverage = script:Get-CostRendererCoverage -Attribution $Attribution
+    [object[]]$providerSupport = if ($Attribution.ContainsKey('provider_support')) { @($Attribution['provider_support']) } else { @() }
+    $shouldEmitProviderSupport = ($providerSupport.Count -gt 0 -and -not ($providerSupport.Count -eq 1 -and [string]$providerSupport[0] -eq 'claude'))
 
     $sb = [System.Text.StringBuilder]::new()
     $null = $sb.AppendLine('<!-- cost-pattern-data')
     $null = $sb.AppendLine('version: 1')
+    if ($shouldEmitProviderSupport) {
+        $null = $sb.AppendLine('provider_support: ' + (script:Format-CostRendererYamlArray -Values $providerSupport))
+    }
+    if ($coverage) {
+        $null = $sb.AppendLine("coverage: $coverage")
+    }
+    if ($Attribution.ContainsKey('install_status')) {
+        $null = $sb.AppendLine("install_status: $($Attribution['install_status'])")
+    }
+    if ($Attribution.ContainsKey('unmapped_session_count')) {
+        $null = $sb.AppendLine("unmapped_session_count: $($Attribution['unmapped_session_count'])")
+    }
     $null = $sb.AppendLine("session_completeness: $completenessValue")
     $null = $sb.AppendLine("excluded_from_rolling_baseline: $excludedStr")
     $null = $sb.AppendLine("generated_at: $generatedAt")
@@ -481,15 +683,15 @@ function Format-CostPatternYaml {
     foreach ($portName in $portKeys) {
         $bucket = $ports[$portName]
         $tok = $bucket['tokens']
-        $cost = script:Format-CostYaml -Value ([double]$bucket['cost_estimate_usd'])
-        $ratio = script:Format-RatioYaml -Value ([double]$bucket['cache_read_hit_ratio'])
+        $cost = if ($null -ne $bucket['cost_estimate_usd']) { script:Format-CostYaml -Value ([double]$bucket['cost_estimate_usd']) } else { 'null' }
+        $ratio = if ($null -ne $bucket['cache_read_hit_ratio']) { script:Format-RatioYaml -Value ([double]$bucket['cache_read_hit_ratio']) } else { 'null' }
         $mixed = if ($bucket['mixed_regime']) { 'true' } else { 'false' }
         $null = $sb.AppendLine("  - name: $portName")
         $null = $sb.AppendLine('    tokens:')
-        $null = $sb.AppendLine("      input: $($tok['input'])")
-        $null = $sb.AppendLine("      output: $($tok['output'])")
-        $null = $sb.AppendLine("      cache_creation: $($tok['cache_creation'])")
-        $null = $sb.AppendLine("      cache_read: $($tok['cache_read'])")
+        $null = $sb.AppendLine('      input: ' + (script:Format-CostRendererYamlScalar -Value $tok['input']))
+        $null = $sb.AppendLine('      output: ' + (script:Format-CostRendererYamlScalar -Value $tok['output']))
+        $null = $sb.AppendLine('      cache_creation: ' + (script:Format-CostRendererYamlScalar -Value $tok['cache_creation']))
+        $null = $sb.AppendLine('      cache_read: ' + (script:Format-CostRendererYamlScalar -Value $tok['cache_read']))
         $null = $sb.AppendLine("    dispatch_count: $($bucket['dispatch_count'])")
         $null = $sb.AppendLine("    prompt_size_chars: $($bucket['prompt_size_chars'])")
         $null = $sb.AppendLine("    cost_estimate_usd: $cost")
@@ -501,6 +703,45 @@ function Format-CostPatternYaml {
         $nullEvents = script:Get-CostRendererIntValue -Bucket $bucket -Key 'null_cost_events'
         $null = $sb.AppendLine("    null_cost_events: $nullEvents")
         $null = $sb.AppendLine("    mixed_regime: $mixed")
+        if ($bucket.ContainsKey('provider_support')) {
+            [object[]]$portProviderSupport = @($bucket['provider_support'])
+            if ($portProviderSupport.Count -gt 0 -and -not ($portProviderSupport.Count -eq 1 -and [string]$portProviderSupport[0] -eq 'claude')) {
+                $null = $sb.AppendLine('    provider_support: ' + (script:Format-CostRendererYamlArray -Values $portProviderSupport))
+            }
+        }
+        if ($bucket.ContainsKey('providers') -and $bucket['providers'] -is [hashtable]) {
+            $providers = $bucket['providers']
+            $providerNames = [System.Collections.Generic.List[string]]::new()
+            foreach ($candidate in @('claude', 'copilot')) {
+                if ($providers.ContainsKey($candidate)) { $providerNames.Add($candidate) }
+            }
+            foreach ($candidate in $providers.Keys) {
+                if ($providerNames -notcontains $candidate) { $providerNames.Add($candidate) }
+            }
+
+            $null = $sb.AppendLine('    providers:')
+            foreach ($providerName in $providerNames) {
+                $provider = $providers[$providerName]
+                $null = $sb.AppendLine("      $providerName`:")
+                if ($provider.ContainsKey('tokens')) {
+                    $providerTokens = $provider['tokens']
+                    $null = $sb.AppendLine('        tokens:')
+                    $null = $sb.AppendLine('          input: ' + (script:Format-CostRendererYamlScalar -Value $providerTokens['input']))
+                    $null = $sb.AppendLine('          output: ' + (script:Format-CostRendererYamlScalar -Value $providerTokens['output']))
+                    if ($providerTokens.ContainsKey('cache_creation')) {
+                        $null = $sb.AppendLine('          cache_creation: ' + (script:Format-CostRendererYamlScalar -Value $providerTokens['cache_creation']))
+                    }
+                    if ($providerTokens.ContainsKey('cache_read')) {
+                        $null = $sb.AppendLine('          cache_read: ' + (script:Format-CostRendererYamlScalar -Value $providerTokens['cache_read']))
+                    }
+                }
+                foreach ($field in @('dispatch_count', 'prompt_size_chars', 'cost_estimate_usd', 'cache_read_hit_ratio', 'null_cost_events', 'mixed_regime', 'cache_metric_unavailable', 'rate_unavailable', 'per_token_rates_published')) {
+                    if ($provider.ContainsKey($field)) {
+                        $null = $sb.AppendLine("        $field`: " + (script:Format-CostRendererYamlScalar -Value $provider[$field]))
+                    }
+                }
+            }
+        }
     }
 
     # orchestrator_overhead
@@ -569,7 +810,7 @@ function Format-CostPatternYaml {
 
     $null = $sb.Append('-->')
 
-    return $sb.ToString()
+    return ($sb.ToString() -replace "`r`n", "`n")
 }
 
 #endregion
