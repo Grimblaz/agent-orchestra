@@ -427,7 +427,9 @@ function Write-CostAttributionWarningRecord {
     if ([string]::IsNullOrWhiteSpace($variableName)) { return }
 
     $warningValues = @($WarningMessages.ToArray())
-    foreach ($scope in @(1, 2)) {
+    $maxCallerScopeMirrorDepth = 3
+    # Pester assertion scriptblocks add dynamic scopes, so mirror through the nearby caller chain.
+    foreach ($scope in 1..$maxCallerScopeMirrorDepth) {
         try {
             if ($append) {
                 $existing = @(Get-Variable -Name $variableName -Scope $scope -ValueOnly -ErrorAction SilentlyContinue)
