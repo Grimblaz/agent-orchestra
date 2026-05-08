@@ -211,6 +211,13 @@ Describe 'Format-CostPatternMarkdown' {
         function script:Get-LegacyUnknownSessionWarningText {
             return ('session not found or ' + 'unrecognized')
         }
+
+        function script:Assert-CopilotFallbackRemediationFooter {
+            param([Parameter(Mandatory)][string]$Markdown)
+
+            $Markdown | Should -Match 'Copilot telemetry may be incomplete or not included for this run'
+            $Markdown | Should -Match 'Initialize-CopilotCostCollection'
+        }
     }
 
     Context 'header paths (golden assertions per M20/M21/M22)' {
@@ -410,6 +417,42 @@ Describe 'Format-CostPatternMarkdown' {
 
             $legendMatches.Count | Should -Be 1
             $result | Should -Match 'Coverage tags:.*claude\+copilot.*claude-only.*copilot-only.*claude-only-with-copilot-fallback-warning'
+        }
+
+        It 'renders a complete-session fallback remediation footer for <Coverage> / <InstallStatus>' -TestCases @(
+            @{ Coverage = 'claude-only-with-copilot-fallback-warning'; InstallStatus = 'ok' }
+            @{ Coverage = 'claude-only'; InstallStatus = 'missing-or-fallback' }
+        ) {
+            param([string]$Coverage, [string]$InstallStatus)
+
+            $attribution = script:Add-CoverageMetadata `
+                -Attribution (script:New-MinimalAttribution) `
+                -Coverage $Coverage `
+                -InstallStatus $InstallStatus `
+                -ProviderSupport @('claude')
+            $completeness = script:New-Completeness
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            script:Assert-CopilotFallbackRemediationFooter -Markdown $result
+        }
+
+        It 'renders a partial-session fallback remediation footer for <Coverage> / <InstallStatus>' -TestCases @(
+            @{ Coverage = 'claude-only-with-copilot-fallback-warning'; InstallStatus = 'ok' }
+            @{ Coverage = 'claude-only'; InstallStatus = 'missing-or-fallback' }
+        ) {
+            param([string]$Coverage, [string]$InstallStatus)
+
+            $attribution = script:Add-CoverageMetadata `
+                -Attribution (script:New-MinimalAttribution) `
+                -Coverage $Coverage `
+                -InstallStatus $InstallStatus `
+                -ProviderSupport @('claude')
+            $completeness = script:New-Completeness -Completeness 'partial' -StopReason 'max turns' -Excluded $true -ExcludeReason 'session completeness: partial'
+
+            $result = Format-CostPatternMarkdown -Attribution $attribution -Completeness $completeness
+
+            script:Assert-CopilotFallbackRemediationFooter -Markdown $result
         }
     }
 

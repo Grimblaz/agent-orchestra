@@ -129,6 +129,28 @@ function script:Format-CostRendererYamlArray {
     return '[' + ($items -join ', ') + ']'
 }
 
+function script:Test-CostRendererShouldEmitProviderSupport {
+    [OutputType([bool])]
+    param([AllowEmptyCollection()][object[]]$ProviderSupport)
+
+    return ($ProviderSupport.Count -gt 0 -and -not ($ProviderSupport.Count -eq 1 -and [string]$ProviderSupport[0] -eq 'claude'))
+}
+
+function script:Get-CostRendererProviderNames {
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)][hashtable]$Providers)
+
+    $providerNames = [System.Collections.Generic.List[string]]::new()
+    foreach ($candidate in @('claude', 'copilot')) {
+        if ($Providers.ContainsKey($candidate)) { $providerNames.Add($candidate) }
+    }
+    foreach ($candidate in $Providers.Keys) {
+        if (-not $providerNames.Contains([string]$candidate)) { $providerNames.Add([string]$candidate) }
+    }
+
+    return [string[]]$providerNames.ToArray()
+}
+
 function script:Format-CostRendererYamlScalar {
     [OutputType([string])]
     param([AllowNull()][object]$Value)
@@ -225,6 +247,23 @@ function script:Test-CostRendererCrossToolCoverage {
     param([AllowEmptyString()][string]$Coverage)
 
     return @('claude+copilot', 'copilot-only', 'claude-only-with-copilot-fallback-warning') -contains $Coverage
+}
+
+function script:Test-CostRendererFallbackWarning {
+    param(
+        [Parameter(Mandatory)][hashtable]$Attribution,
+        [AllowEmptyString()][string]$Coverage
+    )
+
+    if ($Coverage -eq 'claude-only-with-copilot-fallback-warning') { return $true }
+    return ($Attribution.ContainsKey('install_status') -and [string]$Attribution['install_status'] -eq 'missing-or-fallback')
+}
+
+function script:Format-CostRendererFallbackRemediationNote {
+    [OutputType([string])]
+    param()
+
+    return '> **Copilot telemetry fallback**: Copilot telemetry may be incomplete or not included for this run. Run ``Initialize-CopilotCostCollection`` to configure Copilot-side collection before the next capture.'
 }
 
 #endregion
@@ -609,6 +648,9 @@ function Format-CostPatternMarkdown {
     if ($Completeness['exclude_reason'] -eq 'phase-marker-only attribution; rolling-history excluded') {
         $body += "`n`n> **Note**: This Cost Pattern shows Claude-side phase-marker attribution. Copilot-side collection remains tracked by [#488](https://github.com/Grimblaz/agent-orchestra/issues/488)."
     }
+    if (script:Test-CostRendererFallbackWarning -Attribution $Attribution -Coverage $coverage) {
+        $body += "`n`n" + (script:Format-CostRendererFallbackRemediationNote)
+    }
     return $body
 }
 
@@ -655,7 +697,7 @@ function Format-CostPatternYaml {
     $totals = $Attribution['totals']
     $coverage = script:Get-CostRendererCoverage -Attribution $Attribution
     [object[]]$providerSupport = if ($Attribution.ContainsKey('provider_support')) { @($Attribution['provider_support']) } else { @() }
-    $shouldEmitProviderSupport = ($providerSupport.Count -gt 0 -and -not ($providerSupport.Count -eq 1 -and [string]$providerSupport[0] -eq 'claude'))
+    $shouldEmitProviderSupport = script:Test-CostRendererShouldEmitProviderSupport -ProviderSupport $providerSupport
 
     $sb = [System.Text.StringBuilder]::new()
     $null = $sb.AppendLine('<!-- cost-pattern-data')
@@ -713,22 +755,15 @@ function Format-CostPatternYaml {
         $null = $sb.AppendLine("    mixed_regime: $mixed")
         if ($bucket.ContainsKey('provider_support')) {
             [object[]]$portProviderSupport = @($bucket['provider_support'])
-            if ($portProviderSupport.Count -gt 0 -and -not ($portProviderSupport.Count -eq 1 -and [string]$portProviderSupport[0] -eq 'claude')) {
+            if (script:Test-CostRendererShouldEmitProviderSupport -ProviderSupport $portProviderSupport) {
                 $null = $sb.AppendLine('    provider_support: ' + (script:Format-CostRendererYamlArray -Values $portProviderSupport))
             }
         }
         if ($bucket.ContainsKey('providers') -and $bucket['providers'] -is [hashtable]) {
             $providers = $bucket['providers']
-            $providerNames = [System.Collections.Generic.List[string]]::new()
-            foreach ($candidate in @('claude', 'copilot')) {
-                if ($providers.ContainsKey($candidate)) { $providerNames.Add($candidate) }
-            }
-            foreach ($candidate in $providers.Keys) {
-                if ($providerNames -notcontains $candidate) { $providerNames.Add($candidate) }
-            }
 
             $null = $sb.AppendLine('    providers:')
-            foreach ($providerName in $providerNames) {
+            foreach ($providerName in (script:Get-CostRendererProviderNames -Providers $providers)) {
                 $provider = $providers[$providerName]
                 $null = $sb.AppendLine("      $providerName`:")
                 if ($provider.ContainsKey('tokens')) {

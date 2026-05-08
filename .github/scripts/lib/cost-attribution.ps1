@@ -117,6 +117,40 @@ function New-OverheadBucket {
     }
 }
 
+function New-ProviderCostBucket {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param()
+
+    return @{
+        tokens               = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
+        dispatch_count       = 0
+        prompt_size_chars    = 0
+        cost_estimate_usd    = 0.0
+        cache_read_hit_ratio = 0.0
+        null_cost_events     = 0
+        mixed_regime         = $false
+    }
+}
+
+function Get-OrAddProviderCostBucket {
+    [CmdletBinding()]
+    [OutputType([hashtable])]
+    param(
+        [Parameter(Mandatory)][hashtable]$Bucket,
+        [Parameter(Mandatory)][string]$ProviderName
+    )
+
+    if (-not $Bucket.ContainsKey('providers') -or -not ($Bucket['providers'] -is [hashtable])) {
+        $Bucket['providers'] = @{}
+    }
+    if (-not $Bucket['providers'].ContainsKey($ProviderName)) {
+        $Bucket['providers'][$ProviderName] = New-ProviderCostBucket
+    }
+
+    return $Bucket['providers'][$ProviderName]
+}
+
 function Get-EventUsage {
     <#
     .SYNOPSIS
@@ -199,6 +233,26 @@ function Get-EventProvider {
     return 'claude'
 }
 
+function Test-EventCacheMetricUnavailable {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][object]$Evt,
+        [Parameter(Mandatory)][string]$Provider
+    )
+
+    if ((Get-NormalizedCostProvider -Provider $Provider) -ne 'copilot') { return $false }
+
+    $msg = $Evt['message']
+    if ($null -eq $msg) { return $true }
+
+    $usage = $msg['usage']
+    if ($null -eq $usage) { return $true }
+
+    if (-not $usage.ContainsKey('cache_creation_input_tokens') -or -not $usage.ContainsKey('cache_read_input_tokens')) { return $true }
+    return ($null -eq $usage['cache_creation_input_tokens'] -or $null -eq $usage['cache_read_input_tokens'])
+}
+
 function Get-CostRateLookupKey {
     [CmdletBinding()]
     [OutputType([string])]
@@ -279,6 +333,29 @@ function Add-TokensToAccumulator {
 
     $Accumulator['input'] += $Usage['input']
     $Accumulator['output'] += $Usage['output']
+    $Accumulator['cache_creation'] += $Usage['cache_creation']
+    $Accumulator['cache_read'] += $Usage['cache_read']
+}
+
+function Add-TokensToProviderAccumulator {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][hashtable]$Accumulator,
+        [Parameter(Mandatory)][hashtable]$Usage,
+        [bool]$CacheMetricUnavailable = $false
+    )
+
+    $Accumulator['input'] += $Usage['input']
+    $Accumulator['output'] += $Usage['output']
+
+    if ($CacheMetricUnavailable) {
+        $Accumulator['cache_creation'] = $null
+        $Accumulator['cache_read'] = $null
+        return
+    }
+
+    if ($null -eq $Accumulator['cache_creation']) { $Accumulator['cache_creation'] = 0 }
+    if ($null -eq $Accumulator['cache_read']) { $Accumulator['cache_read'] = 0 }
     $Accumulator['cache_creation'] += $Usage['cache_creation']
     $Accumulator['cache_read'] += $Usage['cache_read']
 }
@@ -404,6 +481,58 @@ function Add-CostToBucket {
     $Bucket['cost_estimate_usd'] += $costEstimate
 }
 
+function Test-CostContributionRateUnavailable {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][hashtable]$Usage,
+        [AllowNull()][string]$Model,
+        [string]$Provider = 'claude',
+        [Parameter(Mandatory)][hashtable]$RatesByProviderModel
+    )
+
+    if ($null -eq $Model -or [string]::IsNullOrWhiteSpace($Model)) { return $true }
+
+    $lookupKey = Get-CostRateLookupKey -Provider $Provider -Model $Model
+    if (-not $RatesByProviderModel.ContainsKey($lookupKey)) { return $true }
+
+    return ($null -eq (Get-CostEstimateFromUsage -Usage $Usage -Rates $RatesByProviderModel[$lookupKey]))
+}
+
+function Add-ProviderContributionToPortBucket {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][hashtable]$Bucket,
+        [Parameter(Mandatory)][hashtable]$Usage,
+        [AllowNull()][string]$Model,
+        [string]$Provider = 'claude',
+        [bool]$CacheMetricUnavailable = $false,
+        [int]$DispatchCount = 0,
+        [int]$PromptSizeChars = 0,
+        [bool]$MixedRegime = $false,
+        [Parameter(Mandatory)][hashtable]$RatesByProviderModel
+    )
+
+    $providerName = Get-NormalizedCostProvider -Provider $Provider
+    $providerBucket = Get-OrAddProviderCostBucket -Bucket $Bucket -ProviderName $providerName
+    Add-TokensToProviderAccumulator -Accumulator $providerBucket['tokens'] -Usage $Usage -CacheMetricUnavailable:$CacheMetricUnavailable
+    $providerBucket['dispatch_count'] += $DispatchCount
+    $providerBucket['prompt_size_chars'] += $PromptSizeChars
+    if ($MixedRegime) { $providerBucket['mixed_regime'] = $true }
+
+    $providerWarnings = [System.Collections.Generic.List[string]]::new()
+    Add-CostToBucket -Bucket $providerBucket -Usage $Usage -Model $Model -Provider $providerName -RatesByProviderModel $RatesByProviderModel -WarningMessages $providerWarnings
+
+    if ($CacheMetricUnavailable) {
+        $providerBucket['cache_metric_unavailable'] = $true
+    }
+    if ($providerName -eq 'copilot') {
+        $rateUnavailable = Test-CostContributionRateUnavailable -Usage $Usage -Model $Model -Provider $providerName -RatesByProviderModel $RatesByProviderModel
+        $providerBucket['rate_unavailable'] = $rateUnavailable
+        $providerBucket['per_token_rates_published'] = -not $rateUnavailable
+    }
+}
+
 function Set-CacheHitRatio {
     <#
     .SYNOPSIS
@@ -423,6 +552,57 @@ function Set-CacheHitRatio {
     else {
         $Bucket['cache_read_hit_ratio'] = 0.0
     }
+}
+
+function Set-ProviderCacheHitRatio {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][hashtable]$Bucket
+    )
+
+    $tokens = $Bucket['tokens']
+    if ($null -eq $tokens['cache_read'] -or $null -eq $tokens['cache_creation']) {
+        $Bucket['cache_read_hit_ratio'] = $null
+        return
+    }
+
+    Set-CacheHitRatio -Bucket $Bucket
+}
+
+function Get-OrderedCostProviders {
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param([Parameter(Mandatory)][hashtable]$Providers)
+
+    $ordered = [System.Collections.Generic.List[string]]::new()
+    foreach ($candidate in @('claude', 'copilot')) {
+        if ($Providers.ContainsKey($candidate)) { $ordered.Add($candidate) }
+    }
+    foreach ($providerName in $Providers.Keys) {
+        if (-not $ordered.Contains($providerName)) { $ordered.Add([string]$providerName) }
+    }
+
+    return [string[]]$ordered.ToArray()
+}
+
+function Set-PortProviderMetadata {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable]$Bucket)
+
+    if (-not $Bucket.ContainsKey('providers') -or -not ($Bucket['providers'] -is [hashtable])) { return }
+
+    $providerNames = @(Get-OrderedCostProviders -Providers $Bucket['providers'])
+    foreach ($providerName in $providerNames) {
+        Set-ProviderCacheHitRatio -Bucket $Bucket['providers'][$providerName]
+    }
+
+    if ($providerNames.Count -eq 1 -and $providerNames[0] -eq 'claude') {
+        $Bucket.Remove('providers')
+        $Bucket.Remove('provider_support')
+        return
+    }
+
+    $Bucket['provider_support'] = [string[]]$providerNames
 }
 
 function Get-PhaseMarkerAttributionTarget {
@@ -521,6 +701,7 @@ function Get-CostAttribution {
         $usage = Get-EventUsage -Evt $evt
         $model = Get-EventModel -Evt $evt
         $provider = Get-EventProvider -Evt $evt
+        $cacheMetricUnavailable = Test-EventCacheMetricUnavailable -Evt $evt -Provider $provider
 
         # Determine if this is a parent (has cwd) or subagent (no cwd) event.
         # Subagent events are loaded from subagent transcripts and have no cwd/gitBranch.
@@ -569,6 +750,7 @@ function Get-CostAttribution {
                     }
                     Add-TokensToAccumulator -Accumulator $ports[$phaseMarkerTarget]['tokens'] -Usage $usage
                     Add-CostToBucket -Bucket $ports[$phaseMarkerTarget] -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
+                    Add-ProviderContributionToPortBucket -Bucket $ports[$phaseMarkerTarget] -Usage $usage -Model $model -Provider $provider -CacheMetricUnavailable:$cacheMetricUnavailable -RatesByProviderModel $ratesByProviderModel
                     $currentSubagentBuckets = @($ports[$phaseMarkerTarget])
                 }
                 else {
@@ -583,6 +765,7 @@ function Get-CostAttribution {
                 $portNames = [System.Collections.Generic.List[string]]::new()
                 $generalPurposeCount = 0
                 $unattributedCount = 0
+                $portPromptChars = @{}
 
                 foreach ($dispatch in $agentDispatches) {
                     $mappedPort = Get-AgentTypePort -AgentType $dispatch['subagent_type']
@@ -602,6 +785,10 @@ function Get-CostAttribution {
                         $ports[$mappedPort]['dispatch_count'] += 1
                         # Accumulate prompt_size_chars per dispatch (D4 prompt_size metric)
                         $ports[$mappedPort]['prompt_size_chars'] += [int]$dispatch['prompt_chars']
+                        if (-not $portPromptChars.ContainsKey($mappedPort)) {
+                            $portPromptChars[$mappedPort] = 0
+                        }
+                        $portPromptChars[$mappedPort] += [int]$dispatch['prompt_chars']
                         $portNames.Add($mappedPort)
                     }
                 }
@@ -651,6 +838,9 @@ function Get-CostAttribution {
                     }
                     Add-TokensToAccumulator -Accumulator $ports[$primaryPort]['tokens'] -Usage $usage
                     Add-CostToBucket -Bucket $ports[$primaryPort] -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
+                    $primaryDispatchCount = if ($portDispatchCounts.ContainsKey($primaryPort)) { [int]$portDispatchCounts[$primaryPort] } else { 0 }
+                    $primaryPromptChars = if ($portPromptChars.ContainsKey($primaryPort)) { [int]$portPromptChars[$primaryPort] } else { 0 }
+                    Add-ProviderContributionToPortBucket -Bucket $ports[$primaryPort] -Usage $usage -Model $model -Provider $provider -CacheMetricUnavailable:$cacheMetricUnavailable -DispatchCount $primaryDispatchCount -PromptSizeChars $primaryPromptChars -MixedRegime:($ports[$primaryPort]['mixed_regime'] -eq $true) -RatesByProviderModel $ratesByProviderModel
                     $currentSubagentBuckets = @($ports[$primaryPort])
                 }
                 elseif ($generalPurposeCount -gt 0) {
@@ -677,6 +867,9 @@ function Get-CostAttribution {
                 $targetBucket = $currentSubagentBuckets[0]
                 Add-TokensToAccumulator -Accumulator $targetBucket['tokens'] -Usage $usage
                 Add-CostToBucket -Bucket $targetBucket -Usage $usage -Model $model -Provider $provider -RatesByProviderModel $ratesByProviderModel -WarningMessages $costAttributionWarnings
+                if ($targetBucket.ContainsKey('prompt_size_chars')) {
+                    Add-ProviderContributionToPortBucket -Bucket $targetBucket -Usage $usage -Model $model -Provider $provider -CacheMetricUnavailable:$cacheMetricUnavailable -RatesByProviderModel $ratesByProviderModel
+                }
             }
             else {
                 # No context established — attribute to overhead
@@ -706,6 +899,7 @@ function Get-CostAttribution {
     # Finalize cache_read_hit_ratio for all port buckets and overhead
     foreach ($portBucket in $ports.Values) {
         Set-CacheHitRatio -Bucket $portBucket
+        Set-PortProviderMetadata -Bucket $portBucket
     }
     Set-CacheHitRatio -Bucket $overhead
 
