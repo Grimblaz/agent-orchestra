@@ -18,6 +18,7 @@ $script:CostWalkerSilentTypes = [System.Collections.Generic.HashSet[string]]@(
     'queue-operation', 'pr-link', 'command_permissions', 'auto_mode',
     'tool_use', 'tool_result'
 )
+$script:CostWalkerCopilotOtelCwdPrefix = 'copilot-otel://'
 
 function script:Get-CostWalkerPhaseMarker {
     param(
@@ -78,6 +79,8 @@ function script:Test-CostWalkerEventCwdMatchesParent {
 
     $eventCwd = $TranscriptEvent['cwd']
     if ($null -eq $eventCwd) { return $false }
+
+    if (([string]$eventCwd).StartsWith($script:CostWalkerCopilotOtelCwdPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
 
     $normalizedEventCwd = Get-NormalizedPath -Path ([string]$eventCwd)
     return $normalizedEventCwd -eq $NormalizedParentCwd

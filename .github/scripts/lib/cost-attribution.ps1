@@ -41,6 +41,7 @@ $script:CostAttributionPortMap.Add('research-agent', 'plan')
 $script:CostAttributionPortMap.Add('agent-orchestra:Code-Conductor', 'orchestrator-overhead')
 $script:CostAttributionPortMap.Add('code-conductor', 'orchestrator-overhead')
 $script:CostAttributionPortMap.Add('Explore', 'orchestrator-overhead')
+$script:CostAttributionPortMap.Add('GitHub Copilot Chat', 'orchestrator-overhead')
 $script:CostAttributionPortMap.Add('general-purpose', 'dispatches.general_purpose')
 $script:CostAttributionPortMap.Add('claude-code-guide', 'orchestrator-overhead')
 
@@ -175,6 +176,26 @@ function Add-TokensToAccumulator {
     $Accumulator['cache_read'] += $Usage['cache_read']
 }
 
+function Get-CostEstimateFromUsage {
+    <#
+    .SYNOPSIS
+        Computes the USD cost estimate for one usage/rate pair.
+    #>
+    [CmdletBinding()]
+    [OutputType([double])]
+    param(
+        [Parameter(Mandatory)][hashtable]$Usage,
+        [Parameter(Mandatory)][hashtable]$Rates
+    )
+
+    return (
+        $Usage['input'] * $Rates['input_per_mtok'] +
+        $Usage['output'] * $Rates['output_per_mtok'] +
+        $Usage['cache_creation'] * $Rates['cache_creation_per_mtok'] +
+        $Usage['cache_read'] * $Rates['cache_read_per_mtok']
+    ) / 1000000.0
+}
+
 function Add-CostToBucket {
     <#
     .SYNOPSIS
@@ -196,14 +217,7 @@ function Add-CostToBucket {
     }
 
     $rates = $RatesByModel[$Model]
-    $cost = (
-        $Usage['input'] * $rates['input_per_mtok'] +
-        $Usage['output'] * $rates['output_per_mtok'] +
-        $Usage['cache_creation'] * $rates['cache_creation_per_mtok'] +
-        $Usage['cache_read'] * $rates['cache_read_per_mtok']
-    ) / 1000000.0
-
-    $Bucket['cost_estimate_usd'] += $cost
+    $Bucket['cost_estimate_usd'] += Get-CostEstimateFromUsage -Usage $Usage -Rates $rates
 }
 
 function Set-CacheHitRatio {
@@ -492,12 +506,7 @@ function Get-CostAttribution {
         Add-TokensToAccumulator -Accumulator $totals['tokens'] -Usage $usage
         if ($null -ne $model -and $ratesByModel.ContainsKey($model)) {
             $rates = $ratesByModel[$model]
-            $totals['cost_estimate_usd'] += (
-                $usage['input'] * $rates['input_per_mtok'] +
-                $usage['output'] * $rates['output_per_mtok'] +
-                $usage['cache_creation'] * $rates['cache_creation_per_mtok'] +
-                $usage['cache_read'] * $rates['cache_read_per_mtok']
-            ) / 1000000.0
+            $totals['cost_estimate_usd'] += Get-CostEstimateFromUsage -Usage $usage -Rates $rates
         }
     }
 
