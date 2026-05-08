@@ -11,6 +11,8 @@
     by comparing timestamp values.
 #>
 
+$script:DefaultCostCoverageClass = 'claude-only'
+
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
@@ -128,6 +130,17 @@ function script:ConvertFrom-CheckpointYaml {
     return , $checkpoints.ToArray()
 }
 
+function script:Get-CheckpointCoverage {
+    [OutputType([string])]
+    param([Parameter(Mandatory)][hashtable]$Entry)
+
+    if ($Entry.ContainsKey('coverage') -and -not [string]::IsNullOrWhiteSpace([string]$Entry['coverage'])) {
+        return [string]$Entry['coverage']
+    }
+
+    return $script:DefaultCostCoverageClass
+}
+
 # ---------------------------------------------------------------------------
 # Public functions
 # ---------------------------------------------------------------------------
@@ -144,7 +157,9 @@ function Get-MostRecentRegimeCheckpoint {
     [OutputType([hashtable])]
     param(
         [Parameter(Mandatory)]
-        [string]$Path
+        [string]$Path,
+
+        [string]$Coverage = ''
     )
 
     if (-not (Test-Path -LiteralPath $Path)) {
@@ -164,6 +179,13 @@ function Get-MostRecentRegimeCheckpoint {
     # Find the entry with the greatest timestamp (ISO-8601 lexicographic sort is correct)
     $best = $null
     foreach ($entry in $entries) {
+        $entryCoverage = script:Get-CheckpointCoverage -Entry $entry
+        if (-not [string]::IsNullOrEmpty($Coverage) -and $entryCoverage -ne $Coverage) {
+            continue
+        }
+
+        $entry['coverage'] = $entryCoverage
+
         if ($null -eq $best) {
             $best = $entry
             continue
@@ -195,7 +217,9 @@ function Add-RegimeCheckpoint {
         [string]$Path,
 
         [Parameter(Mandatory)]
-        [hashtable]$Entry
+        [hashtable]$Entry,
+
+        [string]$Coverage = ''
     )
 
     # Ensure parent directory exists
@@ -216,6 +240,9 @@ checkpoints: []
     $id = [string]$Entry['id']
     $timestamp = [string]$Entry['timestamp']
     $subIssue = if ($Entry.ContainsKey('sub_issue') -and -not [string]::IsNullOrEmpty($Entry['sub_issue'])) { [string]$Entry['sub_issue'] } else { '' }
+    $coverage = if (-not [string]::IsNullOrEmpty($Coverage)) { $Coverage }
+    elseif ($Entry.ContainsKey('coverage') -and -not [string]::IsNullOrEmpty($Entry['coverage'])) { [string]$Entry['coverage'] }
+    else { '' }
     $reason = [string]$Entry['reason']
     $note = if ($Entry.ContainsKey('note') -and -not [string]::IsNullOrEmpty([string]$Entry['note'])) { [string]$Entry['note'] } else { '' }
 
@@ -249,6 +276,7 @@ checkpoints: []
     $escId = ($id -replace '\\', '\\') -replace '"', '\"'
     $escTimestamp = ($timestamp -replace '\\', '\\') -replace '"', '\"'
     $escSubIssue = ($subIssue -replace '\\', '\\') -replace '"', '\"'
+    $escCoverage = ($coverage -replace '\\', '\\') -replace '"', '\"'
     $escReason = ($reason -replace '\\', '\\') -replace '"', '\"'
     $escNote = ($note -replace '\\', '\\') -replace '"', '\"'
 
@@ -258,6 +286,9 @@ checkpoints: []
     $entryLines.Add("    timestamp: `"$escTimestamp`"")
     if (-not [string]::IsNullOrEmpty($subIssue)) {
         $entryLines.Add("    sub_issue: `"$escSubIssue`"")
+    }
+    if (-not [string]::IsNullOrEmpty($coverage)) {
+        $entryLines.Add("    coverage: `"$escCoverage`"")
     }
     $entryLines.Add("    reason: `"$escReason`"")
     if (-not [string]::IsNullOrEmpty($note)) {

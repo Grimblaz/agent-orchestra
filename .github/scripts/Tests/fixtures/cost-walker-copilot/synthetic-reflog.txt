@@ -1,0 +1,5 @@
+# Synthetic reflog fixture for issue #488 Copilot cost attribution experiments.
+# Format mirrors `git reflog --date=iso-strict --format='%h %gd: %gs'` output.
+1111111 HEAD@{2026-01-01T00:00:00+00:00}: checkout: moving from main to feature/issue-488-copilot-cost-collection
+2222222 HEAD@{2026-01-01T00:02:00+00:00}: commit: step(1): Plan: issue-488, capture Copilot OTel fixture
+3333333 HEAD@{2026-01-01T00:05:00+00:00}: commit: step(2): Plan: issue-488, parse Copilot OTel usage

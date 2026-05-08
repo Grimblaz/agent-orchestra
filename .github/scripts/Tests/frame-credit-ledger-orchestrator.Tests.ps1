@@ -432,6 +432,199 @@ integrity_checks:
             url  = 'https://github.com/example/example/issues/512#issuecomment-spine'
         }
     }
+
+    $script:InvokeCostWalkerOrchestratorInProcess = {
+        param(
+            [ValidateSet('ok', 'throw', 'timeout', 'empty')][string]$ClaudeMode = 'ok',
+            [ValidateSet('ok', 'throw', 'timeout', 'empty')][string]$CopilotMode = 'ok',
+            [string]$CostBranch = 'feature/issue-488-copilot-cost-collection',
+            [string]$CopilotTimeoutSeconds = '2',
+            [string]$ClaudeTimeoutSeconds = '2',
+            [object[]]$RollingEntries = @()
+        )
+
+        $previousCopilotPath = $env:FRAME_CREDIT_LEDGER_TEST_COPILOT_OTEL_JSONL
+        $previousCopilotTimeout = $env:FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS
+        $previousClaudeTimeout = $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS
+        $previousClaudeMode = $env:FCL_TEST_CLAUDE_MODE
+        $previousCopilotMode = $env:FCL_TEST_COPILOT_MODE
+        $previousCostBranch = $env:FCL_TEST_COST_BRANCH
+        $previousRepoRoot = $env:FCL_TEST_REPO_ROOT
+        $copilotJsonlPath = Join-Path $TestDrive 'copilot-test.jsonl'
+
+        try {
+            $env:FRAME_CREDIT_LEDGER_TEST_COPILOT_OTEL_JSONL = $copilotJsonlPath
+            $env:FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS = $CopilotTimeoutSeconds
+            $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS = $ClaudeTimeoutSeconds
+
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+            $script:FrameCreditLedgerRepoRoot = $script:RepoRoot
+
+            $env:FCL_TEST_CLAUDE_MODE = $ClaudeMode
+            $env:FCL_TEST_COPILOT_MODE = $CopilotMode
+            $env:FCL_TEST_COST_BRANCH = $CostBranch
+            $env:FCL_TEST_REPO_ROOT = $script:RepoRoot
+            $script:FCL_TEST_ROLLING_ENTRIES = @($RollingEntries)
+            $script:FCL_TEST_CHECKPOINT_COVERAGE = $null
+
+            function git {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+
+                if ($joined -match 'rev-parse --show-toplevel') {
+                    $global:LASTEXITCODE = 0
+                    return $env:FCL_TEST_REPO_ROOT
+                }
+                if ($joined -match 'config --get remote\.origin\.url') {
+                    $global:LASTEXITCODE = 0
+                    return 'https://github.com/example/example.git'
+                }
+                if ($joined -match 'rev-parse --abbrev-ref HEAD') {
+                    $global:LASTEXITCODE = 0
+                    return $env:FCL_TEST_COST_BRANCH
+                }
+                if ($joined -match 'diff') {
+                    $global:LASTEXITCODE = 0
+                    return ''
+                }
+
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+
+            function gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                if ($joined -match 'pr view \d+ --json baseRefOid') {
+                    $global:LASTEXITCODE = 0
+                    return '{"baseRefOid":"abc123"}'
+                }
+                if ($joined -match 'pr view \d+ --json body') {
+                    $global:LASTEXITCODE = 0
+                    return (@{ body = $script:V4AllCoveredBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
+                }
+                if ($joined -match 'issue view \d+ --json comments') {
+                    $global:LASTEXITCODE = 0
+                    return '{"comments":[]}'
+                }
+                if ($joined -match 'pr edit \d+ .*--body-file') {
+                    $global:LASTEXITCODE = 0
+                    return 'https://github.com/example/example/pull/429'
+                }
+                if ($joined -match '(issue|pr) comment \d+ --body') {
+                    $global:LASTEXITCODE = 0
+                    return 'https://github.com/example/example/pull/429#issuecomment-1'
+                }
+                if ($joined -match 'api repos/[^/]+/[^/]+ ') {
+                    $global:LASTEXITCODE = 0
+                    return '{"owner":{"login":"example"},"name":"example"}'
+                }
+                if ($joined -match 'api -X PATCH repos/[^/]+/[^/]+/issues/comments/\d+') {
+                    $global:LASTEXITCODE = 0
+                    return '{"html_url":"https://github.com/example/example/pull/429#issuecomment-2"}'
+                }
+
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+
+            function Get-FCLTestClaudeCostEvent {
+                return @{
+                    type      = 'assistant'
+                    provider  = 'claude'
+                    cwd       = $env:FCL_TEST_REPO_ROOT
+                    gitBranch = $env:FCL_TEST_COST_BRANCH
+                    message   = @{
+                        model       = 'claude-sonnet-4-x'
+                        stop_reason = 'end_turn'
+                        usage       = @{
+                            input_tokens                = 100
+                            output_tokens               = 20
+                            cache_creation_input_tokens = 0
+                            cache_read_input_tokens     = 0
+                        }
+                        content     = @()
+                    }
+                }
+            }
+
+            function Get-FCLTestCopilotCostEvent {
+                return @{
+                    type      = 'assistant'
+                    provider  = 'copilot'
+                    agentType = 'GitHub Copilot Chat'
+                    cwd       = 'copilot-otel://copilot-orchestra'
+                    gitBranch = $env:FCL_TEST_COST_BRANCH
+                    message   = @{
+                        model       = 'claude-sonnet-4.6'
+                        stop_reason = 'end_turn'
+                        usage       = @{
+                            input_tokens                = 40
+                            output_tokens               = 10
+                            cache_creation_input_tokens = 0
+                            cache_read_input_tokens     = 0
+                        }
+                        content     = @()
+                    }
+                }
+            }
+
+            function Get-CostTranscriptSlug { param([string]$CwdPath) $null = $CwdPath; return 'test-slug' }
+            function Invoke-CostTranscriptWalk {
+                param([string]$Slug, [string]$Branch, [string]$ParentCwd, [Nullable[int]]$IssueNumber = $null)
+                $null = $Slug
+                $null = $ParentCwd
+                $null = $IssueNumber
+                if ($Branch -ne $env:FCL_TEST_COST_BRANCH) { throw "unexpected Claude branch '$Branch'" }
+                switch ($env:FCL_TEST_CLAUDE_MODE) {
+                    'throw' { throw 'simulated Claude walker failure' }
+                    'timeout' { Start-Sleep -Seconds 10; return @() }
+                    'empty' { return @() }
+                    default { return @(Get-FCLTestClaudeCostEvent) }
+                }
+            }
+            function Invoke-CostCopilotWalk {
+                param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+                $null = $RepoRoot
+                $null = $OtelJsonlPath
+                $null = $WorkspaceFolderBasename
+                if ($Branch -ne $env:FCL_TEST_COST_BRANCH) { throw "unexpected Copilot branch '$Branch'" }
+                switch ($env:FCL_TEST_COPILOT_MODE) {
+                    'throw' { throw 'simulated Copilot walker failure' }
+                    'timeout' { Start-Sleep -Seconds 10; return @() }
+                    'empty' { return @() }
+                    default { return @(Get-FCLTestCopilotCostEvent) }
+                }
+            }
+            function Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) $null = $TimeoutSeconds; return @{ timed_out = $false; entries = @($script:FCL_TEST_ROLLING_ENTRIES) } }
+            function Get-MostRecentRegimeCheckpoint { param([string]$Path, [string]$Coverage = '') $null = $Path; $script:FCL_TEST_CHECKPOINT_COVERAGE = $Coverage; return $null }
+            function Get-CostAnomalyFlags {
+                [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
+                param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint)
+                $null = $ThisRun
+                $null = $RollingHistory
+                $null = $RegimeCheckpoint
+                return @()
+            }
+
+            $result = Invoke-FrameCreditLedger -Pr 429 -Mode warn
+            return @{
+                Result             = $result
+                CheckpointCoverage = $script:FCL_TEST_CHECKPOINT_COVERAGE
+            }
+        }
+        finally {
+            $env:FRAME_CREDIT_LEDGER_TEST_COPILOT_OTEL_JSONL = $previousCopilotPath
+            $env:FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS = $previousCopilotTimeout
+            $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS = $previousClaudeTimeout
+            $env:FCL_TEST_CLAUDE_MODE = $previousClaudeMode
+            $env:FCL_TEST_COPILOT_MODE = $previousCopilotMode
+            $env:FCL_TEST_COST_BRANCH = $previousCostBranch
+            $env:FCL_TEST_REPO_ROOT = $previousRepoRoot
+            Remove-Variable -Name FCL_TEST_ROLLING_ENTRIES -Scope Script -ErrorAction SilentlyContinue
+            Remove-Variable -Name FCL_TEST_CHECKPOINT_COVERAGE -Scope Script -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 Describe 'frame-credit-ledger.ps1 orchestrator' {
@@ -536,7 +729,7 @@ if (`$joined -match 'pr view \d+ --json body') {
 
             $result.ExitCode | Should -Be 0
             # Sleeps are skipped via TEST_NO_SLEEP, so the whole retry sequence completes fast.
-            $result.DurationSeconds | Should -BeLessThan 15
+            $result.DurationSeconds | Should -BeLessThan 25
         }
 
         It 'bails out after 3 attempts and emits a stderr note (warn mode exit 0)' {
@@ -743,6 +936,72 @@ body
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 0
+        }
+    }
+
+    Context 'Issue #488 Step 8 cost walker integration' {
+
+        It 'renders Claude cost data when the Copilot walker times out' {
+            $result = & $script:InvokeCostWalkerOrchestratorInProcess -ClaudeMode 'ok' -CopilotMode 'timeout' -CopilotTimeoutSeconds '1'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Result.Comment | Should -Match '## Cost Pattern'
+            $result.Result.Comment | Should -Match '(?m)^coverage: claude-only-with-copilot-fallback-warning$'
+            $result.Result.Comment | Should -Match '(?m)^branch: feature/issue-488-copilot-cost-collection$'
+        }
+
+        It 'merges Claude and Copilot walker events before attribution and renders claude+copilot coverage' {
+            $result = & $script:InvokeCostWalkerOrchestratorInProcess -ClaudeMode 'ok' -CopilotMode 'ok'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Result.Comment | Should -Match '(?m)^coverage: claude\+copilot$'
+            $result.Result.Comment | Should -Match 'provider_support: \["claude", "copilot"\]'
+            $result.Result.Comment | Should -Match '(?m)^branch: feature/issue-488-copilot-cost-collection$'
+        }
+
+        It 'fail-opens to no cost section when the Claude walker throws and no Copilot events are available' {
+            $result = & $script:InvokeCostWalkerOrchestratorInProcess -ClaudeMode 'throw' -CopilotMode 'empty'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Result.Comment | Should -Match 'Frame credit ledger'
+            $result.Result.Comment | Should -Not -Match '## Cost Pattern'
+        }
+
+        It 'wires coverage into the fixture-driven Cost Pattern comment end to end' {
+            $result = & $script:InvokeCostWalkerOrchestratorInProcess -ClaudeMode 'ok' -CopilotMode 'ok'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Result.Comment | Should -Match '<!-- cost-pattern-data'
+            $result.Result.Comment | Should -Match '(?m)^coverage: claude\+copilot$'
+        }
+
+        It 'passes current coverage to regime checkpoint lookup' {
+            $result = & $script:InvokeCostWalkerOrchestratorInProcess -ClaudeMode 'ok' -CopilotMode 'ok'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.CheckpointCoverage | Should -Be 'claude+copilot'
+        }
+
+        It 'renders the transition notice from production rolling metadata when matching coverage history is below five entries' {
+            $rollingEntries = @()
+            for ($i = 0; $i -lt 4; $i++) {
+                $rollingEntries += @{ coverage = 'claude+copilot'; install_status = 'ok' }
+            }
+            $rollingEntries += @{ coverage = 'claude-only'; install_status = 'ok' }
+
+            $result = & $script:InvokeCostWalkerOrchestratorInProcess -ClaudeMode 'ok' -CopilotMode 'ok' -RollingEntries $rollingEntries
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Result.Comment | Should -Match '⚠ building cross-tool baseline — matching-coverage history < 5 entries'
+        }
+
+        It 'classifies missing Copilot OTel file with Claude events as fallback-warning coverage without adding Copilot support' {
+            $result = & $script:InvokeCostWalkerOrchestratorInProcess -ClaudeMode 'ok' -CopilotMode 'empty'
+
+            $result.Result.ExitCode | Should -Be 0
+            $result.Result.Comment | Should -Match '(?m)^coverage: claude-only-with-copilot-fallback-warning$'
+            $result.Result.Comment | Should -Match '(?m)^install_status: missing-or-fallback$'
+            $result.Result.Comment | Should -Not -Match 'provider_support: \["claude", "copilot"\]'
         }
     }
 

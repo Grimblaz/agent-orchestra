@@ -28,6 +28,111 @@ function script:Get-CostPatternDataFromComment {
     return $null
 }
 
+function script:ConvertFrom-CostPatternYamlScalar {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return $null }
+    $text = ([string]$Value).Trim()
+    if ($text -eq '' -or $text -eq 'null') { return $null }
+    if (($text.StartsWith('"') -and $text.EndsWith('"')) -or ($text.StartsWith("'") -and $text.EndsWith("'"))) {
+        return $text.Substring(1, $text.Length - 2)
+    }
+    if ($text -eq 'true') { return $true }
+    if ($text -eq 'false') { return $false }
+
+    $intValue = 0
+    if ([int]::TryParse($text, [ref]$intValue)) { return $intValue }
+
+    $doubleValue = 0.0
+    if ([double]::TryParse($text, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$doubleValue)) {
+        return $doubleValue
+    }
+
+    return $text
+}
+
+function script:ConvertFrom-CostPatternYamlArray {
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return @() }
+    $text = ([string]$Value).Trim()
+    if ($text.StartsWith('[') -and $text.EndsWith(']')) {
+        $text = $text.Substring(1, $text.Length - 2)
+    }
+    if ([string]::IsNullOrWhiteSpace($text)) { return @() }
+
+    $items = $text -split ',' | ForEach-Object {
+        $item = $_.Trim()
+        if (($item.StartsWith('"') -and $item.EndsWith('"')) -or ($item.StartsWith("'") -and $item.EndsWith("'"))) {
+            $item = $item.Substring(1, $item.Length - 2)
+        }
+        $item
+    } | Where-Object { $_ -ne '' }
+
+    return , @($items)
+}
+
+function script:New-CostPatternTokenBucket {
+    return @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
+}
+
+function script:Get-CostPatternTokenBucket {
+    param([Parameter(Mandatory)][hashtable]$Bucket)
+
+    if (-not $Bucket.ContainsKey('tokens')) {
+        $Bucket['tokens'] = (script:New-CostPatternTokenBucket)
+    }
+
+    return $Bucket['tokens']
+}
+
+function script:Set-CostPatternTokenField {
+    param(
+        [Parameter(Mandatory)][hashtable]$Bucket,
+        [Parameter(Mandatory)][string]$Field,
+        [AllowNull()][object]$Value
+    )
+
+    $tokens = script:Get-CostPatternTokenBucket -Bucket $Bucket
+    $tokens[$Field] = [int](script:ConvertFrom-CostPatternYamlScalar -Value $Value)
+}
+
+function script:Set-CostPatternPortDefaults {
+    param([Parameter(Mandatory)][hashtable]$PortEntry)
+
+    $null = script:Get-CostPatternTokenBucket -Bucket $PortEntry
+
+    $defaults = @{
+        dispatch_count       = 0
+        cost_estimate_usd    = 0.0
+        cache_read_hit_ratio = 0.0
+        prompt_size_chars    = 0
+        null_cost_events     = 0
+    }
+
+    foreach ($field in $defaults.Keys) {
+        if (-not $PortEntry.ContainsKey($field)) {
+            $PortEntry[$field] = $defaults[$field]
+        }
+    }
+}
+
+function script:Set-CostPatternNumericField {
+    param(
+        [Parameter(Mandatory)][hashtable]$Bucket,
+        [Parameter(Mandatory)][string]$Field,
+        [AllowNull()][object]$Value
+    )
+
+    $scalar = script:ConvertFrom-CostPatternYamlScalar -Value $Value
+    if ($null -eq $scalar) {
+        $Bucket[$Field] = $null
+    }
+    else {
+        $Bucket[$Field] = $scalar
+    }
+}
+
 function script:ConvertFrom-CostPatternYaml {
     <#
     .SYNOPSIS
@@ -42,6 +147,10 @@ function script:ConvertFrom-CostPatternYaml {
             totals                         = @{}
             excluded_from_rolling_baseline = $false
             cost_pattern_data              = @{}
+            coverage                       = 'claude-only'
+            install_status                 = 'ok'
+            unmapped_session_count         = 0
+            provider_support               = @('claude')
         }
 
         $lines = $Yaml -split '\r?\n'
@@ -54,6 +163,22 @@ function script:ConvertFrom-CostPatternYaml {
             if ($line -match '^\s*excluded_from_rolling_baseline\s*:\s*(.+)$') {
                 $val = $Matches[1].Trim()
                 $result['excluded_from_rolling_baseline'] = ($val -eq 'true')
+            }
+
+            if ($line -match '^provider_support\s*:\s*(.+)$') {
+                $result['provider_support'] = script:ConvertFrom-CostPatternYamlArray -Value $Matches[1]
+            }
+
+            if ($line -match '^coverage\s*:\s*(.+)$') {
+                $result['coverage'] = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
+            if ($line -match '^install_status\s*:\s*(.+)$') {
+                $result['install_status'] = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
+            if ($line -match '^unmapped_session_count\s*:\s*(.+)$') {
+                $result['unmapped_session_count'] = [int](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
             }
 
             # cost_pattern_data block
@@ -83,6 +208,9 @@ function script:ConvertFrom-CostPatternYaml {
                 $portsList = [System.Collections.Generic.List[hashtable]]::new()
                 $j = $i + 1
                 $currentPort = $null
+                $inProviders = $false
+                $currentProvider = $null
+                $currentTokenTarget = $null
                 while ($j -lt $lines.Count) {
                     $subLine = $lines[$j]
                     if ($subLine -match '^\s*$') { $j++; continue }
@@ -92,57 +220,78 @@ function script:ConvertFrom-CostPatternYaml {
                     if ($subLine -match '^\s*-\s*name\s*:\s*(.+)$') {
                         if ($null -ne $currentPort) { $portsList.Add($currentPort) }
                         $currentPort = @{ name = $Matches[1].Trim() }
+                        $inProviders = $false
+                        $currentProvider = $null
+                        $currentTokenTarget = $null
                     }
                     elseif ($null -ne $currentPort) {
-                        if ($subLine -match '^\s+cost_estimate_usd\s*:\s*(.+)$') {
-                            $currentPort['cost_estimate_usd'] = [double]$Matches[1].Trim()
+                        if ($subLine -match '^\s+providers\s*:\s*$') {
+                            if (-not $currentPort.ContainsKey('providers')) {
+                                $currentPort['providers'] = @{}
+                            }
+                            $inProviders = $true
+                            $currentProvider = $null
+                            $currentTokenTarget = $null
                         }
-                        if ($subLine -match '^\s+dispatch_count\s*:\s*(.+)$') {
+                        elseif ($inProviders -and $subLine -match '^\s+(claude|copilot)\s*:\s*$') {
+                            $currentProvider = @{ tokens = @{} }
+                            $currentPort['providers'][$Matches[1]] = $currentProvider
+                            $currentTokenTarget = $null
+                        }
+                        elseif ($inProviders -and $null -ne $currentProvider) {
+                            if ($subLine -match '^\s+tokens\s*:\s*$') {
+                                if (-not $currentProvider.ContainsKey('tokens')) { $currentProvider['tokens'] = @{} }
+                                $currentTokenTarget = $currentProvider['tokens']
+                            }
+                            elseif ($subLine -match '^\s+(input|output|cache_creation|cache_read)\s*:\s*(.+)$') {
+                                if ($null -eq $currentTokenTarget) {
+                                    if (-not $currentProvider.ContainsKey('tokens')) { $currentProvider['tokens'] = @{} }
+                                    $currentTokenTarget = $currentProvider['tokens']
+                                }
+                                $currentTokenTarget[$Matches[1]] = script:ConvertFrom-CostPatternYamlScalar -Value $Matches[2]
+                            }
+                            elseif ($subLine -match '^\s+(dispatch_count|prompt_size_chars|null_cost_events)\s*:\s*(.+)$') {
+                                $currentProvider[$Matches[1]] = [int](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[2])
+                                $currentTokenTarget = $null
+                            }
+                            elseif ($subLine -match '^\s+(cost_estimate_usd|cache_read_hit_ratio)\s*:\s*(.+)$') {
+                                $currentProvider[$Matches[1]] = script:ConvertFrom-CostPatternYamlScalar -Value $Matches[2]
+                                $currentTokenTarget = $null
+                            }
+                            elseif ($subLine -match '^\s+(mixed_regime|cache_metric_unavailable|rate_unavailable|per_token_rates_published)\s*:\s*(.+)$') {
+                                $currentProvider[$Matches[1]] = [bool](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[2])
+                                $currentTokenTarget = $null
+                            }
+                        }
+                        elseif ($subLine -match '^\s+cost_estimate_usd\s*:\s*(.+)$') {
+                            script:Set-CostPatternNumericField -Bucket $currentPort -Field 'cost_estimate_usd' -Value $Matches[1]
+                        }
+                        elseif ($subLine -match '^\s+dispatch_count\s*:\s*(.+)$') {
                             $currentPort['dispatch_count'] = [int]$Matches[1].Trim()
                         }
-                        if ($subLine -match '^\s+prompt_size_chars\s*:\s*(.+)$') {
+                        elseif ($subLine -match '^\s+prompt_size_chars\s*:\s*(.+)$') {
                             $currentPort['prompt_size_chars'] = [int]$Matches[1].Trim()
                         }
                         # cache_read_hit_ratio (Fix Pass1-F1: per-port cache-hit anomaly metric was
                         # silently reading 0.0 because the parser never matched this field;
                         # rendered by cost-pattern-renderer.ps1 line 453, consumed by cost-anomaly).
-                        if ($subLine -match '^\s+cache_read_hit_ratio\s*:\s*(.+)$') {
-                            $currentPort['cache_read_hit_ratio'] = [double]$Matches[1].Trim()
+                        elseif ($subLine -match '^\s+cache_read_hit_ratio\s*:\s*(.+)$') {
+                            script:Set-CostPatternNumericField -Bucket $currentPort -Field 'cache_read_hit_ratio' -Value $Matches[1]
                         }
                         # null_cost_events (Fix Pass3-F4: parser must round-trip this field so
                         # rolling-history entries reflect unknown-model events).
-                        if ($subLine -match '^\s+null_cost_events\s*:\s*(.+)$') {
+                        elseif ($subLine -match '^\s+null_cost_events\s*:\s*(.+)$') {
                             $currentPort['null_cost_events'] = [int]$Matches[1].Trim()
                         }
+                        elseif ($subLine -match '^\s+provider_support\s*:\s*(.+)$') {
+                            $currentPort['provider_support'] = script:ConvertFrom-CostPatternYamlArray -Value $Matches[1]
+                        }
                         # tokens sub-block (Fix Pass1-F10: parse token fields for anomaly baseline)
-                        if ($subLine -match '^\s+tokens\s*:\s*$') {
-                            if (-not $currentPort.ContainsKey('tokens')) {
-                                $currentPort['tokens'] = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
-                            }
+                        elseif ($subLine -match '^\s+tokens\s*:\s*$') {
+                            $null = script:Get-CostPatternTokenBucket -Bucket $currentPort
                         }
-                        if ($subLine -match '^\s{6,}input\s*:\s*(.+)$') {
-                            if (-not $currentPort.ContainsKey('tokens')) {
-                                $currentPort['tokens'] = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
-                            }
-                            $currentPort['tokens']['input'] = [int]$Matches[1].Trim()
-                        }
-                        if ($subLine -match '^\s{6,}output\s*:\s*(.+)$') {
-                            if (-not $currentPort.ContainsKey('tokens')) {
-                                $currentPort['tokens'] = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
-                            }
-                            $currentPort['tokens']['output'] = [int]$Matches[1].Trim()
-                        }
-                        if ($subLine -match '^\s{6,}cache_creation\s*:\s*(.+)$') {
-                            if (-not $currentPort.ContainsKey('tokens')) {
-                                $currentPort['tokens'] = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
-                            }
-                            $currentPort['tokens']['cache_creation'] = [int]$Matches[1].Trim()
-                        }
-                        if ($subLine -match '^\s{6,}cache_read\s*:\s*(.+)$') {
-                            if (-not $currentPort.ContainsKey('tokens')) {
-                                $currentPort['tokens'] = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
-                            }
-                            $currentPort['tokens']['cache_read'] = [int]$Matches[1].Trim()
+                        elseif ($subLine -match '^\s{6,}(input|output|cache_creation|cache_read)\s*:\s*(.+)$') {
+                            script:Set-CostPatternTokenField -Bucket $currentPort -Field $Matches[1] -Value $Matches[2]
                         }
                     }
                     $j++
@@ -154,16 +303,7 @@ function script:ConvertFrom-CostPatternYaml {
                 foreach ($portEntry in $portsList) {
                     $pName = $portEntry['name']
                     if ($null -ne $pName) {
-                        # Ensure tokens sub-hashtable exists (zeroed if absent)
-                        if (-not $portEntry.ContainsKey('tokens')) {
-                            $portEntry['tokens'] = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
-                        }
-                        # Ensure numeric fields exist with defaults
-                        if (-not $portEntry.ContainsKey('dispatch_count')) { $portEntry['dispatch_count'] = 0 }
-                        if (-not $portEntry.ContainsKey('cost_estimate_usd')) { $portEntry['cost_estimate_usd'] = 0.0 }
-                        if (-not $portEntry.ContainsKey('cache_read_hit_ratio')) { $portEntry['cache_read_hit_ratio'] = 0.0 }
-                        if (-not $portEntry.ContainsKey('prompt_size_chars')) { $portEntry['prompt_size_chars'] = 0 }
-                        if (-not $portEntry.ContainsKey('null_cost_events')) { $portEntry['null_cost_events'] = 0 }
+                        script:Set-CostPatternPortDefaults -PortEntry $portEntry
                         $portsDict[$pName] = $portEntry
                     }
                 }
@@ -175,7 +315,7 @@ function script:ConvertFrom-CostPatternYaml {
             # orchestrator_overhead block
             if ($line -match '^\s*orchestrator_overhead\s*:\s*$') {
                 $oo = @{
-                    tokens               = @{ input = 0; output = 0; cache_creation = 0; cache_read = 0 }
+                    tokens               = (script:New-CostPatternTokenBucket)
                     cost_estimate_usd    = 0.0
                     cache_read_hit_ratio = 0.0
                 }
@@ -185,23 +325,17 @@ function script:ConvertFrom-CostPatternYaml {
                     if ($subLine -match '^\s*$') { $j++; continue }
                     if (-not ($subLine -match '^\s')) { break }
                     if ($subLine -match '^\s+cost_estimate_usd\s*:\s*(.+)$') {
-                        $oo['cost_estimate_usd'] = [double]$Matches[1].Trim()
+                        script:Set-CostPatternNumericField -Bucket $oo -Field 'cost_estimate_usd' -Value $Matches[1]
                     }
                     if ($subLine -match '^\s+cache_read_hit_ratio\s*:\s*(.+)$') {
-                        $oo['cache_read_hit_ratio'] = [double]$Matches[1].Trim()
+                        script:Set-CostPatternNumericField -Bucket $oo -Field 'cache_read_hit_ratio' -Value $Matches[1]
+                    }
+                    if ($subLine -match '^\s+null_cost_events\s*:\s*(.+)$') {
+                        $oo['null_cost_events'] = [int](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
                     }
                     # tokens sub-block (Fix Pass1-F10)
-                    if ($subLine -match '^\s{4,}input\s*:\s*(.+)$') {
-                        $oo['tokens']['input'] = [int]$Matches[1].Trim()
-                    }
-                    if ($subLine -match '^\s{4,}output\s*:\s*(.+)$') {
-                        $oo['tokens']['output'] = [int]$Matches[1].Trim()
-                    }
-                    if ($subLine -match '^\s{4,}cache_creation\s*:\s*(.+)$') {
-                        $oo['tokens']['cache_creation'] = [int]$Matches[1].Trim()
-                    }
-                    if ($subLine -match '^\s{4,}cache_read\s*:\s*(.+)$') {
-                        $oo['tokens']['cache_read'] = [int]$Matches[1].Trim()
+                    if ($subLine -match '^\s{4,}(input|output|cache_creation|cache_read)\s*:\s*(.+)$') {
+                        $oo['tokens'][$Matches[1]] = [int](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[2])
                     }
                     $j++
                 }
@@ -240,7 +374,7 @@ function script:ConvertFrom-CostPatternYaml {
                     if ($subLine -match '^\s*$') { $j++; continue }
                     if (-not ($subLine -match '^\s')) { break }
                     if ($subLine -match '^\s+cost_estimate_usd\s*:\s*(.+)$') {
-                        $tot['cost_estimate_usd'] = [double]$Matches[1].Trim()
+                        script:Set-CostPatternNumericField -Bucket $tot -Field 'cost_estimate_usd' -Value $Matches[1]
                     }
                     $j++
                 }

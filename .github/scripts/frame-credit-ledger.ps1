@@ -65,6 +65,7 @@ $script:CostLibLoadFailed = $false  # default; set to $true below if load fails
 try {
     . (Join-Path $PSScriptRoot 'lib/path-normalize.ps1')
     . (Join-Path $PSScriptRoot 'lib/cost-walker.ps1')
+    . (Join-Path $PSScriptRoot 'lib/cost-walker-copilot.ps1')
     . (Join-Path $PSScriptRoot 'lib/cost-attribution.ps1')
     . (Join-Path $PSScriptRoot 'lib/cost-anomaly.ps1')
     . (Join-Path $PSScriptRoot 'lib/cost-rolling-history.ps1')
@@ -878,11 +879,326 @@ function Update-FCLPrBodyDispatchCostSamples {
     return Update-DispatchCostSampleEvaluationInPrBody @updateParameters
 }
 
+function script:Get-FCLCostScriptState {
+    $state = @{}
+    foreach ($costStateName in @(
+            'CostWalkerSilentTypes',
+            'CostAttributionPortMap',
+            'CostCompletenessPartialReasons',
+            'CostRendererPortOrder',
+            'CostRendererSkillDrivenPorts'
+        )) {
+        try {
+            $state[$costStateName] = Get-Variable -Scope Script -Name $costStateName -ValueOnly -ErrorAction Stop
+        }
+        catch { $null = $_ }
+    }
+
+    return $state
+}
+
+function script:New-FCLInitialSessionStateClone {
+    $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault2()
+
+    # Use function definitions directly so advanced-function metadata survives cloning.
+    $parentFunctions = Get-ChildItem -Path Function:\ -ErrorAction SilentlyContinue
+    foreach ($fn in $parentFunctions) {
+        try {
+            $entry = New-Object System.Management.Automation.Runspaces.SessionStateFunctionEntry($fn.Name, $fn.Definition)
+            $iss.Commands.Add($entry)
+        }
+        catch { $null = $_ }
+    }
+
+    $autoNoneOptionsBlocklist = @('args', 'input', '_', '^', 'PWD', 'MyInvocation', 'PSCommandPath', 'PSScriptRoot', 'StackTrace', 'null')
+    $parentGlobals = Get-Variable -Scope Global -ErrorAction SilentlyContinue
+    foreach ($v in $parentGlobals) {
+        if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::Constant) { continue }
+        if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::ReadOnly) { continue }
+        if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::AllScope) { continue }
+        if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::Private) { continue }
+        if ($autoNoneOptionsBlocklist -contains $v.Name) { continue }
+        try {
+            $entry = New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry($v.Name, $v.Value, '')
+            $iss.Variables.Add($entry)
+        }
+        catch { $null = $_ }
+    }
+
+    return $iss
+}
+
+function script:New-FCLCostWalkerResult {
+    param(
+        [AllowEmptyCollection()][object[]]$Events = @(),
+        [bool]$TimedOut = $false,
+        [bool]$Failed = $false,
+        [AllowEmptyCollection()][string[]]$Warnings = @()
+    )
+
+    return [pscustomobject]@{
+        Events   = @($Events)
+        TimedOut = $TimedOut
+        Failed   = $Failed
+        Warnings = @($Warnings)
+    }
+}
+
+function script:Invoke-FCLCostWalkerWithTimeout {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$WalkerName,
+        [Parameter(Mandatory)][string]$CommandName,
+        [Parameter(Mandatory)][hashtable]$Parameters,
+        [Parameter(Mandatory)][int]$TimeoutSeconds
+    )
+
+    if ($TimeoutSeconds -le 0) {
+        return (script:New-FCLCostWalkerResult -TimedOut $true)
+    }
+
+    if ($env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE -eq '1') {
+        try {
+            $events = @(& $CommandName @Parameters)
+            return (script:New-FCLCostWalkerResult -Events $events)
+        }
+        catch {
+            [Console]::Error.WriteLine("frame-credit-ledger: cost $WalkerName walker failed: $($_.Exception.Message)")
+            return (script:New-FCLCostWalkerResult -Failed $true)
+        }
+    }
+
+    $runspace = $null
+    $worker = $null
+    try {
+        $runspace = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace((script:New-FCLInitialSessionStateClone))
+        $runspace.Open()
+        $worker = [System.Management.Automation.PowerShell]::Create()
+        $worker.Runspace = $runspace
+
+        $costScriptState = script:Get-FCLCostScriptState
+        $null = $worker.AddScript({
+                param($CommandNameArg, $ParametersArg, $CostScriptStateArg)
+                foreach ($costStateName in @($CostScriptStateArg.Keys)) {
+                    Set-Variable -Scope Script -Name $costStateName -Value $CostScriptStateArg[$costStateName]
+                }
+                & $CommandNameArg @ParametersArg
+            }).AddArgument($CommandName).AddArgument($Parameters).AddArgument($costScriptState)
+
+        $async = $worker.BeginInvoke()
+        $waited = $async.AsyncWaitHandle.WaitOne([int]($TimeoutSeconds * 1000))
+        if (-not $waited) {
+            try { $worker.Stop() } catch { $null = $_ }
+            [Console]::Error.WriteLine("frame-credit-ledger: cost $WalkerName walker timed out after ${TimeoutSeconds}s; continuing with empty $WalkerName events")
+            return (script:New-FCLCostWalkerResult -TimedOut $true)
+        }
+
+        $output = @()
+        $failed = $false
+        try { $output = @($worker.EndInvoke($async)) }
+        catch {
+            [Console]::Error.WriteLine("frame-credit-ledger: cost $WalkerName walker failed: $($_.Exception.Message)")
+            $failed = $true
+        }
+
+        foreach ($errRecord in $worker.Streams.Error) {
+            try { [Console]::Error.WriteLine([string]$errRecord) } catch { $null = $_ }
+        }
+
+        $warnings = @($worker.Streams.Warning | ForEach-Object { [string]$_ })
+        return (script:New-FCLCostWalkerResult -Events $output -Failed $failed -Warnings $warnings)
+    }
+    catch {
+        [Console]::Error.WriteLine("frame-credit-ledger: cost $WalkerName walker failed: $($_.Exception.Message)")
+        return (script:New-FCLCostWalkerResult -Failed $true)
+    }
+    finally {
+        if ($null -ne $worker) { $worker.Dispose() }
+        if ($null -ne $runspace) { $runspace.Dispose() }
+    }
+}
+
+function script:Resolve-FCLCostCopilotOtelJsonlPath {
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$RepoRoot)
+
+    if (-not [string]::IsNullOrWhiteSpace($env:FRAME_CREDIT_LEDGER_TEST_COPILOT_OTEL_JSONL)) {
+        return [string]$env:FRAME_CREDIT_LEDGER_TEST_COPILOT_OTEL_JSONL
+    }
+
+    $settingsPath = Join-Path $RepoRoot '.vscode/settings.json'
+    if (Test-Path -LiteralPath $settingsPath -PathType Leaf) {
+        try {
+            $settings = Get-Content -LiteralPath $settingsPath -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            $outfileProperty = $settings.PSObject.Properties['github.copilot.chat.otel.outfile']
+            if ($null -ne $outfileProperty -and -not [string]::IsNullOrWhiteSpace([string]$outfileProperty.Value)) {
+                $resolved = Resolve-CostCopilotOutfileTemplate -Template ([string]$outfileProperty.Value) -WorkspaceRoot $RepoRoot
+                if ($null -ne $resolved -and -not [string]::IsNullOrWhiteSpace([string]$resolved.ResolvedPath)) {
+                    return [string]$resolved.ResolvedPath
+                }
+            }
+        }
+        catch { $null = $_ }
+    }
+
+    $workspaceFolderBasename = Split-Path -Leaf $RepoRoot
+    return (Join-Path ([Environment]::GetFolderPath('UserProfile')) ".copilot-otel/$workspaceFolderBasename/copilot.jsonl")
+}
+
+function script:Get-FCLCostWalkerTimeoutSeconds {
+    param(
+        [Parameter(Mandatory)][string]$EnvironmentVariableName,
+        [Parameter(Mandatory)][int]$DefaultSeconds
+    )
+
+    $raw = [Environment]::GetEnvironmentVariable($EnvironmentVariableName, 'Process')
+    $parsed = 0
+    if (-not [string]::IsNullOrWhiteSpace($raw) -and [int]::TryParse($raw, [ref]$parsed) -and $parsed -gt 0) {
+        return $parsed
+    }
+
+    return $DefaultSeconds
+}
+
+function script:Get-FCLCostEventProviderSet {
+    param([AllowEmptyCollection()][object[]]$Events)
+
+    $providers = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($evt in @($Events)) {
+        if ($null -eq $evt) { continue }
+
+        $provider = $null
+        try { $provider = Get-EventProvider -Evt $evt }
+        catch {
+            if ($evt -is [System.Collections.IDictionary] -and $evt.ContainsKey('provider')) { $provider = $evt['provider'] }
+            elseif ($null -ne $evt.PSObject.Properties['provider']) { $provider = $evt.provider }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace([string]$provider)) {
+            $null = $providers.Add(([string]$provider).ToLowerInvariant())
+        }
+    }
+
+    $ordered = [System.Collections.Generic.List[string]]::new()
+    foreach ($candidate in @('claude', 'copilot')) {
+        if ($providers.Contains($candidate)) { $ordered.Add($candidate) }
+    }
+    foreach ($provider in $providers) {
+        if (-not $ordered.Contains($provider)) { $ordered.Add($provider) }
+    }
+
+    return [string[]]$ordered.ToArray()
+}
+
+function script:Get-FCLCostUnmappedSessionCount {
+    param([AllowEmptyCollection()][string[]]$Warnings)
+
+    $total = 0
+    foreach ($warning in @($Warnings)) {
+        $match = [regex]::Match([string]$warning, 'unmapped_session_count=(?<count>\d+)')
+        if ($match.Success) { $total += [int]$match.Groups['count'].Value }
+    }
+
+    return $total
+}
+
+function script:Get-FCLCostMetadataValue {
+    param(
+        [AllowNull()][object]$Entry,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    if ($null -eq $Entry) { return $null }
+    if ($Entry -is [System.Collections.IDictionary]) { return $Entry[$Name] }
+    $property = $Entry.PSObject.Properties[$Name]
+    if ($null -ne $property) { return $property.Value }
+    return $null
+}
+
+function script:Get-FCLEffectiveCostCoverageClass {
+    param([AllowNull()][object]$Entry)
+
+    $installStatus = script:Get-FCLCostMetadataValue -Entry $Entry -Name 'install_status'
+    if ([string]$installStatus -eq 'missing-or-fallback') { return 'claude-only' }
+
+    $coverage = script:Get-FCLCostMetadataValue -Entry $Entry -Name 'coverage'
+    if (-not [string]::IsNullOrWhiteSpace([string]$coverage)) { return [string]$coverage }
+
+    return 'claude-only'
+}
+
+function script:Set-FCLRollingMetaCoverageCount {
+    param(
+        [Parameter(Mandatory)][hashtable]$RollingResult,
+        [Parameter(Mandatory)][hashtable]$Attribution
+    )
+
+    if ($RollingResult['timed_out'] -eq $true) { return }
+
+    $currentCoverage = script:Get-FCLEffectiveCostCoverageClass -Entry $Attribution
+    $matchingCount = 0
+    foreach ($entry in @($RollingResult['entries'])) {
+        if ((script:Get-FCLEffectiveCostCoverageClass -Entry $entry) -eq $currentCoverage) {
+            $matchingCount++
+        }
+    }
+
+    $RollingResult['matching_coverage_history_count'] = $matchingCount
+}
+
+function script:Set-FCLCostCoverageMetadata {
+    param(
+        [Parameter(Mandatory)][hashtable]$Attribution,
+        [AllowEmptyCollection()][object[]]$Events,
+        [AllowNull()]$ClaudeWalk,
+        [AllowNull()]$CopilotWalk,
+        [Parameter(Mandatory)][string]$CopilotOtelJsonlPath
+    )
+
+    [string[]]$providers = @(script:Get-FCLCostEventProviderSet -Events $Events)
+    $hasClaude = $providers -contains 'claude'
+    $hasCopilot = $providers -contains 'copilot'
+    $copilotWarnings = if ($null -ne $CopilotWalk) { @($CopilotWalk.Warnings) } else { @() }
+    $unmappedSessionCount = script:Get-FCLCostUnmappedSessionCount -Warnings $copilotWarnings
+    $copilotTimedOut = ($null -ne $CopilotWalk -and $CopilotWalk.TimedOut -eq $true)
+    $copilotFailed = ($null -ne $CopilotWalk -and $CopilotWalk.Failed -eq $true)
+
+    $installStatus = 'ok'
+    if ([string]::IsNullOrWhiteSpace($CopilotOtelJsonlPath) -or -not (Test-Path -LiteralPath $CopilotOtelJsonlPath -PathType Leaf)) {
+        $installStatus = 'missing-or-fallback'
+    }
+
+    $coverage = 'claude-only'
+    if ($hasClaude -and $hasCopilot) { $coverage = 'claude+copilot' }
+    elseif ($hasCopilot) { $coverage = 'copilot-only' }
+    elseif ($hasClaude -and ($copilotTimedOut -or $copilotFailed -or $unmappedSessionCount -gt 0 -or $installStatus -eq 'missing-or-fallback')) { $coverage = 'claude-only-with-copilot-fallback-warning' }
+
+    if ($providers.Count -eq 0) { $providers = @('claude') }
+
+    $Attribution['coverage'] = $coverage
+    $Attribution['install_status'] = $installStatus
+    $Attribution['unmapped_session_count'] = $unmappedSessionCount
+    $Attribution['provider_support'] = [string[]]$providers
+}
+
+function script:Get-FCLRemainingCostBudgetSeconds {
+    param(
+        [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
+        [Parameter(Mandatory)][int]$BudgetSeconds
+    )
+
+    $remaining = $BudgetSeconds - [int][Math]::Ceiling($Stopwatch.Elapsed.TotalSeconds)
+    if ($remaining -lt 0) { return 0 }
+    return $remaining
+}
+
 # ---------------------------------------------------------------------------
 # Invoke-FrameCreditLedger
 # ---------------------------------------------------------------------------
 function Invoke-FrameCreditLedger {
     [CmdletBinding()]
+    [OutputType([hashtable])]
     param(
         [Parameter(Mandatory)][int]$Pr,
         [ValidateSet('warn', 'enforce')][string]$Mode = 'warn'
@@ -1120,10 +1436,13 @@ function Invoke-FrameCreditLedger {
         try {
             $costBudgetSeconds = 19
 
-            # 6a. Walker
+            # 6a. Walkers
             $slug = Get-CostTranscriptSlug -CwdPath $repoRoot
             $costBranch = & git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null
             $costEvents = @()
+            $claudeWalk = $null
+            $copilotWalk = $null
+            $copilotOtelJsonlPath = ''
             if (-not [string]::IsNullOrWhiteSpace($slug) -and -not [string]::IsNullOrWhiteSpace($costBranch)) {
                 $resolvedIssueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $prBody -Branch ([string]$costBranch)
                 $walkParameters = @{
@@ -1135,7 +1454,33 @@ function Invoke-FrameCreditLedger {
                     $walkParameters['IssueNumber'] = [int]$resolvedIssueNumber
                 }
 
-                $costEvents = @(Invoke-CostTranscriptWalk @walkParameters)
+                $claudeTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_CLAUDE_WALKER_TIMEOUT_SECONDS' -DefaultSeconds 10
+                $copilotTimeoutSeconds = script:Get-FCLCostWalkerTimeoutSeconds -EnvironmentVariableName 'FRAME_CREDIT_LEDGER_TEST_COPILOT_WALKER_TIMEOUT_SECONDS' -DefaultSeconds 6
+
+                $claudeWalk = script:Invoke-FCLCostWalkerWithTimeout `
+                    -WalkerName 'claude' `
+                    -CommandName 'Invoke-CostTranscriptWalk' `
+                    -Parameters $walkParameters `
+                    -TimeoutSeconds $claudeTimeoutSeconds
+
+                $copilotOtelJsonlPath = script:Resolve-FCLCostCopilotOtelJsonlPath -RepoRoot $repoRoot
+                $copilotWalkParameters = @{
+                    Branch                  = [string]$costBranch
+                    RepoRoot                = $repoRoot
+                    OtelJsonlPath           = $copilotOtelJsonlPath
+                    WorkspaceFolderBasename = (Split-Path -Leaf $repoRoot)
+                }
+                $copilotWalk = script:Invoke-FCLCostWalkerWithTimeout `
+                    -WalkerName 'copilot' `
+                    -CommandName 'Invoke-CostCopilotWalk' `
+                    -Parameters $copilotWalkParameters `
+                    -TimeoutSeconds $copilotTimeoutSeconds
+
+                $costEvents = @($claudeWalk.Events) + @($copilotWalk.Events)
+            }
+
+            if ($null -ne $claudeWalk -and $claudeWalk.Failed -eq $true -and ($null -eq $copilotWalk -or @($copilotWalk.Events).Count -eq 0)) {
+                throw 'Claude cost walker failed and no Copilot events were available for fallback attribution'
             }
 
             # 6b. Attribution
@@ -1148,20 +1493,23 @@ function Invoke-FrameCreditLedger {
                 Join-Path $repoRoot '.github/scripts'
             }
             $costAttribution = Get-CostAttribution -Events $costEvents -RateTablePath (Join-Path $costScriptsDir 'lib/cost-rate-table.json')
+            script:Set-FCLCostCoverageMetadata -Attribution $costAttribution -Events $costEvents -ClaudeWalk $claudeWalk -CopilotWalk $copilotWalk -CopilotOtelJsonlPath $copilotOtelJsonlPath
 
             # 6c. Rolling history (has its own 10s timeout via Get-CostRollingHistory)
             $rollingResult = @{ timed_out = $false; entries = @() }
-            if ($costStopwatch.Elapsed.TotalSeconds -lt $costBudgetSeconds) {
-                try { $rollingResult = Get-CostRollingHistory -TimeoutSeconds 10 }
+            $remainingCostBudgetSeconds = script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds
+            if ($remainingCostBudgetSeconds -gt 0) {
+                try { $rollingResult = Get-CostRollingHistory -TimeoutSeconds ([Math]::Min(10, $remainingCostBudgetSeconds)) }
                 catch { $rollingResult = @{ timed_out = $true; entries = @() } }
             }
+            script:Set-FCLRollingMetaCoverageCount -RollingResult $rollingResult -Attribution $costAttribution
 
             # 6d. Regime checkpoint
             $checkpoint = $null
-            if ($costStopwatch.Elapsed.TotalSeconds -lt $costBudgetSeconds) {
+            if ((script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
                 try {
                     $cpPath = Join-Path $repoRoot '.github/scripts/cost-regime-checkpoints.yaml'
-                    if (Test-Path $cpPath) { $checkpoint = Get-MostRecentRegimeCheckpoint -Path $cpPath }
+                    if (Test-Path $cpPath) { $checkpoint = Get-MostRecentRegimeCheckpoint -Path $cpPath -Coverage ([string]$costAttribution['coverage']) }
                 }
                 catch { $checkpoint = $null }
             }
@@ -1186,13 +1534,13 @@ function Invoke-FrameCreditLedger {
 
             # 6f. Anomaly flags
             $anomalyFlags = @()
-            if (-not $rollingResult.timed_out -and $costStopwatch.Elapsed.TotalSeconds -lt $costBudgetSeconds) {
+            if (-not $rollingResult.timed_out -and (script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
                 try { $anomalyFlags = @(Get-CostAnomalyFlags -ThisRun $costAttribution -RollingHistory @($rollingResult.entries) -RegimeCheckpoint $checkpoint) }
                 catch { $anomalyFlags = @() }
             }
 
             # 6g. Render
-            if ($costStopwatch.Elapsed.TotalSeconds -lt $costBudgetSeconds) {
+            if ((script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
                 $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$costBranch)
                 $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$costBranch)
                 $costSection = $costMarkdown + "`n" + $costYaml
@@ -1250,54 +1598,7 @@ if (-not $isDotSourced) {
         # PowerShell instance (which interrupts a hanging Start-Sleep
         # inside the gh mock) and emit a fail-open stderr note.
 
-        # Build an InitialSessionState that imports the parent's functions
-        # and global variables. This is what makes `gh` resolvable inside
-        # the worker runspace.
-        $iss = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault2()
-
-        # Copy parent's functions into the new ISS.
-        # NOTE (C-Risk-2 follow-up, issue #429 Step 12): `$fn.Definition` returns
-        # the function body INCLUDING the leading `[CmdletBinding()] param(...)`
-        # block. When SessionStateFunctionEntry wraps this in `function $Name
-        # { ... }`, the attributes survive intact. We verified that the
-        # cloned `Invoke-FrameCreditLedger` retains its `-Mode` ValidateSet
-        # binding via the existing 'rejects an invalid -Mode value via
-        # ValidateSet' integration test. Investigated, no behavior impact —
-        # do not switch to source-text reconstruction.
-        $parentFunctions = Get-ChildItem -Path Function:\ -ErrorAction SilentlyContinue
-        foreach ($fn in $parentFunctions) {
-            try {
-                $entry = New-Object System.Management.Automation.Runspaces.SessionStateFunctionEntry($fn.Name, $fn.Definition)
-                $iss.Commands.Add($entry)
-            }
-            catch { $null = $_ }
-        }
-
-        # Copy global variables (e.g. $global:GhCallLog used by the test mock).
-        # We skip PowerShell's automatic variables, which fall into two camps:
-        #   1. Vars flagged with Constant / ReadOnly / AllScope / Private —
-        #      these would error when re-added to the child runspace's ISS
-        #      (e.g. $true, $false, $Host, $PID, $PSVersionTable, $HOME, $?,
-        #      $IsLinux, $IsMacOS, $IsWindows, $IsCoreCLR, $PSCulture, ...).
-        #      The .Options check catches these programmatically.
-        #   2. Vars with Options=None that PowerShell auto-populates per
-        #      runspace ($args, $input, $_, $^, $PWD, $MyInvocation,
-        #      $PSCommandPath, $PSScriptRoot, $StackTrace, $null). These
-        #      have no flag we can use, so we keep a small, named blocklist.
-        $autoNoneOptionsBlocklist = @('args', 'input', '_', '^', 'PWD', 'MyInvocation', 'PSCommandPath', 'PSScriptRoot', 'StackTrace', 'null')
-        $parentGlobals = Get-Variable -Scope Global -ErrorAction SilentlyContinue
-        foreach ($v in $parentGlobals) {
-            if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::Constant) { continue }
-            if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::ReadOnly) { continue }
-            if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::AllScope) { continue }
-            if ($v.Options -band [System.Management.Automation.ScopedItemOptions]::Private) { continue }
-            if ($autoNoneOptionsBlocklist -contains $v.Name) { continue }
-            try {
-                $entry = New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry($v.Name, $v.Value, '')
-                $iss.Variables.Add($entry)
-            }
-            catch { $null = $_ }
-        }
+        $iss = script:New-FCLInitialSessionStateClone
 
         $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
         $rs.Open()
@@ -1308,19 +1609,7 @@ if (-not $isDotSourced) {
         # and pass it through so the worker doesn't need to re-derive it.
         $resolvedRepoRoot = script:Resolve-FCLRepoRoot -ScriptPath $PSCommandPath
 
-        $costScriptState = @{}
-        foreach ($costStateName in @(
-                'CostWalkerSilentTypes',
-                'CostAttributionPortMap',
-                'CostCompletenessPartialReasons',
-                'CostRendererPortOrder',
-                'CostRendererSkillDrivenPorts'
-            )) {
-            try {
-                $costScriptState[$costStateName] = Get-Variable -Scope Script -Name $costStateName -ValueOnly -ErrorAction Stop
-            }
-            catch { $null = $_ }
-        }
+        $costScriptState = script:Get-FCLCostScriptState
 
         $null = $worker.AddScript({
                 param($PrArg, $ModeArg, $RepoRootArg, $CostScriptStateArg)

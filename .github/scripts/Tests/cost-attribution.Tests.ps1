@@ -4,10 +4,14 @@
 Describe 'Get-CostAttribution' {
     BeforeAll {
         $script:LibPath = Join-Path $PSScriptRoot '..\lib\cost-attribution.ps1'
+        $script:RendererPath = Join-Path $PSScriptRoot '..\lib\cost-pattern-renderer.ps1'
         $script:RateTablePath = Join-Path $PSScriptRoot '..\lib\cost-rate-table.json'
 
         if (Test-Path $script:LibPath) {
             . $script:LibPath
+        }
+        if (Test-Path $script:RendererPath) {
+            . $script:RendererPath
         }
 
         # Helper: build a minimal parent assistant event (has cwd to distinguish from subagent events)
@@ -37,6 +41,37 @@ Describe 'Get-CostAttribution' {
                         output_tokens               = $OutputTokens
                         cache_creation_input_tokens = $CacheCreation
                         cache_read_input_tokens     = $CacheRead
+                    }
+                    content = $Content
+                }
+            }
+        }
+
+        function script:New-CopilotAssistantEvent {
+            param(
+                [string]$Uuid = [System.Guid]::NewGuid().ToString(),
+                [string]$Timestamp = '2026-01-01T00:02:00Z',
+                [string]$Model = 'gpt-4o-mini-2024-07-18',
+                [int]$InputTokens = 300,
+                [int]$OutputTokens = 90,
+                [object[]]$Content = @()
+            )
+
+            return @{
+                type      = 'assistant'
+                provider  = 'copilot'
+                agentType = 'GitHub Copilot Chat'
+                uuid      = $Uuid
+                timestamp = $Timestamp
+                cwd       = 'copilot-otel://copilot-orchestra'
+                gitBranch = 'feature/test-branch'
+                message   = @{
+                    model   = $Model
+                    usage   = @{
+                        input_tokens                = $InputTokens
+                        output_tokens               = $OutputTokens
+                        cache_creation_input_tokens = $null
+                        cache_read_input_tokens     = $null
                     }
                     content = $Content
                 }
@@ -184,6 +219,22 @@ Describe 'Get-CostAttribution' {
             $result = Get-CostAttribution -Events @($parentEvent) -RateTablePath $script:RateTablePath
 
             $result.ports.ContainsKey('experience') | Should -BeTrue
+        }
+
+        It 'maps observed Copilot chat agent name to orchestrator-overhead case-insensitively' -TestCases @(
+            @{ AgentType = 'GitHub Copilot Chat' }
+            @{ AgentType = 'github copilot chat' }
+            @{ AgentType = 'GITHUB COPILOT CHAT' }
+        ) {
+            param([string]$AgentType)
+
+            Get-AgentTypePort -AgentType $AgentType | Should -Be 'orchestrator-overhead'
+        }
+
+        It 'maps unknown Copilot agent names to unattributed-dispatch without changing existing Claude mappings' {
+            Get-AgentTypePort -AgentType 'GitHub Copilot Future Specialist' | Should -Be 'unattributed-dispatch'
+            Get-AgentTypePort -AgentType 'code-smith' | Should -Be 'implement-code'
+            Get-AgentTypePort -AgentType 'Explore' | Should -Be 'orchestrator-overhead'
         }
     }
 
@@ -429,6 +480,65 @@ Describe 'Get-CostAttribution' {
             $result = Get-CostAttribution -Events @($parentEvent) -RateTablePath $script:RateTablePath
 
             $result.ports['plan'].prompt_size_chars | Should -Be 0
+        }
+    }
+
+    Context 'provider provenance aggregation (#488 CE-F1)' {
+        It 'renders mixed Claude and Copilot contributions to the same port as merged with provider YAML' {
+            $claudeDispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $claudeEvent = script:New-AssistantEvent `
+                -Content @($claudeDispatch) `
+                -Model 'claude-sonnet-4-x' `
+                -InputTokens 1000 `
+                -OutputTokens 200 `
+                -CacheCreation 50 `
+                -CacheRead 150
+
+            $copilotDispatch = script:New-AgentDispatch -SubagentType 'code-smith'
+            $copilotEvent = script:New-CopilotAssistantEvent `
+                -Content @($copilotDispatch) `
+                -Model 'gpt-4o-mini-2024-07-18' `
+                -InputTokens 400 `
+                -OutputTokens 100
+
+            $result = Get-CostAttribution -Events @($claudeEvent, $copilotEvent) -RateTablePath $script:RateTablePath -WarningVariable costWarnings
+            $result['coverage'] = 'claude+copilot'
+            $result['install_status'] = 'ok'
+            $result['unmapped_session_count'] = 0
+            $result['provider_support'] = @('claude', 'copilot')
+
+            $portBucket = $result.ports['implement-code']
+            $portBucket.provider_support | Should -Be @('claude', 'copilot')
+            $portBucket.providers.ContainsKey('claude') | Should -BeTrue
+            $portBucket.providers.ContainsKey('copilot') | Should -BeTrue
+            $portBucket.tokens.input | Should -Be 1400
+            $portBucket.tokens.output | Should -Be 300
+            $portBucket.tokens.cache_creation | Should -Be 50
+            $portBucket.tokens.cache_read | Should -Be 150
+            $portBucket.providers.copilot.tokens.input | Should -Be 400
+            $portBucket.providers.copilot.tokens.output | Should -Be 100
+            $portBucket.providers.copilot.tokens.cache_creation | Should -BeNullOrEmpty
+            $portBucket.providers.copilot.tokens.cache_read | Should -BeNullOrEmpty
+            $portBucket.providers.copilot.cost_estimate_usd | Should -BeNullOrEmpty
+            $portBucket.providers.copilot.cache_metric_unavailable | Should -BeTrue
+            $portBucket.providers.copilot.rate_unavailable | Should -BeTrue
+
+            $completeness = @{
+                completeness                   = 'complete'
+                stop_reason                    = 'end_turn'
+                excluded_from_rolling_baseline = $false
+                exclude_reason                 = ''
+            }
+            $markdown = Format-CostPatternMarkdown -Attribution $result -Completeness $completeness
+            $yaml = Format-CostPatternYaml -Attribution $result -Completeness $completeness -Pr 488 -Branch 'feature/issue-488-copilot-cost-collection'
+
+            $markdown | Should -Match '\| implement-code \(merged\) \|'
+            $yaml | Should -Match '(?m)^  - name: implement-code$'
+            $yaml | Should -Match '(?m)^    providers:$'
+            $yaml | Should -Match '(?m)^      claude:$'
+            $yaml | Should -Match '(?m)^      copilot:$'
+            $yaml | Should -Match '(?m)^        cost_estimate_usd: null$'
+            $yaml | Should -Match '(?m)^        cache_metric_unavailable: true$'
         }
     }
 }

@@ -392,6 +392,25 @@ Describe 'Invoke-CostTranscriptWalk' {
         }
     }
 
+    Context 'Copilot OTel sentinel cwd bypass' {
+        It 'treats sentinel cwd <Cwd> as matching before path normalization' -TestCases @(
+            @{ Cwd = 'copilot-otel://copilot-orchestra' }
+            @{ Cwd = 'copilot-otel://copilot-orchestra/' }
+        ) {
+            param([string]$Cwd)
+
+            Mock Get-NormalizedPath { throw 'Get-NormalizedPath must not run for Copilot OTel sentinel cwd values' } `
+                -ParameterFilter { $Path -like 'copilot-otel://*' }
+
+            $matchesParent = script:Test-CostWalkerEventCwdMatchesParent `
+                -TranscriptEvent @{ cwd = $Cwd } `
+                -NormalizedParentCwd '/c/test/repo'
+
+            $matchesParent | Should -BeTrue
+            Should -Invoke Get-NormalizedPath -Exactly -Times 0 -ParameterFilter { $Path -like 'copilot-otel://*' }
+        }
+    }
+
     Context 'mixed-branch session' {
         It 'includes only events matching the target branch in a multi-branch JSONL' {
             $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"

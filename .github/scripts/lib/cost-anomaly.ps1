@@ -10,6 +10,8 @@
     Pure logic function — no file I/O, no gh calls.
 #>
 
+$script:DefaultCostCoverageClass = 'claude-only'
+
 #region ---- Statistical helpers -----------------------------------------------
 
 function script:Get-Mean {
@@ -52,6 +54,24 @@ function script:Get-Stddev {
 
 #region ---- Metric extraction from attribution entry --------------------------
 
+function script:Get-MetricBaseKey {
+    [OutputType([string])]
+    param([Parameter(Mandatory)][string]$MetricKey)
+
+    $bracketIdx = $MetricKey.IndexOf('[')
+    if ($bracketIdx -ge 0) { return $MetricKey.Substring(0, $bracketIdx) }
+    return $MetricKey
+}
+
+function script:ConvertTo-NullableMetricDouble {
+    [OutputType([object])]
+    param([AllowNull()][object]$Value)
+
+    if ($null -eq $Value) { return $null }
+    if ($Value -is [string] -and ([string]::IsNullOrWhiteSpace($Value) -or [string]$Value -eq 'null')) { return $null }
+    return [double]$Value
+}
+
 function script:Get-MetricValue {
     <#
     .SYNOPSIS
@@ -68,8 +88,13 @@ function script:Get-MetricValue {
 
     # Parse the base key (part before '[') to handle per-port metric keys cleanly.
     # Square brackets are character class wildcards in PowerShell -like, so we split instead.
-    $bracketIdx = $MetricKey.IndexOf('[')
-    $baseKey = if ($bracketIdx -ge 0) { $MetricKey.Substring(0, $bracketIdx) } else { $MetricKey }
+    $baseKey = script:Get-MetricBaseKey -MetricKey $MetricKey
+
+    if ($MetricKey -match '^ports\[(?<port>[^\]]+)\]\.tokens\.(?<kind>input|output)$') {
+        $portName = if ($Port) { $Port } else { $Matches['port'] }
+        if (-not $portName -or -not $Entry.ports.ContainsKey($portName)) { return $null }
+        return [double]$Entry.ports[$portName].tokens[$Matches['kind']]
+    }
 
     if ($baseKey -eq 'dispatches.per_port') {
         if (-not $Port -or -not $Entry.ports.ContainsKey($Port)) { return $null }
@@ -95,26 +120,60 @@ function script:Get-MetricValue {
     }
     elseif ($baseKey -eq 'cache_read.hit_ratio') {
         if (-not $Port -or -not $Entry.ports.ContainsKey($Port)) { return $null }
-        return [double]$Entry.ports[$Port].cache_read_hit_ratio
+        return script:ConvertTo-NullableMetricDouble -Value $Entry.ports[$Port].cache_read_hit_ratio
     }
     elseif ($baseKey -eq 'cost_estimate_usd' -and $Port) {
         if (-not $Entry.ports.ContainsKey($Port)) { return $null }
-        return [double]$Entry.ports[$Port].cost_estimate_usd
+        return script:ConvertTo-NullableMetricDouble -Value $Entry.ports[$Port].cost_estimate_usd
     }
     elseif ($MetricKey -eq 'orchestrator_overhead.tokens.input') {
         return [double]$Entry.orchestrator_overhead.tokens.input
     }
     elseif ($MetricKey -eq 'orchestrator_overhead.cache_read.hit_ratio') {
-        return [double]$Entry.orchestrator_overhead.cache_read_hit_ratio
+        return script:ConvertTo-NullableMetricDouble -Value $Entry.orchestrator_overhead.cache_read_hit_ratio
     }
     elseif ($MetricKey -eq 'dispatches.general_purpose.count') {
         return [double]$Entry.dispatches.general_purpose_count
     }
     elseif ($MetricKey -eq 'cost_estimate_usd.total') {
-        return [double]$Entry.totals.cost_estimate_usd
+        return script:ConvertTo-NullableMetricDouble -Value $Entry.totals.cost_estimate_usd
     }
 
     return $null
+}
+
+#endregion
+
+#region ---- Coverage-class helpers -------------------------------------------
+
+function script:Get-EffectiveCoverageClass {
+    [OutputType([string])]
+    param([Parameter(Mandatory)][hashtable]$Entry)
+
+    if ($Entry.ContainsKey('install_status') -and [string]$Entry['install_status'] -eq 'missing-or-fallback') {
+        return $script:DefaultCostCoverageClass
+    }
+
+    if ($Entry.ContainsKey('coverage') -and -not [string]::IsNullOrWhiteSpace([string]$Entry['coverage'])) {
+        return [string]$Entry['coverage']
+    }
+
+    return $script:DefaultCostCoverageClass
+}
+
+function script:Test-CoverageSensitiveMetric {
+    [OutputType([bool])]
+    param([Parameter(Mandatory)][string]$MetricKey)
+
+    $baseKey = script:Get-MetricBaseKey -MetricKey $MetricKey
+
+    if ($MetricKey -match '^ports\[[^\]]+\]\.tokens\.(input|output)$') { return $true }
+
+    return @(
+        'orchestrator_overhead.tokens.input',
+        'orchestrator_overhead.cache_read.hit_ratio',
+        'cost_estimate_usd.total'
+    ) -contains $baseKey
 }
 
 #endregion
@@ -213,6 +272,8 @@ function script:Get-MetricDescriptors {
         $skipTokensPerDispatch = ($port -eq 'review') -and (-not $IncludeReviewDispatch)
 
         $metrics.Add(@{ MetricKey = "dispatches.per_port[$port]"; Port = $port; Direction = 'shrink' })
+        $metrics.Add(@{ MetricKey = "ports[$port].tokens.input"; Port = $port; Direction = 'shrink' })
+        $metrics.Add(@{ MetricKey = "ports[$port].tokens.output"; Port = $port; Direction = 'shrink' })
 
         if (-not $skipTokensPerDispatch) {
             $metrics.Add(@{ MetricKey = "tokens.per_dispatch.avg.output[$port]"; Port = $port; Direction = 'shrink' })
@@ -277,11 +338,13 @@ function Get-CostAnomalyFlags {
     $includeReviewDispatch = $OptInLabels -contains 'cost-target:review-discipline'
 
     $descriptors = script:Get-MetricDescriptors -ActivePorts $activePorts -IncludeReviewDispatch $includeReviewDispatch
+    $thisCoverageClass = script:Get-EffectiveCoverageClass -Entry $ThisRun
 
     foreach ($desc in $descriptors) {
         $metricKey = $desc.MetricKey
         $port = $desc.Port
         $direction = $desc.Direction
+        $coverageSensitive = script:Test-CoverageSensitiveMetric -MetricKey $metricKey
 
         # Extract this run's value
         $thisValue = script:Get-MetricValue -Entry $ThisRun -MetricKey $metricKey -Port ($port ?? '')
@@ -290,6 +353,10 @@ function Get-CostAnomalyFlags {
         # Extract rolling baseline values
         $baselineValues = [System.Collections.Generic.List[double]]::new()
         foreach ($histEntry in $RollingHistory) {
+            if ($coverageSensitive -and (script:Get-EffectiveCoverageClass -Entry $histEntry) -ne $thisCoverageClass) {
+                continue
+            }
+
             $v = script:Get-MetricValue -Entry $histEntry -MetricKey $metricKey -Port ($port ?? '')
             if ($null -ne $v) {
                 $baselineValues.Add($v)

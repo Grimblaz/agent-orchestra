@@ -31,6 +31,46 @@ Describe 'cost-pattern-presence-check workflow logic' {
             return $false
         }
 
+        function script:Get-CostPatternCoverage {
+            param([string[]]$CommentBodies)
+
+            foreach ($body in $CommentBodies) {
+                $inBlock = $false
+                foreach ($line in @(([string]$body) -split "`r?`n")) {
+                    if ($line -match '<!-- cost-pattern-data') {
+                        $inBlock = $true
+                        continue
+                    }
+                    if ($inBlock -and $line -match '^coverage:\s*(.+)\s*$') {
+                        return $Matches[1].Trim()
+                    }
+                    if ($inBlock -and $line -match '-->') {
+                        $inBlock = $false
+                    }
+                }
+            }
+
+            return ''
+        }
+
+        function script:Invoke-CoverageCheck {
+            param([string[]]$CommentBodies)
+
+            if (-not (script:Test-CostPatternMarker -CommentBodies $CommentBodies)) {
+                return @{ ExitCode = 1; Annotation = 'error'; Coverage = '' }
+            }
+
+            $coverage = script:Get-CostPatternCoverage -CommentBodies $CommentBodies
+            switch ($coverage) {
+                'claude+copilot' { return @{ ExitCode = 0; Annotation = ''; Coverage = $coverage } }
+                'claude-only' { return @{ ExitCode = 0; Annotation = 'warning'; Coverage = $coverage } }
+                'copilot-only' { return @{ ExitCode = 0; Annotation = 'warning'; Coverage = $coverage } }
+                'claude-only-with-copilot-fallback-warning' { return @{ ExitCode = 0; Annotation = 'warning'; Coverage = $coverage } }
+                '' { return @{ ExitCode = 1; Annotation = 'error'; Coverage = $coverage } }
+                default { return @{ ExitCode = 1; Annotation = 'error'; Coverage = $coverage } }
+            }
+        }
+
         # Counter-based retry mock: simulates a sequence of comment-body sets where
         # the marker appears on a given attempt (1-based index into $AttemptBodySets).
         # Each entry in $AttemptBodySets is a PSCustomObject with a Bodies array to
@@ -57,7 +97,7 @@ Describe 'cost-pattern-presence-check workflow logic' {
 
         It 'exits 0 immediately when marker found on first attempt' {
             $attemptSets = @(
-                [PSCustomObject]@{ Bodies = @('Some unrelated comment', '<!-- cost-pattern-data ... -->') }
+                [PSCustomObject]@{ Bodies = @('Some unrelated comment', "<!-- cost-pattern-data`ncoverage: claude+copilot`n-->") }
             )
             $result = script:Invoke-RetryLoop -MaxAttempts 5 -AttemptBodySets $attemptSets
             $result.ExitCode | Should -Be 0
@@ -69,11 +109,43 @@ Describe 'cost-pattern-presence-check workflow logic' {
             $attemptSets = @(
                 [PSCustomObject]@{ Bodies = @('No marker here') }
                 [PSCustomObject]@{ Bodies = @('Still no marker') }
-                [PSCustomObject]@{ Bodies = @('<!-- cost-pattern-data start', 'extra comment') }
+                [PSCustomObject]@{ Bodies = @("<!-- cost-pattern-data`ncoverage: claude+copilot`n-->", 'extra comment') }
             )
             $result = script:Invoke-RetryLoop -MaxAttempts 5 -AttemptBodySets $attemptSets
             $result.ExitCode | Should -Be 0
             $result.AttemptCount | Should -Be 3
+        }
+    }
+
+    Context 'coverage-line check' {
+
+        It 'exits 0 without annotation for claude+copilot coverage' {
+            $result = script:Invoke-CoverageCheck -CommentBodies @("<!-- cost-pattern-data`ncoverage: claude+copilot`n-->")
+
+            $result.ExitCode | Should -Be 0
+            $result.Annotation | Should -Be ''
+            $result.Coverage | Should -Be 'claude+copilot'
+        }
+
+        It 'exits 0 with a warning annotation for <Coverage> coverage' -TestCases @(
+            @{ Coverage = 'claude-only' }
+            @{ Coverage = 'copilot-only' }
+            @{ Coverage = 'claude-only-with-copilot-fallback-warning' }
+        ) {
+            param([string]$Coverage)
+
+            $result = script:Invoke-CoverageCheck -CommentBodies @("<!-- cost-pattern-data`ncoverage: $Coverage`n-->")
+
+            $result.ExitCode | Should -Be 0
+            $result.Annotation | Should -Be 'warning'
+            $result.Coverage | Should -Be $Coverage
+        }
+
+        It 'exits 1 when the marker exists but coverage is missing' {
+            $result = script:Invoke-CoverageCheck -CommentBodies @('<!-- cost-pattern-data -->')
+
+            $result.ExitCode | Should -Be 1
+            $result.Annotation | Should -Be 'error'
         }
     }
 
@@ -145,6 +217,15 @@ Describe 'cost-pattern-presence-check workflow logic' {
             $content = Get-Content -Path $script:WorkflowPath -Raw
             # The retry loop iterates 1 2 3 4 5
             $content | Should -Match '1 2 3 4 5'
+        }
+
+        It 'workflow YAML checks coverage and warns for Claude-only fallback coverage' {
+            $content = Get-Content -Path $script:WorkflowPath -Raw
+            $content | Should -Match 'coverage:'
+            $content | Should -Match 'claude\+copilot'
+            $content | Should -Match 'copilot-only'
+            $content | Should -Match 'claude-only-with-copilot-fallback-warning'
+            $content | Should -Match '::warning::Cost Pattern coverage is'
         }
     }
 }

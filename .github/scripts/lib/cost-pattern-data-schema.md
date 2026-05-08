@@ -19,6 +19,10 @@ This document defines the schema for the `<!-- cost-pattern-data ... -->` YAML b
 | `generated_at` | string (ISO-8601) | UTC timestamp when the payload was generated (e.g., `"2026-04-30T12:00:00Z"`). |
 | `pr` | integer | GitHub pull request number this payload is attached to. |
 | `branch` | string | Git branch name associated with the PR. |
+| `provider_support` | array of strings | Additive post-#488 field listing telemetry providers represented by this payload (for example, `["claude", "copilot"]`). Pre-#488 readers default to Claude-only behavior. |
+| `coverage` | string | Additive post-#488 coverage tag: `claude+copilot`, `claude-only`, `copilot-only`, or `claude-only-with-copilot-fallback-warning`. Missing v1 values default to `claude-only`. |
+| `install_status` | string | Additive post-#488 Copilot collection status, such as `ok` or `missing-or-fallback`. Missing v1 values default to `ok`. |
+| `unmapped_session_count` | integer | Additive post-#488 count of Copilot sessions found but not mapped to the current PR branch. Missing v1 values default to `0`. |
 
 ## `ports` — Per-Port Token and Cost Breakdown
 
@@ -44,6 +48,8 @@ Each port entry:
 | `cache_read_hit_ratio` | number | Ratio of cache-read tokens to total input tokens (0.0–1.0). |
 | `parallel_dispatch_groups` | integer | Number of parallel dispatch groups detected for this port. |
 | `mixed_regime` | boolean | `true` when more than one model was used across dispatches on this port. |
+| `provider_support` | array of strings | Optional post-#488 provider list for this port. Omitted for ordinary Claude-only rows. |
+| `providers` | object | Optional post-#488 per-provider subobjects keyed by provider name. Provider rows preserve provider-local tokens, dispatch counts, costs, cache ratios, and availability flags such as `providers.copilot.cache_metric_unavailable`. Copilot provider rows may omit cache ratio fields when Copilot telemetry cannot supply cache metrics. |
 
 ## `orchestrator_overhead` — Orchestrator Token and Cost Breakdown
 
@@ -87,7 +93,7 @@ Array of objects. Each entry represents a metric that deviated from baseline or 
 | --- | --- | --- |
 | `metric` | string | Metric name that triggered the flag (e.g., `"cost_estimate_usd"`, `"tokens.input"`). |
 | `port` | string | Port name the anomaly applies to, or `"totals"` / `"orchestrator_overhead"` for aggregate metrics. |
-| `value` | number | Observed value for this session. |
+| `this_value` | number | Observed value for this session. |
 | `baseline_mean` | number | Rolling-baseline mean for comparison. |
 | `baseline_median` | number | Rolling-baseline median for comparison. |
 | `baseline_stddev` | number | Rolling-baseline standard deviation. |

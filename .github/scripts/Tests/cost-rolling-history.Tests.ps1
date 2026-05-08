@@ -56,6 +56,91 @@ Some text after the block.
 "@
     }
 
+        function global:New-Post488CostPatternComment {
+                param(
+                        [string]$Coverage = 'claude+copilot',
+                        [string]$InstallStatus = 'ok',
+                        [int]$UnmappedSessionCount = 0,
+                        [string]$ProviderSupportLine = 'provider_support: ["claude", "copilot"]',
+                        [string]$ProviderBlock = ''
+                )
+
+                if ([string]::IsNullOrWhiteSpace($ProviderBlock)) {
+                        $ProviderBlock = @"
+            claude:
+                tokens:
+                    input: 1000
+                    output: 250
+                    cache_creation: 125
+                    cache_read: 625
+                dispatch_count: 1
+                prompt_size_chars: 2200
+                cost_estimate_usd: 0.0200
+                cache_read_hit_ratio: 0.357
+                null_cost_events: 0
+                mixed_regime: false
+            copilot:
+                tokens:
+                    input: 500
+                    output: 100
+                dispatch_count: 1
+                prompt_size_chars: 800
+                cost_estimate_usd: 0.0000
+                cache_metric_unavailable: true
+                rate_unavailable: true
+                per_token_rates_published: false
+"@
+                }
+
+                return @"
+Some PR comment text before the block.
+<!-- cost-pattern-data
+version: 1
+$ProviderSupportLine
+coverage: $Coverage
+install_status: $InstallStatus
+unmapped_session_count: $UnmappedSessionCount
+session_completeness: complete
+excluded_from_rolling_baseline: false
+ports:
+    - name: implement-test
+        tokens:
+            input: 1500
+            output: 350
+            cache_creation: 125
+            cache_read: 625
+        dispatch_count: 2
+        prompt_size_chars: 3000
+        cost_estimate_usd: 0.0200
+        cache_read_hit_ratio: 0.357
+        null_cost_events: 0
+        mixed_regime: false
+        providers:
+$ProviderBlock
+orchestrator_overhead:
+    tokens:
+        input: 200
+        output: 50
+        cache_creation: 0
+        cache_read: 0
+    cost_estimate_usd: 0.0020
+    cache_read_hit_ratio: 0.000
+dispatches:
+    general_purpose_count: 0
+    unattributed_count: 0
+totals:
+    tokens:
+        input: 1700
+        output: 400
+        cache_creation: 125
+        cache_read: 625
+    cost_estimate_usd: 0.0220
+anomaly_flags: []
+-->
+Some text after the block.
+"@
+        }
+
     # Build a GraphQL success response with one PR containing one comment.
     function global:New-GraphQLResponse {
         param(
@@ -622,6 +707,116 @@ totals:
             $result.ContainsKey('entries') | Should -Be $true -Because 'entries key must always be present'
             $null -ne $result.entries | Should -Be $true -Because 'entries must not be $null'
             @($result.entries).Count | Should -Be 0
+        }
+    }
+
+    Context 'post-#488 YAML parser forward compatibility' {
+
+        It 'defaults missing coverage and install fields for pre-#488 v1 YAML' {
+            $comment = New-CostPatternComment
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($comment)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.timed_out | Should -Be $false
+            $result.entries.Count | Should -Be 1
+            $entry = $result.entries[0]
+            $entry['coverage'] | Should -Be 'claude-only'
+            $entry['install_status'] | Should -Be 'ok'
+            $entry['unmapped_session_count'] | Should -Be 0
+        }
+
+        It 'parses post-#488 additive top-level and per-port provider fields' {
+            $comment = New-Post488CostPatternComment
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($comment)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.timed_out | Should -Be $false
+            $result.entries.Count | Should -Be 1
+            $entry = $result.entries[0]
+
+            @($entry['provider_support']) | Should -Be @('claude', 'copilot')
+            $entry['coverage'] | Should -Be 'claude+copilot'
+            $entry['install_status'] | Should -Be 'ok'
+            $entry['unmapped_session_count'] | Should -Be 0
+            $entry['ports'].ContainsKey('implement-test') | Should -Be $true
+            $entry['ports']['implement-test']['providers']['claude']['dispatch_count'] | Should -Be 1
+            $entry['ports']['implement-test']['providers']['copilot']['cache_metric_unavailable'] | Should -Be $true
+        }
+
+        It 'parses provider subobjects with two-space provider indentation' {
+            $providerBlock = @"
+      claude:
+        tokens:
+          input: 1000
+          output: 250
+          cache_creation: 125
+          cache_read: 625
+        dispatch_count: 1
+        cost_estimate_usd: 0.0200
+        cache_read_hit_ratio: 0.357
+      copilot:
+        tokens:
+          input: 500
+          output: 100
+        dispatch_count: 1
+        cost_estimate_usd: 0.0000
+        cache_metric_unavailable: true
+"@
+            $comment = New-Post488CostPatternComment -ProviderBlock $providerBlock
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($comment)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.timed_out | Should -Be $false
+            $providers = $result.entries[0]['ports']['implement-test']['providers']
+            $providers | Should -Not -BeNullOrEmpty -Because 'post-#488 parser must preserve per-port providers subobjects'
+            $providers | Should -BeOfType [hashtable]
+            $providers.ContainsKey('claude') | Should -Be $true
+            $providers.ContainsKey('copilot') | Should -Be $true
+        }
+
+        It 'does not turn Copilot cache-metric-unavailable rows into zero cache-hit baseline values' {
+            $comment = New-Post488CostPatternComment
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($comment)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $providers = $result.entries[0]['ports']['implement-test']['providers']
+            $providers | Should -Not -BeNullOrEmpty -Because 'post-#488 parser must preserve provider rows before cache baselines can filter Copilot rows'
+            $copilotProvider = $providers['copilot']
+            $copilotProvider | Should -Not -BeNullOrEmpty
+            $copilotProvider['cache_metric_unavailable'] | Should -Be $true
+            $copilotProvider.ContainsKey('cache_read_hit_ratio') | Should -Be $false -Because 'Copilot rows must be skipped for cache_read.hit_ratio, not included as 0.0 values'
+        }
+
+        It 'carries coverage and install-status outcomes for the cross-tool collection matrix' -TestCases @(
+            @{ Scenario = 'sentinel-present + Copilot-events-merged'; Coverage = 'claude+copilot'; InstallStatus = 'ok'; Unmapped = 0; SupportLine = 'provider_support: ["claude", "copilot"]' }
+            @{ Scenario = 'sentinel-present + Copilot-reflog-no-match'; Coverage = 'claude-only-with-copilot-fallback-warning'; InstallStatus = 'ok'; Unmapped = 2; SupportLine = 'provider_support: ["claude"]' }
+            @{ Scenario = 'sentinel-absent + fallback Copilot events'; Coverage = 'claude-only-with-copilot-fallback-warning'; InstallStatus = 'missing-or-fallback'; Unmapped = 0; SupportLine = 'provider_support: ["claude"]' }
+            @{ Scenario = 'sentinel-absent + no Copilot data'; Coverage = 'claude-only'; InstallStatus = 'missing-or-fallback'; Unmapped = 0; SupportLine = 'provider_support: ["claude"]' }
+        ) {
+            param([string]$Scenario, [string]$Coverage, [string]$InstallStatus, [int]$Unmapped, [string]$SupportLine)
+
+            $comment = New-Post488CostPatternComment `
+                -Coverage $Coverage `
+                -InstallStatus $InstallStatus `
+                -UnmappedSessionCount $Unmapped `
+                -ProviderSupportLine $SupportLine
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($comment)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $entry = $result.entries[0]
+            $entry['coverage'] | Should -Be $Coverage -Because $Scenario
+            $entry['install_status'] | Should -Be $InstallStatus -Because $Scenario
+            $entry['unmapped_session_count'] | Should -Be $Unmapped -Because $Scenario
         }
     }
 }

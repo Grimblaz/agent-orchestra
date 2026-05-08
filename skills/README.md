@@ -20,7 +20,7 @@ Each skill should use this flow:
 
 This keeps prompts concise while preserving depth when needed.
 
-## Available Skills (44)
+## Available Skills (47)
 
 | Skill | Purpose | Status |
 | ----- | ------- | ------ |
@@ -30,10 +30,13 @@ This keeps prompts concise while preserving depth when needed.
 | `browser-canvas-testing` | VS Code native browser tool behavior for canvas-based games | ✅ Included |
 | `calibration-pipeline` | Calibration and review-pipeline tooling guidance | ✅ Included |
 | `code-review-intake` | Deterministic GitHub review intake workflow with ledger-based judgment | ✅ Included |
+| `copilot-cost-collection` | Copilot OTel cost collection setup and branch-correlated telemetry guidance | ✅ Included |
 | `customer-experience` | Reusable customer framing and CE evidence methodology | ✅ Included |
 | `design-exploration` | Technical design option comparison and decision-framing workflow | ✅ Included |
 | `documentation-finalization` | Documentation cleanup and design-doc maintenance workflow | ✅ Included |
+| `frame-credit-emission` | Frame credit row emission and deferred credit-input methodology | ✅ Included |
 | `frame-credit-ledger` | Warn-only frame port-coverage ledger posted as a PR comment after `gh pr create` | ✅ Included |
+| `frame-spine-lookup` | Frame spine lookup methodology for specialist plan-slice retrieval | ✅ Included |
 | `frontend-design` | Guide for creating distinctive UI designs that avoid generic templates | ✅ Included |
 | `guidance-measurement` | Guidance-complexity measurement tooling and deterministic analysis guidance | ✅ Included |
 | `implementation-discipline` | Minimal implementation workflow for plan-driven coding | ✅ Included |
@@ -43,6 +46,7 @@ This keeps prompts concise while preserving depth when needed.
 | `post-pr-review` | Post-merge checklist for archiving, documentation, versioning, and release tagging | ✅ Included |
 | `pre-commit-formatting` | Final markdown and whitespace formatting backstop before validation | ✅ Included |
 | `process-analysis` | Retrospective and process-analysis methodology for workflow review | ✅ Included |
+| `process-retrospective` | Deferred process-retrospective frame-port skeleton | ✅ Included |
 | `process-troubleshooting` | Five-scenario guide for diagnosing common orchestration failure patterns | ✅ Included |
 | `property-based-testing` | Incremental rollout policy for property-based testing | ✅ Included |
 | `refactoring-methodology` | Proportionate refactoring workflow for touched files and nearby debt | ✅ Included |
