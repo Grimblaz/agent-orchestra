@@ -208,6 +208,246 @@ credits:
                 $result.MetricsVersion | Should -Be 'parse-error'
                 $result.Reason | Should -Match 'dispatch-cost-samples'
         }
+
+        # -------------------------------------------------------------------------
+        # Step 3 RED — 6-key provider field tests (issue #514)
+        # These tests FAIL against the current implementation because:
+        #   - ConvertFrom-FCLDispatchCostSampleChunk rejects any row with count != 5
+        #   - New-DispatchCostSampleRow has no -Provider parameter
+        #   - Set-FCLDispatchCostSamplesSection is not merge-aware
+        # They go GREEN after Step 4 adds provider support.
+        # -------------------------------------------------------------------------
+
+        Context 'Context: 6-key provider field — parser back-compat' {
+
+            It 'parses 5-key legacy rows without throwing (back-compat invariant)' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 7421
+        rc-conformance: pass
+        judge-disposition: accepted
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+
+                $result.MetricsVersion | Should -Be 4
+                $result.DispatchCostSamples | Should -Not -BeNullOrEmpty
+                $sample = @($result.DispatchCostSamples)[0]
+                # 5-key back-compat: exactly the five base keys, no provider
+                (@($sample.PSObject.Properties.Name) -join ',') | Should -Be 'step-id,mode,bytes,rc-conformance,judge-disposition'
+                $sample.'step-id' | Should -Be 's12'
+            }
+        }
+
+        Context 'Context: 6-key provider field — parser additive' {
+
+            It 'parses 6-key rows with provider: claude and round-trips through Set-FCLDispatchCostSamplesSection' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 7421
+        rc-conformance: pass
+        judge-disposition: accepted
+        provider: claude
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+
+                $result.MetricsVersion | Should -Be 4
+                $result.DispatchCostSamples | Should -Not -BeNullOrEmpty
+                $sample = @($result.DispatchCostSamples)[0]
+                $sample.PSObject.Properties['provider'] | Should -Not -BeNullOrEmpty
+                $sample.provider | Should -Be 'claude'
+            }
+
+            It 'parses 6-key rows with provider: copilot without error' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s13
+        mode: spine
+        bytes: 5000
+        rc-conformance: pass
+        judge-disposition: accepted
+        provider: copilot
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+
+                $result.MetricsVersion | Should -Be 4
+                $result.DispatchCostSamples | Should -Not -BeNullOrEmpty
+                $sample = @($result.DispatchCostSamples)[0]
+                $sample.provider | Should -Be 'copilot'
+            }
+
+            It 'tolerates unknown provider value per #467 D12 additivity (provider: future-tool does not throw)' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s14
+        mode: spine
+        bytes: 3000
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+        provider: future-tool
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+
+                $result.MetricsVersion | Should -Be 4
+                $result.DispatchCostSamples | Should -Not -BeNullOrEmpty
+            }
+        }
+
+        Context 'Context: 6-key provider field — strict-position enforcement' {
+
+            It 'throws when a 6-key row has provider at the wrong position (not position 6)' {
+                # provider appears at position 2 (after step-id), which is wrong position
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        provider: claude
+        mode: spine
+        bytes: 7421
+        rc-conformance: pass
+        judge-disposition: accepted
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+
+                $result.MetricsVersion | Should -Be 'parse-error'
+            }
+        }
+
+        Context 'Context: merge-aware dispatch-cost-samples writer (M9)' {
+
+            It 'preserves existing provider:claude rows when called with provider:copilot rows for different tuples' {
+                # PR body that already has a (s12, spine) row with provider: claude
+                $existingYaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 7421
+        rc-conformance: pass
+        judge-disposition: accepted
+        provider: claude
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $existingYaml
+
+                # Add a new (s13, spine, copilot) row — different tuple
+                $updated = Add-DispatchCostSampleToPrBody -PrBody $body -StepId 's13' -Mode 'spine' -Bytes 5000 -Provider 'copilot'
+                $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+
+                # Both tuples must be present in the output
+                $normalized | Should -Match 'step-id: s12'
+                $normalized | Should -Match 'provider: claude'
+                $normalized | Should -Match 'step-id: s13'
+                $normalized | Should -Match 'provider: copilot'
+            }
+
+            It 'replaces existing rows when the same (step-id, mode, provider) tuple is submitted' {
+                # Existing block has (s12, spine, claude, 7421)
+                $existingYaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 7421
+        rc-conformance: pass
+        judge-disposition: accepted
+        provider: claude
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $existingYaml
+
+                # Update the same tuple with bytes 9000
+                $updated = Add-DispatchCostSampleToPrBody -PrBody $body -StepId 's12' -Mode 'spine' -Bytes 9000 -Provider 'claude'
+                $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+
+                # s12/spine/claude row should now have bytes 9000, not 7421
+                $normalized | Should -Match 'bytes: 9000'
+                $normalized | Should -Not -Match 'bytes: 7421'
+            }
+        }
+
+        Context 'Context: D17 baseline-equivalence fixture (mixed 5-key + 6-key)' {
+
+            It 'mixed 5-key and 6-key sample set parses without error (D17 calibration not reset by provider field)' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s10
+        mode: legacy-fallback
+        bytes: 1234
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+    - step-id: s12
+        mode: spine
+        bytes: 7421
+        rc-conformance: pass
+        judge-disposition: accepted
+        provider: claude
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+
+                $result.MetricsVersion | Should -Be 4
+                @($result.DispatchCostSamples).Count | Should -Be 2
+
+                $withProvider = @($result.DispatchCostSamples) | Where-Object { $_.'step-id' -eq 's12' }
+                $withProvider | Should -Not -BeNullOrEmpty
+                $withProvider.provider | Should -Be 'claude'
+
+                $withoutProvider = @($result.DispatchCostSamples) | Where-Object { $_.'step-id' -eq 's10' }
+                $withoutProvider | Should -Not -BeNullOrEmpty
+            }
+        }
 }
 
 Describe 'dispatch-cost-samples PR-body mutation helpers (issue #512 Step 12)' {
@@ -294,6 +534,74 @@ integrity_checks:
                 $updated = & $command -PrBody $body -StepId 's99' -Mode 'spine' -RcConformance 'pass'
 
                 $updated | Should -Be $body -Because 'pre-PR lifecycle must create the placeholder sample before RC or judge back-fill can target it'
+        }
+
+        # -------------------------------------------------------------------------
+        # Step 3 RED — producer-side provider emission tests (issue #514)
+        # These tests FAIL against the current implementation because:
+        #   - New-DispatchCostSampleRow has no -Provider parameter
+        #   - Add-DispatchCostSampleToPrBody has no -Provider parameter
+        # They go GREEN after Step 4 adds provider support.
+        # -------------------------------------------------------------------------
+
+        Context 'Context: producer-side -Provider emission (M13)' {
+
+            It 'New-DispatchCostSampleRow -Provider claude produces row with provider field' {
+                $row = New-DispatchCostSampleRow -StepId 's12' -Mode 'spine' -Bytes 7421 -Provider 'claude'
+                $row.PSObject.Properties['provider'] | Should -Not -BeNullOrEmpty
+                $row.provider | Should -Be 'claude'
+            }
+
+            It 'New-DispatchCostSampleRow -Provider copilot produces row with provider: copilot' {
+                $row = New-DispatchCostSampleRow -StepId 's12' -Mode 'spine' -Bytes 7421 -Provider 'copilot'
+                $row.provider | Should -Be 'copilot'
+            }
+
+            It 'New-DispatchCostSampleRow without -Provider omits provider field for back-compat' {
+                $row = New-DispatchCostSampleRow -StepId 's12' -Mode 'spine' -Bytes 7421
+                $row.PSObject.Properties['provider'] | Should -BeNullOrEmpty
+            }
+        }
+
+        Context 'Context: Add-DispatchCostSampleToPrBody -Provider passthrough (M13)' {
+
+            It 'Add-DispatchCostSampleToPrBody -Provider claude produces PR body with provider: claude line' {
+                $body = & $script:NewV4PrBody -Yaml $script:V4FullYaml
+                $updated = Add-DispatchCostSampleToPrBody -PrBody $body -StepId 's12' -Mode 'spine' -Bytes 7421 -Provider 'claude'
+                $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+
+                $normalized | Should -Match 'provider: claude'
+            }
+        }
+
+        Context 'Context: provider field preserved on RC back-fill update (M13 upsert preservation)' {
+
+            It 'provider: claude is not dropped when Add-DispatchCostSampleToPrBody updates an existing row by RC back-fill' {
+                # Build PR body that already has (s12, spine) row WITH provider: claude
+                $existingYaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 7421
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+        provider: claude
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $existingYaml
+
+                # RC back-fill update for the same step-id+mode (same tuple)
+                $updated = Add-DispatchCostSampleToPrBody -PrBody $body -StepId 's12' -Mode 'spine' -Bytes 7421 -Provider 'claude'
+                $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+
+                # provider: claude must be preserved after the upsert
+                $normalized | Should -Match 'provider: claude'
+            }
         }
 }
 
