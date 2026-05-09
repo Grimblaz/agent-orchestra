@@ -254,7 +254,7 @@ If Agent Teams cost proves viable (follow-up to this spike), a Claude-only P2P i
 - Transport survey identified two collection paths required (JSONL walker for Claude, OTel walker for Copilot) — dual-path is unavoidable given architectural divergence.
 - Agent Teams P2P has no OTel surface; mailbox files (`~/.claude/teams/`) are the only observable record. Harness must read mailbox JSON directly if Agent Teams prototype runs.
 - Copilot attribution is probabilistic (reflog timestamp join) — sessions crossing branch switches may be mis-attributed.
-- **`.tmp/issue-535/` retention**: Spike scaffolding (`harness.ps1`, `transport-survey.md`) is committed to the feature branch for reproducibility. Per issue #535 acceptance criteria, the branch is retained until at least one Go-verdict follow-up has shipped or close-out is explicit. Spike artifacts are not promoted to main.
+- **`.tmp/issue-535/` retention**: Spike scaffolding (`harness.ps1`, `transport-survey.md`) is committed to the feature branch for reproducibility and merges to main with the spike PR. Per issue #535 acceptance criteria, the spike branch is retained until at least one Go-verdict follow-up has shipped or close-out is explicit. The artifacts are not promoted as production assets — they remain candidates for removal once Go-verdict follow-ups (issues #538/#539) ship.
 
 ## S1–S4 Documentation Validation
 

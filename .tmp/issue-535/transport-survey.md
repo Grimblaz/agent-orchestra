@@ -115,7 +115,7 @@ Subagents cannot spawn further subagents (no nested recursion). Multiple `Agent`
 
 **Peer-to-peer via Agent Teams (experimental)**
 
-Agent teams (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, requires v2.1.32+) provide a distinct bidirectional transport through a mailbox system. Teammates communicate via `SendMessage`, which writes JSON inbox files to `~/.claude/teams/{team-name}/inboxes/{agent-name}.json`. Message fields include `from`, `text`, `summary`, `timestamp`, `color`, and `read` status. Any teammate can message any other by name; the lead assigns names at spawn time.
+Agent Teams (`CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`, requires v2.1.32+) provide a distinct bidirectional transport through a mailbox system. Teammates communicate via `SendMessage`, which writes JSON inbox files to `~/.claude/teams/{team-name}/inboxes/{agent-name}.json`. Message fields include `from`, `text`, `summary`, `timestamp`, `color`, and `read` status. Any teammate can message any other by name; the lead assigns names at spawn time.
 
 The shared task list (`~/.claude/tasks/{team-name}/`) provides a further coordination primitive: teammates can claim tasks, mark them complete, and read dependency status. File locking prevents concurrent claim races.
 

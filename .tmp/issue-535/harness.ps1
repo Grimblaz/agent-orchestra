@@ -13,14 +13,16 @@
       2. After the operator's session completes, invokes the appropriate cost walker to
          post-process resulting transcripts/OTel files and emit per-round token deltas.
 
-    This file lives under .tmp/issue-535/ and is intentionally NOT merged to main.
+    This file lives under .tmp/issue-535/ and is spike scaffolding, not a production asset. It merges with the spike PR but remains a candidate for removal once issue #535 follow-ups ship.
 
     # Cache-warmup criterion: discard rounds where cache_creation_input_tokens > 0.
     # Those rounds are building the prompt cache — their input token cost is inflated.
     # Steady-state rounds (cache_creation_input_tokens == 0) reflect cached inference cost.
     # Use --warmup-rounds to control how many initial rounds to exclude from the avg.
 
-    CLI accepts GNU-style long flags (double-dash + hyphens) or PowerShell-style flags.
+    CLI accepts double-dashed long flags (e.g., --mode, --platform, --warmup-rounds).
+    Single-dashed forms work as well because the parser strips dashes uniformly, but
+    parameter names retain hyphens (e.g., --warmup-rounds, not -WarmupRounds).
     Examples:
       pwsh harness.ps1 --mode self-validate --platform claude --non-interactive
       pwsh harness.ps1 --mode run-prototype --platform claude --rounds 10 --warmup-rounds 2
@@ -56,6 +58,17 @@ function script:Resolve-Args {
         OutputJson     = ''
     }
 
+    # Bounds-check helper: throw a friendly error if a value-bearing flag is the
+    # final argv with no following value. Without this guard, $RawArgs[$i] would
+    # return $null on OOB; [int] casts would silently coerce to 0 and string
+    # flags would assign $null, producing misleading downstream errors.
+    $assertNext = {
+        param([int]$idx, [int]$count, [string]$flag)
+        if (($idx + 1) -ge $count) {
+            throw "Flag --$flag requires a value (none supplied)."
+        }
+    }
+
     $i = 0
     while ($i -lt $RawArgs.Count) {
         $arg = $RawArgs[$i]
@@ -65,22 +78,27 @@ function script:Resolve-Args {
 
         switch ($key) {
             'mode' {
+                & $assertNext $i $RawArgs.Count 'mode'
                 $i++
                 $result.Mode = $RawArgs[$i]
             }
             'platform' {
+                & $assertNext $i $RawArgs.Count 'platform'
                 $i++
                 $result.Platform = $RawArgs[$i]
             }
             'rounds' {
+                & $assertNext $i $RawArgs.Count 'rounds'
                 $i++
                 $result.Rounds = [int]$RawArgs[$i]
             }
             'warmup-rounds' {
+                & $assertNext $i $RawArgs.Count 'warmup-rounds'
                 $i++
                 $result.WarmupRounds = [int]$RawArgs[$i]
             }
             'issue-number' {
+                & $assertNext $i $RawArgs.Count 'issue-number'
                 $i++
                 $result.IssueNumber = [int]$RawArgs[$i]
             }
@@ -91,6 +109,7 @@ function script:Resolve-Args {
                 $result.NonInteractive = $true
             }
             'output-json' {
+                & $assertNext $i $RawArgs.Count 'output-json'
                 $i++
                 $result.OutputJson = $RawArgs[$i]
             }
@@ -327,6 +346,13 @@ function Invoke-Walker {
     $output   = ''
     $exitCode = 0
     try {
+        # Clear any stale $LASTEXITCODE from a prior session command before
+        # invoking the walker. PowerShell's $LASTEXITCODE is session-scoped and
+        # persists across invocations; if the walker (a function-library script)
+        # does not call exit explicitly, the previous value would contaminate
+        # the read below. The null/empty defaulting at L334-337 covers the
+        # never-set case; this reset covers the previous-zero-not-cleared case.
+        $global:LASTEXITCODE = 0
         $output = & $walkerPath `
             -IssueNumber $IssueNumber `
             -Repo $Repo `
