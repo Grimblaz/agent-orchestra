@@ -129,15 +129,15 @@ Copilot specialists (`execute/runInTerminal` or `execute` wildcard):
 - `agents/Experience-Owner.agent.md`
 
 `agents/Research-Agent.agent.md` is excluded: it has only `read`, `edit`, `search`, and
-`web` grants — no `execute/*`. Copilot spine lookup for Research-Agent is deferred to a
-follow-up issue (Step 12 of #514).
+`web` grants — no `execute/*`. Copilot spine lookup for Research-Agent is deferred to
+[#544](https://github.com/Grimblaz/agent-orchestra/issues/544).
 
 Do not edit specialist shells for this contract unless a future test proves the grants drifted.
 
 ## Non-Goals and Deferred Work
 
 - Copilot parity shims for spine lookup shipped in #514. Research-Agent Copilot
-  spine lookup is deferred to a follow-up issue (Step 12 of #514).
+  spine lookup is deferred to [#544](https://github.com/Grimblaz/agent-orchestra/issues/544).
 - A custom MCP server lookup path is deferred and is a non-goal for this skill.
 - This skill is supporting methodology only. It declares no `provides:` field
   and does not fill a frame port.
