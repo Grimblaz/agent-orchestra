@@ -593,7 +593,7 @@ credits:
         evidence: "tests passed"
 '@
                 $body = & $script:NewV4PrBody -Yaml $yaml
-                $updated = Update-DispatchCostSampleEvaluationInPrBody -PrBody $body -StepId 's12' -Mode 'spine' -RcConformance 'pass'
+                $updated = Update-DispatchCostSampleEvaluationInPrBody -PrBody $body -StepId 's12' -Mode 'spine' -Provider 'claude' -RcConformance 'pass'
                 $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
 
                 # provider: claude must survive the back-fill

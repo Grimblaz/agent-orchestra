@@ -415,7 +415,7 @@ function script:ConvertFrom-FCLDispatchCostSampleChunk {
         }
     }
     if ($keyOrder.Count -eq 6 -and $keyOrder[5] -ne 'provider') {
-        throw 'row keys must be exactly step-id, mode, bytes, rc-conformance, judge-disposition in that order'
+        throw 'row keys must be exactly step-id, mode, bytes, rc-conformance, judge-disposition (with optional provider as 6th key)'
     }
 
     $values = $parsed.Values
@@ -492,14 +492,13 @@ function script:Set-FCLDispatchCostSamplesSection {
             }
         }
 
-        $sectionContent = ($lines.GetRange($sectionStart, $sectionEnd - $sectionStart).ToArray() -join "`n")
-        $chunkMatches = [regex]::Matches($sectionContent, '(?ms)  - step-id:.*?(?=\n  - step-id:|\z)')
-        foreach ($chunkMatch in $chunkMatches) {
-            $chunkText = $chunkMatch.Value.Trim()
-            $rawChunk = $chunkText -replace '^-\s+', ''
+        $existingChunks = script:Get-FCLEntryChunks -Block $MetricsBlock -SectionName 'dispatch-cost-samples'
+        foreach ($chunk in $existingChunks) {
             try {
-                $existingRows.Add((script:ConvertFrom-FCLDispatchCostSampleChunk -Chunk $rawChunk)) | Out-Null
-            } catch { }
+                $existingRows.Add((script:ConvertFrom-FCLDispatchCostSampleChunk -Chunk $chunk)) | Out-Null
+            } catch {
+                Write-Verbose "frame-credit-ledger: discarded malformed dispatch-cost-sample chunk: $($_.Exception.Message)"
+            }
         }
 
         for ($lineIndex = $sectionEnd - 1; $lineIndex -ge $sectionStart; $lineIndex--) {
@@ -950,7 +949,10 @@ function Update-DispatchCostSampleEvaluationInPrBody {
     $filterByProvider = $PSBoundParameters.ContainsKey('Provider') -and -not [string]::IsNullOrEmpty($Provider)
     foreach ($sample in @($metrics.DispatchCostSamples)) {
         $sampleProvider = if ($sample.PSObject.Properties['provider']) { [string]$sample.provider } else { $null }
-        $providerMatch = (-not $filterByProvider) -or ($sampleProvider -eq $Provider)
+        # Without -Provider: match only legacy rows lacking a provider field (backward compat).
+        # With -Provider: match only rows whose provider equals the specified value.
+        # This prevents cross-provider contamination once multi-provider rows coexist (post-#545).
+        $providerMatch = if ($filterByProvider) { $sampleProvider -eq $Provider } else { [string]::IsNullOrEmpty($sampleProvider) }
 
         if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode -and $providerMatch) {
             $updatedRcConformance = [string]$sample.'rc-conformance'
