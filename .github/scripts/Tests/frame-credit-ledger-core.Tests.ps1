@@ -665,6 +665,48 @@ credits:
                 $claudeRow.'rc-conformance' | Should -Be 'pass'
                 $copilotRow.'rc-conformance' | Should -Be 'not-evaluated'
             }
+
+            It 'no-Provider call leaves a 6-key (provider-attributed) row unchanged' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 1234
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+        provider: claude
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $updated = Update-DispatchCostSampleEvaluationInPrBody -PrBody $body -StepId 's12' -Mode 'spine' -RcConformance 'pass'
+                $updated | Should -Be $body
+            }
+
+            It 'no-Provider call updates a 5-key legacy (no-provider) row' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 1234
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $updated = Update-DispatchCostSampleEvaluationInPrBody -PrBody $body -StepId 's12' -Mode 'spine' -RcConformance 'pass'
+                $updated | Should -Not -Be $body
+                $updated | Should -Match 'rc-conformance: pass'
+            }
         }
 
         Context 'Context: provider field preserved on RC back-fill update (M13 upsert preservation)' {
