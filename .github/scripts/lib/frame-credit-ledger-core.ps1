@@ -405,14 +405,17 @@ function script:ConvertFrom-FCLDispatchCostSampleChunk {
 
     $parsed = script:Get-FCLDispatchCostSampleKeysAndValues -Chunk $Chunk
     $keyOrder = @($parsed.KeyOrder)
-    if ($keyOrder.Count -ne $requiredKeys.Count) {
-        throw 'row must contain exactly step-id, mode, bytes, rc-conformance, judge-disposition'
+    if ($keyOrder.Count -notin @($requiredKeys.Count, ($requiredKeys.Count + 1))) {
+        throw 'row must contain exactly step-id, mode, bytes, rc-conformance, judge-disposition (optionally followed by provider)'
     }
 
     for ($keyIndex = 0; $keyIndex -lt $requiredKeys.Count; $keyIndex++) {
         if ($keyOrder[$keyIndex] -ne $requiredKeys[$keyIndex]) {
             throw 'row keys must be exactly step-id, mode, bytes, rc-conformance, judge-disposition in that order'
         }
+    }
+    if ($keyOrder.Count -eq 6 -and $keyOrder[5] -ne 'provider') {
+        throw 'row keys must be exactly step-id, mode, bytes, rc-conformance, judge-disposition (with optional provider as 6th key)'
     }
 
     $values = $parsed.Values
@@ -437,12 +440,17 @@ function script:ConvertFrom-FCLDispatchCostSampleChunk {
         throw 'bytes must be an integer'
     }
 
+    $providerParam = @{}
+    if ($keyOrder.Count -eq 6 -and $values.ContainsKey('provider') -and -not [string]::IsNullOrWhiteSpace([string]$values['provider'])) {
+        $providerParam['Provider'] = [string]$values['provider']
+    }
     return New-DispatchCostSampleRow `
         -StepId ([string]$values['step-id']) `
         -Mode ([string]$values['mode']) `
         -Bytes $bytesValue `
         -RcConformance ([string]$values['rc-conformance']) `
-        -JudgeDisposition ([string]$values['judge-disposition'])
+        -JudgeDisposition ([string]$values['judge-disposition']) `
+        @providerParam
 }
 
 function script:Set-FCLDispatchCostSamplesSection {
@@ -468,6 +476,8 @@ function script:Set-FCLDispatchCostSamplesSection {
         }
     }
 
+    # Collect existing rows from current section before removal
+    $existingRows = [System.Collections.Generic.List[object]]::new()
     if ($sectionStart -ge 0) {
         $sectionEnd = $lines.Count
         for ($lineIndex = $sectionStart + 1; $lineIndex -lt $lines.Count; $lineIndex++) {
@@ -482,23 +492,52 @@ function script:Set-FCLDispatchCostSamplesSection {
             }
         }
 
+        $existingChunks = script:Get-FCLEntryChunks -Block $MetricsBlock -SectionName 'dispatch-cost-samples'
+        foreach ($chunk in $existingChunks) {
+            try {
+                $existingRows.Add((script:ConvertFrom-FCLDispatchCostSampleChunk -Chunk $chunk)) | Out-Null
+            } catch {
+                Write-Verbose "frame-credit-ledger: discarded malformed dispatch-cost-sample chunk: $($_.Exception.Message)"
+            }
+        }
+
         for ($lineIndex = $sectionEnd - 1; $lineIndex -ge $sectionStart; $lineIndex--) {
             $lines.RemoveAt($lineIndex)
         }
     }
 
-    if (@($Samples).Count -eq 0) {
+    # Build merged list: existing rows that aren't overridden + all incoming samples
+    $mergedRows = [System.Collections.Generic.List[object]]::new()
+    foreach ($existing in $existingRows) {
+        $override = $null
+        foreach ($incoming in @($Samples)) {
+            $existingProvider = if ($existing.PSObject.Properties['provider']) { [string]$existing.provider } else { $null }
+            $incomingProvider = if ($incoming.PSObject.Properties['provider']) { [string]$incoming.provider } else { $null }
+            $providerMatch = ($null -eq $existingProvider -and $null -eq $incomingProvider) -or ($existingProvider -eq $incomingProvider)
+            if ([string]$existing.'step-id' -eq [string]$incoming.'step-id' -and [string]$existing.mode -eq [string]$incoming.mode -and $providerMatch) {
+                $override = $incoming
+                break
+            }
+        }
+        if ($null -eq $override) { $mergedRows.Add($existing) | Out-Null }
+    }
+    foreach ($incoming in @($Samples)) { $mergedRows.Add($incoming) | Out-Null }
+
+    if ($mergedRows.Count -eq 0) {
         return ($lines.ToArray() -join $eol)
     }
 
     $sectionLines = [System.Collections.Generic.List[string]]::new()
     [void]$sectionLines.Add('dispatch-cost-samples:')
-    foreach ($sample in @($Samples)) {
+    foreach ($sample in $mergedRows) {
         [void]$sectionLines.Add("  - step-id: $($sample.'step-id')")
         [void]$sectionLines.Add("    mode: $($sample.mode)")
         [void]$sectionLines.Add("    bytes: $($sample.bytes)")
         [void]$sectionLines.Add("    rc-conformance: $($sample.'rc-conformance')")
         [void]$sectionLines.Add("    judge-disposition: $($sample.'judge-disposition')")
+        if ($sample.PSObject.Properties['provider'] -and -not [string]::IsNullOrEmpty([string]$sample.provider)) {
+            [void]$sectionLines.Add("    provider: $($sample.provider)")
+        }
     }
 
     $insertIndex = if ($sectionStart -ge 0) { $sectionStart } else { $lines.Count }
@@ -818,16 +857,21 @@ function New-DispatchCostSampleRow {
         [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
         [Parameter(Mandatory)][int]$Bytes,
         [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance = 'not-evaluated',
-        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition = 'not-evaluated'
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition = 'not-evaluated',
+        [string]$Provider = $null
     )
 
-    return [pscustomobject][ordered]@{
+    $row = [ordered]@{
         'step-id'           = $StepId
         mode                = $Mode
         bytes               = $Bytes
         'rc-conformance'    = $RcConformance
         'judge-disposition' = $JudgeDisposition
     }
+    if (-not [string]::IsNullOrEmpty($Provider)) {
+        $row['provider'] = $Provider
+    }
+    return [pscustomobject]$row
 }
 
 function Add-DispatchCostSampleToPrBody {
@@ -838,7 +882,8 @@ function Add-DispatchCostSampleToPrBody {
         [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
         [Parameter(Mandatory)][int]$Bytes,
         [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance = 'not-evaluated',
-        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition = 'not-evaluated'
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition = 'not-evaluated',
+        [string]$Provider = $null
     )
 
     $metrics = Read-PRMetricsBlock -PrBody $PrBody
@@ -850,7 +895,9 @@ function Add-DispatchCostSampleToPrBody {
     $existingIndex = -1
     for ($sampleIndex = 0; $sampleIndex -lt $samples.Count; $sampleIndex++) {
         $sample = $samples[$sampleIndex]
-        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode) {
+        $sampleProvider = if ($sample.PSObject.Properties['provider']) { [string]$sample.provider } else { $null }
+        $providerMatch = ($null -eq $sampleProvider -and [string]::IsNullOrEmpty($Provider)) -or ($sampleProvider -eq $Provider)
+        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode -and $providerMatch) {
             $existingIndex = $sampleIndex
             break
         }
@@ -858,20 +905,26 @@ function Add-DispatchCostSampleToPrBody {
 
     if ($existingIndex -ge 0) {
         $existingSample = $samples[$existingIndex]
+        $existingProvider = if ($existingSample.PSObject.Properties['provider']) { [string]$existingSample.provider } else { $null }
+        $effectiveProvider = if (-not [string]::IsNullOrEmpty($Provider)) { $Provider } elseif (-not [string]::IsNullOrEmpty($existingProvider)) { $existingProvider } else { $null }
+        $providerParam = if (-not [string]::IsNullOrEmpty($effectiveProvider)) { @{ Provider = $effectiveProvider } } else { @{} }
         $samples[$existingIndex] = New-DispatchCostSampleRow `
             -StepId $StepId `
             -Mode $Mode `
             -Bytes $Bytes `
             -RcConformance ([string]$existingSample.'rc-conformance') `
-            -JudgeDisposition ([string]$existingSample.'judge-disposition')
+            -JudgeDisposition ([string]$existingSample.'judge-disposition') `
+            @providerParam
     }
     else {
+        $providerParam = if (-not [string]::IsNullOrEmpty($Provider)) { @{ Provider = $Provider } } else { @{} }
         [void]$samples.Add((New-DispatchCostSampleRow `
                     -StepId $StepId `
                     -Mode $Mode `
                     -Bytes $Bytes `
                     -RcConformance $RcConformance `
-                    -JudgeDisposition $JudgeDisposition))
+                    -JudgeDisposition $JudgeDisposition `
+                    @providerParam))
     }
 
     return script:Set-FCLDispatchCostSamplesInPrBody -PrBody $PrBody -Samples $samples.ToArray()
@@ -884,7 +937,8 @@ function Update-DispatchCostSampleEvaluationInPrBody {
         [Parameter(Mandatory)][string]$StepId,
         [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
         [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance,
-        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition,
+        [string]$Provider = $null
     )
 
     $metrics = Read-PRMetricsBlock -PrBody $PrBody
@@ -892,19 +946,32 @@ function Update-DispatchCostSampleEvaluationInPrBody {
 
     $samples = [System.Collections.Generic.List[object]]::new()
     $updated = $false
+    $filterByProvider = $PSBoundParameters.ContainsKey('Provider') -and -not [string]::IsNullOrEmpty($Provider)
     foreach ($sample in @($metrics.DispatchCostSamples)) {
-        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode) {
+        $sampleProvider = if ($sample.PSObject.Properties['provider']) { [string]$sample.provider } else { $null }
+        # Without -Provider: match only legacy rows lacking a provider field (backward compat).
+        # With -Provider: match only rows whose provider equals the specified value.
+        # This prevents cross-provider contamination once multi-provider rows coexist (post-#545).
+        $providerMatch = if ($filterByProvider) { $sampleProvider -eq $Provider } else { [string]::IsNullOrEmpty($sampleProvider) }
+
+        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode -and $providerMatch) {
             $updatedRcConformance = [string]$sample.'rc-conformance'
             $updatedJudgeDisposition = [string]$sample.'judge-disposition'
             if ($PSBoundParameters.ContainsKey('RcConformance')) { $updatedRcConformance = $RcConformance }
             if ($PSBoundParameters.ContainsKey('JudgeDisposition')) { $updatedJudgeDisposition = $JudgeDisposition }
+
+            # Preserve the existing row's provider field — never drop it on back-fill (issue #514 F1)
+            $preservedProvider = if ($sample.PSObject.Properties['provider']) { [string]$sample.provider } else { $null }
+            $providerArgs = @{}
+            if (-not [string]::IsNullOrEmpty($preservedProvider)) { $providerArgs['Provider'] = $preservedProvider }
 
             [void]$samples.Add((New-DispatchCostSampleRow `
                         -StepId ([string]$sample.'step-id') `
                         -Mode ([string]$sample.mode) `
                         -Bytes ([int]$sample.bytes) `
                         -RcConformance $updatedRcConformance `
-                        -JudgeDisposition $updatedJudgeDisposition))
+                        -JudgeDisposition $updatedJudgeDisposition `
+                        @providerArgs))
             $updated = $true
         }
         else {

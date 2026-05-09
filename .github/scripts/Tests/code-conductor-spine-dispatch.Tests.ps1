@@ -84,7 +84,7 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
     }
 
     It 'requires spine-bearing dispatch announcements to cite the frame-spine lookup skill' {
-        $script:ExecuteEachStepSection | Should -Match '(?is)(ANNOUNCE|announcement|Calling @\{Agent-Name\}).{0,700}(spine-bearing|spine context|frame-spine).{0,700}skills/frame-spine-lookup/SKILL\.md|skills/frame-spine-lookup/SKILL\.md.{0,700}(ANNOUNCE|announcement|Calling @\{Agent-Name\})' `
+        $script:ExecuteEachStepSection | Should -Match '(?is)(ANNOUNCE|announcement|Calling @\{Agent-Name\}).{0,1500}(spine-bearing|spine context|frame-spine).{0,700}skills/frame-spine-lookup/SKILL\.md|skills/frame-spine-lookup/SKILL\.md.{0,1500}(ANNOUNCE|announcement|Calling @\{Agent-Name\})' `
             -Because 'when dispatch carries spine-bearing context, the visible specialist announcement must cite skills/frame-spine-lookup/SKILL.md'
     }
 
@@ -100,6 +100,42 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
 
         $script:DispatchMetricsLifecycleText | Should -Match '(?is)After (?:the )?PR (?:exists|creation).{0,420}(RC conformance|judge disposition).{0,420}live PR body.{0,420}\(step-id, mode\)' `
             -Because 'post-creation RC or judge updates must target the live PR body sample by composite key'
+    }
+
+    It 'requires Copilot-only cost-collection pre-flight sub-bullet under Hub Execution Workflow item 3' {
+        # Platform-scope prefix must be present
+        $script:ExecuteEachStepSection | Should -Match '(?is)\*\*Copilot\s+dispatch\s+only\*\*' `
+            -Because 'the Copilot-only pre-flight check must begin with the **Copilot dispatch only:** platform-scope prefix'
+
+        # Sentinel detection must be referenced
+        $script:ExecuteEachStepSection | Should -Match '(?is)\.copilot-cost-collection-installed' `
+            -Because 'the pre-flight must detect the cost-collection sentinel file at workspace root'
+
+        # D8 option 1 must begin with the prescribed text (F12a: amended to clarify producer-wiring needed)
+        $script:ExecuteEachStepSection | Should -Match ([regex]::Escape('Install Copilot cost collection now? (Recommended')) `
+            -Because 'D8 option 1 text must begin with the prescribed Install... (Recommended prefix in the Copilot dispatch pre-flight sub-bullet'
+
+        # D8 option 2 verbatim
+        $script:ExecuteEachStepSection | Should -Match ([regex]::Escape('Continue without — S4 cost-parity scenario will be INCONCLUSIVE for this PR')) `
+            -Because 'D8 option 2 text must be present verbatim in the Copilot dispatch pre-flight sub-bullet'
+
+        # Session-scoped suppression key
+        $script:ExecuteEachStepSection | Should -Match ([regex]::Escape('cost-collection-install-prompt-{repo-cwd}')) `
+            -Because 'session-scoped suppression key (SMC-18) must be referenced to suppress repeated prompts within a session'
+    }
+
+    It 'requires SMC-18 suppression: skip-if-set behavior, headless skip, and platform-gate are all documented (F8 behavioral coverage)' {
+        # Suppression check: if the key is already set, skip the prompt
+        $script:ExecuteEachStepSection | Should -Match '(?is)(key is already set|key.{0,60}set|suppression key.{0,80}skip).{0,400}(skip.{0,80}prompt|prompt.{0,80}skip)' `
+            -Because 'SMC-18 suppression must document: check key first; if set, skip prompt entirely (no re-prompt this session)'
+
+        # Headless skip: when vscode/askQuestions is unavailable, skip silently
+        $script:ExecuteEachStepSection | Should -Match '(?is)(Headless skip|vscode/askQuestions.{0,80}unavailable|CI or programmatic).{0,300}skip' `
+            -Because 'the sub-bullet must document the headless-skip clause for CI / programmatic invocations'
+
+        # Platform gate: Claude orchestration paths skip this sub-bullet entirely
+        $script:ExecuteEachStepSection | Should -Match '(?is)(Claude orchestration|Claude.{0,40}paths).{0,200}(skip|gate|not.{0,20}applicable)' `
+            -Because 'the platform-scope gate must document that Claude orchestration paths skip this sub-bullet entirely'
     }
 
     It 'preserves Code-Conductor ownership stance and ANNOUNCE-before-tool-call rule' {

@@ -94,6 +94,7 @@ In parallel mode, this check is mandatory before claiming implementation complet
 - Follow the Iron Law: NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST
 - Reference `skills/frontend-design/SKILL.md` for aesthetic guidance
 - Load `skills/frame-credit-emission/SKILL.md` for the terminal-step credit-row emission contract
+- When dispatched with a frame spine and a cross-step reference is needed mid-turn, invoke the lookup primitive per `skills/frame-spine-lookup/` (Copilot: see `platforms/copilot.md`; Claude: see `platforms/claude.md`)
 
 ## Terminal Step: Frame Credit Emission
 

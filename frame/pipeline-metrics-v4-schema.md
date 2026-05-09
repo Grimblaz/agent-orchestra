@@ -23,6 +23,13 @@ dispatch-cost-samples:
     bytes: 7421
     rc-conformance: pass
     judge-disposition: accepted
+    provider: claude
+  - step-id: s12
+    mode: spine
+    bytes: 6832
+    rc-conformance: pass
+    judge-disposition: accepted
+    provider: copilot
 dispatch-fallback-events:
   legacy-plan-shape: true
   pre-load-budget-exceeded: true
@@ -94,7 +101,7 @@ integrity_checks:
 Field notes:
 
 - `frame_version` tracks the frame-specific additive schema independently from the inherited v1-v3 pipeline-metrics history.
-- `dispatch-cost-samples[]` is an additive best-effort instrumentation array for plan-spine dispatch analysis. Each row is keyed by `(step-id, mode)` and carries exactly `step-id`, `mode`, `bytes`, `rc-conformance`, and `judge-disposition`. Enum values: `mode = spine | legacy-fallback | budget-exceeded`; `rc-conformance = pass | fail | not-evaluated`; `judge-disposition = accepted | rejected | deferred | not-evaluated`.
+- `dispatch-cost-samples[]` is an additive best-effort instrumentation array for plan-spine dispatch analysis. Each row carries `step-id`, `mode`, `bytes`, `rc-conformance`, `judge-disposition`, and an optional `provider:` field (see below). Rows without `provider:` preserve backwards-compatibility; the parser accepts 5-key and 6-key rows (position 6, if present, must be `provider`). Enum values: `mode = spine | legacy-fallback | budget-exceeded`; `rc-conformance = pass | fail | not-evaluated`; `judge-disposition = accepted | rejected | deferred | not-evaluated`. `provider:` — Known values: `claude` | `copilot`; additional values tolerated additively per #467 D12. Optional — when absent, no provider attribution is recorded. When a section is re-emitted across cross-tool runs, rows are merged keying on `(step-id, mode, provider)`; existing rows with a different tuple are preserved. See `frame-credit-ledger-core.ps1` (`Set-FCLDispatchCostSamplesSection`) for the merge-aware writer contract.
 - `dispatch-fallback-events` is optional and absent when no dispatch fallback was observed. When present, it records additive fallback evidence without affecting enforcement:
   - `legacy-plan-shape: true` means the plan had no `frame-spine` block, so Code-Conductor dispatched the full plan. Once observed, preserve the `true` flag.
   - `pre-load-budget-exceeded: true` means the focused context (`frame-spine` + active slice + depth-1 dependencies) exceeded the configured pre-load budget, so Code-Conductor dispatched the full plan. Once observed, preserve the `true` flag.

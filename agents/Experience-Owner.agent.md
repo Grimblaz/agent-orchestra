@@ -131,6 +131,10 @@ Load `skills/customer-experience/SKILL.md` for the downstream workflow. Exercise
 
 ---
 
+## Spine Lookup
+
+When dispatched with a frame spine and a cross-step reference is needed mid-turn, invoke the lookup primitive per `skills/frame-spine-lookup/` (Copilot: see `platforms/copilot.md`; Claude: see `platforms/claude.md`).
+
 ## Platform-specific invocation
 
 The methodology above is tool-agnostic. Platform-specific activation and tool names:

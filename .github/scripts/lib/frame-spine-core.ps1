@@ -1,9 +1,14 @@
 #Requires -Version 7.0
-[CmdletBinding()]
+[CmdletBinding(DefaultParameterSetName = 'ByPath')]
 param(
     [ValidateSet('Lookup')]
     [string]$Op,
+    [Parameter(ParameterSetName = 'ByPath')]
     [string]$CommentBodyPath,
+    [Parameter(ParameterSetName = 'ByStdin')]
+    [switch]$CommentBodyStdin,
+    [ValidateSet('Text', 'Json')]
+    [string]$Format = 'Text',
     [string]$GeneratedAt,
     [string]$StepId
 )
@@ -409,36 +414,69 @@ function Resolve-FSCCommentBodyPath {
     }
 }
 
+function script:ConvertTo-FSCSpineLookupJsonLines {
+    param([Parameter(Mandatory)][hashtable]$Data)
+
+    $json = $Data | ConvertTo-Json -Compress -Depth 5
+    return [string[]]@($json)
+}
+
 function Invoke-FSCSpineLookupCli {
     param(
-        [Parameter(Mandatory)][string]$CommentBodyPath,
+        [Parameter(ParameterSetName = 'ByPath', Mandatory)]
+        [string]$CommentBodyPath,
+        [Parameter(ParameterSetName = 'ByStdin', Mandatory)]
+        [switch]$CommentBodyStdin,
+        [ValidateSet('Text', 'Json')]
+        [string]$Format = 'Text',
         [Parameter(Mandatory)][string]$GeneratedAt,
         [Parameter(Mandatory)][string]$StepId
     )
 
     $lines = [System.Collections.Generic.List[string]]::new()
 
-    $resolvedCommentBodyPath = Resolve-FSCCommentBodyPath -CommentBodyPath $CommentBodyPath
-    if (-not [System.IO.File]::Exists($resolvedCommentBodyPath)) {
-        $lines.Add("error: CommentBodyPath not found: $CommentBodyPath") | Out-Null
-        return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+    # Wrapper-level codes (gh-not-installed, gh-auth-expired, gh-rate-limited) are surfaced by
+    # platforms/{tool}.md wrappers, not this script.
+    if ($CommentBodyStdin) {
+        [Console]::InputEncoding = [System.Text.Encoding]::UTF8
+        $commentBody = [Console]::In.ReadToEnd()
+    }
+    else {
+        $resolvedCommentBodyPath = Resolve-FSCCommentBodyPath -CommentBodyPath $CommentBodyPath
+        if (-not [System.IO.File]::Exists($resolvedCommentBodyPath)) {
+            $lines.Add("error: CommentBodyPath not found: $CommentBodyPath") | Out-Null
+            return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+        }
+        $commentBody = [System.IO.File]::ReadAllText($resolvedCommentBodyPath)
     }
 
-    $commentBody = [System.IO.File]::ReadAllText($resolvedCommentBodyPath)
     $spineBlock = Get-FSCSpineBlock -CommentBody $commentBody
     if ($null -eq $spineBlock) {
+        if ($Format -eq 'Json') {
+            return [pscustomobject]@{ ExitCode = 1; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{ status = 'missing-spine' } }
+        }
         $lines.Add('status: missing-spine') | Out-Null
         return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
     }
 
     $parsedSpine = ConvertFrom-FSCSpineYaml -SpineBlock $spineBlock
     if ($null -eq $parsedSpine) {
+        if ($Format -eq 'Json') {
+            return [pscustomobject]@{ ExitCode = 1; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{ status = 'invalid-spine' } }
+        }
         $lines.Add('status: invalid-spine') | Out-Null
         return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
     }
 
     $currentGeneratedAt = script:Get-FSCScalarValue -Block $spineBlock -Name 'generated_at'
     if ($currentGeneratedAt -ne $GeneratedAt) {
+        if ($Format -eq 'Json') {
+            return [pscustomobject]@{ ExitCode = 0; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
+                status                  = 'stale-spine'
+                dispatched_generated_at = $GeneratedAt
+                current_generated_at    = $currentGeneratedAt
+            } }
+        }
         $lines.Add('status: stale-spine') | Out-Null
         $lines.Add("dispatched_generated_at: $GeneratedAt") | Out-Null
         $lines.Add("current_generated_at: $currentGeneratedAt") | Out-Null
@@ -447,9 +485,25 @@ function Invoke-FSCSpineLookupCli {
 
     $sliceBlocks = @(Get-FSCSliceBlocksByStepId -CommentBody $commentBody -StepId $StepId)
     if ($sliceBlocks.Count -eq 0) {
+        if ($Format -eq 'Json') {
+            return [pscustomobject]@{ ExitCode = 1; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
+                status  = 'missing-slice'
+                step_id = $StepId
+            } }
+        }
         $lines.Add('status: missing-slice') | Out-Null
         $lines.Add("step_id: $StepId") | Out-Null
         return [pscustomobject]@{ ExitCode = 1; Lines = [string[]]$lines.ToArray() }
+    }
+
+    if ($Format -eq 'Json') {
+        $sliceContent = script:ConvertTo-FSCNormalizedText -Text $sliceBlocks[0]
+        return [pscustomobject]@{ ExitCode = 0; Lines = script:ConvertTo-FSCSpineLookupJsonLines -Data @{
+            status       = 'ok'
+            step_id      = $StepId
+            generated_at = $GeneratedAt
+            slice        = $sliceContent
+        } }
     }
 
     $lines.Add('status: ok') | Out-Null
@@ -466,14 +520,26 @@ function Invoke-FSCCommand {
     param(
         [ValidateSet('Lookup')]
         [string]$Op,
+        [Parameter(ParameterSetName = 'ByPath')]
         [string]$CommentBodyPath,
+        [Parameter(ParameterSetName = 'ByStdin')]
+        [switch]$CommentBodyStdin,
+        [ValidateSet('Text', 'Json')]
+        [string]$Format = 'Text',
         [string]$GeneratedAt,
         [string]$StepId
     )
 
     switch ($Op) {
         'Lookup' {
-            return (Invoke-FSCSpineLookupCli -CommentBodyPath $CommentBodyPath -GeneratedAt $GeneratedAt -StepId $StepId)
+            $splat = @{
+                GeneratedAt = $GeneratedAt
+                StepId      = $StepId
+                Format      = $Format
+            }
+            if ($CommentBodyStdin) { $splat['CommentBodyStdin'] = $true }
+            else { $splat['CommentBodyPath'] = $CommentBodyPath }
+            return (Invoke-FSCSpineLookupCli @splat)
         }
         default {
             return [pscustomobject]@{

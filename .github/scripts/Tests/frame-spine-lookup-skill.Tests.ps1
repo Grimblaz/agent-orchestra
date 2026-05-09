@@ -15,12 +15,25 @@ Describe 'frame-spine-lookup skill contract' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:SkillPath = Join-Path $script:RepoRoot 'skills\frame-spine-lookup\SKILL.md'
-        $script:SpecialistShellPaths = @(
+        $script:ClaudeSpecialistShellPaths = @(
             'agents/code-smith.md',
             'agents/test-writer.md',
             'agents/doc-keeper.md',
             'agents/refactor-specialist.md'
         )
+
+        $script:CopilotSpecialistShellPaths = @(
+            'agents/Code-Smith.agent.md',
+            'agents/Test-Writer.agent.md',
+            'agents/Doc-Keeper.agent.md',
+            'agents/Refactor-Specialist.agent.md',
+            'agents/Specification.agent.md',
+            'agents/UI-Iterator.agent.md',
+            'agents/Experience-Owner.agent.md'
+        )
+
+        # Research-Agent deferral: excluded because it has no execute/* grant; Copilot spine lookup deferred per #514 Step 12
+        $script:ClaudePlatformPath = Join-Path $script:RepoRoot 'skills\frame-spine-lookup\platforms\claude.md'
 
         $script:ReadContent = {
             param([Parameter(Mandatory)][string]$Path)
@@ -94,10 +107,11 @@ Describe 'frame-spine-lookup skill contract' {
 
         BeforeAll {
             $script:SkillContent = & $script:ReadContent -Path $script:SkillPath
+            $script:ClaudePlatformContent = & $script:ReadContent -Path $script:ClaudePlatformPath
         }
 
         It 'documents fetching the plan-issue comment body through the GitHub issue comments API' {
-            $script:SkillContent | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/comments/{id}')) -Because 'specialists with Bash access must fetch the plan-issue comment body by comment id'
+            $script:ClaudePlatformContent | Should -Match ([regex]::Escape('gh api repos/{owner}/{repo}/issues/comments/{id}')) -Because 'Claude platform shim must document the gh api invocation for body retrieval'
             $script:SkillContent | Should -Match '(?is)plan-issue\s+comment\s+body' -Because 'the fetched payload must be identified as the plan-issue comment body'
         }
 
@@ -116,16 +130,19 @@ Describe 'frame-spine-lookup skill contract' {
             $script:SkillContent | Should -Match '(?is)return\s+control\s+to\s+Conductor.{0,160}re-dispatch|Conductor.{0,160}re-dispatch' -Because 'specialists must stop and let Conductor re-dispatch on stale spine'
         }
 
-        It 'states Copilot shim and custom MCP server lookup paths are deferred non-goals' {
-            $script:SkillContent | Should -Match '(?is)Copilot\s+tool\s+shim.{0,160}#514|#514.{0,160}Copilot\s+tool\s+shim' -Because 'Copilot parity is deferred to issue #514'
+        It 'documents Copilot spine lookup shipped in #514 and custom MCP server lookup as deferred non-goal' {
+            # Copilot parity shipped in #514 - the "deferred to #514" claim must be retired
+            $script:SkillContent | Should -Not -Match '(?is)Copilot\s+tool\s+shim.{0,160}deferred' -Because 'Copilot spine lookup shipped in #514; the deferred claim must be retired'
+            # platforms/copilot.md must exist as evidence Copilot parity landed
+            Test-Path -LiteralPath (Join-Path $script:RepoRoot 'skills\frame-spine-lookup\platforms\copilot.md') | Should -BeTrue -Because 'Copilot parity shipped in #514 requires platforms/copilot.md to exist'
             $script:SkillContent | Should -Match '(?is)custom\s+MCP\s+server.{0,160}(deferred|non-goals?|non-goal)|(deferred|non-goals?|non-goal).{0,160}custom\s+MCP\s+server' -Because 'custom MCP server work is out of scope for this skill'
         }
     }
 
     Context 'specialist tool grants' {
 
-        It 'grants both Read and Bash to each specialist shell that can perform lookup' {
-            foreach ($relativePath in $script:SpecialistShellPaths) {
+        It 'grants both Read and Bash to each Claude specialist shell that can perform lookup' {
+            foreach ($relativePath in $script:ClaudeSpecialistShellPaths) {
                 $shellPath = Join-Path $script:RepoRoot $relativePath
                 Test-Path -LiteralPath $shellPath | Should -BeTrue -Because "$relativePath must exist"
 
@@ -136,6 +153,23 @@ Describe 'frame-spine-lookup skill contract' {
                 $tools | Should -Contain 'Read' -Because "$relativePath must be able to read dispatched spine context"
                 $tools | Should -Contain 'Bash' -Because "$relativePath must be able to call gh api and pwsh lookup helpers"
             }
+        }
+
+        It 'grants execute/runInTerminal or execute wildcard to each Copilot specialist agent that can perform lookup' {
+            foreach ($relativePath in $script:CopilotSpecialistShellPaths) {
+                $shellPath = Join-Path $script:RepoRoot $relativePath
+                Test-Path -LiteralPath $shellPath | Should -BeTrue -Because "$relativePath must exist"
+
+                $content = Get-Content -LiteralPath $shellPath -Raw -ErrorAction Stop
+                $frontmatter = & $script:GetFrontmatter -Content $content
+
+                $frontmatter | Should -Match '\bexecute\b' -Because "$relativePath must have execute/runInTerminal or execute wildcard grant for terminal-based spine lookup"
+            }
+        }
+
+        It 'Research-Agent is not in the Copilot specialist list because it lacks execute/* grants (deferred to follow-up)' {
+            # Research-Agent deferral: deferred to follow-up issue per Step 12 of #514
+            $script:CopilotSpecialistShellPaths | Should -Not -Contain 'agents/Research-Agent.agent.md' -Because 'Research-Agent has no execute/* grant; Copilot spine lookup deferred to follow-up per #514 Step 12'
         }
     }
 }

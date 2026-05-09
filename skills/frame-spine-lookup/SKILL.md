@@ -42,11 +42,8 @@ plan-issue comment body.
 
 ## Operational Contract
 
-1. Fetch the durable plan payload with the GitHub issue comments API:
-
-   ```bash
-   gh api repos/{owner}/{repo}/issues/comments/{id}
-   ```
+1. Fetch the durable plan payload with the GitHub issue comments API. See
+   `platforms/claude.md` and `platforms/copilot.md` for tool-specific invocations.
 
    Read the response body field as the plan-issue comment body. Do not parse
    issue timelines or search results when the comment id is already known.
@@ -55,13 +52,17 @@ plan-issue comment body.
    operation. The command shape must match this contract:
 
    ```powershell
-   pwsh -File .github/scripts/lib/frame-spine-core.ps1 -Op Lookup -CommentBodyPath {path} -GeneratedAt {generated_at} -StepId {id}
+   pwsh -File .github/scripts/lib/frame-spine-core.ps1 -Op Lookup -CommentBodyPath {path} -GeneratedAt {generated_at} -StepId {id} -Format Json
    ```
 
-   The implementation may pass the fetched body by a supported path or stream,
-   but the operation remains `-Op Lookup` against `frame-spine-core.ps1`, with
-   the dispatched `generated_at` value and requested `-StepId {id}` present in
-   the lookup invocation.
+   The implementation may pass the fetched body by a supported path or stream
+   (`-CommentBodyPath` for file-based, `-CommentBodyStdin` for piped stdin), but
+   the operation remains `-Op Lookup` against `frame-spine-core.ps1`, with the
+   dispatched `generated_at` value and requested `-StepId {id}` present in the
+   lookup invocation. Always pass `-Format Json` so the response is machine-
+   parseable JSON regardless of platform; parse the returned `status` field to
+   determine the lookup outcome (do not rely on exit code alone — see Exit Codes
+   below).
 
 3. Use the returned slice content as the only additional plan context for the
    current turn. Do not manually parse `<!-- frame-spine -->` or
@@ -70,6 +71,25 @@ plan-issue comment body.
 4. On generated_at mismatch, respect the F2.2 hash-elision filter before
    declaring staleness. If the lookup result is `stale-spine`, stop specialist
    work and return control to Conductor for re-dispatch with a fresh spine.
+
+## Exit Codes and Status Values
+
+Always parse the JSON `status` field to determine the lookup outcome. Do not
+branch on exit code alone — `stale-spine` exits 0, not 1.
+
+| Status          | Exit code | Meaning                                                       |
+| --------------- | --------- | ------------------------------------------------------------- |
+| `ok`            | 0         | Slice retrieved successfully; `slice` field contains content. |
+| `stale-spine`   | 0         | Dispatched spine is no longer current; return to Conductor.   |
+| `missing-spine` | 1         | Comment body contains no `<!-- frame-spine -->` block.        |
+| `invalid-spine` | 1         | Spine block is present but malformed (parse error).           |
+| `missing-slice` | 1         | Spine is valid but the requested step id was not found.       |
+| `error`         | 1         | Unexpected error; `message` field contains the reason.        |
+
+Wrapper-level error codes (when the outer process fails before the script
+can run) are surfaced by the platform shim — see `platforms/copilot.md` and
+`platforms/claude.md` for `gh-not-installed`, `gh-auth-expired`, and
+`pwsh-not-found` error handling.
 
 ## Stale-Spine Handling
 
@@ -89,24 +109,45 @@ Specialist response on `stale-spine` is intentionally narrow:
 
 ## Tool-Grant Verification
 
-The Claude specialist shells that can perform lookup already have the required
-tool grants:
+The specialist shells that can perform lookup already have the required tool grants.
 
-- `agents/code-smith.md` has `Read` and `Bash`.
-- `agents/test-writer.md` has `Read` and `Bash`.
-- `agents/doc-keeper.md` has `Read` and `Bash`.
-- `agents/refactor-specialist.md` has `Read` and `Bash`.
+Claude Code specialists (`Read` and `Bash`):
 
-This step verifies those grants only. Do not edit specialist shells for this
-contract unless a future test proves the grants drifted.
+- `agents/code-smith.md`
+- `agents/test-writer.md`
+- `agents/doc-keeper.md`
+- `agents/refactor-specialist.md`
+
+Copilot specialists (`execute/runInTerminal` or `execute` wildcard):
+
+- `agents/Code-Smith.agent.md`
+- `agents/Test-Writer.agent.md`
+- `agents/Doc-Keeper.agent.md`
+- `agents/Refactor-Specialist.agent.md`
+- `agents/Specification.agent.md`
+- `agents/UI-Iterator.agent.md`
+- `agents/Experience-Owner.agent.md`
+
+`agents/Research-Agent.agent.md` is excluded: it has only `read`, `edit`, `search`, and
+`web` grants — no `execute/*`. Copilot spine lookup for Research-Agent is deferred to
+[#544](https://github.com/Grimblaz/agent-orchestra/issues/544).
+
+Do not edit specialist shells for this contract unless a future test proves the grants drifted.
 
 ## Non-Goals and Deferred Work
 
-- Copilot tool shim support is deferred to #514. This skill documents the
-  current specialist lookup contract and does not add Copilot parity shims.
+- Copilot parity shims for spine lookup shipped in #514. Research-Agent Copilot
+  spine lookup is deferred to [#544](https://github.com/Grimblaz/agent-orchestra/issues/544).
 - A custom MCP server lookup path is deferred and is a non-goal for this skill.
 - This skill is supporting methodology only. It declares no `provides:` field
   and does not fill a frame port.
+
+## Platform-specific invocation
+
+See `platforms/claude.md` for Claude Code tool bindings (`Bash` and `Read`) and
+`platforms/copilot.md` for Copilot VS Code tool bindings (`execute/runInTerminal`).
+Platform shims are the only location where tool names appear; the Operational
+Contract above is tool-agnostic.
 
 ## Gotchas
 
