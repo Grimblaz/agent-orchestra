@@ -246,7 +246,7 @@ If Agent Teams cost proves viable (follow-up to this spike), a Claude-only P2P i
 - **Multi-git installer bug**: `Initialize-CopilotCostCollection.ps1` crashes when `Get-Command git` returns multiple results. Fix: add `| Select-Object -First 1`. Tracked in issue #538.
 - **Reproducer commands** (after #538 merges):
   - Install: `pwsh skills/copilot-cost-collection/scripts/Initialize-CopilotCostCollection.ps1 -WorkspacePath . -Yes -NonInteractive`
-  - Run measurement: `pwsh .tmp/issue-535/harness.ps1 --mode run-prototype --platform copilot --rounds 10 --warmup-rounds 2`
+  - Run measurement: dispatch prototype rounds in a dedicated fresh Copilot Chat session per the methodology in #539 (the spike's operator-driven harness was bypassed and is not retained on main; it is recoverable from branch history if useful — see retention note in General Lessons below)
   - Walker: `pwsh .github/scripts/lib/cost-walker-copilot.ps1 -IssueNumber 535 -Repo Grimblaz/agent-orchestra -Branch feature/issue-535-peer-to-peer-research`
 
 ### General
@@ -254,7 +254,7 @@ If Agent Teams cost proves viable (follow-up to this spike), a Claude-only P2P i
 - Transport survey identified two collection paths required (JSONL walker for Claude, OTel walker for Copilot) — dual-path is unavoidable given architectural divergence.
 - Agent Teams P2P has no OTel surface; mailbox files (`~/.claude/teams/`) are the only observable record. Harness must read mailbox JSON directly if Agent Teams prototype runs.
 - Copilot attribution is probabilistic (reflog timestamp join) — sessions crossing branch switches may be mis-attributed.
-- **`.tmp/issue-535/` retention**: Spike scaffolding (`harness.ps1`, `transport-survey.md`) is committed to the feature branch for reproducibility and merges to main with the spike PR. Per issue #535 acceptance criteria, the spike branch is retained until at least one Go-verdict follow-up has shipped or close-out is explicit. The artifacts are not promoted as production assets — they remain candidates for removal once Go-verdict follow-ups (issues #538/#539) ship.
+- **`.tmp/issue-535/` retention**: Spike scaffolding (`harness.ps1`, `transport-survey.md`) is **not merged to main** — the harness was built per the original plan but bypassed during measurement (operator-driven design replaced by direct `Agent` dispatch from Code-Conductor) and is not a production asset. The artifacts are preserved in branch history at commit `2f9b8ba` on `feature/issue-535-peer-to-peer-research`, recoverable via `git show origin/feature/issue-535-peer-to-peer-research:.tmp/issue-535/harness.ps1` (and similarly for `transport-survey.md`). Per issue #535 acceptance criteria, the spike branch is retained until at least one Go-verdict follow-up has shipped or close-out is explicit; #539's implementer can pull the harness from branch history if useful, but the methodology lessons in this document are the durable record.
 
 ## S1–S4 Documentation Validation
 
