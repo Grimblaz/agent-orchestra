@@ -1,4 +1,5 @@
 #Requires -Version 7.0
+# Spike scaffolding — not wired into CI. Validate manually before reuse.
 <#
 .SYNOPSIS
     Measurement-orchestration harness for peer-to-peer agent dispatch research spike (issue #535).

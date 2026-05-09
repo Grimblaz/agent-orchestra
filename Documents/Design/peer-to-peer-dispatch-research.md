@@ -133,9 +133,9 @@ Measurement was conducted inline during Code-Conductor orchestration on branch `
 | 2 | steady-state | 24,665 |
 | 3 | steady-state | 24,665 |
 
-Cache-warmup criterion: discard rounds where `cache_creation_input_tokens > 0`. Rounds 2–3 are steady-state (delta = 0 tokens between rounds, confirming cache fully warm).
+Cache-warmup criterion: discard rounds where `cache_creation_input_tokens > 0`. Rounds 2–3 are steady-state (delta = 0 tokens between rounds, confirming cache fully warm). Steady-state was inferred from token-count stability (delta=0 between rounds 2 and 3) rather than direct `cache_creation_input_tokens=0` observation, because the in-flight walker miss prevented field-level inspection.
 
-**Walker miss**: `cost-walker.ps1` returned 0 sessions for the spike branch. Root cause: session transcript is in-flight (walker reads JSONL files after session completes). `cost_source: sdk-usage` applies. Per-round `input_tokens`/`output_tokens` breakdown unavailable; only `total_tokens` captured from Agent tool result.
+**Walker miss**: `cost-walker.ps1` returned 0 sessions for the spike branch. Root cause: session transcript is in-flight (walker reads JSONL files after session completes). `cost_source: sdk-usage` applies. SDK-usage fallback: walker was unavailable (in-flight session); per-dispatch `total_tokens` was captured directly from Agent tool result metadata. Per-round `input_tokens`/`output_tokens` breakdown unavailable; only `total_tokens` captured from Agent tool result.
 
 **Key observation**: Per-dispatch `total_tokens` (~24.6K) is dominated by parent conversation context propagation, not the task payload. This means per-dispatch cost scales with parent session size, not task size.
 
@@ -161,10 +161,12 @@ verdict_claude_agent_tool:
   transport_maturity: stable
   cost_source: sdk-usage
   walker_credits: null
-  sdk_usage_evidence: "3 dispatch rounds on feature/issue-535-peer-to-peer-research; total_tokens per round: warmup=24667, ss1=24665, ss2=24665"
+  sdk_usage_evidence: "3 dispatch rounds on feature/issue-535-peer-to-peer-research; total_tokens per round: warmup=24667, ss1=24665, ss2=24665 (session transcript was in-flight at spike time; JSONL slug unavailable; evidence reconstructed from Agent tool result metadata)"
   cost_per_round_input_tokens: null
   cost_per_round_output_tokens: null
   cost_per_round_total_tokens_observed: 24665
+  cost_per_round_cache_creation_input_tokens: null  # in-flight walker miss; field not captured
+  cost_per_round_cache_read_input_tokens: null       # in-flight walker miss; field not captured
   verdict_rationale: >
     Agent tool dispatch shows ~24.6K tokens/round overhead dominated by parent context propagation.
     Viable for coarse-grained ensemble dispatch where specialist agents do substantial work
@@ -180,9 +182,12 @@ verdict_claude_agent_teams:
   transport_maturity: experimental
   cost_source: sdk-usage
   walker_credits: null
-  sdk_usage_evidence: "Not measured — requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1; capability documented from transport survey and Claude Code agent teams docs"
+  sdk_usage_evidence: "Not measured — requires CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1; capability documented from transport survey and Claude Code agent teams docs (issue #539 tracks dedicated-session measurement follow-up)"
   cost_per_round_input_tokens: null
   cost_per_round_output_tokens: null
+  cost_per_round_total_tokens_observed: null
+  cost_per_round_cache_creation_input_tokens: null  # not measured; requires dedicated session
+  cost_per_round_cache_read_input_tokens: null       # not measured; requires dedicated session
   verdict_rationale: >
     Agent Teams provides mailbox-on-disk P2P via SendMessage, writing JSON to
     ~/.claude/teams/{team-name}/inboxes/{agent-name}.json. Transport exists and is the
@@ -196,11 +201,14 @@ verdict_copilot:
   verdict: partial
   transport: none
   transport_maturity: "n/a"
-  cost_source: sdk-usage
+  cost_source: unmeasured
   walker_credits: null
-  sdk_usage_evidence: "No measurement — Copilot OTel collection not installed (issue #538 pending). No P2P transport primitive available on Copilot Chat."
+  sdk_usage_evidence: "No measurement — Copilot OTel collection not installed (issue #538 pending). No P2P transport primitive available on Copilot Chat. Issue #539 tracks Agent Teams measurement follow-up."
   cost_per_round_input_tokens: null
   cost_per_round_output_tokens: null
+  cost_per_round_total_tokens_observed: null
+  cost_per_round_cache_creation_input_tokens: null  # Copilot OTel does not expose cache fields
+  cost_per_round_cache_read_input_tokens: null       # Copilot OTel does not expose cache fields
   verdict_rationale: >
     Copilot Chat has no peer-to-peer transport primitive. Multi-agent capability is
     hierarchical runSubagent only — a parent agent invokes child agents; children cannot
@@ -216,7 +224,7 @@ verdict_copilot:
 
 ## Asymmetry Stance
 
-**Stance**: `ship-claude-only`
+**Stance**: `ship-claude-only` (satisfies issue #535 acceptance: cross-platform recommendation explicit, asymmetry stance with rationale)
 
 **Rationale**: Claude Code has the Agent Teams transport primitive required for true P2P dispatch (mailbox-on-disk, experimental but available). Copilot Chat lacks an equivalent — its multi-agent model is strictly hierarchical. Proceeding symmetrically would require Copilot to emulate P2P through sequential subagent chains, adding orchestration complexity without transport-level P2P semantics.
 
@@ -246,26 +254,47 @@ If Agent Teams cost proves viable (follow-up to this spike), a Claude-only P2P i
 - Transport survey identified two collection paths required (JSONL walker for Claude, OTel walker for Copilot) — dual-path is unavoidable given architectural divergence.
 - Agent Teams P2P has no OTel surface; mailbox files (`~/.claude/teams/`) are the only observable record. Harness must read mailbox JSON directly if Agent Teams prototype runs.
 - Copilot attribution is probabilistic (reflog timestamp join) — sessions crossing branch switches may be mis-attributed.
+- **`.tmp/issue-535/` retention**: Spike scaffolding (`harness.ps1`, `transport-survey.md`) is committed to the feature branch for reproducibility. Per issue #535 acceptance criteria, the branch is retained until at least one Go-verdict follow-up has shipped or close-out is explicit. Spike artifacts are not promoted to main.
 
 ## S1–S4 Documentation Validation
 
 Per plan s5 RC, explicitly walking the four customer scenarios against this doc:
 
-**S1** (no platform ends in TBD): Both Claude platforms and Copilot have explicit `verdict: partial` — not TBD. ✅
+**S1** (no platform ends in TBD): Both Claude platforms and Copilot have explicit `verdict: partial` — not TBD. ✅  
+  _Evidence_: Platform Verdict Blocks — `verdict_claude_agent_tool.verdict: partial`, `verdict_claude_agent_teams.verdict: partial`, `verdict_copilot.verdict: partial`.
 
-**S2** (every cost figure traceable to transcript or sdk_usage_evidence): The only cost figure is `cost_per_round_total_tokens_observed: 24665` traceable to `sdk_usage_evidence` field in `verdict_claude_agent_tool`. Copilot figures are null with explicit null reason. ✅
+**S2** (every cost figure traceable to transcript or sdk_usage_evidence): The only cost figure is `cost_per_round_total_tokens_observed: 24665` traceable to `sdk_usage_evidence` field in `verdict_claude_agent_tool`. Copilot figures are null with explicit null reason. ✅  
+  _Evidence_: `sdk_usage_evidence: "3 dispatch rounds on feature/issue-535-peer-to-peer-research; total_tokens per round: warmup=24667, ss1=24665, ss2=24665 …"`.
 
-**S3** (asymmetry section names one of five stances + rationale): `ship-claude-only` stated with rationale. ✅
+**S3** (asymmetry section names one of five stances + rationale): `ship-claude-only` stated with rationale. ✅  
+  _Evidence_: Asymmetry Stance section — "Claude Code has the Agent Teams transport primitive required for true P2P dispatch…".
 
-**S4** (No-go path's `decision_criterion_cited` non-empty): Copilot verdict (functionally No-go for P2P) has `decision_criterion_cited: "No P2P transport primitive available on Copilot Chat as of 2026-05."` ✅
+**S4** (No-go path's `decision_criterion_cited` non-empty): Copilot verdict (functionally No-go for P2P) has `decision_criterion_cited` field populated. ✅  
+  _Evidence_: `verdict_copilot.decision_criterion_cited: "No P2P transport primitive available on Copilot Chat as of 2026-05. Only hierarchical runSubagent dispatch is supported."`.
 
 ## Follow-up Work
 
 Per coherence check against issue #534 "Next steps":
 
-1. **Complete Agent Teams measurement** (follow-up to this spike): run `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` prototype; measure per-message cost vs. Agent tool baseline; determine if 40% threshold is met.
+1. **Complete Agent Teams measurement** (issue #539): run `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` prototype; measure per-message cost vs. Agent tool baseline; determine if 40% threshold is met.
 2. **Fix Copilot installer** (issue #538): unblock Copilot OTel measurement.
 3. **Complete Copilot measurement** (after #538): run Copilot-side prototype once OTel is working.
 4. If Claude Agent Teams verdict is Go: **Conductor-dispatch-of-ensemble** implementation — named per issue AC9.
+
+## CE Gate
+
+**Waiver basis**: plan step s5 invariant + issue #535 time-box clause (AC10).
+
+`partial` verdict is the expected outcome for this spike:
+
+- Copilot OTel measurement blocked by multi-git installer bug (issue #538 pending).
+- Agent Teams measurement requires a dedicated fresh session (running inside the orchestration session causes context-scale contamination — see Lessons Learned).
+
+Neither blocker reflects an unmet acceptance criterion; both are infrastructure constraints outside the spike scope. Follow-up issues carry CE Gate forward:
+
+- **#538** — fix Copilot installer bug, then run Copilot-side measurement
+- **#539** — run Agent Teams dedicated-session measurement; evaluate 40% cost-reduction threshold
+
+**Exercised surface**: design doc only. No CLI, browser, canvas, or API surface was changed. CE Gate runner work is not required.
 
 <!-- markdownlint-disable-file MD041 -->
