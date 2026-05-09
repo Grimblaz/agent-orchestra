@@ -59,3 +59,7 @@ The specification file must be formatted in well formed Markdown.
 **When defining technical architecture:**
 
 - Load `skills/software-architecture/SKILL.md` and follow `.github/architecture-rules.md` for architecture and layer placement
+
+**When dispatched with a frame spine:**
+
+- When a cross-step reference is needed mid-turn, invoke the lookup primitive per `skills/frame-spine-lookup/` (Copilot: see `platforms/copilot.md`; Claude: see `platforms/claude.md`)

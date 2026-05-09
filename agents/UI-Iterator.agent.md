@@ -109,6 +109,7 @@ When invoked, this agent should:
 
 - Load `skills/frontend-design/SKILL.md` for stronger visual direction when the polish requires more than tidy consistency
 - Consult `.github/copilot-instructions.md`, `.github/architecture-rules.md`, and the project's theme config before changing presentation tokens
+- When dispatched with a frame spine and a cross-step reference is needed mid-turn, invoke the lookup primitive per `skills/frame-spine-lookup/` (Copilot: see `platforms/copilot.md`; Claude: see `platforms/claude.md`)
 
 ---
 

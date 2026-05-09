@@ -111,9 +111,9 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
         $script:ExecuteEachStepSection | Should -Match '(?is)\.copilot-cost-collection-installed' `
             -Because 'the pre-flight must detect the cost-collection sentinel file at workspace root'
 
-        # D8 option 1 verbatim
-        $script:ExecuteEachStepSection | Should -Match ([regex]::Escape('Install Copilot cost collection now? (Recommended)')) `
-            -Because 'D8 option 1 text must be present verbatim in the Copilot dispatch pre-flight sub-bullet'
+        # D8 option 1 must begin with the prescribed text (F12a: amended to clarify producer-wiring needed)
+        $script:ExecuteEachStepSection | Should -Match ([regex]::Escape('Install Copilot cost collection now? (Recommended')) `
+            -Because 'D8 option 1 text must begin with the prescribed Install... (Recommended prefix in the Copilot dispatch pre-flight sub-bullet'
 
         # D8 option 2 verbatim
         $script:ExecuteEachStepSection | Should -Match ([regex]::Escape('Continue without — S4 cost-parity scenario will be INCONCLUSIVE for this PR')) `
@@ -122,6 +122,20 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
         # Session-scoped suppression key
         $script:ExecuteEachStepSection | Should -Match ([regex]::Escape('cost-collection-install-prompt-{repo-cwd}')) `
             -Because 'session-scoped suppression key (SMC-18) must be referenced to suppress repeated prompts within a session'
+    }
+
+    It 'requires SMC-18 suppression: skip-if-set behavior, headless skip, and platform-gate are all documented (F8 behavioral coverage)' {
+        # Suppression check: if the key is already set, skip the prompt
+        $script:ExecuteEachStepSection | Should -Match '(?is)(key is already set|key.{0,60}set|suppression key.{0,80}skip).{0,400}(skip.{0,80}prompt|prompt.{0,80}skip)' `
+            -Because 'SMC-18 suppression must document: check key first; if set, skip prompt entirely (no re-prompt this session)'
+
+        # Headless skip: when vscode/askQuestions is unavailable, skip silently
+        $script:ExecuteEachStepSection | Should -Match '(?is)(Headless skip|vscode/askQuestions.{0,80}unavailable|CI or programmatic).{0,300}skip' `
+            -Because 'the sub-bullet must document the headless-skip clause for CI / programmatic invocations'
+
+        # Platform gate: Claude orchestration paths skip this sub-bullet entirely
+        $script:ExecuteEachStepSection | Should -Match '(?is)(Claude orchestration|Claude.{0,40}paths).{0,200}(skip|gate|not.{0,20}applicable)' `
+            -Because 'the platform-scope gate must document that Claude orchestration paths skip this sub-bullet entirely'
     }
 
     It 'preserves Code-Conductor ownership stance and ANNOUNCE-before-tool-call rule' {

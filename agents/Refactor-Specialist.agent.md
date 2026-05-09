@@ -91,6 +91,7 @@ Follow the Integration Gaps Are Not Tech Debt rule in `skills/refactoring-method
 - Load `skills/software-architecture/SKILL.md` for Clean Architecture guidance
 - Load `skills/systematic-debugging/SKILL.md` for root cause investigation
 - Load `skills/frame-credit-emission/SKILL.md` for the terminal-step credit-row emission contract
+- When dispatched with a frame spine and a cross-step reference is needed mid-turn, invoke the lookup primitive per `skills/frame-spine-lookup/` (Copilot: see `platforms/copilot.md`; Claude: see `platforms/claude.md`)
 
 ## Terminal Step: Frame Credit Emission
 

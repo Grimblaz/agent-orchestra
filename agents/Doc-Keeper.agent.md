@@ -87,6 +87,7 @@ See also: [Experience-Owner](Experience-Owner.agent.md) for customer framing doc
 - Load `documentation-finalization` for the documentation process and deletion-first cleanup workflow
 - Load relevant project guidance from `.github/copilot-instructions.md` and `.github/architecture-rules.md`
 - Load `skills/frame-credit-emission/SKILL.md` for the terminal-step credit-row emission contract
+- When dispatched with a frame spine and a cross-step reference is needed mid-turn, invoke the lookup primitive per `skills/frame-spine-lookup/` (Copilot: see `platforms/copilot.md`; Claude: see `platforms/claude.md`)
 
 **Note**: Doc-Keeper primarily handles documentation formatting and accuracy. Most deep implementation skills are owned by implementation agents.
 

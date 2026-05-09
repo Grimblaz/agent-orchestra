@@ -100,6 +100,7 @@ Generate Gherkin `.feature` files for `[auto]` scenarios only; exclude `[manual]
 - Load `skills/systematic-debugging/SKILL.md` before attempting fixes
 - Reference `skills/verification-before-completion/SKILL.md` and `.github/architecture-rules.md` when validating coverage and architecture compliance
 - Load `skills/frame-credit-emission/SKILL.md` for the terminal-step credit-row emission contract
+- When dispatched with a frame spine and a cross-step reference is needed mid-turn, invoke the lookup primitive per `skills/frame-spine-lookup/` (Copilot: see `platforms/copilot.md`; Claude: see `platforms/claude.md`)
 
 ## Terminal Step: Frame Credit Emission
 

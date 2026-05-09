@@ -102,3 +102,24 @@ Array of objects. Each entry represents a metric that deviated from baseline or 
 | `vs_baseline` | string | Which comparisons triggered: `"rolling"`, `"checkpoint"`, or `"both"`. |
 | `direction` | string | Direction of deviation: `"shrink"` (lower than expected), `"grow"` (higher than expected), or `"informational"` (within threshold but noteworthy). |
 | `confidence` | string | Detection confidence: `"high"`, `"medium"`, or `"low"`. |
+
+## `dispatch-cost-samples[]` — Per-Dispatch Spine Context Audit
+
+Additive array introduced in `frame/pipeline-metrics-v4-schema.md` (issue #512, extended in #514).
+Each row records one specialist dispatch with its spine-context size and evaluation results.
+See `frame/pipeline-metrics-v4-schema.md` for the authoritative contract; this section is a
+cross-reference summary only.
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `step-id` | string | yes | Implementation step identifier (e.g., `"s12"`). |
+| `mode` | string | yes | Dispatch mode: `spine`, `legacy-fallback`, or `budget-exceeded`. |
+| `bytes` | integer | yes | Byte count of the focused dispatch context (spine + active slice + depth-1 deps). |
+| `rc-conformance` | string | yes | RC review result: `pass`, `fail`, or `not-evaluated`. |
+| `judge-disposition` | string | yes | Judge ruling: `accepted`, `rejected`, `deferred`, or `not-evaluated`. |
+| `provider` | string | no | Additive 6th key (issue #514). Identifies the originating tool: `claude` or `copilot`. Additional values tolerated additively per D12. Rows without `provider:` are pre-#514 legacy rows. |
+
+Rows are merged by the `(step-id, mode, provider)` tuple; multiple rows with the same tuple
+are collapsed to the most recent write. Cross-tool runs produce multiple rows for the same
+`(step-id, mode)` pair — one per provider. Parser must accept both 5-key (legacy) and 6-key
+rows in the same array without error.

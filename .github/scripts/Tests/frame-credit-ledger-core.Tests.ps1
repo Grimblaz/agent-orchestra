@@ -574,6 +574,99 @@ integrity_checks:
             }
         }
 
+        Context 'Context: Update-DispatchCostSampleEvaluationInPrBody provider preservation (issue #514 F1/F4a)' {
+
+            It 'provider: claude is preserved when Update-DispatchCostSampleEvaluationInPrBody back-fills RC on a 6-key row' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 7421
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+        provider: claude
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $updated = Update-DispatchCostSampleEvaluationInPrBody -PrBody $body -StepId 's12' -Mode 'spine' -RcConformance 'pass'
+                $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+
+                # provider: claude must survive the back-fill
+                $normalized | Should -Match 'provider: claude'
+                # rc-conformance must be updated
+                $normalized | Should -Match 'rc-conformance: pass'
+                # exactly one dispatch-cost-samples row must exist (no duplicate)
+                $result = Read-PRMetricsBlock -PrBody $updated
+                @($result.DispatchCostSamples).Count | Should -Be 1
+            }
+
+            It 'provider: copilot is preserved when Update-DispatchCostSampleEvaluationInPrBody back-fills judge-disposition' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s10
+        mode: spine
+        bytes: 4096
+        rc-conformance: pass
+        judge-disposition: not-evaluated
+        provider: copilot
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $updated = Update-DispatchCostSampleEvaluationInPrBody -PrBody $body -StepId 's10' -Mode 'spine' -Provider 'copilot' -JudgeDisposition 'accepted'
+                $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+
+                $normalized | Should -Match 'provider: copilot'
+                $normalized | Should -Match 'judge-disposition: accepted'
+                $result = Read-PRMetricsBlock -PrBody $updated
+                @($result.DispatchCostSamples).Count | Should -Be 1
+            }
+
+            It 'cross-tool rows are not duplicated: claude and copilot rows for same (step-id, mode) are preserved as two distinct rows' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s12
+        mode: spine
+        bytes: 7421
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+        provider: claude
+    - step-id: s12
+        mode: spine
+        bytes: 3100
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+        provider: copilot
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                # Update only the claude row
+                $updated = Update-DispatchCostSampleEvaluationInPrBody -PrBody $body -StepId 's12' -Mode 'spine' -Provider 'claude' -RcConformance 'pass'
+                $result = Read-PRMetricsBlock -PrBody $updated
+
+                # Both rows must survive — no duplication, no cross-contamination
+                @($result.DispatchCostSamples).Count | Should -Be 2
+                $claudeRow = @($result.DispatchCostSamples) | Where-Object { $_.provider -eq 'claude' }
+                $copilotRow = @($result.DispatchCostSamples) | Where-Object { $_.provider -eq 'copilot' }
+                $claudeRow.'rc-conformance' | Should -Be 'pass'
+                $copilotRow.'rc-conformance' | Should -Be 'not-evaluated'
+            }
+        }
+
         Context 'Context: provider field preserved on RC back-fill update (M13 upsert preservation)' {
 
             It 'provider: claude is not dropped when Add-DispatchCostSampleToPrBody updates an existing row by RC back-fill' {

@@ -52,13 +52,17 @@ plan-issue comment body.
    operation. The command shape must match this contract:
 
    ```powershell
-   pwsh -File .github/scripts/lib/frame-spine-core.ps1 -Op Lookup -CommentBodyPath {path} -GeneratedAt {generated_at} -StepId {id}
+   pwsh -File .github/scripts/lib/frame-spine-core.ps1 -Op Lookup -CommentBodyPath {path} -GeneratedAt {generated_at} -StepId {id} -Format Json
    ```
 
-   The implementation may pass the fetched body by a supported path or stream,
-   but the operation remains `-Op Lookup` against `frame-spine-core.ps1`, with
-   the dispatched `generated_at` value and requested `-StepId {id}` present in
-   the lookup invocation.
+   The implementation may pass the fetched body by a supported path or stream
+   (`-CommentBodyPath` for file-based, `-CommentBodyStdin` for piped stdin), but
+   the operation remains `-Op Lookup` against `frame-spine-core.ps1`, with the
+   dispatched `generated_at` value and requested `-StepId {id}` present in the
+   lookup invocation. Always pass `-Format Json` so the response is machine-
+   parseable JSON regardless of platform; parse the returned `status` field to
+   determine the lookup outcome (do not rely on exit code alone — see Exit Codes
+   below).
 
 3. Use the returned slice content as the only additional plan context for the
    current turn. Do not manually parse `<!-- frame-spine -->` or
@@ -67,6 +71,25 @@ plan-issue comment body.
 4. On generated_at mismatch, respect the F2.2 hash-elision filter before
    declaring staleness. If the lookup result is `stale-spine`, stop specialist
    work and return control to Conductor for re-dispatch with a fresh spine.
+
+## Exit Codes and Status Values
+
+Always parse the JSON `status` field to determine the lookup outcome. Do not
+branch on exit code alone — `stale-spine` exits 0, not 1.
+
+| Status          | Exit code | Meaning                                                       |
+| --------------- | --------- | ------------------------------------------------------------- |
+| `ok`            | 0         | Slice retrieved successfully; `slice` field contains content. |
+| `stale-spine`   | 0         | Dispatched spine is no longer current; return to Conductor.   |
+| `missing-spine` | 1         | Comment body contains no `<!-- frame-spine -->` block.        |
+| `invalid-spine` | 1         | Spine block is present but malformed (parse error).           |
+| `missing-slice` | 1         | Spine is valid but the requested step id was not found.       |
+| `error`         | 1         | Unexpected error; `message` field contains the reason.        |
+
+Wrapper-level error codes (when the outer process fails before the script
+can run) are surfaced by the platform shim — see `platforms/copilot.md` and
+`platforms/claude.md` for `gh-not-installed`, `gh-auth-expired`, and
+`pwsh-not-found` error handling.
 
 ## Stale-Spine Handling
 

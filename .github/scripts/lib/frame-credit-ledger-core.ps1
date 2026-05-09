@@ -405,7 +405,6 @@ function script:ConvertFrom-FCLDispatchCostSampleChunk {
 
     $parsed = script:Get-FCLDispatchCostSampleKeysAndValues -Chunk $Chunk
     $keyOrder = @($parsed.KeyOrder)
-    $optionalKeys = @('provider')
     if ($keyOrder.Count -notin @($requiredKeys.Count, ($requiredKeys.Count + 1))) {
         throw 'row must contain exactly step-id, mode, bytes, rc-conformance, judge-disposition (optionally followed by provider)'
     }
@@ -939,7 +938,8 @@ function Update-DispatchCostSampleEvaluationInPrBody {
         [Parameter(Mandatory)][string]$StepId,
         [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
         [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance,
-        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition
+        [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition,
+        [string]$Provider = $null
     )
 
     $metrics = Read-PRMetricsBlock -PrBody $PrBody
@@ -947,19 +947,29 @@ function Update-DispatchCostSampleEvaluationInPrBody {
 
     $samples = [System.Collections.Generic.List[object]]::new()
     $updated = $false
+    $filterByProvider = $PSBoundParameters.ContainsKey('Provider') -and -not [string]::IsNullOrEmpty($Provider)
     foreach ($sample in @($metrics.DispatchCostSamples)) {
-        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode) {
+        $sampleProvider = if ($sample.PSObject.Properties['provider']) { [string]$sample.provider } else { $null }
+        $providerMatch = (-not $filterByProvider) -or ($sampleProvider -eq $Provider)
+
+        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode -and $providerMatch) {
             $updatedRcConformance = [string]$sample.'rc-conformance'
             $updatedJudgeDisposition = [string]$sample.'judge-disposition'
             if ($PSBoundParameters.ContainsKey('RcConformance')) { $updatedRcConformance = $RcConformance }
             if ($PSBoundParameters.ContainsKey('JudgeDisposition')) { $updatedJudgeDisposition = $JudgeDisposition }
+
+            # Preserve the existing row's provider field — never drop it on back-fill (issue #514 F1)
+            $preservedProvider = if ($sample.PSObject.Properties['provider']) { [string]$sample.provider } else { $null }
+            $providerArgs = @{}
+            if (-not [string]::IsNullOrEmpty($preservedProvider)) { $providerArgs['Provider'] = $preservedProvider }
 
             [void]$samples.Add((New-DispatchCostSampleRow `
                         -StepId ([string]$sample.'step-id') `
                         -Mode ([string]$sample.mode) `
                         -Bytes ([int]$sample.bytes) `
                         -RcConformance $updatedRcConformance `
-                        -JudgeDisposition $updatedJudgeDisposition))
+                        -JudgeDisposition $updatedJudgeDisposition `
+                        @providerArgs))
             $updated = $true
         }
         else {
