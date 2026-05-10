@@ -5,6 +5,8 @@ argument-hint: "[issue number or short description of what needs customer framin
 
 # /experience
 
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+
 Run the Experience-Owner role inline in this conversation for the provided issue (upstream framing or CE Gate evidence capture).
 
 **Pre-flight**:

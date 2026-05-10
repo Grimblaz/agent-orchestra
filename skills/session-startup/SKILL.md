@@ -191,6 +191,12 @@ The first entry covers the composite cleanup-script invocation that the session-
 
 Automated detection or installation of these allowlist rules is out of scope for this issue and would be a follow-up. AC4 of issue #500 is satisfied by this documentation per the Experience-Owner framing: "documents how the cleanup confirmation answer translates into permission."
 
+On Windows, the existing `Bash(pwsh*post-merge-cleanup.ps1*)` allowlist entry covers `pwsh` invocations through Claude Code's Bash tool surface; no separate `PowerShell(...)` entry is required.
+
+If the cleanup script (or a settings.local.json edit applying these recommendations) is silently denied even after explicit user authorization in the same conversation, you are observing the contextual-classifier override pattern documented in [issue #546](https://github.com/Grimblaz/agent-orchestra/issues/546) (see comments [4414368049](https://github.com/Grimblaz/agent-orchestra/issues/546#issuecomment-4414368049) and [4414376114](https://github.com/Grimblaz/agent-orchestra/issues/546#issuecomment-4414376114)). Workaround: apply this allowlist *before* the deny fires by editing `.claude/settings.local.json` directly; do not ask the agent to make the edit on your behalf in the same turn you authorize it.
+
+[Issue #548](https://github.com/Grimblaz/agent-orchestra/issues/548)'s entries (e.g., `gh issue view`, `gh pr list --head`) layer below this section's entries when implemented. #548 inherits its own L2 customer-self-verification responsibility for the auto-mode behavior of those `gh` calls — agent-orchestra does not re-document the classifier behavior per allowlist addition.
+
 ### Step 8 — Continue with the user's request
 
 After the automatic startup path is complete, continue with the user's original request only after completing any other applicable startup steps below, including Step 7b and Step 9 when they apply. In hook-driven runs, this means consuming any injected `additionalContext`, recording the run-once marker, and then proceeding. This automatic run-once guard applies only to the cleanup-detector plus Claude drift-check path; explicit or manual detector runs still remain allowed after the automatic guard fires.

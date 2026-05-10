@@ -1,5 +1,7 @@
 # Platform — Claude Code
 
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+
 The `upstream-onboarding` skill uses Claude Code's `AskUserQuestion` tool for structured questions.
 
 ## Brief rendering

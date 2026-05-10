@@ -1,5 +1,7 @@
 # Platform — Claude Code
 
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+
 Claude Code receives `session-startup` through the plugin-distributed `SessionStart` hook declared in `hooks/hooks.json`. That hook runs the detector script from the plugin cache and injects any resulting `additionalContext` into the agent's first turn.
 
 When `session-startup` needs user confirmation before running the detector's fenced cleanup commands, Claude Code agents invoke the `AskUserQuestion` tool. Present the detector's `additionalContext` text and offer two options:
