@@ -11,7 +11,7 @@ Shared opening-phase protocol for the three upstream agents in the Agent Orchest
 
 ## When to Use
 
-Load this skill as the first opening-phase action when a user-invocable upstream agent (Experience-Owner, Solution-Designer, Issue-Planner) or Code-Conductor receives a request referencing an existing GitHub issue, or when the developer is describing a brand-new idea (Greenfield Mode below).
+Load this skill as the first opening-phase action when a user-invocable upstream agent (Experience-Owner, Solution-Designer, Issue-Planner) or Code-Conductor receives a request referencing an existing GitHub issue, or when the developer is describing a brand-new idea (Greenfield Mode below). Structured-question contracts are platform-mode-independent — see your platform guide for any auto-mode boundary.
 
 ## When to Skip
 

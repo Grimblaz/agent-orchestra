@@ -103,6 +103,32 @@ claude plugin install <plugin@marketplace>
 claude plugin uninstall <plugin@marketplace>
 ```
 
+## Auto-mode boundary
+
+This section applies to Claude Code. Copilot uses a different permission model and is out of scope.
+
+<!-- auto-mode-boundary:begin -->
+**Auto-mode governs tool-permission prompts only — not structured questions.**
+
+- **D1 — Routine ops auto-approve**: when auto-mode is on, read-only and low-impact tool calls (`git status`, file reads, `git log`, etc.) execute without a permission prompt. This is the intended behavior.
+- **D3 — `AskUserQuestion` is unconditional**: `AskUserQuestion` fires regardless of auto-mode. Auto-mode does not suppress `AskUserQuestion`. Agents must still ask at all methodology checkpoints (upstream-onboarding standards checks, plan approval, design convergence decisions, etc.).
+- **D2 — Outside-allowlist ops prompt**: tool calls outside the auto-approve allowlist produce a permission prompt for the user to approve or reject. Silent rejection occurs only when `permissions.deny` explicitly blocks the call.
+<!-- auto-mode-boundary:end -->
+
+**Known limitation (L2 — platform-side classifier behavior):** The live evidence in [issue #546](https://github.com/Grimblaz/agent-orchestra/issues/546) (comments [4414368049](https://github.com/Grimblaz/agent-orchestra/issues/546#issuecomment-4414368049) and [4414376114](https://github.com/Grimblaz/agent-orchestra/issues/546#issuecomment-4414376114)) shows that Claude Code's contextual risk classifier can silently deny a tool call even after explicit same-turn user authorization, bypassing D2. The workaround is the opt-in allowlist in [skills/session-startup/SKILL.md](skills/session-startup/SKILL.md) § Permission allowlist (recommended) — apply those entries before the deny fires by editing `.claude/settings.local.json` directly, not by asking the agent to make the edit in the same turn you authorize it. If the gap proves materially worse than this workaround, file an upstream Claude Code issue referencing this evidence.
+
+<!-- auto-mode-boundary-recipe:begin -->
+### Manual verification recipe
+
+Run these three checks in Claude Code to audit the auto-mode boundary in your session.
+
+**1. Positive case (D1):** Run `git status` under auto-mode. It should execute immediately without a permission prompt. If it prompts, D1 has regressed — check your `permissions.allow` list.
+
+**2. Risky case (D2):** Run `gh pr merge --admin` against a draft PR you own, then **abort at the Claude Code permission prompt** — do not complete the merge. Expected: a permission prompt appears before execution. If no prompt appears and the command is silently denied, you are observing the L2 contextual-classifier override pattern documented above. Fallback: (a) record the chat transcript verbatim, (b) confirm the [cleanup-script allowlist entry](skills/session-startup/SKILL.md) is applied (project-level for contributors, `~/.claude/settings.json` for plugin consumers — see that skill section for the correct path), (c) file an issue at the [agent-orchestra repo](https://github.com/Grimblaz/agent-orchestra/issues) with the transcript and settings excerpt.
+
+**3. Axis B case (D3):** Run `/experience N` against an **existing issue** you own (use an issue that already carries an upstream marker — e.g., a `<!-- experience-owner-complete-{ID} -->` comment from a prior `/experience` run — so the upstream-onboarding standards check actually fires; a fresh unframed issue will skip the standards check per [skills/upstream-onboarding/SKILL.md § When to Skip](skills/upstream-onboarding/SKILL.md)). Verify the upstream-onboarding standards check fires `AskUserQuestion`. If the agent skips the question and assumes an answer, D3 has regressed — report it on [issue #546](https://github.com/Grimblaz/agent-orchestra/issues/546).
+<!-- auto-mode-boundary-recipe:end -->
+
 ## Where things live
 
 - `agents/*.agent.md` — shared, tool-agnostic agent bodies used by both Copilot and Claude Code (capitalized filename, `.agent.md` extension)

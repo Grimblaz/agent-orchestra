@@ -5,6 +5,8 @@ argument-hint: "[issue number]"
 
 # /plan
 
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+
 <!-- scope: claude-only -->
 
 Run the Issue-Planner role inline in this conversation to produce an implementation plan for the provided issue.

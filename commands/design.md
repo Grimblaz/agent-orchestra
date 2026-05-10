@@ -5,6 +5,8 @@ argument-hint: "[issue number]"
 
 # /design
 
+> Auto-mode boundary: see [CLAUDE.md § Auto-mode boundary](/CLAUDE.md#auto-mode-boundary). Auto-mode does not suppress `AskUserQuestion`.
+
 Run the Solution-Designer role inline in this conversation for the provided issue.
 
 **Pre-flight**:
