@@ -390,7 +390,8 @@ Per coherence check against issue #534 "Next steps":
 1. **Agent Teams measurement complete — OQ1 closed** (issue #539, 2026-05-09): Verdict No-Go. Agent Teams structurally cannot achieve cost parity with Agent-tool under the current API (see verdict block above). OQ1 in #534 is closed as structurally unresolvable. Follow-up requires Agent Teams API evolution (model-pin + cache-persistence). If those land, reopen with the same 8-round fixed-N harness.
 2. **Fix Copilot installer** (issue #538): unblock Copilot OTel measurement.
 3. **Complete Copilot measurement** (after #538): run Copilot-side prototype once OTel is working.
-4. If Claude Agent Teams verdict is ever revised to Go (pending API evolution): **Conductor-dispatch-of-ensemble** implementation — named per issue AC9.
+4. **Conductor-dispatch-of-ensemble via Agent-tool — actionable now**: `verdict_claude_agent_tool: confirmed`; steady-state cost is 11 non-cached tokens/round. Scope a new issue for AC9 Conductor-dispatch-of-ensemble using the Agent-tool (hub-and-spoke) transport. Does not require Agent Teams API evolution or any API change — the transport is stable and measured.
+5. **Conductor-dispatch-of-ensemble via Agent Teams — blocked on API evolution**: Revisit if and when Agent Teams API adds (a) model-pin support (lead `--model` propagates to teammates) and (b) cache persistence across `SendMessage` rounds (shared subprocess or session reuse). Reopen with the same 8-round fixed-N harness at that time.
 
 ## CE Gate
 
