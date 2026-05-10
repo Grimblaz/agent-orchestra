@@ -3,7 +3,7 @@
 **Issue**: #535  
 **Branch**: feature/issue-535-peer-to-peer-research  
 **Date**: 2026-05-08  
-**Status**: closed — Agent Teams: No-Go, Agent-tool: confirmed (see verdict blocks; updated by issue #539 2026-05-09)
+**Status**: closed — Agent Teams: No-Go, Agent-tool: Go (see verdict blocks; updated by issue #539 2026-05-09)
 
 ## Overview
 
@@ -172,7 +172,7 @@ Copilot OTel collection installer (`Initialize-CopilotCostCollection.ps1`) fails
 
 | Platform | Transport | Maturity | Measured | Verdict |
 |----------|-----------|----------|----------|---------|
-| Claude Code — Agent tool | One-directional hub→subagent | stable | Yes (walker + JSONL-direct; issues #535, #539) | **confirmed** |
+| Claude Code — Agent tool | One-directional hub→subagent | stable | Yes (walker + JSONL-direct; issues #535, #539) | **go** |
 | Claude Code — Agent Teams | Mailbox P2P (SendMessage) | experimental | Yes (walker + JSONL-direct; issue #539) | **no-go** |
 | Copilot Chat | Hierarchical runSubagent only | stable | No (installer bug #538) | partial |
 
@@ -181,11 +181,11 @@ Copilot OTel collection installer (`Initialize-CopilotCostCollection.ps1`) fails
 ```yaml
 ---
 verdict_claude_agent_tool:
-  verdict: confirmed
+  verdict: go
   transport: agent-tool-dispatch
   transport_maturity: stable
   cost_source: walker+jsonl-direct
-  walker_credits: "issue #539 dedicated headless session; 8 rounds fixed-N; branch feature/issue-539-headless-sandbox; slug C--Users-Micah-Code-2-copilot-orchestra-539-headless; cost-walker Tier 1 for lead events; JSONL-direct Tier 2 for subagent events; cross-validated, no discrepancies"
+  walker_credits: "issue #539 dedicated headless session; 8 rounds fixed-N; branch feature/issue-539-headless-sandbox; slug c--Users-Micah-Code-2-copilot-orchestra-539-headless; cost-walker Tier 1 for lead events; JSONL-direct Tier 2 for subagent events; cross-validated, no discrepancies"
   sdk_usage_evidence: "8 dispatch rounds on feature/issue-539-headless-sandbox (claude -p --model claude-sonnet-4-6, issue #539); 1 warmup round (cc=15537, cr=0) + 7 steady-state rounds (cc=0, cr=15537)"
   cost_per_round_input_tokens: 3           # steady-state mean (n=7, stddev=0)
   cost_per_round_output_tokens: 8          # steady-state mean (n=7, stddev=0)
@@ -205,7 +205,7 @@ verdict_claude_agent_tool:
     contamination from an in-flight orchestration session; this #539 dedicated-session
     measurement with cc=0 filter produces the clean baseline.
   threshold_rationale: >
-    Confirmed viable. Per-round marginal cost is effectively zero in steady state.
+    Go. Per-round marginal cost is effectively zero in steady state.
     The 40% cost-reduction threshold is not the binding constraint for Agent-tool;
     the relevant constraint is task granularity (overhead dominates for sub-1K-token tasks).
 
@@ -214,7 +214,7 @@ verdict_claude_agent_teams:
   transport: agent-teams-sendmessage
   transport_maturity: experimental
   cost_source: walker+jsonl-direct
-  walker_credits: "issue #539 dedicated headless session; 8 sends fixed-N; branch feature/issue-539-headless-sandbox; cost-walker Tier 1 for lead events; JSONL-direct Tier 2 for teammate subprocess events (4 JSONL files under subagents/)"
+  walker_credits: "issue #539 dedicated headless session; 8 sends fixed-N; branch feature/issue-539-headless-sandbox; cost-walker Tier 1 for lead events; JSONL-direct Tier 2 for teammate subprocess events (4 JSONL files under {slugDir}/{sessionId}/subagents/ — distinct from Agent-tool path {slugDir}/subagents/)"
   sdk_usage_evidence: "8 SendMessage calls on feature/issue-539-headless-sandbox (claude -p --model claude-sonnet-4-6, issue #539); teammate model claude-opus-4-7 (server default — not configurable from lead --model); 3 of 8 sends produced effective teammate responses before TeamDelete; 27 API calls across 4 teammate subprocess sessions"
   cost_per_round_input_tokens: null           # no steady-state rounds (cc=0 structurally impossible)
   cost_per_round_output_tokens: null          # no steady-state rounds
@@ -316,13 +316,12 @@ Issue #539 completed the Agent Teams cost measurement and returned a No-Go verdi
     . .github/scripts/lib/path-normalize.ps1
     . .github/scripts/lib/cost-walker.ps1
     $events = Invoke-CostTranscriptWalk `
-        -Slug 'c--Users-Micah-Code-2-copilot-orchestra' `
+        -Slug '<transcript-slug>' `
         -Branch 'feature/issue-535-peer-to-peer-research' `
-        -ParentCwd 'C:\Users\Micah\Code 2\copilot-orchestra' `
+        -ParentCwd '<absolute-path-to-repo-root>' `
         -IssueNumber 535
     ```
-    Valid parameters: `-Slug`, `-Branch`, `-ParentCwd`, `-IssueNumber`, `-ProjectsRoot`.
-    `-Repo` is not a valid parameter name.
+    Where `<transcript-slug>` is the slug derived from your repo path (e.g., `c--Users-YourName-Code-copilot-orchestra`; drive letter is lowercased) and `<absolute-path-to-repo-root>` is the absolute path to your local clone (e.g., `C:\Users\YourName\Code\copilot-orchestra`). Valid parameters: `-Slug`, `-Branch`, `-ParentCwd`, `-IssueNumber`, `-ProjectsRoot`. `-Repo` is not a valid parameter name.
 
 ### Copilot Chat — methodology
 
@@ -371,8 +370,8 @@ If two API changes land — (1) model-pin (lead `--model` propagates to teammate
 
 Per plan s5 RC, explicitly walking the four customer scenarios against this doc:
 
-**S1** (no platform ends in TBD): Both Claude platforms have explicit verdicts (`confirmed` and `no-go`). Copilot has `partial` (blocked by #538 — not TBD). ✅  
-  _Evidence_: Platform Verdict Blocks — `verdict_claude_agent_tool.verdict: confirmed`, `verdict_claude_agent_teams.verdict: no-go`, `verdict_copilot.verdict: partial`.
+**S1** (no platform ends in TBD): Both Claude platforms have explicit verdicts (`go` and `no-go`). Copilot has `partial` (blocked by #538 — not TBD). ✅  
+  _Evidence_: Platform Verdict Blocks — `verdict_claude_agent_tool.verdict: go`, `verdict_claude_agent_teams.verdict: no-go`, `verdict_copilot.verdict: partial`.
 
 **S2** (every cost figure traceable to transcript or sdk_usage_evidence): Agent-tool figures traceable to `walker_credits` (issue #539 headless session, walker + JSONL-direct). Agent Teams figures traceable to `walker_credits` (same session, JSONL-direct Tier 2). Copilot figures null with explicit null reason. The #535 sdk-usage figure (24.6K) is preserved in Measurement Methodology for historical traceability. ✅  
   _Evidence_: `verdict_claude_agent_tool.walker_credits`, `verdict_claude_agent_teams.walker_credits`, both referencing issue #539 branch and cost-walker fidelity tier.
