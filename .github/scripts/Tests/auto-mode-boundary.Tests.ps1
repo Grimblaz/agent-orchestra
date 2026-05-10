@@ -54,16 +54,16 @@ Describe 'auto-mode boundary contract' {
             'auto-mode means don''t ask'
         )
 
-        # Negative-lookbehind patterns: tolerate citation prose "does not suppress AskUserQuestion"
-        # and "does not silence AskUserQuestion" while catching contradictory bare forms.
+        # Negative-lookbehind patterns: tolerate citation prose "does not suppress `AskUserQuestion`"
+        # and "does not silence `AskUserQuestion`" while catching contradictory bare and backtick-wrapped forms.
+        # The \s+`? makes the patterns match both "suppress AskUserQuestion" and "suppress `AskUserQuestion`".
         $script:ForbiddenPatterns = @(
-            '(?<!does not )suppress AskUserQuestion',
-            '(?<!Auto-mode does not )silence AskUserQuestion'
+            '(?<!does not )suppress\s+`?AskUserQuestion`?',
+            '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?'
         )
 
         $script:RiskyCommandWhitelist = @(
-            'gh pr merge --admin',
-            'gh api -X DELETE'
+            'gh pr merge --admin'
         )
 
         # Helper: read file content or return empty string on failure
@@ -143,7 +143,9 @@ Describe 'auto-mode boundary contract' {
             $lines   = $content -split '\r?\n'
             foreach ($line in $lines) {
                 if ($line -match [regex]::Escape($script:CitationAnchor)) {
-                    $line | Should -Not -Match '\.\.[/\\]|^\.[/\\]' `
+                    # \.\.[/\\] catches ../ anywhere; (?:^|[([ \t])\.[/\\] catches ./ at start of line,
+                    # after (, [, or whitespace — covering bare paths AND inline markdown link targets.
+                    $line | Should -Not -Match '\.\.[/\\]|(?:^|[([ \t])\.[/\\]' `
                         -Because "${rel}: citation lines must use root-anchored form, not relative paths"
                 }
             }
@@ -209,26 +211,50 @@ Describe 'auto-mode boundary contract' {
 
         It 'tolerates the citation prose "Auto-mode does not suppress AskUserQuestion"' {
             $safe = 'Auto-mode does not suppress AskUserQuestion.'
-            $safe | Should -Not -Match '(?<!does not )suppress AskUserQuestion' `
+            $safe | Should -Not -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
                 -Because 'negative lookbehind must allow the citation prose'
         }
 
         It 'catches the bare contradictory phrase "The agent should suppress AskUserQuestion in auto-mode"' {
             $bad = 'The agent should suppress AskUserQuestion in auto-mode.'
-            $bad | Should -Match '(?<!does not )suppress AskUserQuestion' `
+            $bad | Should -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
                 -Because 'regex must catch bare suppress without the negation prefix'
+        }
+
+        It 'catches the backtick-wrapped contradictory phrase "suppress `AskUserQuestion` in auto-mode"' {
+            $bad = 'agents should suppress `AskUserQuestion` in auto-mode.'
+            $bad | Should -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
+                -Because 'regex must catch backtick-wrapped suppress (the canonical codebase form)'
+        }
+
+        It 'tolerates "Auto-mode does not suppress `AskUserQuestion`"' {
+            $safe = 'Auto-mode does not suppress `AskUserQuestion`.'
+            $safe | Should -Not -Match '(?<!does not )suppress\s+`?AskUserQuestion`?' `
+                -Because 'negative lookbehind must allow the backtick-wrapped negated form'
         }
 
         It 'tolerates "Auto-mode does not silence AskUserQuestion"' {
             $safe = 'Auto-mode does not silence AskUserQuestion in any mode.'
-            $safe | Should -Not -Match '(?<!Auto-mode does not )silence AskUserQuestion' `
+            $safe | Should -Not -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
                 -Because 'negative lookbehind must allow the negated form'
         }
 
         It 'catches bare "silence AskUserQuestion"' {
             $bad = 'Agents should silence AskUserQuestion when mode is auto.'
-            $bad | Should -Match '(?<!Auto-mode does not )silence AskUserQuestion' `
+            $bad | Should -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
                 -Because 'regex must catch bare silence form'
+        }
+
+        It 'catches backtick-wrapped "silence `AskUserQuestion`"' {
+            $bad = 'Agents should silence `AskUserQuestion` when mode is auto.'
+            $bad | Should -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
+                -Because 'regex must catch backtick-wrapped silence form'
+        }
+
+        It 'tolerates "Auto-mode does not silence `AskUserQuestion`"' {
+            $safe = 'Auto-mode does not silence `AskUserQuestion` in any mode.'
+            $safe | Should -Not -Match '(?<!Auto-mode does not )silence\s+`?AskUserQuestion`?' `
+                -Because 'negative lookbehind must allow the backtick-wrapped negated form'
         }
     }
 
