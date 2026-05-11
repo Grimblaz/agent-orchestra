@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestra",
-  "version": "2.12.4",
+  "version": "2.13.0",
   "agents": [
     "./agents/code-conductor.md",
     "./agents/code-critic.md",
@@ -14,6 +14,7 @@
     "./agents/research-agent.md",
     "./agents/solution-designer.md",
     "./agents/specification.md",
+    "./agents/spine-runner.md",
     "./agents/test-writer.md",
     "./agents/ui-iterator.md"
   ],

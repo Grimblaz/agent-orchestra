@@ -9,10 +9,10 @@
     Enforces the agent-orchestra routing convention (D9 in agent-body-architecture.md):
 
     - Override-discipline:    each Claude shell declares both model: and effort:, or neither.
-    - Enum membership:        declared values belong to the allowed sets (case-insensitive).
+    - Enum membership:        declared values belong to the allowed sets (case-insensitive), including explicit D7 inherit.
     - Inherit-comment:        omitting shells carry an explanatory YAML comment.
     - Routing-values oracle:  declared-routing shells match hard-coded expected values (D2+D5+quality).
-    - Routing-table parity:   CLAUDE.md routing table matches shell frontmatter for oracle shells.
+    - Routing-table parity:   CLAUDE.md routing table matches shell frontmatter for oracle shells and D7 inherit rows.
     - Command enforcement D3: upstream commands (/experience /design /plan /polish) must NOT declare model/effort.
     - Command enforcement D1: commands/orchestrate.md MUST declare model: sonnet, effort: medium.
     - Scope guard:            commands/orchestrate.md `# /orchestrate` H1 is permanently followed by <!-- scope: claude-only -->.
@@ -41,6 +41,12 @@ Describe 'Per-agent model + effort routing contract' {
             'agents/refactor-specialist.md'  = @{ model = 'sonnet'; effort = 'high' }
             'agents/process-review.md'       = @{ model = 'sonnet'; effort = 'high' }
             'agents/code-conductor.md'       = @{ model = 'sonnet'; effort = 'medium' }
+        }
+
+        # D7: explicit inherit/inherit routing for the minimal frame walker.
+        $script:D7InheritRouting = @{
+            'agents/spine-runner.md' = @{ model = 'inherit'; effort = 'inherit' }
+            'commands/spine-run.md'  = @{ model = 'inherit'; effort = 'inherit' }
         }
 
         # D1: commands/orchestrate.md required routing
@@ -84,6 +90,44 @@ Describe 'Per-agent model + effort routing contract' {
             return ($Frontmatter -match $routinePattern) -or ($Frontmatter -match $inlinePattern)
         }
 
+        $script:HasD7InheritComment = {
+            param([string]$Frontmatter)
+            return $Frontmatter -match '(?ms)^# inherit\b.*?\(D7\)\.'
+        }
+
+        $script:ReadRoutingDeclaration = {
+            param([string]$RelPath)
+
+            $path = Join-Path $script:RepoRoot $RelPath
+            Test-Path $path | Should -BeTrue -Because "$RelPath must exist in the repo"
+
+            $frontmatter = & $script:GetFrontmatter -Content (Get-Content -Path $path -Raw)
+            $modelRaw = & $script:GetFrontmatterField -Frontmatter $frontmatter -FieldName 'model'
+            $effortRaw = & $script:GetFrontmatterField -Frontmatter $frontmatter -FieldName 'effort'
+
+            return [PSCustomObject]@{
+                Frontmatter = $frontmatter
+                Model       = if ($null -ne $modelRaw) { $modelRaw.ToLowerInvariant() } else { $null }
+                Effort      = if ($null -ne $effortRaw) { $effortRaw.ToLowerInvariant() } else { $null }
+            }
+        }
+
+        $script:AssertRoutingTableMatchesDeclaration = {
+            param(
+                [string]$RelPath,
+                [PSCustomObject]$Declaration,
+                [string]$ExpectationLabel
+            )
+
+            $row = $script:RoutingTable[$RelPath]
+            $row | Should -Not -BeNullOrEmpty -Because "CLAUDE.md routing table must contain a row for '$RelPath'"
+
+            $rowModel = if ($null -ne $row.model) { $row.model.ToLowerInvariant() } else { $null }
+            $rowEffort = if ($null -ne $row.effort) { $row.effort.ToLowerInvariant() } else { $null }
+            $rowModel  | Should -Be $Declaration.Model  -Because "CLAUDE.md table model for '$RelPath' must match $ExpectationLabel"
+            $rowEffort | Should -Be $Declaration.Effort -Because "CLAUDE.md table effort for '$RelPath' must match $ExpectationLabel"
+        }
+
         # Levenshtein distance for enum-mismatch hints
         $script:Levenshtein = {
             param([string]$A, [string]$B)
@@ -106,9 +150,18 @@ Describe 'Per-agent model + effort routing contract' {
         # Find closest candidate by Levenshtein distance
         $script:FindClosest = {
             param([string]$Value, [string[]]$Candidates)
-            $Candidates |
-                Sort-Object { & $script:Levenshtein -A $Value -B $_ } |
-                Select-Object -First 1
+            $closest = $null
+            $closestDistance = [int]::MaxValue
+
+            foreach ($candidate in $Candidates) {
+                $distance = & $script:Levenshtein -A $Value -B $candidate
+                if ($distance -lt $closestDistance) {
+                    $closest = $candidate
+                    $closestDistance = $distance
+                }
+            }
+
+            return $closest
         }
 
         # Parse CLAUDE.md routing table: returns hashtable keyed by shell path
@@ -154,8 +207,8 @@ Describe 'Per-agent model + effort routing contract' {
     }
 
     It 'enum membership: declared model and effort values are in the allowed sets' {
-        $validModels = @('sonnet', 'opus', 'haiku')
-        $validEfforts = @('low', 'medium', 'high', 'xhigh', 'max')
+        $validModels = @('sonnet', 'opus', 'haiku', 'inherit')
+        $validEfforts = @('low', 'medium', 'high', 'xhigh', 'max', 'inherit')
 
         foreach ($shellFile in $script:ShellFiles) {
             $fm = & $script:GetFrontmatter -Content (Get-Content -Path $shellFile.FullName -Raw)
@@ -168,7 +221,7 @@ Describe 'Per-agent model + effort routing contract' {
                     $hint = & $script:FindClosest -Value $norm -Candidates $validModels
                     $norm | Should -BeIn $validModels -Because (
                         "$($shellFile.Name): model '$norm' is not valid. " +
-                        "Expected one of {sonnet|opus|haiku}. Did you mean '$hint'?"
+                        "Expected one of {sonnet|opus|haiku|inherit}. Did you mean '$hint'?"
                     )
                 }
             }
@@ -179,7 +232,7 @@ Describe 'Per-agent model + effort routing contract' {
                     $hint = & $script:FindClosest -Value $norm -Candidates $validEfforts
                     $norm | Should -BeIn $validEfforts -Because (
                         "$($shellFile.Name): effort '$norm' is not valid. " +
-                        "Expected one of {low|medium|high|xhigh|max}. Did you mean '$hint'?"
+                        "Expected one of {low|medium|high|xhigh|max|inherit}. Did you mean '$hint'?"
                     )
                 }
             }
@@ -203,17 +256,9 @@ Describe 'Per-agent model + effort routing contract' {
 
     It 'routing-values oracle: declared-routing shells match hard-coded expected values (D2+D5+quality)' {
         foreach ($relPath in $script:ExpectedRouting.Keys) {
-            $shellPath = Join-Path $script:RepoRoot $relPath
-            Test-Path $shellPath | Should -BeTrue -Because "$relPath must exist in the repo"
-
-            $fm = & $script:GetFrontmatter -Content (Get-Content -Path $shellPath -Raw)
-            $modelRaw = & $script:GetFrontmatterField -Frontmatter $fm -FieldName 'model'
-            $effortRaw = & $script:GetFrontmatterField -Frontmatter $fm -FieldName 'effort'
-            $model = if ($null -ne $modelRaw) { $modelRaw.ToLowerInvariant() } else { $null }
-            $effort = if ($null -ne $effortRaw) { $effortRaw.ToLowerInvariant() } else { $null }
-
-            $model  | Should -Be $script:ExpectedRouting[$relPath].model  -Because "$relPath model must match routing-values oracle"
-            $effort | Should -Be $script:ExpectedRouting[$relPath].effort -Because "$relPath effort must match routing-values oracle"
+            $declaration = & $script:ReadRoutingDeclaration -RelPath $relPath
+            $declaration.Model  | Should -Be $script:ExpectedRouting[$relPath].model  -Because "$relPath model must match routing-values oracle"
+            $declaration.Effort | Should -Be $script:ExpectedRouting[$relPath].effort -Because "$relPath effort must match routing-values oracle"
         }
     }
 
@@ -223,20 +268,22 @@ Describe 'Per-agent model + effort routing contract' {
         )
 
         foreach ($relPath in $script:ExpectedRouting.Keys) {
-            $shellPath = Join-Path $script:RepoRoot $relPath
-            $fm = & $script:GetFrontmatter -Content (Get-Content -Path $shellPath -Raw)
-            $modelRaw = & $script:GetFrontmatterField -Frontmatter $fm -FieldName 'model'
-            $effortRaw = & $script:GetFrontmatterField -Frontmatter $fm -FieldName 'effort'
-            $shellModel = if ($null -ne $modelRaw) { $modelRaw.ToLowerInvariant() } else { $null }
-            $shellEffort = if ($null -ne $effortRaw) { $effortRaw.ToLowerInvariant() } else { $null }
+            $declaration = & $script:ReadRoutingDeclaration -RelPath $relPath
+            & $script:AssertRoutingTableMatchesDeclaration `
+                -RelPath $relPath `
+                -Declaration $declaration `
+                -ExpectationLabel 'shell frontmatter'
+        }
 
-            $row = $script:RoutingTable[$relPath]
-            $row | Should -Not -BeNullOrEmpty -Because "CLAUDE.md routing table must contain a row for '$relPath'"
-
-            $rowModel = if ($null -ne $row.model) { $row.model.ToLowerInvariant() } else { $null }
-            $rowEffort = if ($null -ne $row.effort) { $row.effort.ToLowerInvariant() } else { $null }
-            $rowModel  | Should -Be $shellModel  -Because "CLAUDE.md table model for '$relPath' must match shell frontmatter"
-            $rowEffort | Should -Be $shellEffort -Because "CLAUDE.md table effort for '$relPath' must match shell frontmatter"
+        foreach ($relPath in $script:D7InheritRouting.Keys) {
+            $declaration = & $script:ReadRoutingDeclaration -RelPath $relPath
+            $declaration.Model  | Should -Be $script:D7InheritRouting[$relPath].model  -Because "$relPath model must match D7 inherit routing"
+            $declaration.Effort | Should -Be $script:D7InheritRouting[$relPath].effort -Because "$relPath effort must match D7 inherit routing"
+            (& $script:HasD7InheritComment -Frontmatter $declaration.Frontmatter) | Should -BeTrue -Because "$relPath must carry the D7 inherit YAML comment"
+            & $script:AssertRoutingTableMatchesDeclaration `
+                -RelPath $relPath `
+                -Declaration $declaration `
+                -ExpectationLabel 'D7 frontmatter'
         }
 
         # Also check orchestrate.md command row
@@ -248,7 +295,7 @@ Describe 'Per-agent model + effort routing contract' {
         }
     }
 
-    It 'routing-table parity: inherit rows in CLAUDE.md must not have frontmatter model/effort' {
+    It 'routing-table parity: non-D7 inherit rows in CLAUDE.md must not have frontmatter model/effort' {
         $script:RoutingTable.Count | Should -BeGreaterThan 0 -Because (
             'CLAUDE.md must contain a parseable "## Per-agent model + reasoning routing" table'
         )
@@ -256,6 +303,7 @@ Describe 'Per-agent model + effort routing contract' {
         foreach ($relPath in $script:RoutingTable.Keys) {
             $row = $script:RoutingTable[$relPath]
             if ($row.model -ne 'inherit') { continue }
+            if ($script:D7InheritRouting.ContainsKey($relPath)) { continue }
 
             $shellPath = Join-Path $script:RepoRoot $relPath
             Test-Path $shellPath | Should -BeTrue -Because (
