@@ -98,14 +98,14 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
             'slices:'
             '  s2:'
             '    execution_mode: serial'
-            '    adapter: code-smith'
+            '    adapter: agents/Code-Smith.agent.md'
             '    rc: GREEN code action'
             '    ac_refs: [AC1]'
             '    depends_on: []'
             '    cycle: 1'
             '  s3:'
             '    execution_mode: serial'
-            '    adapter: test-writer'
+            '    adapter: agents/Test-Writer.agent.md'
             '    rc: RED tests for v2 schema acceptance'
             '    ac_refs: [AC1, AC5, AC7]'
             '    depends_on: [s2]'
@@ -115,7 +115,7 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
         $s2Slice = @(
             'id: s2'
             'provides: [implement-code]'
-            'adapter: code-smith'
+            'adapter: agents/Code-Smith.agent.md'
             'execution_mode: serial'
             'rc: GREEN code action'
             'ac_refs: [AC1]'
@@ -125,7 +125,7 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
         $s3Slice = @(
             'id: s3'
             'provides: [implement-test]'
-            'adapter: test-writer'
+            'adapter: agents/Test-Writer.agent.md'
             'execution_mode: serial'
             'rc: RED tests for v2 schema acceptance'
             'ac_refs: [AC1, AC5, AC7]'
@@ -157,9 +157,9 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
         $parsed = (($result.Lines) -join "`n") | ConvertFrom-Json
         $parsed.status | Should -Be 'ok'
         $parsed.step_id | Should -Be 's3'
-        $parsed.slice | Should -Match 'adapter:\s*test-writer'
+        $parsed.slice | Should -Match 'adapter:\s*agents/Test-Writer\.agent\.md'
         $parsed.slice | Should -Match 'provides:\s*\[implement-test\]'
-        $parsed.slice | Should -Not -Match 'adapter:\s*code-smith'
+        $parsed.slice | Should -Not -Match 'adapter:\s*agents/Code-Smith\.agent\.md'
         $parsed.slice | Should -Not -Match 'provides:\s*\[implement-code\]'
     }
 
@@ -206,7 +206,7 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
             -Because 'D8 option 1 text must begin with the prescribed Install... (Recommended prefix in the Copilot dispatch pre-flight sub-bullet'
 
         # D8 option 2 verbatim
-        $script:ExecuteEachStepSection | Should -Match ([regex]::Escape('Continue without — S4 cost-parity scenario will be INCONCLUSIVE for this PR')) `
+        $script:ExecuteEachStepSection | Should -Match 'Continue without\s+\u2014\s+S4 cost-parity scenario will be INCONCLUSIVE for this PR' `
             -Because 'D8 option 2 text must be present verbatim in the Copilot dispatch pre-flight sub-bullet'
 
         # Session-scoped suppression key

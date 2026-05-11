@@ -81,14 +81,14 @@ Describe 'frame spine parser' -Tag 'unit' {
             'slices:'
             '  s2:'
             '    execution_mode: serial'
-            '    adapter: code-smith'
+            '    adapter: agents/Code-Smith.agent.md'
             '    rc: GREEN code action'
             '    ac_refs: [AC1]'
             '    depends_on: []'
             '    cycle: 1'
             '  s3:'
             '    execution_mode: serial'
-            '    adapter: test-writer'
+            '    adapter: agents/Test-Writer.agent.md'
             '    rc: RED tests for v2 schema acceptance'
             '    ac_refs: [AC1, AC5, AC7]'
             '    depends_on: [s2]'
@@ -326,8 +326,20 @@ Describe 'frame spine parser' -Tag 'unit' {
 
         $parsed | Should -Not -BeNullOrEmpty
         $parsed.CanonicalYaml | Should -BeExactly $script:CanonicalSpineBlockV2WithAdapters
-        $parsed.CanonicalYaml | Should -Match '(?m)^    adapter: code-smith$'
-        $parsed.CanonicalYaml | Should -Match '(?m)^    adapter: test-writer$'
+        $parsed.CanonicalYaml | Should -Match '(?m)^    adapter: agents/Code-Smith\.agent\.md$'
+        $parsed.CanonicalYaml | Should -Match '(?m)^    adapter: agents/Test-Writer\.agent\.md$'
+
+        $slicesByStepId = @{}
+        foreach ($slice in @($parsed.Slices)) {
+            $slicesByStepId[$slice.StepId] = $slice
+            $slice.PSObject.Properties['Adapter'] | Should -Not -BeNullOrEmpty
+            $slice.PSObject.Properties['AdapterRaw'] | Should -Not -BeNullOrEmpty
+        }
+
+        $slicesByStepId['s2'].Adapter | Should -Be 'agents/Code-Smith.agent.md'
+        $slicesByStepId['s2'].AdapterRaw | Should -Be 'agents/Code-Smith.agent.md'
+        $slicesByStepId['s3'].Adapter | Should -Be 'agents/Test-Writer.agent.md'
+        $slicesByStepId['s3'].AdapterRaw | Should -Be 'agents/Test-Writer.agent.md'
 
         $tokens = @(& $script:GetPortEntries -ParsedSpine $parsed -PortName 'implement-test')
         $tokens | Should -HaveCount 1

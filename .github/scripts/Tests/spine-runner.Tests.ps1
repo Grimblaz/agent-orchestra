@@ -21,6 +21,7 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
         $script:ClaudeCommandPath = Join-Path $script:RepoRoot 'commands\spine-run.md'
         $script:ClaudeShellPath = Join-Path $script:RepoRoot 'agents\spine-runner.md'
         $script:FrameCreditEmissionPath = Join-Path $script:RepoRoot 'skills\frame-credit-emission\SKILL.md'
+        $script:PortsDirectory = Join-Path $script:RepoRoot 'frame\ports'
         $script:CopilotPromptPath = Join-Path $script:RepoRoot '.github\prompts\spine-run.prompt.md'
         $script:OrchestratePromptPath = Join-Path $script:RepoRoot '.github\prompts\orchestrate.prompt.md'
         $script:FrameSpineParseTestsPath = Join-Path $script:RepoRoot '.github\scripts\Tests\frame-spine-parse.Tests.ps1'
@@ -48,6 +49,20 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
             $pattern = '(?ms)^' + [regex]::Escape($Heading) + '\s*\n(?<body>.*?)(?=^## |\z)'
             $match = [regex]::Match($Content, $pattern)
             $match.Success | Should -BeTrue -Because "Spine-Runner must keep an extractable $Heading section"
+
+            if (-not $match.Success) { return '' }
+            return $match.Groups['body'].Value
+        }
+
+        $script:GetMarkdownSubsection = {
+            param(
+                [Parameter(Mandatory)][string]$Content,
+                [Parameter(Mandatory)][string]$Heading
+            )
+
+            $pattern = '(?ms)^' + [regex]::Escape($Heading) + '\s*\n(?<body>.*?)(?=^### |^## |\z)'
+            $match = [regex]::Match($Content, $pattern)
+            $match.Success | Should -BeTrue -Because "Frame credit emission must keep an extractable $Heading subsection"
 
             if (-not $match.Success) { return '' }
             return $match.Groups['body'].Value
@@ -139,6 +154,7 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
         $script:EvidenceVerificationSection = & $script:GetMarkdownSection -Content $script:SpineRunnerContent -Heading '## Evidence Verification'
         $script:FailureHandlingSection = & $script:GetMarkdownSection -Content $script:SpineRunnerContent -Heading '## Failure Handling'
         $script:InvocationContractSection = & $script:GetMarkdownSection -Content $script:SpineRunnerContent -Heading '## Invocation Contract'
+        $script:SkillOnlyLocusSection = & $script:GetMarkdownSubsection -Content $script:FrameCreditEmissionContent -Heading '### `skill-only`'
     }
 
     Context 'body budget and skill loading discipline' {
@@ -168,26 +184,30 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
                 -Because 'frozen-resolution stability must be part of the Spine-Runner contract'
         }
 
-        It 'documents working-tree adapter precedence before plugin-cache candidates' {
+        It 'prefers source-tree adapters before plugin cache but protects consumer worktrees from shadowing' {
             & $script:AssertContractMentions `
                 -Content $script:AdapterResolverSection `
                 -Patterns @(
-                    'Working\s+tree:\s+first\s+ancestor\s+of\s+`walk_start`\s+containing\s+`\.git`,\s+then\s+`\{root\}/\{adapter\s+path\}`',
-                    'first\s+existing\s+adapter\s+file\s+wins'
+                    'Agent\s+Orchestra\s+source\s+tree.*search\s+`\{root\}/\{adapter\s+path\}`\s+before\s+plugin-cache\s+roots',
+                    'consumer\s+or\s+other\s+working\s+tree.*search\s+plugin-cache\s+roots\s+first',
+                    'try\s+`\{root\}/\{adapter\s+path\}`\s+only\s+as\s+an\s+explicit\s+fallback\s+after\s+plugin-cache\s+misses',
+                    '`consumer-worktree-fallback`\s+warning',
+                    '`working-tree-shadow`\s+warning',
+                    'first\s+existing\s+adapter\s+file\s+in\s+the\s+applicable\s+lookup\s+order\s+wins'
                 ) `
-                -Because 'the structural contract must prefer working-tree adapter hits before plugin-cache candidates'
+                -Because 'adapter precedence must be source-first for plugin development and plugin-cache-first for consumer repos'
         }
 
-        It 'falls back to plugin-cache roots only when the working-tree candidate is absent' {
+        It 'documents plugin-cache roots and source-tree classification signals' {
             & $script:AssertContractMentions `
                 -Content $script:AdapterResolverSection `
                 -Patterns @(
-                    'Plugin\s+cache:\s+each\s+known\s+Agent\s+Orchestra\s+plugin\s+root,\s+then\s+`\{root\}/\{adapter\s+path\}`',
+                    '`plugin\.json`,\s+`\.claude-plugin/plugin\.json`,\s+`agents/Code-Conductor\.agent\.md`,\s+and\s+`skills/frame-credit-emission/SKILL\.md`\s+all\s+exist',
                     'AGENT_ORCHESTRA_PLUGIN_ROOT',
                     'platform-provided\s+agent\s+body\s+root',
                     'installed\s+`agent-orchestra@agent-orchestra`\s+plugin\s+cache\s+locations'
                 ) `
-                -Because 'plugin-cache resolution must be explicit and fixtureable without reading a real plugin cache'
+                -Because 'plugin-cache resolution must be explicit and source-tree classification must be deterministic'
         }
 
         It 'halts on unresolved adapters with the full searched-location list' {
@@ -207,7 +227,7 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
                 -Patterns @(
                     'keyed\s+by\s+slice\s+ID',
                     'absolute\s+path',
-                    'root\s+kind\s+\(`working-tree`\s+or\s+`plugin-cache`\)',
+                    'root\s+kind\s+\(`working-tree`,\s+`plugin-cache`,\s+or\s+`consumer-worktree-fallback`\)',
                     'git\s+blob\s+SHA\s+or\s+file\s+hash'
                 ) `
                 -Because 'subsequent invocation and evidence checks must use a stable resolved adapter identity'
@@ -256,14 +276,66 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
         It 'mirrors every frame-credit-emission port to locus row in the Spine-Runner verification dispatch table' {
             $sourceRows = @(& $script:GetPortLocusRows -Content $script:FrameCreditEmissionContent)
             $runnerRows = @(& $script:GetPortLocusRows -Content $script:EvidenceVerificationSection)
+            $portFiles = @(Get-ChildItem -LiteralPath $script:PortsDirectory -Filter '*.yaml' -File | Sort-Object BaseName)
 
-            $sourceRows | Should -HaveCount 14 -Because 'frame-credit-emission must expose the canonical 14-row port to locus table'
+            $portFiles | Should -HaveCount 17 -Because 'frame/ports currently declares the canonical 17 frame ports'
+            $sourceRows | Should -HaveCount $portFiles.Count -Because 'frame-credit-emission must expose one canonical port to locus row per frame/ports YAML file'
             $runnerRows.Count | Should -Be $sourceRows.Count -Because 'Spine-Runner must mirror each canonical row in its verification dispatch table'
 
             $sourceSignatures = @($sourceRows | ForEach-Object { '{0}|{1}|{2}' -f $_.AddOrder, $_.Port, $_.Locus })
             $runnerSignatures = @($runnerRows | ForEach-Object { '{0}|{1}|{2}' -f $_.AddOrder, $_.Port, $_.Locus })
+            $sourcePorts = @($sourceRows | ForEach-Object { $_.Port } | Sort-Object)
+            $filePorts = @($portFiles | ForEach-Object { $_.BaseName } | Sort-Object)
 
+            ($sourcePorts -join "`n") | Should -BeExactly ($filePorts -join "`n") -Because 'the authoritative locus table must cover every frame/ports YAML file exactly once'
             ($runnerSignatures -join "`n") | Should -BeExactly ($sourceSignatures -join "`n") -Because 'Spine-Runner dispatch inference must stay in exact table parity with frame-credit-emission'
+            $sourceRows | Where-Object { $_.Port -eq 'release-hygiene' } | Select-Object -ExpandProperty Locus | Should -Be 'pr-body-pipeline-metrics'
+            $sourceRows | Where-Object { $_.Port -eq 'post-fix-review' } | Select-Object -ExpandProperty Locus | Should -Be 'pr-body-pipeline-metrics'
+            $sourceRows | Where-Object { $_.Port -eq 'process-retrospective' } | Select-Object -ExpandProperty Locus | Should -Be 'deferred-skill-only'
+        }
+
+        It 'distinguishes post-pr and review builder guidance for skill-only ports' {
+            & $script:AssertContractMentions `
+                -Content $script:SkillOnlyLocusSection `
+                -Patterns @(
+                    'Ports\s+owned\s+by\s+skills\s+rather\s+than\s+agents',
+                    'For\s+`post-pr`,\s+call\s+`Build-PostPrCreditRow`\s+with\s+the\s+post-merge\s+checklist\s+outcomes\s+from\s+the\s+`post-pr-review`\s+skill',
+                    'For\s+`review`,\s+follow\s+the\s+review-credit-emission\s+reference,\s+call\s+`Build-ReviewCreditRow`',
+                    'review-specific\s+evidence\s+such\s+as\s+judge\s+ruling\s+status,\s+reviewed\s+PR\s+context,\s+and\s+persisted\s+review\s+ledger\s+or\s+sentinel\s+details'
+                ) `
+                -Because 'post-pr and review are both skill-only, but each requires a distinct builder and evidence source'
+
+            $script:SkillOnlyLocusSection | Should -Not -Match 'skill-only\s+builder' -Because 'skill-owned ports should not be described with ambiguous skill-only builder wording'
+            $script:SkillOnlyLocusSection | Should -Not -Match 'generic\s+builder' -Because 'skill-owned ports must name the concrete builder for each port'
+        }
+    }
+
+    Context 'terminal-slice and success reporting contract' {
+
+        It 'verifies terminal PR-body credits only at terminal slices and reports successful walks compactly' {
+            & $script:AssertContractMentions `
+                -Content $script:SpineRunnerContent `
+                -Patterns @(
+                    'Terminal\s+PR-body\s+credit\s+rows\s+are\s+verified\s+when\s+a\s+slice\s+is\s+explicitly\s+terminal\s+for\s+that\s+port\s+or\s+when\s+the\s+runner\s+is\s+processing\s+the\s+last\s+unresolved\s+slice\s+for\s+that\s+port',
+                    'non-terminal\s+slices\s+need\s+adapter\s+completion\s+evidence',
+                    'PR-body\s+`credits\[\]`\s+checks\s+wait\s+until.*`#terminal`.*`terminal:\s+true`.*no\s+later\s+unresolved\s+slice\s+in\s+the\s+frozen\s+ordered\s+walk\s+has\s+the\s+same\s+port',
+                    'The\s+last\s+unresolved\s+slice\s+for\s+a\s+port\s+must\s+close\s+any\s+pending\s+terminal\s+credit\s+verification\s+even\s+without\s+an\s+explicit\s+terminal\s+marker',
+                    'On\s+a\s+complete\s+walk,\s+print\s+one\s+compact\s+stdout/report\s+payload',
+                    'completed\s+slice\s+IDs.*adapters\s+invoked\s+as\s+relative\s+paths.*terminal\s+credits\s+verified.*skipped\s+or\s+not-applicable\s+rows\s+observed.*warning\s+count.*`halt_count:\s+0`'
+                ) `
+                -Because 'success output must summarize completed execution while terminal credit evidence remains tied to terminal slices'
+        }
+
+        It 'blocks final success when terminal credit verification remains pending' {
+            & $script:AssertContractMentions `
+                -Content $script:EvidenceVerificationSection `
+                -Patterns @(
+                    'Before\s+reporting\s+final\s+success,\s+assert\s+that\s+no\s+terminal\s+credit\s+verifications\s+remain\s+pending',
+                    'If\s+any\s+port\s+remains\s+pending,\s+halt\s+with\s+S2\s+evidence\s+details',
+                    'port,\s+completed\s+slice\s+IDs,\s+unresolved\s+terminal\s+expectation,\s+expected\s+evidence\s+surface,\s+observed\s+evidence\s+or\s+`none`,\s+inspected\s+issue\s+or\s+PR\s+source,\s+and\s+the\s+frozen\s+resolver\s+map',
+                    'prevents\s+a\s+completed\s+single-slice\s+or\s+last-slice\s+walk\s+from\s+leaving\s+terminal\s+credit\s+verification\s+open'
+                ) `
+                -Because 'single-slice and last-slice walks must not silently complete with unresolved terminal evidence'
         }
     }
 
@@ -289,7 +361,7 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
                 -Patterns @(
                     '`agent-pre-pr`',
                     '<!--\s+credit-input-\{port\}-\{ID\}\s+-->',
-                    'matching\s+`port`.*adapter\s+identity.*non-empty\s+flat\s+`evidence`\s+string',
+                    'matching\s+`port`.*adapter\s+path\s+used\s+by\s+this\s+run.*non-empty\s+flat\s+`evidence`\s+string',
                     'If\s+the\s+expected\s+surface\s+is\s+unavailable,\s+malformed,\s+or\s+contradicted.*halt'
                 ) `
                 -Because 'agent-pre-pr success and failure evidence must be contractually distinguishable'
@@ -427,15 +499,29 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
         It 'keeps Code-Conductor schema v2 adapter lookup coverage in the existing dispatch test file' {
             $script:ConductorSpineDispatchTestsContent | Should -Match 'uses\s+the\s+spine\s+lookup\s+path\s+to\s+select\s+the\s+active\s+slice\s+from\s+a\s+schema\s+v2\s+plan\s+with\s+adapters' -Because 'Step 7 must verify the Step 1 fixture remains rather than duplicating it'
             $script:ConductorSpineDispatchTestsContent | Should -Match 'spine_schema_version:\s+2'
-            $script:ConductorSpineDispatchTestsContent | Should -Match 'adapter:\s+test-writer'
+            $script:ConductorSpineDispatchTestsContent | Should -Match 'adapter:\s+agents/Test-Writer\.agent\.md'
             $script:ConductorSpineDispatchTestsContent | Should -Match 'Invoke-FSCSpineLookupCli'
         }
 
         It 'keeps parser-level schema v2 adapter coverage in frame-spine-parse.Tests.ps1' {
             $script:FrameSpineParseTestsContent | Should -Match 'accepts\s+schema\s+v2\s+spine\s+YAML\s+when\s+each\s+slice\s+declares\s+an\s+adapter' -Because 'parser acceptance belongs in frame-spine-parse.Tests.ps1'
             $script:FrameSpineParseTestsContent | Should -Match 'spine_schema_version:\s+2'
-            $script:FrameSpineParseTestsContent | Should -Match 'adapter:\s+code-smith'
-            $script:FrameSpineParseTestsContent | Should -Match 'adapter:\s+test-writer'
+            $script:FrameSpineParseTestsContent | Should -Match 'adapter:\s+agents/Code-Smith\.agent\.md'
+            $script:FrameSpineParseTestsContent | Should -Match 'adapter:\s+agents/Test-Writer\.agent\.md'
+            $script:FrameSpineParseTestsContent | Should -Match 'AdapterRaw'
+        }
+    }
+
+    Context 'Claude command and Copilot prompt dispatch targets' {
+
+        It 'dispatches the Claude slash command to the registered shell while the Copilot prompt targets the Copilot agent name' {
+            $claudeFrontmatter = & $script:GetFrontmatter -Content $script:ClaudeCommandContent
+            $copilotFrontmatter = & $script:GetFrontmatter -Content $script:CopilotPromptContent
+
+            (& $script:GetFrontmatterScalar -Frontmatter $claudeFrontmatter -FieldName 'agent') | Should -Be 'spine-runner'
+            (& $script:GetFrontmatterScalar -Frontmatter $copilotFrontmatter -FieldName 'agent') | Should -Be 'Spine-Runner'
+            $script:ClaudeCommandContent | Should -Match 'dispatches\s+to\s+`spine-runner`'
+            $script:CopilotPromptContent | Should -Match 'Copilot\s+resolves\s+`agent:\s+Spine-Runner`'
         }
     }
 

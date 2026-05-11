@@ -1,5 +1,5 @@
 ---
-agent: Spine-Runner
+agent: spine-runner
 description: "Run Spine-Runner against an issue with a persisted v2 frame-spine plan."
 argument-hint: "Issue number"
 # inherit — Spine-Runner is a minimal walker; subagent dispatches inherit dispatcher tier
@@ -12,6 +12,6 @@ effort: inherit
 
 <!-- scope: claude-only -->
 
-Run the Spine-Runner role for the supplied issue or plan reference. The command frontmatter dispatches to `Spine-Runner`, whose Claude shell resolves and loads `agents/Spine-Runner.agent.md` before role work.
+Run the Spine-Runner role for the supplied issue or plan reference. The command frontmatter dispatches to `spine-runner`, whose Claude shell resolves and loads `agents/Spine-Runner.agent.md` before role work.
 
 ARGUMENTS: $ARGUMENTS

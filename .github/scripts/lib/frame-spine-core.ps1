@@ -215,6 +215,7 @@ function script:ConvertFrom-FSCSpineYamlInternal {
 
                     $sliceByStepId[$currentSliceId] = [ordered]@{
                         StepId     = $currentSliceId
+                        AdapterRaw = $null
                         AcRefsRaw  = $null
                         DependsRaw = $null
                         Cycle      = $null
@@ -234,6 +235,9 @@ function script:ConvertFrom-FSCSpineYamlInternal {
                 $value = $propertyMatch.Groups['value'].Value.Trim()
 
                 switch ($key) {
+                    'adapter' {
+                        $slice.AdapterRaw = $value
+                    }
                     'ac_refs' {
                         if ($null -eq (script:Split-FSCInlineList -Value $value)) { return $null }
                         $slice.AcRefsRaw = $value
@@ -288,6 +292,8 @@ function script:ConvertFrom-FSCSpineYamlInternal {
             $slice = $sliceByStepId[$stepId]
             $slices.Add([pscustomobject]@{
                     StepId    = $slice.StepId
+                    Adapter   = if ([string]::IsNullOrWhiteSpace([string]$slice.AdapterRaw)) { $null } else { [string]$slice.AdapterRaw }
+                    AdapterRaw = $slice.AdapterRaw
                     Cycle     = [int]$slice.Cycle
                     Terminal  = [bool]$slice.Terminal
                     AcRefs    = [string[]](script:Split-FSCInlineList -Value $slice.AcRefsRaw)
