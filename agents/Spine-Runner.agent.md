@@ -28,6 +28,8 @@ Spine-Runner walks the ordered v2 frame from the `plan-issue` comment for Code-C
 
 ## Adapter Resolver
 
+Before resolving adapters, read the durable `plan-issue-{ID}` source. When no `plan-issue` marker, no `<!-- frame-spine` block, or an empty spine is present, emit exactly `No frame found on plan-issue-{ID}. Run /plan first.` and exit with zero side effects: post no comments, write no issue or PR state, and do not create halt markers.
+
 1. Accept issue ID, ordered v2 frame, dependency slice summaries, PR number when available, and the current changeset evidence.
 2. Freeze `walk_start` once per walk before resolving any adapter. Record the initial CWD, working-tree root, branch, HEAD, issue ID, PR number, ordered slice IDs with adapter paths, and timestamp. Do not replace this map after `Set-Location`, subagent dispatch, terminal work, or slice advancement.
 3. Resolve every slice's declared adapter path from the frozen walk in order, using this lookup order and recording every searched location:
@@ -49,6 +51,23 @@ These rules apply to each slice as the runner advances through the frozen ordere
 ## Evidence Verification
 
 After each adapter call, read the port->locus mapping table in `skills/frame-credit-emission/SKILL.md` and use it as the authority for the current slice's expected evidence surface. Verify exactly one locus-specific surface for that slice's port before advancing:
+
+| Add order | Canonical port | Locus | Canonical adapter file |
+| --- | --- | --- | --- |
+| 1 | `experience` | `agent-pre-pr` | [frame/ports/experience.yaml](../frame/ports/experience.yaml) |
+| 2 | `design` | `agent-pre-pr` | [frame/ports/design.yaml](../frame/ports/design.yaml) |
+| 3 | `plan` | `agent-pre-pr` | [frame/ports/plan.yaml](../frame/ports/plan.yaml) |
+| 4 | `implement-code` | `agent-post-pr` | [frame/ports/implement-code.yaml](../frame/ports/implement-code.yaml) |
+| 5 | `implement-test` | `agent-post-pr` | [frame/ports/implement-test.yaml](../frame/ports/implement-test.yaml) |
+| 6 | `implement-refactor` | `agent-post-pr` | [frame/ports/implement-refactor.yaml](../frame/ports/implement-refactor.yaml) |
+| 7 | `implement-docs` | `agent-post-pr` | [frame/ports/implement-docs.yaml](../frame/ports/implement-docs.yaml) |
+| 8 | `process-review` | `agent-post-pr` | [frame/ports/process-review.yaml](../frame/ports/process-review.yaml) |
+| 9 | `post-pr` | `skill-only` | [frame/ports/post-pr.yaml](../frame/ports/post-pr.yaml) |
+| 10 | `review` | `skill-only` | [frame/ports/review.yaml](../frame/ports/review.yaml) |
+| 11 | `ce-gate-api` | `ce-gate-per-surface` | [frame/ports/ce-gate-api.yaml](../frame/ports/ce-gate-api.yaml) |
+| 12 | `ce-gate-browser` | `ce-gate-per-surface` | [frame/ports/ce-gate-browser.yaml](../frame/ports/ce-gate-browser.yaml) |
+| 13 | `ce-gate-canvas` | `ce-gate-per-surface` | [frame/ports/ce-gate-canvas.yaml](../frame/ports/ce-gate-canvas.yaml) |
+| 14 | `ce-gate-cli` | `ce-gate-per-surface` | [frame/ports/ce-gate-cli.yaml](../frame/ports/ce-gate-cli.yaml) |
 
 - `agent-pre-pr`: inspect GitHub issue comments for `<!-- credit-input-{port}-{ID} -->`. Verify the YAML payload has matching `port`, the adapter identity used by this run, and a non-empty flat `evidence` string. If same-turn comment creation was used, check both in-memory returned comment text and visible issue comments before halting.
 - `agent-post-pr`: inspect the PR body `<!-- pipeline-metrics -->` block. Verify a `credits[]` row for the port and terminal step number exists, has the expected adapter/status relationship, and includes human-readable evidence from the run.

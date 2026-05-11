@@ -1,0 +1,467 @@
+#Requires -Version 7.0
+#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
+
+<#
+.SYNOPSIS
+    Contract tests for the Spine-Runner minimal frame-walking conductor.
+
+.DESCRIPTION
+    Locks issue #555 Step 7 coverage against the current production surfaces:
+    agents/Spine-Runner.agent.md plus the Claude/Copilot command shells. The
+    runner has no standalone executable resolver yet, so resolver, evidence,
+    halt, and refusal checks are structural/prose-contract tests rather than
+    helper-driven simulations of production behavior.
+#>
+
+Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:SpineRunnerPath = Join-Path $script:RepoRoot 'agents\Spine-Runner.agent.md'
+        $script:ClaudeCommandPath = Join-Path $script:RepoRoot 'commands\spine-run.md'
+        $script:ClaudeShellPath = Join-Path $script:RepoRoot 'agents\spine-runner.md'
+        $script:FrameCreditEmissionPath = Join-Path $script:RepoRoot 'skills\frame-credit-emission\SKILL.md'
+        $script:CopilotPromptPath = Join-Path $script:RepoRoot '.github\prompts\spine-run.prompt.md'
+        $script:OrchestratePromptPath = Join-Path $script:RepoRoot '.github\prompts\orchestrate.prompt.md'
+        $script:FrameSpineParseTestsPath = Join-Path $script:RepoRoot '.github\scripts\Tests\frame-spine-parse.Tests.ps1'
+        $script:ConductorSpineDispatchTestsPath = Join-Path $script:RepoRoot '.github\scripts\Tests\code-conductor-spine-dispatch.Tests.ps1'
+        $script:NoFrameRefusal = 'No frame found on plan-issue-{ID}. Run /plan first.'
+
+        $script:Normalize = {
+            param([Parameter(Mandatory)][AllowEmptyString()][string]$Content)
+
+            return ($Content -replace "`r`n?", "`n")
+        }
+
+        $script:ReadNormalized = {
+            param([Parameter(Mandatory)][string]$Path)
+
+            return & $script:Normalize -Content (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop)
+        }
+
+        $script:GetMarkdownSection = {
+            param(
+                [Parameter(Mandatory)][string]$Content,
+                [Parameter(Mandatory)][string]$Heading
+            )
+
+            $pattern = '(?ms)^' + [regex]::Escape($Heading) + '\s*\n(?<body>.*?)(?=^## |\z)'
+            $match = [regex]::Match($Content, $pattern)
+            $match.Success | Should -BeTrue -Because "Spine-Runner must keep an extractable $Heading section"
+
+            if (-not $match.Success) { return '' }
+            return $match.Groups['body'].Value
+        }
+
+        $script:GetFrontmatter = {
+            param([Parameter(Mandatory)][AllowEmptyString()][string]$Content)
+
+            $match = [regex]::Match($Content, '(?ms)\A---\n(?<frontmatter>.*?)\n---(?:\n|\z)')
+            if (-not $match.Success) { return '' }
+            return $match.Groups['frontmatter'].Value
+        }
+
+        $script:GetFrontmatterScalar = {
+            param(
+                [Parameter(Mandatory)][string]$Frontmatter,
+                [Parameter(Mandatory)][string]$FieldName
+            )
+
+            $match = [regex]::Match($Frontmatter, "(?m)^$([regex]::Escape($FieldName)):\s*(?<value>.+?)\s*$")
+            if (-not $match.Success) { return $null }
+            return $match.Groups['value'].Value.Trim().Trim('"').Trim("'")
+        }
+
+        $script:GetFrontmatterFieldNames = {
+            param([Parameter(Mandatory)][string]$Frontmatter)
+
+            return @(
+                $Frontmatter -split "`n" |
+                    Where-Object { $_ -match '^([A-Za-z0-9_-]+):' } |
+                    ForEach-Object { [regex]::Match($_, '^([A-Za-z0-9_-]+):').Groups[1].Value }
+            )
+        }
+
+        $script:GetDispatchLine = {
+            param([Parameter(Mandatory)][string]$Content)
+
+            return @($Content -split "`n" | Where-Object { $_ -match '^Start the .+ for: \{\{input\}\}$' } | Select-Object -First 1)[0]
+        }
+
+        $script:GetPortLocusRows = {
+            param([Parameter(Mandatory)][AllowEmptyString()][string]$Content)
+
+            $rows = [System.Collections.Generic.List[object]]::new()
+            foreach ($line in ($Content -split "`n")) {
+                if ($line -notmatch '^\|\s*\d+\s*\|') { continue }
+
+                $cells = @(
+                    $line.Trim().Trim('|') -split '\|' |
+                        ForEach-Object { ($_.Trim() -replace '^`|`$', '') }
+                )
+
+                if ($cells.Count -lt 4) { continue }
+
+                $rows.Add([pscustomobject]@{
+                        AddOrder = [int]$cells[0]
+                        Port     = $cells[1]
+                        Locus    = $cells[2]
+                        Adapter  = ($cells[3] -replace '\[([^\]]+)\]\([^\)]+\)', '$1')
+                    }) | Out-Null
+            }
+
+            return @($rows.ToArray())
+        }
+
+        $script:AssertContractMentions = {
+            param(
+                [Parameter(Mandatory)][string]$Content,
+                [Parameter(Mandatory)][string[]]$Patterns,
+                [Parameter(Mandatory)][string]$Because
+            )
+
+            foreach ($pattern in $Patterns) {
+                $Content | Should -Match $pattern -Because $Because
+            }
+        }
+
+        $script:SpineRunnerLines = Get-Content -LiteralPath $script:SpineRunnerPath -ErrorAction Stop
+        $script:SpineRunnerContent = & $script:ReadNormalized -Path $script:SpineRunnerPath
+        $script:ClaudeCommandContent = & $script:ReadNormalized -Path $script:ClaudeCommandPath
+        $script:ClaudeShellContent = & $script:ReadNormalized -Path $script:ClaudeShellPath
+        $script:FrameCreditEmissionContent = & $script:ReadNormalized -Path $script:FrameCreditEmissionPath
+        $script:CopilotPromptContent = & $script:ReadNormalized -Path $script:CopilotPromptPath
+        $script:OrchestratePromptContent = & $script:ReadNormalized -Path $script:OrchestratePromptPath
+        $script:FrameSpineParseTestsContent = & $script:ReadNormalized -Path $script:FrameSpineParseTestsPath
+        $script:ConductorSpineDispatchTestsContent = & $script:ReadNormalized -Path $script:ConductorSpineDispatchTestsPath
+
+        $script:AdapterResolverSection = & $script:GetMarkdownSection -Content $script:SpineRunnerContent -Heading '## Adapter Resolver'
+        $script:EvidenceVerificationSection = & $script:GetMarkdownSection -Content $script:SpineRunnerContent -Heading '## Evidence Verification'
+        $script:FailureHandlingSection = & $script:GetMarkdownSection -Content $script:SpineRunnerContent -Heading '## Failure Handling'
+        $script:InvocationContractSection = & $script:GetMarkdownSection -Content $script:SpineRunnerContent -Heading '## Invocation Contract'
+    }
+
+    Context 'body budget and skill loading discipline' {
+
+        It 'keeps the shared body within the 250-line budget including frontmatter and bracketed lines' {
+            $script:SpineRunnerLines.Count | Should -BeLessOrEqual 250 -Because 'the minimal walker body must stay compact enough for dispatch contexts'
+        }
+
+        It 'does not include direct Load skills/ directives outside frame-slice dispatch' {
+            $loadSkillLines = @($script:SpineRunnerLines | Where-Object { $_ -match '\bLoad\s+skills/' })
+
+            $loadSkillLines | Should -HaveCount 0 -Because 'Spine-Runner should resolve adapters rather than broad-loading skills from the shared body'
+        }
+    }
+
+    Context 'adapter resolver behavior contract' {
+
+        It 'freezes walk_start and keeps resolution stable after later CWD or slice changes' {
+            & $script:AssertContractMentions `
+                -Content $script:AdapterResolverSection `
+                -Patterns @(
+                    'Freeze\s+`walk_start`\s+once\s+per\s+walk\s+before\s+resolving\s+any\s+adapter',
+                    'Record\s+the\s+initial\s+CWD.*working-tree\s+root.*branch.*HEAD.*issue\s+ID.*PR\s+number.*ordered\s+slice\s+IDs.*adapter\s+paths.*timestamp',
+                    'Do\s+not\s+replace\s+this\s+map\s+after\s+`Set-Location`,\s+subagent\s+dispatch,\s+terminal\s+work,\s+or\s+slice\s+advancement',
+                    'Freeze\s+the\s+resolved\s+map\s+for\s+the\s+whole\s+walk'
+                ) `
+                -Because 'frozen-resolution stability must be part of the Spine-Runner contract'
+        }
+
+        It 'documents working-tree adapter precedence before plugin-cache candidates' {
+            & $script:AssertContractMentions `
+                -Content $script:AdapterResolverSection `
+                -Patterns @(
+                    'Working\s+tree:\s+first\s+ancestor\s+of\s+`walk_start`\s+containing\s+`\.git`,\s+then\s+`\{root\}/\{adapter\s+path\}`',
+                    'first\s+existing\s+adapter\s+file\s+wins'
+                ) `
+                -Because 'the structural contract must prefer working-tree adapter hits before plugin-cache candidates'
+        }
+
+        It 'falls back to plugin-cache roots only when the working-tree candidate is absent' {
+            & $script:AssertContractMentions `
+                -Content $script:AdapterResolverSection `
+                -Patterns @(
+                    'Plugin\s+cache:\s+each\s+known\s+Agent\s+Orchestra\s+plugin\s+root,\s+then\s+`\{root\}/\{adapter\s+path\}`',
+                    'AGENT_ORCHESTRA_PLUGIN_ROOT',
+                    'platform-provided\s+agent\s+body\s+root',
+                    'installed\s+`agent-orchestra@agent-orchestra`\s+plugin\s+cache\s+locations'
+                ) `
+                -Because 'plugin-cache resolution must be explicit and fixtureable without reading a real plugin cache'
+        }
+
+        It 'halts on unresolved adapters with the full searched-location list' {
+            & $script:AssertContractMentions `
+                -Content $script:AdapterResolverSection `
+                -Patterns @(
+                    'recording\s+every\s+searched\s+location',
+                    'If\s+any\s+adapter\s+file\s+is\s+not\s+found,\s+halt\s+for\s+AC5\s+with\s+the\s+full\s+searched-location\s+list',
+                    'Do\s+not\s+guess\s+a\s+nearby\s+adapter,\s+normalize\s+to\s+another\s+port,\s+or\s+continue\s+with\s+inline\s+prose'
+                ) `
+                -Because 'resolver misses must be observable and non-lossy'
+        }
+
+        It 'records root kind and content identity in the frozen map' {
+            & $script:AssertContractMentions `
+                -Content $script:AdapterResolverSection `
+                -Patterns @(
+                    'keyed\s+by\s+slice\s+ID',
+                    'absolute\s+path',
+                    'root\s+kind\s+\(`working-tree`\s+or\s+`plugin-cache`\)',
+                    'git\s+blob\s+SHA\s+or\s+file\s+hash'
+                ) `
+                -Because 'subsequent invocation and evidence checks must use a stable resolved adapter identity'
+        }
+    }
+
+    Context 'halt marker sequence preservation' {
+
+        It 'preserves halt N=1 and N=2 markers while the latest sentinel points to N=2' {
+            $issueCommentsAfterTwoHalts = @(
+                '<!-- spine-run-halt-555-1 -->',
+                'halt N: 1',
+                '<!-- spine-run-latest-halt-555 -->',
+                'latest N: 1',
+                '<!-- spine-run-halt-555-2 -->',
+                'halt N: 2',
+                '<!-- spine-run-latest-halt-555 -->',
+                'latest N: 2'
+            ) -join "`n"
+
+            $haltNumbers = @(
+                [regex]::Matches($issueCommentsAfterTwoHalts, '<!--\s*spine-run-halt-555-(?<number>\d+)\s*-->') |
+                    ForEach-Object { [int]$_.Groups['number'].Value }
+            )
+            $latestSentinelMatches = @([regex]::Matches($issueCommentsAfterTwoHalts, '(?s)<!--\s*spine-run-latest-halt-555\s*-->.*?latest N:\s*(?<number>\d+)'))
+            $latestSentinelNumber = [int]$latestSentinelMatches[-1].Groups['number'].Value
+
+            ($haltNumbers -join ',') | Should -Be '1,2' -Because 'a second halt must not rewrite or coalesce the first halt marker'
+            $latestSentinelNumber | Should -Be 2 -Because 'the latest sentinel must point at the newest halt number'
+
+            & $script:AssertContractMentions `
+                -Content $script:FailureHandlingSection `
+                -Patterns @(
+                    'N\s+=\s+max\(existing\s+spine-run-halt\s+numbers\s+for\s+this\s+issue\)\s+\+\s+1',
+                    '<!--\s+spine-run-halt-\{ID\}-\{N\}\s+-->',
+                    'Preserve\s+all\s+older\s+halt\s+comments',
+                    '<!--\s+spine-run-latest-halt-\{ID\}\s+-->',
+                    'points?\s+to\s+the\s+new\s+N|names\s+the\s+latest\s+N'
+                ) `
+                -Because 'the prose contract must match the halt sequence fixture'
+        }
+    }
+
+    Context 'port to locus parity' {
+
+        It 'mirrors every frame-credit-emission port to locus row in the Spine-Runner verification dispatch table' {
+            $sourceRows = @(& $script:GetPortLocusRows -Content $script:FrameCreditEmissionContent)
+            $runnerRows = @(& $script:GetPortLocusRows -Content $script:EvidenceVerificationSection)
+
+            $sourceRows | Should -HaveCount 14 -Because 'frame-credit-emission must expose the canonical 14-row port to locus table'
+            $runnerRows.Count | Should -Be $sourceRows.Count -Because 'Spine-Runner must mirror each canonical row in its verification dispatch table'
+
+            $sourceSignatures = @($sourceRows | ForEach-Object { '{0}|{1}|{2}' -f $_.AddOrder, $_.Port, $_.Locus })
+            $runnerSignatures = @($runnerRows | ForEach-Object { '{0}|{1}|{2}' -f $_.AddOrder, $_.Port, $_.Locus })
+
+            ($runnerSignatures -join "`n") | Should -BeExactly ($sourceSignatures -join "`n") -Because 'Spine-Runner dispatch inference must stay in exact table parity with frame-credit-emission'
+        }
+    }
+
+    Context 'per-locus evidence dispatch fixtures' {
+
+        It 'requires agent-pre-pr evidence to use matching credit-input marker payloads and halt when absent' {
+            $presentEvidence = @(
+                '<!-- credit-input-plan-555 -->',
+                'port: plan',
+                'adapter: agents/Issue-Planner.agent.md',
+                'evidence: "issue #555; plan marker posted"'
+            ) -join "`n"
+            $absentEvidence = 'issue comment without credit-input marker'
+
+            $presentEvidence | Should -Match '<!--\s*credit-input-plan-555\s*-->'
+            $presentEvidence | Should -Match '(?m)^port:\s*plan$'
+            $presentEvidence | Should -Match '(?m)^adapter:\s*agents/Issue-Planner\.agent\.md$'
+            $presentEvidence | Should -Match '(?m)^evidence:\s*".+"$'
+            $absentEvidence | Should -Not -Match '<!--\s*credit-input-plan-555\s*-->'
+
+            & $script:AssertContractMentions `
+                -Content $script:EvidenceVerificationSection `
+                -Patterns @(
+                    '`agent-pre-pr`',
+                    '<!--\s+credit-input-\{port\}-\{ID\}\s+-->',
+                    'matching\s+`port`.*adapter\s+identity.*non-empty\s+flat\s+`evidence`\s+string',
+                    'If\s+the\s+expected\s+surface\s+is\s+unavailable,\s+malformed,\s+or\s+contradicted.*halt'
+                ) `
+                -Because 'agent-pre-pr success and failure evidence must be contractually distinguishable'
+        }
+
+        It 'requires agent-post-pr evidence to use a terminal-step PR body credit row and halt when absent' {
+            $presentEvidence = @(
+                '<!-- pipeline-metrics -->',
+                'credits:',
+                '  - port: implement-test',
+                '    terminal-step-id: 7',
+                '    adapter: agents/Test-Writer.agent.md',
+                '    status: passed',
+                '    evidence: "Pester spine-runner.Tests.ps1 passed"'
+            ) -join "`n"
+            $absentEvidence = '<!-- pipeline-metrics -->' + "`n" + 'credits: []'
+
+            $presentEvidence | Should -Match '(?m)^\s*-\s*port:\s*implement-test$'
+            $presentEvidence | Should -Match '(?m)^\s*terminal-step-id:\s*7$'
+            $presentEvidence | Should -Match '(?m)^\s*evidence:\s*".+"$'
+            $absentEvidence | Should -Not -Match '(?m)^\s*-\s*port:\s*implement-test$'
+
+            & $script:AssertContractMentions `
+                -Content $script:EvidenceVerificationSection `
+                -Patterns @(
+                    '`agent-post-pr`',
+                    'PR\s+body\s+`<!--\s+pipeline-metrics\s+-->`\s+block',
+                    '`credits\[\]`\s+row\s+for\s+the\s+port\s+and\s+terminal\s+step\s+number',
+                    'adapter/status\s+relationship',
+                    'human-readable\s+evidence\s+from\s+the\s+run',
+                    'If\s+the\s+expected\s+surface\s+is\s+unavailable,\s+malformed,\s+or\s+contradicted.*halt'
+                ) `
+                -Because 'agent-post-pr completion must be tied to the PR body row for the current terminal step'
+        }
+
+        It 'requires ce-gate-per-surface evidence to include row, step, status, evidence, and defects_found' {
+            $presentEvidence = @(
+                '<!-- pipeline-metrics -->',
+                'credits:',
+                '  - port: ce-gate-api',
+                '    surface: api',
+                '    terminal-step-id: 9',
+                '    status: passed',
+                '    evidence: "API CE scenario exercised"',
+                '    defects_found: 0'
+            ) -join "`n"
+            $absentEvidence = @(
+                '<!-- pipeline-metrics -->',
+                'credits:',
+                '  - port: ce-gate-api',
+                '    surface: api',
+                '    terminal-step-id: 9',
+                '    status: passed'
+            ) -join "`n"
+
+            $presentEvidence | Should -Match '(?m)^\s*-\s*port:\s*ce-gate-api$'
+            $presentEvidence | Should -Match '(?m)^\s*surface:\s*api$'
+            $presentEvidence | Should -Match '(?m)^\s*terminal-step-id:\s*9$'
+            $presentEvidence | Should -Match '(?m)^\s*defects_found:\s*0$'
+            $absentEvidence | Should -Not -Match '(?m)^\s*defects_found:'
+
+            & $script:AssertContractMentions `
+                -Content $script:EvidenceVerificationSection `
+                -Patterns @(
+                    '`ce-gate-per-surface`',
+                    'exact\s+`ce-gate-\{surface\}`\s+row\s+tied\s+to\s+the\s+step',
+                    'surface\s+name,\s+terminal\s+step\s+ID,\s+status,\s+evidence,\s+and\s+`defects_found`',
+                    'If\s+the\s+expected\s+surface\s+is\s+unavailable,\s+malformed,\s+or\s+contradicted.*halt'
+                ) `
+                -Because 'each CE Gate surface must independently prove its row-level outcome'
+        }
+
+        It 'requires auto-na evidence to match the predicate outcome and fail on status mismatch' {
+            $presentEvidence = @(
+                '<!-- pipeline-metrics -->',
+                'credits:',
+                '  - port: implement-docs',
+                '    adapter: skills/documentation-finalization/adapters/auto-na-docs.md',
+                '    status: not-applicable',
+                '    evidence: "predicate evaluated false"'
+            ) -join "`n"
+            $mismatchedEvidence = $presentEvidence -replace 'status: not-applicable', 'status: passed'
+
+            $presentEvidence | Should -Match '(?m)^\s*status:\s*not-applicable$'
+            $mismatchedEvidence | Should -Match '(?m)^\s*status:\s*passed$'
+
+            & $script:AssertContractMentions `
+                -Content $script:InvocationContractSection `
+                -Patterns @(
+                    'adapter\s+name\s+starts\s+with\s+`auto-na-`',
+                    'evaluate\s+its\s+predicate\s+before\s+credit\s+verification',
+                    'Unknown,\s+parse-error,\s+or\s+predicate/status\s+mismatch\s+is\s+a\s+halt'
+                ) `
+                -Because 'auto-na invocation must evaluate the real predicate before verification'
+
+            & $script:AssertContractMentions `
+                -Content $script:EvidenceVerificationSection `
+                -Patterns @(
+                    '`auto-na`\s+or\s+`explicit-skip`',
+                    'predicate\s+or\s+skip\s+outcome\s+recorded\s+during\s+invocation\s+matches\s+the\s+emitted\s+row\s+or\s+credit-input\s+marker',
+                    '`auto-na`\s+expects\s+`status:\s+not-applicable`'
+                ) `
+                -Because 'auto-na completion must be evidence-matched to a not-applicable predicate outcome'
+        }
+    }
+
+    Context 'AC4 refusal contract' {
+
+        It 'requires exact no-frame refusal text and zero side effects for empty plan inputs' {
+            $emptyIssueBodies = @(
+                'plain issue body with no durable plan marker',
+                '<!-- plan-issue-555 -->' + "`n" + 'body with no frame-spine block',
+                '<!-- plan-issue-555 -->' + "`n" + '<!-- frame-spine' + "`n" + '-->'
+            )
+
+            foreach ($emptyIssueBody in $emptyIssueBodies) {
+                $emptyIssueBody | Should -Not -Match '(?m)^spine_schema_version:\s*2$'
+            }
+
+            $combinedContract = @(
+                $script:SpineRunnerContent,
+                $script:ClaudeCommandContent,
+                $script:ClaudeShellContent,
+                $script:CopilotPromptContent
+            ) -join "`n"
+
+            $combinedContract | Should -Match ([regex]::Escape($script:NoFrameRefusal)) -Because 'AC4 requires this exact refusal string when no executable frame exists'
+            $combinedContract | Should -Match '(?is)(no\s+marker|no\s+`?<!--\s*frame-spine|empty\s+spine).{0,900}No\s+frame\s+found\s+on\s+plan-issue-\{ID\}\.\s+Run\s+/plan\s+first\.' -Because 'the refusal must be tied to no marker, no spine block, or empty spine cases'
+            $combinedContract | Should -Match '(?is)No\s+frame\s+found\s+on\s+plan-issue-\{ID\}\.\s+Run\s+/plan\s+first\..{0,700}(zero\s+side\s+effects|no\s+side\s+effects|do\s+not\s+post|post\s+no\s+comments)' -Because 'AC4 refusal must not post halt markers or mutate issue/PR state'
+        }
+    }
+
+    Context 'existing v2 parse fixture ownership' {
+
+        It 'keeps Code-Conductor schema v2 adapter lookup coverage in the existing dispatch test file' {
+            $script:ConductorSpineDispatchTestsContent | Should -Match 'uses\s+the\s+spine\s+lookup\s+path\s+to\s+select\s+the\s+active\s+slice\s+from\s+a\s+schema\s+v2\s+plan\s+with\s+adapters' -Because 'Step 7 must verify the Step 1 fixture remains rather than duplicating it'
+            $script:ConductorSpineDispatchTestsContent | Should -Match 'spine_schema_version:\s+2'
+            $script:ConductorSpineDispatchTestsContent | Should -Match 'adapter:\s+test-writer'
+            $script:ConductorSpineDispatchTestsContent | Should -Match 'Invoke-FSCSpineLookupCli'
+        }
+
+        It 'keeps parser-level schema v2 adapter coverage in frame-spine-parse.Tests.ps1' {
+            $script:FrameSpineParseTestsContent | Should -Match 'accepts\s+schema\s+v2\s+spine\s+YAML\s+when\s+each\s+slice\s+declares\s+an\s+adapter' -Because 'parser acceptance belongs in frame-spine-parse.Tests.ps1'
+            $script:FrameSpineParseTestsContent | Should -Match 'spine_schema_version:\s+2'
+            $script:FrameSpineParseTestsContent | Should -Match 'adapter:\s+code-smith'
+            $script:FrameSpineParseTestsContent | Should -Match 'adapter:\s+test-writer'
+        }
+    }
+
+    Context 'Copilot prompt mirror' {
+
+        It 'keeps the spine-run prompt frontmatter in the same three-field shape as orchestrate' {
+            $spineFrontmatter = & $script:GetFrontmatter -Content $script:CopilotPromptContent
+            $orchestrateFrontmatter = & $script:GetFrontmatter -Content $script:OrchestratePromptContent
+
+            $spineFrontmatter | Should -Not -BeNullOrEmpty
+            $orchestrateFrontmatter | Should -Not -BeNullOrEmpty
+
+            (& $script:GetFrontmatterFieldNames -Frontmatter $spineFrontmatter) -join ',' | Should -Be 'agent,description,argument-hint'
+            (& $script:GetFrontmatterFieldNames -Frontmatter $orchestrateFrontmatter) -join ',' | Should -Be 'agent,description,argument-hint'
+            (& $script:GetFrontmatterScalar -Frontmatter $spineFrontmatter -FieldName 'agent') | Should -Be 'Spine-Runner'
+        }
+
+        It 'keeps the spine-run Copilot dispatch line in parity with the orchestrate prompt pattern' {
+            $spineDispatchLine = & $script:GetDispatchLine -Content $script:CopilotPromptContent
+            $orchestrateDispatchLine = & $script:GetDispatchLine -Content $script:OrchestratePromptContent
+
+            $spineDispatchLine | Should -Be 'Start the Spine-Runner walk for: {{input}}'
+
+            $normalizedSpineDispatch = $spineDispatchLine -replace 'Spine-Runner walk', '{agent workflow}'
+            $normalizedOrchestrateDispatch = $orchestrateDispatchLine -replace 'Code-Conductor hub mode orchestration workflow', '{agent workflow}'
+            $normalizedSpineDispatch | Should -Be $normalizedOrchestrateDispatch -Because 'Copilot prompt dispatch text should follow the same Start the {workflow} for: {{input}} pattern'
+        }
+    }
+}
