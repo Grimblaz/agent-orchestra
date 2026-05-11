@@ -2,17 +2,16 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
 .SYNOPSIS
-    RED contract tests for Issue-Planner frame spine emission guidance.
+    Contract tests for Issue-Planner frame spine emission guidance.
 
 .DESCRIPTION
-    Locks the issue #512 AC3 contract that Issue-Planner-authored plans emit a
-    durable frame-spine block, one frame-slice block per implementation step,
-    and an acceptance-criteria coverage manifest while preserving existing plan
-    persistence semantics and agent identity wording.
+    Locks the issue #555 Step 2 contract that Issue-Planner-authored plans emit
+    frame-slice adapter metadata while preserving durable frame-spine emission,
+    acceptance-criteria coverage, plan persistence semantics, and agent identity
+    wording.
 
-    These tests intentionally target agents/Issue-Planner.agent.md guidance only.
-    Production guidance is expected to fail these tests until Step 7 GREEN amends
-    the Persist Plan section.
+    These tests cover agents/Issue-Planner.agent.md and the matching
+    skills/plan-authoring/SKILL.md plan-template guidance.
 #>
 
 Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
@@ -20,7 +19,9 @@ Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:IssuePlanner = Join-Path $script:RepoRoot 'agents\Issue-Planner.agent.md'
+        $script:PlanAuthoring = Join-Path $script:RepoRoot 'skills\plan-authoring\SKILL.md'
         $script:Content = Get-Content -Path $script:IssuePlanner -Raw
+        $script:PlanAuthoringContent = Get-Content -Path $script:PlanAuthoring -Raw
 
         $script:GetSection = {
             param(
@@ -53,6 +54,176 @@ Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
             }
         }
 
+        $script:GetFrameSliceBlocks = {
+            param([Parameter(Mandatory)][string]$Content)
+
+            $normalized = $Content -replace "`r`n", "`n" -replace "`r", "`n"
+            $blocks = [System.Collections.Generic.List[string]]::new()
+            $payloadLines = [System.Collections.Generic.List[string]]::new()
+            $insideSlice = $false
+
+            $appendPayload = {
+                if ($payloadLines.Count -eq 0) { return }
+
+                $payload = [string](($payloadLines.ToArray()) -join "`n").Trim("`n")
+                if (-not [string]::IsNullOrWhiteSpace($payload)) {
+                    $blocks.Add($payload) | Out-Null
+                }
+
+                $payloadLines.Clear()
+            }
+
+            foreach ($line in ($normalized -split "`n")) {
+                if ($line -match '^\s*<!--\s*frame-slice(?:\s*-->)?\s*$') {
+                    if ($insideSlice) { & $appendPayload }
+                    $insideSlice = $true
+                    continue
+                }
+
+                if (-not $insideSlice) { continue }
+
+                if ($line -match '^\s*-->\s*$' -or $line -match '^\s*```\s*$') {
+                    & $appendPayload
+                    $insideSlice = $false
+                    continue
+                }
+
+                $payloadLines.Add($line) | Out-Null
+            }
+
+            if ($insideSlice) {
+                & $appendPayload
+            }
+
+            return [string[]]$blocks.ToArray()
+        }
+
+        $script:GetFrameSliceScalarValue = {
+            param(
+                [Parameter(Mandatory)][string]$SliceBlock,
+                [Parameter(Mandatory)][string]$Name
+            )
+
+            $match = [regex]::Match($SliceBlock, "(?m)^\s*$([regex]::Escape($Name))\s*:\s*(?<value>.*?)\s*$")
+            if (-not $match.Success) { return $null }
+            return $match.Groups['value'].Value.Trim()
+        }
+
+        $script:GetFrameSliceDisplayId = {
+            param(
+                [Parameter(Mandatory)][string]$SliceBlock,
+                [Parameter(Mandatory)][int]$Index
+            )
+
+            $id = & $script:GetFrameSliceScalarValue -SliceBlock $SliceBlock -Name 'id'
+            if ([string]::IsNullOrWhiteSpace($id)) {
+                $id = & $script:GetFrameSliceScalarValue -SliceBlock $SliceBlock -Name 'step_id'
+            }
+
+            if ([string]::IsNullOrWhiteSpace($id)) { return "slice#$Index" }
+            return $id
+        }
+
+        $script:GetFrameSlicesMissingAdapter = {
+            param([Parameter(Mandatory)][string]$Content)
+
+            $missingSlices = [System.Collections.Generic.List[string]]::new()
+            $sliceBlocks = @(& $script:GetFrameSliceBlocks -Content $Content)
+
+            for ($index = 0; $index -lt $sliceBlocks.Count; $index++) {
+                $sliceBlock = $sliceBlocks[$index]
+                $adapter = & $script:GetFrameSliceScalarValue -SliceBlock $sliceBlock -Name 'adapter'
+                if ([string]::IsNullOrWhiteSpace($adapter)) {
+                    $missingSlices.Add((& $script:GetFrameSliceDisplayId -SliceBlock $sliceBlock -Index ($index + 1))) | Out-Null
+                }
+            }
+
+            return [string[]]$missingSlices.ToArray()
+        }
+
+        $script:ResolveFrameSliceAdapterPath = {
+            param([Parameter(Mandatory)][string]$AdapterValue)
+
+            $adapterMap = @{
+                'code-review-response' = 'agents\Code-Review-Response.agent.md'
+                'code-smith'           = 'agents\Code-Smith.agent.md'
+                'doc-keeper'           = 'agents\Doc-Keeper.agent.md'
+                'experience-owner'     = 'agents\Experience-Owner.agent.md'
+                'issue-planner'        = 'agents\Issue-Planner.agent.md'
+                'process-review'       = 'agents\Process-Review.agent.md'
+                'refactor-specialist'  = 'agents\Refactor-Specialist.agent.md'
+                'solution-designer'    = 'agents\Solution-Designer.agent.md'
+                'specification'        = 'agents\Specification.agent.md'
+                'test-writer'          = 'agents\Test-Writer.agent.md'
+                'ui-iterator'          = 'agents\UI-Iterator.agent.md'
+            }
+
+            $candidatePath = if ($adapterMap.ContainsKey($AdapterValue)) {
+                Join-Path $script:RepoRoot $adapterMap[$AdapterValue]
+            }
+            elseif ([System.IO.Path]::IsPathRooted($AdapterValue)) {
+                $AdapterValue
+            }
+            else {
+                Join-Path $script:RepoRoot ($AdapterValue -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+            }
+
+            if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) { return $null }
+            return (Resolve-Path -LiteralPath $candidatePath).ProviderPath
+        }
+
+        $script:GetFrameSlicesWithUnresolvedAdapter = {
+            param([Parameter(Mandatory)][string]$Content)
+
+            $unresolvedSlices = [System.Collections.Generic.List[string]]::new()
+            $sliceBlocks = @(& $script:GetFrameSliceBlocks -Content $Content)
+
+            for ($index = 0; $index -lt $sliceBlocks.Count; $index++) {
+                $sliceBlock = $sliceBlocks[$index]
+                $adapter = & $script:GetFrameSliceScalarValue -SliceBlock $sliceBlock -Name 'adapter'
+                if ([string]::IsNullOrWhiteSpace($adapter)) { continue }
+
+                $resolvedPath = & $script:ResolveFrameSliceAdapterPath -AdapterValue $adapter
+                if ([string]::IsNullOrWhiteSpace($resolvedPath)) {
+                    $sliceId = & $script:GetFrameSliceDisplayId -SliceBlock $sliceBlock -Index ($index + 1)
+                    $unresolvedSlices.Add("${sliceId}: $adapter") | Out-Null
+                }
+            }
+
+            return [string[]]$unresolvedSlices.ToArray()
+        }
+
+        $script:GetFrameSlicesWithMisorderedAdapter = {
+            param([Parameter(Mandatory)][string]$Content)
+
+            $misorderedSlices = [System.Collections.Generic.List[string]]::new()
+            $sliceBlocks = @(& $script:GetFrameSliceBlocks -Content $Content)
+
+            for ($index = 0; $index -lt $sliceBlocks.Count; $index++) {
+                $sliceBlock = $sliceBlocks[$index]
+                $fieldPositions = @{}
+                $lines = $sliceBlock -split "`n"
+
+                for ($lineIndex = 0; $lineIndex -lt $lines.Count; $lineIndex++) {
+                    if ($lines[$lineIndex] -match '^\s*(provides|adapter|depends-on)\s*:') {
+                        $fieldName = $Matches[1]
+                        if (-not $fieldPositions.ContainsKey($fieldName)) {
+                            $fieldPositions[$fieldName] = $lineIndex
+                        }
+                    }
+                }
+
+                $hasRequiredFields = $fieldPositions.ContainsKey('provides') -and $fieldPositions.ContainsKey('adapter') -and $fieldPositions.ContainsKey('depends-on')
+                $isOrdered = $hasRequiredFields -and $fieldPositions['provides'] -lt $fieldPositions['adapter'] -and $fieldPositions['adapter'] -lt $fieldPositions['depends-on']
+
+                if (-not $isOrdered) {
+                    $misorderedSlices.Add((& $script:GetFrameSliceDisplayId -SliceBlock $sliceBlock -Index ($index + 1))) | Out-Null
+                }
+            }
+
+            return [string[]]$misorderedSlices.ToArray()
+        }
+
         $script:FrontmatterFormatPattern = '(?ms)^```yaml\s*\r?\n---\s*\r?\nstatus:\s+pending\s*\r?\npriority:\s+\{ priority \}.*\r?\nissue_id:\s+\{ issue-id \}\s*\r?\ncreated:\s+\{ date \}\s*\r?\nce_gate:\s+\{ true\|false \}'
     }
 
@@ -62,21 +233,100 @@ Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
             -Patterns @(
                 '<!--\s*plan-issue-\{ID\}\s*-->',
                 '<!--\s*frame-spine\b',
-                'spine_schema_version:\s*1',
+                'spine_schema_version:\s*2',
                 '<!--\s*frame-slice\s*-->.{0,160}step_id:\s*s\{N\}',
                 'coverage\s+manifest',
                 'ac-refs-by-slice:'
             ) `
-            -Because 'Persist Plan must describe the durable plan comment shape as plan marker, frame-spine schema v1, per-step frame-slice blocks, then AC coverage manifest mapping'
+            -Because 'Persist Plan must describe the durable plan comment shape as plan marker, frame-spine schema v2, per-step frame-slice blocks, then AC coverage manifest mapping'
 
         $script:PersistPlanSection | Should -Match '(?is)(one|a)\s+(?:bare\s+)?`?<!--\s*frame-slice\s*-->`?.{0,220}(per|for each|each).{0,80}implementation step|(?:per|for each|each).{0,80}implementation step.{0,220}`?<!--\s*frame-slice\s*-->`?' -Because 'Issue-Planner must require one bare frame-slice block per implementation step'
         $script:PersistPlanSection | Should -Match '(?is)frame-slice.{0,180}step_id:\s*s\{N\}' -Because 'Issue-Planner must preserve slice addressability through the step_id field, not the marker suffix'
     }
 
     It 'requires frame-slice guidance to carry routing fields and the step Requirement Contract content' {
-        $sliceGuidancePattern = '(?is)<!--\s*frame-slice\s*-->.{0,260}step_id:\s*(?:s\{N\}|\{step-id\}|sN).{0,220}commit-index:\s*(?:\{N\}|N|\d+).{0,220}provides:\s*\[[^\]]*port[^\]]*\].{0,220}(?:cycle:\s*N)?.{0,220}(?:terminal:\s*true)?.{0,220}(?:depends-on:\s*\[[^\]]*step-ids?[^\]]*\])?.{0,260}ac-refs:\s*\[[^\]]*AC[^\]]*\].{0,260}Requirement Contract'
+        $sliceGuidancePattern = '(?is)<!--\s*frame-slice\s*-->.{0,260}step_id:\s*(?:s\{N\}|\{step-id\}|sN).{0,220}commit-index:\s*(?:\{N\}|N|\d+).{0,220}provides:\s*\[[^\]]*port[^\]]*\].{0,220}adapter:\s*[^\r\n]+.{0,220}(?:cycle:\s*N)?.{0,220}(?:terminal:\s*true)?.{0,220}(?:depends-on:\s*\[[^\]]*step-ids?[^\]]*\])?.{0,260}ac-refs:\s*\[[^\]]*AC[^\]]*\].{0,260}Requirement Contract'
 
-        $script:PersistPlanSection | Should -Match $sliceGuidancePattern -Because 'each frame-slice block must document id, commit-index, provides, optional cycle/terminal/depends-on, ac-refs, and the original step Requirement Contract content'
+        $script:PersistPlanSection | Should -Match $sliceGuidancePattern -Because 'each frame-slice block must document id, commit-index, provides, adapter, optional cycle/terminal/depends-on, ac-refs, and the original step Requirement Contract content'
+    }
+
+    It 'flags a synthetic planner output when any emitted frame-slice omits adapter' {
+        $plannerOutput = @(
+            '<!-- frame-slice',
+            'id: s1',
+            'commit-index: 1',
+            'provides: [implement-docs]',
+            'adapter: doc-keeper',
+            'depends-on: []',
+            'ac-refs: [AC7]',
+            'requirement-contract: |',
+            '  RED docs emission test.',
+            '-->',
+            '',
+            '<!-- frame-slice',
+            'id: s2',
+            'commit-index: 2',
+            'provides: [implement-test]',
+            'depends-on: [s1]',
+            'ac-refs: [AC8]',
+            'requirement-contract: |',
+            '  Pre-flight fixture selection test.',
+            '-->'
+        ) -join "`n"
+
+        $missingAdapters = @(& $script:GetFrameSlicesMissingAdapter -Content $plannerOutput)
+        ($missingAdapters -join ',') | Should -Be 's2' -Because 'the adapter contract must identify the exact slice that omits adapter:'
+    }
+
+    It 'requires synthetic emitted frame-slice blocks to declare adapters resolvable to worktree files' {
+        $plannerOutput = @(
+            '<!-- frame-slice',
+            'id: s1',
+            'commit-index: 1',
+            'provides: [implement-docs]',
+            'adapter: doc-keeper',
+            'depends-on: []',
+            'ac-refs: [AC7]',
+            'requirement-contract: |',
+            '  RED docs emission test.',
+            '-->',
+            '',
+            '<!-- frame-slice',
+            'id: s2',
+            'commit-index: 2',
+            'provides: [implement-test]',
+            'adapter: test-writer',
+            'depends-on: [s1]',
+            'ac-refs: [AC8]',
+            'requirement-contract: |',
+            '  Pre-flight fixture selection test.',
+            '-->'
+        ) -join "`n"
+
+        $sliceBlocks = @(& $script:GetFrameSliceBlocks -Content $plannerOutput)
+        $sliceBlocks.Count | Should -Be 2 -Because 'the synthetic fixture must exercise a multi-slice planner output'
+
+        @(& $script:GetFrameSlicesMissingAdapter -Content $plannerOutput).Count | Should -Be 0 -Because 'every emitted frame-slice must include adapter:'
+        @(& $script:GetFrameSlicesWithUnresolvedAdapter -Content $plannerOutput).Count | Should -Be 0 -Because 'adapter ids must resolve to deterministic working-tree agent files'
+    }
+
+    It 'requires Issue-Planner frame-slice output guidance to include a resolvable adapter on every slice' {
+        $sliceBlocks = @(& $script:GetFrameSliceBlocks -Content $script:PersistPlanSection)
+        $sliceBlocks.Count | Should -BeGreaterThan 0 -Because 'Persist Plan must include an example frame-slice payload that can be checked as synthetic planner output'
+
+        @(& $script:GetFrameSlicesMissingAdapter -Content $script:PersistPlanSection).Count | Should -Be 0 -Because 'Issue-Planner must emit adapter: on every frame-slice it writes'
+        @(& $script:GetFrameSlicesWithUnresolvedAdapter -Content $script:PersistPlanSection).Count | Should -Be 0 -Because 'documented adapter values must resolve to deterministic working-tree paths or installed-plugin-cache paths'
+    }
+
+    It 'keeps adapter between provides and depends-on in documented frame-slice examples' {
+        $issuePlannerSlices = @(& $script:GetFrameSliceBlocks -Content $script:PersistPlanSection)
+        $planAuthoringSlices = @(& $script:GetFrameSliceBlocks -Content $script:PlanAuthoringContent)
+
+        $issuePlannerSlices.Count | Should -BeGreaterThan 0 -Because 'Issue-Planner Persist Plan guidance must include a checkable frame-slice example'
+        $planAuthoringSlices.Count | Should -BeGreaterThan 0 -Because 'Plan Authoring guidance must include checkable frame-slice examples'
+
+        @(& $script:GetFrameSlicesWithMisorderedAdapter -Content $script:PersistPlanSection).Count | Should -Be 0 -Because 'Issue-Planner frame-slice guidance must place adapter: after provides: and before depends-on:'
+        @(& $script:GetFrameSlicesWithMisorderedAdapter -Content $script:PlanAuthoringContent).Count | Should -Be 0 -Because 'Plan Authoring frame-slice examples must place adapter: after provides: and before depends-on:'
     }
 
     It 'requires tiny plans to emit an explicit plan-too-small omission marker instead of a spine block' {
