@@ -55,6 +55,31 @@ CE Gate surface ports, where each surface (CLI, browser, canvas, API) is evaluat
 
 **Terminal-step contract**: Each `Build-CeGateCreditRow -Surface {name} -Step {terminal-step-id}` call is its own terminal step with its own integrity check. See "Per-Surface Terminal-Step Contract" below for orchestration-failure handling.
 
+## Port -> Locus Inference
+
+Spine-Runner consumes this table as the authoritative port-to-locus mapping. Add rows in this order so inferred frame walking remains deterministic.
+
+| Add order | Canonical port | Locus | Canonical adapter file |
+| --- | --- | --- | --- |
+| 1 | `experience` | `agent-pre-pr` | [frame/ports/experience.yaml](../../frame/ports/experience.yaml) |
+| 2 | `design` | `agent-pre-pr` | [frame/ports/design.yaml](../../frame/ports/design.yaml) |
+| 3 | `plan` | `agent-pre-pr` | [frame/ports/plan.yaml](../../frame/ports/plan.yaml) |
+| 4 | `implement-code` | `agent-post-pr` | [frame/ports/implement-code.yaml](../../frame/ports/implement-code.yaml) |
+| 5 | `implement-test` | `agent-post-pr` | [frame/ports/implement-test.yaml](../../frame/ports/implement-test.yaml) |
+| 6 | `implement-refactor` | `agent-post-pr` | [frame/ports/implement-refactor.yaml](../../frame/ports/implement-refactor.yaml) |
+| 7 | `implement-docs` | `agent-post-pr` | [frame/ports/implement-docs.yaml](../../frame/ports/implement-docs.yaml) |
+| 8 | `process-review` | `agent-post-pr` | [frame/ports/process-review.yaml](../../frame/ports/process-review.yaml) |
+| 9 | `post-pr` | `skill-only` | [frame/ports/post-pr.yaml](../../frame/ports/post-pr.yaml) |
+| 10 | `review` | `skill-only` | [frame/ports/review.yaml](../../frame/ports/review.yaml) |
+| 11 | `ce-gate-api` | `ce-gate-per-surface` | [frame/ports/ce-gate-api.yaml](../../frame/ports/ce-gate-api.yaml) |
+| 12 | `ce-gate-browser` | `ce-gate-per-surface` | [frame/ports/ce-gate-browser.yaml](../../frame/ports/ce-gate-browser.yaml) |
+| 13 | `ce-gate-canvas` | `ce-gate-per-surface` | [frame/ports/ce-gate-canvas.yaml](../../frame/ports/ce-gate-canvas.yaml) |
+| 14 | `ce-gate-cli` | `ce-gate-per-surface` | [frame/ports/ce-gate-cli.yaml](../../frame/ports/ce-gate-cli.yaml) |
+
+`auto-na` and `explicit-skip` are adapter file-name prefixes, not canonical port rows. Do not add them to this table.
+
+`frame-credit-ledger` and `pre-pr-format` are descriptive locus-category aliases from design discussion. They refer to skill-only methodology that runs alongside the ports above, are not canonical ports in `frame/ports/*.yaml`, and Spine-Runner does not directly verify them.
+
 ## Credit-Input Marker Schema
 
 Pre-PR agents (`agent-pre-pr` locus category) use credit-input markers for deferred emission. The marker shape is:
