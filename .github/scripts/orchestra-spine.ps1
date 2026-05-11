@@ -368,7 +368,7 @@ function Get-OrchestraSpineLiveCommentsJson {
 
 function Initialize-OrchestraSpineRenderWarmup {
     $warmupSpine = @(
-        'spine_schema_version: 1'
+        'spine_schema_version: 1' # v1 retained intentionally - see #555 step 1
         'generated_at: 2026-05-05T00:00:00Z'
         'coverage: complete'
         'ports:'

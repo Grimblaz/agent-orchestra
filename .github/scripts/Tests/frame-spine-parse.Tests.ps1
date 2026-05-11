@@ -48,6 +48,54 @@ Describe 'frame spine parser' -Tag 'unit' {
             '    terminal: true'
         ) -join "`n"
 
+        $script:CanonicalSpineBlockV2WithoutAdapter = @(
+            'spine_schema_version: 2'
+            'generated_at: 2026-05-11T10:00:00Z'
+            'coverage: complete'
+            'ports:'
+            '  implement-code: [s2]'
+            '  implement-test: [s3#terminal]'
+            'slices:'
+            '  s2:'
+            '    execution_mode: serial'
+            '    rc: GREEN code action'
+            '    ac_refs: [AC1]'
+            '    depends_on: []'
+            '    cycle: 1'
+            '  s3:'
+            '    execution_mode: serial'
+            '    rc: RED tests for v2 schema acceptance'
+            '    ac_refs: [AC1, AC5, AC7]'
+            '    depends_on: [s2]'
+            '    cycle: 1'
+            '    terminal: true'
+        ) -join "`n"
+
+        $script:CanonicalSpineBlockV2WithAdapters = @(
+            'spine_schema_version: 2'
+            'generated_at: 2026-05-11T10:05:00Z'
+            'coverage: complete'
+            'ports:'
+            '  implement-code: [s2]'
+            '  implement-test: [s3#terminal]'
+            'slices:'
+            '  s2:'
+            '    execution_mode: serial'
+            '    adapter: code-smith'
+            '    rc: GREEN code action'
+            '    ac_refs: [AC1]'
+            '    depends_on: []'
+            '    cycle: 1'
+            '  s3:'
+            '    execution_mode: serial'
+            '    adapter: test-writer'
+            '    rc: RED tests for v2 schema acceptance'
+            '    ac_refs: [AC1, AC5, AC7]'
+            '    depends_on: [s2]'
+            '    cycle: 1'
+            '    terminal: true'
+        ) -join "`n"
+
         $script:S2SliceBlock = @(
             'step_id: s2'
             'ports: [implement-code]'
@@ -258,6 +306,32 @@ Describe 'frame spine parser' -Tag 'unit' {
         $parsed | Should -Not -BeNullOrEmpty
         $parsed.CanonicalYaml | Should -BeExactly $script:CanonicalSpineBlock
         Test-FSCCanonicalForm -SpineBlock $script:CanonicalSpineBlock | Should -BeTrue
+    }
+
+    It 'accepts schema v2 spine YAML without requiring adapter fields on slices' {
+        $parsed = ConvertFrom-FSCSpineYaml -SpineBlock $script:CanonicalSpineBlockV2WithoutAdapter
+
+        $parsed | Should -Not -BeNullOrEmpty
+        $parsed.CanonicalYaml | Should -BeExactly $script:CanonicalSpineBlockV2WithoutAdapter
+        $parsed.CanonicalYaml | Should -Not -Match '(?m)^\s+adapter:'
+        $parsed.Slices | Should -HaveCount 2
+
+        $tokens = @(& $script:GetPortEntries -ParsedSpine $parsed -PortName 'implement-test')
+        $tokens | Should -HaveCount 1
+        & $script:AssertStepToken -Token $tokens[0] -StepId 's3' -Cycle 1 -Terminal $true
+    }
+
+    It 'accepts schema v2 spine YAML when each slice declares an adapter' {
+        $parsed = ConvertFrom-FSCSpineYaml -SpineBlock $script:CanonicalSpineBlockV2WithAdapters
+
+        $parsed | Should -Not -BeNullOrEmpty
+        $parsed.CanonicalYaml | Should -BeExactly $script:CanonicalSpineBlockV2WithAdapters
+        $parsed.CanonicalYaml | Should -Match '(?m)^    adapter: code-smith$'
+        $parsed.CanonicalYaml | Should -Match '(?m)^    adapter: test-writer$'
+
+        $tokens = @(& $script:GetPortEntries -ParsedSpine $parsed -PortName 'implement-test')
+        $tokens | Should -HaveCount 1
+        & $script:AssertStepToken -Token $tokens[0] -StepId 's3' -Cycle 1 -Terminal $true
     }
 
     It 'executes the documented lookup CLI and returns the requested slice content' {

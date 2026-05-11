@@ -87,23 +87,24 @@ This is the test for whether to split or merge a port.
 
 ---
 
-## Spine schema (v1)
+## Spine schema (v1 and v2)
 
 The frame spine is a plan-routing and context-sharing block, not a replacement for the PR body's pipeline metrics block.
 
-1. **Field name**: spine blocks use `spine_schema_version: 1`. They do not use `frame_version`; the existing pipeline metrics `frame_version: 1.0` field remains unrelated.
+1. **Field name**: spine blocks use `spine_schema_version: 1` or `spine_schema_version: 2`. Version 2 is additive and remains wire-compatible with v1 consumers that ignore unknown slice fields. Spine blocks do not use `frame_version`; the existing pipeline metrics `frame_version: 1.0` field remains unrelated.
 2. **Canonical form**: port keys are sorted alphabetically. Port values use inline lists such as `[s2, s5]`. Flow-style bracket entries may carry cycle markers such as `s8#cycle:3#terminal`; block-scalar slice metadata uses the alternate `cycle: N` field. Canonical blocks have no trailing whitespace and use ISO-8601 UTC timestamps in `generated_at`.
 3. **Cycle marker grammar**: inline slice tokens use `sN[#cycle:N][#terminal]`. `cycle:N` is omitted when `N=1`. Block-form slice metadata uses explicit `terminal: true` for terminal steps. Ordering is the list position, not the numeric slice ID.
-4. **Exploratory coverage escape hatch**: `coverage: exploratory — {reason}` is allowed only when the reason is present. That reason is surfaced as a ledger row so reviewers can challenge incomplete routing coverage.
-5. **Plan-size threshold D8**: an implementation step means a step whose Execution Mode is `serial` or `parallel` and whose RC contains a GREEN code or test action. Adversarial review, CE Gate, and post-retrospective steps do not count toward the threshold.
-6. **Metrics version bump policy**: adding `spine-stale-fallback-count`, `dispatch-fallback-events[]`, and `dispatch-cost-samples[]` does not bump `metrics_version` because they are additive optional v4 fields. Likewise, the optional sixth key `provider:` on `dispatch-cost-samples[]` rows is additive and does not bump `metrics_version`; parsers accept 5-key and 6-key rows. Known values for `provider`: `claude` | `copilot`; additional values tolerated additively per #467 D12. See `frame/pipeline-metrics-v4-schema.md` for the authoritative `dispatch-cost-samples[]` row contract.
-7. **D9 normalized-diff `generated_at` elision**: for D9 model-switch diff comparison, hash-elide the `generated_at:` line inside frame-spine blocks so identical content does not append duplicate durable handoff comments.
+4. **Slice adapter hint (v2)**: v2 slice metadata may include an optional `adapter: {adapter-id}` scalar. The value names the intended work adapter for that slice, using the same adapter identity vocabulary as frame credits and adapter declarations. It is a dispatch hint, not a validator requirement; v2 slices without `adapter:` remain valid and fall back to predicate-based selection.
+5. **Exploratory coverage escape hatch**: `coverage: exploratory — {reason}` is allowed only when the reason is present. That reason is surfaced as a ledger row so reviewers can challenge incomplete routing coverage.
+6. **Plan-size threshold D8**: an implementation step means a step whose Execution Mode is `serial` or `parallel` and whose RC contains a GREEN code or test action. Adversarial review, CE Gate, and post-retrospective steps do not count toward the threshold.
+7. **Metrics version bump policy**: adding `spine-stale-fallback-count`, `dispatch-fallback-events[]`, and `dispatch-cost-samples[]` does not bump `metrics_version` because they are additive optional v4 fields. Likewise, the optional sixth key `provider:` on `dispatch-cost-samples[]` rows is additive and does not bump `metrics_version`; parsers accept 5-key and 6-key rows. Known values for `provider`: `claude` | `copilot`; additional values tolerated additively per #467 D12. See `frame/pipeline-metrics-v4-schema.md` for the authoritative `dispatch-cost-samples[]` row contract.
+8. **D9 normalized-diff `generated_at` elision**: for D9 model-switch diff comparison, hash-elide the `generated_at:` line inside frame-spine blocks so identical content does not append duplicate durable handoff comments.
 
-Example canonical shape:
+Example v2 canonical shape:
 
 ```yaml
 <!-- frame-spine
-spine_schema_version: 1
+spine_schema_version: 2
 generated_at: 2026-05-04T14:30:00Z
 coverage: complete
 ports:
@@ -113,18 +114,21 @@ ports:
 slices:
   s2:
     execution_mode: serial
+    adapter: code-smith
     rc: GREEN code action
     ac_refs: [AC1, AC2]
     depends_on: []
     cycle: 1
   s5:
     execution_mode: parallel
+    adapter: code-smith
     rc: GREEN code/test action
     ac_refs: [AC4]
     depends_on: [s2]
     cycle: 2
   s8:
     execution_mode: serial
+    adapter: ce-gate-api
     rc: CE Gate evidence capture
     ac_refs: [AC9]
     depends_on: [s5]
@@ -281,10 +285,11 @@ Lowercase Claude shells and slash commands are dispatchers, not adapters; they d
 
 Each agent that owns a port is responsible for selection. When the agent runs:
 
-1. Read the port file for its port.
-2. Evaluate each adapter's `applies-when` against the changeset.
-3. Pick the matching adapter (port file declares precedence if multiple match: `default: review-standard`).
-4. If no adapter matches, invoke the explicit-skip adapter with a justification.
+1. If the active v2 frame slice includes `adapter:`, the runner SHOULD respect that adapter hint when the named adapter is available for the requested port.
+2. If `adapter:` is absent, or the named adapter is unavailable for the requested port, read the port file for the port.
+3. Evaluate each adapter's `applies-when` against the changeset.
+4. Pick the matching adapter (port file declares precedence if multiple match: `default: review-standard`).
+5. If no adapter matches, invoke the explicit-skip adapter with a justification.
 
 The pre-PR hook independently verifies via the credit. Selection logic is never re-run by the hook — it just checks that *some* credit exists.
 
