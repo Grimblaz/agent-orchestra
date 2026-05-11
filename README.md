@@ -23,9 +23,9 @@ A multi-agent workflow system that orchestrates AI-assisted software development
    ```
 
 2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins agent-orchestra` and install.
-3. **Use** — All 14 agents and the shared skill library are immediately available in VS Code Chat.
+3. **Use** — All 15 agents and the shared skill library are immediately available in VS Code Chat.
 
-**What's included in the repo plugin payload**: 14 agents, the shared skill library, and 12 command files under `commands/` (`/code-conductor`, `/design`, `/experience`, `/orchestrate`, `/plan`, `/polish`, `/review-github`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`). VS Code currently ignores the plugin `commands` field; Claude Code and CLI consumers use it.
+**What's included in the repo plugin payload**: 15 agents, the shared skill library, and 14 command files under `commands/` (`/code-conductor`, `/design`, `/experience`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/plan`, `/polish`, `/review-github`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`). VS Code currently ignores the plugin `commands` field; Claude Code and CLI consumers use it.
 
 **What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo. Plugin-distributed hooks are also not active when you only point VS Code at a clone via `chat.agentFilesLocations`; deterministic `SessionStart` cleanup and Claude `PostToolUse` release-hygiene prompts require an actual plugin install.
 
@@ -40,11 +40,11 @@ Claude Code loads agents and skills from `.claude-plugin/plugin.json`. Install v
 /plugin install agent-orchestra@agent-orchestra
 ```
 
-All 14 agents and the shared skill library are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (`agents` uses an explicit registration whitelist; `skills` auto-discovers).
+All 15 agents and the shared skill library are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (`agents` uses an explicit registration whitelist; `skills` auto-discovers).
 
 This is zero-config for consumer repositories: after marketplace registration and plugin install, Claude Code loads the shared agent bodies and skills from its plugin cache. The repository using the plugin does not need a local `agents/` directory.
 
-The plugin payload includes all 14 shared agent definitions and the shared skill library. The Claude-specific command and specialist surface is outlined below.
+The plugin payload includes all 15 shared agent definitions and the shared skill library. The Claude-specific command and specialist surface is outlined below.
 
 ### Upstream Agents In Claude Code
 
@@ -70,6 +70,7 @@ The Claude review surface now ships in the `orchestra-review-*` command namespac
 ### Code-Conductor Orchestration In Claude Code
 
 - `/orchestrate` — Claude entry point for the full pipeline from durable issue state through implementation, validation, CE Gate, and PR readiness via Code-Conductor
+- `/spine-run` — minimal frame-walking conductor for an issue with a persisted v2 frame-spine plan
 - `/code-conductor` — explicit non-hub-mode free-text Code-Conductor entry point
 
 For paused Claude orchestration work, `/orchestrate` is also the resume entry point. The shared workflow's `/implement` wording is Copilot-specific; Claude does not ship a `/implement` command.
@@ -163,6 +164,7 @@ That's it. You're ready to use agents.
 | Create an implementation plan for an issue | `@Issue-Planner` |
 | Implement a planned feature end-to-end | `@Code-Conductor` |
 | Run the full pipeline end-to-end for an issue | `/orchestrate` |
+| Walk an existing v2 frame-spine plan | `/spine-run` |
 | Review code and identify risks | `@Code-Critic` |
 | Respond to a code review | `@Code-Review-Response` |
 | Polish a UI page or component | `@UI-Iterator` |
@@ -194,7 +196,7 @@ Then, once the design is in the issue:
 
 ## Agent Reference
 
-### Agents you interact with directly (7)
+### Agents and runners you invoke directly (8)
 
 | Agent | What it does |
 |-------|-------------|
@@ -202,6 +204,7 @@ Then, once the design is in the issue:
 | **Solution-Designer** | Design exploration and issue management |
 | **Issue-Planner** | Multi-step implementation plan creation |
 | **Code-Conductor** | End-to-end orchestration of implementation |
+| **Spine-Runner** | Minimal frame-spine plan walking via `/spine-run` |
 | **Code-Critic** | Adversarial code review and risk discovery |
 | **Code-Review-Response** | Judges review feedback, scores findings, and emits categorization |
 | **UI-Iterator** | Systematic UI polish through screenshot-based iteration |
@@ -212,7 +215,7 @@ These agents are hidden from the picker (`user-invocable: false`) and are used a
 
 Code-Smith, Test-Writer, Refactor-Specialist, Doc-Keeper, Research-Agent, Process-Review, Specification
 
-> See `agents/` (repo root) for full definitions of all 14 agents.
+> See `agents/` (repo root) for full definitions of all 15 agents.
 
 ---
 
