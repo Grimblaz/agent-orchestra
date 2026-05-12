@@ -150,6 +150,9 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
         $script:FrameSpineParseTestsContent = & $script:ReadNormalized -Path $script:FrameSpineParseTestsPath
         $script:ConductorSpineDispatchTestsContent = & $script:ReadNormalized -Path $script:ConductorSpineDispatchTestsPath
 
+        $script:SpineRunnerFrontmatter = & $script:GetFrontmatter -Content $script:SpineRunnerContent
+        $script:ClaudeShellFrontmatter = & $script:GetFrontmatter -Content $script:ClaudeShellContent
+
         $script:AdapterResolverSection = & $script:GetMarkdownSection -Content $script:SpineRunnerContent -Heading '## Adapter Resolver'
         $script:EvidenceVerificationSection = & $script:GetMarkdownSection -Content $script:SpineRunnerContent -Heading '## Evidence Verification'
         $script:FailureHandlingSection = & $script:GetMarkdownSection -Content $script:SpineRunnerContent -Heading '## Failure Handling'
@@ -167,6 +170,50 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
             $loadSkillLines = @($script:SpineRunnerLines | Where-Object { $_ -match '\bLoad\s+skills/' })
 
             $loadSkillLines | Should -HaveCount 0 -Because 'Spine-Runner should resolve adapters rather than broad-loading skills from the shared body'
+        }
+
+        It 'keeps a true persona sentence that reinforces disciplined frame walking' {
+            $script:SpineRunnerContent | Should -Match '(?m)^You are a disciplined frame walker:.*freeze the map.*move one slice at a time.*believe evidence before progress.*preserve halt history' -Because 'the shared body should carry an identity hook that reinforces the runner stance without expanding scope'
+        }
+    }
+
+    Context 'tool surface contract' {
+
+        It 'declares the broad Copilot tool surface needed for frame walking and CE evidence' {
+            $expectedTools = @(
+                'vscode/askQuestions',
+                'vscode',
+                'execute',
+                'read',
+                'agent',
+                'edit',
+                'search',
+                'web',
+                'github/*',
+                'vscode/memory',
+                'todo',
+                'browser/openBrowserPage',
+                'browser/readPage',
+                'browser/screenshotPage',
+                'browser/clickElement',
+                'browser/hoverElement',
+                'browser/dragElement',
+                'browser/typeInPage',
+                'browser/handleDialog',
+                'browser/runPlaywrightCode'
+            )
+
+            foreach ($tool in $expectedTools) {
+                $toolPattern = '(?m)^\s*-\s+"?' + [regex]::Escape($tool) + '"?\s*$'
+                $script:SpineRunnerFrontmatter | Should -Match $toolPattern -Because "Spine-Runner must declare '$tool' in its Copilot tool surface"
+            }
+        }
+
+        It 'maps shared question, web, and browser surfaces onto Claude shell equivalents' {
+            $script:ClaudeShellFrontmatter | Should -Match '(?m)^tools:\s*.*\bWebFetch\b.*\bAskUserQuestion\b' -Because 'the Claude shell must expose equivalents for shared web and question surfaces'
+            $script:ClaudeShellContent | Should -Match '\|\s*`vscode/askQuestions`\s*\|\s*`AskUserQuestion`\s*\|' -Because 'the shared askQuestions surface must map to AskUserQuestion in Claude'
+            $script:ClaudeShellContent | Should -Match '\|\s*`web`\s*\|\s*`WebFetch`\s+for\s+known\s+URLs\s*\|' -Because 'the shared web surface must map to WebFetch in Claude'
+            $script:ClaudeShellContent | Should -Match '\|\s*Browser\s+tools\s*\(`browser/\*`\)\s*\|.*WebFetch.*computer-use.*surface\s+the\s+limitation' -Because 'the Claude shell must acknowledge browser-tool fallback behavior instead of inventing browser coverage'
         }
     }
 
@@ -465,6 +512,22 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
                     '`auto-na`\s+expects\s+`status:\s+not-applicable`'
                 ) `
                 -Because 'auto-na completion must be evidence-matched to a not-applicable predicate outcome'
+        }
+
+        It 'resolves predicate evaluation from the frozen adapter root and halts when the evaluator is unavailable' {
+            & $script:AssertContractMentions `
+                -Content $script:InvocationContractSection `
+                -Patterns @(
+                    'resolve\s+`\{frozen\s+root\}/\.github/scripts/lib/frame-predicate-core\.ps1`',
+                    'where\s+`\{frozen\s+root\}`\s+is\s+the\s+resolved\s+root\s+that\s+supplied\s+the\s+adapter',
+                    'dot-source\s+that\s+evaluator',
+                    'ConvertTo-FVPredicate',
+                    'Test-FVPredicateAgainstChangeset\s+-Ast\s+\{ast\}\s+-Changeset\s+\{changeset\}',
+                    'If\s+the\s+evaluator\s+is\s+missing,\s+halt\s+with\s+`predicate-evaluator-unavailable/source-tree-required`\s+and\s+include\s+the\s+searched\s+locations'
+                ) `
+                -Because 'auto-na and explicit-skip predicates must use the evaluator from the frozen adapter root, not from the current working directory'
+
+            $script:InvocationContractSection | Should -Not -Match '(?i)(current\s+working\s+directory|CWD).{0,160}\.github/scripts/lib/frame-predicate-core\.ps1' -Because 'predicate evaluation must not be described as CWD-relative dot-sourcing'
         }
     }
 

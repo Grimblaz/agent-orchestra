@@ -213,8 +213,10 @@ Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
                     }
                 }
 
-                $hasRequiredFields = $fieldPositions.ContainsKey('provides') -and $fieldPositions.ContainsKey('adapter') -and $fieldPositions.ContainsKey('depends-on')
-                $isOrdered = $hasRequiredFields -and $fieldPositions['provides'] -lt $fieldPositions['adapter'] -and $fieldPositions['adapter'] -lt $fieldPositions['depends-on']
+                $hasRequiredFields = $fieldPositions.ContainsKey('provides') -and $fieldPositions.ContainsKey('adapter')
+                $hasOrderedRequiredFields = $hasRequiredFields -and $fieldPositions['provides'] -lt $fieldPositions['adapter']
+                $hasOrderedOptionalDependency = -not $fieldPositions.ContainsKey('depends-on') -or $fieldPositions['adapter'] -lt $fieldPositions['depends-on']
+                $isOrdered = $hasOrderedRequiredFields -and $hasOrderedOptionalDependency
 
                 if (-not $isOrdered) {
                     $misorderedSlices.Add((& $script:GetFrameSliceDisplayId -SliceBlock $sliceBlock -Index ($index + 1))) | Out-Null
@@ -316,6 +318,22 @@ Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
 
         @(& $script:GetFrameSlicesMissingAdapter -Content $script:PersistPlanSection).Count | Should -Be 0 -Because 'Issue-Planner must emit adapter: on every frame-slice it writes'
         @(& $script:GetFrameSlicesWithUnresolvedAdapter -Content $script:PersistPlanSection).Count | Should -Be 0 -Because 'documented adapter values must resolve to deterministic working-tree paths or installed-plugin-cache paths'
+    }
+
+    It 'does not flag a frame-slice with provides and adapter but no optional depends-on as misordered' {
+        $plannerOutput = @(
+            '<!-- frame-slice',
+            'id: s1',
+            'commit-index: 1',
+            'provides: [implement-test]',
+            'adapter: test-writer',
+            'ac-refs: [AC8]',
+            'requirement-contract: |',
+            '  RED fixture covers optional dependency omission.',
+            '-->'
+        ) -join "`n"
+
+        @(& $script:GetFrameSlicesWithMisorderedAdapter -Content $plannerOutput).Count | Should -Be 0 -Because 'depends-on is optional; present fields are ordered when provides appears before adapter'
     }
 
     It 'keeps adapter between provides and depends-on in documented frame-slice examples' {

@@ -1,7 +1,7 @@
 ---
 name: spine-runner
 description: Minimal frame-walking conductor shell for Claude Code. Use when a v2 frame-spine plan should be walked slice by slice.
-tools: Read, Write, Edit, Glob, Grep, Bash, Agent
+tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
 user-invocable: false
 # inherit — Spine-Runner is a minimal walker; subagent dispatches inherit dispatcher tier
 # for cost-comparison parity with Code-Conductor (D7).
@@ -26,12 +26,17 @@ After loading, follow everything under its `## Core Principles`, `## Role`, `## 
 | Shared body references | Claude Code tool or behavior |
 | --- | --- |
 | `execute/getTerminalOutput`, `execute/runInTerminal` | `Bash` |
+| `vscode/askQuestions` | `AskUserQuestion` |
+| `vscode` | No direct Claude equivalent; use the available Claude Code file, shell, question, and browser surfaces for the specific action |
 | `read` | `Read` |
 | `edit` | `Edit`, `Write` |
 | `search` | `Grep`, `Glob` |
+| `web` | `WebFetch` for known URLs |
 | `agent` | `Agent` |
 | `github/*` | `gh` CLI via `Bash` |
 | `vscode/memory` | Parent dispatch context first; otherwise latest-comment-wins GitHub issue markers |
+| `todo` | No Claude shell tool is declared here; track progress in the parent conductor context or compact local notes |
+| Browser tools (`browser/*`) | Prefer `WebFetch` for remote pages or published artifacts; when interactive browser evidence is required, use the repo's documented Claude-in-Chrome/computer-use fallback if available, otherwise surface the limitation instead of inventing coverage |
 
 ## Invocation
 
