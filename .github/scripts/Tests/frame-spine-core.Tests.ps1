@@ -54,6 +54,29 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
             '    cycle: 1'
         ) -join "`n"
 
+        $script:CanonicalSpineBlockV2WithoutAdapter = @(
+            'spine_schema_version: 2'
+            'generated_at: 2026-05-11T10:00:00Z'
+            'coverage: complete'
+            'ports:'
+            '  implement-code: [s2]'
+            '  implement-test: [s3#terminal]'
+            'slices:'
+            '  s2:'
+            '    execution_mode: serial'
+            '    rc: GREEN code action'
+            '    ac_refs: [AC1]'
+            '    depends_on: []'
+            '    cycle: 1'
+            '  s3:'
+            '    execution_mode: serial'
+            '    rc: RED tests for v2 schema acceptance'
+            '    ac_refs: [AC1, AC5, AC7]'
+            '    depends_on: [s2]'
+            '    cycle: 1'
+            '    terminal: true'
+        ) -join "`n"
+
         # Slice block for non-ASCII case (id/provides style)
         $script:S2SliceBlockNonAscii = @(
             'id: s2'
@@ -74,6 +97,17 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
             'ac_refs: [AC1, AC2]'
             'depends_on: []'
             'cycle: 1'
+        ) -join "`n"
+
+        $script:S3SliceBlockV2WithoutAdapter = @(
+            'id: s3'
+            'provides: [implement-test]'
+            'execution_mode: serial'
+            'rc: RED tests for v2 schema acceptance'
+            'ac_refs: [AC1, AC5, AC7]'
+            'depends_on: [s2]'
+            'cycle: 1'
+            'terminal: true'
         ) -join "`n"
 
         # Full comment body with non-ASCII spine + slice (for case 1)
@@ -99,6 +133,18 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
             ''
             '<!-- frame-slice'
             $script:S2SliceBlock
+            '-->'
+        ) -join "`n"
+
+        $script:LookupCommentBodyV2WithoutAdapter = @(
+            'Issue discussion before the durable handoff.'
+            ''
+            '<!-- frame-spine'
+            $script:CanonicalSpineBlockV2WithoutAdapter
+            '-->'
+            ''
+            '<!-- frame-slice'
+            $script:S3SliceBlockV2WithoutAdapter
             '-->'
         ) -join "`n"
 
@@ -261,6 +307,26 @@ Describe 'frame-spine-core stdin and JSON output' -Tag 'unit' {
 
             $parsed.status | Should -Be 'missing-slice'
             $parsed.step_id | Should -Be 's99'
+        }
+    }
+
+    Context 'Case 7: schema v2 lookup remains compatible with adapter-optional slices' {
+
+        It 'returns the requested v2 slice when the frame-slice block omits adapter' {
+            $commentFile = & $script:WriteCommentBody -Content $script:LookupCommentBodyV2WithoutAdapter
+            $resolvedPath = (Resolve-Path -LiteralPath $commentFile).ProviderPath
+
+            $result = Invoke-FSCSpineLookupCli -CommentBodyPath $resolvedPath -Format Json -GeneratedAt '2026-05-11T10:00:00Z' -StepId 's3'
+
+            $result | Should -Not -BeNullOrEmpty
+            $result.ExitCode | Should -Be 0
+            $jsonText = ($result.Lines) -join "`n"
+            $parsed = $jsonText | ConvertFrom-Json
+
+            $parsed.status | Should -Be 'ok'
+            $parsed.step_id | Should -Be 's3'
+            $parsed.slice | Should -Match 'provides:\s*\[implement-test\]'
+            $parsed.slice | Should -Not -Match '(?m)^adapter:'
         }
     }
 }

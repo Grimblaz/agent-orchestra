@@ -136,7 +136,7 @@ spine-omitted: { omit unless plan-too-small }
 {TL;DR - what, how, why. Reference key decisions. (30-200 words)}
 
 <!-- frame-spine
-spine_schema_version: 1
+spine_schema_version: 2
 generated_at: {ISO-8601 UTC}
 coverage: complete
 ports:
@@ -158,6 +158,7 @@ slices:
    <!-- frame-slice
    id: s1
    provides: [{port}]
+   adapter: {path}
    depends-on: []
    ac-refs: [AC#]
    -->
@@ -167,6 +168,7 @@ slices:
    <!-- frame-slice
    id: s2
    provides: [{port}]
+   adapter: {path}
    depends-on: [s1]
    ac-refs: [AC#]
    -->

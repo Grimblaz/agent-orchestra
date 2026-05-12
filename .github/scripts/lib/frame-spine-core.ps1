@@ -18,6 +18,9 @@ param(
     Pure-logic parser for frame spine and slice comment blocks.
 #>
 
+$script:FSCSupportedSpineSchemaVersions = [string[]]@('1', '2')
+$script:FSCPortTokenPattern = '^(?<step>s\d+)(?:#cycle:(?<cycle>\d+))?(?<terminal>#terminal)?$'
+
 function script:ConvertTo-FSCNormalizedText {
     param([AllowNull()][string]$Text)
 
@@ -113,7 +116,7 @@ function script:ConvertFrom-FSCPortToken {
         [Parameter(Mandatory)][hashtable]$SliceByStepId
     )
 
-    $match = [regex]::Match($TokenText, '^(?<step>s\d+)(?:#cycle:(?<cycle>\d+)(?<terminal>#terminal)?)?$')
+    $match = [regex]::Match($TokenText, $script:FSCPortTokenPattern)
     if (-not $match.Success) { return $null }
 
     $stepId = $match.Groups['step'].Value
@@ -160,7 +163,7 @@ function script:ConvertFrom-FSCSpineYamlInternal {
         if ([string]::IsNullOrWhiteSpace($normalized)) { return $null }
 
         $schemaVersion = script:Get-FSCScalarValue -Block $normalized -Name 'spine_schema_version'
-        if ($schemaVersion -ne '1') { return $null }
+        if ($schemaVersion -notin $script:FSCSupportedSpineSchemaVersions) { return $null }
 
         $generatedAtValue = script:Get-FSCScalarValue -Block $normalized -Name 'generated_at'
         if ($null -eq $generatedAtValue) { return $null }
@@ -212,6 +215,7 @@ function script:ConvertFrom-FSCSpineYamlInternal {
 
                     $sliceByStepId[$currentSliceId] = [ordered]@{
                         StepId     = $currentSliceId
+                        AdapterRaw = $null
                         AcRefsRaw  = $null
                         DependsRaw = $null
                         Cycle      = $null
@@ -231,6 +235,9 @@ function script:ConvertFrom-FSCSpineYamlInternal {
                 $value = $propertyMatch.Groups['value'].Value.Trim()
 
                 switch ($key) {
+                    'adapter' {
+                        $slice.AdapterRaw = $value
+                    }
                     'ac_refs' {
                         if ($null -eq (script:Split-FSCInlineList -Value $value)) { return $null }
                         $slice.AcRefsRaw = $value
@@ -285,6 +292,8 @@ function script:ConvertFrom-FSCSpineYamlInternal {
             $slice = $sliceByStepId[$stepId]
             $slices.Add([pscustomobject]@{
                     StepId    = $slice.StepId
+                    Adapter   = if ([string]::IsNullOrWhiteSpace([string]$slice.AdapterRaw)) { $null } else { [string]$slice.AdapterRaw }
+                    AdapterRaw = $slice.AdapterRaw
                     Cycle     = [int]$slice.Cycle
                     Terminal  = [bool]$slice.Terminal
                     AcRefs    = [string[]](script:Split-FSCInlineList -Value $slice.AcRefsRaw)

@@ -5,7 +5,7 @@ description: "Frame credit row emission and deferred credit-input methodology fo
 
 # Frame Credit Emission
 
-Reusable methodology for frame credit row emission across all 12 pipeline ports. Defines the terminal-step contract, credit-input marker schema, and locus-category routing for agents and skills that contribute to the frame ledger.
+Reusable methodology for frame credit row emission across all 17 frame ports. Defines the terminal-step contract, credit-input marker schema, and locus-category routing for agents and skills that contribute to the frame ledger.
 
 ## When to Use
 
@@ -43,9 +43,25 @@ Ports owned by pipeline-entry agents that complete before any PR exists. These a
 
 Ports owned by skills rather than agents. Code-Conductor owns the selector and invokes the appropriate builder function with evidence from the skill's execution.
 
-**Ports in this category**: `post-pr`
+**Ports in this category**: `post-pr`, `review`
 
-**Terminal-step contract**: Code-Conductor reads the port's adapter file from `frame/ports/{port}.yaml`, calls `Build-PostPrCreditRow` with the post-merge checklist outcomes from the `post-pr-review` skill, and upserts the credit row into the PR-body pipeline-metrics block.
+**Terminal-step contract**: Code-Conductor reads the port's adapter file from `frame/ports/{port}.yaml` and emits the skill-owned credit row for that port. For `post-pr`, call `Build-PostPrCreditRow` with the post-merge checklist outcomes from the `post-pr-review` skill. For `review`, follow the review-credit-emission reference, call `Build-ReviewCreditRow`, and use review-specific evidence such as judge ruling status, reviewed PR context, and persisted review ledger or sentinel details. Upsert the resulting credit row into the PR-body pipeline-metrics block.
+
+### `pr-body-pipeline-metrics`
+
+Ports emitted into the PR-body `<!-- pipeline-metrics -->` block by Code-Conductor or the owning skill after PR creation, outside the specialist-agent terminal-step path.
+
+**Ports in this category**: `release-hygiene`, `post-fix-review`
+
+**Terminal-step contract**: Verify the port row in `credits[]`. `release-hygiene` uses the symmetric-bump state-file contract from the `plugin-release-hygiene` skill. `post-fix-review` uses the review-triggered `adversarial-review` post-fix adapter and may be explicitly skipped when the review trigger is absent.
+
+### `deferred-skill-only`
+
+Formalized trigger-conditional ports whose producer is intentionally deferred. Code-Conductor emits a not-applicable deferred row with `Build-DeferredPortCreditRow`.
+
+**Ports in this category**: `process-retrospective`
+
+**Terminal-step contract**: Verify a `credits[]` row with `status: not-applicable` and evidence beginning with `DEFERRED(#NNN):`; the port remains excluded from the coverage denominator until its `trigger-status` becomes live.
 
 ### `ce-gate-per-surface`
 
@@ -54,6 +70,34 @@ CE Gate surface ports, where each surface (CLI, browser, canvas, API) is evaluat
 **Ports in this category**: `ce-gate-cli`, `ce-gate-browser`, `ce-gate-canvas`, `ce-gate-api`
 
 **Terminal-step contract**: Each `Build-CeGateCreditRow -Surface {name} -Step {terminal-step-id}` call is its own terminal step with its own integrity check. See "Per-Surface Terminal-Step Contract" below for orchestration-failure handling.
+
+## Port -> Locus Inference
+
+Spine-Runner consumes this table as the authoritative port-to-locus mapping. Add rows in this order so inferred frame walking remains deterministic.
+
+| Add order | Canonical port | Locus | Canonical adapter file |
+| --- | --- | --- | --- |
+| 1 | `experience` | `agent-pre-pr` | [frame/ports/experience.yaml](../../frame/ports/experience.yaml) |
+| 2 | `design` | `agent-pre-pr` | [frame/ports/design.yaml](../../frame/ports/design.yaml) |
+| 3 | `plan` | `agent-pre-pr` | [frame/ports/plan.yaml](../../frame/ports/plan.yaml) |
+| 4 | `implement-code` | `agent-post-pr` | [frame/ports/implement-code.yaml](../../frame/ports/implement-code.yaml) |
+| 5 | `implement-test` | `agent-post-pr` | [frame/ports/implement-test.yaml](../../frame/ports/implement-test.yaml) |
+| 6 | `implement-refactor` | `agent-post-pr` | [frame/ports/implement-refactor.yaml](../../frame/ports/implement-refactor.yaml) |
+| 7 | `implement-docs` | `agent-post-pr` | [frame/ports/implement-docs.yaml](../../frame/ports/implement-docs.yaml) |
+| 8 | `process-review` | `agent-post-pr` | [frame/ports/process-review.yaml](../../frame/ports/process-review.yaml) |
+| 9 | `post-pr` | `skill-only` | [frame/ports/post-pr.yaml](../../frame/ports/post-pr.yaml) |
+| 10 | `review` | `skill-only` | [frame/ports/review.yaml](../../frame/ports/review.yaml) |
+| 11 | `ce-gate-api` | `ce-gate-per-surface` | [frame/ports/ce-gate-api.yaml](../../frame/ports/ce-gate-api.yaml) |
+| 12 | `ce-gate-browser` | `ce-gate-per-surface` | [frame/ports/ce-gate-browser.yaml](../../frame/ports/ce-gate-browser.yaml) |
+| 13 | `ce-gate-canvas` | `ce-gate-per-surface` | [frame/ports/ce-gate-canvas.yaml](../../frame/ports/ce-gate-canvas.yaml) |
+| 14 | `ce-gate-cli` | `ce-gate-per-surface` | [frame/ports/ce-gate-cli.yaml](../../frame/ports/ce-gate-cli.yaml) |
+| 15 | `release-hygiene` | `pr-body-pipeline-metrics` | [frame/ports/release-hygiene.yaml](../../frame/ports/release-hygiene.yaml) |
+| 16 | `post-fix-review` | `pr-body-pipeline-metrics` | [frame/ports/post-fix-review.yaml](../../frame/ports/post-fix-review.yaml) |
+| 17 | `process-retrospective` | `deferred-skill-only` | [frame/ports/process-retrospective.yaml](../../frame/ports/process-retrospective.yaml) |
+
+`auto-na` and `explicit-skip` are adapter file-name prefixes, not canonical port rows. Do not add them to this table.
+
+`frame-credit-ledger` and `pre-pr-format` are descriptive locus-category aliases from design discussion. They refer to skill-only methodology that runs alongside the ports above, are not canonical ports in `frame/ports/*.yaml`, and Spine-Runner does not directly verify them.
 
 ## Credit-Input Marker Schema
 
@@ -65,14 +109,14 @@ Pre-PR agents (`agent-pre-pr` locus category) use credit-input markers for defer
 
 ```yaml
 port: { port }
-adapter: { adapter-name }
+adapter: { adapter }
 evidence: "{human-readable evidence string}"
 ```
 
 **Field requirements**:
 
 - `port`: The frame port identifier (e.g., `experience`, `design`, `plan`).
-- `adapter`: The adapter name that produced this credit (e.g., `work-adapter`, `auto-na`).
+- `adapter`: The adapter reference that produced this credit. Spine-Runner v2 frames use the repo-relative adapter path; legacy pipeline-entry emitters may continue to use builder adapter names such as `work-adapter` or `auto-na` until migrated.
 - `evidence`: A flat quoted string describing what the agent observed (e.g., `"issue #123; plan-issue marker posted"`). The harvester passes this string verbatim as the `-Evidence` parameter to the matching `Build-*CreditRow` function. Do **not** use a nested YAML mapping here - the harvester's flat key-value parser will silently drop nested fields.
 
 **Persistence rule**: Post the credit-input marker as a GitHub issue comment immediately after the agent's completion marker comment. Code-Conductor harvests all credit-input markers at PR-creation time by reading the issue's comments and calling the matching builder functions.

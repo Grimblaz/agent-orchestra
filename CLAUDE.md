@@ -31,6 +31,7 @@ All three upstream agents share a common opening behavior — implemented in `sk
 Code-Conductor orchestration is available in Claude Code.
 
 - `/orchestrate` runs Code-Conductor inline in the parent conversation for the full pipeline from smart resume and plan handoff through implementation, validation, CE Gate, and PR readiness.
+- `/spine-run` runs Spine-Runner as the minimal frame-walking conductor once a v2 plan exists.
 
 For paused Code-Conductor work, `/orchestrate` is also the Claude resume entry point. The shared workflow still uses `/implement` language in Copilot-specific paths, but Claude does not ship a `/implement` command.
 
@@ -133,7 +134,7 @@ Run these three checks in Claude Code to audit the auto-mode boundary in your se
 
 - `agents/*.agent.md` — shared, tool-agnostic agent bodies used by both Copilot and Claude Code (capitalized filename, `.agent.md` extension)
 - `agents/{name}.md` — Claude-native subagent shells that point at the shared bodies (lowercase filename, plain `.md`). Claude registers only the lowercase shells via the explicit `agents` array in `.claude-plugin/plugin.json`; bodies are loaded by paired shells via `Read` and are intentionally excluded from `subagent_type` registration.
-- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/code-conductor`, `/review-github`, `/polish`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
+- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/code-conductor`, `/review-github`, `/polish`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
 - `skills/` — reusable methodology loaded by both platforms; each skill has `platforms/claude.md` for Claude-specific invocation details
 - `platforms/` (at skill root) — platform-specific routing notes
 
@@ -146,8 +147,10 @@ Each Claude subagent shell in `agents/*.md` may declare `model:` and `effort:` i
 | `commands/orchestrate.md` | `sonnet` | `medium` | sonnet + medium | D1: command front-end sets the primary dispatch tier |
 | `commands/code-conductor.md` | `sonnet` | `medium` | sonnet + medium | D1: command front-end sets the primary dispatch tier |
 | `commands/review-github.md` | `sonnet` | `medium` | sonnet + medium | D1: command front-end sets the primary dispatch tier |
+| `commands/spine-run.md` | `inherit` | `inherit` | dispatcher | D7: minimal frame walker inherits dispatcher tier |
 | `commands/orchestra-spine.md` | `inherit` | `inherit` | dispatcher | D4: routine inspection |
 | `agents/code-conductor.md` | `sonnet` | `medium` | sonnet + medium | D2: redundant declaration; ensures orchestrator tier even without command override |
+| `agents/spine-runner.md` | `inherit` | `inherit` | dispatcher | D7: minimal frame walker inherits dispatcher tier |
 | `agents/code-critic.md` | `opus` | `high` | opus + high | D5: adversarial review requires maximum reasoning depth |
 | `agents/code-review-response.md` | `opus` | `xhigh` | opus + xhigh | D5: judge pass requires full synthesis depth |
 | `agents/refactor-specialist.md` | `sonnet` | `high` | sonnet + high | D5: code-quality analysis benefits from extended reasoning |
@@ -173,13 +176,13 @@ Note: the user-session default (`/model` setting) never propagates to subagents 
 
 **Multi-turn `/orchestrate` boundary**: the `model: sonnet, effort: medium` override declared in `commands/orchestrate.md` applies for the duration of the command's turn. `/code-conductor` and `/review-github` have their own `sonnet + medium` command-front-end overrides that apply for their respective command turns. If a user interrupts a multi-turn `/orchestrate` session mid-flow, the override resets to the user's session model. Re-invoking `/orchestrate` re-applies the override for the new turn.
 
-**Sonnet-default trade-off**: `commands/orchestrate.md` and `agents/code-conductor.md` default to `sonnet + medium` because the majority of orchestration work (plan parsing, dispatch, coordination) does not need full reasoning depth. Quality-critical roles (adversarial review, judge synthesis) explicitly upgrade to `opus`. This is an intentional cost-vs-depth trade-off per D3.
+**Sonnet-default trade-off**: `commands/orchestrate.md` and `agents/code-conductor.md` default to `sonnet + medium` because the majority of orchestration work (plan parsing, dispatch, coordination) does not need full reasoning depth. Spine-Runner inherits the dispatcher tier because it is a minimal frame walker. Quality-critical roles (adversarial review, judge synthesis) explicitly upgrade to `opus`. This is an intentional cost-vs-depth trade-off per D3.
 
 **Override-discipline rule**: every `agents/*.md` shell must declare both `model:` and `effort:`, or neither (both-or-neither). A shell with only one field is a test failure. The Pester test at `.github/scripts/Tests/per-agent-model-routing.Tests.ps1` enforces this, the enum membership set, the inherit-comment requirement, the D5 oracle, and CLAUDE.md routing-table parity.
 
 **How to override the declared routing**:
 
-- **Inline slash commands**: when a command file declares `model:` frontmatter (currently `/orchestrate`, `/code-conductor`, and `/review-github`), that frontmatter governs the command's turn — running `/model <name>` first does *not* override it. To run any of those at a different tier, edit the corresponding `commands/*.md` frontmatter directly. The user-session `/model` setting only governs inline commands that omit `model:` frontmatter (`/experience`, `/design`, `/plan`, `/polish`).
+- **Inline slash commands**: when a command file declares concrete `model:` frontmatter (currently `/orchestrate`, `/code-conductor`, and `/review-github`), that frontmatter governs the command's turn — running `/model <name>` first does *not* override it. `/spine-run` declares `inherit` routing for D7 parity and follows the dispatcher's active tier. The user-session `/model` setting only governs inline commands that omit `model:` frontmatter (`/experience`, `/design`, `/plan`, `/polish`).
 - **Subagent dispatches** from any command follow the inheritance order above. For a process-wide override of every subagent, set the `CLAUDE_CODE_SUBAGENT_MODEL` environment variable. For a one-off override, pass `model:` on a specific `Agent` tool call. Shell frontmatter still wins over the dispatcher model, so quality-justified shells (code-critic, code-review-response, etc.) keep their declared tier even when the dispatcher's model differs.
 - **Multi-turn `/orchestrate` interruption**: if you interrupt mid-flow and the next message is not `/orchestrate`, the model falls back to the user-session default until you re-invoke `/orchestrate`, which re-applies the command frontmatter.
 

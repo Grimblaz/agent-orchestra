@@ -20,6 +20,12 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:CodeConductor = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
+        $script:FrameSpineCore = Join-Path $script:RepoRoot '.github\scripts\lib\frame-spine-core.ps1'
+
+        if (Test-Path $script:FrameSpineCore) {
+            . $script:FrameSpineCore
+        }
+
         $script:Content = (Get-Content -Path $script:CodeConductor -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
 
         $script:GetBoundedSection = {
@@ -60,6 +66,14 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
             -SectionName 'Pipeline Metrics'
 
         $script:DispatchMetricsLifecycleText = "$($script:ExecuteEachStepSection)`n$($script:PipelineMetricsSection)"
+
+        $script:WriteCommentBody = {
+            param([Parameter(Mandatory)][string]$Content)
+
+            $path = Join-Path -Path 'TestDrive:' -ChildPath "conductor-spine-$([System.Guid]::NewGuid().ToString('N')).md"
+            Set-Content -Path $path -Value $Content -Encoding utf8NoBOM
+            return $path
+        }
     }
 
     It 'requires spine-bearing specialist dispatch context to include spine, active slice, and depth-1 dependencies' {
@@ -71,6 +85,82 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
 
         $script:ExecuteEachStepSection | Should -Match '(?is)(depth-1|depth 1|one-hop).{0,220}depends-on.{0,220}slices?.{0,260}(resolved against|resolve(?:d)? from|via).{0,160}spine' `
             -Because 'spine-bearing dispatch context must include only depth-1 depends-on slices resolved against the spine'
+    }
+
+    It 'uses the spine lookup path to select the active slice from a schema v2 plan with adapters' {
+        $spine = @(
+            'spine_schema_version: 2'
+            'generated_at: 2026-05-11T10:05:00Z'
+            'coverage: complete'
+            'ports:'
+            '  implement-code: [s2]'
+            '  implement-test: [s3#terminal]'
+            'slices:'
+            '  s2:'
+            '    execution_mode: serial'
+            '    adapter: agents/Code-Smith.agent.md'
+            '    rc: GREEN code action'
+            '    ac_refs: [AC1]'
+            '    depends_on: []'
+            '    cycle: 1'
+            '  s3:'
+            '    execution_mode: serial'
+            '    adapter: agents/Test-Writer.agent.md'
+            '    rc: RED tests for v2 schema acceptance'
+            '    ac_refs: [AC1, AC5, AC7]'
+            '    depends_on: [s2]'
+            '    cycle: 1'
+            '    terminal: true'
+        ) -join "`n"
+        $s2Slice = @(
+            'id: s2'
+            'provides: [implement-code]'
+            'adapter: agents/Code-Smith.agent.md'
+            'execution_mode: serial'
+            'rc: GREEN code action'
+            'ac_refs: [AC1]'
+            'depends_on: []'
+            'cycle: 1'
+        ) -join "`n"
+        $s3Slice = @(
+            'id: s3'
+            'provides: [implement-test]'
+            'adapter: agents/Test-Writer.agent.md'
+            'execution_mode: serial'
+            'rc: RED tests for v2 schema acceptance'
+            'ac_refs: [AC1, AC5, AC7]'
+            'depends_on: [s2]'
+            'cycle: 1'
+            'terminal: true'
+        ) -join "`n"
+        $planComment = @(
+            '<!-- plan-issue-555 -->'
+            ''
+            '<!-- frame-spine'
+            $spine
+            '-->'
+            ''
+            '<!-- frame-slice'
+            $s2Slice
+            '-->'
+            ''
+            '<!-- frame-slice'
+            $s3Slice
+            '-->'
+        ) -join "`n"
+        $commentFile = & $script:WriteCommentBody -Content $planComment
+        $resolvedPath = (Resolve-Path -LiteralPath $commentFile).ProviderPath
+
+        $result = Invoke-FSCSpineLookupCli -CommentBodyPath $resolvedPath -Format Json -GeneratedAt '2026-05-11T10:05:00Z' -StepId 's3'
+
+        $result.ExitCode | Should -Be 0
+        $parsed = (($result.Lines) -join "`n") | ConvertFrom-Json
+        $parsed.status | Should -Be 'ok'
+        $parsed.step_id | Should -Be 's3'
+        $parsed.slice | Should -Match 'adapter:\s*agents/Test-Writer\.agent\.md'
+        $parsed.slice | Should -Match 'provides:\s*\[implement-test\]'
+        $parsed.slice | Should -Not -Match 'adapter:\s*agents/Code-Smith\.agent\.md'
+        $parsed.slice | Should -Not -Match 'provides:\s*\[implement-code\]'
     }
 
     It 'requires legacy no-spine plans to fall back to full-plan dispatch with a visible metrics event' {
@@ -116,7 +206,7 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
             -Because 'D8 option 1 text must begin with the prescribed Install... (Recommended prefix in the Copilot dispatch pre-flight sub-bullet'
 
         # D8 option 2 verbatim
-        $script:ExecuteEachStepSection | Should -Match ([regex]::Escape('Continue without — S4 cost-parity scenario will be INCONCLUSIVE for this PR')) `
+        $script:ExecuteEachStepSection | Should -Match 'Continue without\s+\u2014\s+S4 cost-parity scenario will be INCONCLUSIVE for this PR' `
             -Because 'D8 option 2 text must be present verbatim in the Copilot dispatch pre-flight sub-bullet'
 
         # Session-scoped suppression key
