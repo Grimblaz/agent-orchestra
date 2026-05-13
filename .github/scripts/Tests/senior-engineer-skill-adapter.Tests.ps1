@@ -289,6 +289,13 @@ ac-refs: [AC10]
 
             $content | Should -Match $pattern -Because 'the synthetic D11(b) fixture must be represented by documented dispatch-table/body text, not live Agent dispatch'
         }
+
+        It 'documents absent executor defaulting for single-variant work adapters' {
+            $content = & $script:ReadText -Path $script:SpineRunnerPath
+
+            $content | Should -Match 'absent `executor:` or `executor: agents/\*\.agent\.md`' -Because 'Spine-Runner must not require planners to repeat the default Senior Engineer executor on every work-adapter slice'
+            $content | Should -Match 'When `executor:` is absent, use `agents/Senior-Engineer\.agent\.md`' -Because 'the invocation contract must match plan-authoring and frame-architecture defaulting rules'
+        }
     }
 
     Context 'cross-document enum string equality' {

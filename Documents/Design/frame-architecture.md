@@ -265,7 +265,8 @@ Port-filling skills and agents declare `provides:`. Supporting skills loaded onl
 | Adapter type | Declaration location |
 |---|---|
 | Agent-owned work adapter | Canonical `agents/<Name>.agent.md` |
-| Skill-owned single work adapter | `skills/<skill>/SKILL.md` |
+| Legacy skill-owned single work adapter | `skills/<skill>/SKILL.md` |
+| Skill-as-adapter single work adapter | `skills/<skill>/adapters/<port>-adapter.md` |
 | Skill-owned variant or work file | `skills/<skill>/adapters/<variant>.md` |
 | Auto-N/A adapter | `skills/<skill>/adapters/auto-na-<port>.md` |
 | Explicit-skip adapter | `skills/<skill>/adapters/explicit-skip-<port>.md` |
