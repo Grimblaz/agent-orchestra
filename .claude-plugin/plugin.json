@@ -12,6 +12,7 @@
     "./agents/process-review.md",
     "./agents/refactor-specialist.md",
     "./agents/research-agent.md",
+    "./agents/senior-engineer.md",
     "./agents/solution-designer.md",
     "./agents/specification.md",
     "./agents/spine-runner.md",
