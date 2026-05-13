@@ -30,6 +30,7 @@ Describe 'Claude shell body-resolution contract' {
             [pscustomobject]@{ ShellName = 'process-review'; BodyFile = 'Process-Review.agent.md' }
             [pscustomobject]@{ ShellName = 'refactor-specialist'; BodyFile = 'Refactor-Specialist.agent.md' }
             [pscustomobject]@{ ShellName = 'research-agent'; BodyFile = 'Research-Agent.agent.md' }
+            [pscustomobject]@{ ShellName = 'senior-engineer'; BodyFile = 'Senior-Engineer.agent.md' }
             [pscustomobject]@{ ShellName = 'solution-designer'; BodyFile = 'Solution-Designer.agent.md' }
             [pscustomobject]@{ ShellName = 'specification'; BodyFile = 'Specification.agent.md' }
             [pscustomobject]@{ ShellName = 'spine-runner'; BodyFile = 'Spine-Runner.agent.md' }
@@ -100,7 +101,7 @@ Describe 'Claude shell body-resolution contract' {
         $script:GeneralizedCanonicalParagraph = $script:CanonicalBodyLoadParagraph.Replace($script:CanonicalBodyFile, '{Name}.agent.md')
     }
 
-    It 'discovers exactly the 15 Claude shells covered by the body-resolution contract' {
+    It 'discovers exactly the 16 Claude shells covered by the body-resolution contract' {
         $expectedShellNames = @($script:ExpectedShells.ShellName | Sort-Object)
         $actualShellNames = @(
             Get-ChildItem -Path $script:AgentsDirectory -Filter '*.md' -File |
@@ -109,7 +110,7 @@ Describe 'Claude shell body-resolution contract' {
                 Sort-Object
         )
 
-        $actualShellNames.Count | Should -Be 15 -Because 'the D1 contract must cover all 15 Claude shell wrappers'
+        $actualShellNames.Count | Should -Be 16 -Because 'the D1 contract must cover all 16 Claude shell wrappers'
         $actualShellNames | Should -Be $expectedShellNames
     }
 
