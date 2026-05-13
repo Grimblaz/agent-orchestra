@@ -23,9 +23,9 @@ A multi-agent workflow system that orchestrates AI-assisted software development
    ```
 
 2. **Install** — In the Extensions view (`Ctrl+Shift+X`), search `@agentPlugins agent-orchestra` and install.
-3. **Use** — All 15 agents and the shared skill library are immediately available in VS Code Chat.
+3. **Use** — The 16-agent payload and shared skill library are immediately available in VS Code Chat.
 
-**What's included in the repo plugin payload**: 15 agents, the shared skill library, and 14 command files under `commands/` (`/code-conductor`, `/design`, `/experience`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/plan`, `/polish`, `/review-github`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`). VS Code currently ignores the plugin `commands` field; Claude Code and CLI consumers use it.
+**What's included in the repo plugin payload**: 16 agents, the shared skill library, and 14 command files under `commands/` (`/code-conductor`, `/design`, `/experience`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/plan`, `/polish`, `/review-github`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`). VS Code currently ignores the plugin `commands` field; Claude Code and CLI consumers use it.
 
 **What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo. Plugin-distributed hooks are also not active when you only point VS Code at a clone via `chat.agentFilesLocations`; deterministic `SessionStart` cleanup and Claude `PostToolUse` release-hygiene prompts require an actual plugin install.
 
@@ -40,11 +40,11 @@ Claude Code loads agents and skills from `.claude-plugin/plugin.json`. Install v
 /plugin install agent-orchestra@agent-orchestra
 ```
 
-All 15 agents and the shared skill library are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (`agents` uses an explicit registration whitelist; `skills` auto-discovers).
+All 16 agents and the shared skill library are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (`agents` uses an explicit registration whitelist; `skills` auto-discovers).
 
 This is zero-config for consumer repositories: after marketplace registration and plugin install, Claude Code loads the shared agent bodies and skills from its plugin cache. The repository using the plugin does not need a local `agents/` directory.
 
-The plugin payload includes all 15 shared agent definitions and the shared skill library. The Claude-specific command and specialist surface is outlined below.
+The plugin payload includes all 16 shared agent definitions and the shared skill library. The Claude-specific command and specialist surface is outlined below.
 
 ### Upstream Agents In Claude Code
 
@@ -91,6 +91,7 @@ Claude Code includes the implementation specialists for Code-Conductor dispatch.
 - `UI-Iterator` — screenshot-driven UI polish and visual refinement
 - `Research-Agent` — evidence-driven technical research and recommendation building
 - `Specification` — formal specification drafting and refinement
+- `Senior-Engineer` — general implementation executor for planner-designated skill adapters
 
 `/polish` is the direct slash-command entry point for UI-Iterator work.
 
@@ -209,13 +210,13 @@ Then, once the design is in the issue:
 | **Code-Review-Response** | Judges review feedback, scores findings, and emits categorization |
 | **UI-Iterator** | Systematic UI polish through screenshot-based iteration |
 
-### Internal agents (called automatically by Code-Conductor)
+### Internal agents and runners
 
-These agents are hidden from the picker (`user-invocable: false`) and are used automatically during `@Code-Conductor` workflows:
+These agents are hidden from the picker (`user-invocable: false`) and are used automatically during orchestration workflows:
 
-Code-Smith, Test-Writer, Refactor-Specialist, Doc-Keeper, Research-Agent, Process-Review, Specification
+Code-Smith, Test-Writer, Refactor-Specialist, Doc-Keeper, Research-Agent, Process-Review, Specification, Spine-Runner, Senior-Engineer
 
-> See `agents/` (repo root) for full definitions of all 15 agents.
+> See `agents/` (repo root) for full definitions of all 16 agents.
 
 ---
 

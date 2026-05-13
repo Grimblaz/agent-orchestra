@@ -66,7 +66,7 @@ These rules apply to each slice as the runner advances through the frozen ordere
 | `skills/*/SKILL.md` | inline or absent | inline load | Existing productive skill path unchanged |
 | `skills/{skill}/adapters/{adapter}.md` | inline or absent | inline load | Existing predicate and legacy adapter path unchanged |
 | `skills/*/adapters/{port}-adapter.md` | absent or `agents/*.agent.md` | Agent tool dispatch | Single-variant work adapter path; absent executor defaults to `agents/Senior-Engineer.agent.md`; pass adapter path as adapter/port-skill input |
-| `skills/adversarial-review/adapters/standard.md` | `agents/Senior-Engineer.agent.md` | halt-return | reason: adversarial-independence-required |
+| `skills/adversarial-review/adapters/*.md` | `agents/Senior-Engineer.agent.md` | halt-return | reason: adversarial-independence-required; plan validation rejects explicit pairings before dispatch |
 
 ## Evidence Verification
 

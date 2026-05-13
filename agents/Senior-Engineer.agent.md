@@ -60,9 +60,11 @@ Use `uncertainty` when required inputs are missing, `confusion` when inputs conf
 
 Halt when the slice's adapter path matches the adversarial-pattern regex and the executor is the default Senior Engineer; emit halt-return with reason: adversarial-independence-required
 
-Adversarial-pattern regex: `skills/*/adapters/(review|adversarial|critique|challenge)*-adapter.md`.
+Adversarial-pattern regex: `^skills/adversarial-review/adapters/[^/]+\.md$|^skills/[^/]+/adapters/(review|adversarial|critique|challenge)[^/]*-adapter\.md$`.
 
-Known brittleness and follow-up note: the pattern is an issue #552 scaffold for default-executor protection, not a complete policy engine. Future work should replace the glob-like regex with a declarative adapter capability or independence flag when the adapter registry matures.
+Structural plan validation rejects explicit `agents/Senior-Engineer.agent.md` pairing with `skills/adversarial-review/adapters/*.md` paths before dispatch. The runtime guard remains a backstop for malformed or pre-validation dispatches.
+
+Known brittleness and follow-up note: the pattern is an issue #552 scaffold for default-executor protection, not a complete policy engine. Future work should replace the regex with a declarative adapter capability or independence flag when the adapter registry matures.
 
 ## Platform-specific invocation
 

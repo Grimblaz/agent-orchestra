@@ -247,6 +247,7 @@ function ConvertFrom-FVPlanSliceBlock {
     $acRefsRaw = Get-FVPlanScalarField -Block $Block -Names @('ac-refs', 'ac_refs')
     $coverage = Get-FVPlanScalarField -Block $Block -Names @('coverage')
     $executor = Get-FVPlanScalarField -Block $Block -Names @('executor')
+    $adapter = Get-FVPlanScalarField -Block $Block -Names @('adapter')
 
     $provides = if ($null -eq $providesRaw) { [string[]]@() } else { ConvertFrom-FVInlineList -Value $providesRaw }
     if ($null -eq $provides) { $provides = [string[]]@() }
@@ -267,6 +268,7 @@ function ConvertFrom-FVPlanSliceBlock {
         AcRefs            = [string[]]$acRefs
         Coverage          = if ($null -eq $coverage) { '' } else { $coverage }
         Executor          = if ($null -eq $executor) { '' } else { $executor }
+        Adapter           = if ($null -eq $adapter) { '' } else { $adapter }
         IsExploratory     = [bool]$isExploratory
         ExploratoryReason = [string]$exploratoryReason
     }
@@ -282,6 +284,22 @@ function Test-FVExecutorValue {
 
     # TODO(follow-up): define executor: none semantics before accepting `none` here.
     return ($normalized -cmatch '^agents/[^/]+\.agent\.md$')
+}
+
+function Test-FVExecutorAdapterCompatibility {
+    param(
+        [AllowNull()][string]$Executor,
+        [AllowNull()][string]$Adapter
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Executor) -or [string]::IsNullOrWhiteSpace($Adapter)) { return $true }
+
+    $normalizedExecutor = $Executor.Trim() -replace '\\', '/'
+    $normalizedAdapter = $Adapter.Trim() -replace '\\', '/'
+
+    if ($normalizedExecutor -cne 'agents/Senior-Engineer.agent.md') { return $true }
+
+    return ($normalizedAdapter -cnotmatch '^skills/adversarial-review/adapters/[^/]+\.md$')
 }
 
 function ConvertFrom-FVPlanSpineBlock {
@@ -406,6 +424,10 @@ function Invoke-FVPlanValidate {
     foreach ($slice in $slices) {
         if (-not (Test-FVExecutorValue -Executor $slice.Executor)) {
             $structuralViolations.Add("step $($slice.StepId) has invalid executor '$($slice.Executor)'; expected absent executor, agents/*.agent.md path, or inline. executor: none is deferred.") | Out-Null
+        }
+
+        if (-not (Test-FVExecutorAdapterCompatibility -Executor $slice.Executor -Adapter $slice.Adapter)) {
+            $structuralViolations.Add("step $($slice.StepId) pairs adversarial-review adapter '$($slice.Adapter)' with default Senior Engineer executor; use an independent adversarial reviewer executor or inline review path.") | Out-Null
         }
 
         if (@($slice.Provides).Count -gt 0) { continue }

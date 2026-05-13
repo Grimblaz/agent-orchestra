@@ -24,6 +24,9 @@ Describe 'Issue #552 Senior Engineer skill-as-adapter contracts (grep/YAML/valid
         $script:ClaudeMdPath = Join-Path $script:RepoRoot 'CLAUDE.md'
         $script:PlanAuthoringPath = Join-Path $script:RepoRoot 'skills\plan-authoring\SKILL.md'
         $script:FrameArchitecturePath = Join-Path $script:RepoRoot 'Documents\Design\frame-architecture.md'
+        $script:ImplementCodeAdapterPath = Join-Path $script:RepoRoot 'skills\implementation-discipline\adapters\implement-code-adapter.md'
+        $script:AdversarialAdaptersPath = Join-Path $script:RepoRoot 'skills\adversarial-review\adapters'
+        $script:CanonicalHandshakeShellPath = Join-Path $script:RepoRoot 'agents\code-critic.md'
 
         . $script:FrameValidateLibPath
         . $script:LedgerCorePath
@@ -94,10 +97,25 @@ Describe 'Issue #552 Senior Engineer skill-as-adapter contracts (grep/YAML/valid
             return ([System.IO.Path]::GetRelativePath($script:RepoRoot, $Path) -replace '\\', '/')
         }
 
+        $script:GetSectionBody = {
+            param(
+                [Parameter(Mandatory)][AllowEmptyString()][string]$Content,
+                [Parameter(Mandatory)][string]$Heading
+            )
+
+            $match = [regex]::Match($Content, '(?ms)^' + [regex]::Escape($Heading) + '\s*\n(?<body>.*?)(?=^## |\z)')
+            if (-not $match.Success) { return '' }
+            return $match.Groups['body'].Value.Trim()
+        }
+
         $script:GetPlanComment = {
-            param([AllowNull()][string]$ExecutorLine)
+            param(
+                [AllowNull()][string]$ExecutorLine,
+                [AllowNull()][string]$AdapterLine
+            )
 
             $sliceFields = [System.Collections.Generic.List[string]]::new()
+            if (-not [string]::IsNullOrWhiteSpace($AdapterLine)) { $sliceFields.Add($AdapterLine) | Out-Null }
             $sliceFields.Add('provides: [implement-code]') | Out-Null
             if (-not [string]::IsNullOrWhiteSpace($ExecutorLine)) { $sliceFields.Add($ExecutorLine) | Out-Null }
             $sliceFields.Add('depends-on: []') | Out-Null
@@ -158,6 +176,17 @@ Describe 'Issue #552 Senior Engineer skill-as-adapter contracts (grep/YAML/valid
             $frontmatter = & $script:GetFrontmatter -Content $content
 
             (& $script:GetFrontmatterList -Frontmatter $frontmatter -FieldName 'provides') | Should -BeNullOrEmpty
+        }
+
+        It 'runs the canonical Claude environment handshake before loading the Senior Engineer shared body' {
+            $content = & $script:ReadText -Path $script:SeniorEngineerShellPath
+            $canonicalContent = & $script:ReadText -Path $script:CanonicalHandshakeShellPath
+
+            $stepZero = & $script:GetSectionBody -Content $content -Heading '## Step 0: Environment Handshake Verification'
+            $canonicalStepZero = & $script:GetSectionBody -Content $canonicalContent -Heading '## Step 0: Environment Handshake Verification'
+
+            $stepZero | Should -Be $canonicalStepZero -Because 'Senior Engineer is tree-capable and must use the established Claude subagent handshake before role work'
+            $content.IndexOf('## Step 0: Environment Handshake Verification') | Should -BeLessThan $content.IndexOf('## Shared methodology')
         }
     }
 
@@ -238,6 +267,23 @@ ac-refs: [AC10]
             $withExecutor.Executor | Should -Be 'agents/Senior-Engineer.agent.md'
         }
 
+        It 'parses adapter from frame-slice blocks while keeping it optional' {
+            $withoutAdapter = ConvertFrom-FVPlanSliceBlock -Block @'
+id: s1
+provides: [implement-code]
+ac-refs: [AC10]
+'@
+            $withAdapter = ConvertFrom-FVPlanSliceBlock -Block @'
+id: s1
+adapter: skills/implementation-discipline/adapters/implement-code-adapter.md
+provides: [implement-code]
+ac-refs: [AC10]
+'@
+
+            $withoutAdapter.Adapter | Should -Be ''
+            $withAdapter.Adapter | Should -Be 'skills/implementation-discipline/adapters/implement-code-adapter.md'
+        }
+
         It 'accepts only absent executor, agents/*.agent.md paths, and inline' -ForEach @(
             @{ Case = 'absent'; Executor = $null; Expected = $true }
             @{ Case = 'empty'; Executor = ''; Expected = $true }
@@ -274,6 +320,31 @@ ac-refs: [AC10]
             (@($result.Results).Detail -join "`n") | Should -Match 'invalid executor'
         }
 
+        It 'rejects explicit Senior Engineer executor pairing for every adversarial-review adapter path' {
+            $adapterPaths = @(
+                Get-ChildItem -LiteralPath $script:AdversarialAdaptersPath -Filter '*.md' -File |
+                    Sort-Object -Property Name |
+                    ForEach-Object { & $script:GetRelativePath -Path $_.FullName }
+            )
+
+            $adapterPaths | Should -Not -BeNullOrEmpty
+
+            foreach ($adapterPath in $adapterPaths) {
+                $comment = & $script:GetPlanComment -ExecutorLine 'executor: agents/Senior-Engineer.agent.md' -AdapterLine "adapter: $adapterPath"
+                $result = Invoke-FrameValidate -Mode plan -CommentText $comment
+
+                $result.ExitCode | Should -Not -Be 0 -Because "$adapterPath must not be executable by the default Senior Engineer"
+                (@($result.Results).Detail -join "`n") | Should -Match 'adversarial-review adapter'
+            }
+        }
+
+        It 'keeps explicit Senior Engineer executor valid for non-adversarial work adapters' {
+            $comment = & $script:GetPlanComment -ExecutorLine 'executor: agents/Senior-Engineer.agent.md' -AdapterLine 'adapter: skills/implementation-discipline/adapters/implement-code-adapter.md'
+            $result = Invoke-FrameValidate -Mode plan -CommentText $comment
+
+            $result.ExitCode | Should -Be 0
+        }
+
         It 'documents the deferred executor none semantics in the validator source' {
             $validatorContent = & $script:ReadText -Path $script:FrameValidateLibPath
 
@@ -285,7 +356,7 @@ ac-refs: [AC10]
 
         It 'maps adversarial adapters plus default Senior Engineer executor to halt-return without live dispatch' {
             $content = & $script:ReadText -Path $script:SpineRunnerPath
-            $pattern = '(?is)skills/adversarial-review/adapters/standard\.md.*agents/Senior-Engineer\.agent\.md.*halt-return.*adversarial-independence-required|agents/Senior-Engineer\.agent\.md.*skills/adversarial-review/adapters/standard\.md.*halt-return.*adversarial-independence-required'
+            $pattern = '(?is)skills/adversarial-review/adapters/\*\.md.*agents/Senior-Engineer\.agent\.md.*halt-return.*adversarial-independence-required|agents/Senior-Engineer\.agent\.md.*skills/adversarial-review/adapters/\*\.md.*halt-return.*adversarial-independence-required'
 
             $content | Should -Match $pattern -Because 'the synthetic D11(b) fixture must be represented by documented dispatch-table/body text, not live Agent dispatch'
         }
@@ -318,6 +389,13 @@ ac-refs: [AC10]
     }
 
     Context 'Senior Engineer credit-emission schema forward compatibility' {
+
+        It 'documents terminal-step credit emission with -Step while preserving spine-omitted legacy behavior' {
+            $content = & $script:ReadText -Path $script:ImplementCodeAdapterPath
+
+            $content | Should -Match '-Step \{terminal-step-id\}' -Because 'spine-backed terminal slices must pass the terminal step to the implement-code credit builder'
+            $content | Should -Match 'spine-omitted|legacy' -Because 'adapter guidance must preserve existing semantics when no terminal step id is available'
+        }
 
         It 'documents the same SE credit row keys as Build-ImplementCodeCreditRow' {
             # Cross-link #557: this guards the future credit-schema migration while SE remains additive.

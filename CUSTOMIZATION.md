@@ -8,7 +8,7 @@ This template supports two distribution models:
 
 | Model | How to Install | What You Get |
 |-------|---------------|--------------|
-| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 15 agents, a shared skill library, and 14 shipped command files (`/code-conductor`, `/design`, `/experience`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/polish`, `/review-github`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`) — instantly available |
+| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 16 agents, a shared skill library, and 14 shipped command files (`/code-conductor`, `/design`, `/experience`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/polish`, `/review-github`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`) — instantly available |
 | **Clone/Fork** | `git clone` or use as template | Everything above PLUS editable prompts, project templates, examples, and any repo-local instruction files you choose to keep under `.github/instructions/` |
 
 ### Plugin Installation
@@ -43,7 +43,7 @@ This template supports two distribution models:
 
 | Feature | Plugin | What you need |
 |---------|--------|---------------|
-| All 15 agents in chat picker | ✅ Works | Nothing |
+| 16 shared agent definitions in the plugin payload | ✅ Works | Nothing |
 | Shared skill library in Configure Skills menu | ✅ Works | Nothing |
 | 14 shipped command files (`/code-conductor`, `/design`, `/experience`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/polish`, `/review-github`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`) | ✅ Works | Nothing |
 | Shared workflow skills (`safe-operations`, `step-commit`, etc.) | ✅ Works | Nothing |
