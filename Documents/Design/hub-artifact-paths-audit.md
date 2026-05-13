@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 126b2a550aedda32331536760870319574845654
-generated-at: 2026-05-13T06:43:32Z
+last-verified: d13d53bd69c27a6eaa21d666278ac8ee2ce9ee81
+generated-at: 2026-05-13T18:18:04Z
 -->
 
 ## Purpose
@@ -31,7 +31,7 @@ This audit document is produced and kept current by the following pipeline:
 
 (d) **Pester drift gate** (Step 5 test: `.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1`): asserts that `-Diff` reports `added: 0; removed: 0; uncategorized: 0`, blocking merges when the inventory diverges from the classification.
 
-(e) **Pester CI workflow** (Step 4: `.github/workflows/pester.yml`): runs the full Pester suite on every push and pull request, including the extraction grammar tests and drift gate.
+(e) **Pester CI workflow** (Step 4: `.github/workflows/pester.yml`): runs the full Pester suite on every pull request, including the extraction grammar tests and drift gate.
 
 (f) **Reproduction recipes for CE Gate**:
 
@@ -120,7 +120,7 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **experience**: wasted-tool-call
 - **examples**:
   - `.claude/.state/release-hygiene-{slug}.json`
-- **notes**: Claude runtime state files written by the plugin-release-hygiene hook. Session-scoped; not distribution artifacts. Placeholders like {slug} are normalized per D2a. Attempting to resolve from plugin cache is a wasted tool call.
+- **notes**: Claude runtime state files written by the plugin-release-hygiene hook. Session-scoped; not distribution artifacts. Placeholders like {slug} are session-scoped runtime tokens; only the D2a eight ({ID}, {PR}, {NUMBER}, {name}, {port}, {ISSUE_NUMBER}, {N}, {Surface}) are normalized for path-family clustering. Attempting to resolve from plugin cache is a wasted tool call.
 
 ### `.claude/settings.json`
 
@@ -279,7 +279,7 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `/memories/session/plan-issue-{ID}.md`
   - `/memories/session/design-issue-{ID}.md`
   - `/memories/session/review-state-{ID}.md`
-- **notes**: Claude Code session-only memory files written during a live session. Not distribution artifacts and not committed to any repo. Placeholders {id}, {ID}, {N}, {scope}, {primary}, {secondary1}, {secondaryN} are D2a-normalized. Any agent that tries to Read a path in this family when no session is active performs a wasted tool call.
+- **notes**: Claude Code session-only memory files written during a live session. Not distribution artifacts and not committed to any repo. Placeholders {ID} and {N} are in the D2a set; {id} (lowercase), {scope}, {primary}, {secondary1}, {secondaryN} are session-scoped runtime tokens, not D2a-normalized. Only the canonical eight ({ID}, {PR}, {NUMBER}, {name}, {port}, {ISSUE_NUMBER}, {N}, {Surface}) are normalized for path-family clustering. Any agent that tries to Read a path in this family when no session is active performs a wasted tool call.
 
 ### `agents/*.agent.md`
 
@@ -531,7 +531,7 @@ added: N; removed: N; uncategorized: N
 
 A result of `added: 0; removed: 0; uncategorized: 0` means the classification covers all inventory paths. Any non-zero value identifies the gap.
 
-(b) **Pester drift gate**: the Pester test `.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1` runs `-Diff` and asserts that all three counts are zero. It runs as part of the CI workflow at `.github/workflows/pester.yml` on every push and pull request.
+(b) **Pester drift gate**: the Pester test `.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1` runs `-Diff` and asserts that all three counts are zero. It runs as part of the CI workflow at `.github/workflows/pester.yml` on every pull request.
 
 (c) **`<!-- audit-meta -->` header**: the `last-verified` SHA in the audit-meta comment block at the top of this file records the HEAD commit at the time this document was last regenerated. Compare it against `git rev-parse HEAD` to see whether a regeneration pass has occurred since the last code change.
 

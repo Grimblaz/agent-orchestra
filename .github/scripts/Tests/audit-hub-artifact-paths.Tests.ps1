@@ -333,28 +333,53 @@ Describe 'audit-hub-artifact-paths extraction grammar (AC4)' {
             )
         }
 
-        It 'normalises placeholder <Placeholder> before family clustering' -ForEach @(
-            @{ Placeholder = '{ID}' },
-            @{ Placeholder = '{PR}' },
-            @{ Placeholder = '{NUMBER}' },
-            @{ Placeholder = '{name}' },
-            @{ Placeholder = '{port}' },
-            @{ Placeholder = '{ISSUE_NUMBER}' },
-            @{ Placeholder = '{N}' },
-            @{ Placeholder = '{Surface}' }
+        It 'normalises placeholder <Placeholder> to * before family clustering' -ForEach @(
+            @{ Placeholder = '{ID}';           PathWithPlaceholder = 'memories/session/plan-issue-{ID}.md' },
+            @{ Placeholder = '{PR}';           PathWithPlaceholder = 'memories/session/review-state-{PR}.md' },
+            @{ Placeholder = '{NUMBER}';       PathWithPlaceholder = 'memories/session/issue-{NUMBER}.md' },
+            @{ Placeholder = '{name}';         PathWithPlaceholder = 'skills/{name}/SKILL.md' },
+            @{ Placeholder = '{port}';         PathWithPlaceholder = 'frame/ports/{port}.yaml' },
+            @{ Placeholder = '{ISSUE_NUMBER}'; PathWithPlaceholder = 'memories/session/design-issue-{ISSUE_NUMBER}.md' },
+            @{ Placeholder = '{N}';            PathWithPlaceholder = 'examples/example-{N}.md' },
+            @{ Placeholder = '{Surface}';      PathWithPlaceholder = 'skills/ce-gate-{Surface}/SKILL.md' }
         ) {
-            param($Placeholder)
+            param($Placeholder, $PathWithPlaceholder)
             if (-not (Test-Path $script:ScriptPath)) {
                 throw "Missing script: $($script:ScriptPath)"
             }
-            # Confirm the script accepts --normalize-placeholders or equivalent mode
-            # that strips/normalises these tokens before clustering. When the script
-            # exists, invoke with a synthetic path string containing the placeholder
-            # and verify it maps to the base family, not a distinct entry per instance.
-            $output = & pwsh -NoProfile -NonInteractive -File $script:ScriptPath --help 2>&1
-            # Until implemented, the throw above will fire first; this assertion is
-            # the post-implementation contract.
-            $output | Should -Not -BeNullOrEmpty
+
+            # Extract the $D2aPlaceholders regex array and Normalize-Placeholders
+            # function body from the production script source. This reads the ACTUAL
+            # patterns in use rather than a hardcoded test copy, so any change to the
+            # script's placeholder list is immediately visible here.
+            $scriptContent = Get-Content -Path $script:ScriptPath -Raw
+
+            # Locate the $D2aPlaceholders constant block in the script source.
+            $constMatch = [regex]::Match(
+                $scriptContent,
+                '(?s)\$D2aPlaceholders\s*=\s*@\(\s*(.*?)\s*\)',
+                [System.Text.RegularExpressions.RegexOptions]::Singleline
+            )
+            $constMatch.Success | Should -BeTrue `
+                -Because 'production script must define $D2aPlaceholders'
+
+            # Reconstruct the array expression and evaluate it to get the regex strings.
+            $d2aRegexPatterns = Invoke-Expression "@($($constMatch.Groups[1].Value))"
+
+            # Apply the same normalization logic as Normalize-Placeholders in the script:
+            #   foreach placeholder regex, replace with '*'
+            $normalized = $PathWithPlaceholder
+            foreach ($ph in $d2aRegexPatterns) {
+                $normalized = [regex]::Replace($normalized, $ph, '*')
+            }
+
+            # The normalized path_family must contain '*' — the placeholder was replaced.
+            $normalized | Should -Match '\*' `
+                -Because "placeholder $Placeholder in '$PathWithPlaceholder' must be normalized to '*' before family clustering"
+
+            # The original placeholder literal must not survive in the path_family.
+            $normalized | Should -Not -Match ([regex]::Escape($Placeholder)) `
+                -Because "literal $Placeholder must not remain in the path_family after normalization"
         }
 
         It 'all eight D2a placeholders are covered by the normalisation set' {

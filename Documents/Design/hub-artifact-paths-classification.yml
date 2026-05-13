@@ -293,8 +293,10 @@ families:
     examples:
       - .claude/.state/release-hygiene-{slug}.json
     notes: "Claude runtime state files written by the plugin-release-hygiene hook.
-      Session-scoped; not distribution artifacts. Placeholders like {slug} are normalized
-      per D2a. Attempting to resolve from plugin cache is a wasted tool call."
+      Session-scoped; not distribution artifacts. Placeholders like {slug} are
+      session-scoped runtime tokens; only the D2a eight ({ID}, {PR}, {NUMBER}, {name},
+      {port}, {ISSUE_NUMBER}, {N}, {Surface}) are normalized for path-family clustering.
+      Attempting to resolve from plugin cache is a wasted tool call."
 
   "/memories/session/*.md":
     claude_resolves: none
@@ -306,10 +308,12 @@ families:
       - /memories/session/design-issue-{ID}.md
       - /memories/session/review-state-{ID}.md
     notes: "Claude Code session-only memory files written during a live session. Not
-      distribution artifacts and not committed to any repo. Placeholders {id}, {ID}, {N},
-      {scope}, {primary}, {secondary1}, {secondaryN} are D2a-normalized. Any agent that
-      tries to Read a path in this family when no session is active performs a wasted
-      tool call."
+      distribution artifacts and not committed to any repo. Placeholders {ID} and {N} are
+      in the D2a set; {id} (lowercase), {scope}, {primary}, {secondary1}, {secondaryN}
+      are session-scoped runtime tokens, not D2a-normalized. Only the canonical eight
+      ({ID}, {PR}, {NUMBER}, {name}, {port}, {ISSUE_NUMBER}, {N}, {Surface}) are
+      normalized for path-family clustering. Any agent that tries to Read a path in this
+      family when no session is active performs a wasted tool call."
 
   ".copilot-tracking/*.yml":
     claude_resolves: none

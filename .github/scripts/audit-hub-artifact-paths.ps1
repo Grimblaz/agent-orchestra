@@ -103,7 +103,7 @@ $ExtPattern = '(?:' + ($AllowedExtensions -join '|') + ')'
 
 # Path body pattern: characters allowed in a file path token
 # Must contain at least one slash to be considered a path
-$PathBodyPattern = "[A-Za-z0-9._/{\}-]+"
+$PathBodyPattern = "[A-Za-z0-9._/{\\}*-]+"
 
 # Regex: backtick-fenced inline code whose body looks like a path with allowed ext
 $MarkdownPathRegex = [regex]"``($PathBodyPattern\.(?:$ExtPattern))``"
@@ -182,6 +182,9 @@ function Test-IsExtractablePath {
 
     # Must contain a slash — bare filenames without a path separator are not paths
     if ($Candidate -notmatch '/') { return $false }
+
+    # Exclude glob-only patterns starting with ** (tool capability globs, not real paths)
+    if ($Candidate -match '^\*\*') { return $false }
 
     # Must end with an allowed extension
     if ($Candidate -notmatch "\.($ExtPattern)$") { return $false }
@@ -495,7 +498,7 @@ function Get-PathFamilyCandidates {
                 # A bare path like "bdd-scenarios/SKILL.md" or "session-startup/SKILL.md"
                 # These are bare skill-relative SKILL.md references; they map to skills/*/SKILL.md.
                 # Also try "skills/*/{bare}" for completeness.
-                if ($stripped -match '/SKILL\.md$' -or $stripped -match '/SKILL\.md$') {
+                if ($stripped -match '/SKILL\.md$') {
                     $candidates.Add('skills/*/SKILL.md')
                 }
                 $candidates.Add("skills/*/$stripped")
@@ -715,7 +718,7 @@ function Invoke-RenderMode {
         '',
         "(d) **Pester drift gate** (Step 5 test: ${BT}.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1${BT}): asserts that ${BT}-Diff${BT} reports ${BT}added: 0; removed: 0; uncategorized: 0${BT}, blocking merges when the inventory diverges from the classification.",
         '',
-        "(e) **Pester CI workflow** (Step 4: ${BT}.github/workflows/pester.yml${BT}): runs the full Pester suite on every push and pull request, including the extraction grammar tests and drift gate.",
+        "(e) **Pester CI workflow** (Step 4: ${BT}.github/workflows/pester.yml${BT}): runs the full Pester suite on every pull request, including the extraction grammar tests and drift gate.",
         '',
         "(f) **Reproduction recipes for CE Gate**:",
         '',
@@ -849,7 +852,7 @@ function Invoke-RenderMode {
         '',
         "A result of ${BT}added: 0; removed: 0; uncategorized: 0${BT} means the classification covers all inventory paths. Any non-zero value identifies the gap.",
         '',
-        "(b) **Pester drift gate**: the Pester test ${BT}.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1${BT} runs ${BT}-Diff${BT} and asserts that all three counts are zero. It runs as part of the CI workflow at ${BT}.github/workflows/pester.yml${BT} on every push and pull request.",
+        "(b) **Pester drift gate**: the Pester test ${BT}.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1${BT} runs ${BT}-Diff${BT} and asserts that all three counts are zero. It runs as part of the CI workflow at ${BT}.github/workflows/pester.yml${BT} on every pull request.",
         '',
         "(c) **${BT}<!-- audit-meta -->${BT} header**: the ${BT}last-verified${BT} SHA in the audit-meta comment block at the top of this file records the HEAD commit at the time this document was last regenerated. Compare it against ${BT}git rev-parse HEAD${BT} to see whether a regeneration pass has occurred since the last code change."
     ) -join "`n"
