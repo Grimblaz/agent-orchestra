@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 0cc04b7eb326c401c0b577f25b726b72f3cc5940
-generated-at: 2026-05-13T06:34:14Z
+last-verified: 126b2a550aedda32331536760870319574845654
+generated-at: 2026-05-13T06:43:32Z
 -->
 
 ## Purpose
@@ -38,6 +38,32 @@ This audit document is produced and kept current by the following pipeline:
 **Hub-repo verification** (maintainers): from the cloned agent-orchestra working tree, run `pwsh .github/scripts/audit-hub-artifact-paths.ps1 -Diff`. A result of `added: 0; removed: 0; uncategorized: 0` confirms the classification covers all inventory paths in the current working tree.
 
 **Consumer scratch-repo verification** (downstream consumers): in a fresh directory that contains only a consumer project (no agent-orchestra source tree), install the plugin via `claude plugin install agent-orchestra@agent-orchestra`. Then obtain the script from the plugin cache (path shown by `cat ~/.claude/plugins/installed_plugins.json` → `installPath`) and run it from your consumer repo root: `pwsh <installPath>/.github/scripts/audit-hub-artifact-paths.ps1 -Diff`. A zero-result output confirms the installed plugin cache matches the current classification.
+
+(g) **Verification Log** (CE Gate s9, issue [#243](https://github.com/Grimblaz/agent-orchestra/issues/243), 2026-05-13): 12-path spot-check executed against plugin cache v2.13.0. All 12 checks PASS.
+
+| Check | Family | claude_resolves / copilot_resolves | Mechanism | Result |
+|---|---|---|---|---|
+| C1 | `agents/*.agent.md` | both | plugin-cache hit: `agents/Code-Critic.agent.md`; source-tree hit | PASS |
+| C2 | `agents/*.md` | plugin-cache | plugin-cache hit: `agents/code-critic.md`; registered in `agents[]` array | PASS |
+| C3 | `skills/*/SKILL.md` | both | plugin-cache hit: `skills/session-startup/SKILL.md`; source-tree hit | PASS |
+| C4 | `commands/*.md` | plugin-cache | plugin-cache hit: `commands/orchestrate.md` | PASS |
+| C5 | `.claude-plugin/*.json` | plugin-cache | `.claude-plugin/plugin.json` present in plugin cache | PASS |
+| C6 | `.github/scripts/*.ps1` | plugin-cache | plugin-cache hit: `.github/scripts/frame-credit-ledger.ps1` | PASS |
+| P1 | `agents/*.agent.md` | source-tree | `agents/Code-Conductor.agent.md` present in hub source tree | PASS |
+| P2 | `skills/*/SKILL.md` | source-tree | `skills/customer-experience/SKILL.md` + `skills/implementation-discipline/SKILL.md` present | PASS |
+| P3 | `skills/*/platforms/*.md` | source-tree | `skills/session-startup/platforms/claude.md` + `copilot.md` present | PASS |
+| P4 | `.github/scripts/*.ps1` | source-tree | `.github/scripts/frame-credit-ledger.ps1` present in source tree | PASS |
+| P5 | `.github/scripts/lib/*.ps1` | source-tree | `.github/scripts/lib/frame-credit-ledger-core.ps1` present | PASS |
+| P6 | `agents/*.md` | not-applicable | Shell registered via `agents[]` in `.claude-plugin/plugin.json` only; no Copilot equivalent | PASS |
+
+Scenario results:
+
+- **S1** (hub agent runs in consumer repo without missing-artifact failures): PASS — all `hard-failure` families present in plugin cache v2.13.0.
+- **S2** (audit catalog covers every referenced artifact across five scopes): PASS — `-Diff` reports `added: 0; removed: 0; uncategorized: 0`.
+- **S3** (intentionally unresolved references feel informative not broken): PASS — `none`-classified families use `wasted-tool-call` experience with explicit documentation.
+- **S4** (maintainer can find the audit and act on it without prior context): PASS — audit doc linked from README.md + CLAUDE.md; Purpose + Customer sections orient a cold reader; `-Diff` output is actionable.
+
+CE Gate result: ✅ CE Gate passed — intent match: strong. Browser, canvas, and api surfaces: ⏭️ not applicable.
 
 ## Resolution Taxonomy
 
