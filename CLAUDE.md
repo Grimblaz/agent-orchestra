@@ -12,7 +12,15 @@ Install the plugin from the marketplace if you have not already. Run this inside
 
 The plugin exposes the upstream pipeline, the review surface, the `/orchestrate` entry point, and a library of shared skills. Claude Code discovers them automatically once the plugin is installed.
 
+### Path resolution for downstream consumers
+
 Consumer repositories are zero-config after install: Claude Code loads the agent bodies and skills from the installed plugin cache, so the working repository does not need a local `agents/` directory.
+
+See [`Documents/Design/hub-artifact-paths-audit.md`](Documents/Design/hub-artifact-paths-audit.md) for the full hub artifact path catalog.
+
+Related: see the [Releases](#releases) section for cache invalidation behavior and the audit doc's [How to Detect Staleness](Documents/Design/hub-artifact-paths-audit.md#how-to-detect-staleness) section for drift detection.
+
+See also: [CUSTOMIZATION.md > Script portability for plugin users](CUSTOMIZATION.md#script-portability-for-plugin-users).
 
 ## Upstream pipeline
 

@@ -59,6 +59,8 @@ All skills' PowerShell scripts self-resolve their sibling paths via `$PSScriptRo
 
 If a skill's script produces no output when invoked from the plugin, file an issue with the skill name and reproduction steps; silent failure is a regression, not an expected limitation.
 
+See also: [README.md > Path resolution for downstream consumers](README.md#path-resolution-for-downstream-consumers).
+
 <!-- migration-note-begin -->
 ### Migrating from pre-1.14 layouts (issue #367)
 

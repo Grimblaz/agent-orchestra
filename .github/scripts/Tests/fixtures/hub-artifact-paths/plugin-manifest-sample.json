@@ -1,0 +1,9 @@
+{
+  "agents": ["agents/code-smith.md", "agents/test-writer.md"],
+  "entry": "agents/Code-Conductor.agent.md",
+  "hooks": {
+    "SessionStart": ".github/scripts/session-start.ps1",
+    "PostToolUse": ".github/scripts/post-tool-use.ps1"
+  },
+  "nested": { "schema": "Documents/Design/frame-architecture.md" }
+}

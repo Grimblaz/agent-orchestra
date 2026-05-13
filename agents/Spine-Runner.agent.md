@@ -2,7 +2,7 @@
 name: Spine-Runner
 description: "Walks frame-spine frames by resolving adapters, invoking the right agent or inline methodology, and verifying frame-credit evidence"
 argument-hint: "Run a frame-spine frame from an issue plan"
-user-invocable: false
+user-invocable: true
 tools:
   - vscode/askQuestions
   - vscode

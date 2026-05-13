@@ -42,7 +42,17 @@ Claude Code loads agents and skills from `.claude-plugin/plugin.json`. Install v
 
 All 15 agents and the shared skill library are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (`agents` uses an explicit registration whitelist; `skills` auto-discovers).
 
+#### Path resolution for downstream consumers
+
 This is zero-config for consumer repositories: after marketplace registration and plugin install, Claude Code loads the shared agent bodies and skills from its plugin cache. The repository using the plugin does not need a local `agents/` directory.
+
+See [`Documents/Design/hub-artifact-paths-audit.md`](Documents/Design/hub-artifact-paths-audit.md) for the full hub artifact path catalog.
+
+For what's included in the plugin payload vs. what requires clone/fork, see the [Install as Plugin (Claude Code)](#install-as-plugin-claude-code) section above.
+
+Related: see the [Releases section](CLAUDE.md#releases) in CLAUDE.md for cache invalidation behavior and the audit doc's [How to Detect Staleness](Documents/Design/hub-artifact-paths-audit.md#how-to-detect-staleness) section for drift detection.
+
+See also: [CUSTOMIZATION.md > Script portability for plugin users](CUSTOMIZATION.md#script-portability-for-plugin-users).
 
 The plugin payload includes all 15 shared agent definitions and the shared skill library. The Claude-specific command and specialist surface is outlined below.
 
