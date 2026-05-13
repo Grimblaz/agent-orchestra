@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 79381bc7e413fd1e658834fbe4fd6d4430836162
-generated-at: 2026-05-13T06:07:17Z
+last-verified: 0cc04b7eb326c401c0b577f25b726b72f3cc5940
+generated-at: 2026-05-13T06:34:14Z
 -->
 
 ## Purpose
@@ -33,7 +33,11 @@ This audit document is produced and kept current by the following pipeline:
 
 (e) **Pester CI workflow** (Step 4: `.github/workflows/pester.yml`): runs the full Pester suite on every push and pull request, including the extraction grammar tests and drift gate.
 
-(f) **Scratch-repo reproduction recipe for CE Gate**: clone the repository, install the plugin via `claude plugin install agent-orchestra@agent-orchestra`, and run `pwsh .github/scripts/audit-hub-artifact-paths.ps1 -Diff` in the consumer repo root. A zero-result output confirms the installed plugin cache matches the current classification.
+(f) **Reproduction recipes for CE Gate**:
+
+**Hub-repo verification** (maintainers): from the cloned agent-orchestra working tree, run `pwsh .github/scripts/audit-hub-artifact-paths.ps1 -Diff`. A result of `added: 0; removed: 0; uncategorized: 0` confirms the classification covers all inventory paths in the current working tree.
+
+**Consumer scratch-repo verification** (downstream consumers): in a fresh directory that contains only a consumer project (no agent-orchestra source tree), install the plugin via `claude plugin install agent-orchestra@agent-orchestra`. Then obtain the script from the plugin cache (path shown by `cat ~/.claude/plugins/installed_plugins.json` → `installPath`) and run it from your consumer repo root: `pwsh <installPath>/.github/scripts/audit-hub-artifact-paths.ps1 -Diff`. A zero-result output confirms the installed plugin cache matches the current classification.
 
 ## Resolution Taxonomy
 
@@ -71,113 +75,6 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 
 ## Catalog
 
-### `agents/*.agent.md`
-
-- **claude_resolves**: both
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: true
-- **experience**: hard-failure
-- **examples**:
-  - `agents/Code-Smith.agent.md`
-  - `agents/Code-Conductor.agent.md`
-  - `agents/Code-Critic.agent.md`
-- **notes**: Shared agent bodies; loaded by paired Claude shells via D1 plugin-cache-first chain (installed_plugins.json -> plugin-cache path) with source-repo CWD as fallback. Copilot reads directly from source tree in the hub repo. Missing body = agent dispatch fails at first Read call.
-
-### `agents/*.md`
-
-- **claude_resolves**: plugin-cache
-- **copilot_resolves**: not-applicable
-- **requires_version_bump**: true
-- **experience**: hard-failure
-- **examples**:
-  - `agents/code-smith.md`
-  - `agents/code-critic.md`
-  - `agents/spine-runner.md`
-- **notes**: Claude-only subagent shells; paired to shared agent bodies; registered via the explicit agents[] array in .claude-plugin/plugin.json. Not applicable for Copilot tool perspective — Copilot uses .agent.md bodies directly. Missing shell = subagent_type dispatch fails in Claude.
-
-### `commands/*.md`
-
-- **claude_resolves**: plugin-cache
-- **copilot_resolves**: not-applicable
-- **requires_version_bump**: true
-- **experience**: hard-failure
-- **examples**:
-  - `commands/orchestrate.md`
-  - `commands/spine-run.md`
-  - `commands/orchestra-review.md`
-- **notes**: Claude Code slash command entry points registered via the commands[] array in .claude-plugin/plugin.json. Copilot slash commands are a distinct surface — these .md command files are not applicable from Copilot's perspective.
-
-### `skills/*/SKILL.md`
-
-- **claude_resolves**: both
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: true
-- **experience**: hard-failure
-- **examples**:
-  - `skills/implementation-discipline/SKILL.md`
-  - `skills/parallel-execution/SKILL.md`
-  - `skills/session-startup/SKILL.md`
-- **notes**: Core skill bodies. Paths like 'bdd-scenarios/SKILL.md', 'customer-experience/SKILL.md', 'plugin-release-hygiene/SKILL.md', 'post-pr-review/SKILL.md', and 'session-startup/SKILL.md' appearing without the skills/ prefix are relative references from within skill subdirectories and map to this same family. Both Claude (plugin-cache D1 or source-tree fallback) and Copilot (source-tree) must resolve these for agent methodology to function.
-
-### `skills/*/platforms/*.md`
-
-- **claude_resolves**: both
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: true
-- **experience**: hard-failure
-- **examples**:
-  - `skills/session-startup/platforms/claude.md`
-  - `skills/upstream-onboarding/platforms/claude.md`
-  - `skills/parallel-execution/platforms/copilot.md`
-- **notes**: Platform-specific invocation details for each skill. Bare-relative references 'platforms/claude.md' and 'platforms/copilot.md' appearing in skill body text are relative to the containing skill directory and map to this family. Missing = agent uses wrong platform bindings or silently omits platform-specific steps.
-
-### `skills/*/references/*.md`
-
-- **claude_resolves**: both
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: true
-- **experience**: hard-failure
-- **examples**:
-  - `skills/calibration-pipeline/references/findings-construction.md`
-  - `skills/validation-methodology/references/post-judgment-routing.md`
-  - `skills/parallel-execution/references/error-handling.md`
-- **notes**: Reference sub-documents within skill directories. Bare-relative paths such as 'references/anti-patterns.md', 'references/commands.md', 'references/quality-gates.md', and 'references/test-patterns.md' appearing in skill body text are relative references that map to this family. Missing reference docs produce hard-failure when a skill body tries to Read them during execution.
-
-### `skills/*/adapters/*.md`
-
-- **claude_resolves**: both
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: true
-- **experience**: hard-failure
-- **examples**:
-  - `skills/process-retrospective/adapters/explicit-skip-process-retrospective.md`
-  - `skills/process-retrospective/adapters/auto-na-process-retrospective.md`
-  - `skills/{skill}/adapters/{adapter}.md`
-- **notes**: Frame adapter documents nested within skill directories. Bare-relative paths 'adapters/{port}.md', 'adapters/auto-na-{port}.md', 'adapters/auto-na-experience.md', 'adapters/explicit-skip-{port}.md', and 'adapters/explicit-skip-experience.md' are relative references from skill body text that map to this family.
-
-### `skills/*/scripts/*.ps1`
-
-- **claude_resolves**: both
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: true
-- **experience**: visible-warning
-- **examples**:
-  - `skills/session-startup/scripts/post-merge-cleanup.ps1`
-  - `skills/session-startup/scripts/session-cleanup-detector.ps1`
-  - `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1`
-- **notes**: PowerShell helper scripts nested within skill directories. Bare-relative paths 'scripts/session-cleanup-detector.ps1' appearing in skill text, and 'lib/*.ps1' paths (e.g., 'lib/cost-anomaly.ps1', 'lib/frame-spine-core.ps1') referenced from within skills/copilot-cost-collection/ context, map to this family or skills/lib/*.ps1. Missing script produces visible-warning rather than hard-failure because the skill body can fall back to inline guidance.
-
-### `skills/*/assets/*.json`
-
-- **claude_resolves**: both
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: true
-- **experience**: hard-failure
-- **examples**:
-  - `skills/routing-tables/assets/gate-criteria.json`
-  - `skills/routing-tables/assets/routing-config.json`
-- **notes**: JSON data assets nested within skill directories. Bare-relative paths 'assets/gate-criteria.json' and 'assets/routing-config.json' appearing in skill body text are relative references that map to this family. Routing logic that reads these files will hard-fail if they are missing.
-
 ### `.claude-plugin/*.json`
 
 - **claude_resolves**: plugin-cache
@@ -188,6 +85,109 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `.claude-plugin/plugin.json`
   - `.claude-plugin/marketplace.json`
 - **notes**: Claude plugin manifest files. plugin.json is the version-triggering artifact itself — modifying it does not require a separate bump because the bump IS the edit to plugin.json. marketplace.json is the marketplace descriptor. Not applicable from Copilot's perspective. Missing or malformed plugin.json = Claude cannot load the plugin at all.
+
+### `.claude/.state/*.json`
+
+- **claude_resolves**: none
+- **copilot_resolves**: not-applicable
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `.claude/.state/release-hygiene-{slug}.json`
+- **notes**: Claude runtime state files written by the plugin-release-hygiene hook. Session-scoped; not distribution artifacts. Placeholders like {slug} are normalized per D2a. Attempting to resolve from plugin cache is a wasted tool call.
+
+### `.claude/settings.json`
+
+- **claude_resolves**: none
+- **copilot_resolves**: not-applicable
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `.claude/settings.json`
+- **notes**: Consumer-generated Claude Code project settings. Not a distribution artifact; each consumer repo creates its own. Reading from plugin cache or another repo's tree is a wasted tool call.
+
+### `.claude/settings.local.json`
+
+- **claude_resolves**: none
+- **copilot_resolves**: not-applicable
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `.claude/settings.local.json`
+- **notes**: Consumer-generated local overrides for Claude Code settings. gitignored; not committed to hub or consumer repos. Attempting to resolve is always a wasted tool call.
+
+### `.copilot-tracking/*.json`
+
+- **claude_resolves**: none
+- **copilot_resolves**: none
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `.copilot-tracking/calibration/review-data.json`
+- **notes**: Consumer-repo Copilot tracking data files (e.g., calibration review data). Not distribution artifacts. Attempting to resolve outside the consumer repo is a wasted tool call.
+
+### `.copilot-tracking/*.md`
+
+- **claude_resolves**: none
+- **copilot_resolves**: none
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `.copilot-tracking/research/{YYYYMMDD-name}-research.md`
+  - `.copilot-tracking/reviews/{date}-process-review.md`
+- **notes**: Consumer-repo research and process-review markdown files produced during Copilot sessions. Not distribution artifacts.
+
+### `.copilot-tracking/*.yml`
+
+- **claude_resolves**: none
+- **copilot_resolves**: none
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `.copilot-tracking/issue-42-my-feature.yml`
+- **notes**: Consumer-repo Copilot tracking files for in-progress issues. Not distribution artifacts. Consumer-specific; attempting to resolve from the hub repo or plugin cache is a wasted tool call.
+
+### `.github/architecture-rules.md`
+
+- **claude_resolves**: source-tree
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: false
+- **experience**: visible-warning
+- **examples**:
+  - `.github/architecture-rules.md`
+- **notes**: Hub-repo architecture rules. Consumer repos maintain their own copy; the hub copy is a template. Intentionally hub-only per the plan (carved out). Missing produces visible-warning because Copilot instructions reference it but can fall back.
+
+### `.github/copilot-instructions.md`
+
+- **claude_resolves**: source-tree
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: false
+- **experience**: visible-warning
+- **examples**:
+  - `.github/copilot-instructions.md`
+- **notes**: Copilot system prompt injected by GitHub. Intentionally hub-only; consumer repos maintain their own. Missing = Copilot operates without hub-level instruction context (visible-warning, not hard-failure).
+
+### `.github/instructions/*.instructions.md`
+
+- **claude_resolves**: none
+- **copilot_resolves**: none
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `.github/instructions/browser-mcp.instructions.md`
+  - `.github/instructions/browser-tools.instructions.md`
+  - `.github/instructions/local-gotchas.instructions.md`
+- **notes**: Consumer-generated VS Code / Copilot instruction files. Not distribution artifacts; created per consumer repo setup. Attempting to resolve these from the plugin cache or a different consumer repo results in a wasted tool call.
+
+### `.github/plugin/marketplace.json`
+
+- **claude_resolves**: plugin-cache
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
+- **examples**:
+  - `.github/plugin/marketplace.json`
+- **notes**: Marketplace descriptor residing under .github/plugin/. Distinct from .claude-plugin/marketplace.json; this copy is consumed by the GitHub-hosted plugin marketplace integration. Missing = marketplace cannot resolve the plugin.
 
 ### `.github/scripts/*.ps1`
 
@@ -233,77 +233,15 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `.github/scripts/Tests/fixtures/subagent-env-handshake-verifier.ps1`
 - **notes**: Test fixture scripts. Missing fixture causes the referencing Pester test to fail with a visible error rather than hard-blocking a pipeline run.
 
-### `.github/plugin/marketplace.json`
-
-- **claude_resolves**: plugin-cache
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: true
-- **experience**: hard-failure
-- **examples**:
-  - `.github/plugin/marketplace.json`
-- **notes**: Marketplace descriptor residing under .github/plugin/. Distinct from .claude-plugin/marketplace.json; this copy is consumed by the GitHub-hosted plugin marketplace integration. Missing = marketplace cannot resolve the plugin.
-
-### `.github/architecture-rules.md`
-
-- **claude_resolves**: source-tree
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: false
-- **experience**: visible-warning
-- **examples**:
-  - `.github/architecture-rules.md`
-- **notes**: Hub-repo architecture rules. Consumer repos maintain their own copy; the hub copy is a template. Intentionally hub-only per the plan (carved out). Missing produces visible-warning because Copilot instructions reference it but can fall back.
-
-### `.github/copilot-instructions.md`
-
-- **claude_resolves**: source-tree
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: false
-- **experience**: visible-warning
-- **examples**:
-  - `.github/copilot-instructions.md`
-- **notes**: Copilot system prompt injected by GitHub. Intentionally hub-only; consumer repos maintain their own. Missing = Copilot operates without hub-level instruction context (visible-warning, not hard-failure).
-
-### `.github/instructions/*.instructions.md`
+### `.vscode/settings.json`
 
 - **claude_resolves**: none
 - **copilot_resolves**: none
 - **requires_version_bump**: false
 - **experience**: wasted-tool-call
 - **examples**:
-  - `.github/instructions/browser-mcp.instructions.md`
-  - `.github/instructions/browser-tools.instructions.md`
-  - `.github/instructions/local-gotchas.instructions.md`
-- **notes**: Consumer-generated VS Code / Copilot instruction files. Not distribution artifacts; created per consumer repo setup. Attempting to resolve these from the plugin cache or a different consumer repo results in a wasted tool call.
-
-### `.claude/settings.json`
-
-- **claude_resolves**: none
-- **copilot_resolves**: not-applicable
-- **requires_version_bump**: false
-- **experience**: wasted-tool-call
-- **examples**:
-  - `.claude/settings.json`
-- **notes**: Consumer-generated Claude Code project settings. Not a distribution artifact; each consumer repo creates its own. Reading from plugin cache or another repo's tree is a wasted tool call.
-
-### `.claude/settings.local.json`
-
-- **claude_resolves**: none
-- **copilot_resolves**: not-applicable
-- **requires_version_bump**: false
-- **experience**: wasted-tool-call
-- **examples**:
-  - `.claude/settings.local.json`
-- **notes**: Consumer-generated local overrides for Claude Code settings. gitignored; not committed to hub or consumer repos. Attempting to resolve is always a wasted tool call.
-
-### `.claude/.state/*.json`
-
-- **claude_resolves**: none
-- **copilot_resolves**: not-applicable
-- **requires_version_bump**: false
-- **experience**: wasted-tool-call
-- **examples**:
-  - `.claude/.state/release-hygiene-{slug}.json`
-- **notes**: Claude runtime state files written by the plugin-release-hygiene hook. Session-scoped; not distribution artifacts. Placeholders like {slug} are normalized per D2a. Attempting to resolve from plugin cache is a wasted tool call.
+  - `.vscode/settings.json`
+- **notes**: Consumer-generated VS Code workspace settings. Not a distribution artifact. gitignored or consumer-specific; never resolved from the hub repo or plugin cache.
 
 ### `/memories/session/*.md`
 
@@ -317,46 +255,41 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `/memories/session/review-state-{ID}.md`
 - **notes**: Claude Code session-only memory files written during a live session. Not distribution artifacts and not committed to any repo. Placeholders {id}, {ID}, {N}, {scope}, {primary}, {secondary1}, {secondaryN} are D2a-normalized. Any agent that tries to Read a path in this family when no session is active performs a wasted tool call.
 
-### `.copilot-tracking/*.yml`
+### `agents/*.agent.md`
 
-- **claude_resolves**: none
-- **copilot_resolves**: none
-- **requires_version_bump**: false
-- **experience**: wasted-tool-call
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
 - **examples**:
-  - `.copilot-tracking/issue-42-my-feature.yml`
-- **notes**: Consumer-repo Copilot tracking files for in-progress issues. Not distribution artifacts. Consumer-specific; attempting to resolve from the hub repo or plugin cache is a wasted tool call.
+  - `agents/Code-Smith.agent.md`
+  - `agents/Code-Conductor.agent.md`
+  - `agents/Code-Critic.agent.md`
+- **notes**: Shared agent bodies; loaded by paired Claude shells via D1 plugin-cache-first chain (installed_plugins.json -> plugin-cache path) with source-repo CWD as fallback. Copilot reads directly from source tree in the hub repo. Missing body = agent dispatch fails at first Read call.
 
-### `.copilot-tracking/*.json`
+### `agents/*.md`
 
-- **claude_resolves**: none
-- **copilot_resolves**: none
-- **requires_version_bump**: false
-- **experience**: wasted-tool-call
+- **claude_resolves**: plugin-cache
+- **copilot_resolves**: not-applicable
+- **requires_version_bump**: true
+- **experience**: hard-failure
 - **examples**:
-  - `.copilot-tracking/calibration/review-data.json`
-- **notes**: Consumer-repo Copilot tracking data files (e.g., calibration review data). Not distribution artifacts. Attempting to resolve outside the consumer repo is a wasted tool call.
+  - `agents/code-smith.md`
+  - `agents/code-critic.md`
+  - `agents/spine-runner.md`
+- **notes**: Claude-only subagent shells; paired to shared agent bodies; registered via the explicit agents[] array in .claude-plugin/plugin.json. Not applicable for Copilot tool perspective — Copilot uses .agent.md bodies directly. Missing shell = subagent_type dispatch fails in Claude.
 
-### `.copilot-tracking/*.md`
+### `commands/*.md`
 
-- **claude_resolves**: none
-- **copilot_resolves**: none
-- **requires_version_bump**: false
-- **experience**: wasted-tool-call
+- **claude_resolves**: plugin-cache
+- **copilot_resolves**: not-applicable
+- **requires_version_bump**: true
+- **experience**: hard-failure
 - **examples**:
-  - `.copilot-tracking/research/{YYYYMMDD-name}-research.md`
-  - `.copilot-tracking/reviews/{date}-process-review.md`
-- **notes**: Consumer-repo research and process-review markdown files produced during Copilot sessions. Not distribution artifacts.
-
-### `.vscode/settings.json`
-
-- **claude_resolves**: none
-- **copilot_resolves**: none
-- **requires_version_bump**: false
-- **experience**: wasted-tool-call
-- **examples**:
-  - `.vscode/settings.json`
-- **notes**: Consumer-generated VS Code workspace settings. Not a distribution artifact. gitignored or consumer-specific; never resolved from the hub repo or plugin cache.
+  - `commands/orchestrate.md`
+  - `commands/spine-run.md`
+  - `commands/orchestra-review.md`
+- **notes**: Claude Code slash command entry points registered via the commands[] array in .claude-plugin/plugin.json. Copilot slash commands are a distinct surface — these .md command files are not applicable from Copilot's perspective.
 
 ### `Documents/Design/*.md`
 
@@ -380,27 +313,6 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `Documents/Design/hub-artifact-paths-classification.yml`
 - **notes**: Hub-repo design YAML data files (e.g., classification schemas). Intentionally hub-only per the plan (carved out). Same resolution and experience semantics as Documents/Design/*.md — agents that cross-reference these for schema or classification data will proceed without that context if the file is absent (visible-warning).
 
-### `frame/ports/*.yaml`
-
-- **claude_resolves**: both
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: true
-- **experience**: hard-failure
-- **examples**:
-  - `frame/ports/process-retrospective.yaml`
-  - `frame/ports/{port}.yaml`
-- **notes**: Frame port declaration files. Consumed by Code-Conductor to validate adapter presence for each step. Placeholder {port} is D2a-normalized. Missing = Conductor cannot verify port fill status, producing hard-failure in frame-spine validation.
-
-### `frame/pipeline-metrics-v4-schema.md`
-
-- **claude_resolves**: both
-- **copilot_resolves**: source-tree
-- **requires_version_bump**: true
-- **experience**: hard-failure
-- **examples**:
-  - `frame/pipeline-metrics-v4-schema.md`
-- **notes**: Frame pipeline metrics schema document. Authoritative schema for the <!-- pipeline-metrics --> block format. Missing = credit-emission agents cannot validate block structure.
-
 ### `examples/{stack}/*.md`
 
 - **claude_resolves**: source-tree
@@ -412,6 +324,27 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `examples/{stack}/copilot-instructions.md`
 - **notes**: Example consumer-repo templates. Placeholder {stack} is D2a-normalized. These are reference templates for new consumer repo setup, not loaded at runtime. Attempting to resolve a specific example path during agent execution is a wasted tool call.
 
+### `frame/pipeline-metrics-v4-schema.md`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
+- **examples**:
+  - `frame/pipeline-metrics-v4-schema.md`
+- **notes**: Frame pipeline metrics schema document. Authoritative schema for the <!-- pipeline-metrics --> block format. Missing = credit-emission agents cannot validate block structure.
+
+### `frame/ports/*.yaml`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
+- **examples**:
+  - `frame/ports/process-retrospective.yaml`
+  - `frame/ports/{port}.yaml`
+- **notes**: Frame port declaration files. Consumed by Code-Conductor to validate adapter presence for each step. Placeholder {port} is D2a-normalized. Missing = Conductor cannot verify port fill status, producing hard-failure in frame-spine validation.
+
 ### `hooks/hooks.json`
 
 - **claude_resolves**: both
@@ -421,6 +354,77 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `hooks/hooks.json`
 - **notes**: Bare-relative reference from within a skill body pointing to the root hooks/hooks.json Copilot hooks configuration. Copilot reads from source-tree; Claude loads from plugin-cache. Missing = hook registration fails for Copilot.
+
+### `skills/*/adapters/*.md`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
+- **examples**:
+  - `skills/process-retrospective/adapters/explicit-skip-process-retrospective.md`
+  - `skills/process-retrospective/adapters/auto-na-process-retrospective.md`
+  - `skills/{skill}/adapters/{adapter}.md`
+- **notes**: Frame adapter documents nested within skill directories. Bare-relative paths 'adapters/{port}.md', 'adapters/auto-na-{port}.md', 'adapters/auto-na-experience.md', 'adapters/explicit-skip-{port}.md', and 'adapters/explicit-skip-experience.md' are relative references from skill body text that map to this family.
+
+### `skills/*/assets/*.json`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
+- **examples**:
+  - `skills/routing-tables/assets/gate-criteria.json`
+  - `skills/routing-tables/assets/routing-config.json`
+- **notes**: JSON data assets nested within skill directories. Bare-relative paths 'assets/gate-criteria.json' and 'assets/routing-config.json' appearing in skill body text are relative references that map to this family. Routing logic that reads these files will hard-fail if they are missing.
+
+### `skills/*/platforms/*.md`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
+- **examples**:
+  - `skills/session-startup/platforms/claude.md`
+  - `skills/upstream-onboarding/platforms/claude.md`
+  - `skills/parallel-execution/platforms/copilot.md`
+- **notes**: Platform-specific invocation details for each skill. Bare-relative references 'platforms/claude.md' and 'platforms/copilot.md' appearing in skill body text are relative to the containing skill directory and map to this family. Missing = agent uses wrong platform bindings or silently omits platform-specific steps.
+
+### `skills/*/references/*.md`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
+- **examples**:
+  - `skills/calibration-pipeline/references/findings-construction.md`
+  - `skills/validation-methodology/references/post-judgment-routing.md`
+  - `skills/parallel-execution/references/error-handling.md`
+- **notes**: Reference sub-documents within skill directories. Bare-relative paths such as 'references/anti-patterns.md', 'references/commands.md', 'references/quality-gates.md', and 'references/test-patterns.md' appearing in skill body text are relative references that map to this family. Missing reference docs produce hard-failure when a skill body tries to Read them during execution.
+
+### `skills/*/scripts/*.ps1`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: visible-warning
+- **examples**:
+  - `skills/session-startup/scripts/post-merge-cleanup.ps1`
+  - `skills/session-startup/scripts/session-cleanup-detector.ps1`
+  - `skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1`
+- **notes**: PowerShell helper scripts nested within skill directories. Bare-relative paths 'scripts/session-cleanup-detector.ps1' appearing in skill text, and 'lib/*.ps1' paths (e.g., 'lib/cost-anomaly.ps1', 'lib/frame-spine-core.ps1') referenced from within skills/copilot-cost-collection/ context, map to this family or skills/lib/*.ps1. Missing script produces visible-warning rather than hard-failure because the skill body can fall back to inline guidance.
+
+### `skills/*/SKILL.md`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
+- **examples**:
+  - `skills/implementation-discipline/SKILL.md`
+  - `skills/parallel-execution/SKILL.md`
+  - `skills/session-startup/SKILL.md`
+- **notes**: Core skill bodies. Paths like 'bdd-scenarios/SKILL.md', 'customer-experience/SKILL.md', 'plugin-release-hygiene/SKILL.md', 'post-pr-review/SKILL.md', and 'session-startup/SKILL.md' appearing without the skills/ prefix are relative references from within skill subdirectories and map to this same family. Both Claude (plugin-cache D1 or source-tree fallback) and Copilot (source-tree) must resolve these for agent methodology to function.
 
 ### `templates/*.md`
 
@@ -471,7 +475,7 @@ The agent issues a file-read tool call that returns nothing (or an empty result)
 
 The path reference is recognized as consumer-local or gitignored; the agent skips loading it without issuing a tool call or warning.
 
-**Example families**: `.claude/settings.local.json`
+**Example families**: None currently classified. This experience tier is reserved for families where the agent has explicit consumer-local knowledge and suppresses the tool call entirely.
 
 ## Historical Context
 
@@ -511,7 +515,7 @@ A result of `added: 0; removed: 0; uncategorized: 0` means the classification co
 
 `Documents/Design/*.md` files are carved out of the downstream-consumer scope because they are internal design and decision records for the Agent Orchestra hub repository. Downstream consumer repositories do not receive these files through the plugin distribution mechanism (they are not included in the plugin cache). Agents and skills may cross-reference them for design intent during hub-repo development, but a consumer repo that attempts to resolve a `Documents/Design/*.md` path receives a visible-warning (the agent proceeds without the design context) rather than a hard-failure.
 
-**(AC9 follow-up tracking issue: TBD — will be filed in s9)**
+**(AC9 follow-up tracking issue: [#561](https://github.com/Grimblaz/agent-orchestra/issues/561))**
 
 ### Intentionally hub-only families
 

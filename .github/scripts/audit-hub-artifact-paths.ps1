@@ -13,10 +13,10 @@
     Default invocation prints a deterministic JSON inventory to stdout.
 
     Switches:
-      -Diff      Compare against Documents/Design/hub-artifact-paths-classification.yml
-                 (stub; not yet implemented in s2)
-      -Render    Regenerate Documents/Design/hub-artifact-paths-audit.md
-                 (stub; not yet implemented in s2)
+      -Diff      Compare extracted inventory against the classification YAML and
+                 report added, removed, and uncategorized families.
+      -Render    Regenerate Documents/Design/hub-artifact-paths-audit.md from
+                 the current classification YAML and extraction inventory.
       --input    Single-file mode for testing
       --format   Output format flag (currently only 'json' is recognised)
       --help     Print usage
@@ -29,10 +29,12 @@
     Output format. Currently only 'json' is recognised.
 
 .PARAMETER Diff
-    Stub: compare against the classification YAML. Prints a stub message.
+    Compare the extracted path inventory against the classification YAML.
+    Prints a single-line report: added, removed, and uncategorized counts.
 
 .PARAMETER Render
-    Stub: regenerate the audit document. Prints a stub message.
+    Regenerate Documents/Design/hub-artifact-paths-audit.md from the current
+    classification YAML and extraction inventory.
 
 .PARAMETER RepoRoot
     Override the repository root (defaults to three levels above this script).
@@ -61,8 +63,10 @@ USAGE
 SWITCHES
     --input <file>   Single-file mode: extract from one file only.
     --format json    Emit JSON (default when --format is omitted: also JSON).
-    -Diff            Compare against hub-artifact-paths-classification.yml (stub).
-    -Render          Regenerate hub-artifact-paths-audit.md (stub).
+    -Diff            Compare extracted inventory against classification YAML;
+                     prints: added: N; removed: N; uncategorized: N.
+    -Render          Regenerate hub-artifact-paths-audit.md from the
+                     classification YAML and current extraction inventory.
     --help           Print this message.
 '@
     exit 0
@@ -396,6 +400,13 @@ function Get-ScopeFiles {
     if (Test-Path $hooksDir) {
         $hookScripts = Get-ChildItem -Path $hooksDir -Filter '*.ps1' -Depth 0 -ErrorAction SilentlyContinue
         foreach ($f in $hookScripts) { $files.Add($f.FullName) }
+
+        # lib/ helper scripts are also plugin-distributed; scan them separately
+        $libDir = Join-Path $hooksDir 'lib'
+        if (Test-Path $libDir) {
+            $libScripts = Get-ChildItem -Path $libDir -Filter '*.ps1' -Depth 0 -ErrorAction SilentlyContinue
+            foreach ($f in $libScripts) { $files.Add($f.FullName) }
+        }
     }
 
     # skills/*/platforms/*.md
@@ -640,10 +651,12 @@ function Invoke-RenderMode {
     }
 
     # ---------------------------------------------------------------------------
-    # Build the catalog section text
+    # Build the catalog section text (families sorted alphabetically for
+    # deterministic output and ease of lookup)
     # ---------------------------------------------------------------------------
+    $sortedFamilies = $families | Sort-Object { $_.Name }
     $catalogLines = [System.Collections.Generic.List[string]]::new()
-    foreach ($fam in $families) {
+    foreach ($fam in $sortedFamilies) {
         $catalogLines.Add("### $BT$($fam.Name)$BT")
         $catalogLines.Add('')
         $catalogLines.Add("- **claude_resolves**: $($fam.Claude)")
@@ -704,7 +717,11 @@ function Invoke-RenderMode {
         '',
         "(e) **Pester CI workflow** (Step 4: ${BT}.github/workflows/pester.yml${BT}): runs the full Pester suite on every push and pull request, including the extraction grammar tests and drift gate.",
         '',
-        "(f) **Scratch-repo reproduction recipe for CE Gate**: clone the repository, install the plugin via ${BT}claude plugin install agent-orchestra@agent-orchestra${BT}, and run ${BT}pwsh .github/scripts/audit-hub-artifact-paths.ps1 -Diff${BT} in the consumer repo root. A zero-result output confirms the installed plugin cache matches the current classification."
+        "(f) **Reproduction recipes for CE Gate**:",
+        '',
+        "**Hub-repo verification** (maintainers): from the cloned agent-orchestra working tree, run ${BT}pwsh .github/scripts/audit-hub-artifact-paths.ps1 -Diff${BT}. A result of ${BT}added: 0; removed: 0; uncategorized: 0${BT} confirms the classification covers all inventory paths in the current working tree.",
+        '',
+        "**Consumer scratch-repo verification** (downstream consumers): in a fresh directory that contains only a consumer project (no agent-orchestra source tree), install the plugin via ${BT}claude plugin install agent-orchestra@agent-orchestra${BT}. Then obtain the script from the plugin cache (path shown by ${BT}cat ~/.claude/plugins/installed_plugins.json${BT} → ${BT}installPath${BT}) and run it from your consumer repo root: ${BT}pwsh <installPath>/.github/scripts/audit-hub-artifact-paths.ps1 -Diff${BT}. A zero-result output confirms the installed plugin cache matches the current classification."
     ) -join "`n"
 
     $sectionResolutionTaxonomy = @(
@@ -772,7 +789,7 @@ function Invoke-RenderMode {
         '',
         'The path reference is recognized as consumer-local or gitignored; the agent skips loading it without issuing a tool call or warning.',
         '',
-        "**Example families**: ${BT}.claude/settings.local.json${BT}"
+        '**Example families**: None currently classified. This experience tier is reserved for families where the agent has explicit consumer-local knowledge and suppresses the tool call entirely.'
     ) -join "`n"
 
     $sectionHistoricalContext = @(
@@ -818,7 +835,7 @@ function Invoke-RenderMode {
         '',
         "${BT}Documents/Design/*.md${BT} files are carved out of the downstream-consumer scope because they are internal design and decision records for the Agent Orchestra hub repository. Downstream consumer repositories do not receive these files through the plugin distribution mechanism (they are not included in the plugin cache). Agents and skills may cross-reference them for design intent during hub-repo development, but a consumer repo that attempts to resolve a ${BT}Documents/Design/*.md${BT} path receives a visible-warning (the agent proceeds without the design context) rather than a hard-failure.",
         '',
-        '**(AC9 follow-up tracking issue: TBD — will be filed in s9)**',
+        '**(AC9 follow-up tracking issue: [#561](https://github.com/Grimblaz/agent-orchestra/issues/561))**',
         '',
         '### Intentionally hub-only families',
         '',
@@ -852,12 +869,27 @@ function Invoke-RenderMode {
         New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
     }
 
-    # Write with LF line endings for cross-platform byte-stability
+    # Write with LF line endings for cross-platform byte-stability.
+    # Skip write if only the audit-meta timestamps changed (body unchanged).
     $docLf = $doc -replace "`r`n", "`n" -replace "`r", "`n"
-    $docBytes = [System.Text.Encoding]::UTF8.GetBytes($docLf)
-    [System.IO.File]::WriteAllBytes($outputPath, $docBytes)
-
-    Write-Output "Rendered: $outputPath"
+    $auditMetaPattern = [regex]'(?s)<!-- audit-meta.*?-->'
+    $newBody = $auditMetaPattern.Replace($docLf, '')
+    $shouldWrite = $true
+    if (Test-Path $outputPath) {
+        $existingRaw = [System.IO.File]::ReadAllText($outputPath, [System.Text.Encoding]::UTF8)
+        $existingLf  = $existingRaw -replace "`r`n", "`n" -replace "`r", "`n"
+        $existingBody = $auditMetaPattern.Replace($existingLf, '')
+        if ($existingBody -eq $newBody) {
+            # Body identical — only timestamps differ; skip write to avoid spurious diffs
+            Write-Output "Rendered: $outputPath (no body changes; timestamp update skipped)"
+            $shouldWrite = $false
+        }
+    }
+    if ($shouldWrite) {
+        $docBytes = [System.Text.Encoding]::UTF8.GetBytes($docLf)
+        [System.IO.File]::WriteAllBytes($outputPath, $docBytes)
+        Write-Output "Rendered: $outputPath"
+    }
 }
 
 # ---------------------------------------------------------------------------
