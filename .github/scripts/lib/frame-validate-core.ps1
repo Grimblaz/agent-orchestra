@@ -292,14 +292,14 @@ function Test-FVExecutorAdapterCompatibility {
         [AllowNull()][string]$Adapter
     )
 
-    if ([string]::IsNullOrWhiteSpace($Executor) -or [string]::IsNullOrWhiteSpace($Adapter)) { return $true }
+    if ([string]::IsNullOrWhiteSpace($Adapter)) { return $true }
 
-    $normalizedExecutor = $Executor.Trim() -replace '\\', '/'
+    $normalizedExecutor = if ([string]::IsNullOrWhiteSpace($Executor)) { 'agents/Senior-Engineer.agent.md' } else { $Executor.Trim() -replace '\\', '/' }
     $normalizedAdapter = $Adapter.Trim() -replace '\\', '/'
 
     if ($normalizedExecutor -cne 'agents/Senior-Engineer.agent.md') { return $true }
 
-    return ($normalizedAdapter -cnotmatch '^skills/adversarial-review/adapters/[^/]+\.md$')
+    return ($normalizedAdapter -cnotmatch '^skills/adversarial-review/adapters/[^/]+\.md$|^skills/[^/]+/adapters/(review|adversarial|critique|challenge)[^/]*-adapter\.md$')
 }
 
 function ConvertFrom-FVPlanSpineBlock {
@@ -427,7 +427,7 @@ function Invoke-FVPlanValidate {
         }
 
         if (-not (Test-FVExecutorAdapterCompatibility -Executor $slice.Executor -Adapter $slice.Adapter)) {
-            $structuralViolations.Add("step $($slice.StepId) pairs adversarial-review adapter '$($slice.Adapter)' with default Senior Engineer executor; use an independent adversarial reviewer executor or inline review path.") | Out-Null
+            $structuralViolations.Add("step $($slice.StepId) pairs adversarial-pattern adapter '$($slice.Adapter)' with default Senior Engineer executor; use an independent adversarial reviewer executor or inline review path.") | Out-Null
         }
 
         if (@($slice.Provides).Count -gt 0) { continue }

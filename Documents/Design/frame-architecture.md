@@ -138,17 +138,17 @@ slices:
 -->
 ```
 
-Concise skill-as-adapter slice shape:
+Concise skill-as-adapter `frame-slice` block shape:
 
-```yaml
-s2:
-  execution_mode: serial
-  adapter: skills/implementation-discipline/adapters/implement-code-adapter.md
-  executor: agents/Senior-Engineer.agent.md
-  rc: GREEN code action
-  ac_refs: [AC5]
-  depends_on: []
-  cycle: 1
+```markdown
+<!-- frame-slice
+id: s2
+provides: [implement-code]
+adapter: skills/implementation-discipline/adapters/implement-code-adapter.md
+executor: agents/Senior-Engineer.agent.md
+ac_refs: [AC5]
+coverage: GREEN code action
+-->
 ```
 
 ---

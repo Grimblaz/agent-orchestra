@@ -60,13 +60,13 @@ These rules apply to each slice as the runner advances through the frozen ordere
 
 ### Dispatch Table
 
-| Adapter path | Executor | Invocation result | Guard or notes |
-| --- | --- | --- | --- |
-| `agents/*.agent.md` | paired shell | Agent tool dispatch | Existing shared-body dispatch path unchanged |
-| `skills/*/SKILL.md` | inline or absent | inline load | Existing productive skill path unchanged |
-| `skills/{skill}/adapters/{adapter}.md` | inline or absent | inline load | Existing predicate and legacy adapter path unchanged |
-| `skills/*/adapters/{port}-adapter.md` | absent or `agents/*.agent.md` | Agent tool dispatch | Single-variant work adapter path; absent executor defaults to `agents/Senior-Engineer.agent.md`; pass adapter path as adapter/port-skill input |
-| `skills/adversarial-review/adapters/*.md` | `agents/Senior-Engineer.agent.md` | halt-return | reason: adversarial-independence-required; plan validation rejects explicit pairings before dispatch |
+| Adapter path                              | Executor                          | Invocation result   | Guard or notes                                                                                                                                 |
+| ----------------------------------------- | --------------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agents/*.agent.md`                       | paired shell                      | Agent tool dispatch | Existing shared-body dispatch path unchanged                                                                                                   |
+| `skills/*/SKILL.md`                       | inline or absent                  | inline load         | Existing productive skill path unchanged                                                                                                       |
+| `skills/{skill}/adapters/{adapter}.md`    | inline or absent                  | inline load         | Existing predicate and legacy adapter path unchanged                                                                                           |
+| `skills/*/adapters/{port}-adapter.md`     | absent or `agents/*.agent.md`     | Agent tool dispatch | Single-variant work adapter path; absent executor defaults to `agents/Senior-Engineer.agent.md`; pass adapter path as adapter/port-skill input |
+| adversarial-pattern adapters              | `agents/Senior-Engineer.agent.md` | halt-return         | Senior Engineer adversarial-pattern guard; reason: adversarial-independence-required; plan validation rejects default pairings before dispatch |
 
 ## Evidence Verification
 

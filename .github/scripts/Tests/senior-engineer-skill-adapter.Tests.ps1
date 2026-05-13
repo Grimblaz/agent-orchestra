@@ -82,13 +82,13 @@ Describe 'Issue #552 Senior Engineer skill-as-adapter contracts (grep/YAML/valid
             $skillsPath = Join-Path $script:RepoRoot 'skills'
             return [System.IO.FileInfo[]]@(
                 Get-ChildItem -LiteralPath $skillsPath -Directory |
-                    ForEach-Object {
-                        $adaptersPath = Join-Path $_.FullName 'adapters'
-                        if (Test-Path -LiteralPath $adaptersPath) {
-                            Get-ChildItem -LiteralPath $adaptersPath -Filter '*-adapter.md' -File
-                        }
-                    } |
-                    Sort-Object -Property FullName
+                ForEach-Object {
+                    $adaptersPath = Join-Path $_.FullName 'adapters'
+                    if (Test-Path -LiteralPath $adaptersPath) {
+                        Get-ChildItem -LiteralPath $adaptersPath -Filter '*-adapter.md' -File
+                    }
+                } |
+                Sort-Object -Property FullName
             )
         }
 
@@ -122,36 +122,36 @@ Describe 'Issue #552 Senior Engineer skill-as-adapter contracts (grep/YAML/valid
             $sliceFields.Add('ac-refs: [AC10]') | Out-Null
 
             return [string](@(
-                '# Issue 552 plan fixture'
-                ''
-                '## Acceptance Criteria'
-                '- **AC10** Senior Engineer skill-as-adapter contracts are structurally validated.'
-                ''
-                '<!-- frame-spine'
-                'spine_schema_version: 1'
-                'generated_at: 2026-05-13T12:00:00Z'
-                'coverage: complete'
-                'ports:'
-                '  implement-code: [s1]'
-                'slices:'
-                '  s1:'
-                '    execution_mode: serial'
-                '    rc: GREEN code action'
-                '    ac_refs: [AC10]'
-                '    depends_on: []'
-                '    cycle: 1'
-                '-->'
-                ''
-                '<!-- frame-slice'
-                'id: s1'
-            ) + $sliceFields.ToArray() + @(
-                'slice: |'
-                '  Step 1 - Implement Senior Engineer executor path'
-                '  Execution Mode: serial'
-                '  Requirement Contract:'
-                '    - AC10 structural validation'
-                '-->'
-            ) -join "`n")
+                    '# Issue 552 plan fixture'
+                    ''
+                    '## Acceptance Criteria'
+                    '- **AC10** Senior Engineer skill-as-adapter contracts are structurally validated.'
+                    ''
+                    '<!-- frame-spine'
+                    'spine_schema_version: 1'
+                    'generated_at: 2026-05-13T12:00:00Z'
+                    'coverage: complete'
+                    'ports:'
+                    '  implement-code: [s1]'
+                    'slices:'
+                    '  s1:'
+                    '    execution_mode: serial'
+                    '    rc: GREEN code action'
+                    '    ac_refs: [AC10]'
+                    '    depends_on: []'
+                    '    cycle: 1'
+                    '-->'
+                    ''
+                    '<!-- frame-slice'
+                    'id: s1'
+                ) + $sliceFields.ToArray() + @(
+                    'slice: |'
+                    '  Step 1 - Implement Senior Engineer executor path'
+                    '  Execution Mode: serial'
+                    '  Requirement Contract:'
+                    '    - AC10 structural validation'
+                    '-->'
+                ) -join "`n")
         }
     }
 
@@ -206,7 +206,7 @@ Describe 'Issue #552 Senior Engineer skill-as-adapter contracts (grep/YAML/valid
 
             foreach ($pattern in $forbiddenPatterns) {
                 [regex]::IsMatch($content, $pattern, [System.Text.RegularExpressions.RegexOptions]::Singleline) |
-                    Should -BeFalse -Because "Senior Engineer must use the planner-designated adapter path instead of '$pattern'"
+                Should -BeFalse -Because "Senior Engineer must use the planner-designated adapter path instead of '$pattern'"
             }
         }
     }
@@ -320,29 +320,50 @@ ac-refs: [AC10]
             (@($result.Results).Detail -join "`n") | Should -Match 'invalid executor'
         }
 
-        It 'rejects explicit Senior Engineer executor pairing for every adversarial-review adapter path' {
+        It 'rejects explicit and default Senior Engineer executor pairing for every adversarial-review adapter path' {
             $adapterPaths = @(
                 Get-ChildItem -LiteralPath $script:AdversarialAdaptersPath -Filter '*.md' -File |
-                    Sort-Object -Property Name |
-                    ForEach-Object { & $script:GetRelativePath -Path $_.FullName }
+                Sort-Object -Property Name |
+                ForEach-Object { & $script:GetRelativePath -Path $_.FullName }
             )
 
             $adapterPaths | Should -Not -BeNullOrEmpty
 
             foreach ($adapterPath in $adapterPaths) {
-                $comment = & $script:GetPlanComment -ExecutorLine 'executor: agents/Senior-Engineer.agent.md' -AdapterLine "adapter: $adapterPath"
-                $result = Invoke-FrameValidate -Mode plan -CommentText $comment
+                foreach ($executorLine in @($null, 'executor: agents/Senior-Engineer.agent.md')) {
+                    $comment = & $script:GetPlanComment -ExecutorLine $executorLine -AdapterLine "adapter: $adapterPath"
+                    $result = Invoke-FrameValidate -Mode plan -CommentText $comment
 
-                $result.ExitCode | Should -Not -Be 0 -Because "$adapterPath must not be executable by the default Senior Engineer"
-                (@($result.Results).Detail -join "`n") | Should -Match 'adversarial-review adapter'
+                    $result.ExitCode | Should -Not -Be 0 -Because "$adapterPath must not be executable by the default Senior Engineer"
+                    (@($result.Results).Detail -join "`n") | Should -Match 'adversarial-pattern adapter'
+                }
             }
         }
 
-        It 'keeps explicit Senior Engineer executor valid for non-adversarial work adapters' {
-            $comment = & $script:GetPlanComment -ExecutorLine 'executor: agents/Senior-Engineer.agent.md' -AdapterLine 'adapter: skills/implementation-discipline/adapters/implement-code-adapter.md'
-            $result = Invoke-FrameValidate -Mode plan -CommentText $comment
+        It 'rejects explicit and default Senior Engineer executor pairing for keyword adversarial adapter paths' -ForEach @(
+            @{ Keyword = 'review'; AdapterPath = 'skills/example/adapters/review-findings-adapter.md' }
+            @{ Keyword = 'adversarial'; AdapterPath = 'skills/example/adapters/adversarial-scan-adapter.md' }
+            @{ Keyword = 'critique'; AdapterPath = 'skills/example/adapters/critique-output-adapter.md' }
+            @{ Keyword = 'challenge'; AdapterPath = 'skills/example/adapters/challenge-plan-adapter.md' }
+        ) {
+            param($Keyword, $AdapterPath)
 
-            $result.ExitCode | Should -Be 0
+            foreach ($executorLine in @($null, 'executor: agents/Senior-Engineer.agent.md')) {
+                $comment = & $script:GetPlanComment -ExecutorLine $executorLine -AdapterLine "adapter: $AdapterPath"
+                $result = Invoke-FrameValidate -Mode plan -CommentText $comment
+
+                $result.ExitCode | Should -Not -Be 0 -Because "keyword adversarial adapter '$Keyword' must not be executable by the default Senior Engineer"
+                (@($result.Results).Detail -join "`n") | Should -Match 'adversarial-pattern adapter'
+            }
+        }
+
+        It 'keeps explicit and default Senior Engineer executor valid for non-adversarial work adapters' {
+            foreach ($executorLine in @($null, 'executor: agents/Senior-Engineer.agent.md')) {
+                $comment = & $script:GetPlanComment -ExecutorLine $executorLine -AdapterLine 'adapter: skills/implementation-discipline/adapters/implement-code-adapter.md'
+                $result = Invoke-FrameValidate -Mode plan -CommentText $comment
+
+                $result.ExitCode | Should -Be 0
+            }
         }
 
         It 'documents the deferred executor none semantics in the validator source' {
@@ -354,9 +375,9 @@ ac-refs: [AC10]
 
     Context 'Spine-Runner Senior Engineer dispatch-table inspection' {
 
-        It 'maps adversarial adapters plus default Senior Engineer executor to halt-return without live dispatch' {
+        It 'maps adversarial-pattern adapters plus default Senior Engineer executor to halt-return without live dispatch' {
             $content = & $script:ReadText -Path $script:SpineRunnerPath
-            $pattern = '(?is)skills/adversarial-review/adapters/\*\.md.*agents/Senior-Engineer\.agent\.md.*halt-return.*adversarial-independence-required|agents/Senior-Engineer\.agent\.md.*skills/adversarial-review/adapters/\*\.md.*halt-return.*adversarial-independence-required'
+            $pattern = '(?is)adversarial-pattern adapters.*agents/Senior-Engineer\.agent\.md.*halt-return.*adversarial-independence-required|agents/Senior-Engineer\.agent\.md.*adversarial-pattern adapters.*halt-return.*adversarial-independence-required'
 
             $content | Should -Match $pattern -Because 'the synthetic D11(b) fixture must be represented by documented dispatch-table/body text, not live Agent dispatch'
         }
@@ -409,8 +430,8 @@ ac-refs: [AC10]
 
             $documentedKeys = [string[]]@(
                 [regex]::Matches($sectionMatch.Groups['body'].Value, '`(?<key>port|adapter|status|evidence)`') |
-                    ForEach-Object { $_.Groups['key'].Value } |
-                    Sort-Object -Unique
+                ForEach-Object { $_.Groups['key'].Value } |
+                Sort-Object -Unique
             )
 
             ($documentedKeys -join ',') | Should -Be ($canonicalKeys -join ',') -Because 'SE documentation must name exactly the same row keys as Build-ImplementCodeCreditRow'
