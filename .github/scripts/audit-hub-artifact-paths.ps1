@@ -183,8 +183,8 @@ function Test-IsExtractablePath {
     # Must contain a slash — bare filenames without a path separator are not paths
     if ($Candidate -notmatch '/') { return $false }
 
-    # Exclude glob-only patterns starting with ** (tool capability globs, not real paths)
-    if ($Candidate -match '^\*\*') { return $false }
+    # Exclude glob-only patterns containing ** (tool capability globs, not real paths)
+    if ($Candidate -match '\*\*') { return $false }
 
     # Must end with an allowed extension
     if ($Candidate -notmatch "\.($ExtPattern)$") { return $false }

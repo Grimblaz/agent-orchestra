@@ -364,7 +364,8 @@ Describe 'audit-hub-artifact-paths extraction grammar (AC4)' {
                 -Because 'production script must define $D2aPlaceholders'
 
             # Reconstruct the array expression and evaluate it to get the regex strings.
-            $d2aRegexPatterns = Invoke-Expression "@($($constMatch.Groups[1].Value))"
+            $d2aRegexPatterns = [regex]::Matches($constMatch.Groups[1].Value, "'([^']+)'") |
+                ForEach-Object { $_.Groups[1].Value }
 
             # Apply the same normalization logic as Normalize-Placeholders in the script:
             #   foreach placeholder regex, replace with '*'
