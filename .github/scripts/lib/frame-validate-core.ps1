@@ -246,6 +246,7 @@ function ConvertFrom-FVPlanSliceBlock {
     $providesRaw = Get-FVPlanScalarField -Block $Block -Names @('provides', 'ports')
     $acRefsRaw = Get-FVPlanScalarField -Block $Block -Names @('ac-refs', 'ac_refs')
     $coverage = Get-FVPlanScalarField -Block $Block -Names @('coverage')
+    $executor = Get-FVPlanScalarField -Block $Block -Names @('executor')
 
     $provides = if ($null -eq $providesRaw) { [string[]]@() } else { ConvertFrom-FVInlineList -Value $providesRaw }
     if ($null -eq $provides) { $provides = [string[]]@() }
@@ -265,9 +266,22 @@ function ConvertFrom-FVPlanSliceBlock {
         Provides          = [string[]]$provides
         AcRefs            = [string[]]$acRefs
         Coverage          = if ($null -eq $coverage) { '' } else { $coverage }
+        Executor          = if ($null -eq $executor) { '' } else { $executor }
         IsExploratory     = [bool]$isExploratory
         ExploratoryReason = [string]$exploratoryReason
     }
+}
+
+function Test-FVExecutorValue {
+    param([AllowNull()][string]$Executor)
+
+    if ([string]::IsNullOrWhiteSpace($Executor)) { return $true }
+
+    $normalized = $Executor.Trim() -replace '\\', '/'
+    if ($normalized -ceq 'inline') { return $true }
+
+    # TODO(follow-up): define executor: none semantics before accepting `none` here.
+    return ($normalized -cmatch '^agents/[^/]+\.agent\.md$')
 }
 
 function ConvertFrom-FVPlanSpineBlock {
@@ -390,6 +404,10 @@ function Invoke-FVPlanValidate {
     $coverageGaps = [System.Collections.Generic.List[string]]::new()
 
     foreach ($slice in $slices) {
+        if (-not (Test-FVExecutorValue -Executor $slice.Executor)) {
+            $structuralViolations.Add("step $($slice.StepId) has invalid executor '$($slice.Executor)'; expected absent executor, agents/*.agent.md path, or inline. executor: none is deferred.") | Out-Null
+        }
+
         if (@($slice.Provides).Count -gt 0) { continue }
 
         if ($slice.IsExploratory) {
