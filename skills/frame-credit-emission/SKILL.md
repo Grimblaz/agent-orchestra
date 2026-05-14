@@ -28,6 +28,12 @@ Ports owned by specialist agents whose terminal step occurs after PR creation. T
 
 **Dedupe contract** (`process-review` only): `Build-ProcessReviewCreditRow` is the canonical emitter. If a `process-review` credit row already exists in the pipeline-metrics block with `status: passed` or `status: not-applicable`, Code-Conductor skips emission (additive-merge rule, D9). Note: the SMC-16 `not-persisted` synthesis path covers only the `review` port (judge-sentinel-driven); it does not extend to `process-review` — no `process-review`-specific sentinel exists.
 
+### Senior Engineer skill-as-adapter credits
+
+For `adapter-type: work` skill adapters, the default executor is `agents/Senior-Engineer.agent.md`. Spine-Runner dispatches Senior Engineer with the planner-selected adapter path, and the Senior Engineer subagent emits the terminal credit row after validation; Spine-Runner verifies the row but does not write it directly.
+
+Credit attribution remains builder-owned. Existing `Build-*CreditRow` functions are unchanged; the work adapter passes its repo-relative adapter path as the builder adapter value and repeats that path in human-readable evidence. For `Build-ImplementCodeCreditRow`, the forward-compatible row key set guarded for #557 is exactly `port`, `adapter`, `status`, `evidence`. The #557 schema migration should preserve this set-equal assertion until the canonical schema intentionally changes.
+
 ### `agent-pre-pr`
 
 Ports owned by pipeline-entry agents that complete before any PR exists. These agents use a two-stage deferred-emission pattern:

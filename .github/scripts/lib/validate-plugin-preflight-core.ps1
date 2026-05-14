@@ -93,7 +93,7 @@ function Invoke-PluginPreflight {
         try {
             $agentDir = Resolve-PluginContentPath -RootPath $RootPath -ContentName 'agents'
             $agentFiles = @(Get-ChildItem -Path $agentDir -Filter '*.agent.md' -File -ErrorAction SilentlyContinue)
-            $expectedAgentCount = 14
+            $expectedAgentCount = 16
             if ($agentFiles.Count -eq $expectedAgentCount) {
                 $results.Add([PSCustomObject]@{ Name = 'AgentCount'; Passed = $true; Detail = "$($agentFiles.Count) agents found" })
             }

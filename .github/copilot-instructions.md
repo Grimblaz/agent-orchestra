@@ -25,12 +25,12 @@ Pipeline-based agent orchestration:
                                                 ↓
                               Code-Smith, Test-Writer, Refactor-Specialist,
                               Doc-Keeper, Research-Agent, Process-Review,
-                              Specification
+                              Specification, Spine-Runner, Senior-Engineer
 (CE Gate: @Code-Conductor delegates evidence capture to @Experience-Owner)
 ```
 
 - **User-facing agents** (7): Experience-Owner, Solution-Designer, Issue-Planner, Code-Conductor, Code-Critic, Code-Review-Response, UI-Iterator
-- **Internal agents** (7): Called automatically by Code-Conductor as subagents (`user-invocable: false`)
+- **Internal agents and runners** (9): Code-Smith, Test-Writer, Refactor-Specialist, Doc-Keeper, Research-Agent, Process-Review, Specification, Spine-Runner, Senior-Engineer (`user-invocable: false`)
 - **Skills** (42): Loaded on demand by agents from `skills/` (repo root)
 - **Instruction files**: Repo-local instruction files remain under `.github/instructions/`, while shared workflow rules load from skills
 
@@ -74,7 +74,7 @@ pwsh -NoProfile -NonInteractive -Command "Invoke-Pester .github/scripts/Tests/ -
 pwsh -NoProfile -NonInteractive -File .github/scripts/quick-validate.ps1
 
 # Check agent count
-(Get-ChildItem agents/*.agent.md).Count  # should be 14
+(Get-ChildItem agents/*.agent.md).Count  # should be 16
 ```
 
 ### Script Library Convention

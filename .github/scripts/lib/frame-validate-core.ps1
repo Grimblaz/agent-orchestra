@@ -246,6 +246,8 @@ function ConvertFrom-FVPlanSliceBlock {
     $providesRaw = Get-FVPlanScalarField -Block $Block -Names @('provides', 'ports')
     $acRefsRaw = Get-FVPlanScalarField -Block $Block -Names @('ac-refs', 'ac_refs')
     $coverage = Get-FVPlanScalarField -Block $Block -Names @('coverage')
+    $executor = Get-FVPlanScalarField -Block $Block -Names @('executor')
+    $adapter = Get-FVPlanScalarField -Block $Block -Names @('adapter')
 
     $provides = if ($null -eq $providesRaw) { [string[]]@() } else { ConvertFrom-FVInlineList -Value $providesRaw }
     if ($null -eq $provides) { $provides = [string[]]@() }
@@ -265,9 +267,39 @@ function ConvertFrom-FVPlanSliceBlock {
         Provides          = [string[]]$provides
         AcRefs            = [string[]]$acRefs
         Coverage          = if ($null -eq $coverage) { '' } else { $coverage }
+        Executor          = if ($null -eq $executor) { '' } else { $executor }
+        Adapter           = if ($null -eq $adapter) { '' } else { $adapter }
         IsExploratory     = [bool]$isExploratory
         ExploratoryReason = [string]$exploratoryReason
     }
+}
+
+function Test-FVExecutorValue {
+    param([AllowNull()][string]$Executor)
+
+    if ([string]::IsNullOrWhiteSpace($Executor)) { return $true }
+
+    $normalized = $Executor.Trim() -replace '\\', '/'
+    if ($normalized -ceq 'inline') { return $true }
+
+    # TODO(follow-up): define executor: none semantics before accepting `none` here.
+    return ($normalized -cmatch '^agents/[^/]+\.agent\.md$')
+}
+
+function Test-FVExecutorAdapterCompatibility {
+    param(
+        [AllowNull()][string]$Executor,
+        [AllowNull()][string]$Adapter
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Adapter)) { return $true }
+
+    $normalizedExecutor = if ([string]::IsNullOrWhiteSpace($Executor)) { 'agents/Senior-Engineer.agent.md' } else { $Executor.Trim() -replace '\\', '/' }
+    $normalizedAdapter = $Adapter.Trim() -replace '\\', '/'
+
+    if ($normalizedExecutor -cne 'agents/Senior-Engineer.agent.md') { return $true }
+
+    return ($normalizedAdapter -cnotmatch '^skills/adversarial-review/adapters/[^/]+\.md$|^skills/[^/]+/adapters/(review|adversarial|critique|challenge)[^/]*-adapter\.md$')
 }
 
 function ConvertFrom-FVPlanSpineBlock {
@@ -390,6 +422,14 @@ function Invoke-FVPlanValidate {
     $coverageGaps = [System.Collections.Generic.List[string]]::new()
 
     foreach ($slice in $slices) {
+        if (-not (Test-FVExecutorValue -Executor $slice.Executor)) {
+            $structuralViolations.Add("step $($slice.StepId) has invalid executor '$($slice.Executor)'; expected absent executor, agents/*.agent.md path, or inline. executor: none is deferred.") | Out-Null
+        }
+
+        if (-not (Test-FVExecutorAdapterCompatibility -Executor $slice.Executor -Adapter $slice.Adapter)) {
+            $structuralViolations.Add("step $($slice.StepId) pairs adversarial-pattern adapter '$($slice.Adapter)' with default Senior Engineer executor; use an independent adversarial reviewer executor or inline review path.") | Out-Null
+        }
+
         if (@($slice.Provides).Count -gt 0) { continue }
 
         if ($slice.IsExploratory) {

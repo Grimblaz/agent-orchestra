@@ -61,7 +61,7 @@ To make agents available globally across all VS Code workspaces (not just repos 
 }
 ```
 
-Replace the path with the absolute path to where you cloned this repository. This makes all agents available globally — 7 user-facing agents in the chat picker, plus 7 internal subagents used automatically by Code-Conductor.
+Replace the path with the absolute path to where you cloned this repository. This makes all 16 shared agent definitions available globally — 7 user-facing agents in the chat picker, plus 9 internal agents and runners used automatically by Code-Conductor.
 
 <!-- legacy-path -->
 > **Upgrading from v1.13 or earlier?** Agents lived at `.github/agents/` before v1.14. Replace any `.github/agents` path in your `chat.agentFilesLocations` with `agents` (repo root). See [CUSTOMIZATION.md — Migrating from pre-1.14 layouts](CUSTOMIZATION.md#migrating-from-pre-114-layouts-issue-367).
