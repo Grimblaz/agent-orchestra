@@ -1,0 +1,33 @@
+name: Pester Tests
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  pester:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Pester
+        shell: pwsh
+        run: |
+          Install-Module -Name Pester -Force -SkipPublisherCheck -MinimumVersion 5.0.0
+          Import-Module Pester
+      - name: Run Pester tests (issue #243 audit-paths drift gate + grammar + safety)
+        shell: pwsh
+        run: |
+          # Scope: per AC8 for #243, this workflow validates the hub artifact-paths audit
+          # (drift gate + grammar) and the script-safety contract that gates it. The wider
+          # .github/scripts/Tests/ suite contains pre-existing failures in unrelated
+          # subsystems (OTel install, frame-credit ledger, SKILL.md size lints, etc.)
+          # which are out of scope for #243 and tracked separately in issue #566.
+          $config = New-PesterConfiguration
+          $config.Run.Path = @(
+            '.github/scripts/Tests/audit-hub-artifact-paths.Tests.ps1',
+            '.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1',
+            '.github/scripts/Tests/script-safety-contract.Tests.ps1'
+          )
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $config

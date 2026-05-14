@@ -76,8 +76,10 @@ Describe 'script safety contract' {
 
         It 'script safety: test files must not spawn child pwsh processes (use dot-source + in-process call pattern)' {
             $allowlist = @(
+                'audit-hub-artifact-paths.Tests.ps1',      # CLI integration tests: exercises script argument-parsing entry point; dot-source pattern cannot cover CLI flag paths
                 'branch-authority-gate.Tests.ps1',
-                'script-safety-contract.Tests.ps1',   # self-excluded: this file contains the literal '& pwsh' in its own scan pattern, which would cause a false-positive match
+                'hub-artifact-paths-coverage.Tests.ps1',   # CLI integration tests: exercises -Diff mode against live repo; requires sub-process invocation
+                'script-safety-contract.Tests.ps1',        # self-excluded: this file contains the literal '& pwsh' in its own scan pattern, which would cause a false-positive match
                 'session-cleanup-detector.Tests.ps1'
             )
 
