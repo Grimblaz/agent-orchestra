@@ -18,7 +18,7 @@ Describe 'Invoke-PluginPreflight' -Tag 'unit' {
         $script:NewFixture = {
             param(
                 [string]$Root = "TestDrive:\pf-$([System.Guid]::NewGuid().ToString('N'))",
-                [int]$AgentCount = 14,
+                [int]$AgentCount = 16,
                 [int]$SkillCount = 39,
                 [switch]$Placeholders,
                 [switch]$IncludeUnsupportedCommandsField
@@ -131,7 +131,7 @@ $($skillEntries -join ",`n")
     # ==================================================================
     Context 'agent validation' {
 
-        It 'reports PASS when agent directory exists and has 14 agents' {
+        It 'reports PASS when agent directory exists and has 16 agents' {
             $root = & $script:NewFixture
             $pjPath = Join-Path $root 'plugin.json'
             $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
@@ -139,7 +139,7 @@ $($skillEntries -join ",`n")
             ($result.Results | Where-Object { $_.Name -eq 'AgentCount' }).Passed | Should -BeTrue
         }
 
-        It 'reports FAIL AgentCount when fewer than 14 agents on disk' {
+        It 'reports FAIL AgentCount when fewer than 16 agents on disk' {
             $root = & $script:NewFixture -AgentCount 12
             $pjPath = Join-Path $root 'plugin.json'
             $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath

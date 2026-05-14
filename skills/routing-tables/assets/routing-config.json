@@ -21,6 +21,14 @@
         "agent": "Code-Smith"
       },
       {
+        "file_type_or_task": "Frame slices with skill-as-adapter work adapters",
+        "file_patterns": ["skills/*/adapters/*-adapter.md"],
+        "keywords": ["skill-as-adapter", "frame-slice", "executor", "adapter-loaded"],
+        "dispatch_mechanism": "spine-driven, adapter-loaded",
+        "agent": "senior-engineer",
+        "agent_body": "agents/Senior-Engineer.agent.md"
+      },
+      {
         "file_type_or_task": "src/**/*.ts, src/**/*.tsx (restructure existing)",
         "keywords": ["refactor", "simplify", "extract", "dedupe"],
         "agent": "Refactor-Specialist"

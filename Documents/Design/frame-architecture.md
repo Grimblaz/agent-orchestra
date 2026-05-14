@@ -95,10 +95,11 @@ The frame spine is a plan-routing and context-sharing block, not a replacement f
 2. **Canonical form**: port keys are sorted alphabetically. Port values use inline lists such as `[s2, s5]`. Flow-style bracket entries may carry cycle markers such as `s8#cycle:3#terminal`; block-scalar slice metadata uses the alternate `cycle: N` field. Canonical blocks have no trailing whitespace and use ISO-8601 UTC timestamps in `generated_at`.
 3. **Cycle marker grammar**: inline slice tokens use `sN[#cycle:N][#terminal]`. `cycle:N` is omitted when `N=1`. Block-form slice metadata uses explicit `terminal: true` for terminal steps. Ordering is the list position, not the numeric slice ID.
 4. **Slice adapter hint (v2)**: v2 slice metadata may include an optional `adapter: {repo-relative path}` scalar. For executable Spine-Runner frames, the value is a repo-relative adapter file path such as `agents/Code-Smith.agent.md`, `skills/frame-credit-emission/SKILL.md`, or `skills/{skill}/adapters/{adapter}.md`; short adapter IDs are not resolved through a separate registry. The parser preserves this value as `AdapterRaw` and exposes non-empty values as `Adapter`. The field remains optional for legacy and non-runner consumers: v2 slices without `adapter:` remain valid for predicate-based selection, but Spine-Runner needs a resolvable path to execute a slice.
-5. **Exploratory coverage escape hatch**: `coverage: exploratory — {reason}` is allowed only when the reason is present. That reason is surfaced as a ledger row so reviewers can challenge incomplete routing coverage.
-6. **Plan-size threshold D8**: an implementation step means a step whose Execution Mode is `serial` or `parallel` and whose RC contains a GREEN code or test action. Adversarial review, CE Gate, and post-retrospective steps do not count toward the threshold.
-7. **Metrics version bump policy**: adding `spine-stale-fallback-count`, `dispatch-fallback-events[]`, and `dispatch-cost-samples[]` does not bump `metrics_version` because they are additive optional v4 fields. Likewise, the optional sixth key `provider:` on `dispatch-cost-samples[]` rows is additive and does not bump `metrics_version`; parsers accept 5-key and 6-key rows. Known values for `provider`: `claude` | `copilot`; additional values tolerated additively per #467 D12. See `frame/pipeline-metrics-v4-schema.md` for the authoritative `dispatch-cost-samples[]` row contract.
-8. **D9 normalized-diff `generated_at` elision**: for D9 model-switch diff comparison, hash-elide the `generated_at:` line inside frame-spine blocks so identical content does not append duplicate durable handoff comments.
+5. **Slice executor hint (v2)**: v2 slice metadata may include optional `executor:`. Legal values use the exact enum literal `agents/*.agent.md path | inline`. When absent, the executor is derived from the adapter frontmatter's `adapter-type:` enum literal `work | predicate`: `work` defaults to `agents/Senior-Engineer.agent.md`, and `predicate` defaults to `inline`. `executor: none` is deferred and rejected by current validation.
+6. **Exploratory coverage escape hatch**: `coverage: exploratory — {reason}` is allowed only when the reason is present. That reason is surfaced as a ledger row so reviewers can challenge incomplete routing coverage.
+7. **Plan-size threshold D8**: an implementation step means a step whose Execution Mode is `serial` or `parallel` and whose RC contains a GREEN code or test action. Adversarial review, CE Gate, and post-retrospective steps do not count toward the threshold.
+8. **Metrics version bump policy**: adding `spine-stale-fallback-count`, `dispatch-fallback-events[]`, and `dispatch-cost-samples[]` does not bump `metrics_version` because they are additive optional v4 fields. Likewise, the optional sixth key `provider:` on `dispatch-cost-samples[]` rows is additive and does not bump `metrics_version`; parsers accept 5-key and 6-key rows. Known values for `provider`: `claude` | `copilot`; additional values tolerated additively per #467 D12. See `frame/pipeline-metrics-v4-schema.md` for the authoritative `dispatch-cost-samples[]` row contract.
+9. **D9 normalized-diff `generated_at` elision**: for D9 model-switch diff comparison, hash-elide the `generated_at:` line inside frame-spine blocks so identical content does not append duplicate durable handoff comments.
 
 Example v2 canonical shape:
 
@@ -134,6 +135,19 @@ slices:
     depends_on: [s5]
     cycle: 3
     terminal: true
+-->
+```
+
+Concise skill-as-adapter `frame-slice` block shape:
+
+```markdown
+<!-- frame-slice
+id: s2
+provides: [implement-code]
+adapter: skills/implementation-discipline/adapters/implement-code-adapter.md
+executor: agents/Senior-Engineer.agent.md
+ac_refs: [AC5]
+coverage: GREEN code action
 -->
 ```
 
@@ -220,6 +234,8 @@ applies-when: changeset.totalLines < 200 and not scope.isReReview and not scope.
 
 Explicit-skip adapters add `reason-required: true` and omit `applies-when` because they are invoked manually with a visible justification.
 
+Work and predicate adapter files use the `adapter-type:` enum literal `work | predicate`. Single-variant work adapters follow `skills/{skill}/adapters/{port}-adapter.md`; multi-variant ports keep selector-named files under `skills/{skill}/adapters/` and distinguish variants with `applies-when:`. The #559 rename sweep owns remaining terminology cleanup outside the #552 Senior Engineer + skill-as-adapter slice.
+
 The current frame validator ships as `.github/scripts/frame-validate.ps1`, backed by `.github/scripts/lib/frame-validate-core.ps1` and `.github/scripts/lib/frame-predicate-core.ps1`. `quick-validate.ps1` aggregates it as `FrameValidator`, so the validator passes or fails with the existing structural validation suite rather than adding a separate CI lane.
 
 The first shipped validator slice is intentionally symmetry-only plus predicate parse-only:
@@ -249,7 +265,8 @@ Port-filling skills and agents declare `provides:`. Supporting skills loaded onl
 | Adapter type | Declaration location |
 |---|---|
 | Agent-owned work adapter | Canonical `agents/<Name>.agent.md` |
-| Skill-owned single work adapter | `skills/<skill>/SKILL.md` |
+| Legacy skill-owned single work adapter | `skills/<skill>/SKILL.md` |
+| Skill-as-adapter single work adapter | `skills/<skill>/adapters/<port>-adapter.md` |
 | Skill-owned variant or work file | `skills/<skill>/adapters/<variant>.md` |
 | Auto-N/A adapter | `skills/<skill>/adapters/auto-na-<port>.md` |
 | Explicit-skip adapter | `skills/<skill>/adapters/explicit-skip-<port>.md` |
@@ -257,6 +274,8 @@ Port-filling skills and agents declare `provides:`. Supporting skills loaded onl
 Lowercase Claude shells and slash commands are dispatchers, not adapters; they do not declare `provides:`.
 
 ### Per-port adapter table
+
+New single-variant work adapters should prefer the skill-as-adapter path: declare `adapter-type: work`, name the file `skills/{skill}/adapters/{port}-adapter.md`, and rely on the default executor `agents/Senior-Engineer.agent.md` unless a slice explicitly names another `agents/*.agent.md` executor. Multi-variant work ports use selector-named adapter files plus `applies-when:` and `## When to use` guidance so the planner can choose the right variant.
 
 | Port | Applies | Work declaration | Work predicate | Auto-N/A declaration | Explicit-skip declaration |
 |---|---|---|---|---|---|
@@ -364,6 +383,8 @@ The previously documented marker `<!-- code-review-complete-{PR} -->` was design
 Per-agent issue markers (`<!-- experience-owner-complete-{ID} -->`, `<!-- design-phase-complete-{ID} -->`, `<!-- plan-issue-{ID} -->`) **do** appear reliably on linked issues and remain valuable as **evidence pointers** referenced by credit entries. They are not replaced.
 
 The sample credit `adapter:` values below preserve legacy credit-ledger vocabulary from the v3 design era. They are evidence labels, not executable Spine-Runner slice adapter values; executable v2 frame slices use repo-relative adapter paths.
+
+Senior Engineer skill-as-adapter credits use the existing builder row shape. The Senior Engineer subagent, not Spine-Runner directly, emits the terminal credit row at completion; the repo-relative adapter path is captured in `adapter` and repeated in human-readable `evidence` so attribution points to the methodology file that drove the work.
 
 ```yaml
 # Embedded in PR body as an HTML comment

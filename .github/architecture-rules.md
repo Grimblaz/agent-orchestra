@@ -70,7 +70,7 @@ Required frontmatter fields: `name`, `description`, `tools`
 Optional frontmatter: `handoffs`, `user-invocable` (defaults to `true` if omitted)
 
 - User-facing agents (7): Must have `user-invocable: true` or omit the field
-- Internal agents (7): Must have `user-invocable: false`
+- Internal agents and runners (9): Must have `user-invocable: false`
 
 ### Skill Files (`SKILL.md`)
 

@@ -124,6 +124,24 @@ Use `depends-on:` for explicit depth-1 dependencies only. A slice may name the i
 
 Spine port values must use flow-style inline lists. Cycle tokens use `sN[#cycle:N][#terminal]`: omit `#cycle:1` for the first cycle, add `#cycle:N` when a later step continues the same port in another implementation cycle, and add `#terminal` only to the last step that must produce the terminal credit for that port. In the matching slice metadata, use `cycle: N` and `terminal: true`. Append monotonic follow-up work after earlier tokens; use non-monotonic insertion only when an amendment inserts a new step between existing steps, and preserve list order as the execution order even when step numbers are not monotonic.
 
+### Adapter and executor selection
+
+#### Executor field semantics
+
+Frame slices may include optional `executor:`. Legal values use the exact enum literal `agents/*.agent.md path | inline`. `agents/*.agent.md` paths dispatch that agent's paired shell; `inline` keeps the resolved adapter methodology in the active conductor context. `executor: none` is deferred and must not be emitted by current plans.
+
+When `executor:` is absent, derive the default from the adapter frontmatter's `adapter-type:` enum literal `work | predicate`: `work` defaults to `agents/Senior-Engineer.agent.md`, while `predicate` defaults to `inline`.
+
+#### Planner glob workflow
+
+For single-variant work adapters, run `Glob skills/*/adapters/{port}-adapter.md`, read each candidate's frontmatter and `## When to use`, and pick the candidate whose guidance matches the slice. For multi-variant work adapters, run `Glob skills/*/adapters/*.md`, filter to `adapter-type: work` plus a positive or relevant `applies-when:`, read each candidate's `## When to use`, and pick the selector-named adapter whose predicate and guidance match the slice.
+
+Do not infer methodology from a skill directory when no adapter file matches. Either select an explicit adapter path or document why the plan remains legacy/non-runner for that slice.
+
+#### Cycle and terminal interaction
+
+`executor:` controls only how the selected adapter is invoked. It does not change existing cycle or terminal token semantics: keep `sN[#cycle:N][#terminal]` in the spine, `cycle: N` and `terminal: true` in slice metadata, and terminal credit responsibility on the last terminal slice for the port.
+
 ### Plan-markdown template
 
 ```markdown
