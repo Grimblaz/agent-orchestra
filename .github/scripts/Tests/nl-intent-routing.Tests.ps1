@@ -136,4 +136,21 @@ Describe 'Natural-language intent routing table contract' {
         (& $script:GetIntentValue $result 'claude_command') | Should -Be '/orchestra:review'
         (& $script:GetIntentValue $result 'copilot_command') | Should -Be '/review'
     }
+
+    It 'matches review-local natural-language phrases through the Pattern lookup' {
+        $lowercaseResult = Invoke-RoutingLookup -Table nl_intent_routing -Key Pattern -Value 'review this code'
+        $surroundingPhraseResult = Invoke-RoutingLookup -Table nl_intent_routing -Key Pattern -Value 'please review this code'
+        $uppercaseResult = Invoke-RoutingLookup -Table nl_intent_routing -Key Pattern -Value 'REVIEW THIS CODE'
+
+        $lowercaseResult | Should -Not -BeNullOrEmpty
+        (& $script:GetIntentValue $lowercaseResult 'intent_key') | Should -Be 'review-local'
+        (& $script:GetIntentValue $lowercaseResult 'claude_command') | Should -Be '/orchestra:review'
+        (& $script:GetIntentValue $lowercaseResult 'copilot_command') | Should -Be '/review'
+
+        $surroundingPhraseResult | Should -Not -BeNullOrEmpty
+        (& $script:GetIntentValue $surroundingPhraseResult 'intent_key') | Should -Be 'review-local'
+
+        $uppercaseResult | Should -Not -BeNullOrEmpty
+        (& $script:GetIntentValue $uppercaseResult 'intent_key') | Should -Be 'review-local'
+    }
 }

@@ -165,8 +165,10 @@ function Test-RTRoutingEntryMatch {
     }
 
     if ($Table -eq 'nl_intent_routing' -and $Key -eq 'Pattern') {
+        $regexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+
         foreach ($pattern in @($entryValue)) {
-            if ([string]$pattern -eq $Value) {
+            if ([regex]::IsMatch($Value, [string]$pattern, $regexOptions)) {
                 return $true
             }
         }
