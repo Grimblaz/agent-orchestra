@@ -261,18 +261,18 @@
     "source": "skills/routing-tables/SKILL.md + CLAUDE.md/copilot-instructions.md directives",
     "entries": [
       {
+        "intent_key": "review-pr-github",
+        "patterns": ["review (my latest|my|this|the open|the latest) PR", "review #?\\d+", "respond to the github review"],
+        "claude_command": "/review-github",
+        "copilot_command": "/review-github",
+        "notes": "Route GitHub PR review intake or PR-number review requests."
+      },
+      {
         "intent_key": "review-local",
         "patterns": ["review (this|the) (code|diff|changes)", "review local"],
         "claude_command": "/orchestra:review",
         "copilot_command": "/review",
         "notes": "Run the local adversarial review pipeline against workspace changes."
-      },
-      {
-        "intent_key": "review-pr-github",
-        "patterns": ["review (my|this|the open|the latest) PR", "review #?\\d+", "respond to the github review"],
-        "claude_command": "/review-github",
-        "copilot_command": "/review",
-        "notes": "Route GitHub PR review intake or PR-number review requests."
       },
       {
         "intent_key": "review-lite",
@@ -304,7 +304,7 @@
       },
       {
         "intent_key": "plan",
-        "patterns": ["plan issue", "create a plan", "implementation plan"],
+        "patterns": ["plan issue", "create a plan", "implementation plan", "plan implementation for issue #?\\d+"],
         "claude_command": "/plan",
         "copilot_command": "/plan",
         "notes": "Run Issue-Planner for implementation plan authoring."
@@ -339,7 +339,7 @@
       },
       {
         "intent_key": "polish",
-        "patterns": ["polish the ui", "visual polish", "ui iteration"],
+        "patterns": ["polish the ui", "polish (this|the) ui( component)?", "visual polish", "ui iteration"],
         "claude_command": "/polish",
         "copilot_command": "/polish",
         "notes": "Run UI-Iterator for screenshot-driven polish."

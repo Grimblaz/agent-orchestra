@@ -12,7 +12,7 @@ Live Copilot transcript capture is INCONCLUSIVE. Issue #567 Phase 1 ships prose/
 
 - `.github/copilot-instructions.md` has an `## Intent Routing` section stating that plugin processes are the default chat experience and natural-language requests matching `nl_intent_routing` route to slash commands with visible confirmation.
 - The section says the recommended order is VS Code dropdown, slash commands, natural-language confirmation, and that `@-mention` is NOT recommended.
-- Confirmation wording names slash commands: first match uses structured `AskUserQuestion` options such as `Run /X for this (Recommended)`; later same-family matches use `Routing to /X -- say /raw to opt out, otherwise proceed.`
+- Confirmation wording names slash commands: first match uses `#tool:vscode/askQuestions` options such as `Run /X for this (Recommended)`; later same-family matches use `Routing to /X — say /raw to opt out, otherwise proceed.`
 - D3 scope is explicit: routing detection runs only for top-level user messages outside active slash-command turns and outside subagent dispatches.
 - `/raw`, `just answer normally`, `don't run the pipeline`, `raw mode`, and `skip routing` activate raw mode for the conversation only; any explicit slash command clears raw mode.
 - For matched entries with a non-null `copilot_command` that require explicit handoff, the directive says to emit `Please run /X to continue` using the Copilot command from `nl_intent_routing` and stop.
@@ -27,7 +27,7 @@ Live Copilot transcript capture is INCONCLUSIVE. Issue #567 Phase 1 ships prose/
 
 Prompt: `review my PR`
 Expected route row: `review-pr-github`
-Expected Copilot confirmation names `/review` verbatim because the row maps GitHub review intake to the Copilot command surface.
+Expected Copilot confirmation names `/review-github` verbatim because the row maps GitHub review intake to the Copilot command surface.
 Result: PASS for Phase 1 directive/resolver evidence; live transcript INCONCLUSIVE.
 
 ### S2 Functional - Raw Mode
@@ -44,7 +44,7 @@ Result: PASS for Phase 1 directive/resolver evidence; live transcript INCONCLUSI
 
 ### S4 Intent - Slash Commands, Not Mentions
 
-Expected transcript language names `/review`, `/orchestrate`, `/plan`, `/design`, and other slash commands. It does not recommend `@-mention` as the routing surface.
+Expected transcript language names `/review-github`, `/orchestrate`, `/plan`, `/design`, and other slash commands. It does not recommend `@-mention` as the routing surface.
 Result: PASS for directive evidence.
 
 ### D3 Scope - Active Slash-Command Turn
@@ -91,4 +91,6 @@ Result: PASS for directive evidence; live transcript INCONCLUSIVE.
 
 ## Exploratory Observation
 
-The Copilot directive is aligned with the Claude directive, while allowing Copilot-specific command availability such as `/review` and null `copilot_command` rows. Live default routing still waits for the Phase 2 Copilot custom chat mode work.
+The Copilot directive is aligned with the Claude directive, while allowing Copilot-specific command availability.
+GitHub review intake uses `/review-github`.
+Local review uses `/review`; some rows intentionally have null `copilot_command` values. Live default routing still waits for the Phase 2 Copilot custom chat mode work.

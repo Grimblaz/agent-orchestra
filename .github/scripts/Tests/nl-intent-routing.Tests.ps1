@@ -26,7 +26,7 @@ Describe 'Natural-language intent routing table contract' {
 
         # Slash command file resolution rules under test:
         # Claude command_to_file(cmd) = "commands/" + cmd.TrimStart('/').Replace(':','-') + ".md"
-        # Copilot command_to_file(cmd) = ".github/prompts/" + "/" + cmd.TrimStart('/') + ".prompt.md"
+        # Copilot command_to_file(cmd) = ".github/prompts/" + cmd.TrimStart('/') + ".prompt.md"
         $script:ResolveClaudeCommandRelativePath = {
             param([Parameter(Mandatory)][string]$Command)
 
@@ -83,16 +83,16 @@ Describe 'Natural-language intent routing table contract' {
 
     It 'documents and implements slash command file resolution for both plugin surfaces' {
         $script:TestSource | Should -Match ([regex]::Escape('Claude command_to_file(cmd) = "commands/" + cmd.TrimStart(''/'').Replace('':'',''-'') + ".md"'))
-        $script:TestSource | Should -Match ([regex]::Escape('Copilot command_to_file(cmd) = ".github/prompts/" + "/" + cmd.TrimStart(''/'') + ".prompt.md"'))
+        $script:TestSource | Should -Match ([regex]::Escape('Copilot command_to_file(cmd) = ".github/prompts/" + cmd.TrimStart(''/'') + ".prompt.md"'))
 
         $claudeRelativePath = & $script:ResolveClaudeCommandRelativePath '/orchestra:spine'
-        $copilotRelativePath = & $script:ResolveCopilotCommandRelativePath '/review'
+        $copilotRelativePath = & $script:ResolveCopilotCommandRelativePath '/review-github'
 
         $claudeRelativePath | Should -Be 'commands/orchestra-spine.md'
         (Test-Path -LiteralPath (& $script:ResolveWorkspacePath $claudeRelativePath) -PathType Leaf) | Should -BeTrue -Because '/orchestra:spine must resolve to the Claude command shell commands/orchestra-spine.md'
 
-        $copilotRelativePath | Should -Be '.github/prompts/review.prompt.md'
-        (Test-Path -LiteralPath (& $script:ResolveWorkspacePath $copilotRelativePath) -PathType Leaf) | Should -BeTrue -Because '/review must resolve to the Copilot prompt file .github/prompts/review.prompt.md'
+        $copilotRelativePath | Should -Be '.github/prompts/review-github.prompt.md'
+        (Test-Path -LiteralPath (& $script:ResolveWorkspacePath $copilotRelativePath) -PathType Leaf) | Should -BeTrue -Because '/review-github must resolve to the Copilot prompt file .github/prompts/review-github.prompt.md'
     }
 
     It 'resolves every configured Claude and Copilot slash command to an existing file' {
@@ -154,6 +154,70 @@ Describe 'Natural-language intent routing table contract' {
         (& $script:GetIntentValue $uppercaseResult 'intent_key') | Should -Be 'review-local'
     }
 
+    It 'routes common plan, polish, and GitHub-review natural-language phrases through Pattern lookup' -ForEach @(
+        @{ Phrase = 'plan implementation for issue 567'; IntentKey = 'plan'; ClaudeCommand = '/plan'; CopilotCommand = '/plan' },
+        @{ Phrase = 'polish this UI component'; IntentKey = 'polish'; ClaudeCommand = '/polish'; CopilotCommand = '/polish' },
+        @{ Phrase = 'review my PR'; IntentKey = 'review-pr-github'; ClaudeCommand = '/review-github'; CopilotCommand = '/review-github' }
+    ) {
+        $result = Invoke-RoutingLookup -Table nl_intent_routing -Key Pattern -Value $Phrase
+
+        $result | Should -Not -BeNullOrEmpty
+        (& $script:GetIntentValue $result 'intent_key') | Should -Be $IntentKey
+        (& $script:GetIntentValue $result 'claude_command') | Should -Be $ClaudeCommand
+        (& $script:GetIntentValue $result 'copilot_command') | Should -Be $CopilotCommand
+    }
+
+    It 'routes canonical PR phrase <Phrase> only to GitHub review intake through all-match and first-match lookups' -ForEach @(
+        @{ Phrase = 'review my PR' },
+        @{ Phrase = 'review this PR' }
+    ) {
+        $routingMatches = @(Invoke-RoutingLookupAll -Table nl_intent_routing -Key Pattern -Value $Phrase)
+        $intentKeys = @($routingMatches | ForEach-Object { & $script:GetIntentValue $_ 'intent_key' })
+
+        $routingMatches.Count | Should -Be 1 -Because 'canonical PR review phrasing should not be ambiguous with local workspace review'
+        $intentKeys | Should -Be @('review-pr-github')
+        (& $script:GetIntentValue $routingMatches[0] 'copilot_command') | Should -Be '/review-github'
+
+        $firstMatch = Invoke-RoutingLookup -Table nl_intent_routing -Key Pattern -Value $Phrase
+        (& $script:GetIntentValue $firstMatch 'intent_key') | Should -Be 'review-pr-github'
+        (& $script:GetIntentValue $firstMatch 'copilot_command') | Should -Be '/review-github'
+    }
+
+    It 'can observe every intent matched by an ambiguous natural-language phrase' {
+        $script:SyntheticRoutingConfig = @{
+            nl_intent_routing = @{
+                entries = @(
+                    @{
+                        intent_key = 'review-pr-github'
+                        patterns = @('ambiguous review request')
+                        claude_command = '/review-github'
+                        copilot_command = '/review-github'
+                    },
+                    @{
+                        intent_key = 'review-local'
+                        patterns = @('ambiguous review request')
+                        claude_command = '/orchestra:review'
+                        copilot_command = '/review'
+                    }
+                )
+            }
+        }
+
+        Mock -CommandName Read-RTJsonFile -MockWith {
+            return $script:SyntheticRoutingConfig
+        }
+
+        $routingMatches = @(Invoke-RoutingLookupAll -Table nl_intent_routing -Key Pattern -Value 'ambiguous review request')
+        $intentKeys = @($routingMatches | ForEach-Object { & $script:GetIntentValue $_ 'intent_key' })
+
+        $routingMatches.Count | Should -BeGreaterThan 1 -Because 'ambiguous-match handling needs all candidate rows, not only the first match'
+        $intentKeys | Should -Contain 'review-pr-github'
+        $intentKeys | Should -Contain 'review-local'
+
+        $firstMatch = Invoke-RoutingLookup -Table nl_intent_routing -Key Pattern -Value 'ambiguous review request'
+        (& $script:GetIntentValue $firstMatch 'intent_key') | Should -Be $intentKeys[0] -Because 'Invoke-RoutingLookup must preserve first-match behavior for existing callers'
+    }
+
     It 'returns no route for raw-mode natural-language signal <Value>' -ForEach @(
         @{ Value = 'just answer normally' },
         @{ Value = "don't run the pipeline" },
@@ -208,5 +272,42 @@ Describe 'Natural-language intent routing table contract' {
 
         $script:MalformedLookupResult | Should -Not -BeNullOrEmpty
         (& $script:GetIntentValue $script:MalformedLookupResult 'intent_key') | Should -Be 'review-local'
+    }
+
+    It 'skips malformed Pattern regexes while collecting all later matches' {
+        $script:SyntheticRoutingConfig = @{
+            nl_intent_routing = @{
+                entries = @(
+                    @{
+                        intent_key = 'malformed-first'
+                        patterns = @('review (')
+                        claude_command = '/orchestra:review-lite'
+                        copilot_command = '/review'
+                    },
+                    @{
+                        intent_key = 'review-pr-github'
+                        patterns = @('review this PR')
+                        claude_command = '/review-github'
+                        copilot_command = '/review-github'
+                    },
+                    @{
+                        intent_key = 'review-local'
+                        patterns = @('review this PR')
+                        claude_command = '/orchestra:review'
+                        copilot_command = '/review'
+                    }
+                )
+            }
+        }
+
+        Mock -CommandName Read-RTJsonFile -MockWith {
+            return $script:SyntheticRoutingConfig
+        }
+
+        $script:MalformedLookupResults = @()
+        { $script:MalformedLookupResults = @(Invoke-RoutingLookupAll -Table nl_intent_routing -Key Pattern -Value 'review this PR') } | Should -Not -Throw
+
+        $intentKeys = @($script:MalformedLookupResults | ForEach-Object { & $script:GetIntentValue $_ 'intent_key' })
+        $intentKeys | Should -Be @('review-pr-github', 'review-local')
     }
 }

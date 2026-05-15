@@ -18,23 +18,71 @@ Describe 'Natural-language intent routing collision fixture contract' {
         $script:FixturePath = Join-Path $script:RepoRoot '.github\scripts\Tests\fixtures\intent-routing-collisions.yml'
         $script:YamlText = Get-Content -Path $script:FixturePath -Raw
 
-        $script:ReadCollisionEntries = {
-            $parsed = $script:YamlText | ConvertFrom-Yaml
-            $entries = [System.Collections.Generic.List[object]]::new()
+        $script:ConvertCollisionFixtureValue = {
+            param([Parameter(Mandatory)][string]$Value)
 
-            foreach ($entry in $parsed) {
-                $entries.Add($entry)
+            $trimmed = $Value.Trim()
+            if ($trimmed -eq 'true') {
+                return $true
+            }
+
+            if ($trimmed -eq 'false') {
+                return $false
+            }
+
+            if ($trimmed -match '^"(.*)"$') {
+                return ($Matches[1] -replace '\\"', '"')
+            }
+
+            return $trimmed
+        }
+
+        $script:ReadCollisionEntries = {
+            $entries = [System.Collections.Generic.List[object]]::new()
+            $current = $null
+            $lineNumber = 0
+
+            foreach ($line in ($script:YamlText -split "`r?`n")) {
+                $lineNumber++
+                if ($line.Trim().Length -eq 0) {
+                    continue
+                }
+
+                if ($line -match '^\s*-\s+([a-z_]+):\s*(.+?)\s*$') {
+                    if ($null -ne $current) {
+                        $entries.Add([pscustomobject]$current)
+                    }
+
+                    $current = [ordered]@{}
+                    $current[$Matches[1]] = & $script:ConvertCollisionFixtureValue $Matches[2]
+                    continue
+                }
+
+                if ($line -match '^\s+([a-z_]+):\s*(.+?)\s*$') {
+                    if ($null -eq $current) {
+                        throw "Collision fixture property before first entry at line ${lineNumber}: $line"
+                    }
+
+                    $current[$Matches[1]] = & $script:ConvertCollisionFixtureValue $Matches[2]
+                    continue
+                }
+
+                throw "Unsupported collision fixture line ${lineNumber}: $line"
+            }
+
+            if ($null -ne $current) {
+                $entries.Add([pscustomobject]$current)
             }
 
             return $entries.ToArray()
         }
     }
 
-    It 'parses the collision fixture as YAML' {
-        $command = Get-Command ConvertFrom-Yaml -ErrorAction Stop
-        $parsed = & $command $script:YamlText
+    It 'parses the constrained collision fixture without external YAML modules' {
+        $script:ParsedCollisionEntries = @()
+        { $script:ParsedCollisionEntries = @(& $script:ReadCollisionEntries) } | Should -Not -Throw
 
-        $parsed | Should -Not -BeNullOrEmpty
+        $script:ParsedCollisionEntries | Should -Not -BeNullOrEmpty
     }
 
     It 'contains at least fifteen collision examples' {

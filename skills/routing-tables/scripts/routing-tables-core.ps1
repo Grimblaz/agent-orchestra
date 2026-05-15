@@ -291,11 +291,33 @@ function Invoke-RoutingLookup {
         [string]$Value
     )
 
+    $results = @(Invoke-RoutingLookupAll -Table $Table -Key $Key -Value $Value)
+    if ($results.Count -gt 0) {
+        return $results[0]
+    }
+
+    return $null
+}
+
+function Invoke-RoutingLookupAll {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Table,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Key,
+
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
     Set-StrictMode -Version Latest
     $ErrorActionPreference = 'Stop'
 
     if ($Table -eq 'nl_intent_routing' -and $Key -eq 'Pattern' -and (Test-RTNlIntentRawSignal -Value $Value)) {
-        return $null
+        return
     }
 
     try {
@@ -303,7 +325,7 @@ function Invoke-RoutingLookup {
     }
     catch {
         Write-Warning "Failed to read routing configuration: $($_.Exception.Message)"
-        return $null
+        return
     }
 
     if (-not $config.ContainsKey($Table)) {
@@ -312,16 +334,14 @@ function Invoke-RoutingLookup {
 
     $tableDefinition = $config[$Table]
     if (-not $tableDefinition.ContainsKey('entries')) {
-        return $null
+        return
     }
 
     foreach ($entry in $tableDefinition.entries) {
         if (Test-RTRoutingEntryMatch -Entry $entry -Table $Table -Key $Key -Value $Value) {
-            return Resolve-RTRoutingLookupResult -Entry $entry -Table $Table
+            Resolve-RTRoutingLookupResult -Entry $entry -Table $Table
         }
     }
-
-    return $null
 }
 
 function Test-GateCriteria {

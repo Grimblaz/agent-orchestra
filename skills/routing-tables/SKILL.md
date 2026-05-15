@@ -24,6 +24,8 @@ This skill is the human-readable companion to the routing data in `assets/routin
 - `nl_intent_routing`: natural-language intent keys and patterns mapped to Claude and Copilot slash-command surfaces via `claude_command` and `copilot_command`; `null` means no platform equivalent. This supports Phase 1 directive prose and Phase 2 forward-compatible lookup, not runtime hook wiring
 - `enums`: canonical current enum values used by review and routing outputs
 
+For deterministic consumers, `Invoke-RoutingLookup` preserves the legacy first-match behavior. Use `Invoke-RoutingLookupAll` when a Pattern lookup needs to detect ambiguous natural-language matches and present every matched intent to the user.
+
 `assets/gate-criteria.json` contains four top-level sections:
 
 - `scope_classification`: abbreviated-vs-full pipeline gate criteria and tier table
