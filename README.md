@@ -42,8 +42,6 @@ Claude Code loads agents and skills from `.claude-plugin/plugin.json`. Install v
 
 All 16 agents and the shared skill library are immediately available. The marketplace command registers the source; the install command pulls the plugin into Claude Code's cache. See [`Documents/Decisions/0002-claude-code-plugin-schema.md`](Documents/Decisions/0002-claude-code-plugin-schema.md) for the schema rationale (`agents` uses an explicit registration whitelist; `skills` auto-discovers).
 
-<a id="path-resolution-for-downstream-consumers"></a>
-
 ### Path resolution for downstream consumers
 
 This is zero-config for consumer repositories: after marketplace registration and plugin install, Claude Code loads the shared agent bodies and skills from its plugin cache. The repository using the plugin does not need a local `agents/` directory.
