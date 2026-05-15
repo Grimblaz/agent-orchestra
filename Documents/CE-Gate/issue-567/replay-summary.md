@@ -22,7 +22,7 @@ Evidence type: Focused Pester and resolver replay
 | Phrase | Intent | Claude command | Copilot command | Result |
 | --- | --- | --- | --- | --- |
 | `please review this code` | `review-local` | `/orchestra:review` | `/review` | PASS |
-| `review my PR` | `review-pr-github` | `/review-github` | `/review` | PASS |
+| `review my PR` | `review-pr-github` | `/review-github` | `/review-github` | PASS |
 | `create a plan for issue 567` | `plan` | `/plan` | `/plan` | PASS |
 | `technical design for issue 567` | `design` | `/design` | `/design` | PASS |
 | `orchestrate issue 567` | `orchestrate` | `/orchestrate` | `/orchestrate` | PASS |
@@ -35,7 +35,7 @@ Evidence type: Focused Pester and resolver replay
 | `explain what this code does` | no route | PASS |
 | `just answer normally` | no route | PASS |
 | `orchestrate issue 567` | `orchestrate`, Claude `/orchestrate`, Copilot `/orchestrate` | PASS |
-| `review my PR` | `review-pr-github`, Claude `/review-github`, Copilot `/review` | PASS |
+| `review my PR` | `review-pr-github`, Claude `/review-github`, Copilot `/review-github` | PASS |
 | `technical design for issue 567` | `design`, Claude `/design`, Copilot `/design` | PASS |
 | `create a plan for issue 567` | `plan`, Claude `/plan`, Copilot `/plan` | PASS |
 
