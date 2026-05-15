@@ -16,6 +16,6 @@ Natural-language requests also activate raw mode when the user says one of these
 - `raw mode`
 - `skip routing`
 
-Any explicit user-typed slash command after raw mode is active clears raw mode for the remainder of the conversation. After that clear, natural-language intent routing is active again.
+Any explicit user-typed slash command after raw mode is active clears raw mode. Natural-language intent routing is active again after that slash command.
 
 ARGUMENTS: $ARGUMENTS
