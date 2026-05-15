@@ -153,4 +153,60 @@ Describe 'Natural-language intent routing table contract' {
         $uppercaseResult | Should -Not -BeNullOrEmpty
         (& $script:GetIntentValue $uppercaseResult 'intent_key') | Should -Be 'review-local'
     }
+
+    It 'returns no route for raw-mode natural-language signal <Value>' -ForEach @(
+        @{ Value = 'just answer normally' },
+        @{ Value = "don't run the pipeline" },
+        @{ Value = 'raw mode' },
+        @{ Value = 'skip routing' }
+    ) {
+        $result = Invoke-RoutingLookup -Table nl_intent_routing -Key Pattern -Value $Value
+
+        $result | Should -BeNullOrEmpty -Because "raw-mode signal '$Value' must bypass normal Pattern routing"
+    }
+
+    It 'keeps checked-in nl_intent_routing patterns valid regular expressions' {
+        $entries = @(& $script:GetIntentEntries)
+        $entries | Should -Not -BeNullOrEmpty -Because 'nl_intent_routing must contain entries before pattern validity can be checked'
+
+        foreach ($entry in $entries) {
+            $intentKey = & $script:GetIntentValue $entry 'intent_key'
+            $patterns = @(& $script:GetIntentValue $entry 'patterns')
+
+            foreach ($pattern in $patterns) {
+                { [void][regex]::new([string]$pattern) } | Should -Not -Throw -Because "pattern '$pattern' for intent '$intentKey' should be parseable"
+            }
+        }
+    }
+
+    It 'skips malformed Pattern regexes and continues scanning later entries' {
+        $script:SyntheticRoutingConfig = @{
+            nl_intent_routing = @{
+                entries = @(
+                    @{
+                        intent_key = 'malformed-first'
+                        patterns = @('review (')
+                        claude_command = '/orchestra:review-lite'
+                        copilot_command = '/review'
+                    },
+                    @{
+                        intent_key = 'review-local'
+                        patterns = @('review (this|the) (code|diff|changes)')
+                        claude_command = '/orchestra:review'
+                        copilot_command = '/review'
+                    }
+                )
+            }
+        }
+
+        Mock -CommandName Read-RTJsonFile -MockWith {
+            return $script:SyntheticRoutingConfig
+        }
+
+        $script:MalformedLookupResult = $null
+        { $script:MalformedLookupResult = Invoke-RoutingLookup -Table nl_intent_routing -Key Pattern -Value 'review this code' } | Should -Not -Throw
+
+        $script:MalformedLookupResult | Should -Not -BeNullOrEmpty
+        (& $script:GetIntentValue $script:MalformedLookupResult 'intent_key') | Should -Be 'review-local'
+    }
 }

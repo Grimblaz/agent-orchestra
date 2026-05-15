@@ -136,6 +136,30 @@ function Test-RTWildcardMatch {
     return $false
 }
 
+function Test-RTNlIntentRawSignal {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    $regexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+    $rawSignals = @(
+        'just answer normally',
+        "don't run the pipeline",
+        'raw mode',
+        'skip routing'
+    )
+
+    foreach ($rawSignal in $rawSignals) {
+        $pattern = '(?<!\w)' + [regex]::Escape($rawSignal) + '(?!\w)'
+        if ([regex]::IsMatch($Value, $pattern, $regexOptions)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Test-RTRoutingEntryMatch {
     param(
         [Parameter(Mandatory)]
@@ -166,10 +190,22 @@ function Test-RTRoutingEntryMatch {
 
     if ($Table -eq 'nl_intent_routing' -and $Key -eq 'Pattern') {
         $regexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+        $intentContext = if ($Entry.ContainsKey('intent_key')) {
+            " for intent '$($Entry.intent_key)'"
+        }
+        else {
+            ''
+        }
 
         foreach ($pattern in @($entryValue)) {
-            if ([regex]::IsMatch($Value, [string]$pattern, $regexOptions)) {
-                return $true
+            try {
+                if ([regex]::IsMatch($Value, [string]$pattern, $regexOptions)) {
+                    return $true
+                }
+            }
+            catch {
+                Write-Warning ("Skipping malformed nl_intent_routing Pattern regex{0}: {1} ({2})" -f $intentContext, [string]$pattern, $_.Exception.Message)
+                continue
             }
         }
 
@@ -257,6 +293,10 @@ function Invoke-RoutingLookup {
 
     Set-StrictMode -Version Latest
     $ErrorActionPreference = 'Stop'
+
+    if ($Table -eq 'nl_intent_routing' -and $Key -eq 'Pattern' -and (Test-RTNlIntentRawSignal -Value $Value)) {
+        return $null
+    }
 
     try {
         $config = Read-RTJsonFile -Path (Get-RTConfigPath)
