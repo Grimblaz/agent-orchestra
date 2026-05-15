@@ -160,6 +160,22 @@ function Test-RTNlIntentRawSignal {
     return $false
 }
 
+function Test-RTNlIntentPatternMatch {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Pattern,
+
+        [Parameter(Mandatory)]
+        [string]$Value,
+
+        [Parameter(Mandatory)]
+        [System.Text.RegularExpressions.RegexOptions]$RegexOptions
+    )
+
+    $boundedPattern = '(?<!\w)(?:' + $Pattern + ')(?!\w)'
+    return [regex]::IsMatch($Value, $boundedPattern, $RegexOptions)
+}
+
 function Test-RTRoutingEntryMatch {
     param(
         [Parameter(Mandatory)]
@@ -199,7 +215,7 @@ function Test-RTRoutingEntryMatch {
 
         foreach ($pattern in @($entryValue)) {
             try {
-                if ([regex]::IsMatch($Value, [string]$pattern, $regexOptions)) {
+                if (Test-RTNlIntentPatternMatch -Pattern ([string]$pattern) -Value $Value -RegexOptions $regexOptions) {
                     return $true
                 }
             }

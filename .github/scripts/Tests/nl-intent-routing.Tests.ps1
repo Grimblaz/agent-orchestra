@@ -167,6 +167,19 @@ Describe 'Natural-language intent routing table contract' {
         (& $script:GetIntentValue $result 'copilot_command') | Should -Be $CopilotCommand
     }
 
+    It 'does not route natural-language pattern substrings inside longer words: <Phrase>' -ForEach @(
+        @{ Phrase = 'review this codebase' },
+        @{ Phrase = 'review this codex' },
+        @{ Phrase = 'polish the uiux' },
+        @{ Phrase = "don't run the pipelines" }
+    ) {
+        $firstMatch = Invoke-RoutingLookup -Table nl_intent_routing -Key Pattern -Value $Phrase
+        $allMatches = @(Invoke-RoutingLookupAll -Table nl_intent_routing -Key Pattern -Value $Phrase)
+
+        $firstMatch | Should -BeNullOrEmpty -Because "'$Phrase' contains only a substring of a configured intent phrase"
+        $allMatches.Count | Should -Be 0 -Because "all-match lookup must not collect substring false positives for '$Phrase'"
+    }
+
     It 'routes canonical PR phrase <Phrase> only to GitHub review intake through all-match and first-match lookups' -ForEach @(
         @{ Phrase = 'review my PR' },
         @{ Phrase = 'review this PR' }
