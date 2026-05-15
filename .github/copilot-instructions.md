@@ -8,6 +8,19 @@ applyTo: "**"
 
 Multi-agent workflow system for GitHub Copilot. Provides specialized agents, skills, and prompt templates that orchestrate AI-assisted software development.
 
+## Intent Routing
+
+1. Plugin processes are the default chat experience. Natural-language requests matching the `nl_intent_routing` table route to the corresponding slash command with a visible confirmation; `/raw` opts out.
+2. Recommended order: (1) VS Code dropdown for VS Code users; (2) slash commands for both platforms; (3) natural-language with auto-routing confirmation; (4) @-mention is NOT recommended (unreliable in every plugin surface tested).
+3. Slash commands diverge between Claude (commands/*.md) and Copilot (.github/prompts/*.prompt.md); the nl_intent_routing table carries both column names so the canonical command name is platform-portable.
+4. Source of truth: `skills/routing-tables/assets/routing-config.json` anchors natural-language routing in `nl_intent_routing`.
+5. First match per command-family per conversation uses structured `AskUserQuestion` with options `Run /X for this (Recommended)`, `Continue as raw chat`, and `Don't ask again for this command-family this conversation`; use Copilot-native visible confirmation wording, with final phrasing locked during CE Gate capture. Subsequent same-family matches use inline confirmation: `Routing to /X — say /raw to opt out, otherwise proceed.`
+6. Routing detection runs only on top-level user messages outside an active slash-command turn and outside subagent dispatches, and only after the session-startup run-once marker is recorded.
+7. `/raw`, `just answer normally`, `don't run the pipeline`, `raw mode`, and `skip routing` activate within-conversation raw mode only: no persistence file, no SMC row, and new conversations start routing-active. Any user-typed slash command clears raw mode. Acknowledge with: `Raw mode active for this conversation — natural-language requests will not be routed. Any explicit slash command you type clears raw mode.`
+8. For commands with explicit `model:` frontmatter (`/orchestrate`, `/code-conductor`, `/review-github`), emit `Please run /X to continue` and stop; do not inline-emulate.
+9. When proposed command frontmatter differs from the user-session model, append a one-line tier hint, e.g. `Will run on sonnet + medium per command frontmatter.`
+10. No-match answers normally; first no-match per conversation appends `Tip: type /help for plugin slash commands, or /raw to suppress these hints.` Ambiguous-match uses a text-only disambiguation prompt, e.g. `Did you mean /orchestra:review (local code) or /review-github (GitHub PR)?`
+
 ## Technology Stack
 
 - **Language**: Markdown (agent definitions, skills, instructions, documentation)
