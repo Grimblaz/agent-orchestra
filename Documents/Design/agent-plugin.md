@@ -20,6 +20,16 @@ VS Code 1.110 introduced an experimental agent plugin system (`chat.plugins.enab
 
 ---
 
+## Default Natural-Language Routing
+
+Issue #567 Phase 1 makes plugin-task requests expressed in natural language route through plugin processes by default. The confirmation path names explicit slash commands instead of recommending `@`-mentions, and commands with explicit `model:` frontmatter (`/orchestrate`, `/code-conductor`, `/review-github`) instruct the user with `Please run /X to continue` rather than inline-emulating the command.
+
+The canonical mapping lives in `skills/routing-tables/assets/routing-config.json` under `nl_intent_routing`. Claude and Copilot command names remain platform-divergent, so each row carries `claude_command` and `copilot_command`; Copilot rows with `null` do not synthesize a command. `/raw` is a conversation-local opt-out for natural-language routing, and any explicit slash command clears raw mode.
+
+Phase 2 runtime interception is deferred to follow-up #569: Claude `UserPromptSubmit` hook support and the Copilot custom default chat mode or equivalent. CE Gate for Phase 1 recorded `✅ CE Gate passed — intent match: partial` because directive/config evidence passed while live runtime interception remains deferred.
+
+---
+
 ## Decision: Add Plugin Manifests to `.github/plugin/`
 
 Two manifest files were added under `.github/plugin/`:
