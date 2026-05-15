@@ -51,6 +51,17 @@ function Resolve-RTRoutingLookupEntry {
 
             break
         }
+        'nl_intent_routing' {
+            if ($Key -eq 'IntentKey' -and $Entry.ContainsKey('intent_key')) {
+                return $Entry.intent_key
+            }
+
+            if ($Key -eq 'Pattern' -and $Entry.ContainsKey('patterns')) {
+                return $Entry.patterns
+            }
+
+            break
+        }
     }
 
     $candidateKey = $Key.Substring(0, 1).ToLowerInvariant() + $Key.Substring(1)
@@ -83,6 +94,9 @@ function Resolve-RTRoutingLookupResult {
             }
 
             return $Entry.tool_or_method
+        }
+        'nl_intent_routing' {
+            return $Entry
         }
         default {
             return $null
@@ -147,6 +161,16 @@ function Test-RTRoutingEntryMatch {
 
     $entryValue = Resolve-RTRoutingLookupEntry -Entry $Entry -Table $Table -Key $Key
     if ($null -eq $entryValue) {
+        return $false
+    }
+
+    if ($Table -eq 'nl_intent_routing' -and $Key -eq 'Pattern') {
+        foreach ($pattern in @($entryValue)) {
+            if ([string]$pattern -eq $Value) {
+                return $true
+            }
+        }
+
         return $false
     }
 
