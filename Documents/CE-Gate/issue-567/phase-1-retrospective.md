@@ -39,7 +39,7 @@ Process-Review calibration check on 2026-05-15 found no systemic patterns meetin
 
 ## Phase 2 Handoff Notes
 
-Phase 2 follow-up issue is still required and should be filed after this retrospective. It should reference issue #567, the design and plan comments, and this retrospective artifact: `Documents/CE-Gate/issue-567/phase-1-retrospective.md`.
+Phase 2 follow-up issue #569 is the handoff issue for this work. Duplicate issue #568 was closed as a duplicate. Issue #567 is not blocked on creating another Phase 2 issue; Phase 2 work should proceed through #569.
 
 Phase 2 should cover:
 
@@ -57,6 +57,6 @@ Promotion criteria from D1 to include verbatim in the Phase 2 issue:
 
 ## Recommended Follow-Ups
 
-- Create the Phase 2 implementation issue. Priority: required follow-up for AC10; do not close #567 without it.
+- Track Phase 2 implementation in #569. AC10's Phase 2 follow-up issue is already filed, so no additional Phase 2 issue is needed for #567 closure.
 - No new methodology documentation issue is recommended from this retrospective.
 - No new process guardrail issue is recommended. The current test/review/CE ladder caught the Phase 1 failures, and the remaining customer risk is the intentionally deferred runtime enforcement work.
