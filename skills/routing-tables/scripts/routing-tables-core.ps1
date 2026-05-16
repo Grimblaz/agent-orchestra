@@ -51,6 +51,17 @@ function Resolve-RTRoutingLookupEntry {
 
             break
         }
+        'nl_intent_routing' {
+            if ($Key -eq 'IntentKey' -and $Entry.ContainsKey('intent_key')) {
+                return $Entry.intent_key
+            }
+
+            if ($Key -eq 'Pattern' -and $Entry.ContainsKey('patterns')) {
+                return $Entry.patterns
+            }
+
+            break
+        }
     }
 
     $candidateKey = $Key.Substring(0, 1).ToLowerInvariant() + $Key.Substring(1)
@@ -83,6 +94,9 @@ function Resolve-RTRoutingLookupResult {
             }
 
             return $Entry.tool_or_method
+        }
+        'nl_intent_routing' {
+            return $Entry
         }
         default {
             return $null
@@ -122,6 +136,46 @@ function Test-RTWildcardMatch {
     return $false
 }
 
+function Test-RTNlIntentRawSignal {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
+    $regexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+    $rawSignals = @(
+        'just answer normally',
+        "don't run the pipeline",
+        'raw mode',
+        'skip routing'
+    )
+
+    foreach ($rawSignal in $rawSignals) {
+        $pattern = '(?<!\w)' + [regex]::Escape($rawSignal) + '(?!\w)'
+        if ([regex]::IsMatch($Value, $pattern, $regexOptions)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-RTNlIntentPatternMatch {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Pattern,
+
+        [Parameter(Mandatory)]
+        [string]$Value,
+
+        [Parameter(Mandatory)]
+        [System.Text.RegularExpressions.RegexOptions]$RegexOptions
+    )
+
+    $boundedPattern = '(?<!\w)(?:' + $Pattern + ')(?!\w)'
+    return [regex]::IsMatch($Value, $boundedPattern, $RegexOptions)
+}
+
 function Test-RTRoutingEntryMatch {
     param(
         [Parameter(Mandatory)]
@@ -147,6 +201,30 @@ function Test-RTRoutingEntryMatch {
 
     $entryValue = Resolve-RTRoutingLookupEntry -Entry $Entry -Table $Table -Key $Key
     if ($null -eq $entryValue) {
+        return $false
+    }
+
+    if ($Table -eq 'nl_intent_routing' -and $Key -eq 'Pattern') {
+        $regexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::CultureInvariant
+        $intentContext = if ($Entry.ContainsKey('intent_key')) {
+            " for intent '$($Entry.intent_key)'"
+        }
+        else {
+            ''
+        }
+
+        foreach ($pattern in @($entryValue)) {
+            try {
+                if (Test-RTNlIntentPatternMatch -Pattern ([string]$pattern) -Value $Value -RegexOptions $regexOptions) {
+                    return $true
+                }
+            }
+            catch {
+                Write-Warning ("Skipping malformed nl_intent_routing Pattern regex{0}: {1} ({2})" -f $intentContext, [string]$pattern, $_.Exception.Message)
+                continue
+            }
+        }
+
         return $false
     }
 
@@ -229,15 +307,41 @@ function Invoke-RoutingLookup {
         [string]$Value
     )
 
+    $results = @(Invoke-RoutingLookupAll -Table $Table -Key $Key -Value $Value)
+    if ($results.Count -gt 0) {
+        return $results[0]
+    }
+
+    return $null
+}
+
+function Invoke-RoutingLookupAll {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Table,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Key,
+
+        [Parameter(Mandatory)]
+        [string]$Value
+    )
+
     Set-StrictMode -Version Latest
     $ErrorActionPreference = 'Stop'
+
+    if ($Table -eq 'nl_intent_routing' -and $Key -eq 'Pattern' -and (Test-RTNlIntentRawSignal -Value $Value)) {
+        return
+    }
 
     try {
         $config = Read-RTJsonFile -Path (Get-RTConfigPath)
     }
     catch {
         Write-Warning "Failed to read routing configuration: $($_.Exception.Message)"
-        return $null
+        return
     }
 
     if (-not $config.ContainsKey($Table)) {
@@ -246,16 +350,14 @@ function Invoke-RoutingLookup {
 
     $tableDefinition = $config[$Table]
     if (-not $tableDefinition.ContainsKey('entries')) {
-        return $null
+        return
     }
 
     foreach ($entry in $tableDefinition.entries) {
         if (Test-RTRoutingEntryMatch -Entry $entry -Table $Table -Key $Key -Value $Value) {
-            return Resolve-RTRoutingLookupResult -Entry $entry -Table $Table
+            Resolve-RTRoutingLookupResult -Entry $entry -Table $Table
         }
     }
-
-    return $null
 }
 
 function Test-GateCriteria {

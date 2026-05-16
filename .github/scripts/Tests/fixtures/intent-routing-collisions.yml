@@ -1,0 +1,45 @@
+- phrase: "Can you review this README sentence for tone only?"
+  no_route: true
+  class: review-overlap
+- phrase: "Review my meeting notes and pull out the unresolved questions."
+  no_route: true
+  class: review-overlap
+- phrase: "I need a second opinion on this product name, not a code review."
+  no_route: true
+  class: review-overlap
+- phrase: "Plan a weekend maintenance window for the office network."
+  no_route: true
+  class: plan-overlap
+- phrase: "Could you help design a birthday invitation layout?"
+  no_route: true
+  class: design-overlap
+- phrase: "Polish this paragraph so it sounds less formal."
+  no_route: true
+  class: polish-overlap
+- phrase: "Orchestrate the playlist so the quiet songs come first."
+  no_route: true
+  class: orchestrate-overlap
+- phrase: "What does conductor mean in an electrical circuit?"
+  no_route: true
+  class: conductor-overlap
+- phrase: "Run through this recipe and tell me where the timing looks risky."
+  no_route: true
+  class: run-overlap
+- phrase: "Make a spine outline for a short essay about transit maps."
+  no_route: true
+  class: spine-overlap
+- phrase: "Judge whether this proposal sounds too aggressive for customers."
+  no_route: true
+  class: review-overlap
+- phrase: "Defend the choice of using tabs instead of spaces in this style guide."
+  no_route: true
+  class: review-overlap
+- phrase: "Prosecute the argument in this debate-club draft."
+  no_route: true
+  class: review-overlap
+- phrase: "Experience this onboarding flow as a first-time buyer and summarize the mood."
+  no_route: true
+  class: experience-overlap
+- phrase: "Sketch a plan for learning PowerShell over the next month."
+  no_route: true
+  class: plan-overlap

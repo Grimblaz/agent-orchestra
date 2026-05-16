@@ -15,13 +15,16 @@ This skill is the human-readable companion to the routing data in `assets/routin
 
 ## Schema Overview
 
-`assets/routing-config.json` contains five top-level sections:
+`assets/routing-config.json` contains six top-level sections:
 
 - `specialist_dispatch`: file and task routing entries from Code-Conductor's Agent Selection table; deterministic `FilePattern` consumers should use the optional `file_patterns` arrays rather than parsing `file_type_or_task`
 - `review_mode_routing`: selector-line marker to review-mode mapping from Code-Critic, including conflict resolution
 - `surface_identification`: CE Gate surface to tool mapping from Code-Conductor; `No customer surface` carries the exact status marker template in `status_result_template`
 - `skill_mapping`: delegation guidance from Code-Conductor's Skill Mapping table; this is a reference list, not a strict deterministic router
+- `nl_intent_routing`: natural-language intent keys and patterns mapped to Claude and Copilot slash-command surfaces via `claude_command` and `copilot_command`; `null` means no platform equivalent. This supports Phase 1 directive prose and Phase 2 forward-compatible lookup, not runtime hook wiring
 - `enums`: canonical current enum values used by review and routing outputs
+
+For deterministic consumers, `Invoke-RoutingLookup` preserves the legacy first-match behavior. Use `Invoke-RoutingLookupAll` when a Pattern lookup needs to detect ambiguous natural-language matches and present every matched intent to the user.
 
 `assets/gate-criteria.json` contains four top-level sections:
 

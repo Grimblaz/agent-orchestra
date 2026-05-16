@@ -257,6 +257,109 @@
       }
     ]
   },
+  "nl_intent_routing": {
+    "source": "skills/routing-tables/SKILL.md + CLAUDE.md/copilot-instructions.md directives",
+    "entries": [
+      {
+        "intent_key": "review-pr-github",
+        "patterns": ["review (my latest|my|this|the open|the latest) PR", "review #?\\d+", "respond to the github review"],
+        "claude_command": "/review-github",
+        "copilot_command": "/review-github",
+        "notes": "Route GitHub PR review intake or PR-number review requests."
+      },
+      {
+        "intent_key": "review-local",
+        "patterns": ["review (this|the) (code|diff|changes)", "review local"],
+        "claude_command": "/orchestra:review",
+        "copilot_command": "/review",
+        "notes": "Run the local adversarial review pipeline against workspace changes."
+      },
+      {
+        "intent_key": "review-lite",
+        "patterns": ["lite review", "quick review", "compact review"],
+        "claude_command": "/orchestra:review-lite",
+        "copilot_command": "/review",
+        "notes": "Use the compact local review variant."
+      },
+      {
+        "intent_key": "review-stage-rerun-prosecute",
+        "patterns": ["rerun prosecution", "rerun review prosecution", "review prosecute"],
+        "claude_command": "/orchestra:review-prosecute",
+        "copilot_command": null,
+        "notes": "Rerun only the prosecution stage of the Claude-native review pipeline."
+      },
+      {
+        "intent_key": "review-stage-rerun-defend",
+        "patterns": ["rerun defense", "rerun review defense", "review defend"],
+        "claude_command": "/orchestra:review-defend",
+        "copilot_command": null,
+        "notes": "Rerun only the defense stage of the Claude-native review pipeline."
+      },
+      {
+        "intent_key": "review-stage-rerun-judge",
+        "patterns": ["rerun judge", "rerun review judge", "review judge"],
+        "claude_command": "/orchestra:review-judge",
+        "copilot_command": null,
+        "notes": "Rerun only the judge stage of the Claude-native review pipeline."
+      },
+      {
+        "intent_key": "plan",
+        "patterns": ["plan issue", "create a plan", "implementation plan", "plan implementation for issue #?\\d+"],
+        "claude_command": "/plan",
+        "copilot_command": "/plan",
+        "notes": "Run Issue-Planner for implementation plan authoring."
+      },
+      {
+        "intent_key": "design",
+        "patterns": ["design issue", "technical design", "solution design"],
+        "claude_command": "/design",
+        "copilot_command": "/design",
+        "notes": "Run Solution-Designer for technical design exploration."
+      },
+      {
+        "intent_key": "experience",
+        "patterns": ["frame the customer experience", "customer experience", "experience owner"],
+        "claude_command": "/experience",
+        "copilot_command": "/experience",
+        "notes": "Run Experience-Owner for customer framing and CE scenarios."
+      },
+      {
+        "intent_key": "orchestrate",
+        "patterns": ["orchestrate issue", "implement issue", "run the pipeline"],
+        "claude_command": "/orchestrate",
+        "copilot_command": "/orchestrate",
+        "notes": "Run Code-Conductor orchestration for planned implementation."
+      },
+      {
+        "intent_key": "code-conductor",
+        "patterns": ["code conductor", "run code conductor", "resume conductor"],
+        "claude_command": "/code-conductor",
+        "copilot_command": null,
+        "notes": "Invoke the Claude Code-Conductor command surface directly."
+      },
+      {
+        "intent_key": "polish",
+        "patterns": ["polish the ui", "polish (this|the) ui( component)?", "visual polish", "ui iteration"],
+        "claude_command": "/polish",
+        "copilot_command": "/polish",
+        "notes": "Run UI-Iterator for screenshot-driven polish."
+      },
+      {
+        "intent_key": "spine-run",
+        "patterns": ["spine run", "run the spine", "walk the frame spine"],
+        "claude_command": "/spine-run",
+        "copilot_command": "/spine-run",
+        "notes": "Run Spine-Runner against a persisted frame-spine plan."
+      },
+      {
+        "intent_key": "spine-render",
+        "patterns": ["render the spine", "show the frame spine", "orchestra spine"],
+        "claude_command": "/orchestra:spine",
+        "copilot_command": null,
+        "notes": "Render or inspect the frame spine through the Claude command surface."
+      }
+    ]
+  },
   "enums": {
     "severity": ["critical", "high", "medium", "low"],
     "points_mapping": {
