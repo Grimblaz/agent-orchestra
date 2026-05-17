@@ -1,6 +1,7 @@
----
+﻿---
 name: explicit-skip-release-hygiene
 provides: release-hygiene
+adapter-type: predicate
 suggested-next-step: Document the skip rationale; bump plugin version when ready.
 reason-required: true
 ---

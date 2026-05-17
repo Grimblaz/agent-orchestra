@@ -1,6 +1,7 @@
----
+﻿---
 name: auto-na-design
 provides: design
+adapter-type: predicate
 suggested-next-step: none
 applies-when: changeset.isPipelineEntryTrivial()
 ---

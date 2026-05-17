@@ -1,6 +1,7 @@
----
+﻿---
 name: auto-na-implement-test
 provides: implement-test
+adapter-type: predicate
 suggested-next-step: none
 applies-when: not changeset.touchesTestableCodeOrTests()
 ---

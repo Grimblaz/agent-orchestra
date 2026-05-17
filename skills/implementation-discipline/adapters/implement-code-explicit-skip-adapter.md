@@ -1,6 +1,7 @@
----
+﻿---
 name: explicit-skip-implement-code
 provides: implement-code
+adapter-type: predicate
 suggested-next-step: Document the skip rationale; rerun /orchestrate {ISSUE} when ready.
 reason-required: true
 ---

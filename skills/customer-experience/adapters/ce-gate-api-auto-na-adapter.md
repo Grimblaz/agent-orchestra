@@ -1,6 +1,7 @@
----
+﻿---
 name: auto-na-ce-gate-api
 provides: ce-gate-api
+adapter-type: predicate
 suggested-next-step: none
 applies-when: not changeset.touchesApiSurface()
 ---
