@@ -121,7 +121,7 @@ families:
     experience: hard-failure
     examples:
       - skills/process-retrospective/adapters/process-retrospective-explicit-skip-adapter.md
-      - skills/process-retrospective/adapters/process-retrospective-auto-na-adapter.md
+      - skills/process-retrospective/adapters/process-retrospective-auto-na-adapter.md  # deferred — file intentionally absent until #348 lands
       - skills/{skill}/adapters/{adapter}.md
     notes: "Frame adapter documents nested within skill directories. Bare-relative paths
       'adapters/{port}.md', 'adapters/{port}-auto-na-adapter.md', 'adapters/experience-auto-na-adapter.md',

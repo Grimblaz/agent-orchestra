@@ -134,7 +134,11 @@ When `executor:` is absent, derive the default from the adapter frontmatter's `a
 
 #### Planner glob workflow
 
-Run `Glob skills/*/adapters/*-adapter.md` to discover all adapter candidates for a port; filter by `adapter-type:` frontmatter to distinguish adapter roles. For `adapter-type: work` candidates, read each candidate's `## When to use` and pick the one whose guidance matches the slice; selector-named multi-variant work adapters additionally carry `applies-when:` predicates. For `adapter-type: predicate` candidates, the filename suffix encodes the variant: `-auto-na-adapter.md` for not-applicable, `-explicit-skip-adapter.md` for manual skip; select by port token and variant suffix.
+Run `Glob skills/*/adapters/*.md` to discover all adapter candidates for a port; distinguish adapter roles by `adapter-type:` frontmatter and filename shape:
+
+- **`adapter-type: work`, filename ends in `-adapter.md`** — single-variant work adapter. Read the candidate's `## When to use` and pick the one whose guidance matches the slice.
+- **No `adapter-type:` frontmatter, filename does NOT end in `-adapter.md`** — multi-variant selector-named work adapter (e.g., `standard.md`, `lite.md`, `judge-only.md`, `proxy-github.md`, `ce-gate-api.md`). Select the correct variant via its `applies-when:` predicate.
+- **`adapter-type: predicate`** — the filename suffix encodes the variant: `-auto-na-adapter.md` for not-applicable, `-explicit-skip-adapter.md` for manual skip. Select by port token and variant suffix.
 
 Do not infer methodology from a skill directory when no adapter file matches. Either select an explicit adapter path or document why the plan remains legacy/non-runner for that slice.
 
