@@ -501,7 +501,7 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
                 '<!-- pipeline-metrics -->',
                 'credits:',
                 '  - port: implement-docs',
-                '    adapter: skills/documentation-finalization/adapters/auto-na-docs.md',
+                '    adapter: skills/documentation-finalization/adapters/implement-docs-auto-na-adapter.md',
                 '    status: not-applicable',
                 '    evidence: "predicate evaluated false"'
             ) -join "`n"
@@ -513,7 +513,7 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
             & $script:AssertContractMentions `
                 -Content $script:InvocationContractSection `
                 -Patterns @(
-                'adapter\s+name\s+starts\s+with\s+`auto-na-`',
+                'adapter\s+name\s+ends\s+with\s+`-auto-na-adapter\.md`',
                 'evaluate\s+its\s+predicate\s+before\s+credit\s+verification',
                 'Unknown,\s+parse-error,\s+or\s+predicate/status\s+mismatch\s+is\s+a\s+halt'
             ) `

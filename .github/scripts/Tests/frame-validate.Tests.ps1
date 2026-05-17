@@ -220,41 +220,42 @@ None.
                     'skills/customer-experience/adapters/ce-gate-browser.md' = 'ce-gate-browser'
                     'skills/customer-experience/adapters/ce-gate-canvas.md'  = 'ce-gate-canvas'
                     'skills/customer-experience/adapters/ce-gate-cli.md'     = 'ce-gate-cli'
+                    'skills/implementation-discipline/adapters/implement-code-adapter.md' = 'implement-code'
                     'skills/plugin-release-hygiene/SKILL.md'                 = 'release-hygiene'
                     'skills/post-pr-review/SKILL.md'                         = 'post-pr'
                     'skills/process-retrospective/SKILL.md'                  = 'process-retrospective'
                 }
                 'auto-na'       = [ordered]@{
-                    'skills/customer-experience/adapters/auto-na-ce-gate-api.md'            = 'ce-gate-api'
-                    'skills/customer-experience/adapters/auto-na-ce-gate-browser.md'        = 'ce-gate-browser'
-                    'skills/customer-experience/adapters/auto-na-ce-gate-canvas.md'         = 'ce-gate-canvas'
-                    'skills/customer-experience/adapters/auto-na-ce-gate-cli.md'            = 'ce-gate-cli'
-                    'skills/customer-experience/adapters/auto-na-experience.md'             = 'experience'
-                    'skills/design-exploration/adapters/auto-na-design.md'                  = 'design'
-                    'skills/documentation-finalization/adapters/auto-na-implement-docs.md'  = 'implement-docs'
-                    'skills/implementation-discipline/adapters/auto-na-implement-code.md'   = 'implement-code'
-                    'skills/plan-authoring/adapters/auto-na-plan.md'                        = 'plan'
-                    'skills/refactoring-methodology/adapters/auto-na-implement-refactor.md' = 'implement-refactor'
-                    'skills/test-driven-development/adapters/auto-na-implement-test.md'     = 'implement-test'
+                    'skills/customer-experience/adapters/ce-gate-api-auto-na-adapter.md'            = 'ce-gate-api'
+                    'skills/customer-experience/adapters/ce-gate-browser-auto-na-adapter.md'        = 'ce-gate-browser'
+                    'skills/customer-experience/adapters/ce-gate-canvas-auto-na-adapter.md'         = 'ce-gate-canvas'
+                    'skills/customer-experience/adapters/ce-gate-cli-auto-na-adapter.md'            = 'ce-gate-cli'
+                    'skills/customer-experience/adapters/experience-auto-na-adapter.md'             = 'experience'
+                    'skills/design-exploration/adapters/design-auto-na-adapter.md'                  = 'design'
+                    'skills/documentation-finalization/adapters/implement-docs-auto-na-adapter.md'  = 'implement-docs'
+                    'skills/implementation-discipline/adapters/implement-code-auto-na-adapter.md'   = 'implement-code'
+                    'skills/plan-authoring/adapters/plan-auto-na-adapter.md'                        = 'plan'
+                    'skills/refactoring-methodology/adapters/implement-refactor-auto-na-adapter.md' = 'implement-refactor'
+                    'skills/test-driven-development/adapters/implement-test-auto-na-adapter.md'     = 'implement-test'
                 }
                 'explicit-skip' = [ordered]@{
-                    'skills/adversarial-review/adapters/explicit-skip-post-fix-review.md'         = 'post-fix-review'
-                    'skills/adversarial-review/adapters/explicit-skip-review.md'                  = 'review'
-                    'skills/customer-experience/adapters/explicit-skip-ce-gate-api.md'            = 'ce-gate-api'
-                    'skills/customer-experience/adapters/explicit-skip-ce-gate-browser.md'        = 'ce-gate-browser'
-                    'skills/customer-experience/adapters/explicit-skip-ce-gate-canvas.md'         = 'ce-gate-canvas'
-                    'skills/customer-experience/adapters/explicit-skip-ce-gate-cli.md'            = 'ce-gate-cli'
-                    'skills/customer-experience/adapters/explicit-skip-experience.md'             = 'experience'
-                    'skills/design-exploration/adapters/explicit-skip-design.md'                  = 'design'
-                    'skills/documentation-finalization/adapters/explicit-skip-implement-docs.md'  = 'implement-docs'
-                    'skills/implementation-discipline/adapters/explicit-skip-implement-code.md'   = 'implement-code'
-                    'skills/plan-authoring/adapters/explicit-skip-plan.md'                        = 'plan'
-                    'skills/plugin-release-hygiene/adapters/explicit-skip-release-hygiene.md'     = 'release-hygiene'
-                    'skills/post-pr-review/adapters/explicit-skip-post-pr.md'                     = 'post-pr'
-                    'skills/process-analysis/adapters/explicit-skip-process-review.md'                     = 'process-review'
-                    'skills/process-retrospective/adapters/explicit-skip-process-retrospective.md'        = 'process-retrospective'
-                    'skills/refactoring-methodology/adapters/explicit-skip-implement-refactor.md'         = 'implement-refactor'
-                    'skills/test-driven-development/adapters/explicit-skip-implement-test.md'             = 'implement-test'
+                    'skills/adversarial-review/adapters/post-fix-review-explicit-skip-adapter.md'         = 'post-fix-review'
+                    'skills/adversarial-review/adapters/review-explicit-skip-adapter.md'                  = 'review'
+                    'skills/customer-experience/adapters/ce-gate-api-explicit-skip-adapter.md'            = 'ce-gate-api'
+                    'skills/customer-experience/adapters/ce-gate-browser-explicit-skip-adapter.md'        = 'ce-gate-browser'
+                    'skills/customer-experience/adapters/ce-gate-canvas-explicit-skip-adapter.md'         = 'ce-gate-canvas'
+                    'skills/customer-experience/adapters/ce-gate-cli-explicit-skip-adapter.md'            = 'ce-gate-cli'
+                    'skills/customer-experience/adapters/experience-explicit-skip-adapter.md'             = 'experience'
+                    'skills/design-exploration/adapters/design-explicit-skip-adapter.md'                  = 'design'
+                    'skills/documentation-finalization/adapters/implement-docs-explicit-skip-adapter.md'  = 'implement-docs'
+                    'skills/implementation-discipline/adapters/implement-code-explicit-skip-adapter.md'   = 'implement-code'
+                    'skills/plan-authoring/adapters/plan-explicit-skip-adapter.md'                        = 'plan'
+                    'skills/plugin-release-hygiene/adapters/release-hygiene-explicit-skip-adapter.md'     = 'release-hygiene'
+                    'skills/post-pr-review/adapters/post-pr-explicit-skip-adapter.md'                     = 'post-pr'
+                    'skills/process-analysis/adapters/process-review-explicit-skip-adapter.md'                     = 'process-review'
+                    'skills/process-retrospective/adapters/process-retrospective-explicit-skip-adapter.md'        = 'process-retrospective'
+                    'skills/refactoring-methodology/adapters/implement-refactor-explicit-skip-adapter.md'         = 'implement-refactor'
+                    'skills/test-driven-development/adapters/implement-test-explicit-skip-adapter.md'             = 'implement-test'
                 }
             }
 
@@ -286,8 +287,8 @@ None.
         $script:GetFrameValidateAdapterRole = {
             param([Parameter(Mandatory)][System.IO.FileInfo]$File)
 
-            if ($File.Name -like 'auto-na-*.md') { return 'auto-na' }
-            if ($File.Name -like 'explicit-skip-*.md') { return 'explicit-skip' }
+            if ($File.Name -like '*-auto-na-adapter.md') { return 'auto-na' }
+            if ($File.Name -like '*-explicit-skip-adapter.md') { return 'explicit-skip' }
             return 'work'
         }
 
@@ -311,7 +312,7 @@ None.
                     ForEach-Object {
                         $adaptersPath = Join-Path -Path $_.FullName -ChildPath 'adapters'
                         if (Test-Path -LiteralPath $adaptersPath) {
-                            Get-ChildItem -LiteralPath $adaptersPath -Filter 'explicit-skip-*.md' -File
+                            Get-ChildItem -LiteralPath $adaptersPath -Filter '*-explicit-skip-adapter.md' -File
                         }
                     } |
                     Sort-Object -Property FullName
@@ -541,8 +542,8 @@ None.
             & $script:AddFrameAdapter -Root $root -RelativePath 'agents\discovered.agent.md' -Provides @('experience') | Out-Null
             & $script:AddFrameAdapter -Root $root -RelativePath 'agents\lowercase-shell.md' -Provides @('experience') | Out-Null
             & $script:AddFrameAdapter -Root $root -RelativePath 'commands\discovered-command.md' -Provides @('experience') | Out-Null
-            & $script:AddFrameAdapter -Root $root -RelativePath 'skills\test-skill\adapters\auto-na-experience.md' -Provides @('experience') | Out-Null
-            & $script:AddFrameAdapter -Root $root -RelativePath 'skills\test-skill\adapters\explicit-skip-experience.md' -Provides @('experience') | Out-Null
+            & $script:AddFrameAdapter -Root $root -RelativePath 'skills\test-skill\adapters\experience-auto-na-adapter.md' -Provides @('experience') | Out-Null
+            & $script:AddFrameAdapter -Root $root -RelativePath 'skills\test-skill\adapters\experience-explicit-skip-adapter.md' -Provides @('experience') | Out-Null
             & $script:AddFrameAdapter -Root $root -RelativePath 'skills\test-skill\adapters\variant.md' -Provides @('experience') | Out-Null
 
             $discoveredPaths = [string[]]@(
@@ -556,8 +557,8 @@ None.
                 'agents/lowercase-shell.md'
                 'commands/discovered-command.md'
                 'skills/test-skill/SKILL.md'
-                'skills/test-skill/adapters/auto-na-experience.md'
-                'skills/test-skill/adapters/explicit-skip-experience.md'
+                'skills/test-skill/adapters/experience-auto-na-adapter.md'
+                'skills/test-skill/adapters/experience-explicit-skip-adapter.md'
                 'skills/test-skill/adapters/variant.md'
             ) | Sort-Object
 
@@ -738,10 +739,26 @@ applies-when: |+
             ($actualProviderDeclarations -join "`n") | Should -Be ($expectedProviderDeclarations -join "`n")
         }
 
+        It 'adapter hashtable count matches filesystem count for each predicate role (forward-drift guard)' {
+            # This is the COUNT-PARITY forward-drift guard (issue #559 F1).
+            # Catches "a new predicate adapter was added to the filesystem without updating
+            # the expectedDeclarationsByRole hashtable" — complementary to the per-path
+            # Test-Path assertions which cover set-equality for currently-listed paths.
+            # Keys are in format "role|path|provides"; count by role prefix.
+            $allExpectedKeys = & $script:GetFrameValidateExpectedProviderDeclarationKeys
+            $autoNaExpected = @($allExpectedKeys | Where-Object { $_ -like 'auto-na|*' }).Count
+            $autoNaActual   = @(Get-ChildItem -Path (Join-Path $script:RepoRoot 'skills') -Recurse -Filter '*-auto-na-adapter.md').Count
+            $autoNaExpected | Should -Be $autoNaActual -Because 'every auto-na adapter on disk must be listed in the expected hashtable'
+
+            $explicitSkipExpected = @($allExpectedKeys | Where-Object { $_ -like 'explicit-skip|*' }).Count
+            $explicitSkipActual   = @(Get-ChildItem -Path (Join-Path $script:RepoRoot 'skills') -Recurse -Filter '*-explicit-skip-adapter.md').Count
+            $explicitSkipExpected | Should -Be $explicitSkipActual -Because 'every explicit-skip adapter on disk must be listed in the expected hashtable'
+        }
+
         It 'has exactly the deferred-skeleton providers for process-retrospective' {
             $expectedPaths = [string[]]@(
                 'skills/process-retrospective/SKILL.md'
-                'skills/process-retrospective/adapters/explicit-skip-process-retrospective.md'
+                'skills/process-retrospective/adapters/process-retrospective-explicit-skip-adapter.md'
             ) | Sort-Object
 
             $processRetrospectiveProviders = [System.Collections.Generic.List[string]]::new()
