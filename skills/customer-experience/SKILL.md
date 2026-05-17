@@ -84,5 +84,5 @@ This gate applies equally to upstream framing (Experience-Owner) and downstream 
 ## Frame Ports Filled By This Skill
 
 Ports: `experience`, `ce-gate-cli`, `ce-gate-browser`, `ce-gate-canvas`, and `ce-gate-api`.
-The `experience` work adapter is [agents/Experience-Owner.agent.md](../../agents/Experience-Owner.agent.md); its auto-N/A and explicit-skip adapters use `adapters/auto-na-experience.md` and `adapters/explicit-skip-experience.md`.
-CE Gate adapter files follow `adapters/{port}.md`, `adapters/auto-na-{port}.md`, and `adapters/explicit-skip-{port}.md`.
+The `experience` work adapter is [agents/Experience-Owner.agent.md](../../agents/Experience-Owner.agent.md); its auto-N/A and explicit-skip adapters use `adapters/experience-auto-na-adapter.md` and `adapters/experience-explicit-skip-adapter.md`.
+CE Gate adapter files follow `adapters/{port}.md`, `adapters/{port}-auto-na-adapter.md`, and `adapters/{port}-explicit-skip-adapter.md`.

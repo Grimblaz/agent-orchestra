@@ -28,6 +28,7 @@
 ./.tmp/design-complete-559.md
 ./.tmp/issue-559-body.md
 ./.tmp/issue-559-reference-buckets.md
+./.tmp/issue-559-reference-buckets-paths.txt
 ./Documents/Decisions/0004-process-retrospective-deferred-skeleton.md
 ./.github/scripts/lib/frame-credit-ledger-core.ps1
 ./.github/scripts/Tests/build-deferred-port-credit-row.Tests.ps1

@@ -154,4 +154,4 @@ Refactor-Specialist will:
 
 | Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
 | --- | --- | --- | --- |
-| `implement-refactor` | [agents/Refactor-Specialist.agent.md](../../agents/Refactor-Specialist.agent.md) | [adapters/auto-na-implement-refactor.md](adapters/auto-na-implement-refactor.md) | [adapters/explicit-skip-implement-refactor.md](adapters/explicit-skip-implement-refactor.md) |
+| `implement-refactor` | [agents/Refactor-Specialist.agent.md](../../agents/Refactor-Specialist.agent.md) | [adapters/implement-refactor-auto-na-adapter.md](adapters/implement-refactor-auto-na-adapter.md) | [adapters/implement-refactor-explicit-skip-adapter.md](adapters/implement-refactor-explicit-skip-adapter.md) |

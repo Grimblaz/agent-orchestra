@@ -271,4 +271,4 @@ If discovery becomes long or tool-heavy, compact before drafting. Preserve the k
 
 | Port   | Work adapter                                                         | Auto-N/A adapter                                     | Explicit-skip adapter                                            |
 | ------ | -------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------- |
-| `plan` | [agents/Issue-Planner.agent.md](../../agents/Issue-Planner.agent.md) | [adapters/auto-na-plan.md](adapters/auto-na-plan.md) | [adapters/explicit-skip-plan.md](adapters/explicit-skip-plan.md) |
+| `plan` | [agents/Issue-Planner.agent.md](../../agents/Issue-Planner.agent.md) | [adapters/plan-auto-na-adapter.md](adapters/plan-auto-na-adapter.md) | [adapters/plan-explicit-skip-adapter.md](adapters/plan-explicit-skip-adapter.md) |

@@ -92,4 +92,4 @@ Make documentation reflect the shipped state of the repository. Treat deletion o
 
 | Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
 | --- | --- | --- | --- |
-| `implement-docs` | [agents/Doc-Keeper.agent.md](../../agents/Doc-Keeper.agent.md) | [adapters/auto-na-implement-docs.md](adapters/auto-na-implement-docs.md) | [adapters/explicit-skip-implement-docs.md](adapters/explicit-skip-implement-docs.md) |
+| `implement-docs` | [agents/Doc-Keeper.agent.md](../../agents/Doc-Keeper.agent.md) | [adapters/implement-docs-auto-na-adapter.md](adapters/implement-docs-auto-na-adapter.md) | [adapters/implement-docs-explicit-skip-adapter.md](adapters/implement-docs-explicit-skip-adapter.md) |

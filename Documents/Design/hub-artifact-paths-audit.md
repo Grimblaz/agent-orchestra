@@ -388,10 +388,10 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **requires_version_bump**: true
 - **experience**: hard-failure
 - **examples**:
-  - `skills/process-retrospective/adapters/explicit-skip-process-retrospective.md`
-  - `skills/process-retrospective/adapters/auto-na-process-retrospective.md`
+  - `skills/process-retrospective/adapters/process-retrospective-explicit-skip-adapter.md`
+  - `skills/process-retrospective/adapters/process-retrospective-auto-na-adapter.md`
   - `skills/{skill}/adapters/{adapter}.md`
-- **notes**: Frame adapter documents nested within skill directories. Bare-relative paths 'adapters/{port}.md', 'adapters/auto-na-{port}.md', 'adapters/auto-na-experience.md', 'adapters/explicit-skip-{port}.md', and 'adapters/explicit-skip-experience.md' are relative references from skill body text that map to this family.
+- **notes**: Frame adapter documents nested within skill directories. Bare-relative paths 'adapters/{port}.md', 'adapters/{port}-auto-na-adapter.md', 'adapters/experience-auto-na-adapter.md', 'adapters/{port}-explicit-skip-adapter.md', and 'adapters/experience-explicit-skip-adapter.md' are relative references from skill body text that map to this family. Predicate adapter files use the unified suffix convention: `{port}-auto-na-adapter.md` and `{port}-explicit-skip-adapter.md`.
 
 ### `skills/*/assets/*.json`
 

@@ -162,4 +162,4 @@ Then run the repository validation command required by the current task.
 
 | Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
 | --- | --- | --- | --- |
-| `implement-code` | [agents/Code-Smith.agent.md](../../agents/Code-Smith.agent.md) | [adapters/auto-na-implement-code.md](adapters/auto-na-implement-code.md) | [adapters/explicit-skip-implement-code.md](adapters/explicit-skip-implement-code.md) |
+| `implement-code` | [agents/Code-Smith.agent.md](../../agents/Code-Smith.agent.md); [adapters/implement-code-adapter.md](adapters/implement-code-adapter.md) | [adapters/implement-code-auto-na-adapter.md](adapters/implement-code-auto-na-adapter.md) | [adapters/implement-code-explicit-skip-adapter.md](adapters/implement-code-explicit-skip-adapter.md) |
