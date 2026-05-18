@@ -755,6 +755,21 @@ applies-when: |+
             $explicitSkipExpected | Should -Be $explicitSkipActual -Because 'every explicit-skip adapter on disk must be listed in the expected hashtable'
         }
 
+        It 'every predicate adapter file declares adapter-type: predicate frontmatter (frontmatter-presence guard)' {
+            # Issue #559 M7 (sustained): the count-parity guard above verifies filesystem
+            # vs hashtable counts, but does not verify frontmatter integrity. A file with
+            # the right filename suffix but wrong/missing `adapter-type:` field would pass
+            # count-parity. This guard closes that gap by asserting every file matching
+            # the predicate suffix convention declares `adapter-type: predicate`.
+            $predicateFiles = @(Get-ChildItem -Path (Join-Path $script:RepoRoot 'skills') -Recurse -Include '*-auto-na-adapter.md','*-explicit-skip-adapter.md')
+            $predicateFiles.Count | Should -BeGreaterThan 0 -Because 'the predicate adapter directory should not be empty'
+
+            foreach ($file in $predicateFiles) {
+                $content = Get-Content -Path $file.FullName -Raw
+                $content | Should -Match '(?m)^adapter-type:\s+predicate\s*$' -Because "$($file.Name) should declare 'adapter-type: predicate' in its YAML frontmatter"
+            }
+        }
+
         It 'has exactly the deferred-skeleton providers for process-retrospective' {
             $expectedPaths = [string[]]@(
                 'skills/process-retrospective/SKILL.md'
