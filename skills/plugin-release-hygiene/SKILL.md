@@ -142,7 +142,7 @@ When a drift-check or maintainer flow needs one of these commands, attempt the c
 
 | Port | Work adapter | Explicit-skip adapter |
 | --- | --- | --- |
-| `release-hygiene` | This `SKILL.md` frontmatter declares `provides: release-hygiene` and `applies-when: changeset.touchesPluginEntryPoint()` | [adapters/explicit-skip-release-hygiene.md](adapters/explicit-skip-release-hygiene.md) |
+| `release-hygiene` | This `SKILL.md` frontmatter declares `provides: release-hygiene` and `applies-when: changeset.touchesPluginEntryPoint()` | [adapters/release-hygiene-explicit-skip-adapter.md](adapters/release-hygiene-explicit-skip-adapter.md) |
 
 ## Platform-specific invocation
 

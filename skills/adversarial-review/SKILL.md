@@ -314,8 +314,8 @@ When representing an external review ledger:
 
 | Port | Work adapter | Explicit-skip adapter |
 | --- | --- | --- |
-| `review` | [agents/Code-Review-Response.agent.md](../../agents/Code-Review-Response.agent.md); [adapters/standard.md](adapters/standard.md); [adapters/lite.md](adapters/lite.md); [adapters/judge-only.md](adapters/judge-only.md); [adapters/proxy-github.md](adapters/proxy-github.md) | [adapters/explicit-skip-review.md](adapters/explicit-skip-review.md) |
-| `post-fix-review` | [adapters/post-fix.md](adapters/post-fix.md) | [adapters/explicit-skip-post-fix-review.md](adapters/explicit-skip-post-fix-review.md) |
+| `review` | [agents/Code-Review-Response.agent.md](../../agents/Code-Review-Response.agent.md); [adapters/standard.md](adapters/standard.md); [adapters/lite.md](adapters/lite.md); [adapters/judge-only.md](adapters/judge-only.md); [adapters/proxy-github.md](adapters/proxy-github.md) | [adapters/review-explicit-skip-adapter.md](adapters/review-explicit-skip-adapter.md) |
+| `post-fix-review` | [adapters/post-fix.md](adapters/post-fix.md) | [adapters/post-fix-review-explicit-skip-adapter.md](adapters/post-fix-review-explicit-skip-adapter.md) |
 
 ## Integrity Contract (Decision 6 — per-adapter exemptions)
 

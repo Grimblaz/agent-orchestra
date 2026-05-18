@@ -101,7 +101,7 @@ Spine-Runner consumes this table as the authoritative port-to-locus mapping. Add
 | 16 | `post-fix-review` | `pr-body-pipeline-metrics` | [frame/ports/post-fix-review.yaml](../../frame/ports/post-fix-review.yaml) |
 | 17 | `process-retrospective` | `deferred-skill-only` | [frame/ports/process-retrospective.yaml](../../frame/ports/process-retrospective.yaml) |
 
-`auto-na` and `explicit-skip` are adapter file-name prefixes, not canonical port rows. Do not add them to this table.
+`auto-na` and `explicit-skip` are adapter variant suffixes (unified convention: `{port}-auto-na-adapter.md` / `{port}-explicit-skip-adapter.md`), not canonical port rows. Do not add them to this table.
 
 `frame-credit-ledger` and `pre-pr-format` are descriptive locus-category aliases from design discussion. They refer to skill-only methodology that runs alongside the ports above, are not canonical ports in `frame/ports/*.yaml`, and Spine-Runner does not directly verify them.
 

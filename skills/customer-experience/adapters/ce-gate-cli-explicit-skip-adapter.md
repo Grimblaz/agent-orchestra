@@ -1,6 +1,7 @@
----
+﻿---
 name: explicit-skip-ce-gate-cli
 provides: ce-gate-cli
+adapter-type: predicate
 suggested-next-step: Document the skip rationale; rerun CE Gate via /orchestrate {ISSUE} when ready.
 reason-required: true
 ---

@@ -1,6 +1,7 @@
----
+﻿---
 name: auto-na-ce-gate-cli
 provides: ce-gate-cli
+adapter-type: predicate
 suggested-next-step: none
 applies-when: not changeset.touchesCliSurface()
 ---

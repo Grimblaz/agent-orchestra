@@ -305,4 +305,4 @@ Code-Conductor passes this hashtable to `Build-PostPrCreditRow -ChecklistOutcome
 
 | Port | Work adapter | Explicit-skip adapter |
 | --- | --- | --- |
-| `post-pr` | This `SKILL.md` frontmatter declares `provides: post-pr` | [adapters/explicit-skip-post-pr.md](adapters/explicit-skip-post-pr.md) |
+| `post-pr` | This `SKILL.md` frontmatter declares `provides: post-pr` | [adapters/post-pr-explicit-skip-adapter.md](adapters/post-pr-explicit-skip-adapter.md) |

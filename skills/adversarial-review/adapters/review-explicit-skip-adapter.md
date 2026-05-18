@@ -1,6 +1,7 @@
----
+﻿---
 name: explicit-skip-review
 provides: review
+adapter-type: predicate
 suggested-next-step: Document the skip rationale on the PR; rerun /orchestra:review when ready.
 reason-required: true
 ---

@@ -7,7 +7,7 @@
 #     and per-port status enum.
 # (b) Iterate back-deriver output for each shipped audit fixture; assert same constraint.
 #     Covers AC9 — implement-* never 'inconclusive' from any path.
-# (c) Assert Build-CeGateCreditRow -Surface ValidateSet matches auto-na-ce-gate-*.md
+# (c) Assert Build-CeGateCreditRow -Surface ValidateSet matches ce-gate-*-auto-na-adapter.md
 #     adapter files (drift prevention).
 #
 # Per-port allowed-status table:
@@ -464,39 +464,39 @@ Describe 'Build-CeGateCreditRow schema conformance for all resolution branches (
 # (e) ValidateSet parity: Build-CeGateCreditRow surfaces vs adapter files
 # ---------------------------------------------------------------------------
 
-Describe 'Build-CeGateCreditRow ValidateSet matches auto-na-ce-gate adapter files (Step 6e)' {
+Describe 'Build-CeGateCreditRow ValidateSet matches ce-gate-*-auto-na-adapter files (Step 6e)' {
 
-    It 'each auto-na-ce-gate-*.md adapter has a matching surface value in the ValidateSet' {
-        $adapterFiles = @(Get-ChildItem -Path $script:CeGateAdaptersDir -Filter 'auto-na-ce-gate-*.md' -ErrorAction SilentlyContinue)
+    It 'each ce-gate-*-auto-na-adapter.md adapter has a matching surface value in the ValidateSet' {
+        $adapterFiles = @(Get-ChildItem -Path $script:CeGateAdaptersDir -Filter 'ce-gate-*-auto-na-adapter.md' -ErrorAction SilentlyContinue)
 
         if ($adapterFiles.Count -eq 0) {
-            Set-ItResult -Skipped -Because 'No auto-na-ce-gate-*.md adapter files found'
+            Set-ItResult -Skipped -Because 'No ce-gate-*-auto-na-adapter.md adapter files found'
             return
         }
 
-        # Extract surface names from file names: auto-na-ce-gate-{surface}.md
+        # Extract surface names from file names: ce-gate-{surface}-auto-na-adapter.md
         $adapterSurfaces = @($adapterFiles | ForEach-Object {
-            if ($_.Name -match '^auto-na-ce-gate-(.+)\.md$') { $Matches[1] }
+            if ($_.Name -match '^ce-gate-(.+)-auto-na-adapter\.md$') { $Matches[1] }
         })
 
         $validSetSurfaces = @('cli', 'browser', 'canvas', 'api')
 
         foreach ($surface in $adapterSurfaces) {
-            $validSetSurfaces | Should -Contain $surface -Because "adapter auto-na-ce-gate-$surface.md must match a ValidateSet value in Build-CeGateCreditRow"
+            $validSetSurfaces | Should -Contain $surface -Because "adapter ce-gate-$surface-auto-na-adapter.md must match a ValidateSet value in Build-CeGateCreditRow"
         }
     }
 
-    It 'Build-CeGateCreditRow has a ValidateSet surface for each auto-na-ce-gate-*.md adapter' {
-        $adapterFiles = @(Get-ChildItem -Path $script:CeGateAdaptersDir -Filter 'auto-na-ce-gate-*.md' -ErrorAction SilentlyContinue)
+    It 'Build-CeGateCreditRow has a ValidateSet surface for each ce-gate-*-auto-na-adapter.md adapter' {
+        $adapterFiles = @(Get-ChildItem -Path $script:CeGateAdaptersDir -Filter 'ce-gate-*-auto-na-adapter.md' -ErrorAction SilentlyContinue)
 
         $adapterSurfaces = @($adapterFiles | ForEach-Object {
-            if ($_.Name -match '^auto-na-ce-gate-(.+)\.md$') { $Matches[1] }
+            if ($_.Name -match '^ce-gate-(.+)-auto-na-adapter\.md$') { $Matches[1] }
         })
 
         $validSetSurfaces = @('cli', 'browser', 'canvas', 'api')
 
         foreach ($surface in $validSetSurfaces) {
-            $adapterSurfaces | Should -Contain $surface -Because "ValidateSet surface '$surface' must have a matching auto-na-ce-gate-$surface.md adapter file"
+            $adapterSurfaces | Should -Contain $surface -Because "ValidateSet surface '$surface' must have a matching ce-gate-$surface-auto-na-adapter.md adapter file"
         }
     }
 }

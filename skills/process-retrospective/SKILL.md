@@ -44,7 +44,7 @@ Artifacts that are **stable** (must be preserved when #348 ships):
 
 - `frame/ports/process-retrospective.yaml` port YAML (fields change, file persists)
 - `skills/process-retrospective/SKILL.md` (this file; body replaces, frontmatter evolves)
-- `skills/process-retrospective/adapters/explicit-skip-process-retrospective.md` (name persists)
+- `skills/process-retrospective/adapters/process-retrospective-explicit-skip-adapter.md` (name persists)
 - `DEFERRED(#348):` prefix as migration-detection contract (regex `^DEFERRED\(#\d+\):`)
 
 Artifacts that are **scaffolding** (will be replaced by #348):
@@ -62,4 +62,4 @@ Artifacts that are **scaffolding** (will be replaced by #348):
 
 | Port | Work adapter | Explicit-skip adapter |
 |---|---|---|
-| `process-retrospective` | This `SKILL.md` (skeleton — deferred, never triggers) | [adapters/explicit-skip-process-retrospective.md](adapters/explicit-skip-process-retrospective.md) |
+| `process-retrospective` | This `SKILL.md` (skeleton — deferred, never triggers) | [adapters/process-retrospective-explicit-skip-adapter.md](adapters/process-retrospective-explicit-skip-adapter.md) |

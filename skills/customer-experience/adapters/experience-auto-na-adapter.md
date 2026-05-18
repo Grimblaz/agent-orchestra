@@ -1,6 +1,7 @@
----
+﻿---
 name: auto-na-experience
 provides: experience
+adapter-type: predicate
 suggested-next-step: none
 applies-when: changeset.isPipelineEntryTrivial()
 ---

@@ -134,7 +134,11 @@ When `executor:` is absent, derive the default from the adapter frontmatter's `a
 
 #### Planner glob workflow
 
-For single-variant work adapters, run `Glob skills/*/adapters/{port}-adapter.md`, read each candidate's frontmatter and `## When to use`, and pick the candidate whose guidance matches the slice. For multi-variant work adapters, run `Glob skills/*/adapters/*.md`, filter to `adapter-type: work` plus a positive or relevant `applies-when:`, read each candidate's `## When to use`, and pick the selector-named adapter whose predicate and guidance match the slice.
+Run `Glob skills/*/adapters/*.md` to discover all adapter candidates for a port; distinguish adapter roles by `adapter-type:` frontmatter and filename shape:
+
+- **`adapter-type: work`, filename ends in `-adapter.md`** — single-variant work adapter. Read the candidate's `## When to use` and pick the one whose guidance matches the slice.
+- **No `adapter-type:` frontmatter, filename does NOT end in `-adapter.md`** — multi-variant selector-named work adapter (e.g., `standard.md`, `lite.md`, `judge-only.md`, `proxy-github.md`, `ce-gate-api.md`). Select the correct variant via its `applies-when:` predicate.
+- **`adapter-type: predicate`** — the filename suffix encodes the variant: `-auto-na-adapter.md` for not-applicable, `-explicit-skip-adapter.md` for manual skip. Select by port token and variant suffix.
 
 Do not infer methodology from a skill directory when no adapter file matches. Either select an explicit adapter path or document why the plan remains legacy/non-runner for that slice.
 
@@ -271,4 +275,4 @@ If discovery becomes long or tool-heavy, compact before drafting. Preserve the k
 
 | Port   | Work adapter                                                         | Auto-N/A adapter                                     | Explicit-skip adapter                                            |
 | ------ | -------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------- |
-| `plan` | [agents/Issue-Planner.agent.md](../../agents/Issue-Planner.agent.md) | [adapters/auto-na-plan.md](adapters/auto-na-plan.md) | [adapters/explicit-skip-plan.md](adapters/explicit-skip-plan.md) |
+| `plan` | [agents/Issue-Planner.agent.md](../../agents/Issue-Planner.agent.md) | [adapters/plan-auto-na-adapter.md](adapters/plan-auto-na-adapter.md) | [adapters/plan-explicit-skip-adapter.md](adapters/plan-explicit-skip-adapter.md) |

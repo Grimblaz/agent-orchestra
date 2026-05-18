@@ -219,4 +219,4 @@ For detailed examples of each anti-pattern, see `references/anti-patterns.md`.
 
 | Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
 | --- | --- | --- | --- |
-| `implement-test` | [agents/Test-Writer.agent.md](../../agents/Test-Writer.agent.md) | [adapters/auto-na-implement-test.md](adapters/auto-na-implement-test.md) | [adapters/explicit-skip-implement-test.md](adapters/explicit-skip-implement-test.md) |
+| `implement-test` | [agents/Test-Writer.agent.md](../../agents/Test-Writer.agent.md) | [adapters/implement-test-auto-na-adapter.md](adapters/implement-test-auto-na-adapter.md) | [adapters/implement-test-explicit-skip-adapter.md](adapters/implement-test-explicit-skip-adapter.md) |

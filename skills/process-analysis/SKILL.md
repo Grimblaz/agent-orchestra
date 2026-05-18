@@ -239,4 +239,4 @@ Artifacts:
 
 | Port | Work adapter | Explicit-skip adapter |
 | --- | --- | --- |
-| `process-review` | [agents/Process-Review.agent.md](../../agents/Process-Review.agent.md) | [adapters/explicit-skip-process-review.md](adapters/explicit-skip-process-review.md) |
+| `process-review` | [agents/Process-Review.agent.md](../../agents/Process-Review.agent.md) | [adapters/process-review-explicit-skip-adapter.md](adapters/process-review-explicit-skip-adapter.md) |

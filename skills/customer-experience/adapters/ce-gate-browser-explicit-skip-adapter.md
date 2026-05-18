@@ -1,6 +1,7 @@
----
+﻿---
 name: explicit-skip-ce-gate-browser
 provides: ce-gate-browser
+adapter-type: predicate
 suggested-next-step: Document the skip rationale; rerun CE Gate via /orchestrate {ISSUE} when ready.
 reason-required: true
 ---

@@ -1,6 +1,7 @@
----
+﻿---
 name: explicit-skip-implement-docs
 provides: implement-docs
+adapter-type: predicate
 suggested-next-step: Document the skip rationale; rerun /orchestrate {ISSUE} when ready.
 reason-required: true
 ---

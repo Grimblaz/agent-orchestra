@@ -214,7 +214,7 @@ Notes:
       proxy-github.md   # provides: review, applies-when: scope.isProxyGithub
   ```
 
-- Single-adapter ports declare in the owning `.agent.md` or `SKILL.md`; companion auto-N/A and explicit-skip declarations live in `skills/<skill>/adapters/`.
+- Single-adapter ports declare in the owning `.agent.md` or `SKILL.md`; companion auto-N/A and explicit-skip declarations live in `skills/<skill>/adapters/` using the unified `{port}-auto-na-adapter.md` / `{port}-explicit-skip-adapter.md` suffix convention.
 
 ---
 
@@ -258,7 +258,9 @@ Port-filling skills and agents declare `provides:`. Supporting skills loaded onl
 | **Auto-N/A adapter** | 0 or 1 | Fires when declarative rule matches "nothing to do." Trigger-conditional ports use trigger absence instead and do not declare auto-N/A files. |
 | **Explicit-skip adapter** | exactly 1 for each non-deferred port | Operator/agent invokes with `reason`. Writes `skipped` credit. Justification is visible in PR review and challengeable. |
 
-`process-retrospective` is the only deferred port. It has a formalized-skeleton adapter (`skills/process-retrospective/SKILL.md`) but no live work adapter or auto-N/A adapter. The explicit-skip adapter (`skills/process-retrospective/adapters/explicit-skip-process-retrospective.md`) is declared but inactive until the trigger flips to live in #348.
+Unified filename convention: predicate adapters use `{port}-auto-na-adapter.md` and `{port}-explicit-skip-adapter.md` (suffix form). The filename suffix encodes the variant; `adapter-type: predicate` frontmatter declares the work-vs-predicate axis. Filename suffix is the canonical variant signal; on any drift, filename governs.
+
+`process-retrospective` is the only deferred port. It has a formalized-skeleton adapter (`skills/process-retrospective/SKILL.md`) but no live work adapter or auto-N/A adapter. The explicit-skip adapter (`skills/process-retrospective/adapters/process-retrospective-explicit-skip-adapter.md`) is declared but inactive until the trigger flips to live in #348.
 
 ### Where to declare
 
@@ -268,8 +270,8 @@ Port-filling skills and agents declare `provides:`. Supporting skills loaded onl
 | Legacy skill-owned single work adapter | `skills/<skill>/SKILL.md` |
 | Skill-as-adapter single work adapter | `skills/<skill>/adapters/<port>-adapter.md` |
 | Skill-owned variant or work file | `skills/<skill>/adapters/<variant>.md` |
-| Auto-N/A adapter | `skills/<skill>/adapters/auto-na-<port>.md` |
-| Explicit-skip adapter | `skills/<skill>/adapters/explicit-skip-<port>.md` |
+| Auto-N/A adapter | `skills/<skill>/adapters/<port>-auto-na-adapter.md` |
+| Explicit-skip adapter | `skills/<skill>/adapters/<port>-explicit-skip-adapter.md` |
 
 Lowercase Claude shells and slash commands are dispatchers, not adapters; they do not declare `provides:`.
 
@@ -279,26 +281,26 @@ New single-variant work adapters should prefer the skill-as-adapter path: declar
 
 | Port | Applies | Work declaration | Work predicate | Auto-N/A declaration | Explicit-skip declaration |
 |---|---|---|---|---|---|
-| `experience` | always | `agents/Experience-Owner.agent.md` | (single adapter) | `skills/customer-experience/adapters/auto-na-experience.md` — `changeset.complexity == 'trivial'` | `skills/customer-experience/adapters/explicit-skip-experience.md` |
-| `design` | always | `agents/Solution-Designer.agent.md` | (single adapter) | `skills/design-exploration/adapters/auto-na-design.md` — `changeset.complexity == 'trivial'` | `skills/design-exploration/adapters/explicit-skip-design.md` |
-| `plan` | always | `agents/Issue-Planner.agent.md` | (single adapter) | `skills/plan-authoring/adapters/auto-na-plan.md` — `changeset.complexity == 'trivial'` | `skills/plan-authoring/adapters/explicit-skip-plan.md` |
-| `implement-code` | always | `agents/Code-Smith.agent.md` | `changeset.touchesSource()` | `skills/implementation-discipline/adapters/auto-na-implement-code.md` — `not changeset.touchesSource()` | `skills/implementation-discipline/adapters/explicit-skip-implement-code.md` |
-| `implement-test` | always | `agents/Test-Writer.agent.md` | `changeset.touchesTestableCode()` | `skills/test-driven-development/adapters/auto-na-implement-test.md` — `not changeset.touchesTestableCode()` | `skills/test-driven-development/adapters/explicit-skip-implement-test.md` |
-| `implement-refactor` | always | `agents/Refactor-Specialist.agent.md` | `changeset.touchedAreaHasRefactorableDebt()` | `skills/refactoring-methodology/adapters/auto-na-implement-refactor.md` — `not changeset.touchedAreaHasRefactorableDebt()` | `skills/refactoring-methodology/adapters/explicit-skip-implement-refactor.md` |
-| `implement-docs` | always | `agents/Doc-Keeper.agent.md` | `changeset.changesBehaviorOrInterface()` | `skills/documentation-finalization/adapters/auto-na-implement-docs.md` — `not changeset.changesBehaviorOrInterface()` | `skills/documentation-finalization/adapters/explicit-skip-implement-docs.md` |
-| `review` standard | always | `agents/Code-Review-Response.agent.md`; `skills/adversarial-review/adapters/standard.md` | `changeset.totalLines >= 200 and not scope.isReReview and not scope.isProxyGithub` | none — always applies | `skills/adversarial-review/adapters/explicit-skip-review.md` |
-| `review` lite | always | `agents/Code-Review-Response.agent.md`; `skills/adversarial-review/adapters/lite.md` | `changeset.totalLines < 200 and not scope.isReReview and not scope.isProxyGithub` | none — always applies | `skills/adversarial-review/adapters/explicit-skip-review.md` |
-| `review` judge-only | always | `agents/Code-Review-Response.agent.md`; `skills/adversarial-review/adapters/judge-only.md` | `scope.isReReview` | none — always applies | `skills/adversarial-review/adapters/explicit-skip-review.md` |
-| `review` proxy-github | always | `agents/Code-Review-Response.agent.md`; `skills/adversarial-review/adapters/proxy-github.md` | `scope.isProxyGithub` | none — always applies | `skills/adversarial-review/adapters/explicit-skip-review.md` |
-| `ce-gate-cli` | always | `skills/customer-experience/adapters/ce-gate-cli.md` | `changeset.touchesCliSurface()` | `skills/customer-experience/adapters/auto-na-ce-gate-cli.md` — `not changeset.touchesCliSurface()` | `skills/customer-experience/adapters/explicit-skip-ce-gate-cli.md` |
-| `ce-gate-browser` | always | `skills/customer-experience/adapters/ce-gate-browser.md` | `changeset.touchesBrowserSurface()` | `skills/customer-experience/adapters/auto-na-ce-gate-browser.md` — `not changeset.touchesBrowserSurface()` | `skills/customer-experience/adapters/explicit-skip-ce-gate-browser.md` |
-| `ce-gate-canvas` | always | `skills/customer-experience/adapters/ce-gate-canvas.md` | `changeset.touchesCanvasSurface()` | `skills/customer-experience/adapters/auto-na-ce-gate-canvas.md` — `not changeset.touchesCanvasSurface()` | `skills/customer-experience/adapters/explicit-skip-ce-gate-canvas.md` |
-| `ce-gate-api` | always | `skills/customer-experience/adapters/ce-gate-api.md` | `changeset.touchesApiSurface()` | `skills/customer-experience/adapters/auto-na-ce-gate-api.md` — `not changeset.touchesApiSurface()` | `skills/customer-experience/adapters/explicit-skip-ce-gate-api.md` |
-| `release-hygiene` | trigger-conditional | `skills/plugin-release-hygiene/SKILL.md` | `changeset.touchesPluginEntryPoint()` | none — N/A by trigger absence | `skills/plugin-release-hygiene/adapters/explicit-skip-release-hygiene.md` |
-| `post-pr` | always | `skills/post-pr-review/SKILL.md` | (single adapter) | none — always applies | `skills/post-pr-review/adapters/explicit-skip-post-pr.md` |
-| `post-fix-review` | trigger-conditional | `skills/adversarial-review/adapters/post-fix.md` | `review.sustainedCriticalOrHigh == true` | none — N/A by trigger absence | `skills/adversarial-review/adapters/explicit-skip-post-fix-review.md` |
-| `process-review` | trigger-conditional | `agents/Process-Review.agent.md` | `ceGate.defectsFound > 0` | none — N/A by trigger absence | `skills/process-analysis/adapters/explicit-skip-process-review.md` |
-| `process-retrospective` | deferred | `skills/process-retrospective/SKILL.md` (skeleton; trigger deferred to #348) | `never` (DSL deterministic-false; live predicate authored by #348) | none — deferred skeleton; no auto-N/A adapter | `skills/process-retrospective/adapters/explicit-skip-process-retrospective.md` |
+| `experience` | always | `agents/Experience-Owner.agent.md` | (single adapter) | `skills/customer-experience/adapters/experience-auto-na-adapter.md` — `changeset.complexity == 'trivial'` | `skills/customer-experience/adapters/experience-explicit-skip-adapter.md` |
+| `design` | always | `agents/Solution-Designer.agent.md` | (single adapter) | `skills/design-exploration/adapters/design-auto-na-adapter.md` — `changeset.complexity == 'trivial'` | `skills/design-exploration/adapters/design-explicit-skip-adapter.md` |
+| `plan` | always | `agents/Issue-Planner.agent.md` | (single adapter) | `skills/plan-authoring/adapters/plan-auto-na-adapter.md` — `changeset.complexity == 'trivial'` | `skills/plan-authoring/adapters/plan-explicit-skip-adapter.md` |
+| `implement-code` | always | `agents/Code-Smith.agent.md` | `changeset.touchesSource()` | `skills/implementation-discipline/adapters/implement-code-auto-na-adapter.md` — `not changeset.touchesSource()` | `skills/implementation-discipline/adapters/implement-code-explicit-skip-adapter.md` |
+| `implement-test` | always | `agents/Test-Writer.agent.md` | `changeset.touchesTestableCode()` | `skills/test-driven-development/adapters/implement-test-auto-na-adapter.md` — `not changeset.touchesTestableCode()` | `skills/test-driven-development/adapters/implement-test-explicit-skip-adapter.md` |
+| `implement-refactor` | always | `agents/Refactor-Specialist.agent.md` | `changeset.touchedAreaHasRefactorableDebt()` | `skills/refactoring-methodology/adapters/implement-refactor-auto-na-adapter.md` — `not changeset.touchedAreaHasRefactorableDebt()` | `skills/refactoring-methodology/adapters/implement-refactor-explicit-skip-adapter.md` |
+| `implement-docs` | always | `agents/Doc-Keeper.agent.md` | `changeset.changesBehaviorOrInterface()` | `skills/documentation-finalization/adapters/implement-docs-auto-na-adapter.md` — `not changeset.changesBehaviorOrInterface()` | `skills/documentation-finalization/adapters/implement-docs-explicit-skip-adapter.md` |
+| `review` standard | always | `agents/Code-Review-Response.agent.md`; `skills/adversarial-review/adapters/standard.md` | `changeset.totalLines >= 200 and not scope.isReReview and not scope.isProxyGithub` | none — always applies | `skills/adversarial-review/adapters/review-explicit-skip-adapter.md` |
+| `review` lite | always | `agents/Code-Review-Response.agent.md`; `skills/adversarial-review/adapters/lite.md` | `changeset.totalLines < 200 and not scope.isReReview and not scope.isProxyGithub` | none — always applies | `skills/adversarial-review/adapters/review-explicit-skip-adapter.md` |
+| `review` judge-only | always | `agents/Code-Review-Response.agent.md`; `skills/adversarial-review/adapters/judge-only.md` | `scope.isReReview` | none — always applies | `skills/adversarial-review/adapters/review-explicit-skip-adapter.md` |
+| `review` proxy-github | always | `agents/Code-Review-Response.agent.md`; `skills/adversarial-review/adapters/proxy-github.md` | `scope.isProxyGithub` | none — always applies | `skills/adversarial-review/adapters/review-explicit-skip-adapter.md` |
+| `ce-gate-cli` | always | `skills/customer-experience/adapters/ce-gate-cli.md` | `changeset.touchesCliSurface()` | `skills/customer-experience/adapters/ce-gate-cli-auto-na-adapter.md` — `not changeset.touchesCliSurface()` | `skills/customer-experience/adapters/ce-gate-cli-explicit-skip-adapter.md` |
+| `ce-gate-browser` | always | `skills/customer-experience/adapters/ce-gate-browser.md` | `changeset.touchesBrowserSurface()` | `skills/customer-experience/adapters/ce-gate-browser-auto-na-adapter.md` — `not changeset.touchesBrowserSurface()` | `skills/customer-experience/adapters/ce-gate-browser-explicit-skip-adapter.md` |
+| `ce-gate-canvas` | always | `skills/customer-experience/adapters/ce-gate-canvas.md` | `changeset.touchesCanvasSurface()` | `skills/customer-experience/adapters/ce-gate-canvas-auto-na-adapter.md` — `not changeset.touchesCanvasSurface()` | `skills/customer-experience/adapters/ce-gate-canvas-explicit-skip-adapter.md` |
+| `ce-gate-api` | always | `skills/customer-experience/adapters/ce-gate-api.md` | `changeset.touchesApiSurface()` | `skills/customer-experience/adapters/ce-gate-api-auto-na-adapter.md` — `not changeset.touchesApiSurface()` | `skills/customer-experience/adapters/ce-gate-api-explicit-skip-adapter.md` |
+| `release-hygiene` | trigger-conditional | `skills/plugin-release-hygiene/SKILL.md` | `changeset.touchesPluginEntryPoint()` | none — N/A by trigger absence | `skills/plugin-release-hygiene/adapters/release-hygiene-explicit-skip-adapter.md` |
+| `post-pr` | always | `skills/post-pr-review/SKILL.md` | (single adapter) | none — always applies | `skills/post-pr-review/adapters/post-pr-explicit-skip-adapter.md` |
+| `post-fix-review` | trigger-conditional | `skills/adversarial-review/adapters/post-fix.md` | `review.sustainedCriticalOrHigh == true` | none — N/A by trigger absence | `skills/adversarial-review/adapters/post-fix-review-explicit-skip-adapter.md` |
+| `process-review` | trigger-conditional | `agents/Process-Review.agent.md` | `ceGate.defectsFound > 0` | none — N/A by trigger absence | `skills/process-analysis/adapters/process-review-explicit-skip-adapter.md` |
+| `process-retrospective` | deferred | `skills/process-retrospective/SKILL.md` (skeleton; trigger deferred to #348) | `never` (DSL deterministic-false; live predicate authored by #348) | none — deferred skeleton; no auto-N/A adapter | `skills/process-retrospective/adapters/process-retrospective-explicit-skip-adapter.md` |
 
 ### Selection (where judgment lives)
 
@@ -405,7 +407,7 @@ credits:
     timestamp: 2026-04-24T14:00:00Z
 
   - port: design
-    adapter: design-auto-na
+    adapter: design-auto-na-adapter
     status: not-applicable
     rule: "changeset.complexity == 'trivial'"
     evidence: changeset:diff-stat@HEAD
@@ -447,7 +449,7 @@ credits:
     timestamp: 2026-04-24T14:28:00Z
 
   - port: implement-refactor
-    adapter: implement-refactor-explicit-skip
+    adapter: implement-refactor-explicit-skip-adapter
     status: skipped
     reason: "Touched files have outstanding refactor PR #119; avoid conflicting cleanup."
     applied-by: Code-Conductor
@@ -695,7 +697,7 @@ Two distinct emission paths with structurally distinguishable row shapes:
 
 ### D11 — Adapter stub bodies
 
-12 adapter stub files per port-reification sub-issue (`auto-na-{port}.md` and `explicit-skip-{port}.md`). Format: frontmatter declares `provides`, `suggested-next-step`, `applies-when`; body is one or two sentences describing the credit shape. Behavior lives in `Build-*CreditRow`, not in the adapter body.
+12 adapter stub files per port-reification sub-issue (`{port}-auto-na-adapter.md` and `{port}-explicit-skip-adapter.md`). Format: frontmatter declares `provides`, `adapter-type: predicate`, `suggested-next-step`, `applies-when`; body is one or two sentences describing the credit shape. Behavior lives in `Build-*CreditRow`, not in the adapter body.
 
 ### D12 — Predicate identifiers
 

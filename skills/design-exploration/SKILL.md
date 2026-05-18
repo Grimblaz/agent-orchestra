@@ -141,7 +141,7 @@ See `adversarial-review` for the full prosecution workflow and output schemas th
 
 | Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
 | --- | --- | --- | --- |
-| `design` | [agents/Solution-Designer.agent.md](../../agents/Solution-Designer.agent.md) | [adapters/auto-na-design.md](adapters/auto-na-design.md) | [adapters/explicit-skip-design.md](adapters/explicit-skip-design.md) |
+| `design` | [agents/Solution-Designer.agent.md](../../agents/Solution-Designer.agent.md) | [adapters/design-auto-na-adapter.md](adapters/design-auto-na-adapter.md) | [adapters/design-explicit-skip-adapter.md](adapters/design-explicit-skip-adapter.md) |
 
 ## Platform-specific invocation
 

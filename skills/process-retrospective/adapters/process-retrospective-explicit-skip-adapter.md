@@ -1,6 +1,7 @@
----
+﻿---
 name: explicit-skip-process-retrospective
 provides: process-retrospective
+adapter-type: predicate
 applies-when: never
 suggested-next-step: Document the skip rationale; update when #348 ships the live producer.
 reason-required: true
