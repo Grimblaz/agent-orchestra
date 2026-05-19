@@ -33,6 +33,7 @@ $script:ArtifactReferenceRegex = [regex]::new('(?i)' + $script:ArtifactReference
 $script:FutureCategoryPattern = '(?i)\bcategory\s*:\s*(' + $script:CategoryPattern + ')\b'
 
 function Get-PlanTreeStateInput {
+    [OutputType([string])]
     [CmdletBinding()]
     param(
         [hashtable]$BoundParameters,
@@ -64,6 +65,7 @@ function Get-PlanTreeStateInput {
 }
 
 function Get-PlanVerificationEvidenceBlock {
+    [OutputType([string])]
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Content)
 
@@ -92,6 +94,7 @@ function Get-PlanVerificationEvidenceBlock {
 }
 
 function Get-LoadBearingAcIds {
+    [OutputType([object[]])]
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Content)
 
@@ -223,6 +226,7 @@ function Write-PlanEvidenceRowWarnings {
 }
 
 function Get-PlanEvidenceRowKey {
+    [OutputType([string])]
     [CmdletBinding()]
     param([Parameter(Mandatory)][pscustomobject]$Row)
 

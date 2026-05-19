@@ -70,7 +70,7 @@ exit `$global:LASTEXITCODE
 
         $waited = $proc.WaitForExit($TimeoutSeconds * 1000)
         if (-not $waited) {
-            try { $proc.Kill($true) } catch {}
+            try { $proc.Kill($true) } catch { Write-Warning "Failed to kill timed-out orchestrator process: $($_.Exception.Message)" }
 
             return [pscustomobject]@{
                 ExitCode = -1
