@@ -84,6 +84,44 @@ If no customer-facing surface exists, state why `ce_gate: false` is justified.
 
 Include the fixed adversarial review pipeline: three prosecution passes, merged findings ledger, one defense pass, one judge pass, and local resolution of accepted findings before completion.
 
+## Tree-State Verification Discipline
+
+After drafting the plan and before stress-test preparation, verify every load-bearing acceptance criterion against the current repository tree. Populate the plan's `**Verification Evidence**` block before adversarial review so prosecutors evaluate the plan and its evidence together.
+
+**Why three-layer enforcement**: this discipline uses methodology, a persisted plan-template block, and a later warn-only Pester check because the rejected alternatives each miss part of the failure class: methodology-only leaves no durable audit trail, free-form or external evidence is hard to parse and easy to lose, and hard-blocking rollout or pre-PR hook style alternatives would break in-flight plans before the evidence pattern stabilizes.
+
+A **load-bearing AC** is an AC or assertion that references a verifiable artifact. Apply categories in this precedence order: text-presence > structure-presence > downstream-consumer > numeric-or-structural > named-standard. Once an AC fits an earlier category, use that category for the row even if later categories also apply.
+
+### Text-presence
+
+Use this when the AC depends on a literal file path, directory path, phrase, heading, fenced block, or command text. Verification action: run `rg`/`grep` or read the exact file and cite the command plus `path:line` evidence.
+
+### Structure-presence
+
+Use this when the AC depends on Markdown structure, frontmatter keys, YAML fields, frame-spine or frame-slice comments, section ordering, or other parseable shape. Verification action: grep the stable heading or anchor, or cite the parser/contract test that observes the structure.
+
+### Downstream-consumer
+
+Use this when the AC claims another agent, script, hook, or function consumes the planned artifact or behavior. Verification action: cite the consumer path and line, function name, or command surface that actually reads or depends on it.
+
+### Numeric-or-structural
+
+Use this when the AC depends on a count, threshold, percentage, schema version, enum cardinality, or required number of items. Verification action: cite the source-of-truth standard, script, schema, or counted tree evidence that defines the expected number or structure.
+
+### Named-standard
+
+Use this when the AC invokes an existing standard or convention by identifier, such as `#527`, `SMC-01`, or `D2 in design-579`. Verification action: cite the defining issue, decision, design document, or skill section that owns the standard.
+
+Scope-guard rule: non-load-bearing ACs are not listed in `**Verification Evidence**`. Non-load-bearing means rationale prose, summary statements, scope negation, qualitative intent, or a customer-value statement that does not cite a specific artifact, consumer, number, structure, or named standard.
+
+Boundary example 1: `No retroactive fix to historical plans` is non-load-bearing because it negates scope; do not add a row unless the plan also names a concrete historical file to inspect. Boundary example 2: `Add five H3 subsections named X through Y` is structure-presence because the named headings and count are verifiable in the target file. Boundary example 3: `Code-Conductor harvests the marker` is downstream-consumer because it makes a consumer-behavior claim that must be checked against Code-Conductor or its helper script.
+
+Disposition enum: `verified | revised | exempted | planned`. Use `verified` when the current tree matches the claim. Use `revised` when verification changed the plan; include the correction rationale. Use `exempted` when the AC looked load-bearing but is intentionally outside this discipline; include the scope rationale. Use `planned` only for rows citing artifacts authored later in the same PR; include an `s{N}` slice anchor and the category the future artifact will satisfy.
+
+Specialized rule: when a Verification Evidence row reaches the same conclusion as a design-time annotation, the row must either show new investigation, such as a different grep or anchor, or explicitly state `no drift from design-time annotation at HEAD {sha}`.
+
+[^ac-load-bearing]: `load-bearing` here means an AC references a verifiable artifact. This is distinct from the architectural sense in `Documents/Design/frame-architecture.md`, where `load-bearing` describes spine or methodology essentiality; the two senses do not overlap operationally.
+
 ## Stress-Test Preparation
 
 Before approval, prepare the draft plan for adversarial review:
@@ -197,6 +235,11 @@ slices:
 
 **Verification**
 {How to test: commands, tests, manual checks}
+
+<!-- verification-evidence -->
+**Verification Evidence**
+
+- **AC{N}** ({category: text-presence | structure-presence | downstream-consumer | numeric-or-structural | named-standard}): {verification action and result}. **{disposition: verified | revised | exempted | planned}** - evidence: {grep/read command with path:line, consumer path/function, numeric or structural source, or named-standard reference}. {Required for revised/exempted: rationale. Required for planned: slice anchor s{N} and category the future artifact will satisfy.}
 
 **Decisions** (if applicable)
 
