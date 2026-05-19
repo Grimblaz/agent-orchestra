@@ -24,12 +24,17 @@ $script:ArtifactDirectorySegmentPattern = '\.?[A-Za-z0-9_-]+'
 $script:SlashFileArtifactPattern = '(?:' + $script:ArtifactDirectorySegmentPattern + '/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,12}\b'
 $script:SlashDirectoryArtifactPattern = '(?:' + $script:ArtifactDirectorySegmentPattern + '/)+[A-Za-z0-9_.-]*/'
 $script:RootFileArtifactPattern = '[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.[A-Za-z][A-Za-z0-9]{1,11}\b'
+$script:RootDotfileArtifactPattern = '\.[A-Za-z0-9][A-Za-z0-9_-]*\b'
+$script:RootDotlessFileArtifactPattern = '(?:LICENSE|NOTICE|COPYING|AUTHORS|Makefile|Dockerfile|Gemfile|Rakefile)\b'
 $artifactReferenceAlternatives = @(
     $script:SlashFileArtifactPattern
     $script:SlashDirectoryArtifactPattern
     $script:RootFileArtifactPattern
+    $script:RootDotfileArtifactPattern
+    $script:RootDotlessFileArtifactPattern
 ) -join '|'
 $script:ArtifactReferenceRegex = [regex]::new('(?i)' + $script:ArtifactReferenceBoundaryPattern + '(?:' + $artifactReferenceAlternatives + ')')
+$script:NamedStandardReferenceRegex = [regex]::new('(?i)' + $script:ArtifactReferenceBoundaryPattern + '(?:#\d+\b|SMC-\d+\b|D\d+\b)')
 $script:FutureCategoryPattern = '(?i)\bcategory\s*:\s*(' + $script:CategoryPattern + ')\b'
 
 function Get-PlanTreeStateInput {
@@ -84,7 +89,7 @@ function Get-PlanVerificationEvidenceBlock {
 
     $blockStart = $anchorIndex + $headingMatch.Index + $headingMatch.Length
     $remaining = $Content.Substring($blockStart)
-    $nextHeading = [regex]::Match($remaining, '(?m)^(#{1,6}\s+|\*\*[^*\r\n]+\*\*\s*$)')
+    $nextHeading = [regex]::Match($remaining, '(?m)^\s*(?:#{1,6}\s+|\*\*[^*\r\n]+\*\*(?:\s+\S.*)?\s*$)')
 
     if ($nextHeading.Success) {
         return $remaining.Substring(0, $nextHeading.Index)
@@ -99,14 +104,43 @@ function Get-LoadBearingAcIds {
     param([Parameter(Mandatory)][string]$Content)
 
     $ids = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $acMatches = [regex]::Matches($Content, '(?m)^\s*-\s+\*\*AC(?<id>\d+[A-Za-z0-9-]*)\*\*(?<text>[^\r\n]*)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $currentAcId = $null
+    $currentAcIndent = 0
+    $currentAcText = [System.Text.StringBuilder]::new()
 
-    foreach ($acMatch in $acMatches) {
-        $lineText = $acMatch.Groups['text'].Value
-        if (Test-PlanAcTextLoadBearing -Text $lineText) {
-            $null = $ids.Add($acMatch.Groups['id'].Value)
+    $flushCurrentAc = {
+        if ($null -ne $currentAcId -and (Test-PlanAcTextLoadBearing -Text $currentAcText.ToString())) {
+            $null = $ids.Add($currentAcId)
         }
     }
+
+    foreach ($line in ($Content -split "`n")) {
+        $acMatch = [regex]::Match($line, '^(?<indent>\s*)-\s+\*\*AC(?<id>\d+[A-Za-z0-9-]*)\*\*(?<text>.*)$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        if ($acMatch.Success) {
+            & $flushCurrentAc
+            $currentAcId = $acMatch.Groups['id'].Value
+            $currentAcIndent = $acMatch.Groups['indent'].Value.Length
+            $currentAcText = [System.Text.StringBuilder]::new()
+            $null = $currentAcText.AppendLine($acMatch.Groups['text'].Value)
+            continue
+        }
+
+        if ($null -eq $currentAcId) {
+            continue
+        }
+
+        $bulletMatch = [regex]::Match($line, '^(?<indent>\s*)-\s+')
+        if ($bulletMatch.Success -and $bulletMatch.Groups['indent'].Value.Length -le $currentAcIndent) {
+            & $flushCurrentAc
+            $currentAcId = $null
+            $currentAcText = [System.Text.StringBuilder]::new()
+            continue
+        }
+
+        $null = $currentAcText.AppendLine($line)
+    }
+
+    & $flushCurrentAc
 
     return , $ids
 }
@@ -116,7 +150,8 @@ function Test-PlanAcTextLoadBearing {
     param([Parameter(Mandatory)][string]$Text)
 
     return ($script:LoadBearingCategoryRegex.IsMatch($Text) -or
-        $script:ArtifactReferenceRegex.IsMatch($Text))
+        $script:ArtifactReferenceRegex.IsMatch($Text) -or
+        $script:NamedStandardReferenceRegex.IsMatch($Text))
 }
 
 function ConvertFrom-PlanEvidenceRow {
@@ -225,14 +260,6 @@ function Write-PlanEvidenceRowWarnings {
     }
 }
 
-function Get-PlanEvidenceRowKey {
-    [OutputType([string])]
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][pscustomobject]$Row)
-
-    return "$($Row.AcId)|$($Row.Category)"
-}
-
 function Invoke-PlanTreeStateVerification {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Content)
@@ -256,7 +283,6 @@ function Invoke-PlanTreeStateVerification {
     }
 
     $seenEvidenceRows = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $seenEvidenceRowKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $rowNumber = 0
 
     foreach ($rowText in $topLevelRows) {
@@ -272,9 +298,7 @@ function Invoke-PlanTreeStateVerification {
         }
 
         $null = $loadBearingAcIds.Add($row.AcId)
-        $null = $seenEvidenceRows.Add($row.AcId)
-        $rowKey = Get-PlanEvidenceRowKey -Row $row
-        if (-not $seenEvidenceRowKeys.Add($rowKey)) {
+        if (-not $seenEvidenceRows.Add($row.AcId)) {
             Write-Warning "duplicate evidence row for AC$($row.AcId)"
         }
 

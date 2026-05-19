@@ -120,7 +120,6 @@ Disposition enum: `verified | revised | exempted | planned`. Use `verified` when
 
 Specialized rule: when a Verification Evidence row reaches the same conclusion as a design-time annotation, the row must either show new investigation, such as a different grep or anchor, or explicitly state `no drift from design-time annotation at HEAD {sha}`.
 
-[^ac-load-bearing]: `load-bearing` here means an AC references a verifiable artifact. This is distinct from the architectural sense in `Documents/Design/frame-architecture.md`, where `load-bearing` describes spine or methodology essentiality; the two senses do not overlap operationally.
 
 ## Stress-Test Preparation
 

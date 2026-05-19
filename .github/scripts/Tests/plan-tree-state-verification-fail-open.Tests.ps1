@@ -217,7 +217,7 @@ This plan intentionally has no verification evidence anchor.
         & $script:AssertWarningContains -Result $result -ExpectedWarning 'AC2 marked load-bearing has no evidence row'
     }
 
-    It 'Final-plan-shaped valid evidence with multiple category rows per AC and non-AC audit groups emits no warnings and exits 0' {
+    It 'Final-plan-shaped valid evidence with one category row per AC and non-AC audit groups emits no warnings and exits 0' {
         $plan = @'
 ## Plan
 
@@ -230,9 +230,7 @@ This plan intentionally has no verification evidence anchor.
 **Verification Evidence**
 
 - **AC1** (text-presence): `grep -n '^## Stress-Test Preparation' skills/plan-authoring/SKILL.md` -> line 87. **verified** - evidence: `skills/plan-authoring/SKILL.md:87`.
-- **AC1** (structure-presence): five H3 subsection names are authored later in the implementation. **planned (s2)** - category: structure-presence.
 - **AC3** (text-presence): `grep -n '^\*\*Verification\*\*$' skills/plan-authoring/SKILL.md` -> line 198. **verified** - evidence: `skills/plan-authoring/SKILL.md:198`.
-- **AC3** (structure-presence): `<!-- verification-evidence -->` anchor and heading are authored later in the implementation. **planned (s2)** - category: structure-presence.
 - **Adapter-path verification** (per judge finding F4) - text-presence for each slice's adapter field:
     - s1 adapter `agents/Test-Writer.agent.md`: `Glob agents/Test-Writer.agent.md` -> exists. **verified** - evidence: live tree at HEAD.
     - s5 adapter `skills/implementation-discipline/adapters/implement-code-adapter.md`: `Glob` -> exists. **verified** - evidence: live tree at HEAD.
@@ -246,6 +244,74 @@ This plan intentionally has no verification evidence anchor.
             & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: final-plan-shaped valid evidence must exit 0'
             & $script:AssertNoWarnings -Result $result
             }
+
+    It 'Evidence block parser stops before a following bold heading with trailing text and does not consume later AC-like rows' {
+        $plan = @'
+## Plan
+
+## Acceptance Criteria
+
+- **AC1** (text-presence): load-bearing literal text exists.
+- **AC4** (text-presence): load-bearing literal text also exists.
+
+<!-- verification-evidence -->
+**Verification Evidence**
+
+- **AC1** (text-presence): `rg "foo" target.md` -> found. **verified** - evidence: `target.md:12`.
+
+**Decisions** (if applicable)
+
+- **AC4** (text-presence): decision-like row after the evidence block. **verified** - evidence: `target.md:13`.
+'@
+
+        $result = & $script:InvokeOrchestrator -PlanContent $plan
+
+        & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: AC-like rows after a following bold heading must exit 0'
+        & $script:AssertWarningContains -Result $result -ExpectedWarning 'AC4 marked load-bearing has no evidence row'
+    }
+
+    It 'AC discovery treats a dash-prefixed AC with a load-bearing continuation line as needing evidence and exits 0' {
+        $plan = @'
+## Plan
+
+## Acceptance Criteria
+
+- **AC1**: add the new planner discipline.
+  `skills/plan-authoring/SKILL.md` must contain the heading.
+- **AC2** (text-presence): load-bearing literal text exists.
+
+<!-- verification-evidence -->
+**Verification Evidence**
+
+- **AC2** (text-presence): `rg "foo" target.md` -> found. **verified** - evidence: `target.md:12`.
+'@
+
+        $result = & $script:InvokeOrchestrator -PlanContent $plan
+
+        & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: omitted continuation-line load-bearing AC must exit 0'
+        & $script:AssertWarningContains -Result $result -ExpectedWarning 'AC1 marked load-bearing has no evidence row'
+    }
+
+    It 'Duplicate evidence rows for the same AC across different categories warn and exit 0' {
+        $plan = @'
+## Plan
+
+## Acceptance Criteria
+
+- **AC1** (text-presence + structure-presence): load-bearing literal text and heading exist.
+
+<!-- verification-evidence -->
+**Verification Evidence**
+
+- **AC1** (text-presence): `rg "foo" target.md` -> found. **verified** - evidence: `target.md:12`.
+- **AC1** (structure-presence): `grep "^## Foo" target.md` -> found. **verified** - evidence: `line 13`.
+'@
+
+        $result = & $script:InvokeOrchestrator -PlanContent $plan
+
+        & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: duplicate evidence rows must exit 0'
+        & $script:AssertWarningContains -Result $result -ExpectedWarning 'duplicate evidence row for AC1'
+    }
 
     It 'Row marked revised without rationale warns for the revised disposition and exits 0' {
         $plan = @'
@@ -372,6 +438,34 @@ This plan intentionally has no verification evidence anchor.
         @{ Name = 'root-level file path README.md'; AcLine = '- **AC1**: update README.md.' }
         @{ Name = 'root-level manifest plugin.json'; AcLine = '- **AC1**: update plugin.json.' }
         @{ Name = 'directory path skills/plan-authoring/'; AcLine = '- **AC1**: update skills/plan-authoring/ directory.' }
+        @{ Name = 'root dotfile .gitignore'; AcLine = '- **AC1**: update `.gitignore`.' }
+        @{ Name = 'root dotfile .editorconfig'; AcLine = '- **AC1**: update `.editorconfig`.' }
+        @{ Name = 'dotless root file LICENSE'; AcLine = '- **AC1**: update `LICENSE`.' }
+    ) {
+        $plan = @"
+## Plan
+
+## Acceptance Criteria
+
+$AcLine
+- **AC2** (text-presence): load-bearing literal text exists.
+
+<!-- verification-evidence -->
+**Verification Evidence**
+
+- **AC2** (text-presence): ``rg "foo" target.md`` -> found. **verified** - evidence: ``target.md:12``.
+"@
+
+        $result = & $script:InvokeOrchestrator -PlanContent $plan
+
+        & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: omitted untagged artifact-referencing AC must exit 0'
+        & $script:AssertWarningContains -Result $result -ExpectedWarning 'AC1 marked load-bearing has no evidence row'
+    }
+
+    It 'Untagged named-standard AC omitted from non-empty evidence block warns for <Name> and exits 0' -ForEach @(
+        @{ Name = 'issue standard #527'; AcLine = '- **AC1**: comply with #527.' }
+        @{ Name = 'session-memory standard SMC-01'; AcLine = '- **AC1**: comply with SMC-01.' }
+        @{ Name = 'design decision D2'; AcLine = '- **AC1**: comply with D2.' }
     ) {
         $plan = @"
 ## Plan
