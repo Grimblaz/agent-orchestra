@@ -89,6 +89,8 @@ _(Rubric duplicated from `bdd-scenarios/SKILL.md` for quick reference. If you up
 
 When BDD is enabled, write the full `## Scenarios` section back into the GitHub issue body with numbered `### S{N} — {title} (Type)` headings before plan approval, emitted as concrete IDs such as `### S1` and `### S2`. List each scenario in the `[CE GATE]` step by scenario ID (`S{N}`/`S1`) with classification tags: `S{N}: {description} [auto]` or `S{N}: {description} [manual]`.
 
+- Before stress-test invocation, run the Tree-State Verification Discipline from `skills/plan-authoring/SKILL.md` and populate the plan's `**Verification Evidence**` block.
+
 Before presenting the plan, run the three-pass adversarial stress test from `skills/plan-authoring/SKILL.md`. Apply Post-Judge Reconciliation before surfacing the final draft.
 
 ## 5. Refinement
