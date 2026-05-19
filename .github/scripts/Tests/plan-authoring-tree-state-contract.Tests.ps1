@@ -98,6 +98,12 @@ Describe 'Plan-authoring tree-state verification contract' {
         $script:TreeStateSection | Should -Match '(?i)verified\s*\|\s*revised\s*\|\s*exempted\s*\|\s*planned' -Because 'the disposition enum must include exactly the four planned values in the discipline section'
     }
 
+    It 'distinguishes AC-specific load-bearing evidence from frame-architecture load-bearing usage' {
+        $script:TreeStateSection | Should -Match '(?is)load-bearing.{0,160}(AC|acceptance criterion)' -Because 'the discipline should anchor this load-bearing sense to AC evidence rows'
+        $script:TreeStateSection | Should -Match '(?is)(frame-architecture|Documents/Design/frame-architecture\.md|architectural)' -Because 'the discipline should name the broader frame-architecture load-bearing vocabulary it is disambiguating from'
+        $script:TreeStateSection | Should -Match '(?is)(distinct|different|separate|does not overlap|not the same).{0,240}(load-bearing|frame|architectural)' -Because 'the discipline should state that the AC evidence sense is operationally separate from the frame-architecture sense'
+    }
+
     It 'adds the Verification Evidence block to the plan markdown template between Verification and Decisions' {
         $templateBetweenHeadings = & $script:GetContentBetween -Content $script:PlanAuthoringContent -StartText '**Verification**' -EndText '**Decisions**'
 

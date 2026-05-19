@@ -24,7 +24,7 @@ $script:ArtifactDirectorySegmentPattern = '\.?[A-Za-z0-9_-]+'
 $script:SlashFileArtifactPattern = '(?:' + $script:ArtifactDirectorySegmentPattern + '/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,12}\b'
 $script:SlashDirectoryArtifactPattern = '(?:' + $script:ArtifactDirectorySegmentPattern + '/)+[A-Za-z0-9_.-]*/'
 $script:RootFileArtifactPattern = '[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.[A-Za-z][A-Za-z0-9]{1,11}\b'
-$script:RootDotfileArtifactPattern = '\.[A-Za-z0-9][A-Za-z0-9_-]*\b'
+$script:RootDotfileArtifactPattern = '(?-i:\.[a-z][A-Za-z0-9_-]*\b)'
 $script:RootDotlessFileArtifactPattern = '(?:LICENSE|NOTICE|COPYING|AUTHORS|Makefile|Dockerfile|Gemfile|Rakefile)\b'
 $artifactReferenceAlternatives = @(
     $script:SlashFileArtifactPattern
@@ -99,6 +99,7 @@ function Get-PlanVerificationEvidenceBlock {
 }
 
 function Get-LoadBearingAcIds {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Script-local helper returns a set of AC IDs.')]
     [OutputType([object[]])]
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Content)
@@ -240,6 +241,7 @@ function Test-PlanEvidenceShape {
 }
 
 function Write-PlanEvidenceRowWarnings {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '', Justification = 'Script-local helper can emit multiple warnings for one row.')]
     [CmdletBinding()]
     param([Parameter(Mandatory)][pscustomobject]$Row)
 

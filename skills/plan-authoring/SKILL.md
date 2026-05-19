@@ -88,9 +88,11 @@ Include the fixed adversarial review pipeline: three prosecution passes, merged 
 
 After drafting the plan and before stress-test preparation, verify every load-bearing acceptance criterion against the current repository tree. Populate the plan's `**Verification Evidence**` block before adversarial review so prosecutors evaluate the plan and its evidence together.
 
-**Why three-layer enforcement**: this discipline uses methodology, a persisted plan-template block, and a later warn-only Pester check because the rejected alternatives each miss part of the failure class: methodology-only leaves no durable audit trail, free-form or external evidence is hard to parse and easy to lose, and hard-blocking rollout or pre-PR hook style alternatives would break in-flight plans before the evidence pattern stabilizes.
+**Why layered discipline**: this discipline uses methodology, a persisted plan-template block, and a standalone warn-only verifier because the rejected alternatives each miss part of the failure class: methodology-only leaves no durable audit trail, free-form or external evidence is hard to parse and easy to lose, and hard-blocking rollout or pre-PR hook style alternatives would break in-flight plans before the evidence pattern stabilizes. The verifier is not wired into quick-validate, CI, or normal `/plan` execution.
 
 A **load-bearing AC** is an AC or assertion that references a verifiable artifact. Apply categories in this precedence order: text-presence > structure-presence > downstream-consumer > numeric-or-structural > named-standard. Once an AC fits an earlier category, use that category for the row even if later categories also apply.
+
+Here, **load-bearing** is AC-specific: an AC or assertion is load-bearing only when it cites a verifiable artifact or named standard for a `**Verification Evidence**` row. This is distinct from the broader architectural use in `Documents/Design/frame-architecture.md`, where load-bearing describes frame or methodology essentiality.
 
 ### Text-presence
 
@@ -119,7 +121,6 @@ Boundary example 1: `No retroactive fix to historical plans` is non-load-bearing
 Disposition enum: `verified | revised | exempted | planned`. Use `verified` when the current tree matches the claim. Use `revised` when verification changed the plan; include the correction rationale. Use `exempted` when the AC looked load-bearing but is intentionally outside this discipline; include the scope rationale. Use `planned` only for rows citing artifacts authored later in the same PR; include an `s{N}` slice anchor and the category the future artifact will satisfy.
 
 Specialized rule: when a Verification Evidence row reaches the same conclusion as a design-time annotation, the row must either show new investigation, such as a different grep or anchor, or explicitly state `no drift from design-time annotation at HEAD {sha}`.
-
 
 ## Stress-Test Preparation
 

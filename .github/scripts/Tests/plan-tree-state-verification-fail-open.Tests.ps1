@@ -462,6 +462,29 @@ $AcLine
         & $script:AssertWarningContains -Result $result -ExpectedWarning 'AC1 marked load-bearing has no evidence row'
     }
 
+    It 'Dotted technology prose token omitted from non-empty evidence block does not warn as load-bearing and exits 0' {
+        $plan = @'
+## Plan
+
+## Acceptance Criteria
+
+- **AC1**: Support .NET SDK users without extra setup.
+- **AC2** (text-presence): load-bearing literal text exists.
+
+<!-- verification-evidence -->
+**Verification Evidence**
+
+- **AC2** (text-presence): `rg "foo" target.md` -> found. **verified** - evidence: `target.md:12`.
+'@
+
+        $result = & $script:InvokeOrchestrator -PlanContent $plan
+        $combined = "$($result.Stdout)`n$($result.Stderr)"
+
+        & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: dotted technology prose should not require evidence'
+        & $script:AssertNoWarnings -Result $result
+        $combined | Should -Not -Match ([regex]::Escape('AC1 marked load-bearing has no evidence row')) -Because "dotted technology prose such as .NET should not be classified as a root dotfile artifact. Output: $combined"
+    }
+
     It 'Untagged named-standard AC omitted from non-empty evidence block warns for <Name> and exits 0' -ForEach @(
         @{ Name = 'issue standard #527'; AcLine = '- **AC1**: comply with #527.' }
         @{ Name = 'session-memory standard SMC-01'; AcLine = '- **AC1**: comply with SMC-01.' }
