@@ -1,6 +1,6 @@
 ---
 name: upstream-onboarding
-description: "Shared opening-phase protocol for upstream agents (Experience-Owner, Solution-Designer, Issue-Planner) and Code-Conductor when invoked on an existing GitHub issue. Renders a scaled context brief and runs a standards check on inherited work at each phase boundary. Use when a user-invocable agent receives a request referencing an existing GitHub issue and must load the first opening-phase skill. DO NOT USE FOR: subagent dispatches (which already operate within an assessed session context); post-merge review (use post-pr-review); research or non-tree subagents."
+description: "Shared opening-phase protocol for upstream agents (Experience-Owner, Solution-Designer, Issue-Planner) and Code-Conductor when invoked on an existing GitHub issue. Renders a scaled context brief and runs a standards check on inherited work at each phase boundary. Use when a user-invocable agent receives a request referencing an existing GitHub issue and must load solution-authoring and upstream-onboarding at the opening phase. DO NOT USE FOR: subagent dispatches (which already operate within an assessed session context); post-merge review (use post-pr-review); research or non-tree subagents."
 ---
 
 <!-- markdownlint-disable-file MD041 MD003 -->
@@ -11,7 +11,8 @@ Shared opening-phase protocol for the three upstream agents in the Agent Orchest
 
 ## When to Use
 
-Load this skill as the first opening-phase action when a user-invocable upstream agent (Experience-Owner, Solution-Designer, Issue-Planner) or Code-Conductor receives a request referencing an existing GitHub issue, or when the developer is describing a brand-new idea (Greenfield Mode below). Structured-question contracts are platform-mode-independent — see your platform guide for any auto-mode boundary.
+<!-- d-load-order-resolution-anchor -->
+Load this skill as an opening-phase action when a user-invocable upstream agent (Experience-Owner, Solution-Designer, Issue-Planner) or Code-Conductor receives a request referencing an existing GitHub issue, or when the developer is describing a brand-new idea (Greenfield Mode below). Structured-question contracts are platform-mode-independent — see your platform guide for any auto-mode boundary.
 
 ## When to Skip
 
@@ -42,7 +43,7 @@ The standards check fires only when the active agent is picking up work complete
 
 ### Sequencing
 
-- Runs **first** when a user-invocable agent picks up an issue-referencing request (after the session-startup hook + drift check, which are platform-level concerns).
+- Runs at the opening phase when a user-invocable agent picks up an issue-referencing request (after the session-startup hook + drift check, which are platform-level concerns).
 - Runs **before** the agent loads its role-specific skills (design-exploration, plan-authoring, etc.) or takes any phase action.
 
 ### Subagent Self-Skip
