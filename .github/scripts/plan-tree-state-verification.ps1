@@ -17,6 +17,20 @@ param(
 )
 
 $script:CategoryPattern = 'text-presence|structure-presence|downstream-consumer|numeric-or-structural|named-standard'
+$script:CaseInsensitiveRegexOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
+$script:LoadBearingCategoryRegex = [regex]::new($script:CategoryPattern, $script:CaseInsensitiveRegexOptions)
+$script:ArtifactReferenceBoundaryPattern = '(^|[\s`''"(])'
+$script:ArtifactDirectorySegmentPattern = '\.?[A-Za-z0-9_-]+'
+$script:SlashFileArtifactPattern = '(?:' + $script:ArtifactDirectorySegmentPattern + '/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,12}\b'
+$script:SlashDirectoryArtifactPattern = '(?:' + $script:ArtifactDirectorySegmentPattern + '/)+[A-Za-z0-9_.-]*/'
+$script:RootFileArtifactPattern = '[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.[A-Za-z][A-Za-z0-9]{1,11}\b'
+$artifactReferenceAlternatives = @(
+    $script:SlashFileArtifactPattern
+    $script:SlashDirectoryArtifactPattern
+    $script:RootFileArtifactPattern
+) -join '|'
+$script:ArtifactReferenceRegex = [regex]::new('(?i)' + $script:ArtifactReferenceBoundaryPattern + '(?:' + $artifactReferenceAlternatives + ')')
+$script:FutureCategoryPattern = '(?i)\bcategory\s*:\s*(' + $script:CategoryPattern + ')\b'
 
 function Get-PlanTreeStateInput {
     [CmdletBinding()]
@@ -62,7 +76,7 @@ function Get-PlanVerificationEvidenceBlock {
     $afterAnchor = $Content.Substring($anchorIndex)
     $headingMatch = [regex]::Match($afterAnchor, '(?m)^\s*\*\*Verification Evidence\*\*\s*$')
     if (-not $headingMatch.Success) {
-        Write-Warning 'Verification Evidence block missing'
+        Write-Warning 'Verification Evidence block anchor present but heading missing'
         return $null
     }
 
@@ -82,16 +96,24 @@ function Get-LoadBearingAcIds {
     param([Parameter(Mandatory)][string]$Content)
 
     $ids = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
-    $categoryToken = [regex]::new($script:CategoryPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-    $acMatches = [regex]::Matches($Content, '\*\*AC(?<id>\d+[A-Za-z0-9-]*)\*\*\s*\((?<tags>[^)]*)\)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $acMatches = [regex]::Matches($Content, '(?m)^\s*-\s+\*\*AC(?<id>\d+[A-Za-z0-9-]*)\*\*(?<text>[^\r\n]*)', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
 
     foreach ($acMatch in $acMatches) {
-        if ($categoryToken.IsMatch($acMatch.Groups['tags'].Value)) {
+        $lineText = $acMatch.Groups['text'].Value
+        if (Test-PlanAcTextLoadBearing -Text $lineText) {
             $null = $ids.Add($acMatch.Groups['id'].Value)
         }
     }
 
     return , $ids
+}
+
+function Test-PlanAcTextLoadBearing {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Text)
+
+    return ($script:LoadBearingCategoryRegex.IsMatch($Text) -or
+        $script:ArtifactReferenceRegex.IsMatch($Text))
 }
 
 function ConvertFrom-PlanEvidenceRow {
@@ -194,6 +216,17 @@ function Write-PlanEvidenceRowWarnings {
     if ($Row.Disposition -eq 'planned' -and $Row.RowText -notmatch '(?i)\bs\d+\b') {
         Write-Warning "AC$($Row.AcId) planned disposition lacks slice anchor"
     }
+
+    if ($Row.Disposition -eq 'planned' -and $Row.RowText -notmatch $script:FutureCategoryPattern) {
+        Write-Warning "AC$($Row.AcId) planned disposition lacks future category"
+    }
+}
+
+function Get-PlanEvidenceRowKey {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][pscustomobject]$Row)
+
+    return "$($Row.AcId)|$($Row.Category)"
 }
 
 function Invoke-PlanTreeStateVerification {
@@ -206,9 +239,10 @@ function Invoke-PlanTreeStateVerification {
         return
     }
 
-    # Heuristic v1: only ACs explicitly category-tagged in plan text, or named
-    # in the evidence block itself, are treated as load-bearing. Unlisted ACs are
-    # not classified until the methodology grows a stronger parser.
+    # Heuristic v1: ACs explicitly category-tagged in plan text, ACs containing
+    # concrete artifact/path references, and ACs named in the evidence block
+    # itself are treated as load-bearing until the methodology grows a stronger
+    # parser.
     $loadBearingAcIds = Get-LoadBearingAcIds -Content $normalizedContent
     $topLevelRows = @($block -split "`n" | Where-Object { $_ -match '^-\s+' })
 
@@ -218,23 +252,26 @@ function Invoke-PlanTreeStateVerification {
     }
 
     $seenEvidenceRows = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $seenEvidenceRowKeys = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     $rowNumber = 0
 
     foreach ($rowText in $topLevelRows) {
         $rowNumber++
 
-        $acNameMatch = [regex]::Match($rowText, '^\s*-\s+\*\*AC(?<id>\d+[A-Za-z0-9-]*)\*\*', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-        if ($acNameMatch.Success) {
-            $acId = $acNameMatch.Groups['id'].Value
-            $null = $loadBearingAcIds.Add($acId)
-            if (-not $seenEvidenceRows.Add($acId)) {
-                Write-Warning "duplicate evidence row for AC$acId"
-            }
+        if ($rowText -notmatch '^\s*-\s+\*\*AC\d+[A-Za-z0-9-]*\*\*') {
+            continue
         }
 
         $row = ConvertFrom-PlanEvidenceRow -RowText $rowText -RowNumber $rowNumber
         if ($null -eq $row) {
             continue
+        }
+
+        $null = $loadBearingAcIds.Add($row.AcId)
+        $null = $seenEvidenceRows.Add($row.AcId)
+        $rowKey = Get-PlanEvidenceRowKey -Row $row
+        if (-not $seenEvidenceRowKeys.Add($rowKey)) {
+            Write-Warning "duplicate evidence row for AC$($row.AcId)"
         }
 
         Write-PlanEvidenceRowWarnings -Row $row

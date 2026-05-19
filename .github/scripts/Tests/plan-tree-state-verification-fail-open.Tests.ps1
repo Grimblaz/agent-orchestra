@@ -175,6 +175,27 @@ This plan intentionally has no verification evidence anchor.
         & $script:AssertWarningContains -Result $result -ExpectedWarning 'Verification Evidence block missing'
     }
 
+    It 'Anchor present but Verification Evidence heading missing warns distinctly and exits 0' {
+        $plan = @'
+## Plan
+
+## Acceptance Criteria
+
+- **AC1** (text-presence): load-bearing literal text exists.
+
+<!-- verification-evidence -->
+
+- **AC1** (text-presence): `rg "foo" target.md` -> found. **verified** - evidence: `target.md:12`.
+'@
+
+        $result = & $script:InvokeOrchestrator -PlanContent $plan
+
+        $combined = "$($result.Stdout)`n$($result.Stderr)"
+        & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: missing Verification Evidence heading must exit 0'
+        & $script:AssertWarningContains -Result $result -ExpectedWarning 'Verification Evidence block anchor present but heading missing'
+        $combined | Should -Not -Match ([regex]::Escape('Verification Evidence block missing')) -Because "the heading-specific failure should not collapse into the generic missing-block warning. Output: $combined"
+    }
+
     It 'Block present but missing row for a load-bearing-flagged AC warns for the missing AC row and exits 0' {
         $plan = @'
 ## Plan
@@ -195,6 +216,36 @@ This plan intentionally has no verification evidence anchor.
         & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: missing load-bearing row must exit 0'
         & $script:AssertWarningContains -Result $result -ExpectedWarning 'AC2 marked load-bearing has no evidence row'
     }
+
+    It 'Final-plan-shaped valid evidence with multiple category rows per AC and non-AC audit groups emits no warnings and exits 0' {
+        $plan = @'
+## Plan
+
+## Acceptance Criteria
+
+- **AC1** (text-presence + structure-presence): `skills/plan-authoring/SKILL.md` contains the discipline section and category subsections.
+- **AC3** (text-presence + structure-presence): `skills/plan-authoring/SKILL.md` contains the plan-template Verification Evidence block.
+
+<!-- verification-evidence -->
+**Verification Evidence**
+
+- **AC1** (text-presence): `grep -n '^## Stress-Test Preparation' skills/plan-authoring/SKILL.md` -> line 87. **verified** - evidence: `skills/plan-authoring/SKILL.md:87`.
+- **AC1** (structure-presence): five H3 subsection names are authored later in the implementation. **planned (s2)** - category: structure-presence.
+- **AC3** (text-presence): `grep -n '^\*\*Verification\*\*$' skills/plan-authoring/SKILL.md` -> line 198. **verified** - evidence: `skills/plan-authoring/SKILL.md:198`.
+- **AC3** (structure-presence): `<!-- verification-evidence -->` anchor and heading are authored later in the implementation. **planned (s2)** - category: structure-presence.
+- **Adapter-path verification** (per judge finding F4) - text-presence for each slice's adapter field:
+    - s1 adapter `agents/Test-Writer.agent.md`: `Glob agents/Test-Writer.agent.md` -> exists. **verified** - evidence: live tree at HEAD.
+    - s5 adapter `skills/implementation-discipline/adapters/implement-code-adapter.md`: `Glob` -> exists. **verified** - evidence: live tree at HEAD.
+- **Executor verification** (per judge finding F4) - downstream-consumer for each slice's executor field:
+    - s1 executor `agents/Test-Writer.agent.md`: same path as adapter - verified above.
+    - s5 executor `agents/Code-Smith.agent.md`: `Glob agents/Code-Smith.agent.md` -> exists. **verified** - evidence: live tree at HEAD.
+'@
+
+            $result = & $script:InvokeOrchestrator -PlanContent $plan
+
+            & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: final-plan-shaped valid evidence must exit 0'
+            & $script:AssertNoWarnings -Result $result
+            }
 
     It 'Row marked revised without rationale warns for the revised disposition and exits 0' {
         $plan = @'
@@ -256,6 +307,26 @@ This plan intentionally has no verification evidence anchor.
         & $script:AssertWarningContains -Result $result -ExpectedWarning 'AC1 planned disposition lacks slice anchor'
     }
 
+    It 'Planned row without future category detail warns for missing future category and exits 0' {
+        $plan = @'
+## Plan
+
+## Acceptance Criteria
+
+- **AC1** (text-presence): load-bearing literal text will be authored.
+
+<!-- verification-evidence -->
+**Verification Evidence**
+
+- **AC1** (text-presence): new artifact will be authored in the implementation slice. **planned (s5)** - evidence will be produced later.
+'@
+
+        $result = & $script:InvokeOrchestrator -PlanContent $plan
+
+        & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: planned row without future category detail must exit 0'
+        & $script:AssertWarningContains -Result $result -ExpectedWarning 'AC1 planned disposition lacks future category'
+    }
+
     It 'Planned row with a valid sN slice anchor emits no warnings and exits 0' {
         $plan = @'
 ## Plan
@@ -274,5 +345,51 @@ This plan intentionally has no verification evidence anchor.
 
         & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: planned row with a valid slice anchor must exit 0'
         & $script:AssertNoWarnings -Result $result
+    }
+
+    It 'Untagged artifact-referencing AC omitted from non-empty evidence block warns as load-bearing and exits 0' {
+        $plan = @'
+## Plan
+
+## Acceptance Criteria
+
+- **AC1**: add `skills/plan-authoring/SKILL.md` section.
+- **AC2** (text-presence): load-bearing literal text exists.
+
+<!-- verification-evidence -->
+**Verification Evidence**
+
+- **AC2** (text-presence): `rg "foo" target.md` -> found. **verified** - evidence: `target.md:12`.
+'@
+
+        $result = & $script:InvokeOrchestrator -PlanContent $plan
+
+        & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: omitted untagged artifact-referencing AC must exit 0'
+        & $script:AssertWarningContains -Result $result -ExpectedWarning 'AC1 marked load-bearing has no evidence row'
+    }
+
+    It 'Untagged artifact-referencing AC omitted from non-empty evidence block warns for <Name> and exits 0' -ForEach @(
+        @{ Name = 'root-level file path README.md'; AcLine = '- **AC1**: update README.md.' }
+        @{ Name = 'root-level manifest plugin.json'; AcLine = '- **AC1**: update plugin.json.' }
+        @{ Name = 'directory path skills/plan-authoring/'; AcLine = '- **AC1**: update skills/plan-authoring/ directory.' }
+    ) {
+        $plan = @"
+## Plan
+
+## Acceptance Criteria
+
+$AcLine
+- **AC2** (text-presence): load-bearing literal text exists.
+
+<!-- verification-evidence -->
+**Verification Evidence**
+
+- **AC2** (text-presence): ``rg "foo" target.md`` -> found. **verified** - evidence: ``target.md:12``.
+"@
+
+        $result = & $script:InvokeOrchestrator -PlanContent $plan
+
+        & $script:AssertWarnOnlyExit -Result $result -Because 'warn-only invariant: omitted untagged artifact-referencing AC must exit 0'
+        & $script:AssertWarningContains -Result $result -ExpectedWarning 'AC1 marked load-bearing has no evidence row'
     }
 }
