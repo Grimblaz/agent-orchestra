@@ -123,7 +123,9 @@ Quick checklist before declaring mode for a step:
 
 ## Process
 
-When this user-invocable agent receives a request referencing an existing GitHub issue, load `skills/upstream-onboarding/SKILL.md` and follow its protocol.
+Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires a structured question. Then load `skills/upstream-onboarding/SKILL.md` and follow its protocol. (Note: cross-session resume preserves no engagement state in this release; structured questions on settled decisions may re-fire when resuming in a new session — tracked in #575.)
+
+Content-authoring touchpoints where the solution-authoring classification gate applies in this agent: scope-classification and D9-checkpoint.
 
 For terminal and validation execution guardrails, load `skills/terminal-hygiene/SKILL.md` — especially the **Multiline Continuation-Prompt Hazard** and **Non-Fatal Diagnostic Wrapper Pattern** sections when dispatching subagent diagnostics.
 

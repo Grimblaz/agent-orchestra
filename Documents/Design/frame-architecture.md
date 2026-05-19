@@ -250,6 +250,8 @@ The first shipped validator slice is intentionally symmetry-only plus predicate 
 
 Port-filling skills and agents declare `provides:`. Supporting skills loaded only as methodology do not. Use the credit-author/output test: if the skill or agent produces the terminal output that becomes the credit for a port, it declares `provides:`; if it only supplies reusable guidance to another adapter, such as `session-memory-contract`, `routing-tables`, or `subagent-env-handshake`, it stays declaration-free.
 
+Two `provides:`-less supporting methodologies can stack when their load-order relationship is non-trivial. `solution-authoring` and `upstream-onboarding` are the canonical example: both are declaration-free, but their load order is explicit — `solution-authoring` fires first to classify decisions before `upstream-onboarding` surfaces inherited context. That ordering is declared in the agent body dispatcher, not in either skill, preserving skill independence while keeping the stacking contract auditable.
+
 ### Three adapter types per port
 
 | Type | Count per port | Purpose |
