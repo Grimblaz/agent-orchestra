@@ -26,7 +26,7 @@ The classification gate does NOT intercept structured questions that approve or 
 A decision is load-bearing iff ALL THREE legs pass:
 
 1. **Reversibility** — if wrong, requires rework to a published artifact.
-2. **Non-inheritance with artifact-citation falsifier** — the agent MUST attempt to cite a specific inherited artifact (umbrella comment, prior phase marker, named-decision row, settled methodology rule) that would have answered the decision. The citation is recorded verbatim in `audit_rationale`. If a plausible citation exists, the leg **fails** and the decision is routine. Only documented inability to cite — after a genuine attempt — establishes non-inheritable status. A plausible citation is one a reasonable reader would accept as topical for the decision at hand — it need not be exact; the four enumerated artifact types are exhaustive for v0. **Re-audit trigger**: if an engineer challenges a load-bearing classification with a citation claim after initial classification, the agent MUST re-attempt Leg 2 against that claim; if a plausible citation is found, emit a `**Recommendation shift**` with `trigger: engineer-pushback` (see Template: Free-text option treatment for the output shape).
+2. **Non-inheritance with artifact-citation falsifier** — the agent MUST attempt to cite a specific inherited artifact (umbrella comment, prior phase marker, named-decision row, settled methodology rule) that would have answered the decision. The citation is recorded verbatim in `audit_rationale`. If a plausible citation exists, the leg **fails** and the decision is routine. Only documented inability to cite — after a genuine attempt — establishes non-inheritable status. A plausible citation is one a reasonable reader would accept as topical for the decision at hand — it need not be exact; the four enumerated artifact types are exhaustive for v0. **Re-audit trigger**: if an engineer challenges a load-bearing classification with a citation claim after initial classification, the agent MUST re-attempt Leg 2 against that claim; if a plausible citation is found, emit a `**Recommendation shift**` with `trigger: classification-re-audit` (see Template: Free-text option treatment for the output shape).
 3. **Audit-plausibility** — the agent can write a substantive `audit_rationale` sentence.
 
 Failing any one leg collapses to routine. For load-bearing decisions, render the `audit_rationale` as **one sentence immediately above the decision brief** so the engineer can challenge the classification in-band.
@@ -54,11 +54,12 @@ Forward-compatible capture format:
 ```yaml
 articulation_captures:
   schema_version: 1
-  - decision_id: <id>
-    articulation_text: |
-      <verbatim engineer text>
-    capture_phase: experience | design | plan
-    capture_session: manual-ce-gate-v0
+  entries:
+    - decision_id: <id>
+      articulation_text: |
+        <verbatim engineer text>
+      capture_phase: experience | design | plan
+      capture_session: manual-ce-gate-v0
 ```
 
 **Glossary and forward-compat note**: The YAML field `teaching_paragraph_excerpt` is preserved from the locked #571 engagement-record marker payload (`<!-- engagement-record-design-571 -->`). This skill uses "decision brief" in prose; #575 owns harmonizing the YAML field name. Until #575 ships, `teaching_paragraph_excerpt` and "decision brief" refer to the same concept and both remain valid.
@@ -113,12 +114,13 @@ At phase exit, emit a YAML aggregate of all in-phase shifts:
 ```yaml
 recommendation_shifts:
   schema_version: 1
-  - decision_id: <id>
-    previous: <old_recommendation>
-    revised: <new_recommendation>
-    trigger: engineer-pushback | new-evidence | classification-re-audit
-    reason: <one-sentence>
-    capture_phase: experience | design | plan
+  entries:
+    - decision_id: <id>
+      previous: <old_recommendation>
+      revised: <new_recommendation>
+      trigger: engineer-pushback | new-evidence | classification-re-audit
+      reason: <one-sentence>
+      capture_phase: experience | design | plan
 ```
 
 ### Template: Articulation prompt
