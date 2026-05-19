@@ -64,7 +64,7 @@ Customer experience bookend — upstream framing before technical design begins,
 
 ## Process
 
-Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires a structured question. Then load `skills/upstream-onboarding/SKILL.md` and follow its protocol. (Note: cross-session resume preserves no engagement state in this release; structured questions on settled decisions may re-fire when resuming in a new session — tracked in #575.)
+Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires a structured question. Then load `skills/upstream-onboarding/SKILL.md` and follow its protocol. (Note: cross-session resume preserves no engagement state in this release; structured questions on settled decisions may re-fire when resuming in a new session — tracked in #575. The classification gate applies only once a target artifact is established — on greenfield invocations, defer until an issue is created.)
 
 ## GitHub Setup
 
