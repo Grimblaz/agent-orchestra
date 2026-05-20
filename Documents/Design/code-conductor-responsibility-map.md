@@ -4,6 +4,8 @@ This map records Code-Conductor responsibilities as structured evidence for deci
 
 Retirement clause: this artifact is archived to `Documents/Decisions/` and its Pester gates removed when >=90% of `planner-should-absorb` rows have shipped their absorption work AND the `/orchestrate` -> `/spine-run` switch has landed.
 
+Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/issues/588)
+
 ## Responsibilities
 
 ```yaml
@@ -108,14 +110,14 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
 - source: "Overview"
   responsibility: "Declare serial or parallel execution mode per implementation step with identical requirement contracts and convergence gates."
   disposition: planner-should-absorb
-  action: "TODO(#): move execution-mode declaration defaults into skills/plan-authoring/SKILL.md execution-step responsibilities while runtime still honors slice metadata."
+  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/589; move execution-mode declaration defaults into skills/plan-authoring/SKILL.md execution-step responsibilities while runtime still honors slice metadata."
   verification_status: unverified
   verified-against-sha: ""
   verified-via-pr-sha: ""
 - source: "Overview"
   responsibility: "Choose parallel for stable isolated work and serial for exploratory or high-risk work."
   disposition: planner-should-absorb
-  action: "TODO(#): encode mode-selection heuristics in skills/plan-authoring/SKILL.md and generated frame-slice metadata."
+  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/589; encode mode-selection heuristics in skills/plan-authoring/SKILL.md and generated frame-slice metadata."
   verification_status: unverified
   verified-against-sha: ""
   verified-via-pr-sha: ""
@@ -130,7 +132,7 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
 - source: "Plan Creation Strategy"
   responsibility: "Route well-defined and exploratory scopes through Issue-Planner for plan creation."
   disposition: planner-should-absorb
-  action: "TODO(#): keep plan-creation strategy owned by Issue-Planner and skills/plan-authoring/SKILL.md; conductor should only request or consume plans."
+  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/590; keep plan-creation strategy owned by Issue-Planner and skills/plan-authoring/SKILL.md so the conductor only requests or consumes plans."
   verification_status: unverified
   verified-against-sha: ""
   verified-via-pr-sha: ""
@@ -194,7 +196,7 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
 - source: "Core Workflow / Step protocols Step 0-5 / Issue Transition Step 0"
   responsibility: "Call Issue-Planner when scope or acceptance criteria changed or are ambiguous before execution."
   disposition: planner-should-absorb
-  action: "TODO(#): make plan-amendment criteria explicit in skills/plan-authoring/SKILL.md and Issue-Planner handoff wording."
+  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/590; make plan-amendment criteria explicit in skills/plan-authoring/SKILL.md and Issue-Planner handoff wording."
   verification_status: unverified
   verified-against-sha: ""
   verified-via-pr-sha: ""
@@ -427,7 +429,7 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
 - source: "Hub Execution Workflow / Determine Resume Point & Validate Plan"
   responsibility: "Ensure migration-type plans start with an exhaustive repo scan."
   disposition: planner-should-absorb
-  action: "TODO(#): move migration scan-step requirements into skills/plan-authoring/SKILL.md plan-style enforcement."
+  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/591; move migration scan-step requirements into skills/plan-authoring/SKILL.md plan-style enforcement."
   verification_status: unverified
   verified-against-sha: ""
   verified-via-pr-sha: ""
