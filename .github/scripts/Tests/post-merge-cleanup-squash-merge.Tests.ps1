@@ -163,6 +163,53 @@ exit 64
             return $shimPath
         }
 
+        $script:NewPassingGhShim = {
+            param(
+                [Parameter(Mandatory)]
+                [string]$ParentPath,
+
+                [string]$State = 'CLOSED',
+                [string]$StateReason = 'COMPLETED',
+                [int]$PRNumber = 1,
+                [string]$MergedAt = '2026-01-01T00:00:00Z',
+                [string]$HeadRefOidBranch = '',
+                [string]$HeadRefOid = '',
+                [switch]$EmptyPRList
+            )
+
+            $shimPath = Join-Path $ParentPath "path-shim-$([Guid]::NewGuid().ToString('N'))"
+            New-Item -ItemType Directory -Path $shimPath -Force | Out-Null
+
+            # Resolve headRefOid at shim creation time
+            $resolvedOid = $HeadRefOid
+            if (-not $resolvedOid -and $HeadRefOidBranch) {
+                $resolvedOid = (git rev-parse $HeadRefOidBranch 2>$null).Trim()
+            }
+
+            $issueJsonContent = "{""state"":""$State"",""stateReason"":""$StateReason""}"
+            $prJsonContent     = if ($EmptyPRList) { '[]' } else { "[{""number"":$PRNumber,""mergedAt"":""$MergedAt"",""headRefOid"":""$resolvedOid""}]" }
+
+            $ghMock = @"
+param()
+`$callLogPath = Join-Path `$PSScriptRoot 'gh-calls.log'
+(`$args -join "`t") | Add-Content -Path `$callLogPath -Encoding utf8
+if (`$args -contains 'issue' -and `$args -contains 'view') {
+    Write-Output '$issueJsonContent'
+    exit 0
+}
+if (`$args -contains 'pr' -and `$args -contains 'list') {
+    Write-Output '$prJsonContent'
+    exit 0
+}
+Write-Error "Unexpected gh invocation: `$(`$args -join ' ')"
+exit 1
+"@
+            Set-Content -Path (Join-Path $shimPath 'gh.ps1') -Value $ghMock -Encoding utf8NoBOM
+            $cmdContent = "@echo off`r`npwsh -NoProfile -NonInteractive -File `"%~dp0gh.ps1`" %*`r`nexit %ERRORLEVEL%"
+            Set-Content -Path (Join-Path $shimPath 'gh.cmd') -Value $cmdContent -Encoding ascii
+            return $shimPath
+        }
+
         $script:InvokeCleanup = {
             param(
                 [Parameter(Mandatory)]
@@ -197,6 +244,45 @@ exit 64
                 }
 
                 $ghCallLogPath = Join-Path $shimPath 'gh-calls.log'
+                $ghCalls = if (Test-Path -LiteralPath $ghCallLogPath) {
+                    @(Get-Content -Path $ghCallLogPath -ErrorAction SilentlyContinue)
+                }
+                else { @() }
+
+                return [pscustomobject]@{
+                    ExitCode = $exitCode
+                    Output   = ($scriptOutput | Out-String).Trim()
+                    GhCalls  = $ghCalls
+                }
+            }
+            finally {
+                $env:PATH = $script:SavedPath
+            }
+        }
+
+        $script:InvokeCleanupWithGh = {
+            param(
+                [Parameter(Mandatory)]
+                [string]$RepoPath,
+                [Parameter(Mandatory)]
+                [string]$BranchName,
+                [Parameter(Mandatory)]
+                [string]$GhShimPath
+            )
+
+            $pathSeparator = [System.IO.Path]::PathSeparator
+            $env:PATH = "$GhShimPath$pathSeparator$script:SavedPath"
+            try {
+                Push-Location -LiteralPath $RepoPath
+                try {
+                    $scriptOutput = pwsh -NoProfile -NonInteractive -File $script:ScriptFile -OrphanBranches $BranchName 2>&1
+                    $exitCode = $LASTEXITCODE
+                }
+                finally {
+                    Pop-Location
+                }
+
+                $ghCallLogPath = Join-Path $GhShimPath 'gh-calls.log'
                 $ghCalls = if (Test-Path -LiteralPath $ghCallLogPath) {
                     @(Get-Content -Path $ghCallLogPath -ErrorAction SilentlyContinue)
                 }
@@ -338,7 +424,7 @@ exit 64
         $result.ExitCode | Should -Be 0
         (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeTrue -Because 'genuinely unmerged work must not be deleted'
         $result.Output | Should -Match ([regex]::Escape("Skipped '$branch'"))
-        $result.Output | Should -Match 'unmerged commits'
+        $result.Output | Should -Match 'auto-resolve declined'
         $result.GhCalls | Should -HaveCount 0 -Because 'unmerged detection should not require GitHub'
     }
 
@@ -359,7 +445,7 @@ exit 64
         $result.ExitCode | Should -Be 0 -Because 'expected non-zero native exits should not abort cleanup when the preference is true'
         (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeTrue -Because 'genuinely unmerged work must still be preserved'
         $result.Output | Should -Match ([regex]::Escape("Skipped '$branch'"))
-        $result.Output | Should -Match 'unmerged commits'
+        $result.Output | Should -Match 'auto-resolve declined'
     }
 
     It 'deletes a rebase-merged orphan branch whose patches are already on main' {
@@ -420,5 +506,193 @@ exit 64
         (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'branches with no commits beyond main are safe orphans'
         $result.Output | Should -Match ([regex]::Escape("Deleted 1 orphan branch(es): $branch"))
         $result.GhCalls | Should -HaveCount 0 -Because 'empty branch detection should not require GitHub'
+    }
+
+    Context 'auto-resolve eligible orphan branches (Issue #548)' {
+        It 'S1: no-regression — squash-fingerprint orphan deletes via existing path without calling gh' {
+            # This re-asserts that the squash-fingerprint (tree-equivalent) path still works.
+            # Test-BranchMergedIntoDefault short-circuits before new helper runs.
+            $repoPath = & $script:NewSyntheticRepo -Name 's1-squash-fingerprint'
+            $branch   = 'feature/issue-548-s1-squash'
+
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', '-b', $branch) | Out-Null
+            & $script:SetRepoFile -RepoPath $repoPath -RelativePath 's1.txt' -Content "A`n"
+            & $script:CommitAll -RepoPath $repoPath -Message 'feature A'
+            & $script:SetRepoFile -RepoPath $repoPath -RelativePath 's1.txt' -Content "A`nB`n"
+            & $script:CommitAll -RepoPath $repoPath -Message 'feature B'
+
+            # Squash onto main
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('merge', '--squash', $branch) | Out-Null
+            & $script:CommitAll -RepoPath $repoPath -Message 'squash AB'
+            & $script:PushMain -RepoPath $repoPath
+
+            # Verify squash precondition
+            (& $script:TestTreeEquivalentToMain -RepoPath $repoPath -BranchName $branch) | Should -BeTrue
+
+            $result = & $script:InvokeCleanup -RepoPath $repoPath -BranchName $branch
+            $result.ExitCode   | Should -Be 0
+            $result.GhCalls    | Should -HaveCount 0 -Because 'squash-fingerprint deletion must stay offline'
+            (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse
+        }
+
+        It 'S2: spike-only orphan auto-resolves via new helper when gh signals CLOSED+matched' {
+            $repoPath = & $script:NewSyntheticRepo -Name 's2-spike-only'
+            $branch   = 'feature/issue-548-s2-spike'
+
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', '-b', $branch) | Out-Null
+            $spikeDir = Join-Path $repoPath '.tmp/issue-548'
+            New-Item -ItemType Directory -Path $spikeDir -Force | Out-Null
+            Set-Content -Path (Join-Path $spikeDir 'spike.md') -Value 'spike notes'
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('add', '-A') | Out-Null
+            & $script:CommitAll -RepoPath $repoPath -Message 'add spike notes'
+
+            # Push main WITHOUT the spike commit → branch has cherry+ lines
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
+            & $script:PushMain -RepoPath $repoPath
+
+            # Non-zero tree diff precondition (spike file not on main)
+            (& $script:TestTreeEquivalentToMain -RepoPath $repoPath -BranchName $branch) | Should -BeFalse
+
+            # Capture branch tip for headRefOid
+            $branchTip = (& git -C $repoPath rev-parse $branch 2>$null).Trim()
+            $shimPath  = & $script:NewPassingGhShim -ParentPath $repoPath -State 'CLOSED' -HeadRefOid $branchTip
+
+            $result = & $script:InvokeCleanupWithGh -RepoPath $repoPath -BranchName $branch -GhShimPath $shimPath
+            $result.ExitCode | Should -Be 0
+            (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'spike-only orphan should be auto-resolved'
+        }
+
+        It 'S3: stray-but-reachable orphan auto-resolves via ancestor sub-case' {
+            $repoPath = & $script:NewSyntheticRepo -Name 's3-stray-ancestor'
+            $branch   = 'feature/issue-548-s3-ancestor'
+
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', '-b', $branch) | Out-Null
+            & $script:SetRepoFile -RepoPath $repoPath -RelativePath 'stray.txt' -Content "stray`n"
+            & $script:CommitAll -RepoPath $repoPath -Message 'stray commit'
+
+            # Cherry-pick stray onto main (same content, same patch)
+            $strayCommit = (& git -C $repoPath rev-parse $branch 2>$null).Trim()
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('cherry-pick', $strayCommit) | Out-Null
+            & $script:PushMain -RepoPath $repoPath
+
+            # git cherry should show '-' for the feature commit (patch-equivalent)
+            $branchTip = (& git -C $repoPath rev-parse $branch 2>$null).Trim()
+            $shimPath  = & $script:NewPassingGhShim -ParentPath $repoPath -State 'CLOSED' -HeadRefOid $branchTip
+
+            $result = & $script:InvokeCleanupWithGh -RepoPath $repoPath -BranchName $branch -GhShimPath $shimPath
+            $result.ExitCode | Should -Be 0
+            (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'patch-equivalent stray commit should be absorbed'
+        }
+
+        It 'S3b: tree-at-HEAD orphan auto-resolves via fourth sub-case (reworded squash)' {
+            $repoPath = & $script:NewSyntheticRepo -Name 's3b-tree-at-head'
+            $branch   = 'feature/issue-548-s3b-tree'
+
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', '-b', $branch) | Out-Null
+            & $script:SetRepoFile -RepoPath $repoPath -RelativePath 'src/helper.ps1' -Content "Write-Output 'helper'`n"
+            & $script:CommitAll -RepoPath $repoPath -Message 'add helper (feature commit)'
+
+            # Main: same content, different commit message (different patch-id)
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
+            & $script:SetRepoFile -RepoPath $repoPath -RelativePath 'src/helper.ps1' -Content "Write-Output 'helper'`n"
+            & $script:CommitAll -RepoPath $repoPath -Message 'ship helper via reworded squash'
+            & $script:PushMain -RepoPath $repoPath
+
+            # Tree diff: main now has src/helper.ps1 with same content → tree-equivalent at path level
+            # But commit diff: different commit messages → different patch-id → cherry shows '+'
+            $branchTip = (& git -C $repoPath rev-parse $branch 2>$null).Trim()
+            $shimPath  = & $script:NewPassingGhShim -ParentPath $repoPath -State 'CLOSED' -HeadRefOid $branchTip
+
+            $result = & $script:InvokeCleanupWithGh -RepoPath $repoPath -BranchName $branch -GhShimPath $shimPath
+            $result.ExitCode | Should -Be 0
+            (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'tree-at-HEAD-equivalent orphan should be auto-resolved via fourth sub-case'
+        }
+
+        It 'S4: open parent issue returns auto-resolve declined' {
+            $repoPath = & $script:NewSyntheticRepo -Name 's4-open-parent'
+            $branch   = 'feature/issue-548-s4-open'
+
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', '-b', $branch) | Out-Null
+            & $script:SetRepoFile -RepoPath $repoPath -RelativePath 'work.txt' -Content "wip`n"
+            & $script:CommitAll -RepoPath $repoPath -Message 'wip'
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
+            & $script:PushMain -RepoPath $repoPath
+
+            # Non-zero tree diff
+            (& $script:TestTreeEquivalentToMain -RepoPath $repoPath -BranchName $branch) | Should -BeFalse
+
+            $branchTip = (& git -C $repoPath rev-parse $branch 2>$null).Trim()
+            $shimPath  = & $script:NewPassingGhShim -ParentPath $repoPath -State 'OPEN' -HeadRefOid $branchTip
+
+            $result = & $script:InvokeCleanupWithGh -RepoPath $repoPath -BranchName $branch -GhShimPath $shimPath
+            $result.ExitCode | Should -Be 0
+            $result.Output   | Should -Match 'auto-resolve declined'
+            (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeTrue -Because 'open parent issue should not trigger auto-delete'
+        }
+
+        It 'S5a: CLOSED+NOT_PLANNED parent allows auto-delete (D-state-reason)' {
+            $repoPath = & $script:NewSyntheticRepo -Name 's5a-not-planned'
+            $branch   = 'feature/issue-548-s5a-notplanned'
+
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', '-b', $branch) | Out-Null
+            $spikeDir = Join-Path $repoPath '.tmp/issue-548'
+            New-Item -ItemType Directory -Path $spikeDir -Force | Out-Null
+            Set-Content -Path (Join-Path $spikeDir 'notes.md') -Value 'planned work'
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('add', '-A') | Out-Null
+            & $script:CommitAll -RepoPath $repoPath -Message 'planned work (not-planned closure)'
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
+            & $script:PushMain -RepoPath $repoPath
+
+            (& $script:TestTreeEquivalentToMain -RepoPath $repoPath -BranchName $branch) | Should -BeFalse
+
+            $branchTip = (& git -C $repoPath rev-parse $branch 2>$null).Trim()
+            $shimPath  = & $script:NewPassingGhShim -ParentPath $repoPath -State 'CLOSED' -StateReason 'NOT_PLANNED' -HeadRefOid $branchTip
+
+            $result = & $script:InvokeCleanupWithGh -RepoPath $repoPath -BranchName $branch -GhShimPath $shimPath
+            $result.ExitCode | Should -Be 0
+            (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeFalse -Because 'CLOSED with NOT_PLANNED should allow auto-delete per D-state-reason'
+        }
+
+        It 'S5b: CLOSED parent + empty PR list returns auto-resolve declined' {
+            $repoPath = & $script:NewSyntheticRepo -Name 's5b-empty-pr'
+            $branch   = 'feature/issue-548-s5b-emptyprs'
+
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', '-b', $branch) | Out-Null
+            & $script:SetRepoFile -RepoPath $repoPath -RelativePath 'work.txt' -Content "work`n"
+            & $script:CommitAll -RepoPath $repoPath -Message 'work'
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
+            & $script:PushMain -RepoPath $repoPath
+
+            (& $script:TestTreeEquivalentToMain -RepoPath $repoPath -BranchName $branch) | Should -BeFalse
+
+            $shimPath = & $script:NewPassingGhShim -ParentPath $repoPath -State 'CLOSED' -EmptyPRList
+
+            $result = & $script:InvokeCleanupWithGh -RepoPath $repoPath -BranchName $branch -GhShimPath $shimPath
+            $result.ExitCode | Should -Be 0
+            $result.Output   | Should -Match 'auto-resolve declined'
+            (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeTrue
+        }
+
+        It 'S6: gh non-zero exit returns could not verify GitHub signals' {
+            $repoPath = & $script:NewSyntheticRepo -Name 's6-gh-fail'
+            $branch   = 'feature/issue-548-s6-ghfail'
+
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', '-b', $branch) | Out-Null
+            & $script:SetRepoFile -RepoPath $repoPath -RelativePath 'work.txt' -Content "work`n"
+            & $script:CommitAll -RepoPath $repoPath -Message 'work'
+            & $script:InvokeGit -RepoPath $repoPath -Arguments @('checkout', 'main') | Out-Null
+            & $script:PushMain -RepoPath $repoPath
+
+            (& $script:TestTreeEquivalentToMain -RepoPath $repoPath -BranchName $branch) | Should -BeFalse
+
+            $shimPath = & $script:NewFailingGhShim -ParentPath $repoPath
+
+            $result = & $script:InvokeCleanupWithGh -RepoPath $repoPath -BranchName $branch -GhShimPath $shimPath
+            $result.ExitCode | Should -Be 0
+            $result.Output   | Should -Match 'could not verify GitHub signals'
+            (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeTrue
+        }
     }
 }

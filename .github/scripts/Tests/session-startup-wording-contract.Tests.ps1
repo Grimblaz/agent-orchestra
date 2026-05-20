@@ -382,4 +382,14 @@ Describe 'session startup wording contract' {
         $step8 | Should -Match '(?is)(explicit|manual).{0,80}(manual|detector).{0,160}(remain|still).{0,120}(allowed|possible|available)' -Because 'the session-startup skill must keep manual detector invocation available after the automatic startup check'
         $step8 | Should -Match 'Step 9' -Because 'Step 8 must explicitly reference Step 9 to establish the sequencing dependency'
     }
+
+    It 'requires SKILL.md orphan-branches bullet to reference the auto-resolve wording strings' {
+        $skill = & $script:GetDocumentState -Path $script:SessionStartupSkill
+        $content = $skill.Content
+
+        $content | Should -Match ([regex]::Escape('; eligible for auto-resolve at cleanup time')) `
+            -Because 'SKILL.md orphan bullet must reference the per-line suffix wording'
+        $content | Should -Match ([regex]::Escape('auto-resolve declined')) `
+            -Because 'SKILL.md must reference the auto-resolve declined skip variant'
+    }
 }

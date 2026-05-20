@@ -760,6 +760,20 @@ function Get-SCDOrphanBranchCleanups {
     return $cleanups
 }
 
+function Get-SCDOrphanBranchLines {
+    param([array]$Items)
+
+    $out = @()
+    foreach ($item in $Items) {
+        $line = "- Orphan branch ``$($item.BranchName)`` — $($item.Reason)"
+        if ($item.BranchName -match $script:OrphanIssueRegex) {
+            $line += '; eligible for auto-resolve at cleanup time'
+        }
+        $out += $line
+    }
+    return $out
+}
+
 function Invoke-SessionCleanupDetector {
     [CmdletBinding()]
     [OutputType([hashtable])]
@@ -811,7 +825,7 @@ function Invoke-SessionCleanupDetector {
                 if ($null -ne $upstreamBranch -and (Test-SCDRemoteHeadMissing -RemoteName $upstreamBranch.RemoteName -BranchPattern $upstreamBranch.BranchName)) {
                     # Remote branch is gone — stale branch detected
                     $branchIssueId = $null
-                    if ($currentBranch -match 'issue-(\d+)') {
+                    if ($currentBranch -match $script:OrphanIssueRegex) {
                         $branchIssueId = $Matches[1]
                     }
                     $staleBranch = @{
@@ -1008,16 +1022,6 @@ function Invoke-SessionCleanupDetector {
         return $out
     }
 
-    function Get-OrphanBranchLines {
-        param([array]$Items)
-
-        $out = @()
-        foreach ($item in $Items) {
-            $out += "- Orphan branch ``$($item.BranchName)`` — $($item.Reason)"
-        }
-        return $out
-    }
-
     function Get-ClaudeCleanupKey {
         param(
             [Parameter(Mandatory)]
@@ -1102,7 +1106,7 @@ function Invoke-SessionCleanupDetector {
             $lines += (Get-SiblingWorktreeLines -Items $visibleSiblingWorktreeCleanups)
         }
         if ($visibleOrphanBranchCleanups.Count -gt 0) {
-            $lines += (Get-OrphanBranchLines -Items $visibleOrphanBranchCleanups)
+            $lines += (Get-SCDOrphanBranchLines -Items $visibleOrphanBranchCleanups)
         }
         if ($hiddenClaudeCleanupCount -gt 0) {
             $lines += "- +$hiddenClaudeCleanupCount more — run ``git for-each-ref --format='%(refname:short)' refs/heads/claude/`` to see the full list."
