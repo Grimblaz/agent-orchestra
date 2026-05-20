@@ -60,7 +60,7 @@ BeforeAll {
         }
 
         $mojibakeDash = [string]([char]0x0393) + [string]([char]0x00C7) + [string]([char]0x00F4)
-        return (($Text -replace '[\u2010-\u2015]', '-' -replace [regex]::Escape($mojibakeDash), '-') -replace '\s+', ' ').Trim()
+        return (($Text -replace '[\u2010-\u2015]', '-' -replace [regex]::Escape($mojibakeDash), '-' -replace '\s*[+&]\s*', ' and ') -replace '\s+', ' ').Trim()
     }
 
     function script:Get-CCRMRowValue {
@@ -74,7 +74,16 @@ BeforeAll {
 
         if ($Row -is [System.Collections.IDictionary]) {
             if ($Row.Contains($Name)) {
-                return [string]$Row[$Name]
+                $dictionaryValue = $Row[$Name]
+                if ($null -eq $dictionaryValue) {
+                    return ''
+                }
+
+                if ($dictionaryValue -is [System.Collections.IEnumerable] -and $dictionaryValue -isnot [string]) {
+                    return [string]::Join("`n", @($dictionaryValue | ForEach-Object { [string]$_ }))
+                }
+
+                return [string]$dictionaryValue
             }
 
             return ''
@@ -88,6 +97,49 @@ BeforeAll {
         return [string]$property.Value
     }
 
+    function script:Test-CCRMRowKey {
+        param(
+            [Parameter(Mandatory)]
+            [object]$Row,
+
+            [Parameter(Mandatory)]
+            [string]$Name
+        )
+
+        if ($Row -is [System.Collections.IDictionary]) {
+            return $Row.Contains($Name)
+        }
+
+        return $null -ne $Row.PSObject.Properties[$Name]
+    }
+
+    function script:Get-CCRMRowText {
+        param(
+            [Parameter(Mandatory)]
+            [object]$Row
+        )
+
+        if ($Row -is [System.Collections.IDictionary]) {
+            $rowValues = @(
+                foreach ($key in $Row.Keys) {
+                    script:Get-CCRMRowValue -Row $Row -Name ([string]$key)
+                }
+            )
+
+            return [string]::Join(' ', $rowValues)
+        }
+
+        $propertyValues = @(
+            foreach ($property in $Row.PSObject.Properties) {
+                if ($null -ne $property.Value) {
+                    [string]$property.Value
+                }
+            }
+        )
+
+        return [string]::Join(' ', $propertyValues)
+    }
+
     function script:Get-CCRMRowSource {
         param(
             [Parameter(Mandatory)]
@@ -97,16 +149,123 @@ BeforeAll {
         return script:Get-CCRMRowValue -Row $Row -Name 'source'
     }
 
+    function script:ConvertFrom-CCRMResponsibilityYaml {
+        param(
+            [Parameter(Mandatory)]
+            [string]$Yaml
+        )
+
+        $rows = [System.Collections.Generic.List[object]]::new()
+        $currentRow = $null
+        $currentSequenceKey = $null
+        $lineNumber = 0
+
+        foreach ($rawLine in ($Yaml -split '\r?\n')) {
+            $lineNumber++
+
+            if ([string]::IsNullOrWhiteSpace($rawLine)) {
+                continue
+            }
+
+            if ($rawLine -match '^#') {
+                continue
+            }
+
+            $rowMatch = [regex]::Match($rawLine, '^-[ ]*(?<content>.*)$')
+            if ($rowMatch.Success) {
+                if ($null -ne $currentRow) {
+                    $rows.Add($currentRow)
+                }
+
+                $currentRow = [ordered]@{}
+                $currentSequenceKey = $null
+                $rowContent = $rowMatch.Groups['content'].Value.Trim()
+
+                if (-not [string]::IsNullOrWhiteSpace($rowContent)) {
+                    $propertyMatch = [regex]::Match($rowContent, '^(?<key>[A-Za-z0-9_-]+):(?<value>.*)$')
+                    if (-not $propertyMatch.Success) {
+                        throw ('Unsupported responsibility-map YAML row start at line {0}: {1}' -f $lineNumber, $rawLine)
+                    }
+
+                    $propertyName = $propertyMatch.Groups['key'].Value
+                    $currentRow[$propertyName] = script:ConvertFrom-CCRMYamlScalar -Value $propertyMatch.Groups['value'].Value
+                }
+
+                continue
+            }
+
+            if ($null -eq $currentRow) {
+                throw ('Responsibility-map YAML property appeared before the first row at line {0}: {1}' -f $lineNumber, $rawLine)
+            }
+
+            $propertyLineMatch = [regex]::Match($rawLine, '^[ ]{2}(?<key>[A-Za-z0-9_-]+):(?<value>.*)$')
+            if ($propertyLineMatch.Success) {
+                $propertyName = $propertyLineMatch.Groups['key'].Value
+                $propertyValue = $propertyLineMatch.Groups['value'].Value
+                $currentSequenceKey = $null
+
+                if ([string]::IsNullOrWhiteSpace($propertyValue)) {
+                    $currentRow[$propertyName] = @()
+                    $currentSequenceKey = $propertyName
+                } else {
+                    $currentRow[$propertyName] = script:ConvertFrom-CCRMYamlScalar -Value $propertyValue
+                }
+
+                continue
+            }
+
+            $sequenceItemMatch = [regex]::Match($rawLine, '^[ ]{4}-[ ]*(?<value>.*)$')
+            if ($sequenceItemMatch.Success -and -not [string]::IsNullOrWhiteSpace($currentSequenceKey)) {
+                $sequenceValue = script:ConvertFrom-CCRMYamlScalar -Value $sequenceItemMatch.Groups['value'].Value
+                $currentRow[$currentSequenceKey] = @($currentRow[$currentSequenceKey]) + $sequenceValue
+                continue
+            }
+
+            throw ('Unsupported responsibility-map YAML shape at line {0}: {1}' -f $lineNumber, $rawLine)
+        }
+
+        if ($null -ne $currentRow) {
+            $rows.Add($currentRow)
+        }
+
+        foreach ($row in $rows) {
+            $row
+        }
+    }
+
+    function script:ConvertFrom-CCRMYamlScalar {
+        param(
+            [AllowNull()]
+            [string]$Value
+        )
+
+        if ($null -eq $Value) {
+            return ''
+        }
+
+        $trimmedValue = $Value.Trim()
+        if ($trimmedValue -eq '""') {
+            return ''
+        }
+
+        $doubleQuotedMatch = [regex]::Match($trimmedValue, '^"(?<value>.*)"$')
+        if ($doubleQuotedMatch.Success) {
+            return $doubleQuotedMatch.Groups['value'].Value.Replace('\"', '"')
+        }
+
+        $singleQuotedMatch = [regex]::Match($trimmedValue, "^'(?<value>.*)'$")
+        if ($singleQuotedMatch.Success) {
+            return $singleQuotedMatch.Groups['value'].Value.Replace("''", "'")
+        }
+
+        return $trimmedValue
+    }
+
     function script:Get-CCRMResponsibilityRow {
         param(
             [Parameter(Mandatory)]
             [string]$MapPath
         )
-
-        $yamlParser = Get-Command ConvertFrom-Yaml -ErrorAction SilentlyContinue
-        if (-not $yamlParser) {
-            throw 'ConvertFrom-Yaml is required to parse the responsibility map YAML for this fail-the-build coverage test.'
-        }
 
         $content = Get-Content -Path $MapPath -Raw -ErrorAction Stop
         $yamlMatch = [regex]::Match($content, '(?ms)^## Responsibilities\s*\r?\n\r?\n```yaml\r?\n(?<yaml>.*?)\r?\n```')
@@ -115,13 +274,9 @@ BeforeAll {
         }
 
         try {
-            $parsedRows = $yamlMatch.Groups['yaml'].Value | ConvertFrom-Yaml -ErrorAction Stop
+            $parsedRows = @(script:ConvertFrom-CCRMResponsibilityYaml -Yaml $yamlMatch.Groups['yaml'].Value)
         } catch {
             throw "Could not parse responsibility-map YAML: $($_.Exception.Message)"
-        }
-
-        if ($parsedRows -is [System.Collections.IDictionary] -or $parsedRows -is [string]) {
-            return $parsedRows
         }
 
         foreach ($row in $parsedRows) {
@@ -322,6 +477,71 @@ Describe 'Code-Conductor responsibility map - coverage completeness' {
         )
 
         $missingSections | Should -BeNullOrEmpty -Because "each section named in issue #557's Coverage target Integration test 1 list must appear as a source value in the responsibility map"
+    }
+}
+
+Describe 'Code-Conductor responsibility map - row invariants' {
+    It 'keeps every AC-critical responsibility row machine-checkable' {
+        $rows = @(script:Get-CCRMResponsibilityRow -MapPath $script:ResponsibilityMapPath)
+        $requiredValueKeys = @('source', 'responsibility', 'disposition', 'action', 'verification_status')
+        $requiredDeclaredKeys = @('verified-against-sha', 'verified-via-pr-sha')
+        $allowedDispositions = @('planner-should-absorb', 'spine-runner-keeps', 'adapter-handles', 'not-applicable', 'defer')
+        $allowedVerificationStatuses = @('verified', 'unverified', 'replay-pending-merged-pr')
+        $revisitTriggerPattern = '^(issue|pr):#\d+$|^file:[^\s]+$|^event:[A-Za-z0-9_.-]+$'
+        $githubIssueUrlPattern = 'https://github\.com/[^/\s]+/[^/\s]+/issues/\d+'
+        $replayNeedPattern = '(?i)(replay|live verification|live-verification|real-run|real run)'
+        $rowNumber = 0
+
+        $rows | Should -Not -BeNullOrEmpty -Because 'the responsibility map must expose responsibility rows before row invariants can be meaningful'
+
+        foreach ($row in $rows) {
+            $rowNumber++
+            $rowLabel = "row $rowNumber '$((script:Get-CCRMRowSource -Row $row))'"
+
+            foreach ($requiredValueKey in $requiredValueKeys) {
+                script:Get-CCRMRowValue -Row $row -Name $requiredValueKey | Should -Not -BeNullOrEmpty -Because "$rowLabel must declare a non-empty $requiredValueKey value"
+            }
+
+            foreach ($requiredDeclaredKey in $requiredDeclaredKeys) {
+                script:Test-CCRMRowKey -Row $row -Name $requiredDeclaredKey | Should -BeTrue -Because "$rowLabel must declare $requiredDeclaredKey even when the value is empty"
+            }
+
+            $disposition = script:Get-CCRMRowValue -Row $row -Name 'disposition'
+            $verificationStatus = script:Get-CCRMRowValue -Row $row -Name 'verification_status'
+            $action = script:Get-CCRMRowValue -Row $row -Name 'action'
+            $verifiedAgainstSha = script:Get-CCRMRowValue -Row $row -Name 'verified-against-sha'
+            $verifiedViaPrSha = script:Get-CCRMRowValue -Row $row -Name 'verified-via-pr-sha'
+
+            $allowedDispositions | Should -Contain $disposition -Because "$rowLabel must use a known disposition enum value"
+            $allowedVerificationStatuses | Should -Contain $verificationStatus -Because "$rowLabel must use a known verification_status enum value"
+            script:Get-CCRMRowText -Row $row | Should -Not -Match 'TODO\(#\)' -Because "$rowLabel must not retain unresolved TODO issue placeholders"
+
+            if ($verificationStatus -eq 'verified') {
+                $verifiedAgainstSha | Should -Not -BeNullOrEmpty -Because "$rowLabel is verified and must name the Code-Conductor SHA it was checked against"
+            }
+
+            if ($disposition -eq 'defer') {
+                script:Get-CCRMRowValue -Row $row -Name 'revisit-trigger' | Should -Match $revisitTriggerPattern -Because "$rowLabel is deferred and must have a machine-checkable revisit-trigger"
+            }
+
+            if ($disposition -eq 'not-applicable') {
+                script:Get-CCRMRowValue -Row $row -Name 'rationale' | Should -Not -BeNullOrEmpty -Because "$rowLabel is not-applicable and must explain the rationale"
+            }
+
+            if ($disposition -eq 'planner-should-absorb') {
+                $action | Should -Match $githubIssueUrlPattern -Because "$rowLabel delegates absorption work and must link to a real GitHub issue URL"
+            }
+
+            if ($verificationStatus -eq 'replay-pending-merged-pr') {
+                script:Get-CCRMRowValue -Row $row -Name 'reverification-trigger' | Should -Be 'issue:#592' -Because "$rowLabel has pending replay verification tracked by issue #592"
+                $action | Should -Match $replayNeedPattern -Because "$rowLabel must explain the replay or live verification need"
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($verifiedViaPrSha)) {
+                script:Get-CCRMRowValue -Row $row -Name 'replay-pr' | Should -Not -BeNullOrEmpty -Because "$rowLabel has verified-via-pr-sha and must name the replay PR"
+                script:Get-CCRMRowValue -Row $row -Name 'replay-evidence' | Should -Not -BeNullOrEmpty -Because "$rowLabel has verified-via-pr-sha and must name replay evidence"
+            }
+        }
     }
 }
 
