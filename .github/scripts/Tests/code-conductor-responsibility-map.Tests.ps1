@@ -14,7 +14,7 @@ BeforeAll {
         return ($body -join "`n")
     }
 
-    function script:Get-CCRMCoverageTargets {
+    function script:Get-CCRMCoverageTarget {
         param(
             [Parameter(Mandatory)]
             [string]$IssueBody
@@ -59,7 +59,8 @@ BeforeAll {
             return ''
         }
 
-        return (($Text -replace '[\u2010-\u2015]', '-' -replace 'ΓÇô', '-') -replace '\s+', ' ').Trim()
+        $mojibakeDash = [string]([char]0x0393) + [string]([char]0x00C7) + [string]([char]0x00F4)
+        return (($Text -replace '[\u2010-\u2015]', '-' -replace [regex]::Escape($mojibakeDash), '-') -replace '\s+', ' ').Trim()
     }
 
     function script:Get-CCRMRowValue {
@@ -96,7 +97,7 @@ BeforeAll {
         return script:Get-CCRMRowValue -Row $Row -Name 'source'
     }
 
-    function script:Get-CCRMResponsibilityRows {
+    function script:Get-CCRMResponsibilityRow {
         param(
             [Parameter(Mandatory)]
             [string]$MapPath
@@ -157,7 +158,7 @@ BeforeAll {
 
     function script:Invoke-CCRMStaleAnchorScan {
         $currentSha = script:Get-CCRMCurrentCodeConductorSha
-        $rows = @(script:Get-CCRMResponsibilityRows -MapPath $script:ResponsibilityMapPath)
+        $rows = @(script:Get-CCRMResponsibilityRow -MapPath $script:ResponsibilityMapPath)
 
         foreach ($row in $rows) {
             $status = script:Get-CCRMRowValue -Row $row -Name 'verification_status'
@@ -174,7 +175,7 @@ BeforeAll {
     }
 
     function script:Invoke-CCRMDeferStewardshipScan {
-        $rows = @(script:Get-CCRMResponsibilityRows -MapPath $script:ResponsibilityMapPath)
+        $rows = @(script:Get-CCRMResponsibilityRow -MapPath $script:ResponsibilityMapPath)
 
         foreach ($row in $rows) {
             $disposition = script:Get-CCRMRowValue -Row $row -Name 'disposition'
@@ -252,7 +253,7 @@ BeforeAll {
     }
 
     function script:Invoke-CCRMDispositionBiasScan {
-        $rows = @(script:Get-CCRMResponsibilityRows -MapPath $script:ResponsibilityMapPath)
+        $rows = @(script:Get-CCRMResponsibilityRow -MapPath $script:ResponsibilityMapPath)
         if ($rows.Count -eq 0) {
             Write-Warning 'disposition-bias warn-only: responsibility map contains no rows to analyze.'
             return
@@ -292,11 +293,11 @@ BeforeAll {
     }
 }
 
-Describe 'Code-Conductor responsibility map — coverage completeness' {
+Describe 'Code-Conductor responsibility map - coverage completeness' {
     It 'lists every issue-declared coverage target as a responsibility-map source' {
         $issueBody = script:Get-CCRMIssueBody
-        $expectedSections = script:Get-CCRMCoverageTargets -IssueBody $issueBody
-        $rows = script:Get-CCRMResponsibilityRows -MapPath $script:ResponsibilityMapPath
+        $expectedSections = script:Get-CCRMCoverageTarget -IssueBody $issueBody
+        $rows = script:Get-CCRMResponsibilityRow -MapPath $script:ResponsibilityMapPath
 
         $expectedSections | Should -Not -BeNullOrEmpty -Because 'issue #557 must declare the expected coverage targets in its Coverage target section'
         $rows | Should -Not -BeNullOrEmpty -Because 'the responsibility map must expose YAML responsibility rows'
@@ -324,19 +325,19 @@ Describe 'Code-Conductor responsibility map — coverage completeness' {
     }
 }
 
-Describe 'Code-Conductor responsibility map — stale-anchor warn-only' {
+Describe 'Code-Conductor responsibility map - stale-anchor warn-only' {
     It 'emits advisory warnings for verified rows anchored to older Code-Conductor commits without failing the build' {
         { script:Invoke-CCRMStaleAnchorScan } | Should -Not -Throw -Because 'stale anchor findings are advisory warnings, not build failures'
     }
 }
 
-Describe 'Code-Conductor responsibility map — defer-stewardship warn-only' {
+Describe 'Code-Conductor responsibility map - defer-stewardship warn-only' {
     It 'emits advisory warnings for fired defer revisit triggers without failing the build' {
         { script:Invoke-CCRMDeferStewardshipScan } | Should -Not -Throw -Because 'fired defer triggers are stewardship warnings, not build failures'
     }
 }
 
-Describe 'Code-Conductor responsibility map — disposition-bias warn-only' {
+Describe 'Code-Conductor responsibility map - disposition-bias warn-only' {
     It 'emits advisory warnings when disposition distribution crosses documented bias thresholds without failing the build' {
         # Advisory thresholds: warn when any disposition exceeds 50% of all rows, or when defer exceeds 25% of all rows.
         { script:Invoke-CCRMDispositionBiasScan } | Should -Not -Throw -Because 'disposition distribution findings are advisory warnings, not build failures'
