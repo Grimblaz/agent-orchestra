@@ -202,6 +202,43 @@ else { exit 1 }
         }
     }
 
+    Context 'sub-feature-merge topology (--no-merges fix)' {
+        It 'feature branch that merged in a sub-feature with spike-only commits returns $true' {
+            $repo = & $script:NewTestRepo
+            & git -C $repo checkout -b 'feature/issue-548-parent' 2>&1 | Out-Null
+            # First spike commit directly on the parent feature branch
+            & $script:CommitFile -RepoPath $repo -RelPath '.tmp/issue-548/parent.md' -Content 'parent spike' -Message 'parent spike'
+            # Sub-feature branch with its own spike commits (second-parent ancestors after merge)
+            & git -C $repo checkout -b 'feature/issue-548-subfeature' 2>&1 | Out-Null
+            & $script:CommitFile -RepoPath $repo -RelPath '.tmp/issue-548/sub1.md' -Content 'sub spike 1' -Message 'sub spike 1'
+            & $script:CommitFile -RepoPath $repo -RelPath '.tmp/issue-548/sub2.md' -Content 'sub spike 2' -Message 'sub spike 2'
+            # Merge sub-feature back into parent — creates a merge commit with two parents
+            & git -C $repo checkout 'feature/issue-548-parent' 2>&1 | Out-Null
+            & git -C $repo -c user.email='t@t.com' -c user.name='T' merge --no-ff 'feature/issue-548-subfeature' -m 'merge sub-feature' 2>&1 | Out-Null
+            # All commits (parent + both sub) are spike-only confined to .tmp/issue-548/.
+            # Under --first-parent (the old behavior), the sub-feature commits would land in
+            # $residualSHAs without paths and hit the empty-path guard — returning $false.
+            # Under --no-merges (the new behavior), they appear in both $residualSHAs and $commitPaths
+            # with their real paths and are correctly classified as spike-only.
+            $result = & $script:Invoke -RepoPath $repo -Branch 'feature/issue-548-parent'
+            $result | Should -BeTrue
+        }
+
+        It 'feature branch that merged in a sub-feature with non-spike commits returns $false' {
+            $repo = & $script:NewTestRepo
+            & git -C $repo checkout -b 'feature/issue-548-parent-bad' 2>&1 | Out-Null
+            & $script:CommitFile -RepoPath $repo -RelPath '.tmp/issue-548/parent.md' -Content 'parent spike' -Message 'parent spike'
+            # Sub-feature branch with a non-spike commit (touches src/ outside .tmp/issue-548/)
+            & git -C $repo checkout -b 'feature/issue-548-subfeature-bad' 2>&1 | Out-Null
+            & $script:CommitFile -RepoPath $repo -RelPath 'src/leaked.ps1' -Content 'leaked' -Message 'leaked work on sub'
+            & git -C $repo checkout 'feature/issue-548-parent-bad' 2>&1 | Out-Null
+            & git -C $repo -c user.email='t@t.com' -c user.name='T' merge --no-ff 'feature/issue-548-subfeature-bad' -m 'merge sub with leak' 2>&1 | Out-Null
+            # The sub-feature's non-spike commit should now be visible and correctly fail spike-only
+            $result = & $script:Invoke -RepoPath $repo -Branch 'feature/issue-548-parent-bad'
+            $result | Should -BeFalse
+        }
+    }
+
     Context 'fail-open on git errors' {
         It 'branch that does not exist returns $null' {
             $repo = & $script:NewTestRepo
