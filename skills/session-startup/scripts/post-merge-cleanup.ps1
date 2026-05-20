@@ -116,7 +116,7 @@ function Remove-OrphanBranch {
         switch ($autoResolve) {
             $true { $autoResolveApproved = $true } # fall through to delete via -D
             $null {
-                Write-Output "Skipped '$Branch' — could not verify GitHub signals — review before deleting"
+                Write-Output "Skipped '$Branch' — could not verify auto-resolve signals — review before deleting"
                 return
             }
             default {
@@ -147,7 +147,7 @@ function Remove-OrphanBranch {
                 }
             }
             else {
-                Write-Output "Skipped '$Branch' — became unmerged between re-check and force-delete — review before deleting"
+                Write-Output "Skipped '$Branch' — branch not reachable from default (merged-state re-check returned false) — review before deleting"
                 return
             }
         }
