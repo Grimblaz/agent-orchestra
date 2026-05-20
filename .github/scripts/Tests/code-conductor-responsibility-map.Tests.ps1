@@ -4,8 +4,21 @@
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:ResponsibilityMapPath = Join-Path $script:RepoRoot 'Documents/Design/code-conductor-responsibility-map.md'
+    $script:Issue557CoverageTargetFixture = @'
+### Coverage target
+
+Integration test 1: The body covers Code Conductor Agent, Ownership Principles, D-rules D1-D14, Model-Switch Checkpoint (Authorized Hub-Mode Pause), Review Workflow Interruption Budget (Balanced Policy), Continuation Contract (Mandatory), Overview, Usage Examples, Plan Creation Strategy, Process, Step protocols Step 0-5, Core Workflow, Issue Transition Step 0, Hub Mode + Smart Resume, Non-hub-mode invocation (slash-command path), Scope Classification Gate, Downstream Ownership Boundary, D9 Model-Switch Checkpoint (Hub Mode Only), Branch Authority Gate, Multi-Issue Bundling, Hub Execution Workflow, Locate Plan & Context, D12 Commit policy detection, Determine Resume Point & Validate Plan, D13 Step commit reconciliation, D10 Capacity check, Execute Each Step, Create PR Step 4, Report Completion Step 5, Build-Test Orchestration, Property-Based Testing (PBT) Rollout Policy, Agent Selection, Review Reconciliation Loop (Mandatory), Skill Mapping, Validation Ladder (Mandatory), Validation Ladder tiers, Customer Experience Gate (CE Gate), PR Body Pipeline Metrics, Pipeline Metrics, Pipeline-Entry Credit Harvest (SMC-17), Deferred Port Credit Rows, Post-PR Credit Row (D10 category 3), Refactoring Phase is MANDATORY, Tactical Adaptation, Subagent Call Resilience (R5), Error Handling, Context Management for Long Sessions, Handoff to User, and Best Practices. Each is in scope for the responsibility map.
+'@
+
+    function script:Test-CCRMLiveGitHubOptIn {
+        return [string]::Equals($env:PESTER_LIVE_GH, '1', [System.StringComparison]::Ordinal)
+    }
 
     function script:Get-CCRMIssueBody {
+        if (-not (script:Test-CCRMLiveGitHubOptIn)) {
+            return $script:Issue557CoverageTargetFixture
+        }
+
         $body = & gh issue view 557 --json body --jq .body 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "Failed to fetch issue #557 body via 'gh issue view 557 --json body --jq .body': $($body -join [Environment]::NewLine)"
@@ -61,6 +74,55 @@ BeforeAll {
 
         $mojibakeDash = [string]([char]0x0393) + [string]([char]0x00C7) + [string]([char]0x00F4)
         return (($Text -replace '[\u2010-\u2015]', '-' -replace [regex]::Escape($mojibakeDash), '-' -replace '\s*[+&]\s*', ' and ') -replace '\s+', ' ').Trim()
+    }
+
+    function script:Get-CCRMExpectedSourceAlias {
+        param(
+            [Parameter(Mandatory)]
+            [string]$ExpectedSection
+        )
+
+        $normalizedExpectedSection = script:ConvertTo-CCRMComparableText -Text $ExpectedSection
+        if ([string]::Equals($normalizedExpectedSection, 'Agent Selection', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return @($ExpectedSection, 'Agent Selection table')
+        }
+
+        if ([string]::Equals($normalizedExpectedSection, 'Non-hub-mode invocation (slash-command path)', [System.StringComparison]::OrdinalIgnoreCase)) {
+            return @($ExpectedSection, 'Non-hub-mode invocation')
+        }
+
+        return @($ExpectedSection)
+    }
+
+    function script:Test-CCRMSourceCoversSection {
+        param(
+            [Parameter(Mandatory)]
+            [string]$Source,
+
+            [Parameter(Mandatory)]
+            [string]$ExpectedSection
+        )
+
+        $sourceSegments = @(
+            $Source -split '\s*/\s*' |
+                ForEach-Object { script:ConvertTo-CCRMComparableText -Text $_ } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        )
+
+        $expectedSegments = @(
+            script:Get-CCRMExpectedSourceAlias -ExpectedSection $ExpectedSection |
+                ForEach-Object { script:ConvertTo-CCRMComparableText -Text $_ }
+        )
+
+        foreach ($expectedSegment in $expectedSegments) {
+            foreach ($sourceSegment in $sourceSegments) {
+                if ([string]::Equals($sourceSegment, $expectedSegment, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    return $true
+                }
+            }
+        }
+
+        return $false
     }
 
     function script:Get-CCRMRowValue {
@@ -330,9 +392,15 @@ BeforeAll {
     }
 
     function script:Invoke-CCRMDeferStewardshipScan {
-        $rows = @(script:Get-CCRMResponsibilityRow -MapPath $script:ResponsibilityMapPath)
+        param(
+            [object[]]$Rows
+        )
 
-        foreach ($row in $rows) {
+        if ($null -eq $Rows) {
+            $Rows = @(script:Get-CCRMResponsibilityRow -MapPath $script:ResponsibilityMapPath)
+        }
+
+        foreach ($row in $Rows) {
             $disposition = script:Get-CCRMRowValue -Row $row -Name 'disposition'
             if ($disposition -ine 'defer') {
                 continue
@@ -362,6 +430,10 @@ BeforeAll {
                     }
 
                     $issueNumber = $numberMatch.Groups['number'].Value
+                    if (-not (script:Test-CCRMLiveGitHubOptIn)) {
+                        break
+                    }
+
                     $issueState = script:Invoke-CCRMGhScalar -Arguments @('issue', 'view', $issueNumber, '--json', 'state', '--jq', '.state') -Context "issue #$issueNumber"
                     if ($issueState -ieq 'CLOSED') {
                         Write-Warning ("defer-stewardship warn-only: revisit trigger fired for row '{0}'; issue #{1} is closed." -f (script:Get-CCRMRowSource -Row $row), $issueNumber)
@@ -378,6 +450,10 @@ BeforeAll {
                     }
 
                     $prNumber = $numberMatch.Groups['number'].Value
+                    if (-not (script:Test-CCRMLiveGitHubOptIn)) {
+                        break
+                    }
+
                     $mergedAt = script:Invoke-CCRMGhScalar -Arguments @('pr', 'view', $prNumber, '--json', 'mergedAt', '--jq', '.mergedAt') -Context "PR #$prNumber"
                     if (-not [string]::IsNullOrWhiteSpace($mergedAt) -and $mergedAt -ine 'null') {
                         Write-Warning ("defer-stewardship warn-only: revisit trigger fired for row '{0}'; PR #{1} was merged at {2}." -f (script:Get-CCRMRowSource -Row $row), $prNumber, $mergedAt)
@@ -408,14 +484,21 @@ BeforeAll {
     }
 
     function script:Invoke-CCRMDispositionBiasScan {
-        $rows = @(script:Get-CCRMResponsibilityRow -MapPath $script:ResponsibilityMapPath)
-        if ($rows.Count -eq 0) {
+        param(
+            [object[]]$Rows
+        )
+
+        if ($null -eq $Rows) {
+            $Rows = @(script:Get-CCRMResponsibilityRow -MapPath $script:ResponsibilityMapPath)
+        }
+
+        if ($Rows.Count -eq 0) {
             Write-Warning 'disposition-bias warn-only: responsibility map contains no rows to analyze.'
             return
         }
 
         $countsByDisposition = @{}
-        foreach ($row in $rows) {
+        foreach ($row in $Rows) {
             $disposition = script:Get-CCRMRowValue -Row $row -Name 'disposition'
             if ([string]::IsNullOrWhiteSpace($disposition)) {
                 $disposition = '<missing>'
@@ -430,9 +513,9 @@ BeforeAll {
 
         foreach ($disposition in $countsByDisposition.Keys) {
             $count = $countsByDisposition[$disposition]
-            $ratio = $count / $rows.Count
+            $ratio = $count / $Rows.Count
             if ($ratio -gt 0.5) {
-                Write-Warning ("disposition-bias warn-only: disposition '{0}' is {1:P1} of rows ({2}/{3}), above the >50% advisory threshold." -f $disposition, $ratio, $count, $rows.Count)
+                Write-Warning ("disposition-bias warn-only: disposition '{0}' is {1:P1} of rows ({2}/{3}), above the >50% advisory threshold." -f $disposition, $ratio, $count, $Rows.Count)
             }
         }
 
@@ -441,9 +524,9 @@ BeforeAll {
             $deferCount = $countsByDisposition['defer']
         }
 
-        $deferRatio = $deferCount / $rows.Count
+        $deferRatio = $deferCount / $Rows.Count
         if ($deferRatio -gt 0.25) {
-            Write-Warning ("disposition-bias warn-only: disposition 'defer' is {0:P1} of rows ({1}/{2}), above the >25% advisory threshold." -f $deferRatio, $deferCount, $rows.Count)
+            Write-Warning ("disposition-bias warn-only: disposition 'defer' is {0:P1} of rows ({1}/{2}), above the >25% advisory threshold." -f $deferRatio, $deferCount, $Rows.Count)
         }
     }
 }
@@ -461,14 +544,12 @@ Describe 'Code-Conductor responsibility map - coverage completeness' {
         $sources = @(
             $rows |
                 ForEach-Object { script:Get-CCRMRowSource -Row $_ } |
-                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
-                ForEach-Object { script:ConvertTo-CCRMComparableText -Text $_ }
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         )
 
         $missingSections = @(
             foreach ($section in $expectedSections) {
-                $expectedSection = script:ConvertTo-CCRMComparableText -Text $section
-                $matchingSource = $sources | Where-Object { $_.IndexOf($expectedSection, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 } | Select-Object -First 1
+                $matchingSource = $sources | Where-Object { script:Test-CCRMSourceCoversSection -Source $_ -ExpectedSection $section } | Select-Object -First 1
 
                 if (-not $matchingSource) {
                     $section
@@ -477,6 +558,12 @@ Describe 'Code-Conductor responsibility map - coverage completeness' {
         )
 
         $missingSections | Should -BeNullOrEmpty -Because "each section named in issue #557's Coverage target Integration test 1 list must appear as a source value in the responsibility map"
+    }
+
+    It 'matches coverage targets only against exact normalized source segments or explicit aliases' {
+        script:Test-CCRMSourceCoversSection -Source 'Hub Mode & Smart Resume' -ExpectedSection 'Hub Mode + Smart Resume' | Should -BeTrue -Because 'the issue target intentionally used plus where the Code-Conductor heading uses ampersand'
+        script:Test-CCRMSourceCoversSection -Source 'Agent Selection table' -ExpectedSection 'Agent Selection' | Should -BeTrue -Because 'the map names the table source explicitly for that section'
+        script:Test-CCRMSourceCoversSection -Source 'Archived Hub Mode & Smart Resume Notes' -ExpectedSection 'Hub Mode + Smart Resume' | Should -BeFalse -Because 'substring collisions must not satisfy coverage completeness'
     }
 }
 
@@ -552,12 +639,42 @@ Describe 'Code-Conductor responsibility map - stale-anchor warn-only' {
 }
 
 Describe 'Code-Conductor responsibility map - defer-stewardship warn-only' {
+    It 'emits a deterministic warning when a local file revisit trigger has fired' {
+        $rows = @(
+            [ordered]@{
+                source = 'Synthetic deferred file row'
+                disposition = 'defer'
+                'revisit-trigger' = 'file:__ccrm_missing_fixture__/trigger.txt'
+            }
+        )
+
+        $warnings = @(script:Invoke-CCRMDeferStewardshipScan -Rows $rows 3>&1)
+        $warningText = [string]::Join("`n", @($warnings | ForEach-Object { $_.ToString() }))
+
+        $warningText | Should -Match 'defer-stewardship warn-only: revisit trigger fired' -Because 'a fired defer trigger must emit an advisory warning'
+        $warningText | Should -Match 'Synthetic deferred file row' -Because 'the warning must identify the deferred row that needs stewardship'
+    }
+
     It 'emits advisory warnings for fired defer revisit triggers without failing the build' {
         { script:Invoke-CCRMDeferStewardshipScan } | Should -Not -Throw -Because 'fired defer triggers are stewardship warnings, not build failures'
     }
 }
 
 Describe 'Code-Conductor responsibility map - disposition-bias warn-only' {
+    It 'emits deterministic warnings when disposition distribution crosses advisory thresholds' {
+        $rows = @(
+            [ordered]@{ source = 'Synthetic defer row 1'; disposition = 'defer' },
+            [ordered]@{ source = 'Synthetic defer row 2'; disposition = 'defer' },
+            [ordered]@{ source = 'Synthetic keep row'; disposition = 'spine-runner-keeps' }
+        )
+
+        $warnings = @(script:Invoke-CCRMDispositionBiasScan -Rows $rows 3>&1)
+        $warningText = [string]::Join("`n", @($warnings | ForEach-Object { $_.ToString() }))
+
+        $warningText | Should -Match "disposition-bias warn-only: disposition 'defer' is" -Because 'a biased synthetic distribution must emit an advisory warning'
+        $warningText | Should -Match 'above the >25% advisory threshold' -Because 'the defer-specific advisory threshold must remain observable'
+    }
+
     It 'emits advisory warnings when disposition distribution crosses documented bias thresholds without failing the build' {
         # Advisory thresholds: warn when any disposition exceeds 50% of all rows, or when defer exceeds 25% of all rows.
         { script:Invoke-CCRMDispositionBiasScan } | Should -Not -Throw -Because 'disposition distribution findings are advisory warnings, not build failures'

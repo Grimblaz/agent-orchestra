@@ -742,8 +742,8 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
 - source: "Pipeline metrics emission / Pipeline Metrics"
   responsibility: "Remove legacy v3 pipeline-metrics fallback at v2.9.0 after pre-v4 back-catalog backfill."
   disposition: defer
-  action: "Revisit legacy v3 fallback removal when https://github.com/Grimblaz/agent-orchestra/issues/441 confirms pre-v4 back-catalog backfill."
-  revisit-trigger: "issue:#441"
+  action: "Issue #441 completed the pre-v4 back-catalog backfill evidence; remove the legacy v3 fallback as the remaining cleanup tracked by https://github.com/Grimblaz/agent-orchestra/issues/593."
+  revisit-trigger: "issue:#593"
   verification_status: unverified
   verified-against-sha: ""
   verified-via-pr-sha: ""
