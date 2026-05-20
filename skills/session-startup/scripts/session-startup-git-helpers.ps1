@@ -256,6 +256,20 @@ function Test-OrphanBranchCommitsAbsorbed {
     # constituent commits, walked through all parents by default, carry the actual file changes).
     # Pairs with the --no-merges flag on git log below so $residualSHAs and $commitPaths cover
     # the same commit set, including second-parent ancestors of sub-feature merges.
+    #
+    # SAFETY ASSUMPTION (workflow-dependent): a merge commit on the branch may carry conflict-
+    # resolution content unique to that commit — content absent from both of its parents — at
+    # a path not touched by any non-merge residual commit. Such paths are not inspected by this
+    # function. Safety relies on the calling orchestrator (Test-OrphanBranchAutoResolveEligible):
+    # under the project's squash-merge-only PR convention, Test-OrphanBranchGitHubSignalsShipped
+    # first requires headRefOid == git rev-parse $Branch (a merged PR's recorded head must equal
+    # the current branch tip SHA). A squash-merge captures the full branch-tip-vs-base diff,
+    # so any merge-commit-unique content is independently propagated to main's tree at those
+    # paths. If the project's merge convention ever broadens to rebase-merge or true merge-commit
+    # as the dominant PR strategy, this function should be hardened: add a fourth batched call
+    # 'git rev-list $Branch --not $remoteDefault --merges' and evaluate each residual merge
+    # commit's paths via 'git diff-tree -m -r --name-status <sha>' through the same spike-only /
+    # tree-at-HEAD sub-cases, conservatively returning $false when paths cannot be determined.
     $revListOutput = Invoke-SCDNativeCommand { git rev-list $Branch --not $remoteDefault --no-merges 2>$null }
     if ($LASTEXITCODE -ne 0) { return $null }
     $residualSHAs = @($revListOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
