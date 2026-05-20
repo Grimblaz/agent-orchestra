@@ -212,6 +212,11 @@ else { exit 1 }
                 default { $result = $false }
             }
             $result | Should -BeTrue
+
+            $callLog = Join-Path $shim 'gh-calls.log'
+            $callLogContent = if (Test-Path $callLog) { Get-Content $callLog -Raw } else { '' }
+            $callLogContent | Should -Match '--base\s+master' `
+                -Because "Test-OrphanBranchGitHubSignalsShipped must pass --base `$DefaultBranch to gh pr list, not hardcode 'main'"
         }
     }
 }

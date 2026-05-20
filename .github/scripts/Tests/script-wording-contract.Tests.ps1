@@ -63,7 +63,7 @@ Describe 'cleanup script wording contract' {
 
     It "Remove-OrphanBranch contains 'branch not reachable from default (merged-state re-check returned false)' race-condition variant" {
         $script:RemoveOrphanBranchBody | Should -Match ([regex]::Escape('branch not reachable from default (merged-state re-check returned false)')) `
-            -Because "Remove-OrphanBranch must emit the race-condition skip variant when the branch becomes unmerged between re-check and force-delete"
+            -Because "Remove-OrphanBranch must emit the merged-state re-check skip variant when the merged-state re-check returns false immediately before force-delete"
     }
 
     It "Remove-OrphanBranch body does not contain the legacy 'unmerged commits' wording" {
