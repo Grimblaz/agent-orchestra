@@ -626,7 +626,12 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   action: "Keep executor resolution from frame-slice metadata in Spine-Runner."
   verification_status: verified
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
-  verified-via-pr-sha: ""
+  verified-via-pr-sha: "79381bc7e413fd1e658834fbe4fd6d4430836162"
+  replay-pr: "https://github.com/Grimblaz/agent-orchestra/pull/558"
+  replay-evidence:
+    - "https://github.com/Grimblaz/agent-orchestra/pull/558#issuecomment-4425506916"
+    - "https://github.com/Grimblaz/agent-orchestra/pull/558#issuecomment-4426278362"
+  replay-note: "Issue #555 required minimal Spine-Runner frame walking, planner-named adapter resolution, one resolved adapter per slice, and port-locus evidence. PR #558 includes Spine-Runner, v2 frame-spine adapter paths, /spine-run, terminal-step credits, CE Gate evidence, and frame ledger output; review status is evidenced through PR body plus GitHub review intake/fix comments because no standalone judge-rulings issue comment was found."
 - source: "Review Reconciliation Loop (Mandatory)"
   responsibility: "Load review reconciliation, review-state persistence, post-judgment routing, and express-lane references."
   disposition: adapter-handles
@@ -746,7 +751,11 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   action: "Use skills/calibration-pipeline/references/review-credit-emission.md for v4 review credit row construction."
   verification_status: verified
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
-  verified-via-pr-sha: ""
+  verified-via-pr-sha: "cb13f420e27a54e30a06cf202a2c2905ebadca92"
+  replay-pr: "https://github.com/Grimblaz/agent-orchestra/pull/504"
+  replay-evidence:
+    - "https://github.com/Grimblaz/agent-orchestra/pull/504#issuecomment-4364628241"
+  replay-note: "Issue #441 required Code-Conductor to construct v4 review credit rows from judge-rulings comments. PR #504's body includes v4 pipeline metrics with a passed review credit row pointing to the judge ruling, the review-judge-produced-504 sentinel is present, and post-review fixes resolved all required findings."
 - source: "Pipeline metrics emission / Pipeline Metrics"
   responsibility: "Flush dispatch-cost samples into initial PR-body metrics and later update live PR-body targeted samples."
   disposition: spine-runner-keeps
@@ -867,3 +876,21 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   verified-against-sha: ""
   verified-via-pr-sha: ""
 ```
+
+## Real-run risk-selection rationale
+
+### Chosen rows
+
+The selected `adapter-handles` row covers review-credit construction because mistakes there would make durable review evidence appear present while pointing at the wrong judge-rulings source, credit rule, or verdict state. PR #504 / issue #441 is a real merged run with v4 pipeline metrics, a passed `review` credit row tied to the judge ruling, the `<!-- review-judge-produced-504 -->` sentinel, and completed post-review fixes.
+
+The selected `spine-runner-keeps` row covers Senior Engineer dispatch from frame-slice executor metadata because it is the clearest proof point that Spine-Runner remains a frame walker instead of falling back to generic prose routing. PR #558 / issue #555 exercised v2 frame-spine adapter paths, `/spine-run`, terminal-step credits, CE Gate evidence, and frame ledger output for the minimal runner path.
+
+### Alternatives considered
+
+Other `adapter-handles` candidates included release-hygiene credit rows, frame credit harvest, deferred port credit rows, validation ladder guidance, and frame credit ledger emission. They were useful but less risky for this slice because their failure modes are either narrower or already pinned to explicit helper scripts and references.
+
+Other `spine-runner-keeps` candidates included focused dispatch context, continuation policy, PR-body metrics-block presence, CE Gate placement, and dispatch announcement. They remain important switch-readiness evidence, but they do not stress the migration boundary as directly as executor-metadata dispatch.
+
+### Migration-risk heuristic
+
+Choose rows where ownership mistakes would hide durable workflow evidence or collapse Spine-Runner frame-walking into generic adapter handling.
