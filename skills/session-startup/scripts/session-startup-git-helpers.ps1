@@ -251,23 +251,38 @@ function Test-OrphanBranchCommitsAbsorbed {
         }
     }
 
-    # --- Batched git invocation 2: rev-list — residual commits not reachable from default ---
-    $revListOutput = Invoke-SCDNativeCommand { git rev-list $Branch --not $remoteDefault 2>$null }
+    # --- Batched git invocation 2: rev-list --no-merges — residual non-merge commits not reachable from default ---
+    # --no-merges excludes merge commits (which have no meaningful patch on their own — their
+    # constituent commits, walked through all parents by default, carry the actual file changes).
+    # Pairs with the --no-merges flag on git log below so $residualSHAs and $commitPaths cover
+    # the same commit set, including second-parent ancestors of sub-feature merges.
+    #
+    # SAFETY ASSUMPTION (workflow-dependent): a merge commit on the branch may carry conflict-
+    # resolution content unique to that commit — content absent from both of its parents — at
+    # a path not touched by any non-merge residual commit. Such paths are not inspected by this
+    # function. Safety relies on the calling orchestrator (Test-OrphanBranchAutoResolveEligible):
+    # under the project's squash-merge-only PR convention, Test-OrphanBranchGitHubSignalsShipped
+    # first requires headRefOid == git rev-parse $Branch (a merged PR's recorded head must equal
+    # the current branch tip SHA). A squash-merge captures the full branch-tip-vs-base diff,
+    # so any merge-commit-unique content is independently propagated to main's tree at those
+    # paths. If the project's merge convention ever broadens to rebase-merge or true merge-commit
+    # as the dominant PR strategy, this function should be hardened: add a fourth batched call
+    # 'git rev-list $Branch --not $remoteDefault --merges' and evaluate each residual merge
+    # commit's paths via 'git diff-tree -m -r --name-status <sha>' through the same spike-only /
+    # tree-at-HEAD sub-cases, conservatively returning $false when paths cannot be determined.
+    $revListOutput = Invoke-SCDNativeCommand { git rev-list $Branch --not $remoteDefault --no-merges 2>$null }
     if ($LASTEXITCODE -ne 0) { return $null }
     $residualSHAs = @($revListOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
 
     # No residual commits: branch is fully absorbed
     if ($residualSHAs.Count -eq 0) { return $true }
 
-    # --- Batched git invocation 3: log --first-parent --name-status — per-commit path lists ---
-    # NOTE: --first-parent skips non-first-parent ancestors of merge commits.
-    # If the feature branch ever merged a sub-feature branch in (not just pulling main),
-    # those second-parent SHAs will appear in $residualSHAs (from rev-list, which walks all parents)
-    # but not in $commitPaths (populated from --first-parent log). They hit the empty-path guard
-    # at line 330 and return $false, so auto-resolve is conservatively declined. This is
-    # fail-safe (branch retained, not deleted), but reduces recall for sub-feature-merge topologies.
-    # A future fix could drop --first-parent and explicitly skip merge commits via --no-merges.
-    $logOutput = Invoke-SCDNativeCommand { git log --first-parent --name-status "$remoteDefault..$Branch" 2>$null }
+    # --- Batched git invocation 3: log --no-merges --name-status — per-commit path lists ---
+    # Mirrors the --no-merges flag on rev-list above. Dropping --first-parent (was previously here)
+    # means second-parent ancestors of intra-branch merge commits now appear in $commitPaths with
+    # their actual file paths, so the spike-only / tree-at-HEAD sub-cases can evaluate them
+    # instead of falling through to the empty-path guard and conservatively declining auto-resolve.
+    $logOutput = Invoke-SCDNativeCommand { git log --no-merges --name-status "$remoteDefault..$Branch" 2>$null }
     if ($LASTEXITCODE -ne 0) { return $null }
 
     # Parse per-commit path lists from log output
