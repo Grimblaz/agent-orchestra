@@ -10,6 +10,8 @@
     conservative and fail-open when their evidence is unavailable.
 #>
 
+$script:OrphanIssueRegex = '^feature/issue-(\d+)-'
+
 function Invoke-SCDNativeCommand {
     [CmdletBinding()]
     param(
@@ -119,4 +121,288 @@ function Test-BranchMergedIntoDefault {
 
     # Conservative: treat as unmerged for safety
     return $false
+}
+
+# Cleanup-only decision helpers — feed deletion authorization in post-merge-cleanup.ps1
+# These helpers are cleanup-time (not session-startup-time) evaluators and should only
+# be called from Remove-OrphanBranch inside post-merge-cleanup.ps1.
+
+function Test-OrphanBranchGitHubSignalsShipped {
+    <#
+    .SYNOPSIS
+        Tri-state check: returns $true when the parent issue is CLOSED (any stateReason)
+        and a merged PR with a matching headRefOid exists against the default branch;
+        $false when signals indicate the branch is not cleanly shipped;
+        $null when gh is unavailable or signals cannot be retrieved.
+    .PARAMETER Branch
+        The local orphan branch name to check (e.g. 'feature/issue-548-squash-merge-orphan-autodelete').
+    .PARAMETER DefaultBranch
+        The default branch name (e.g. 'main').
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Branch,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch
+    )
+
+    # (1) Parse issue-ID from branch name via shared regex
+    if ($Branch -notmatch $script:OrphanIssueRegex) { return $false }
+    $issueNum = $Matches[1]
+
+    # (2) Check parent issue state via gh issue view
+    if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return $null }
+
+    # Suppress ErrorActionPreference during gh invocations: callers (e.g. post-merge-cleanup.ps1)
+    # set $ErrorActionPreference = 'Stop', which converts native-process stderr into terminating errors.
+    # The 2>$null redirect suppresses the stderr stream but not PowerShell's error-stream promotion.
+    # Temporarily lowering the preference here keeps the existing $LASTEXITCODE-based tri-state logic intact.
+    $savedEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $issueJson = Invoke-SCDNativeCommand { gh issue view $issueNum --json state 2>$null }
+        $issueExitCode = $LASTEXITCODE
+        $prJson = $null
+        $prExitCode = 0
+        if ($issueExitCode -eq 0) {
+            $prJson = Invoke-SCDNativeCommand { gh pr list --head $Branch --base $DefaultBranch --state merged --json 'number,mergedAt,headRefOid' 2>$null }
+            $prExitCode = $LASTEXITCODE
+        }
+    }
+    finally {
+        $ErrorActionPreference = $savedEap
+    }
+
+    if ($issueExitCode -ne 0) { return $null }
+
+    try {
+        $issue = $issueJson | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch { return $null }
+
+    if ($issue.state -ne 'CLOSED') { return $false }
+    # stateReason is intentionally NOT checked — any CLOSED stateReason authorizes (D-state-reason)
+
+    # (3) Check for a merged PR with headRefOid matching the branch tip
+    if ($prExitCode -ne 0) { return $null }
+
+    try {
+        $prs = $prJson | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch { return $null }
+
+    if ($prs.Count -eq 0) { return $false }
+
+    # (4) Match headRefOid against local branch tip
+    $branchTip = Invoke-SCDNativeCommand { git rev-parse $Branch 2>$null }
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $branchTip = $branchTip.Trim()
+
+    foreach ($pr in $prs) {
+        if ($pr.headRefOid -eq $branchTip) { return $true }
+    }
+
+    return $false
+}
+
+function Test-OrphanBranchCommitsAbsorbed {
+    <#
+    .SYNOPSIS
+        Tri-state check: returns $true when every commit in $Branch that is not
+        reachable from $DefaultBranch has been absorbed by main (via ancestor,
+        patch-equivalence, spike-only-per-issue, or tree-at-HEAD equivalence);
+        $false when at least one commit is genuinely unabsorbed;
+        $null when any batched git invocation fails.
+    .PARAMETER Branch
+        The local orphan branch name.
+    .PARAMETER DefaultBranch
+        The default branch name (e.g. 'main').
+    .PARAMETER IssueId
+        The numeric issue ID parsed from the branch name; used to scope spike-path predicate.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Branch,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch,
+
+        [Parameter(Mandatory)]
+        [long]$IssueId
+    )
+
+    # Resolve remote default ref (e.g. 'origin/main')
+    $remoteDefault = Get-RemoteDefaultRef -DefaultBranch $DefaultBranch
+    if (-not $remoteDefault) { $remoteDefault = $DefaultBranch }
+
+    # --- Batched git invocation 1: cherry — patch-equivalence map ---
+    # Lines prefixed '+' are unique to $Branch; '-' are patch-equivalent in upstream
+    $cherryOutput = Invoke-SCDNativeCommand { git cherry $remoteDefault $Branch 2>$null }
+    if ($LASTEXITCODE -ne 0) { return $null }
+    # Parse: @{ SHA = prefix }
+    $cherryMap = @{}
+    foreach ($line in @($cherryOutput)) {
+        if (-not [string]::IsNullOrWhiteSpace($line)) {
+            $parts = $line.Trim() -split '\s+'
+            if ($parts.Count -ge 2) { $cherryMap[$parts[1]] = $parts[0] }
+        }
+    }
+
+    # --- Batched git invocation 2: rev-list — residual commits not reachable from default ---
+    $revListOutput = Invoke-SCDNativeCommand { git rev-list $Branch --not $remoteDefault 2>$null }
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $residualSHAs = @($revListOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.Trim() })
+
+    # No residual commits: branch is fully absorbed
+    if ($residualSHAs.Count -eq 0) { return $true }
+
+    # --- Batched git invocation 3: log --first-parent --name-status — per-commit path lists ---
+    # NOTE: --first-parent skips non-first-parent ancestors of merge commits.
+    # If the feature branch ever merged a sub-feature branch in (not just pulling main),
+    # those second-parent SHAs will appear in $residualSHAs (from rev-list, which walks all parents)
+    # but not in $commitPaths (populated from --first-parent log). They hit the empty-path guard
+    # at line 330 and return $false, so auto-resolve is conservatively declined. This is
+    # fail-safe (branch retained, not deleted), but reduces recall for sub-feature-merge topologies.
+    # A future fix could drop --first-parent and explicitly skip merge commits via --no-merges.
+    $logOutput = Invoke-SCDNativeCommand { git log --first-parent --name-status "$remoteDefault..$Branch" 2>$null }
+    if ($LASTEXITCODE -ne 0) { return $null }
+
+    # Parse per-commit path lists from log output
+    # Format: commit <SHA>\n...\n<status>\t<path>\n  or  R<N>\t<src>\t<dst>
+    $commitPaths = @{}  # SHA -> [string[]]
+    $currentSha  = $null
+    foreach ($line in @($logOutput)) {
+        if ($line -match '^commit\s+([0-9a-f]{40})') {
+            $currentSha = $Matches[1]
+            if (-not $commitPaths.ContainsKey($currentSha)) { $commitPaths[$currentSha] = [System.Collections.Generic.List[string]]::new() }
+        }
+        elseif ($null -ne $currentSha) {
+            # Rename: R<N>\t<src>\t<dst>
+            if ($line -match '^R\d+\t([^\t]+)\t([^\t]+)$') {
+                $commitPaths[$currentSha].Add($Matches[1]) | Out-Null  # source path
+                $commitPaths[$currentSha].Add($Matches[2]) | Out-Null  # destination path
+            }
+            # Other status lines: A/M/D/C/T/etc.\t<path>
+            elseif ($line -match '^[A-Z]\t(.+)$') {
+                $commitPaths[$currentSha].Add($Matches[1]) | Out-Null
+            }
+        }
+    }
+
+    # --- Collect unique touched paths across all residual commits (for batch diff-tree) ---
+    $allTouchedPaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+    foreach ($sha in $residualSHAs) {
+        if ($commitPaths.ContainsKey($sha)) {
+            foreach ($p in $commitPaths[$sha]) { $allTouchedPaths.Add($p) | Out-Null }
+        }
+    }
+
+    # --- Batched git invocation 4: ls-tree per unique touched path ---
+    # Build tree-equivalence map: path -> bool (true = tree at $Branch equals tree at $remoteDefault)
+    # Uses git ls-tree (not rev-parse --verify) so mode changes (e.g., chmod +x) are detected.
+    $treeEquiv = @{}
+    foreach ($path in $allTouchedPaths) {
+        $branchTree  = Invoke-SCDNativeCommand { git ls-tree "$Branch" -- "$path" 2>$null }
+        $branchTreeExit = $LASTEXITCODE
+        $defaultTree = Invoke-SCDNativeCommand { git ls-tree "$remoteDefault" -- "$path" 2>$null }
+        $defaultTreeExit = $LASTEXITCODE
+        if ($branchTreeExit -ne 0 -or $defaultTreeExit -ne 0) {
+            # git ls-tree command failure (not a valid object ref) — cannot determine equivalence
+            $treeEquiv[$path] = $false
+            continue
+        }
+        if (-not $branchTree -and -not $defaultTree) {
+            # Path absent on both sides (deleted from both) — treat as equivalent
+            $treeEquiv[$path] = $true
+            continue
+        }
+        if (-not $branchTree -or -not $defaultTree) {
+            # Path absent on one side only — not equivalent
+            $treeEquiv[$path] = $false
+            continue
+        }
+        # Compare full tree entries: "<mode> <type> <hash>" (strip tab-delimited path suffix)
+        $branchEntry  = ($branchTree  | Select-Object -First 1).Trim() -replace '\t.*$', ''
+        $defaultEntry = ($defaultTree | Select-Object -First 1).Trim() -replace '\t.*$', ''
+        $treeEquiv[$path] = ($branchEntry -eq $defaultEntry)
+    }
+
+    # NOTE: The 4 "batched" invocations are above. The ls-tree calls per path are
+    # additional O(touched-paths) calls — consistent with the plan's O(1) per-commit +
+    # O(N) per-touched-path contract. ls-tree compares the full tree entry (mode + type + hash),
+    # catching mode-only changes and correctly treating paths absent on both sides as equivalent.
+
+    # --- Evaluate each residual commit ---
+    $spikePrefixForIssue = ".tmp/issue-$IssueId/"
+
+    foreach ($sha in $residualSHAs) {
+        # Sub-case (a): commit is an ancestor of main — absorbed (vacuous; rev-list --not handles this)
+        # (if sha not in residualSHAs it would already be absent, but double-check via cherry map)
+
+        # Sub-case (b): patch-equivalent — cherry prefix is '-'
+        if ($cherryMap.ContainsKey($sha) -and $cherryMap[$sha] -eq '-') { continue }
+
+        # Sub-case (c): spike-only — every path starts with .tmp/issue-$IssueId/
+        $paths = if ($commitPaths.ContainsKey($sha)) { @($commitPaths[$sha]) } else { @() }
+
+        # Empty path list (e.g. --allow-empty commits) — explicitly rejected
+        if ($paths.Count -eq 0) { return $false }
+
+        $allSpike = $true
+        foreach ($p in $paths) {
+            if (-not $p.StartsWith($spikePrefixForIssue)) { $allSpike = $false; break }
+        }
+        if ($allSpike) { continue }
+
+        # Sub-case (d): tree-at-HEAD — every path has tree-equivalent content on main
+        $allTreeEquiv = $true
+        foreach ($p in $paths) {
+            if (-not $treeEquiv.ContainsKey($p) -or -not $treeEquiv[$p]) { $allTreeEquiv = $false; break }
+        }
+        if ($allTreeEquiv) { continue }
+
+        # Not absorbed
+        return $false
+    }
+
+    return $true
+}
+
+function Test-OrphanBranchAutoResolveEligible {
+    <#
+    .SYNOPSIS
+        Orchestrator: returns $true when the branch is eligible for auto-delete,
+        $false when signals indicate it should be skipped,
+        $null when signals cannot be determined (fail-open).
+    .NOTES
+        Name guard: branches not matching $script:OrphanIssueRegex always return $false (not eligible).
+        $null propagation has higher precedence than $false: if either helper returns $null,
+        the orchestrator returns $null regardless of the other helper's result.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Branch,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultBranch
+    )
+
+    # (1) Name guard: non-feature/issue-N branches are definitively not eligible
+    if ($Branch -notmatch $script:OrphanIssueRegex) { return $false }
+    $issueId = [long]$Matches[1]
+
+    # (2) GitHub signals (tri-state)
+    $signals = Test-OrphanBranchGitHubSignalsShipped -Branch $Branch -DefaultBranch $DefaultBranch
+    if ($null -eq $signals) { return $null }
+    if ($signals -ne $true) { return $false }
+
+    # (3) Commit absorption (tri-state)
+    $absorbed = Test-OrphanBranchCommitsAbsorbed -Branch $Branch -DefaultBranch $DefaultBranch -IssueId $issueId
+    if ($null -eq $absorbed) { return $null }
+
+    return ($absorbed -eq $true)
 }

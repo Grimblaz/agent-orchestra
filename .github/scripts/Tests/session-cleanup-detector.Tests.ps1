@@ -1436,3 +1436,84 @@ title: "Issue 185 RED fixture"
         & $script:AssertCalibrationNoiseExcluded -Context $context
     }
 }
+
+Describe 'Get-OrphanBranchLines — per-line suffix and composite invocation' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        . (Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector-core.ps1')
+    }
+
+    It 'appends "; eligible for auto-resolve at cleanup time" to feature/issue-N orphan lines' {
+        $items = @(
+            [pscustomobject]@{ BranchName = 'feature/issue-548-test'; Reason = 'remote branch deleted' }
+        )
+        $lines = @(Get-SCDOrphanBranchLines -Items $items)
+        $lines[0] | Should -Match ([regex]::Escape('; eligible for auto-resolve at cleanup time')) `
+            -Because 'feature/issue-N orphan lines must append the auto-resolve suffix'
+    }
+
+    It 'does not append suffix to claude/* orphan lines' {
+        $items = @(
+            [pscustomobject]@{ BranchName = 'claude/old-feature'; Reason = 'remote branch deleted' }
+        )
+        $lines = @(Get-SCDOrphanBranchLines -Items $items)
+        $lines[0] | Should -Not -Match ([regex]::Escape('; eligible for auto-resolve at cleanup time')) `
+            -Because 'claude/* orphan lines must not receive the auto-resolve suffix'
+    }
+
+    It 'handles mixed-list: feature/issue-N gets suffix, claude/* does not' {
+        $items = @(
+            [pscustomobject]@{ BranchName = 'feature/issue-548-mixed'; Reason = 'remote branch deleted' }
+            [pscustomobject]@{ BranchName = 'claude/old-feature'; Reason = 'remote branch deleted' }
+        )
+        $lines = @(Get-SCDOrphanBranchLines -Items $items)
+        $lines[0] | Should -Match ([regex]::Escape('; eligible for auto-resolve at cleanup time')) `
+            -Because 'feature/issue-N item must have the suffix'
+        $lines[1] | Should -Not -Match ([regex]::Escape('; eligible for auto-resolve at cleanup time')) `
+            -Because 'claude/* item must not have the suffix'
+    }
+
+    It 'emits exactly one composite pwsh invocation with both -SiblingWorktrees and -OrphanBranches when both categories present' {
+        $workDir = Join-Path $TestDrive 'composite-both-categories-current'
+        $siblingDir = Join-Path $TestDrive 'composite-both-categories-sibling'
+        New-Item -ItemType Directory -Path $workDir, $siblingDir -Force | Out-Null
+        $currentPath = & $script:ToPorcelainPath -Path $workDir
+        $siblingPath = & $script:ToPorcelainPath -Path $siblingDir
+        $currentBranch = 'main'
+        $siblingBranch = 'claude/sibling-composite-abcde'
+        $orphanBranch = 'claude/orphan-composite-abcde'
+        $worktreeList = @(
+            (& $script:NewWorktreeRecord -Path $currentPath -Branch $currentBranch),
+            (& $script:NewWorktreeRecord -Path $siblingPath -Branch $siblingBranch)
+        ) -join "`n`n"
+
+        $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+            'branch--show-current'                               = $currentBranch
+            'symbolic-ref-origin-HEAD'                           = 'refs/remotes/origin/main'
+            'worktree-list-porcelain'                            = $worktreeList
+            'show-ref-refs/remotes/origin/main'                  = 0
+            'fetch-exit'                                         = 0
+            "merge-base-$siblingBranch-refs/remotes/origin/main" = 0
+            'for-each-ref-refs/heads/claude/'                    = @($siblingBranch, $orphanBranch)
+            "merge-base-$orphanBranch-refs/remotes/origin/main"  = 0
+            'path-configs'                                       = @{
+                "$siblingPath" = @{
+                    'branch--show-current' = $siblingBranch
+                    'rev-parse-exit'       = 128
+                }
+            }
+        }
+        $context = & $script:GetAdditionalContext -Output $result.Output
+        $fencedBlocks = & $script:GetFencedPowerShellBlocks -Context $context
+        $cleanupLines = @($fencedBlocks | ForEach-Object { $_ -split "`n" } | Where-Object { $_ -match 'post-merge-cleanup\.ps1' })
+
+        $result.ExitCode | Should -Be 0
+        $cleanupLines.Count | Should -Be 1 `
+            -Because 'exactly one composite post-merge-cleanup.ps1 line must appear in the fenced block'
+        $cleanupLines[0] | Should -Match ([regex]::Escape('-SiblingWorktrees @(')) `
+            -Because 'the composite invocation must include -SiblingWorktrees'
+        $cleanupLines[0] | Should -Match ([regex]::Escape('-OrphanBranches @(')) `
+            -Because 'the composite invocation must include -OrphanBranches'
+    }
+}

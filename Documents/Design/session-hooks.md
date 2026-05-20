@@ -18,6 +18,8 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 
 ## Design Decisions
 
+Era values: Hook | Instruction | Skill | Plugin hook | Auto-resolve (business-logic decisions inside the plugin-hook-delivered cleanup script).
+
 | # | Decision | Choice | Rationale | Era |
 |---|----------|--------|-----------|-----|
 | D1 | Cleanup mechanism | VS Code `SessionStart` hook | Fires at the natural post-merge moment; zero overhead for sessions with nothing to clean | Hook |
@@ -37,6 +39,11 @@ Code-Critic Perspective 7 (Documentation Script Audit) was added in the same pha
 | D15 | Shared hook file scope | Carry both `SessionStart` and `PostToolUse` in the same hook file | Keeps startup hygiene and release hygiene under one plugin-distributed hook surface and reduces drift between tools | Plugin hook |
 | D16 | Release-hygiene hook location | Move `plugin-release-hygiene-hook.ps1` into `skills/plugin-release-hygiene/scripts/` | Co-locates the hook script with its owning skill and removes the old `.claude/settings.json` / `.claude/hooks/` maintainer-only path | Plugin hook |
 | D17 | Claude marketplace freshness | Run `claude plugin marketplace update` before the Step 7b cached version comparison | Prevents stale marketplace clones from creating false-current silence while preserving fail-open startup behavior | Plugin hook |
+| D18 | Auto-resolve eligibility rule | Tri-state `$true`/`$false`/`$null`; fail-open on `$null`; cleanup-time evaluation only | Preserve existing conservative behavior when signals are unavailable; surface undeletable branches for manual review; avoid per-session gh latency | Auto-resolve |
+| D19 | Stray-content tolerance boundary | Moderate with tree-at-HEAD: per-commit absorption (ancestor-on-main / patch-equivalent / spike-only-per-IssueId with `--allow-empty` rejection / tree-at-HEAD-matches-main) | Strict (spike-only or fingerprint) misses reworded-squash #535 class; aggressive (closed+merged alone) risks data loss; moderate-with-tree-at-HEAD closes the recall gap at marginal coincidence-of-trees risk | Auto-resolve |
+| D20 | Eligibility evaluation location | Cleanup-time (inside `Remove-OrphanBranch`) | No per-session gh latency; stale-state gap avoidance (signals evaluated immediately before deletion) | Auto-resolve |
+| D21 | CLOSED stateReason authorization | Any CLOSED stateReason accepted (NOT_PLANNED, DUPLICATE, COMPLETED) | Cleanup convergence over branch preservation; intent-respect at issue-closure time; conservative skip-on-NOT_PLANNED rejected | Auto-resolve |
+| D22 | Per-line wording surface | Detector adds `; eligible for auto-resolve at cleanup time` suffix for `feature/issue-N-*` orphans; cleanup script splits skip wording into `auto-resolve declined`, `could not verify auto-resolve signals`, and `branch not reachable from default (merged-state re-check returned false)` | Preamble-only annotation easy to skim past; universal suffix misrepresents `claude/*` orphans; both-surfaces provides per-line visibility at detector time and precise skip context at cleanup time | Auto-resolve |
 
 ---
 

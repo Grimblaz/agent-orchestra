@@ -110,25 +110,46 @@ function Remove-OrphanBranch {
     }
 
     $isMerged = Test-BranchMergedIntoDefault -BranchName $Branch -DefaultBranch $DefaultBranch
+    $autoResolveApproved = $false
     if (-not $isMerged) {
-        Write-Output "Skipped '$Branch' — unmerged commits — review before deleting"
-        return
-    }
-
-    # Prefer -d (safe); escalate to -D only after re-confirming merged
-    Invoke-SCDNativeCommand { git branch -d $Branch 2>$null }
-    if ($LASTEXITCODE -ne 0) {
-        # Re-confirm still merged before forcing
-        if (Test-BranchMergedIntoDefault -BranchName $Branch -DefaultBranch $DefaultBranch) {
-            Invoke-SCDNativeCommand { git branch -D $Branch 2>$null }
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Failed to delete orphan branch '$Branch' (exit $LASTEXITCODE)"
+        $autoResolve = Test-OrphanBranchAutoResolveEligible -Branch $Branch -DefaultBranch $DefaultBranch
+        switch ($autoResolve) {
+            $true { $autoResolveApproved = $true } # fall through to delete via -D
+            $null {
+                Write-Output "Skipped '$Branch' — could not verify GitHub signals — review before deleting"
+                return
+            }
+            default {
+                Write-Output "Skipped '$Branch' — auto-resolve declined — review before deleting"
                 return
             }
         }
-        else {
-            Write-Output "Skipped '$Branch' — unmerged commits — review before deleting"
+    }
+
+    if ($autoResolveApproved) {
+        # Auto-resolve path: commits are absorbed per GitHub signals; use -D directly
+        Invoke-SCDNativeCommand { git branch -D $Branch 2>$null }
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Failed to delete orphan branch '$Branch' (exit $LASTEXITCODE)"
             return
+        }
+    }
+    else {
+        # Prefer -d (safe); escalate to -D only after re-confirming merged
+        Invoke-SCDNativeCommand { git branch -d $Branch 2>$null }
+        if ($LASTEXITCODE -ne 0) {
+            # Re-confirm still merged before forcing
+            if (Test-BranchMergedIntoDefault -BranchName $Branch -DefaultBranch $DefaultBranch) {
+                Invoke-SCDNativeCommand { git branch -D $Branch 2>$null }
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Warning "Failed to delete orphan branch '$Branch' (exit $LASTEXITCODE)"
+                    return
+                }
+            }
+            else {
+                Write-Output "Skipped '$Branch' — became unmerged between re-check and force-delete — review before deleting"
+                return
+            }
         }
     }
 
