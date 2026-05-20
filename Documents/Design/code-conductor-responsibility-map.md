@@ -39,8 +39,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Diagnose failures before retrying specialist work."
   disposition: adapter-handles
   action: "Use skills/parallel-execution/references/error-handling.md for retry classification and recovery routing."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Ownership Principles"
   responsibility: "Escalate with concrete options and a recommendation when user authority is required."
@@ -60,8 +60,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Continue autonomously toward merge-ready unless true user decision authority is required."
   disposition: spine-runner-keeps
   action: "Keep default-continuation behavior as the outer orchestration policy."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "D-rules D1-D14 / Questioning & Pause Policy (Mandatory)"
   responsibility: "Enforce zero-tolerance structured-question and no plain-text pause rules."
@@ -145,22 +145,22 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Never create plans directly, regardless of scope, tier, or bundling."
   disposition: spine-runner-keeps
   action: "Preserve a hard no-plan-authoring boundary in the runner; plan content remains Issue-Planner-owned."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Process"
   responsibility: "Load solution-authoring before any subsequent skill fires a structured question."
   disposition: adapter-handles
   action: "Use skills/solution-authoring/SKILL.md for engagement-gate classification before structured questions."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Process"
   responsibility: "Load upstream-onboarding and run its opening protocol after solution-authoring."
   disposition: adapter-handles
   action: "Use skills/upstream-onboarding/SKILL.md for context brief and inherited-work standards checks."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Process"
   responsibility: "Track the cross-session engagement-state limitation that may re-fire settled structured questions."
@@ -174,8 +174,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Load terminal-hygiene for validation execution, continuation-prompt hazards, and non-fatal diagnostics."
   disposition: adapter-handles
   action: "Use skills/terminal-hygiene/SKILL.md for terminal and diagnostic guardrails."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Step protocols Step 0-5 / Core Workflow / Hub Execution Workflow"
   responsibility: "Keep Issue Transition as Step 0 after any pre-response trigger handling."
@@ -188,8 +188,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Use session-startup cleanup guidance for stale tracking artifacts from merged branches."
   disposition: adapter-handles
   action: "Use skills/session-startup/SKILL.md and skills/session-startup/scripts/post-merge-cleanup.ps1 for cleanup recovery."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Core Workflow / Step protocols Step 0-5 / Issue Transition Step 0"
   responsibility: "Call Issue-Planner when scope or acceptance criteria changed or are ambiguous before execution."
@@ -216,8 +216,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Route direct slash-command prose by leading-token trigger phrases before generic specialist dispatch."
   disposition: adapter-handles
   action: "Use skills/routing-tables/SKILL.md and skills/routing-tables/assets/routing-config.json for prose-trigger and specialist-dispatch lookup."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Hub Mode + Smart Resume / Non-hub-mode invocation"
   responsibility: "Keep direct /code-conductor prose task support in legacy no-spine mode until prose-plan spine support lands."
@@ -238,8 +238,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Evaluate abbreviated-tier criteria and phase matrix through routing-tables gate criteria."
   disposition: adapter-handles
   action: "Use skills/routing-tables/SKILL.md and skills/routing-tables/assets/gate-criteria.json for Test-GateCriteria scope_classification."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Scope Classification Gate"
   responsibility: "Honor user override of the recommended pipeline tier."
@@ -273,8 +273,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Stop with requires upstream issue for upstream shared-workflow mutation and use safe issue-creation rules when needed."
   disposition: adapter-handles
   action: "Use skills/safe-operations/SKILL.md for deduplication, priority labels, prevention analysis, and issue output capture."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Downstream Ownership Boundary"
   responsibility: "Fail closed mid-run when newly discovered scope requires upstream shared-workflow mutation."
@@ -435,22 +435,22 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Measure guidance complexity and block or override agent-prompt rule additions when targets exceed the soft ceiling."
   disposition: adapter-handles
   action: "Use skills/guidance-measurement/SKILL.md and skills/guidance-measurement/scripts/measure-guidance-complexity.ps1 for D10 capacity evidence."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Execute Each Step"
   responsibility: "Identify specialist agents and applicable skills for each step."
   disposition: adapter-handles
   action: "Use skills/routing-tables/SKILL.md and skills/routing-tables/assets/routing-config.json for specialist and skill mapping."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Execute Each Step"
   responsibility: "Build focused dispatch context from frame-spine, active slice, and depth-1 dependencies."
   disposition: spine-runner-keeps
   action: "Keep frame-slice lookup and context-budget assembly in Spine-Runner dispatch."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Execute Each Step"
   responsibility: "Accumulate dispatch-cost placeholder samples before PR creation and back-fill them after conformance or judgment."
@@ -468,8 +468,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Execute Each Step"
   responsibility: "Prompt once for Copilot cost collection when the sentinel is absent and suppression is unset."
-  disposition: adapter-handles
-  action: "Use skills/copilot-cost-collection/SKILL.md and skills/copilot-cost-collection/scripts/Initialize-CopilotCostCollection.ps1 for setup semantics."
+  disposition: spine-runner-keeps
+  action: "Keep the prompt-once and suppression decision in conductor runtime; use skills/copilot-cost-collection/SKILL.md only for setup semantics after the runtime offers collection."
   verification_status: unverified
   verified-against-sha: ""
   verified-via-pr-sha: ""
@@ -498,15 +498,15 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Perform per-step refactor cleanup after GREEN before the dedicated refactor phase."
   disposition: adapter-handles
   action: "Use skills/refactoring-methodology/SKILL.md for cleanup guardrails when per-step refactor work exceeds trivial edits."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Execute Each Step"
   responsibility: "Run incremental validation commands and project tests after each step."
   disposition: adapter-handles
   action: "Use skills/validation-methodology/SKILL.md and skills/terminal-hygiene/SKILL.md for staged validation and execution hygiene."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Execute Each Step"
   responsibility: "Enforce RC conformance after convergence gates and run one dedicated correction cycle when AC items diverge."
@@ -519,8 +519,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Run the step commit protocol when auto_commit_enabled is true and annotate uncommitted success on failure."
   disposition: adapter-handles
   action: "Use skills/step-commit/SKILL.md for validated-step commit behavior."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Execute Each Step"
   responsibility: "Update session-memory plan progress checkpoints after quality checks pass."
@@ -540,8 +540,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Enforce the Review Completion Gate before push or PR creation and re-enter missing review stages when needed."
   disposition: adapter-handles
   action: "Use skills/validation-methodology/references/review-reconciliation.md, skills/validation-methodology/references/review-state-persistence.md, and skills/validation-methodology/references/post-judgment-routing.md for review completion state."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Create PR Step 4"
   responsibility: "Run planned-scope and migration-completeness checks before proceeding."
@@ -554,15 +554,15 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Delegate domain-based design-document creation or update to Doc-Keeper before pushing."
   disposition: adapter-handles
   action: "Use skills/documentation-finalization/SKILL.md for domain design doc selection, update, and stale-doc cleanup."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Create PR Step 4"
   responsibility: "Run the formatting gate on branch-changed files and note any formatting commit."
   disposition: adapter-handles
   action: "Use skills/pre-commit-formatting/SKILL.md for final markdown and whitespace formatting."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Create PR Step 4"
   responsibility: "Capture validation evidence, push the branch, create the PR, and include required PR body sections."
@@ -575,8 +575,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Run the warn-only frame credit ledger after PR creation."
   disposition: adapter-handles
   action: "Use skills/frame-credit-ledger/SKILL.md for post-PR credit-ledger observation."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Report Completion Step 5"
   responsibility: "Report work done, link the PR URL, and hand off to the user for review."
@@ -589,22 +589,22 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Follow the build-test protocol for execution mode, requirement contracts, convergence gates, triage routing, and post-issue checkpoints."
   disposition: adapter-handles
   action: "Use skills/parallel-execution/SKILL.md for build-test orchestration."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Property-Based Testing (PBT) Rollout Policy"
   responsibility: "Use the PBT rollout policy when randomized invariant testing is relevant."
   disposition: adapter-handles
   action: "Use skills/property-based-testing/SKILL.md for property-based testing rollout guidance."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Agent Selection table"
   responsibility: "Resolve specialist dispatch through routing-tables lookup and task-intent rules."
   disposition: adapter-handles
   action: "Use skills/routing-tables/SKILL.md and skills/routing-tables/assets/routing-config.json for specialist_dispatch."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Agent Selection table"
   responsibility: "Choose native Explore for lightweight discovery and Research-Agent for deep persisted research."
@@ -624,15 +624,15 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Invoke Senior Engineer from frame-slice executor metadata rather than ad hoc prose routing."
   disposition: spine-runner-keeps
   action: "Keep executor resolution from frame-slice metadata in Spine-Runner."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Review Reconciliation Loop (Mandatory)"
   responsibility: "Load review reconciliation, review-state persistence, post-judgment routing, and express-lane references."
   disposition: adapter-handles
   action: "Use skills/validation-methodology/references/review-reconciliation.md, skills/validation-methodology/references/review-state-persistence.md, skills/validation-methodology/references/post-judgment-routing.md, and skills/code-review-intake/references/express-lane.md."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Review Reconciliation Loop (Mandatory)"
   responsibility: "Own review-mode entry, express-lane boundaries, post-judgment routing, calibration side effects, and CE Gate sequencing."
@@ -645,22 +645,22 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Use routing-tables skill_mapping entries when naming reusable skills in specialist prompts."
   disposition: adapter-handles
   action: "Use skills/routing-tables/SKILL.md and skills/routing-tables/assets/routing-config.json for skill_mapping."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Skill Mapping"
   responsibility: "Name skill-specific instructions for implementation, review, planning, documentation, refactoring, debugging, testing, and UI work."
   disposition: adapter-handles
   action: "Use the relevant skill paths named by the body, including skills/implementation-discipline/SKILL.md, skills/software-architecture/SKILL.md, skills/adversarial-review/SKILL.md, skills/review-judgment/SKILL.md, skills/plan-authoring/SKILL.md, skills/design-exploration/SKILL.md, skills/customer-experience/SKILL.md, skills/documentation-finalization/SKILL.md, skills/refactoring-methodology/SKILL.md, skills/systematic-debugging/SKILL.md, skills/test-driven-development/SKILL.md, skills/ui-testing/SKILL.md, and skills/frontend-design/SKILL.md."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Validation Ladder (Mandatory) / Validation Ladder tiers"
   responsibility: "Use the graduated four-tier validation ladder and Failure Triage Rule."
   disposition: adapter-handles
   action: "Use skills/validation-methodology/SKILL.md for validation ladder tiers and failure triage."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Validation Ladder (Mandatory) / Validation Ladder tiers"
   responsibility: "Keep incremental validation timing, post-fix review entry, CE Gate sequencing, and PR-gate ownership around the ladder."
@@ -680,8 +680,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Load CE orchestration and defect-response references."
   disposition: adapter-handles
   action: "Use skills/customer-experience/references/orchestration-protocol.md and skills/customer-experience/references/defect-response.md for CE Gate protocol."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "BDD pre-flight / Customer Experience Gate (CE Gate)"
   responsibility: "Extract active scenario IDs from the issue body and run the BDD pre-flight missing-coverage recovery policy."
@@ -708,8 +708,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Apply prevention-analysis before creating systemic follow-up issues from CE Gate Track 2."
   disposition: adapter-handles
   action: "Use skills/safe-operations/SKILL.md prevention-analysis advisory before CE systemic issue creation."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "PR Body Pipeline Metrics"
   responsibility: "Require PR bodies to include a Pipeline Metrics section containing the pipeline-metrics block."
@@ -722,15 +722,15 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Emit Pipeline Metrics at PR creation using canonical metrics schema, verdict mapping, and findings construction references."
   disposition: adapter-handles
   action: "Use skills/calibration-pipeline/references/metrics-schema.md, skills/calibration-pipeline/references/verdict-mapping.md, and skills/calibration-pipeline/references/findings-construction.md."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Pipeline metrics emission / Pipeline Metrics"
   responsibility: "Construct release-hygiene and CE Gate S2 synthetic-PR credit rows from the release-hygiene reference."
   disposition: adapter-handles
   action: "Use skills/calibration-pipeline/references/release-hygiene-credit-emission.md for v4 release-hygiene credit row construction."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Pipeline metrics emission / Pipeline Metrics"
   responsibility: "Remove legacy v3 pipeline-metrics fallback at v2.9.0 after pre-v4 back-catalog backfill."
@@ -744,8 +744,8 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Construct review credit rows from judge-rulings blocks and review-credit rules."
   disposition: adapter-handles
   action: "Use skills/calibration-pipeline/references/review-credit-emission.md for v4 review credit row construction."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Pipeline metrics emission / Pipeline Metrics"
   responsibility: "Flush dispatch-cost samples into initial PR-body metrics and later update live PR-body targeted samples."
@@ -758,43 +758,43 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Harvest deferred pipeline-entry credit markers from the linked issue before emitting credits."
   disposition: adapter-handles
   action: "Use skills/frame-credit-emission/SKILL.md with .github/scripts/lib/frame-credit-ledger-core.ps1 Invoke-CreditInputHarvest for SMC-17 credit harvest."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Pipeline-Entry Credit Harvest (SMC-17)"
   responsibility: "Merge harvested credit rows into credits[] with per-port additive deduplication."
   disposition: adapter-handles
   action: "Use skills/frame-credit-emission/SKILL.md for credit-row merge semantics and additive-merge rules."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Deferred Port Credit Rows"
   responsibility: "Emit deferred credit rows for ports whose frame/ports YAML declares trigger-status: deferred."
   disposition: adapter-handles
   action: "Use skills/frame-credit-emission/SKILL.md and .github/scripts/lib/frame-credit-ledger-core.ps1 Build-DeferredPortCreditRow."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Deferred Port Credit Rows"
   responsibility: "Emit process-review trigger-absent credit when CE Gate found no defects, or skipped credit when CE data is unavailable."
   disposition: adapter-handles
   action: "Use skills/frame-credit-emission/SKILL.md and .github/scripts/lib/frame-credit-ledger-core.ps1 Build-ProcessReviewCreditRow."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Post-PR Credit Row (D10 category 3)"
   responsibility: "After post-merge cleanup completes, emit the post-pr credit row from structured checklist outcomes."
   disposition: adapter-handles
   action: "Use skills/post-pr-review/SKILL.md and skills/frame-credit-emission/SKILL.md for post-pr outcome and credit-row emission."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Refactoring Phase mandate / Refactoring Phase is MANDATORY"
   responsibility: "Always call Refactor-Specialist after Code-Smith completes."
   disposition: adapter-handles
   action: "Use skills/refactoring-methodology/SKILL.md Conductor Integration for mandatory refactor handoff and scope guardrails."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Tactical Adaptation"
   responsibility: "Adapt without asking for renamed files, redundant steps, efficient step reordering, or minor missing subtasks."
@@ -814,15 +814,15 @@ Retirement clause: this artifact is archived to `Documents/Decisions/` and its P
   responsibility: "Classify subagent-call failures, apply retry/backoff, and route defer-vs-skip outcomes."
   disposition: adapter-handles
   action: "Use skills/parallel-execution/references/error-handling.md for R5 subagent-call failure handling."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Error Handling"
   responsibility: "Apply failure triage, escalation thresholds, and recovery routing for non-rate-limit workflow failures after diagnosis."
   disposition: adapter-handles
   action: "Use skills/parallel-execution/references/error-handling.md for general workflow failure handling."
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Context Management for Long Sessions"
   responsibility: "Proactively compact at phase boundaries and rely on session memory or issue comments after compaction."
