@@ -226,7 +226,57 @@ else { exit 1 }
             $result = & $script:Invoke -RepoPath $repo -Branch 'feature/issue-548-perf'
             $sw.Stop()
             $result | Should -BeTrue
-            $sw.ElapsedMilliseconds | Should -BeLessThan 10000 -Because 'batch git invocation should not scale linearly with commit count'
+            $sw.ElapsedMilliseconds | Should -BeLessThan 3000 -Because 'batch git invocation should not scale linearly with commit count'
+        }
+
+        It '50 residual commits complete within time budget and scale sub-linearly vs 5-commit run' {
+            # Validates that git invocations are batched: 50 commits should not take 10x longer than 5.
+            $repo5 = & $script:NewTestRepo
+            & git -C $repo5 checkout -b 'feature/issue-548-perf5' 2>&1 | Out-Null
+            1..5 | ForEach-Object {
+                & $script:CommitFile -RepoPath $repo5 -RelPath ".tmp/issue-548/f$_.md" -Content "content $_" -Message "spike $_"
+            }
+            $sw5 = [System.Diagnostics.Stopwatch]::StartNew()
+            $result5 = & $script:Invoke -RepoPath $repo5 -Branch 'feature/issue-548-perf5'
+            $sw5.Stop()
+            $result5 | Should -BeTrue
+
+            $repo50 = & $script:NewTestRepo
+            & git -C $repo50 checkout -b 'feature/issue-548-perf50' 2>&1 | Out-Null
+            1..50 | ForEach-Object {
+                & git -C $repo50 -c user.email='t@t.com' -c user.name='T' commit --allow-empty -m "commit $_" 2>&1 | Out-Null
+            }
+            # All 50 are allow-empty (empty path list) so the function returns $false quickly.
+            # We just need to validate the timing does not scale per-commit.
+            $sw50 = [System.Diagnostics.Stopwatch]::StartNew()
+            $result50 = & $script:Invoke -RepoPath $repo50 -Branch 'feature/issue-548-perf50'
+            $sw50.Stop()
+            $sw50.ElapsedMilliseconds | Should -BeLessThan 5000 -Because '50-commit run must complete within generous CI budget'
+            # Ratio guard: 50-commit run must not be more than 3x slower than 5-commit run
+            if ($sw5.ElapsedMilliseconds -gt 0) {
+                $ratio = $sw50.ElapsedMilliseconds / $sw5.ElapsedMilliseconds
+                $ratio | Should -BeLessThan 3 -Because 'sub-linear scaling confirms git invocations are batched, not per-commit'
+            }
+        }
+    }
+
+    Context 'with master as default branch' {
+        It 'spike-only branch with master as default returns $true' {
+            $repoPath = Join-Path $script:TempBase "repo-master-$([Guid]::NewGuid().ToString('N').Substring(0,8))"
+            $barePath = "${repoPath}.git"
+            & git -c init.defaultBranch=master -c commit.gpgsign=false init --bare $barePath 2>&1 | Out-Null
+            & git -c init.defaultBranch=master -c commit.gpgsign=false init $repoPath 2>&1 | Out-Null
+            & git -C $repoPath -c user.email='t@t.com' -c user.name='T' commit --allow-empty -m 'root' 2>&1 | Out-Null
+            & git -C $repoPath remote add origin $barePath 2>&1 | Out-Null
+            & git -C $repoPath push -u origin master 2>&1 | Out-Null
+            & git -C $repoPath fetch origin --prune 2>&1 | Out-Null
+            & git -C $repoPath symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/master 2>&1 | Out-Null
+
+            & git -C $repoPath checkout -b 'feature/issue-548-master-spike' 2>&1 | Out-Null
+            & $script:CommitFile -RepoPath $repoPath -RelPath '.tmp/issue-548/notes.md' -Content 'spike' -Message 'add spike'
+
+            $result = & $script:Invoke -RepoPath $repoPath -Branch 'feature/issue-548-master-spike' -DefaultBranch 'master'
+            $result | Should -BeTrue
         }
     }
 }

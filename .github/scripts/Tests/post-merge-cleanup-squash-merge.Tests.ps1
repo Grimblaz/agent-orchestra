@@ -675,7 +675,7 @@ exit 1
             (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeTrue
         }
 
-        It 'S6: gh non-zero exit returns could not verify GitHub signals' {
+        It 'S6: gh non-zero exit returns could not verify auto-resolve signals' {
             $repoPath = & $script:NewSyntheticRepo -Name 's6-gh-fail'
             $branch   = 'feature/issue-548-s6-ghfail'
 
@@ -691,7 +691,7 @@ exit 1
 
             $result = & $script:InvokeCleanupWithGh -RepoPath $repoPath -BranchName $branch -GhShimPath $shimPath
             $result.ExitCode | Should -Be 0
-            $result.Output   | Should -Match 'could not verify GitHub signals'
+            $result.Output   | Should -Match 'could not verify auto-resolve signals'
             (& $script:TestLocalBranchExists -RepoPath $repoPath -BranchName $branch) | Should -BeTrue
         }
     }

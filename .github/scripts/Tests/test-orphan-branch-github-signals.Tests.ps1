@@ -182,4 +182,41 @@ else { exit 1 }
             $result | Should -BeNullOrEmpty
         }
     }
+
+    Context 'with master as default branch' {
+        It 'state CLOSED + matched merged PR with master as default branch returns $true' {
+            $helperPath = $script:HelpersPath.Replace("'", "''")
+            $repoPath   = $script:RepoPath.Replace("'", "''")
+
+            $shim = & $script:MakeGhShim -State 'CLOSED' -HeadRefOid $script:FeatureTip
+
+            $command = @"
+Push-Location '$repoPath'
+. '$helperPath'
+`$result = Test-OrphanBranchGitHubSignalsShipped -Branch 'feature/issue-548-test' -DefaultBranch 'master'
+if (`$null -eq `$result) { exit 2 }
+elseif (`$result -eq `$true) { exit 0 }
+else { exit 1 }
+"@
+            $sep = [System.IO.Path]::PathSeparator
+            $env:PATH = "$shim$sep$script:SavedPath"
+            try {
+                pwsh -NoProfile -NonInteractive -Command $command 2>&1 | Out-Null
+                $exitCode = $LASTEXITCODE
+            } finally {
+                $env:PATH = $script:SavedPath
+            }
+            switch ($exitCode) {
+                0 { $result = $true }
+                2 { $result = $null }
+                default { $result = $false }
+            }
+            $result | Should -BeTrue
+
+            $callLog = Join-Path $shim 'gh-calls.log'
+            $callLogContent = if (Test-Path $callLog) { Get-Content $callLog -Raw } else { '' }
+            $callLogContent | Should -Match '--base\s+master' `
+                -Because "Test-OrphanBranchGitHubSignalsShipped must pass --base `$DefaultBranch to gh pr list, not hardcode 'main'"
+        }
+    }
 }
