@@ -194,7 +194,7 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-against-sha: "50ee151ab33d45cceb7107923c2ae2e6101aa95e"
   verified-via-pr-sha: ""
 - source: "Core Workflow / Step protocols Step 0-5 / Issue Transition Step 0"
-  responsibility: "Call Issue-Planner when scope or acceptance criteria changed or are ambiguous before execution."
+  responsibility: "Call Issue-Planner when scope or acceptance criteria have changed or are ambiguous before execution."
   disposition: planner-should-absorb
   action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/590; make plan-amendment criteria explicit in skills/plan-authoring/SKILL.md and Issue-Planner handoff wording."
   verification_status: unverified

@@ -125,6 +125,29 @@ Integration test 1: The body covers Code Conductor Agent, Ownership Principles, 
         return $false
     }
 
+    function script:ConvertTo-CCRMRowValueText {
+        param(
+            [AllowNull()]
+            [object]$Value
+        )
+
+        if ($null -eq $Value) {
+            return ''
+        }
+
+        if ($Value -is [System.Collections.IEnumerable] -and $Value -isnot [string]) {
+            $normalizedItems = @(
+                foreach ($item in $Value) {
+                    [string]$item
+                }
+            )
+
+            return [string]::Join("`n", $normalizedItems)
+        }
+
+        return [string]$Value
+    }
+
     function script:Get-CCRMRowValue {
         param(
             [Parameter(Mandatory)]
@@ -136,27 +159,18 @@ Integration test 1: The body covers Code Conductor Agent, Ownership Principles, 
 
         if ($Row -is [System.Collections.IDictionary]) {
             if ($Row.Contains($Name)) {
-                $dictionaryValue = $Row[$Name]
-                if ($null -eq $dictionaryValue) {
-                    return ''
-                }
-
-                if ($dictionaryValue -is [System.Collections.IEnumerable] -and $dictionaryValue -isnot [string]) {
-                    return [string]::Join("`n", @($dictionaryValue | ForEach-Object { [string]$_ }))
-                }
-
-                return [string]$dictionaryValue
+                return script:ConvertTo-CCRMRowValueText -Value $Row[$Name]
             }
 
             return ''
         }
 
         $property = $Row.PSObject.Properties[$Name]
-        if ($null -eq $property -or $null -eq $property.Value) {
+        if ($null -eq $property) {
             return ''
         }
 
-        return [string]$property.Value
+        return script:ConvertTo-CCRMRowValueText -Value $property.Value
     }
 
     function script:Test-CCRMRowKey {
@@ -193,9 +207,7 @@ Integration test 1: The body covers Code Conductor Agent, Ownership Principles, 
 
         $propertyValues = @(
             foreach ($property in $Row.PSObject.Properties) {
-                if ($null -ne $property.Value) {
-                    [string]$property.Value
-                }
+                script:Get-CCRMRowValue -Row $Row -Name $property.Name
             }
         )
 
@@ -568,6 +580,22 @@ Describe 'Code-Conductor responsibility map - coverage completeness' {
 }
 
 Describe 'Code-Conductor responsibility map - row invariants' {
+    It 'normalizes PSObject collection values for scalar lookup and aggregate row text' {
+        $row = [pscustomobject]@{
+            source = @('Synthetic PSObject source A', 'Synthetic PSObject source B')
+            action = @('Synthetic PSObject action A', 'Synthetic PSObject action B')
+            disposition = 'defer'
+        }
+
+        $source = script:Get-CCRMRowValue -Row $row -Name 'source'
+        $rowText = script:Get-CCRMRowText -Row $row
+
+        $source | Should -Be "Synthetic PSObject source A`nSynthetic PSObject source B" -Because 'collection-valued PSObject properties must be normalized the same way as dictionary sequence values'
+        $rowText | Should -Match ([regex]::Escape("Synthetic PSObject source A`nSynthetic PSObject source B")) -Because 'aggregate row text must include normalized collection values'
+        $rowText | Should -Match ([regex]::Escape("Synthetic PSObject action A`nSynthetic PSObject action B")) -Because 'aggregate row text must normalize every collection-valued property'
+        $rowText | Should -Not -Match 'System\.Object\[\]' -Because 'aggregate row text must not stringify collection-valued properties as their CLR type name'
+    }
+
     It 'keeps every AC-critical responsibility row machine-checkable' {
         $rows = @(script:Get-CCRMResponsibilityRow -MapPath $script:ResponsibilityMapPath)
         $requiredValueKeys = @('source', 'responsibility', 'disposition', 'action', 'verification_status')
