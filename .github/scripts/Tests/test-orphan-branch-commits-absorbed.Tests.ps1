@@ -178,6 +178,30 @@ else { exit 1 }
         }
     }
 
+    Context 'tree-at-HEAD both-absent fix (#595 review)' {
+        It 'file deleted on branch AND absent on main (both absent at HEAD) returns $true' {
+            $repo = & $script:NewTestRepo
+            # Add a file to main as baseline
+            & $script:CommitFile -RepoPath $repo -RelPath 'src/del.ps1' -Content 'initial' -Message 'add del'
+            & git -C $repo push origin main 2>&1 | Out-Null
+            & git -C $repo fetch origin --prune 2>&1 | Out-Null
+            # Feature branch: modify then delete the file (residual commits, not cherry-equivalent to main)
+            & git -C $repo checkout -b 'feature/issue-548-both-deleted' 2>&1 | Out-Null
+            & $script:CommitFile -RepoPath $repo -RelPath 'src/del.ps1' -Content 'modified' -Message 'modify del'
+            & git -C $repo rm src/del.ps1 2>&1 | Out-Null
+            & git -C $repo -c user.email='t@t.com' -c user.name='T' commit -m 'delete del' 2>&1 | Out-Null
+            # Main: independently delete the same file (squash-merge scenario, different commit message)
+            & git -C $repo checkout main 2>&1 | Out-Null
+            & git -C $repo rm src/del.ps1 2>&1 | Out-Null
+            & git -C $repo -c user.email='t@t.com' -c user.name='T' commit -m 'squash: ship and remove del' 2>&1 | Out-Null
+            & git -C $repo push origin main 2>&1 | Out-Null
+            & git -C $repo fetch origin --prune 2>&1 | Out-Null
+            # Both sides lack src/del.ps1 at HEAD -> tree-equivalent -> absorbed
+            $result = & $script:Invoke -RepoPath $repo -Branch 'feature/issue-548-both-deleted'
+            $result | Should -BeTrue
+        }
+    }
+
     Context 'fail-open on git errors' {
         It 'branch that does not exist returns $null' {
             $repo = & $script:NewTestRepo

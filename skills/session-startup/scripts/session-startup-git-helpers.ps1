@@ -300,25 +300,40 @@ function Test-OrphanBranchCommitsAbsorbed {
         }
     }
 
-    # --- Batched git invocation 4: rev-parse --verify per unique touched path ---
+    # --- Batched git invocation 4: ls-tree per unique touched path ---
     # Build tree-equivalence map: path -> bool (true = tree at $Branch equals tree at $remoteDefault)
+    # Uses git ls-tree (not rev-parse --verify) so mode changes (e.g., chmod +x) are detected.
     $treeEquiv = @{}
     foreach ($path in $allTouchedPaths) {
-        # Check if path exists on both sides (skip deleted paths)
-        $branchBlob  = Invoke-SCDNativeCommand { git rev-parse --verify "$Branch`:$path" 2>$null }
-        $defaultBlob = Invoke-SCDNativeCommand { git rev-parse --verify "$remoteDefault`:$path" 2>$null }
-        if ($LASTEXITCODE -ne 0 -or -not $branchBlob -or -not $defaultBlob) {
-            # Path absent on one side — content cannot be tree-equivalent
+        $branchTree  = Invoke-SCDNativeCommand { git ls-tree "$Branch" -- "$path" 2>$null }
+        $branchTreeExit = $LASTEXITCODE
+        $defaultTree = Invoke-SCDNativeCommand { git ls-tree "$remoteDefault" -- "$path" 2>$null }
+        $defaultTreeExit = $LASTEXITCODE
+        if ($branchTreeExit -ne 0 -or $defaultTreeExit -ne 0) {
+            # git ls-tree command failure (not a valid object ref) — cannot determine equivalence
             $treeEquiv[$path] = $false
             continue
         }
-        # Compare blob SHAs directly (O(1) — no diff needed)
-        $treeEquiv[$path] = ($branchBlob.Trim() -eq $defaultBlob.Trim())
+        if (-not $branchTree -and -not $defaultTree) {
+            # Path absent on both sides (deleted from both) — treat as equivalent
+            $treeEquiv[$path] = $true
+            continue
+        }
+        if (-not $branchTree -or -not $defaultTree) {
+            # Path absent on one side only — not equivalent
+            $treeEquiv[$path] = $false
+            continue
+        }
+        # Compare full tree entries: "<mode> <type> <hash>" (strip tab-delimited path suffix)
+        $branchEntry  = ($branchTree  | Select-Object -First 1).Trim() -replace '\t.*$', ''
+        $defaultEntry = ($defaultTree | Select-Object -First 1).Trim() -replace '\t.*$', ''
+        $treeEquiv[$path] = ($branchEntry -eq $defaultEntry)
     }
 
-    # NOTE: The 4 "batched" invocations are above. The rev-parse calls per path are
+    # NOTE: The 4 "batched" invocations are above. The ls-tree calls per path are
     # additional O(touched-paths) calls — consistent with the plan's O(1) per-commit +
-    # O(N) per-touched-path contract. The diff-tree calls below replace with blob-SHA compare.
+    # O(N) per-touched-path contract. ls-tree compares the full tree entry (mode + type + hash),
+    # catching mode-only changes and correctly treating paths absent on both sides as equivalent.
 
     # --- Evaluate each residual commit ---
     $spikePrefixForIssue = ".tmp/issue-$IssueId/"

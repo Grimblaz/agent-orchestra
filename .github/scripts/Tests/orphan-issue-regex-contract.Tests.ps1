@@ -27,7 +27,7 @@ Describe 'OrphanIssueRegex contract' {
     It 'no file in skills/session-startup/scripts/ carries a duplicated literal feature/issue regex outside helpers' {
         $results = Get-ChildItem -Path $scriptsDir -Filter '*.ps1' |
             Where-Object { $_.Name -ne 'session-startup-git-helpers.ps1' } |
-            Select-String -Pattern 'feature/issue-\(\\d\+' -SimpleMatch:$false
+            Select-String -Pattern 'feature/issue-(\d+' -SimpleMatch
         $results | Should -BeNullOrEmpty -Because 'the shared regex constant should be used instead of duplicating the literal'
     }
 }
