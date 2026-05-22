@@ -7,7 +7,7 @@
 
 .DESCRIPTION
     Locks issue #574: the solution-authoring skill body codifies the 7 D-X decisions
-    with the correct shape (5 rule + 5 template sections, no provides:, decision-brief
+    with the correct shape (6 rule + 5 template sections, no provides:, decision-brief
     terminology, forward-compat note preserving teaching_paragraph_excerpt, and
     recommendation-shift token present).
 #>

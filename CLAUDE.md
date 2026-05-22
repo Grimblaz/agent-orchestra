@@ -125,8 +125,6 @@ claude plugin install <plugin@marketplace>
 claude plugin uninstall <plugin@marketplace>
 ```
 
-## Auto-mode boundary
-
 ## Engagement-gate non-overridability
 
 <!-- engagement-gate-non-overridability:begin -->
@@ -147,6 +145,8 @@ Methodology checkpoints fire unconditionally per D3. The user's only in-band lev
 See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate (the three-leg load-bearing test that defines an engagement-gate methodology checkpoint); `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #575 (engagement-record-{phase}-{ID} marker contract, ships separately) for the Segment-A maintainer-evidence path.
 
 <!-- engagement-gate-non-overridability:end -->
+
+## Auto-mode boundary
 
 This section applies to Claude Code. Copilot uses a different permission model and is out of scope.
 

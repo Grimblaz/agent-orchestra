@@ -41,7 +41,7 @@ $clauseCases = @(
         RequiredPhrases = @(
             'unconditional',
             'methodology checkpoints',
-            'Reject'
+            'documented `Reject` or equivalent option'
         )
     },
     @{
@@ -105,6 +105,32 @@ Describe 'engagement-gate non-overridability clauses' {
             $start = $beginIndex + $Case.Begin.Length
             return $content.Substring($start, $endIndex - $start).Trim()
         }
+
+        function Get-SectionBeforeMarker {
+            param(
+                [string]$RelativePath,
+                [string]$Heading,
+                [string]$Marker
+            )
+
+            $content = Get-NormalizedContent -RelativePath $RelativePath
+            $sectionMatch = [regex]::Match(
+                $content,
+                "(?ms)^## $([regex]::Escape($Heading))\s*\n(?<body>.*?)(?=^## |\z)"
+            )
+
+            if (-not $sectionMatch.Success) {
+                return ''
+            }
+
+            $sectionBody = $sectionMatch.Groups['body'].Value
+            $markerIndex = $sectionBody.IndexOf($Marker, [System.StringComparison]::Ordinal)
+            if ($markerIndex -lt 0) {
+                return $sectionBody.Trim()
+            }
+
+            return $sectionBody.Substring(0, $markerIndex).Trim()
+        }
     }
 
     It '<Name> has exactly one ordered non-empty bounded clause' -ForEach $clauseCases {
@@ -157,5 +183,20 @@ Describe 'engagement-gate non-overridability clauses' {
             $lineDistance | Should -BeGreaterThan 0 -Because "$Name heading must appear above the begin marker"
             $lineDistance | Should -BeLessOrEqual 5 -Because "$Name heading must be within 5 lines above the begin marker"
         }
+    }
+
+    It 'plan-authoring approval prompt format requires approval and reject options' {
+        $promptFormat = Get-SectionBeforeMarker -RelativePath 'skills\plan-authoring\SKILL.md' `
+            -Heading 'Plan Approval Prompt Format' `
+            -Marker '<!-- plan-authoring-non-overridability:begin -->'
+
+        $promptFormat | Should -Match ([regex]::Escape('structured-question options')) `
+            -Because 'the prompt-format section itself must document the option set contract'
+        $promptFormat | Should -Match ([regex]::Escape('explicit approval option')) `
+            -Because 'the prompt-format section must require an approval option'
+        $promptFormat | Should -Match ([regex]::Escape('reject/non-approval option')) `
+            -Because 'the prompt-format section must require a reject or non-approval option'
+        $promptFormat | Should -Match ([regex]::Escape('`Reject` or equivalent wording')) `
+            -Because 'the prompt-format section must preserve the documented reject-equivalent lever'
     }
 }

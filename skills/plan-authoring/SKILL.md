@@ -294,6 +294,8 @@ Prefer exact files only when there are a few high-signal paths. When exact files
 
 Present the plan as a **DRAFT**, then immediately ask for approval via the platform's structured-question tool. Never end a turn after presenting a draft without calling the approval tool — this wastes a user turn just to say "looks good."
 
+The structured-question options must include an explicit approval option and an explicit reject/non-approval option using `Reject` or equivalent wording.
+
 <!-- plan-authoring-non-overridability:begin -->
 
 ### Rule: Non-overridability
