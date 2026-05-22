@@ -117,6 +117,16 @@ When a concern is found, the agent **must**:
 
 The user decides. A well-written but standards-violating prior phase does not proceed unchallenged.
 
+<!-- upstream-onboarding-non-overridability:begin -->
+
+### Rule: Non-overridability
+
+Standards-check structured questions are unconditional with respect to user pacing or auto-mode directives. Pacing directives apply to preference-clarifying pauses, not to methodology checkpoints. The user's lever to override a concern is to select an alternative option in the structured question, not to issue a pacing directive that suppresses it.
+
+Note: upstream-onboarding does NOT introduce a labeled `Decline engagement` option (unlike `solution-authoring/SKILL.md`); the asymmetry is intentional — the user's lever for standards checks is selecting from the structured-question options surfaced by the cite-anchor-and-quote Authority procedure.
+
+<!-- upstream-onboarding-non-overridability:end -->
+
 ### When No Concern Fires
 
 Emit: `Standards check: none flagged` (or equivalent concise phrasing). Do not omit this signal — its absence would be ambiguous.

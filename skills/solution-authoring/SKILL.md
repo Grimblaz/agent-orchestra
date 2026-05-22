@@ -39,6 +39,14 @@ A decision brief has three sentences: (1) **Concrete element** — names the spe
 
 Every structured question on a load-bearing decision includes a `Decline engagement — proceed without classification` option (literally so labeled). The engineer's selection of that option (or a free-text response starting with `decline:`) terminates engagement without argument. If the engineer selects a non-recommended option, the agent acknowledges and proceeds without re-asking, persuading, or qualifying.
 
+<!-- solution-authoring-non-overridability:begin -->
+
+### Rule: Non-overridability
+
+The classification gate and the structured question it produces are unconditional with respect to user pacing or auto-mode directives. "Work without stopping," "don't pause to ask," "make the reasonable call," and semantically equivalent productivity directives do not suppress this gate. The user's only in-band lever for skipping is the `Decline engagement — proceed without classification` option (or `decline:` free-text). The agent must not substitute its interpretation of a pacing directive for that explicit decline.
+
+<!-- solution-authoring-non-overridability:end -->
+
 ### Rule: Skip rules
 
 - **gate-fails**: The classification gate returns routine. No structured question fires. Skip is automatic.
