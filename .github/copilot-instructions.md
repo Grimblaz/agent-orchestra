@@ -72,6 +72,23 @@ This repo uses the Code-Critic / Code-Review-Response scored prosecution → def
 
 Load the relevant agent guidance and follow that protocol for code review, design review, CE review, GitHub review, and post-fix review.
 
+## Engagement-gate non-overridability
+
+<!-- engagement-gate-non-overridability:begin -->
+
+User pacing directives — including but not limited to "work without stopping," "don't pause to ask," "make the reasonable call," and semantically equivalent phrasing — apply to **preference-clarifying questions**: questions the agent would otherwise ask to gather requirements, options, or non-load-bearing preferences. Pacing directives do **NOT** apply to **engagement-gate methodology checkpoints**:
+
+- `solution-authoring` classification gates
+- `upstream-onboarding` standards-check questions
+- `plan-authoring` plan-approval prompts
+- design-convergence decisions
+
+Methodology checkpoints fire unconditionally. The user's only in-band lever to skip an engagement-gate question is the option built into that specific question (e.g., `solution-authoring`'s `Decline engagement — proceed without classification`, `upstream-onboarding`'s alternative-option selection, `plan-authoring`'s `Reject` plan-approval path).
+
+See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate; `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #575 (engagement-record-{phase}-{ID} marker contract, ships separately) for the Segment-A maintainer-evidence path.
+
+<!-- engagement-gate-non-overridability:end -->
+
 ## Build & Run
 
 No build step. This is a configuration/documentation template.
