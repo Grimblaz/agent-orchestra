@@ -39,6 +39,14 @@ A decision brief has three sentences: (1) **Concrete element** — names the spe
 
 Every structured question on a load-bearing decision includes a `Decline engagement — proceed without classification` option (literally so labeled). The engineer's selection of that option (or a free-text response starting with `decline:`) terminates engagement without argument. If the engineer selects a non-recommended option, the agent acknowledges and proceeds without re-asking, persuading, or qualifying.
 
+<!-- solution-authoring-non-overridability:begin -->
+
+### Rule: Non-overridability
+
+The classification gate and the structured question it produces are unconditional with respect to user pacing or auto-mode directives. "Work without stopping," "don't pause to ask," "make the reasonable call," and semantically equivalent productivity directives do not suppress this gate. The user's only in-band lever for skipping is the `Decline engagement — proceed without classification` option (or `decline:` free-text). The agent must not substitute its interpretation of a pacing directive for that explicit decline.
+
+<!-- solution-authoring-non-overridability:end -->
+
 ### Rule: Skip rules
 
 - **gate-fails**: The classification gate returns routine. No structured question fires. Skip is automatic.
@@ -132,6 +140,12 @@ Render at phase exit after all load-bearing decisions are locked:
 **Exemplar** (D-load-directive, from #571 R1+R2):
 
 > "I chose solution-authoring first because upstream-onboarding surfaces prior decisions that have already been answered — if the engagement gate ran after, it would fire on settled content. If upstream-onboarding had run first, the gate would have intercepted the brief's inherited decisions and manufactured false load-bearing signal. The order had to put classification before context so the falsifier could operate on genuinely unanchored decisions only."
+
+## Gotchas
+
+| Trigger | Gotcha | Fix |
+| --- | --- | --- |
+| Treating a pacing directive as an engagement decline | The agent silently skips a load-bearing classification gate even though no explicit decline was given | Fire the structured question unless the engineer selects the explicit decline option or writes `decline:` |
 
 ## Related Guidance
 

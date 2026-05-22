@@ -119,6 +119,19 @@ Describe 'auto-mode boundary contract' {
         ($beginIdx -lt $endIdx) | Should -BeTrue -Because 'auto-mode-boundary:begin must precede auto-mode-boundary:end'
     }
 
+    It 'auto-mode-boundary begin sentinel is owned by the Auto-mode boundary H2 before the next H2' {
+        $content = $script:ClaudemdContent
+        $sectionMatch = [regex]::Match(
+            $content,
+            '(?ms)^## Auto-mode boundary\s*\r?\n(?<body>.*?)(?=^## |\z)'
+        )
+
+        $sectionMatch.Success | Should -BeTrue `
+            -Because 'CLAUDE.md must contain the ## Auto-mode boundary H2 section'
+        $sectionMatch.Groups['body'].Value | Should -Match ([regex]::Escape($script:BeginSentinel)) `
+            -Because 'auto-mode-boundary:begin must remain under ## Auto-mode boundary before the next H2'
+    }
+
     # ─────────────────────────────────────────────────────────────
     # 2. Citation presence in 11 surfaces (root-anchored form)
     # ─────────────────────────────────────────────────────────────

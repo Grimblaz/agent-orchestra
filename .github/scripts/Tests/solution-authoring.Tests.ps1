@@ -7,7 +7,7 @@
 
 .DESCRIPTION
     Locks issue #574: the solution-authoring skill body codifies the 7 D-X decisions
-    with the correct shape (5 rule + 5 template sections, no provides:, decision-brief
+    with the correct shape (6 rule + 5 template sections, no provides:, decision-brief
     terminology, forward-compat note preserving teaching_paragraph_excerpt, and
     recommendation-shift token present).
 #>
@@ -37,9 +37,15 @@ Describe 'solution-authoring SKILL body' {
         $lineCount | Should -BeLessOrEqual 200 -Because 'body must stay under the 200-line cap'
     }
 
-    It 'AC11.a — contains exactly 5 ### Rule: sections' {
+    It 'AC11.a — contains exactly 6 ### Rule: sections' {
         $ruleMatches = [regex]::Matches($script:Content, '(?m)^### Rule:')
-        $ruleMatches.Count | Should -Be 5 -Because 'body must have exactly 5 rule sections'
+        $ruleMatches.Count | Should -Be 6 -Because 'body must have exactly 6 rule sections'
+    }
+
+    It 'AC5 — contains exactly 5 decline engagement option labels' {
+        $declineLabel = 'Decline engagement — proceed without classification'
+        $labelMatches = [regex]::Matches($script:Content, [regex]::Escape($declineLabel))
+        $labelMatches.Count | Should -Be 5 -Because 'body must include the decline engagement option label exactly 5 times'
     }
 
     It 'AC11.a — contains exactly 5 ### Template: sections' {

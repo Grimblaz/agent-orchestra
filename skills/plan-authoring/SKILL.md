@@ -294,6 +294,16 @@ Prefer exact files only when there are a few high-signal paths. When exact files
 
 Present the plan as a **DRAFT**, then immediately ask for approval via the platform's structured-question tool. Never end a turn after presenting a draft without calling the approval tool — this wastes a user turn just to say "looks good."
 
+The structured-question options must include an explicit approval option and an explicit reject/non-approval option using `Reject` or equivalent wording.
+
+<!-- plan-authoring-non-overridability:begin -->
+
+### Rule: Non-overridability
+
+The plan-approval structured question is unconditional with respect to user pacing or auto-mode directives. Pacing directives apply to preference-clarifying pauses, not to plan-approval methodology checkpoints. The user's lever to skip plan approval is to select the documented `Reject` or equivalent option in the approval prompt, not to issue a pacing directive that suppresses the prompt entirely.
+
+<!-- plan-authoring-non-overridability:end -->
+
 ## Context Management
 
 If discovery becomes long or tool-heavy, compact before drafting. Preserve the key decisions, rejected alternatives, acceptance criteria, open questions, and CE Gate assessment so the plan draft starts from stable context instead of a partially remembered transcript.

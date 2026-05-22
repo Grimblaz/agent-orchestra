@@ -125,6 +125,27 @@ claude plugin install <plugin@marketplace>
 claude plugin uninstall <plugin@marketplace>
 ```
 
+## Engagement-gate non-overridability
+
+<!-- engagement-gate-non-overridability:begin -->
+
+User pacing directives — including but not limited to "work without stopping," "don't pause to ask," "make the reasonable call," and semantically equivalent phrasing — apply to **preference-clarifying questions**: questions the agent would otherwise ask to gather requirements, options, or non-load-bearing preferences. Pacing directives do **NOT** apply to **engagement-gate methodology checkpoints**:
+
+- `solution-authoring` classification gates
+- `upstream-onboarding` standards-check questions
+- `plan-authoring` plan-approval prompts
+- design-convergence decisions
+
+Methodology checkpoints fire unconditionally per D3. The user's only in-band lever to skip an engagement-gate question is the option built into that specific question:
+
+- `solution-authoring`: the `Decline engagement — proceed without classification` option (or `decline:` free-text)
+- `upstream-onboarding`: selecting an alternative option in the structured question
+- `plan-authoring`: the documented `Reject` or equivalent plan-approval option
+
+See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate (the three-leg load-bearing test that defines an engagement-gate methodology checkpoint); `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #575 (engagement-record-{phase}-{ID} marker contract, ships separately) for the Segment-A maintainer-evidence path.
+
+<!-- engagement-gate-non-overridability:end -->
+
 ## Auto-mode boundary
 
 This section applies to Claude Code. Copilot uses a different permission model and is out of scope.
