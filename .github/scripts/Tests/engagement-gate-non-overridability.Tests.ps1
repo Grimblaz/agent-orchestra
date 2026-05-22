@@ -14,17 +14,17 @@
 $clauseCases = @(
     @{
         Name = 'solution-authoring'
-        RelativePath = 'skills\solution-authoring\SKILL.md'
+        RelativePath = 'skills/solution-authoring/SKILL.md'
         Begin = '<!-- solution-authoring-non-overridability:begin -->'
         End = '<!-- solution-authoring-non-overridability:end -->'
         RequiredPhrases = @(
             'unconditional',
-            'Decline engagement — proceed without classification'
+            ('Decline engagement ' + [char]0x2014 + ' proceed without classification')
         )
     },
     @{
         Name = 'upstream-onboarding'
-        RelativePath = 'skills\upstream-onboarding\SKILL.md'
+        RelativePath = 'skills/upstream-onboarding/SKILL.md'
         Begin = '<!-- upstream-onboarding-non-overridability:begin -->'
         End = '<!-- upstream-onboarding-non-overridability:end -->'
         RequiredPhrases = @(
@@ -35,7 +35,7 @@ $clauseCases = @(
     },
     @{
         Name = 'plan-authoring'
-        RelativePath = 'skills\plan-authoring\SKILL.md'
+        RelativePath = 'skills/plan-authoring/SKILL.md'
         Begin = '<!-- plan-authoring-non-overridability:begin -->'
         End = '<!-- plan-authoring-non-overridability:end -->'
         RequiredPhrases = @(
@@ -60,7 +60,7 @@ $clauseCases = @(
     },
     @{
         Name = '.github/copilot-instructions.md'
-        RelativePath = '.github\copilot-instructions.md'
+        RelativePath = '.github/copilot-instructions.md'
         Begin = '<!-- engagement-gate-non-overridability:begin -->'
         End = '<!-- engagement-gate-non-overridability:end -->'
         RequiredPhrases = @(
@@ -76,7 +76,7 @@ $clauseCases = @(
 
 $headingCases = @(
     @{ Name = 'CLAUDE.md'; RelativePath = 'CLAUDE.md' },
-    @{ Name = '.github/copilot-instructions.md'; RelativePath = '.github\copilot-instructions.md' }
+    @{ Name = '.github/copilot-instructions.md'; RelativePath = '.github/copilot-instructions.md' }
 )
 
 Describe 'engagement-gate non-overridability clauses' {
@@ -186,7 +186,7 @@ Describe 'engagement-gate non-overridability clauses' {
     }
 
     It 'plan-authoring approval prompt format requires approval and reject options' {
-        $promptFormat = Get-SectionBeforeMarker -RelativePath 'skills\plan-authoring\SKILL.md' `
+        $promptFormat = Get-SectionBeforeMarker -RelativePath 'skills/plan-authoring/SKILL.md' `
             -Heading 'Plan Approval Prompt Format' `
             -Marker '<!-- plan-authoring-non-overridability:begin -->'
 
