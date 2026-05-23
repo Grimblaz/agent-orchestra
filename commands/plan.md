@@ -48,6 +48,8 @@ Before prosecution, emit this visible progress sentence: `Dispatching prosecutio
 
 **Parallel-batch handshake policy** (per `skills/subagent-env-handshake/SKILL.md` "Parallel-batch dispatch" section): live-recapture HEAD, branch, CWD, and dirty fingerprint **once via a single `Bash` invocation in this same turn, immediately before emitting the parallel tool-use block**. Then construct three handshake blocks from those captured values, each with its own UTC ISO-8601 `handshake_issued_at` timestamp and otherwise field-identical content. This satisfies "fresh handshake per dispatch" because no tree mutation can occur between the parallel-block members — they fire as one batch with no interleaved tool calls. Do not reuse a capture from a prior turn or from a sequential earlier dispatch; the capture must be the most recent state before this parallel block.
 
+Per `skills/subagent-env-handshake/SKILL.md` § Subagent working-tree discipline: under `workspace_mode: shared`, you MUST NOT write to the working tree of this repository during analysis. Reads are permitted; scratch space goes outside the repo root (`mktemp -d` on POSIX, `$env:TEMP/$(New-Guid)` on Windows; no `Bash` redirects into the repo).
+
 Then dispatch three Code-Critic prosecution passes in one parallel tool-use block. Use lowercase `code-critic` as the dispatch identifier for every prosecution pass:
 
 1. Pass 1: use the `Agent` tool with `subagent_type: code-critic`. Prepend the fresh handshake block constructed for this pass from the parallel-batch capture above, then prepend `Review mode selector: "Use design review perspectives"`. Include the issue number, issue body, Experience-Owner framing, Solution-Designer output, current draft plan, and project guidance.

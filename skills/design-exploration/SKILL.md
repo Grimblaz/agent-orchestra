@@ -101,6 +101,8 @@ After design decisions are confirmed with the user and before updating the issue
 - **Passes 1 and 2** — design review perspectives (Feasibility & Risk, Scope & Completeness, Integration & Impact). Tag each finding with `pass: 1` or `pass: 2`. Give each pass the full design content, acceptance criteria, scope, and confirmed constraints.
 - **Pass 3** — product-alignment perspectives (Product Direction Fit, Customer Experience Coherence, Planned-Work Alignment). Tag with `pass: 3`. In addition to the design content, provide the issue body, any `Documents/Design/` and `Documents/Decisions/` files, project guidance (`README.md`, `CUSTOMIZATION.md`, `copilot-instructions.md`), and planned-work artifacts (`ROADMAP.md`, `NEXT-STEPS.md`) if present. Note absence of planned-work artifacts explicitly.
 
+Per `skills/subagent-env-handshake/SKILL.md` § Subagent working-tree discipline: under `workspace_mode: shared`, you MUST NOT write to the working tree of this repository during analysis. Reads are permitted; scratch space goes outside the repo root (`mktemp -d` on POSIX, `$env:TEMP/$(New-Guid)` on Windows; no `Bash` redirects into the repo).
+
 Run all three passes independently — do not share findings between passes before merging.
 
 ### Merge and deduplicate
