@@ -88,8 +88,8 @@ Handoffs between phases use durable GitHub issue comments rather than session-lo
 
 - `<!-- experience-owner-complete-{ID} -->` — upstream framing complete
 - `<!-- design-phase-complete-{ID} -->` — technical design complete
-- `<!-- engagement-record-experience-{ID} -->` — durable engagement audit for /experience phase: load-bearing decisions, audit rationale, articulation text persisted alongside the experience-owner-complete marker for cross-session decision memory (SMC-20)
-- `<!-- engagement-record-design-{ID} -->` — durable engagement audit for /design phase: load-bearing decisions plus adversarial-review verdicts persisted alongside the design-phase-complete marker; consumed by solution-authoring's same-decision-resume rule on phase re-entry (SMC-20)
+- `<!-- engagement-record-experience-{ID} -->` — durable engagement audit for /experience phase: load-bearing decisions, audit rationale, articulation text persisted alongside the experience-owner-complete marker for cross-session decision memory (SMC-20) (read path only until #576)
+- `<!-- engagement-record-design-{ID} -->` — durable engagement audit for /design phase: load-bearing decisions plus adversarial-review verdicts persisted alongside the design-phase-complete marker; consumed by solution-authoring's same-decision-resume rule on phase re-entry (SMC-20) (read path only until #576)
 - `<!-- design-issue-{ID} -->` — durable design snapshot handoff used for D9 pause/resume and full-pipeline smart resume
 - `<!-- plan-issue-{ID} -->` — approved plan persisted
 - `<!-- frame-credit-ledger-{PR} -->` — warn-only frame credit-ledger comment posted by the pre-PR hook (sub-issue #429 of frame umbrella #425); idempotently upserted on every PR after `gh pr create`

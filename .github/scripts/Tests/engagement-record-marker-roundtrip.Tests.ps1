@@ -149,7 +149,7 @@ load_bearing_decisions: []
 ```'
         {
             Read-EngagementRecords -IssueNumber $script:IssueId -InMemoryMarkers @($invalidVersionFixture) -Phase design
-        } | Should -Throw -ExpectedMessage "*unknown schema_version*"
+        } | Should -Throw -ExpectedMessage "*unknown schema_version*" -ExceptionType ([System.InvalidOperationException])
     }
 }
 
@@ -280,11 +280,129 @@ Describe 'Read-EngagementRecords: legacy loose parse' {
             return
         }
 
-        $records = Read-EngagementRecords -IssueNumber $script:IssueId -InMemoryMarkers @($script:LegacyFixture) -Phase design -AcceptLegacy
+        # Legacy fixture is for issue 571; call with matching IssueNumber (MF2: issue-number check is always enforced)
+        $records = Read-EngagementRecords -IssueNumber 571 -InMemoryMarkers @($script:LegacyFixture) -Phase design -AcceptLegacy
         $records | Should -Not -BeNullOrEmpty
         $records.Count | Should -Be 1
         $records[0].decision_id | Should -Be 'D-load-directive'
         $records[0].engineer_choice | Should -Be 'solution-authoring first'
         $records[0]._legacy | Should -BeTrue -Because 'AcceptLegacy should mark result with _legacy: true'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# (i) multi-marker: old decisions absent when newer marker wins
+# ---------------------------------------------------------------------------
+Describe 'Read-EngagementRecords: old marker decisions not surfaced when newer wins' {
+    It 'does NOT return decision_ids from the older marker when a newer one exists' {
+        if (-not (Get-Command Read-EngagementRecords -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Read-EngagementRecords not available'
+            return
+        }
+
+        $oldMarker = '<!-- engagement-record-design-575 -->
+```yaml
+schema_version: 1
+phase: design
+capture_session: "normal-design-v1"
+load_bearing_decisions:
+  - decision_id: old-only-id
+    classification: load-bearing
+    engineer_choice: "old-only choice"
+```'
+
+        $newMarker = '<!-- engagement-record-design-575 -->
+```yaml
+schema_version: 1
+phase: design
+capture_session: "normal-design-v1"
+load_bearing_decisions:
+  - decision_id: new-only-id
+    classification: load-bearing
+    engineer_choice: "new-only choice"
+```'
+
+        $comments = @(
+            @{ Body = $oldMarker; CreatedAt = '2026-05-01T00:00:00Z' },
+            @{ Body = $newMarker; CreatedAt = '2026-05-23T00:00:00Z' }
+        )
+
+        $mockPath = Join-Path $script:TempDir 'gh-old-absent.ps1'
+        script:Write-MockGh -ScriptPath $mockPath -Comments $comments
+
+        $records = Read-EngagementRecords -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath $mockPath -Phase design
+        $oldDecision = $records | Where-Object { $_.decision_id -eq 'old-only-id' }
+        $newDecision = $records | Where-Object { $_.decision_id -eq 'new-only-id' }
+        $oldDecision | Should -BeNullOrEmpty -Because 'old marker decisions must not appear when a newer marker exists'
+        $newDecision | Should -Not -BeNullOrEmpty -Because 'new marker decisions should be returned'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# (j) InMemoryMarkers tiebreak: last element in array wins
+# ---------------------------------------------------------------------------
+Describe 'Read-EngagementRecords: InMemoryMarkers last-element tiebreak' {
+    It 'returns decisions from the last in-memory marker when multiple share the same phase' {
+        if (-not (Get-Command Read-EngagementRecords -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Read-EngagementRecords not available'
+            return
+        }
+
+        $firstMarker = '<!-- engagement-record-design-575 -->
+```yaml
+schema_version: 1
+phase: design
+capture_session: "normal-design-v1"
+load_bearing_decisions:
+  - decision_id: tiebreak-id
+    classification: load-bearing
+    engineer_choice: "first choice"
+```'
+
+        $lastMarker = '<!-- engagement-record-design-575 -->
+```yaml
+schema_version: 1
+phase: design
+capture_session: "normal-design-v1"
+load_bearing_decisions:
+  - decision_id: tiebreak-id
+    classification: load-bearing
+    engineer_choice: "last choice"
+```'
+
+        $records = Read-EngagementRecords -IssueNumber $script:IssueId -InMemoryMarkers @($firstMarker, $lastMarker) -Phase design
+        $records.Count | Should -Be 1
+        $records[0].engineer_choice | Should -Be 'last choice' -Because 'last InMemoryMarkers element wins when timestamps are synthetic-ascending'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# (k) unknown optional field: additive-field policy — no throw
+# ---------------------------------------------------------------------------
+Describe 'Read-EngagementRecords: unknown optional field does not throw' {
+    It 'silently ignores unknown optional fields in the YAML payload' {
+        if (-not (Get-Command Read-EngagementRecords -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Read-EngagementRecords not available'
+            return
+        }
+
+        $unknownFieldFixture = '<!-- engagement-record-design-575 -->
+```yaml
+schema_version: 1
+phase: design
+capture_session: "normal-design-v1"
+extra_future_field: "should be ignored"
+load_bearing_decisions:
+  - decision_id: unknown-field-test
+    classification: routine
+    engineer_choice: "choice"
+    extra_decision_field: "also ignored"
+```'
+
+        {
+            $records = Read-EngagementRecords -IssueNumber $script:IssueId -InMemoryMarkers @($unknownFieldFixture) -Phase design
+            $records | Should -Not -BeNullOrEmpty
+            $records[0].decision_id | Should -Be 'unknown-field-test'
+        } | Should -Not -Throw -Because 'additive-field policy: readers must ignore unknown optional fields'
     }
 }

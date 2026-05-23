@@ -37,9 +37,6 @@
     [PSCustomObject[]] Array of parsed decision objects.
 #>
 
-# Import powershell-yaml dynamically as required
-Import-Module powershell-yaml -ErrorAction Stop
-
 function Read-EngagementRecords {
     [CmdletBinding()]
     param(
@@ -63,6 +60,13 @@ function Read-EngagementRecords {
         [switch]$AcceptLegacy
     )
 
+    # MF1: Import powershell-yaml inside the function to avoid polluting file scope
+    try {
+        Import-Module powershell-yaml -ErrorAction Stop
+    } catch {
+        throw [System.InvalidOperationException]::new("powershell-yaml module is required but could not be loaded: $_")
+    }
+
     $parsedMarkers = @()
 
     # Step 1: Gather raw markers and their timestamps
@@ -83,8 +87,13 @@ function Read-EngagementRecords {
                 if ($Repo -match 'github\.com[:/]([^/]+/[^/.]+)(\.git)?') {
                     $Repo = $Matches[1]
                 }
+                # MF3: Validate resolved repo matches expected owner/name format
+                if ($Repo -notmatch '^[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+$') {
+                    $Repo = ''
+                }
             } catch {
-                $null = $_
+                # MF14: Emit a warning instead of silently swallowing the error
+                Write-Warning "Could not resolve repo from git config: $_"
             }
         }
 
@@ -111,11 +120,12 @@ function Read-EngagementRecords {
     foreach ($m in $parsedMarkers) {
         $body = $m.Body
         # Look for engagement-record marker pattern
-        if ($body -match '<!--\s*engagement-record-([a-zA-Z0-9_-]+)-(\d+)\s*-->') {
+        if ($body -match '(?m)^\s*<!--\s*engagement-record-([a-zA-Z0-9_-]+)-(\d+)\s*-->') {
             $commentPhase = $Matches[1].ToLowerInvariant()
             $commentIssue = [int]$Matches[2]
 
-            if ($commentIssue -ne $IssueNumber -and -not $AcceptLegacy) {
+            # MF2: Always enforce issue-number match; -AcceptLegacy only relaxes schema validation
+            if ($commentIssue -ne $IssueNumber) {
                 continue
             }
 
@@ -142,7 +152,8 @@ function Read-EngagementRecords {
             try {
                 $parsedYaml = ConvertFrom-Yaml -Yaml $yamlContent
             } catch {
-                # Failed to parse, skip or throw depending on strictness
+                # MF15: Emit a warning so callers can diagnose malformed payloads
+                Write-Warning "Malformed YAML in engagement-record marker (issue: $IssueNumber, phase: $commentPhase): $_"
                 continue
             }
 
@@ -175,7 +186,8 @@ function Read-EngagementRecords {
 
             # Enum validation for v1
             if (-not $isLegacy) {
-                if ($parsedYaml.phase -notin @('experience', 'design', 'plan')) {
+                # MF10: v1.1 only supports 'experience' and 'design'; 'plan' is deferred
+                if ($parsedYaml.phase -notin @('experience', 'design')) {
                     throw [System.InvalidOperationException]::new("Invalid phase value: $($parsedYaml.phase)")
                 }
             }
@@ -200,21 +212,13 @@ function Read-EngagementRecords {
                         }
                     }
 
-                    # Backward compatibility for decision_brief / teaching_paragraph_excerpt
-                    $brief = $null
-                    if ($null -ne $dec.decision_brief) {
-                        $brief = $dec.decision_brief
-                    } elseif ($null -ne $dec.teaching_paragraph_excerpt) {
-                        $brief = $dec.teaching_paragraph_excerpt
-                    }
-
+                    # MF5/MF11: Pass through raw field values; no decision_brief harmonization
                     $decObj = [PSCustomObject]@{
                         decision_id                = $dec.decision_id
                         classification             = $dec.classification
                         audit_rationale            = $dec.audit_rationale
                         engineer_choice            = $dec.engineer_choice
-                        decision_brief             = $brief
-                        teaching_paragraph_excerpt = $brief
+                        teaching_paragraph_excerpt = $dec.teaching_paragraph_excerpt
                         articulation_text          = $dec.articulation_text
                         articulation_status        = $dec.articulation_status
                     }

@@ -39,8 +39,7 @@ load_bearing_decisions:
     classification: load-bearing      # Valid values: load-bearing | routine
     audit_rationale: "Rationale..."   # Short description of the why
     engineer_choice: "Choice..."      # Technical or design choice made
-    decision_brief: "Brief..."        # Excerpt of the decision's context (harmonized field)
-    teaching_paragraph_excerpt: "..." # Deprecated alias for backward-compatibility
+    teaching_paragraph_excerpt: "..." # Excerpt of the decision's context
     articulation_text: "..."          # Short paragraph detailing the engineer's rationale
     articulation_status: pending      # Valid values: pending | complete | incomplete
 ```
@@ -67,6 +66,8 @@ If a record is returned for a given `decision_id`, the agent activates the `same
 - `pending`: Written by the authoring agent at phase exit.
 - `complete` / `incomplete`: Written by the CE Gate evaluator after assessing the evidence.
 
+> **Initial state**: writers SHOULD emit `articulation_text: ""` (empty string) paired with `articulation_status: pending` at phase exit. This is the documented initial state, not an error. The CE Gate (#578) closes the loop by evaluating and transitioning to `complete` or `incomplete`.
+
 ## capture_session Policy
 
 The `capture_session` is a free-form string field that tracks the execution context. The recommended convention is:
@@ -88,6 +89,8 @@ Readers MUST NOT reject malformed values, but validation tooling may emit warnin
 | Trigger | Gotcha | Fix |
 |---|---|---|
 | Mismatched schema version | An older reader reads a v2 marker and crashes or drops decisions. | Enforce throwing on unknown schema_version and coordinate version bumps across all tools. |
+| `-AcceptLegacy` cross-issue contamination | Before the MF2 fix, `-AcceptLegacy` bypassed the issue-number check, allowing markers from foreign issues to appear in results. | Never pass foreign-issue markers alongside `-AcceptLegacy`; the issue-number check is now always enforced. |
+| v1.1 / #576 emission gap | The read path (`Read-EngagementRecords`) is live; the write path (agents emitting markers) is deferred to #576. Downstream consumers should tolerate missing markers gracefully. | Treat absent records as empty; do not hard-fail when no marker exists for a phase. |
 
 ## Frame Ports Filled By This Skill
 

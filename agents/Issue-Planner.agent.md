@@ -47,7 +47,7 @@ You are a meticulous strategist who leaves nothing to chance. Every step in your
 
 ## Process
 
-Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires a structured question. Then load `skills/upstream-onboarding/SKILL.md` and follow its protocol. (Note: cross-session engagement-state is preserved via the SMC-20 engagement-record markers and the same-decision-resume skip rule, preventing repeated questioning on settled decisions across sessions. The classification gate applies only once a target artifact is established — on greenfield invocations, defer until an issue is created.)
+Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires a structured question. Then load `skills/upstream-onboarding/SKILL.md` and follow its protocol. (Note: cross-session engagement-state will be preserved via the SMC-20 engagement-record markers and the same-decision-resume skip rule, preventing repeated questioning on settled decisions across sessions (engagement-record read path active; write path — marker emission by agents — deferred to #576). The classification gate applies only once a target artifact is established — on greenfield invocations, defer until an issue is created.)
 
 Cycle through the phases below iteratively based on user input.
 
