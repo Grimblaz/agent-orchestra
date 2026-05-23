@@ -65,8 +65,9 @@ Describe 'solution-authoring SKILL body' {
         $script:Content | Should -Match '\*\*Recommendation shift\*\*' -Because 'recommendation-shift template must contain the literal token'
     }
 
-    It 'AC11.e — v0 do-not-apply comment present on same-decision-resume skip rule' {
-        $script:Content | Should -Match '<!-- v0: do not apply; see #575 for marker-driven activation -->' -Because 'same-decision-resume must be gated with v0 comment'
+    It 'AC11.e — same-decision-resume rule activated with Read-EngagementRecords reference' {
+        $script:Content | Should -Match 'Read-EngagementRecords' -Because 'same-decision-resume must reference the helper after #575 activation'
+        $script:Content | Should -Not -Match '<!-- v0: do not apply; see #575' -Because 'v0 deferral comment must be removed after #575 activation'
     }
 
     It 'AC11.g — no bare "teaching paragraph" (case-insensitive) outside forward-compat allowlist' {
