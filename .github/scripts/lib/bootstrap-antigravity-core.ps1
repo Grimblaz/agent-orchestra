@@ -117,12 +117,20 @@ function Get-AntigravitySubagents {
         $frontmatter = @{}
         $lines = $shellContent -split '\r?\n'
         $inFrontmatter = $false
+        $frontmatterDelimiterCount = 0
         $bodyLines = [System.Collections.Generic.List[string]]::new()
 
         foreach ($line in $lines) {
             if ($line -eq '---') {
-                $inFrontmatter = -not $inFrontmatter
-                continue
+                $frontmatterDelimiterCount++
+                if ($frontmatterDelimiterCount -eq 1) {
+                    $inFrontmatter = $true
+                    continue
+                }
+                elseif ($frontmatterDelimiterCount -eq 2) {
+                    $inFrontmatter = $false
+                    continue
+                }
             }
             if ($inFrontmatter) {
                 $trimmedLine = $line.Trim()
@@ -130,10 +138,9 @@ function Get-AntigravitySubagents {
                     continue
                 }
                 # Strip inline comments
-                $commentIndex = $line.IndexOf('#')
                 $lineToParse = $line
-                if ($commentIndex -ge 0) {
-                    $lineToParse = $line.Substring(0, $commentIndex)
+                if ($line -match '^(.*?)\s+#.*$') {
+                    $lineToParse = $Matches[1]
                 }
 
                 if ($lineToParse -match '^\s*([^:]+)\s*:\s*(.*)\s*$') {

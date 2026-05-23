@@ -44,7 +44,7 @@ try {
         $canonicalOutputPath = [System.IO.Path]::GetFullPath($resolvedOutputPath)
         $separator = [System.IO.Path]::DirectorySeparatorChar
         $prefix = $canonicalRepoRoot + $separator
-        if (-not ($canonicalOutputPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase) -or $canonicalOutputPath -eq $canonicalRepoRoot)) {
+        if (-not $canonicalOutputPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) {
             throw "Path traversal detected! OutputPath must reside inside the repository root."
         }
     }

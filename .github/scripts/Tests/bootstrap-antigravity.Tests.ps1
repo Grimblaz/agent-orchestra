@@ -153,6 +153,60 @@ enable_subagent_tools: "false' # mismatched quotes should not be stripped
             if (Test-Path $tempRoot) { Remove-Item $tempRoot -Recurse -Force }
         }
 
+        It 'parses horizontal rules in thin-shell body correctly (F1)' {
+            $tempRoot = Join-Path $script:RepoRoot '.tmp/mock-f1-repo'
+            if (Test-Path $tempRoot) { Remove-Item $tempRoot -Recurse -Force }
+            $agentsDir = Join-Path $tempRoot 'agents'
+            New-Item -Path $agentsDir -ItemType Directory -Force | Out-Null
+
+            $shellText = @"
+---
+name: f1-test
+description: "F1 test role"
+---
+# Some Title
+This is body paragraph 1.
+---
+This is body paragraph 2 after horizontal rule.
+"@
+            $shellText | Set-Content (Join-Path $agentsDir "f1-test.md")
+
+            $res = Get-AntigravitySubagents -RootPath $tempRoot
+            $res.Count | Should -Be 1
+            $res[0].system_prompt | Should -Match "This is body paragraph 1"
+            $res[0].system_prompt | Should -Match "---"
+            $res[0].system_prompt | Should -Match "This is body paragraph 2 after horizontal rule"
+
+            if (Test-Path $tempRoot) { Remove-Item $tempRoot -Recurse -Force }
+        }
+
+        It 'preserves hashes in URLs during comment stripping (F4)' {
+            $tempRoot = Join-Path $script:RepoRoot '.tmp/mock-f4-repo'
+            if (Test-Path $tempRoot) { Remove-Item $tempRoot -Recurse -Force }
+            $agentsDir = Join-Path $tempRoot 'agents'
+            New-Item -Path $agentsDir -ItemType Directory -Force | Out-Null
+
+            $shellText = @"
+---
+name: f4-test
+description: "https://example.com/page#section"
+tools: [Read] # inline comment with tools
+---
+"@
+            $shellText | Set-Content (Join-Path $agentsDir "f4-test.md")
+
+            $res = Get-AntigravitySubagents -RootPath $tempRoot
+            $res.Count | Should -Be 1
+            $res[0].description | Should -Be "https://example.com/page#section"
+
+            if (Test-Path $tempRoot) { Remove-Item $tempRoot -Recurse -Force }
+        }
+
+        It 'exits with non-zero code when OutputPath equals repository root exactly (F3)' {
+            $process = Start-Process -FilePath 'pwsh' -ArgumentList "-NoProfile", "-File", "$script:WrapperScriptPath", "-OutputPath", "$script:RepoRoot" -NoNewWindow -PassThru -Wait
+            $process.ExitCode | Should -Be 1 -Because 'OutputPath matching repository root exactly must trigger path traversal exception and exit code 1'
+        }
+
         It 'throws a terminating error when no subagents are resolved' {
             $tempWorkspace = Join-Path $script:RepoRoot '.tmp/temp-empty-workspace'
             if (Test-Path $tempWorkspace) { Remove-Item $tempWorkspace -Recurse -Force }
