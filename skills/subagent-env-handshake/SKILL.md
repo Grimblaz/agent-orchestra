@@ -178,9 +178,40 @@ If a downstream shell does not yet implement Step 0 environment-handshake verifi
 
 When a parent emits multiple `Agent` calls in one parallel tool-use block (for example `commands/plan.md` and `commands/orchestra-review.md` prosecution × 3), per-dispatch recapture is satisfied by a **single live recapture immediately before the parallel block**, with one handshake block constructed per dispatch from those captured values. Each dispatch's handshake block carries its own UTC ISO-8601 `handshake_issued_at` timestamp; the four parent-side fields (`parent_head`, `parent_branch`, `parent_cwd`, `parent_dirty_fingerprint`) are field-identical across the batch.
 
-This is consistent with the per-dispatch policy because no tree mutation can occur between members of one parallel tool-use block — the dispatches fire as a single batch with no interleaved `Bash` or `Edit` calls. The "immediately before that dispatch" requirement resolves to "immediately before the parallel emit" since that is the most recent state the parent could have observed before any member of the batch ran.
+<!-- parallel-batch-honest-premise-anchor begin -->
+This is consistent with the per-dispatch policy because, while sibling subagents in `workspace_mode: shared` share the working tree and could theoretically mutate it, our load-bearing guarantee relies on strict subagent working-tree discipline to ensure no tree mutation occurs between members of one parallel tool-use block.
+<!-- /parallel-batch-honest-premise-anchor -->
 
 The single-capture-per-batch rule does NOT extend across pipeline stages. Sequential stages (e.g. parallel prosecution → defense → judge in `/orchestra:review`) MUST recapture between stages because the tree may have mutated. The single-capture-per-batch rule applies only within one parallel tool-use block.
+
+#### Failure Mode
+
+When subagents dispatched in parallel do not maintain working-tree discipline, they may generate concurrent tree mutations (e.g. redirecting analysis output to files in the repository). In `workspace_mode: shared`, these untracked files will be visible during other sibling subagents' Step 0 verification, causing a mismatch in the observed dirty fingerprint and triggering a halting `environment-divergence` finding. See ### Subagent working-tree discipline (under workspace_mode: shared) for the strict discipline that prevents this.
+
+#### Dispatch sites
+
+We classify all parallel-batch dispatch sites based on whether they are analysis-only (in scope for working-tree discipline) or editor-required (out of scope):
+
+- **In-Scope (Analysis-Only):**
+  - `commands/plan.md` prosecution × 3 parallel block
+  - `commands/orchestra-review.md` prosecution × 3 parallel block
+  - `skills/design-exploration/SKILL.md` design-challenge × 3 parallel block
+
+#### Out of scope
+
+- **Out-of-Scope (Editor-Parallel):**
+  - Code-Conductor `Execution Mode: parallel` Code-Smith ↔ Test-Writer parallel batches (see [skills/parallel-execution/SKILL.md](skills/parallel-execution/SKILL.md) § Requirement Contract coordination)
+  - Parallel Doc-Keeper batches (see [skills/parallel-execution/SKILL.md](skills/parallel-execution/SKILL.md) § Requirement Contract coordination)
+
+Until v2 worktree mode lands, editor-parallel batches under `workspace_mode: shared` may produce ND-2 cascades equivalent to those described above; there is no documented recovery clause for these batches in v1 — see issue [#606](https://github.com/Grimblaz/agent-orchestra/issues/606) for tracking.
+
+#### Diagnostic Note
+
+In parallel dispatches, attributing the root cause of an ND-2 halt is limited because multiple subagents execute concurrently. When a halt occurs, the divergent dirty fingerprint indicates that at least one sibling subagent mutated the shared tree, but the system logs might not isolate which specific subagent introduced the mutation.
+
+#### Forward-Compatibility Note
+
+Future versions of this handshake contract will support `workspace_mode: worktree` (v2) to run each parallel subagent in an isolated git worktree environment. This structural isolation will completely eliminate inter-subagent tree mutations and the associated ND-2 environment-divergence cascades, removing the reliance on manual working-tree discipline.
 
 ### Subagent working-tree discipline (under workspace_mode: shared)
 
