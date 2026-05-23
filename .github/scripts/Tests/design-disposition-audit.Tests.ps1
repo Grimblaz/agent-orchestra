@@ -78,7 +78,7 @@ BeforeAll {
         return script:Get-YamlValue -Map $Fixture.Payload -Key 'finding_dispositions'
     }
 
-    function script:Get-Entries {
+    function script:Get-Entry {
         param([object]$Block)
 
         return @(script:ConvertTo-ObjectArray -Value (script:Get-YamlValue -Map $Block -Key 'entries'))
@@ -90,7 +90,7 @@ BeforeAll {
         return @(script:ConvertTo-ObjectArray -Value (script:Get-YamlValue -Map $Block -Key 'passes_run') | ForEach-Object { [int]$_ })
     }
 
-    function script:Validate-DesignDispositionFixture {
+    function script:Test-DesignDispositionFixture {
         param([string]$Path)
 
         $fixture = script:Read-DesignDispositionFixture -Path $Path
@@ -125,7 +125,7 @@ BeforeAll {
             $errors.Add('missing entries')
             $entries = @()
         } else {
-            $entries = @(script:Get-Entries -Block $block)
+            $entries = @(script:Get-Entry -Block $block)
         }
 
         $entryPasses = @()
@@ -205,17 +205,17 @@ Describe 'design disposition marker payload schema' {
             $fixture.Marker | Should -Match '^design-phase-complete-\d+$'
             $block | Should -Not -BeNullOrEmpty
             (script:Get-YamlValue -Map $block -Key 'schema_version') | Should -Be 1
-            (script:Validate-DesignDispositionFixture -Path $fixturePath) | Should -BeNullOrEmpty
+            (script:Test-DesignDispositionFixture -Path $fixturePath) | Should -BeNullOrEmpty
         }
     }
 
     It 'allows entries to be empty while preserving the entries array shape' {
         $fixturePath = (script:Get-ValidFixture -Name 'valid-empty-entries.txt').FullName
         $fixture = script:Read-DesignDispositionFixture -Path $fixturePath
-        $entries = @(script:Get-Entries -Block (script:Get-FindingDispositionsBlock -Fixture $fixture))
+        $entries = @(script:Get-Entry -Block (script:Get-FindingDispositionsBlock -Fixture $fixture))
 
         $entries.Count | Should -Be 0
-        (script:Validate-DesignDispositionFixture -Path $fixturePath) | Should -BeNullOrEmpty
+        (script:Test-DesignDispositionFixture -Path $fixturePath) | Should -BeNullOrEmpty
     }
 
     It 'requires every populated entry to carry valid id, pass, disposition, classification, and rationale fields' {
@@ -223,7 +223,7 @@ Describe 'design disposition marker payload schema' {
             $fixture = script:Read-DesignDispositionFixture -Path $fixturePath
             $block = script:Get-FindingDispositionsBlock -Fixture $fixture
 
-            foreach ($entry in (script:Get-Entries -Block $block)) {
+            foreach ($entry in (script:Get-Entry -Block $block)) {
                 (script:Get-YamlValue -Map $entry -Key 'finding_id') | Should -Match '^F\d+$'
                 (script:Get-YamlValue -Map $entry -Key 'pass') | Should -BeIn $script:AllowedPasses
                 (script:Get-YamlValue -Map $entry -Key 'disposition') | Should -BeIn $script:AllowedDispositions
@@ -239,14 +239,14 @@ Describe 'design disposition marker payload schema' {
         $block = script:Get-FindingDispositionsBlock -Fixture $fixture
 
         (script:Get-PassesRun -Block $block) | Should -Be @(1)
-        (script:Get-Entries -Block $block | ForEach-Object { script:Get-YamlValue -Map $_ -Key 'pass' } | Sort-Object -Unique) | Should -Be @(1)
+        (script:Get-Entry -Block $block | ForEach-Object { script:Get-YamlValue -Map $_ -Key 'pass' } | Sort-Object -Unique) | Should -Be @(1)
     }
 
     It 'covers multi-pass concurrence with also_flagged_by preserving secondary pass ids' {
         $fixturePath = (script:Get-ValidFixture -Name 'valid-multi-pass-concurrence.txt').FullName
         $fixture = script:Read-DesignDispositionFixture -Path $fixturePath
         $block = script:Get-FindingDispositionsBlock -Fixture $fixture
-        $concurrentEntry = script:Get-Entries -Block $block | Where-Object { script:Test-YamlKey -Map $_ -Key 'also_flagged_by' } | Select-Object -First 1
+        $concurrentEntry = script:Get-Entry -Block $block | Where-Object { script:Test-YamlKey -Map $_ -Key 'also_flagged_by' } | Select-Object -First 1
 
         (script:Get-PassesRun -Block $block | Sort-Object) | Should -Be @(1, 2, 3)
         @(script:ConvertTo-ObjectArray -Value (script:Get-YamlValue -Map $concurrentEntry -Key 'also_flagged_by')) | Should -Be @(2, 3)
@@ -256,10 +256,10 @@ Describe 'design disposition marker payload schema' {
         $fixturePath = (script:Get-ValidFixture -Name 'valid-routine-artifact-citation.txt').FullName
         $fixture = script:Read-DesignDispositionFixture -Path $fixturePath
         $block = script:Get-FindingDispositionsBlock -Fixture $fixture
-        $routineEntry = script:Get-Entries -Block $block | Where-Object { script:Get-YamlValue -Map $_ -Key 'classification' -eq 'routine' } | Select-Object -First 1
+        $routineEntry = script:Get-Entry -Block $block | Where-Object { script:Get-YamlValue -Map $_ -Key 'classification' -eq 'routine' } | Select-Object -First 1
 
         (script:Get-YamlValue -Map $routineEntry -Key 'artifact_citation') | Should -Not -BeNullOrEmpty
-        (script:Validate-DesignDispositionFixture -Path $fixturePath) | Should -BeNullOrEmpty
+        (script:Test-DesignDispositionFixture -Path $fixturePath) | Should -BeNullOrEmpty
     }
 }
 
@@ -271,21 +271,21 @@ Describe 'design disposition marker payload malformed fixtures' {
         @{ File = 'invalid-credit-input-marker-body.txt'; ExpectedMessage = 'finding_dispositions must appear inside a design-phase-complete marker body' }
     ) {
         $fixturePath = Join-Path $script:FixtureRoot $File
-        $errors = @(script:Validate-DesignDispositionFixture -Path $fixturePath)
+        $errors = @(script:Test-DesignDispositionFixture -Path $fixturePath)
 
         ($errors -join "`n") | Should -Match ([regex]::Escape($ExpectedMessage))
     }
 
     It 'enforces passes_run as a non-empty subset of 1, 2, 3' {
         $fixturePath = Join-Path $script:FixtureRoot 'invalid-passes-run-empty.txt'
-        $errors = @(script:Validate-DesignDispositionFixture -Path $fixturePath)
+        $errors = @(script:Test-DesignDispositionFixture -Path $fixturePath)
 
         $errors | Should -Contain 'invalid passes_run: must be a non-empty subset of 1, 2, 3'
     }
 
     It 'enforces passes_run equality with the populated entries pass set' {
         $fixturePath = Join-Path $script:FixtureRoot 'invalid-passes-run-mismatch.txt'
-        $errors = @(script:Validate-DesignDispositionFixture -Path $fixturePath)
+        $errors = @(script:Test-DesignDispositionFixture -Path $fixturePath)
 
         $errors | Should -Contain 'invalid passes_run: must match entries[].pass set'
     }

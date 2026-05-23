@@ -181,6 +181,16 @@ Render at phase exit after all load-bearing decisions are locked:
 - Load `upstream-onboarding` after this skill per the D-load-directive declared in each agent body dispatcher.
 - Load `bdd-scenarios` when scenario IDs and G/W/T formatting are needed for CE Gate scenarios.
 
+## Gotchas
+
+| Trigger                                         | Gotcha                                                        | Fix                                                                 |
+| ----------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
+| A routine decision is treated as load-bearing   | The agent asks for engagement on content already settled by an inherited artifact | Re-audit Leg 2 against the citation and emit the appropriate recommendation shift |
+
+| Trigger                                         | Gotcha                                                        | Fix                                                                 |
+| ----------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
+| A load-bearing decision is treated as routine   | The durable artifact changes without surfacing the maintainer choice | Rerun all three gate legs and ask before recording the final decision |
+
 ## Frame Ports Filled By This Skill
 
 This skill is **supporting methodology** — it declares no `provides:` field and fills no frame port. Classification per `Documents/Design/frame-architecture.md` Adapter Model: the credit-author test confirms this skill adds no frame credit row.
