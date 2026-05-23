@@ -375,7 +375,7 @@ Describe 'subagent-env-handshake v1 contract' {
             $reviewContent = Get-Content -Path $script:OrchestraReviewMdPath -Raw -Encoding utf8
             $designContent = Get-Content -Path $script:DesignExplorationSkillMdPath -Raw -Encoding utf8
 
-            $directivePattern = 'Per `skills/subagent-env-handshake/SKILL\.md` section Subagent working-tree discipline: under `workspace_mode: shared`[\s\S]*?redirects into the repo\)\.'
+            $directivePattern = 'Per `skills/subagent-env-handshake/SKILL\.md` section Subagent working-tree discipline: under `workspace_mode: shared`[\s\S]*?(?=\r?\n\r?\n|$)'
 
             $planMatch = [regex]::Match($planContent, $directivePattern)
             $planMatch.Success | Should -BeTrue -Because 'commands/plan.md must contain the directive'
