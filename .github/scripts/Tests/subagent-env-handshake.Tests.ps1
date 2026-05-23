@@ -349,23 +349,33 @@ Describe 'subagent-env-handshake v1 contract' {
     Context 'Scenario (j) — Issue #587 Parallel-batch honest handshake contract tests' {
         BeforeAll {
             # Constant SHA-256 for the working-tree mutation discipline directive
-            $script:DirectiveSha256 = 'c6632eaeb2fbbe8a145d760ab5a43e7da87b91f949a5630146bb9d98701bdb0f'
+            $script:DirectiveSha256 = 'e42322d8b9ba0aa64bd4f68d1d40f50ebc8bd9aad18731ae93120d9a43a51d27'
             $script:PlanMdPath = Join-Path $script:RepoRoot 'commands/plan.md'
             $script:OrchestraReviewMdPath = Join-Path $script:RepoRoot 'commands/orchestra-review.md'
             $script:DesignExplorationSkillMdPath = Join-Path $script:RepoRoot 'skills/design-exploration/SKILL.md'
+
+            # Helper to normalize whitespace and compute SHA-256
+            function Get-NormalizedHash($text) {
+                $normalized = ($text -replace '\s+', ' ').Trim()
+                $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
+                $sha = [System.Security.Cryptography.SHA256]::Create()
+                $hashBytes = $sha.ComputeHash($bytes)
+                $hashStr = ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
+                return $hashStr
+            }
         }
 
         It 'contains ### Subagent working-tree discipline H3 section heading in SKILL.md' {
-            $skillContent = Get-Content -Path $script:SkillMdPath -Raw
+            $skillContent = Get-Content -Path $script:SkillMdPath -Raw -Encoding utf8
             $skillContent | Should -Match '(?m)^### Subagent working-tree discipline \(under workspace_mode: shared\)'
         }
 
         It 'contains the byte-identical working-tree mutation discipline directive at three parallel-batch sites' {
-            $planContent = Get-Content -Path $script:PlanMdPath -Raw
-            $reviewContent = Get-Content -Path $script:OrchestraReviewMdPath -Raw
-            $designContent = Get-Content -Path $script:DesignExplorationSkillMdPath -Raw
+            $planContent = Get-Content -Path $script:PlanMdPath -Raw -Encoding utf8
+            $reviewContent = Get-Content -Path $script:OrchestraReviewMdPath -Raw -Encoding utf8
+            $designContent = Get-Content -Path $script:DesignExplorationSkillMdPath -Raw -Encoding utf8
 
-            $directivePattern = 'Per `skills/subagent-env-handshake/SKILL.md` section Subagent working-tree discipline: under `workspace_mode: shared`[^)]*\)'
+            $directivePattern = 'Per `skills/subagent-env-handshake/SKILL\.md` section Subagent working-tree discipline: under `workspace_mode: shared`[\s\S]*?redirects into the repo\)\.'
 
             $planMatch = [regex]::Match($planContent, $directivePattern)
             $planMatch.Success | Should -BeTrue -Because 'commands/plan.md must contain the directive'
@@ -379,21 +389,11 @@ Describe 'subagent-env-handshake v1 contract' {
             $designMatch.Success | Should -BeTrue -Because 'skills/design-exploration/SKILL.md must contain the directive'
             $designDirective = $designMatch.Value
 
-            # Helper to normalize whitespace and compute SHA-256
-            function Get-NormalizedHash($text) {
-                $normalized = ($text -replace '\s+', ' ').Trim()
-                $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
-                $sha = [System.Security.Cryptography.SHA256]::Create()
-                $hashBytes = $sha.ComputeHash($bytes)
-                $hashStr = ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
-                return $hashStr
-            }
-
             $planHash = Get-NormalizedHash $planDirective
             $reviewHash = Get-NormalizedHash $reviewDirective
             $designHash = Get-NormalizedHash $designDirective
 
-            Write-Host "DEBUG: Computed planHash is: $planHash"
+            Write-Debug "Computed planHash is: $planHash"
 
             $planHash | Should -Be $script:DirectiveSha256 -Because 'plan directive SHA-256 must match the constant'
             $reviewHash | Should -Be $planHash -Because 'review directive must be byte-identical to plan directive'
@@ -401,7 +401,7 @@ Describe 'subagent-env-handshake v1 contract' {
         }
 
         It 'contains parallel-batch-honest-premise-anchor sentinels wrapping a non-empty load-bearing claim' {
-            $skillContent = Get-Content -Path $script:SkillMdPath -Raw
+            $skillContent = Get-Content -Path $script:SkillMdPath -Raw -Encoding utf8
             $anchorPattern = '(?ms)<!-- parallel-batch-honest-premise-anchor begin -->\s*\r?\n(?<body>.*?)\r?\n<!-- /parallel-batch-honest-premise-anchor -->'
             $match = [regex]::Match($skillContent, $anchorPattern)
             $match.Success | Should -BeTrue -Because 'SKILL.md must carry the parallel-batch-honest-premise-anchor'
@@ -409,8 +409,8 @@ Describe 'subagent-env-handshake v1 contract' {
         }
 
         It 'contains ND-2, environment-divergence and the S4 framing sentence in partial-pass-recovery clauses' {
-            $planContent = Get-Content -Path $script:PlanMdPath -Raw
-            $reviewContent = Get-Content -Path $script:OrchestraReviewMdPath -Raw
+            $planContent = Get-Content -Path $script:PlanMdPath -Raw -Encoding utf8
+            $reviewContent = Get-Content -Path $script:OrchestraReviewMdPath -Raw -Encoding utf8
 
             $s4Framing = 'ND-2 halts arising from sibling-subagent tree mutation under `workspace_mode: shared` are a documented recovery path declared in `skills/subagent-env-handshake/SKILL.md` section Subagent working-tree discipline, not a contract violation.'
 
