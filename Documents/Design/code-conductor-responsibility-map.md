@@ -110,17 +110,17 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
 - source: "Overview"
   responsibility: "Declare serial or parallel execution mode per implementation step with identical requirement contracts and convergence gates."
   disposition: planner-should-absorb
-  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/589; move execution-mode declaration defaults into skills/plan-authoring/SKILL.md execution-step responsibilities while runtime still honors slice metadata."
-  verification_status: unverified
+  action: "Absorbed by issue #589 into skills/plan-authoring/SKILL.md Execution mode selection: plan authors declare execution mode in the plan and slice metadata while runtime agents consume the declared mode. Frame-slice template reconciliation remains tracked by issue #613."
+  verification_status: verified
   verified-against-sha: ""
-  verified-via-pr-sha: ""
+  verified-via-pr-sha: "pending PR #589"
 - source: "Overview"
   responsibility: "Choose parallel for stable isolated work and serial for exploratory or high-risk work."
   disposition: planner-should-absorb
-  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/589; encode mode-selection heuristics in skills/plan-authoring/SKILL.md and generated frame-slice metadata."
-  verification_status: unverified
+  action: "Absorbed by issue #589 into skills/plan-authoring/SKILL.md Execution mode selection: plan authors own the parallel-vs-serial heuristic and runtime agents consume the declared mode. Out-of-scope skills/parallel-execution/SKILL.md ownership wording remains tracked by issue #614."
+  verification_status: verified
   verified-against-sha: ""
-  verified-via-pr-sha: ""
+  verified-via-pr-sha: "pending PR #589"
 - source: "Usage Examples"
   responsibility: "Describe example flows for full implementation and research-first work."
   disposition: not-applicable
