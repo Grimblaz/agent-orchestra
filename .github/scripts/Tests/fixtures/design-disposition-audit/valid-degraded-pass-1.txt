@@ -16,5 +16,5 @@ finding_dispositions:
       pass: 1
       disposition: dismiss
       classification: routine
-      disposition_rationale: "The finding repeats an already satisfied wording constraint."
+      disposition_rationale: "The finding is a local wording cleanup with no effect on the escalation boundary."
 ```

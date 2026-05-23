@@ -76,7 +76,7 @@ articulation_captures:
 
 For each adversarial-review finding that the calling workflow must disposition, run the classification gate against the action the maintainer would take for that finding, not against the review pass as a whole. Use the Code-Critic Finding Categories contract for the input identity: `id` values are sequential `F1 | F2 | F3 | ...` labels within the review cycle, and `pass` is `1 | 2 | 3` for the prosecution pass that originated code, design, or plan findings. The disposition enum is `incorporate | dismiss | escalate`; the classification enum is `load-bearing | routine`. If a finding is routine, record the disposition without firing the platform's structured-question tool. If a finding is load-bearing, render the normal `audit_rationale`, decision brief, and structured question before recording the disposition.
 
-The marker payload schema is the `finding_dispositions:` block validated by `.github/scripts/Tests/design-disposition-audit.Tests.ps1`: `schema_version: 1`, non-empty `passes_run` as a subset of `[1, 2, 3]`, and `entries[]` carrying `finding_id`, `pass`, `disposition`, `classification`, and `disposition_rationale`. Routine entries may include `artifact_citation` when an inherited artifact answers the finding, and multi-pass concurrence may include `also_flagged_by` with secondary pass ids.
+The marker payload schema is the `finding_dispositions:` block validated by `.github/scripts/Tests/design-disposition-audit.Tests.ps1`: `schema_version: 1`, non-empty `passes_run` as a subset of `[1, 2, 3]`, and `entries[]` carrying `finding_id`, `pass`, `disposition`, `classification`, and `disposition_rationale`. Routine entries require `artifact_citation` when the routine classification rests on an inherited artifact settling the finding; routine entries classified for another non-load-bearing reason do not require a citation. Multi-pass concurrence may include `also_flagged_by` with secondary pass ids.
 
 `disposition_rationale` explains why this specific finding received this specific `incorporate`, `dismiss`, or `escalate` outcome. It is not the v0 `audit_rationale`: `audit_rationale` proves why a decision is load-bearing before asking; `disposition_rationale` persists the final per-finding outcome after the gate decision, including routine outcomes that never asked the maintainer.
 
@@ -154,7 +154,7 @@ Agent re-audits, finds citation in #571 D-customer section, reclassifies, and em
 
 Emit immediately before the revised recommendation:
 
-> `**Recommendation shift** — {decision_id}: previously {old_recommendation}; now {new_recommendation}; trigger: {engineer-pushback | new-evidence | classification-re-audit}; reason: {one-sentence reason}.`
+> `**Recommendation shift** — {decision_id}: previously {old_recommendation}; now {new_recommendation}; trigger: {engineer-pushback | new-evidence | classification-re-audit | classification-re-audit-routine}; reason: {one-sentence reason}.`
 
 **Exemplar** (D-gap-visibility, from #571 R1+R2 — inline token, then phase-exit YAML aggregate):
 
@@ -169,7 +169,7 @@ recommendation_shifts:
     - decision_id: <id>
       previous: <old_recommendation>
       revised: <new_recommendation>
-      trigger: engineer-pushback | new-evidence | classification-re-audit
+      trigger: engineer-pushback | new-evidence | classification-re-audit | classification-re-audit-routine
       reason: <one-sentence>
       capture_phase: experience | design | plan
 ```

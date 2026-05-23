@@ -1,0 +1,14 @@
+<!-- design-phase-complete-586 -->
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1]
+  entries:
+    - finding_id: F6
+      pass: 1
+      disposition: escalate
+      classification: load-bearing
+      disposition_rationale: "The finding changes the required maintainer decision path."
+      also_flagged_by: [4]
+```

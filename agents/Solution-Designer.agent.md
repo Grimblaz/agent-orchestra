@@ -77,7 +77,7 @@ Load `skills/design-exploration/SKILL.md` for the reusable workflow — research
 
 ## Stage 3: Adversarial Design Challenge
 
-Run the 3-pass Design Challenge per `skills/design-exploration/SKILL.md` after decisions are confirmed. Non-blocking — prosecution only (no defense or judge). Before Stage 4, handle the merged finding ledger in this literal order: classify → escalate load-bearing → incorporate/dismiss remainder → emit summary → update issue body. Use `skills/solution-authoring/SKILL.md` section `Applying the gate to adversarial-review dispositions` for the per-finding classification gate and marker schema, and use `skills/design-exploration/SKILL.md` section `Dispositions` for the disposition workflow and summary requirements. Stage 3 emits the merged finding ledger as inline prose in the agent's running response; Stage 4 reads it from same conversation context (`within-conversation:inline` per SMC). If Stage 4 resumes from a session boundary, reconstruct the ledger from the most recent Stage 3 output in the design-issue thread before running the self-check.
+Run the 3-pass Design Challenge per `skills/design-exploration/SKILL.md` after decisions are confirmed. Non-blocking — prosecution only (no defense or judge). Before Stage 4, handle the merged finding ledger in this literal order: classify → escalate load-bearing → incorporate/dismiss remainder → emit summary → update issue body. Use `skills/solution-authoring/SKILL.md` section `Applying the gate to adversarial-review dispositions` for the per-finding classification gate and marker schema, and use `skills/design-exploration/SKILL.md` section `Dispositions` for the disposition workflow and summary requirements. Stage 3 emits the merged finding ledger as inline prose in the agent's running response; Stage 4 may use it only when that same-conversation ledger is still present and verifiable. If Stage 4 resumes and the Stage 3 inline merged ledger is absent, incomplete, or unverifiable, hard-stop before posting the marker and rerun Stage 3 or reload a durable Stage 3 ledger artifact before running the self-check.
 
 ## Stage 4: Update Issue
 
@@ -87,7 +87,7 @@ Update the GitHub issue body with full design details per `skills/design-explora
 
 ### Pre-post YAML integrity check
 
-Before posting the `design-phase-complete` marker, count findings in the merged ledger and entries in the `finding_dispositions:` YAML block about to be posted. The counts must match exactly. If the ledger has zero findings, an empty `entries: []` block passes; the Phase summary still says `all findings dismissed` or `all classified routine` when applicable. If the YAML is malformed or the counts differ, halt and do not post the marker. Use this literal halt template: `YAML integrity check failed: ledger has N finding(s); block has M; missing from block: {ids_or_none}; extra in block: {ids_or_none}`.
+Before posting the `design-phase-complete` marker, compare the merged ledger and the `finding_dispositions:` YAML block about to be posted by both count and identity set over `(finding_id, pass)`. The counts must match exactly, and the identity sets must be equal; missing or extra `(finding_id, pass)` keys are failures even when counts match. If the ledger has zero findings, an empty `entries: []` block passes; the Phase summary still says `all findings dismissed` or `all classified routine` when applicable. If the YAML is malformed, the counts differ, or the identity sets differ, halt and do not post the marker. Use this literal halt template: `YAML integrity check failed: ledger has N finding(s); block has M; missing from block: {ids_or_none}; extra in block: {ids_or_none}`.
 
 Post the `design-phase-complete` marker using this literal template:
 
@@ -101,7 +101,7 @@ Phase summary: N finding(s) classified, M load-bearing, K dismissed. Decisions t
 ```yaml
 finding_dispositions:
   schema_version: 1
-  passes_run: [1, 2, 3]
+  passes_run: [{passes_run}]
   entries:
     - finding_id: F1
       pass: 1
@@ -112,6 +112,8 @@ finding_dispositions:
       also_flagged_by: [2, 3]
 ```
 ````
+
+`passes_run` must equal the set of passes represented by the merged ledger and `entries[]`. A degraded pass-1-only ledger is valid when only pass 1 ran, but the template must then use `passes_run: [1]` and contain only pass-1 finding entries.
 
 Immediately after posting the completion marker, post a credit-input marker comment (SMC-17 deferred-emission):
 
@@ -134,7 +136,7 @@ Hard-stop: never conclude without durable artifacts.
 - [ ] **Rejected alternatives documented** with brief rationale.
 - [ ] **Completion comment posted** with the `<!-- design-phase-complete-{ISSUE_NUMBER} -->` marker.
 - [ ] **Credit-input marker** `<!-- credit-input-design-{ISSUE_NUMBER} -->` posted immediately after.
-- [ ] **YAML integrity check** passed (ledger-finding count equals finding_dispositions entries count; halt and surface error if not).
+- [ ] **YAML integrity check** passed (ledger-finding count equals finding_dispositions entries count, and `(finding_id, pass)` identity sets are equal; halt and surface error if not).
 
 A `Documents/Design/` file is **not** created during design — Doc-Keeper creates it as part of the implementation PR.
 

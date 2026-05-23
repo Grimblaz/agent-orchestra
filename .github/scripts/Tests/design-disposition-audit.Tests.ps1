@@ -52,6 +52,40 @@ BeforeAll {
         return @($Value)
     }
 
+    function script:Test-YamlListValue {
+        param([object]$Value)
+
+        if ($null -eq $Value) { return $false }
+        if ($Value -is [string]) { return $false }
+        if ($Value -is [System.Collections.IDictionary]) { return $false }
+
+        return $Value -is [System.Collections.IEnumerable]
+    }
+
+    function script:Test-RoutineCitationRequired {
+        param([object]$Entry)
+
+        if ((script:Get-YamlValue -Map $Entry -Key 'classification') -ne 'routine') {
+            return $false
+        }
+
+        $rationale = [string](script:Get-YamlValue -Map $Entry -Key 'disposition_rationale')
+        $rationaleRequiresCitation = $rationale -match '(?i)\b(inherited|settled|already[-\s]+documented|existing\s+docs?|cites?|cited|citation-backed)\b'
+
+        if (-not (script:Test-YamlKey -Map $Entry -Key 'artifact_citation_required')) {
+            return $rationaleRequiresCitation
+        }
+
+        $requiredValue = script:Get-YamlValue -Map $Entry -Key 'artifact_citation_required'
+        $explicitlyRequired = if ($requiredValue -is [bool]) {
+            $requiredValue
+        } else {
+            [string]$requiredValue -match '(?i)^true$'
+        }
+
+        return $rationaleRequiresCitation -or $explicitlyRequired
+    }
+
     function script:Read-DesignDispositionFixture {
         param([string]$Path)
 
@@ -130,6 +164,8 @@ BeforeAll {
 
         $entryPasses = @()
         foreach ($entry in $entries) {
+            $entryPass = $null
+
             if (-not (script:Test-YamlKey -Map $entry -Key 'finding_id')) {
                 $errors.Add('missing finding_id')
             } elseif ((script:Get-YamlValue -Map $entry -Key 'finding_id') -notmatch '^F\d+$') {
@@ -140,6 +176,7 @@ BeforeAll {
                 $errors.Add('missing pass')
             } else {
                 $pass = [int](script:Get-YamlValue -Map $entry -Key 'pass')
+                $entryPass = $pass
                 $entryPasses += $pass
                 if ($pass -notin $script:AllowedPasses) {
                     $errors.Add('invalid pass')
@@ -164,12 +201,35 @@ BeforeAll {
                 $errors.Add('invalid disposition_rationale')
             }
 
-            if (
-                (script:Get-YamlValue -Map $entry -Key 'classification') -eq 'routine' -and
-                (script:Test-YamlKey -Map $entry -Key 'artifact_citation') -and
-                [string]::IsNullOrWhiteSpace([string](script:Get-YamlValue -Map $entry -Key 'artifact_citation'))
-            ) {
+            $hasArtifactCitation = script:Test-YamlKey -Map $entry -Key 'artifact_citation'
+            if (($hasArtifactCitation -or (script:Test-RoutineCitationRequired -Entry $entry)) -and [string]::IsNullOrWhiteSpace([string](script:Get-YamlValue -Map $entry -Key 'artifact_citation'))) {
                 $errors.Add('invalid artifact_citation')
+            }
+
+            if (script:Test-YamlKey -Map $entry -Key 'also_flagged_by') {
+                $alsoFlaggedByValue = script:Get-YamlValue -Map $entry -Key 'also_flagged_by'
+                $alsoFlaggedBy = @(script:ConvertTo-ObjectArray -Value $alsoFlaggedByValue)
+                $alsoFlaggedPasses = @()
+                $hasNonNumericPass = $false
+
+                foreach ($alsoFlaggedPass in $alsoFlaggedBy) {
+                    try {
+                        $alsoFlaggedPasses += [int]$alsoFlaggedPass
+                    } catch {
+                        $hasNonNumericPass = $true
+                    }
+                }
+
+                if (
+                    -not (script:Test-YamlListValue -Value $alsoFlaggedByValue) -or
+                    $alsoFlaggedPasses.Count -eq 0 -or
+                    $hasNonNumericPass -or
+                    @($alsoFlaggedPasses | Where-Object { $_ -notin $script:AllowedPasses }).Count -gt 0 -or
+                    ($null -ne $entryPass -and $entryPass -in $alsoFlaggedPasses) -or
+                    @($alsoFlaggedPasses | Sort-Object -Unique).Count -ne $alsoFlaggedPasses.Count
+                ) {
+                    $errors.Add('invalid also_flagged_by')
+                }
             }
         }
 
@@ -261,6 +321,16 @@ Describe 'design disposition marker payload schema' {
         (script:Get-YamlValue -Map $routineEntry -Key 'artifact_citation') | Should -Not -BeNullOrEmpty
         (script:Test-DesignDispositionFixture -Path $fixturePath) | Should -BeNullOrEmpty
     }
+
+    It 'allows routine entries without citations only when their rationale does not claim inherited or settled documentation' {
+        $fixturePath = (script:Get-ValidFixture -Name 'valid-degraded-pass-1.txt').FullName
+        $fixture = script:Read-DesignDispositionFixture -Path $fixturePath
+        $block = script:Get-FindingDispositionsBlock -Fixture $fixture
+        $routineEntry = script:Get-Entry -Block $block | Where-Object { script:Get-YamlValue -Map $_ -Key 'classification' -eq 'routine' } | Select-Object -First 1
+
+        (script:Test-YamlKey -Map $routineEntry -Key 'artifact_citation') | Should -BeFalse
+        (script:Test-DesignDispositionFixture -Path $fixturePath) | Should -BeNullOrEmpty
+    }
 }
 
 Describe 'design disposition marker payload malformed fixtures' {
@@ -269,6 +339,11 @@ Describe 'design disposition marker payload malformed fixtures' {
         @{ File = 'invalid-missing-finding-id.txt'; ExpectedMessage = 'missing finding_id' }
         @{ File = 'invalid-classification-enum.txt'; ExpectedMessage = 'invalid classification' }
         @{ File = 'invalid-credit-input-marker-body.txt'; ExpectedMessage = 'finding_dispositions must appear inside a design-phase-complete marker body' }
+        @{ File = 'invalid-routine-cited-rationale-missing-citation.txt'; ExpectedMessage = 'invalid artifact_citation' }
+        @{ File = 'invalid-routine-artifact-citation-required-missing-citation.txt'; ExpectedMessage = 'invalid artifact_citation' }
+        @{ File = 'invalid-also-flagged-by-invalid-pass.txt'; ExpectedMessage = 'invalid also_flagged_by' }
+        @{ File = 'invalid-also-flagged-by-self-reference.txt'; ExpectedMessage = 'invalid also_flagged_by' }
+        @{ File = 'invalid-also-flagged-by-duplicate.txt'; ExpectedMessage = 'invalid also_flagged_by' }
     ) {
         $fixturePath = Join-Path $script:FixtureRoot $File
         $errors = @(script:Test-DesignDispositionFixture -Path $fixturePath)

@@ -18,9 +18,11 @@ finding_dispositions:
       disposition: incorporate
       classification: routine
       disposition_rationale: "The wording correction is reversible and backed by existing docs."
+      artifact_citation: "skills/solution-authoring/SKILL.md#rule-non-overridability"
     - finding_id: F3
       pass: 3
       disposition: dismiss
       classification: routine
       disposition_rationale: "The evidence points to an already documented non-goal."
+      artifact_citation: "Documents/Design/session-memory-contract.md#non-goals"
 ```

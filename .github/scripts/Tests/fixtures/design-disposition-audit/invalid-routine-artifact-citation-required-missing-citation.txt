@@ -1,0 +1,14 @@
+<!-- design-phase-complete-586 -->
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [3]
+  entries:
+    - finding_id: F6
+      pass: 3
+      disposition: dismiss
+      classification: routine
+      disposition_rationale: "The concern is a reversible naming cleanup."
+      artifact_citation_required: true
+```
