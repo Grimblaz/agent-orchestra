@@ -62,6 +62,36 @@ BeforeAll {
         return $Value -is [System.Collections.IEnumerable]
     }
 
+    function script:Test-AlsoFlaggedByValue {
+        param(
+            [object]$Value,
+            [int[]]$PassesRun,
+            [object]$EntryPass
+        )
+
+        $alsoFlaggedBy = @(script:ConvertTo-ObjectArray -Value $Value)
+        $alsoFlaggedPasses = @()
+        $hasNonNumericPass = $false
+
+        foreach ($alsoFlaggedPass in $alsoFlaggedBy) {
+            try {
+                $alsoFlaggedPasses += [int]$alsoFlaggedPass
+            } catch {
+                $hasNonNumericPass = $true
+            }
+        }
+
+        return (
+            (script:Test-YamlListValue -Value $Value) -and
+            $alsoFlaggedPasses.Count -gt 0 -and
+            -not $hasNonNumericPass -and
+            @($alsoFlaggedPasses | Where-Object { $_ -notin $script:AllowedPasses }).Count -eq 0 -and
+            @($alsoFlaggedPasses | Where-Object { $_ -notin $PassesRun }).Count -eq 0 -and
+            ($null -eq $EntryPass -or $EntryPass -notin $alsoFlaggedPasses) -and
+            @($alsoFlaggedPasses | Sort-Object -Unique).Count -eq $alsoFlaggedPasses.Count
+        )
+    }
+
     function script:Test-RoutineCitationRequired {
         param([object]$Entry)
 
@@ -205,27 +235,8 @@ BeforeAll {
 
             if (script:Test-YamlKey -Map $entry -Key 'also_flagged_by') {
                 $alsoFlaggedByValue = script:Get-YamlValue -Map $entry -Key 'also_flagged_by'
-                $alsoFlaggedBy = @(script:ConvertTo-ObjectArray -Value $alsoFlaggedByValue)
-                $alsoFlaggedPasses = @()
-                $hasNonNumericPass = $false
 
-                foreach ($alsoFlaggedPass in $alsoFlaggedBy) {
-                    try {
-                        $alsoFlaggedPasses += [int]$alsoFlaggedPass
-                    } catch {
-                        $hasNonNumericPass = $true
-                    }
-                }
-
-                if (
-                    -not (script:Test-YamlListValue -Value $alsoFlaggedByValue) -or
-                    $alsoFlaggedPasses.Count -eq 0 -or
-                    $hasNonNumericPass -or
-                    @($alsoFlaggedPasses | Where-Object { $_ -notin $script:AllowedPasses }).Count -gt 0 -or
-                    @($alsoFlaggedPasses | Where-Object { $_ -notin $passesRun }).Count -gt 0 -or
-                    ($null -ne $entryPass -and $entryPass -in $alsoFlaggedPasses) -or
-                    @($alsoFlaggedPasses | Sort-Object -Unique).Count -ne $alsoFlaggedPasses.Count
-                ) {
+                if (-not (script:Test-AlsoFlaggedByValue -Value $alsoFlaggedByValue -PassesRun $passesRun -EntryPass $entryPass)) {
                     $errors.Add('invalid also_flagged_by: every secondary pass must be present in passes_run')
                 }
             }
