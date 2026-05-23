@@ -108,8 +108,8 @@ finding_dispositions:
       disposition: dismiss
       classification: routine
       disposition_rationale: "{rationale}"
-      artifact_citation: "{optional_artifact_citation}"
-      also_flagged_by: [2, 3]
+      # artifact_citation: "{optional_artifact_citation}"
+      # also_flagged_by: [2, 3]
 ```
 ````
 

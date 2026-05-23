@@ -92,27 +92,6 @@ BeforeAll {
         )
     }
 
-    function script:Test-RoutineCitationRequired {
-        param([object]$Entry)
-
-        if ((script:Get-YamlValue -Map $Entry -Key 'classification') -ne 'routine') {
-            return $false
-        }
-
-        if (-not (script:Test-YamlKey -Map $Entry -Key 'artifact_citation_required')) {
-            return $false
-        }
-
-        $requiredValue = script:Get-YamlValue -Map $Entry -Key 'artifact_citation_required'
-        $explicitlyRequired = if ($requiredValue -is [bool]) {
-            $requiredValue
-        } else {
-            [string]$requiredValue -match '(?i)^true$'
-        }
-
-        return $explicitlyRequired
-    }
-
     function script:Read-DesignDispositionFixture {
         param([string]$Path)
 
@@ -151,6 +130,42 @@ BeforeAll {
         return @(script:ConvertTo-ObjectArray -Value (script:Get-YamlValue -Map $Block -Key 'passes_run') | ForEach-Object { [int]$_ })
     }
 
+    function script:ConvertTo-IntegerArray {
+        param(
+            [object]$Value,
+            [string]$FieldName,
+            [System.Collections.Generic.List[string]]$Errors
+        )
+
+        $integerValues = @()
+        foreach ($item in @(script:ConvertTo-ObjectArray -Value $Value)) {
+            $parsedValue = 0
+            if (-not [int]::TryParse([string]$item, [ref]$parsedValue)) {
+                $Errors.Add("invalid ${FieldName}: values must be numeric")
+                return @()
+            }
+
+            $integerValues += $parsedValue
+        }
+
+        return $integerValues
+    }
+
+    function script:Test-IntegerValue {
+        param(
+            [object]$Value,
+            [ref]$Result
+        )
+
+        $parsedValue = 0
+        if (-not [int]::TryParse([string]$Value, [ref]$parsedValue)) {
+            return $false
+        }
+
+        $Result.Value = $parsedValue
+        return $true
+    }
+
     function script:Test-DesignDispositionFixture {
         param([string]$Path)
 
@@ -176,7 +191,7 @@ BeforeAll {
             $errors.Add('missing passes_run')
             $passesRun = @()
         } else {
-            $passesRun = @(script:Get-PassesRun -Block $block)
+            $passesRun = @(script:ConvertTo-IntegerArray -Value (script:Get-YamlValue -Map $block -Key 'passes_run') -FieldName 'passes_run' -Errors $errors)
             if ($passesRun.Count -eq 0 -or @($passesRun | Where-Object { $_ -notin $script:AllowedPasses }).Count -gt 0) {
                 $errors.Add('invalid passes_run: must be a non-empty subset of 1, 2, 3')
             }
@@ -202,11 +217,15 @@ BeforeAll {
             if (-not (script:Test-YamlKey -Map $entry -Key 'pass')) {
                 $errors.Add('missing pass')
             } else {
-                $pass = [int](script:Get-YamlValue -Map $entry -Key 'pass')
-                $entryPass = $pass
-                $entryPasses += $pass
-                if ($pass -notin $script:AllowedPasses) {
-                    $errors.Add('invalid pass')
+                $pass = 0
+                if (-not (script:Test-IntegerValue -Value (script:Get-YamlValue -Map $entry -Key 'pass') -Result ([ref]$pass))) {
+                    $errors.Add('invalid pass: must be numeric')
+                } else {
+                    $entryPass = $pass
+                    $entryPasses += $pass
+                    if ($pass -notin $script:AllowedPasses) {
+                        $errors.Add('invalid pass')
+                    }
                 }
             }
 
@@ -229,7 +248,11 @@ BeforeAll {
             }
 
             $hasArtifactCitation = script:Test-YamlKey -Map $entry -Key 'artifact_citation'
-            if (($hasArtifactCitation -or (script:Test-RoutineCitationRequired -Entry $entry)) -and [string]::IsNullOrWhiteSpace([string](script:Get-YamlValue -Map $entry -Key 'artifact_citation'))) {
+            if (script:Test-YamlKey -Map $entry -Key 'artifact_citation_required') {
+                $errors.Add('unsupported artifact_citation_required')
+            }
+
+            if ($hasArtifactCitation -and [string]::IsNullOrWhiteSpace([string](script:Get-YamlValue -Map $entry -Key 'artifact_citation'))) {
                 $errors.Add('invalid artifact_citation')
             }
 
@@ -361,6 +384,7 @@ Describe 'design disposition marker payload malformed fixtures' {
         @{ File = 'invalid-credit-input-marker-body.txt'; ExpectedMessage = 'finding_dispositions must appear inside a design-phase-complete marker body' }
         @{ File = 'invalid-routine-cited-rationale-missing-citation.txt'; ExpectedMessage = 'invalid artifact_citation' }
         @{ File = 'invalid-routine-artifact-citation-required-missing-citation.txt'; ExpectedMessage = 'invalid artifact_citation' }
+        @{ File = 'invalid-artifact-citation-required-unsupported.txt'; ExpectedMessage = 'unsupported artifact_citation_required' }
         @{ File = 'invalid-also-flagged-by-invalid-pass.txt'; ExpectedMessage = 'invalid also_flagged_by' }
         @{ File = 'invalid-also-flagged-by-self-reference.txt'; ExpectedMessage = 'invalid also_flagged_by' }
         @{ File = 'invalid-also-flagged-by-duplicate.txt'; ExpectedMessage = 'invalid also_flagged_by' }
@@ -384,5 +408,19 @@ Describe 'design disposition marker payload malformed fixtures' {
         $errors = @(script:Test-DesignDispositionFixture -Path $fixturePath)
 
         $errors | Should -Contain 'invalid passes_run: must match entries[].pass set'
+    }
+
+    It 'rejects non-numeric passes_run values with a deterministic validation error' {
+        $fixturePath = Join-Path $script:FixtureRoot 'invalid-passes-run-nonnumeric.txt'
+        $errors = @(script:Test-DesignDispositionFixture -Path $fixturePath)
+
+        $errors | Should -Contain 'invalid passes_run: values must be numeric'
+    }
+
+    It 'rejects non-numeric entry pass values with a deterministic validation error' {
+        $fixturePath = Join-Path $script:FixtureRoot 'invalid-pass-nonnumeric.txt'
+        $errors = @(script:Test-DesignDispositionFixture -Path $fixturePath)
+
+        $errors | Should -Contain 'invalid pass: must be numeric'
     }
 }
