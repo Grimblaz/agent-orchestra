@@ -10,4 +10,5 @@ finding_dispositions:
       disposition: dismiss
       classification: routine
       disposition_rationale: "The finding is already documented in the accepted design notes."
+      artifact_citation_required: true
 ```

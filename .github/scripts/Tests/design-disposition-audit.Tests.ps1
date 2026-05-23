@@ -69,11 +69,8 @@ BeforeAll {
             return $false
         }
 
-        $rationale = [string](script:Get-YamlValue -Map $Entry -Key 'disposition_rationale')
-        $rationaleRequiresCitation = $rationale -match '(?i)\b(inherited|settled|already[-\s]+documented|existing\s+docs?|cites?|cited|citation-backed)\b'
-
         if (-not (script:Test-YamlKey -Map $Entry -Key 'artifact_citation_required')) {
-            return $rationaleRequiresCitation
+            return $false
         }
 
         $requiredValue = script:Get-YamlValue -Map $Entry -Key 'artifact_citation_required'
@@ -83,7 +80,7 @@ BeforeAll {
             [string]$requiredValue -match '(?i)^true$'
         }
 
-        return $rationaleRequiresCitation -or $explicitlyRequired
+        return $explicitlyRequired
     }
 
     function script:Read-DesignDispositionFixture {
@@ -225,10 +222,11 @@ BeforeAll {
                     $alsoFlaggedPasses.Count -eq 0 -or
                     $hasNonNumericPass -or
                     @($alsoFlaggedPasses | Where-Object { $_ -notin $script:AllowedPasses }).Count -gt 0 -or
+                    @($alsoFlaggedPasses | Where-Object { $_ -notin $passesRun }).Count -gt 0 -or
                     ($null -ne $entryPass -and $entryPass -in $alsoFlaggedPasses) -or
                     @($alsoFlaggedPasses | Sort-Object -Unique).Count -ne $alsoFlaggedPasses.Count
                 ) {
-                    $errors.Add('invalid also_flagged_by')
+                    $errors.Add('invalid also_flagged_by: every secondary pass must be present in passes_run')
                 }
             }
         }
@@ -322,12 +320,23 @@ Describe 'design disposition marker payload schema' {
         (script:Test-DesignDispositionFixture -Path $fixturePath) | Should -BeNullOrEmpty
     }
 
-    It 'allows routine entries without citations only when their rationale does not claim inherited or settled documentation' {
+    It 'allows routine entries without citations when citation is not explicitly required' {
         $fixturePath = (script:Get-ValidFixture -Name 'valid-degraded-pass-1.txt').FullName
         $fixture = script:Read-DesignDispositionFixture -Path $fixturePath
         $block = script:Get-FindingDispositionsBlock -Fixture $fixture
         $routineEntry = script:Get-Entry -Block $block | Where-Object { script:Get-YamlValue -Map $_ -Key 'classification' -eq 'routine' } | Select-Object -First 1
 
+        (script:Test-YamlKey -Map $routineEntry -Key 'artifact_citation') | Should -BeFalse
+        (script:Test-DesignDispositionFixture -Path $fixturePath) | Should -BeNullOrEmpty
+    }
+
+    It 'allows negated inherited and citation-backed rationale language without artifact citations' {
+        $fixturePath = (script:Get-ValidFixture -Name 'valid-routine-negated-citation-language.txt').FullName
+        $fixture = script:Read-DesignDispositionFixture -Path $fixturePath
+        $block = script:Get-FindingDispositionsBlock -Fixture $fixture
+        $routineEntry = script:Get-Entry -Block $block | Select-Object -First 1
+
+        (script:Get-YamlValue -Map $routineEntry -Key 'disposition_rationale') | Should -Match 'does not rely on inherited documentation'
         (script:Test-YamlKey -Map $routineEntry -Key 'artifact_citation') | Should -BeFalse
         (script:Test-DesignDispositionFixture -Path $fixturePath) | Should -BeNullOrEmpty
     }
@@ -344,6 +353,7 @@ Describe 'design disposition marker payload malformed fixtures' {
         @{ File = 'invalid-also-flagged-by-invalid-pass.txt'; ExpectedMessage = 'invalid also_flagged_by' }
         @{ File = 'invalid-also-flagged-by-self-reference.txt'; ExpectedMessage = 'invalid also_flagged_by' }
         @{ File = 'invalid-also-flagged-by-duplicate.txt'; ExpectedMessage = 'invalid also_flagged_by' }
+        @{ File = 'invalid-also-flagged-by-pass-not-run.txt'; ExpectedMessage = 'invalid also_flagged_by: every secondary pass must be present in passes_run' }
     ) {
         $fixturePath = Join-Path $script:FixtureRoot $File
         $errors = @(script:Test-DesignDispositionFixture -Path $fixturePath)
