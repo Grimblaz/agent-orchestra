@@ -188,6 +188,8 @@ Do not infer methodology from a skill directory when no adapter file matches. Ei
 
 ### Execution mode selection
 
+Provenance: this heuristic is absorbed from Code-Conductor's prior execution-mode policy for issue #589; plan authors own selection while runtime agents consume the declared mode.
+
 For each implementation step, make a per-step declaration: declare the execution mode in the plan and slice metadata instead of leaving downstream agents to re-derive it. Keep the requirement contract and convergence gates identical for serial and parallel work; the mode changes coordination style, not the acceptance bar.
 
 Prefer `parallel` when the acceptance criteria are stable, the step is isolated with low coupling, clear interfaces exist between the implementation and test work, and fast implementation-plus-test feedback is valuable.

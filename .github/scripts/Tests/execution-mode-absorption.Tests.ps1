@@ -133,12 +133,33 @@ Describe 'Execution mode absorption into plan-authoring' {
         if ([string]::IsNullOrWhiteSpace($codeConductorOverview)) {
             $violations.Add('AC2: agents/Code-Conductor.agent.md must keep an Overview area for the replacement pointer.')
         } else {
-            if ($codeConductorOverview -notmatch [regex]::Escape('skills/plan-authoring/SKILL.md')) {
-                $violations.Add('AC2: Code-Conductor Overview must point to skills/plan-authoring/SKILL.md.')
-            }
+            $requiredPointerTerms = @(
+                [ordered]@{
+                    Term = 'skills/plan-authoring/SKILL.md'
+                    Message = 'AC2: Code-Conductor Overview must name skills/plan-authoring/SKILL.md.'
+                },
+                [ordered]@{
+                    Term = '§ Execution mode selection'
+                    Message = 'AC2: Code-Conductor Overview must point to § Execution mode selection.'
+                },
+                [ordered]@{
+                    Term = 'per-step execution-mode declaration'
+                    Message = 'AC2: Code-Conductor Overview must mention the per-step execution-mode declaration.'
+                },
+                [ordered]@{
+                    Term = 'parallel-vs-serial selection heuristic'
+                    Message = 'AC2: Code-Conductor Overview must mention the parallel-vs-serial selection heuristic.'
+                },
+                [ordered]@{
+                    Term = "at runtime, honor the mode surfaced from each plan slice's metadata"
+                    Message = "AC2: Code-Conductor Overview must preserve the runtime-consumer clause that honors the mode surfaced from each plan slice's metadata."
+                }
+            )
 
-            if ($codeConductorOverview -notmatch [regex]::Escape('Execution mode selection')) {
-                $violations.Add('AC2: Code-Conductor Overview must mention Execution mode selection.')
+            foreach ($requiredPointerTerm in $requiredPointerTerms) {
+                if ($codeConductorOverview -notmatch [regex]::Escape($requiredPointerTerm.Term)) {
+                    $violations.Add($requiredPointerTerm.Message)
+                }
             }
         }
 
@@ -157,11 +178,19 @@ Describe 'Execution mode absorption into plan-authoring' {
         $violations | Should -BeNullOrEmpty -Because 'execution-mode selection ownership must be absorbed into plan-authoring while downstream agents keep only pointers or consumer guidance'
     }
 
-    It 'warns when execution-mode selection guidance is missing semantic-equivalence cues without failing structurally' {
+    It 'requires execution-mode selection guidance to keep semantic-equivalence cues and source provenance' {
         $planAuthoring = script:Get-EMAMarkdownText -Path $script:PlanAuthoringPath
         $executionModeSelection = script:Get-EMAMarkdownSection -Markdown $planAuthoring -Heading 'Execution mode selection' -Level 3
 
+        $executionModeSelection | Should -Not -BeNullOrEmpty -Because 'AC3: skills/plan-authoring/SKILL.md must contain ### Execution mode selection before provenance can be evaluated'
+
         # AC3
         script:Invoke-EMAExecutionModeSemanticScan -SectionText $executionModeSelection
+
+        $hasCodeConductorPolicyProvenance = $executionModeSelection -match '(?is)(prior|previous|formerly|absorbed|moved|source|provenance).{0,160}Code-Conductor.{0,80}policy|Code-Conductor.{0,80}policy.{0,160}(prior|previous|formerly|absorbed|moved|source|provenance)'
+        $hasIssueTraceability = ($executionModeSelection -match [regex]::Escape('#589')) -or ($executionModeSelection -match '(?is)#557.{0,120}responsibility-map disposition|responsibility-map disposition.{0,120}#557')
+
+        $hasCodeConductorPolicyProvenance | Should -BeTrue -Because 'AC3: Execution mode selection must include source/provenance tying the heuristic to the prior Code-Conductor policy'
+        $hasIssueTraceability | Should -BeTrue -Because 'AC3: Execution mode selection provenance must cite issue #589 or the #557 responsibility-map disposition'
     }
 }

@@ -97,7 +97,7 @@ Key continuation points where models commonly stall (proceed autonomously throug
 You are an ORCHESTRATOR AGENT, NOT an implementation agent. You MUST delegate all specialized tasks to expert agents via `runSubagent`. **ALWAYS** announce which agent you're calling before invoking `runSubagent` (e.g., "Calling @Code-Smith for Step 2...").
 
 **YOU MUST NEVER** use replace_string_in_file, multi_replace_string_in_file, or create_file. Only use read/search tools for investigation and run_in_terminal for validation commands.
-**Execution mode policy**: Issue-Planner owns mode selection in [skills/plan-authoring/SKILL.md](../skills/plan-authoring/SKILL.md) `Execution mode selection`; at runtime, honor the mode surfaced from each plan slice's metadata.
+**Execution mode policy**: Issue-Planner owns the per-step execution-mode declaration and parallel-vs-serial selection heuristic in [skills/plan-authoring/SKILL.md](../skills/plan-authoring/SKILL.md) § Execution mode selection; at runtime, honor the mode surfaced from each plan slice's metadata.
 
 ## Usage Examples
 
