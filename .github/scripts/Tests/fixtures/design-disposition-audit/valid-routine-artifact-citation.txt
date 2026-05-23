@@ -1,0 +1,16 @@
+<!-- design-phase-complete-586 -->
+
+Phase summary: routine disposition cites the artifact that already settles the concern.
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [2]
+  entries:
+    - finding_id: F4
+      pass: 2
+      disposition: dismiss
+      classification: routine
+      disposition_rationale: "The artifact already contains the acceptance criterion the finding asks for."
+      artifact_citation: "skills/solution-authoring/SKILL.md#rule-classification-gate"
+```

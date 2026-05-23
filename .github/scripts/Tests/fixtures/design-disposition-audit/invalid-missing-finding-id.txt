@@ -1,0 +1,12 @@
+<!-- design-phase-complete-586 -->
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1]
+  entries:
+    - pass: 1
+      disposition: dismiss
+      classification: routine
+      disposition_rationale: "No identifier is present for this finding."
+```
