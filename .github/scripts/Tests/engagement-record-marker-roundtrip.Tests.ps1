@@ -34,6 +34,8 @@ BeforeAll {
         }) -join ','
 
         $mockBody = 'param()
+# Guard: fail immediately if any unsupported flag is present (e.g. --paginate is gh api only, not gh issue view)
+if ($args -contains ''--paginate'') { Write-Error ''unknown flag: --paginate''; exit 1 }
 Write-Output ''{"comments": [' + $commentsJson + ']}''
 exit 0
 '
