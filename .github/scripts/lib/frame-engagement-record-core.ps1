@@ -98,15 +98,17 @@ function Read-EngagementRecords {
         }
 
         try {
-            $rawJson = & $GhCliPath issue view $IssueNumber --repo $Repo --json comments 2>$null
+            $rawJson = & $GhCliPath issue view $IssueNumber --repo $Repo --json comments --paginate 2>$null
             if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rawJson)) {
                 $commentsObj = $rawJson | ConvertFrom-Json
                 foreach ($comment in $commentsObj.comments) {
                     $parsedMarkers += [PSCustomObject]@{
                         Body      = $comment.body
-                        CreatedAt = [DateTime]::Parse($comment.createdAt)
+                        CreatedAt = [DateTime]::Parse($comment.createdAt, [CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
                     }
                 }
+            } else {
+                Write-Warning "gh issue view exited with code $LASTEXITCODE for issue $IssueNumber (repo: $Repo) — engagement-record markers may be incomplete."
             }
         } catch {
             Write-Error "Failed to fetch comments for issue $IssueNumber from gh CLI: $_"
