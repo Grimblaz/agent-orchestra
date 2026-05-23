@@ -44,7 +44,7 @@ BeforeAll {
         return $sectionMatch.Groups['section'].Value
     }
 
-    function script:Test-EMAContainsAllTerms {
+    function script:Test-EMAContainsTermSet {
         param(
             [Parameter(Mandatory)]
             [string]$Text,
@@ -93,7 +93,7 @@ BeforeAll {
         )
 
         foreach ($semanticCheck in $semanticChecks) {
-            if (-not (script:Test-EMAContainsAllTerms -Text $SectionText -Terms $semanticCheck.Terms)) {
+            if (-not (script:Test-EMAContainsTermSet -Text $SectionText -Terms $semanticCheck.Terms)) {
                 Write-Warning ("execution-mode-absorption warn-only: Execution mode selection is missing semantic cue '{0}' requiring terms: {1}." -f $semanticCheck.Name, [string]::Join(', ', $semanticCheck.Terms))
             }
         }
@@ -133,14 +133,15 @@ Describe 'Execution mode absorption into plan-authoring' {
         if ([string]::IsNullOrWhiteSpace($codeConductorOverview)) {
             $violations.Add('AC2: agents/Code-Conductor.agent.md must keep an Overview area for the replacement pointer.')
         } else {
+            $sectionSign = [char]0x00A7
             $requiredPointerTerms = @(
                 [ordered]@{
                     Term = 'skills/plan-authoring/SKILL.md'
                     Message = 'AC2: Code-Conductor Overview must name skills/plan-authoring/SKILL.md.'
                 },
                 [ordered]@{
-                    Term = '§ Execution mode selection'
-                    Message = 'AC2: Code-Conductor Overview must point to § Execution mode selection.'
+                    Term = "$sectionSign Execution mode selection"
+                    Message = "AC2: Code-Conductor Overview must point to $sectionSign Execution mode selection."
                 },
                 [ordered]@{
                     Term = 'per-step execution-mode declaration'
