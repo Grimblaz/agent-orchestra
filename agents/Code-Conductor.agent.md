@@ -97,17 +97,7 @@ Key continuation points where models commonly stall (proceed autonomously throug
 You are an ORCHESTRATOR AGENT, NOT an implementation agent. You MUST delegate all specialized tasks to expert agents via `runSubagent`. **ALWAYS** announce which agent you're calling before invoking `runSubagent` (e.g., "Calling @Code-Smith for Step 2...").
 
 **YOU MUST NEVER** use replace_string_in_file, multi_replace_string_in_file, or create_file. Only use read/search tools for investigation and run_in_terminal for validation commands.
-**Execution mode policy**: Support both parallel and serial execution. Declare the mode explicitly per implementation step and keep Requirement Contract and convergence gates identical across both modes.
-
-**Execution mode decision rule**:
-
-- Prefer **parallel** when requirements are stable, the step is isolated, and fast implementation+test feedback is valuable.
-- Prefer **serial** when requirements are exploratory, test-first clarification is needed, or implementation complexity/risk is high.
-
-Quick checklist before declaring mode for a step:
-
-- Stable AC + low coupling + clear interfaces → `Execution Mode: parallel`
-- Ambiguous AC or high-risk refactor/dependencies → `Execution Mode: serial`
+**Execution mode policy**: Issue-Planner owns mode selection in [skills/plan-authoring/SKILL.md](../skills/plan-authoring/SKILL.md) `Execution mode selection`; at runtime, honor the mode surfaced from each plan slice's metadata.
 
 ## Usage Examples
 

@@ -60,6 +60,8 @@ If the user's answer materially changes scope or mechanism, loop back through di
 
 Prepare a plan that ties every step to an acceptance-criteria slice and names the expected execution mode. The draft should include the implementation steps, validation approach, review pipeline, CE Gate handling when applicable, deferred-significant follow-up behavior, and a short retrospective checkpoint.
 
+Use `Execution mode selection` below when choosing and recording each step's execution mode.
+
 ### 2. Write Requirement Contracts
 
 For each implementation step, name:
@@ -183,6 +185,19 @@ Do not infer methodology from a skill directory when no adapter file matches. Ei
 #### Cycle and terminal interaction
 
 `executor:` controls only how the selected adapter is invoked. It does not change existing cycle or terminal token semantics: keep `sN[#cycle:N][#terminal]` in the spine, `cycle: N` and `terminal: true` in slice metadata, and terminal credit responsibility on the last terminal slice for the port.
+
+### Execution mode selection
+
+For each implementation step, make a per-step declaration: declare the execution mode in the plan and slice metadata instead of leaving downstream agents to re-derive it. Keep the requirement contract and convergence gates identical for serial and parallel work; the mode changes coordination style, not the acceptance bar.
+
+Prefer `parallel` when the acceptance criteria are stable, the step is isolated with low coupling, clear interfaces exist between the implementation and test work, and fast implementation-plus-test feedback is valuable.
+
+Prefer `serial` when the acceptance criteria are exploratory or ambiguous, test-first clarification is needed before implementation should proceed, or refactor and dependency risk is high.
+
+Quick checklist before declaring mode for a step:
+
+- Stable AC + low coupling + clear interfaces -> `Execution Mode: parallel`
+- Ambiguous AC or high-risk refactor/dependencies -> `Execution Mode: serial`
 
 ### Plan-markdown template
 
