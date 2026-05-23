@@ -184,12 +184,6 @@ Render at phase exit after all load-bearing decisions are locked:
 
 > "I chose solution-authoring first because upstream-onboarding surfaces prior decisions that have already been answered — if the engagement gate ran after, it would fire on settled content. If upstream-onboarding had run first, the gate would have intercepted the brief's inherited decisions and manufactured false load-bearing signal. The order had to put classification before context so the falsifier could operate on genuinely unanchored decisions only."
 
-## Gotchas
-
-| Trigger | Gotcha | Fix |
-| --- | --- | --- |
-| Treating a pacing directive as an engagement decline | The agent silently skips a load-bearing classification gate even though no explicit decline was given | Fire the structured question unless the engineer selects the explicit decline option or writes `decline:` |
-
 ## Related Guidance
 
 - Load `upstream-onboarding` after this skill per the D-load-directive declared in each agent body dispatcher.
@@ -197,13 +191,11 @@ Render at phase exit after all load-bearing decisions are locked:
 
 ## Gotchas
 
-| Trigger                                         | Gotcha                                                        | Fix                                                                 |
-| ----------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
-| A routine decision is treated as load-bearing   | The agent asks for engagement on content already settled by an inherited artifact | Re-audit Leg 2 against the citation and emit the appropriate recommendation shift |
-
-| Trigger                                         | Gotcha                                                        | Fix                                                                 |
-| ----------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------- |
-| A load-bearing decision is treated as routine   | The durable artifact changes without surfacing the maintainer choice | Rerun all three gate legs and ask before recording the final decision |
+| Trigger | Gotcha | Fix |
+| --- | --- | --- |
+| Treating a pacing directive as an engagement decline | The agent silently skips a load-bearing classification gate even though no explicit decline was given | Fire the structured question unless the engineer selects the explicit decline option or writes `decline:` |
+| A routine decision is treated as load-bearing | The agent asks for engagement on content already settled by an inherited artifact | Re-audit Leg 2 against the citation and emit the appropriate recommendation shift |
+| A load-bearing decision is treated as routine | The durable artifact changes without surfacing the maintainer choice | Rerun all three gate legs and ask before recording the final decision |
 
 ## Frame Ports Filled By This Skill
 
