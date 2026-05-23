@@ -345,4 +345,82 @@ Describe 'subagent-env-handshake v1 contract' {
             $skillContent | Should -Match ([regex]::Escape('Always capture `parent_cwd` using `pwd` in the Bash tool, not `(Get-Location).Path` in PowerShell')) -Because 'the existing Windows CWD guidance must remain explicit while adding the orchestration policy note'
         }
     }
+
+    Context 'Scenario (j) — Issue #587 Parallel-batch honest handshake contract tests' {
+        BeforeAll {
+            # Constant SHA-256 for the working-tree mutation discipline directive
+            $script:DirectiveSha256 = 'c6632eaeb2fbbe8a145d760ab5a43e7da87b91f949a5630146bb9d98701bdb0f'
+            $script:PlanMdPath = Join-Path $script:RepoRoot 'commands/plan.md'
+            $script:OrchestraReviewMdPath = Join-Path $script:RepoRoot 'commands/orchestra-review.md'
+            $script:DesignExplorationSkillMdPath = Join-Path $script:RepoRoot 'skills/design-exploration/SKILL.md'
+        }
+
+        It 'contains ### Subagent working-tree discipline H3 section heading in SKILL.md' {
+            $skillContent = Get-Content -Path $script:SkillMdPath -Raw
+            $skillContent | Should -Match '(?m)^### Subagent working-tree discipline \(under workspace_mode: shared\)'
+        }
+
+        It 'contains the byte-identical working-tree mutation discipline directive at three parallel-batch sites' {
+            $planContent = Get-Content -Path $script:PlanMdPath -Raw
+            $reviewContent = Get-Content -Path $script:OrchestraReviewMdPath -Raw
+            $designContent = Get-Content -Path $script:DesignExplorationSkillMdPath -Raw
+
+            $directivePattern = 'Per `skills/subagent-env-handshake/SKILL.md` section Subagent working-tree discipline: under `workspace_mode: shared`[^)]*\)'
+
+            $planMatch = [regex]::Match($planContent, $directivePattern)
+            $planMatch.Success | Should -BeTrue -Because 'commands/plan.md must contain the directive'
+            $planDirective = $planMatch.Value
+
+            $reviewMatch = [regex]::Match($reviewContent, $directivePattern)
+            $reviewMatch.Success | Should -BeTrue -Because 'commands/orchestra-review.md must contain the directive'
+            $reviewDirective = $reviewMatch.Value
+
+            $designMatch = [regex]::Match($designContent, $directivePattern)
+            $designMatch.Success | Should -BeTrue -Because 'skills/design-exploration/SKILL.md must contain the directive'
+            $designDirective = $designMatch.Value
+
+            # Helper to normalize whitespace and compute SHA-256
+            function Get-NormalizedHash($text) {
+                $normalized = ($text -replace '\s+', ' ').Trim()
+                $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
+                $sha = [System.Security.Cryptography.SHA256]::Create()
+                $hashBytes = $sha.ComputeHash($bytes)
+                $hashStr = ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
+                return $hashStr
+            }
+
+            $planHash = Get-NormalizedHash $planDirective
+            $reviewHash = Get-NormalizedHash $reviewDirective
+            $designHash = Get-NormalizedHash $designDirective
+
+            Write-Host "DEBUG: Computed planHash is: $planHash"
+
+            $planHash | Should -Be $script:DirectiveSha256 -Because 'plan directive SHA-256 must match the constant'
+            $reviewHash | Should -Be $planHash -Because 'review directive must be byte-identical to plan directive'
+            $designHash | Should -Be $planHash -Because 'design directive must be byte-identical to plan directive'
+        }
+
+        It 'contains parallel-batch-honest-premise-anchor sentinels wrapping a non-empty load-bearing claim' {
+            $skillContent = Get-Content -Path $script:SkillMdPath -Raw
+            $anchorPattern = '(?ms)<!-- parallel-batch-honest-premise-anchor begin -->\s*\r?\n(?<body>.*?)\r?\n<!-- /parallel-batch-honest-premise-anchor -->'
+            $match = [regex]::Match($skillContent, $anchorPattern)
+            $match.Success | Should -BeTrue -Because 'SKILL.md must carry the parallel-batch-honest-premise-anchor'
+            $match.Groups['body'].Value.Trim() | Should -Not -BeNullOrEmpty -Because 'load-bearing claim must not be empty'
+        }
+
+        It 'contains ND-2, environment-divergence and the S4 framing sentence in partial-pass-recovery clauses' {
+            $planContent = Get-Content -Path $script:PlanMdPath -Raw
+            $reviewContent = Get-Content -Path $script:OrchestraReviewMdPath -Raw
+
+            $s4Framing = 'ND-2 halts arising from sibling-subagent tree mutation under `workspace_mode: shared` are a documented recovery path declared in `skills/subagent-env-handshake/SKILL.md` section Subagent working-tree discipline, not a contract violation.'
+
+            $planContent | Should -Match 'ND-2'
+            $planContent | Should -Match 'environment-divergence'
+            $planContent | Should -Match ([regex]::Escape($s4Framing)) -Because 'commands/plan.md recovery clause must contain the S4 framing'
+
+            $reviewContent | Should -Match 'ND-2'
+            $reviewContent | Should -Match 'environment-divergence'
+            $reviewContent | Should -Match ([regex]::Escape($s4Framing)) -Because 'commands/orchestra-review.md recovery clause must contain the S4 framing'
+        }
+    }
 }
