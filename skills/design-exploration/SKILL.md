@@ -109,13 +109,19 @@ After all three reports return, merge into a single ledger. Deduplication rule: 
 
 ### Dispositions
 
-For each merged finding, decide:
+For each merged finding, assign one disposition while invoking the per-finding classification gate inline with that assignment:
 
-- **Incorporate** — refine the design and note the change
-- **Dismiss** — record rationale inline with the finding
-- **Escalate** — flag for explicit user decision before proceeding
+- **Incorporate** - refine the design and note the change
+- **Dismiss** - record rationale inline with the finding
+- **Escalate** - flag for explicit user decision before proceeding
 
-If any finding is escalated, the agent must ask the user (via the platform's structured-question tool) before updating the issue body. Present the challenge summary alongside the design so the user can see what was challenged and how each finding was handled.
+Use `skills/solution-authoring/SKILL.md` section `Applying the gate to adversarial-review dispositions` for the gate procedure and the `finding_dispositions:` marker schema. The gate classifies the maintainer action for each finding as `routine` or `load-bearing`; routine findings are recorded without firing the platform's structured-question tool, while load-bearing findings are asked before the issue body is updated. If the maintainer questions a classification or disposition, route the question-back through the solution-authoring re-audit/default handler before revising the disposition.
+
+Always emit a disposition summary after classification and before any issue-body update. The summary lists every finding, its `incorporate`, `dismiss`, or `escalate` outcome, its `routine` or `load-bearing` classification, and the per-finding rationale that will be persisted. If there are no non-dismissed findings, the summary still emits and says `all findings dismissed`; if every non-dismissed finding is routine, the summary still emits and says `all classified routine`.
+
+For load-bearing findings, use a batched AskUserQuestion flow. When there are <=4 load-bearing findings, ask them in one batched call; when there are >4, ask in successive batched rounds, each preceded by a running-decisions summary covering findings already locked in earlier rounds. Each finding in a batched call still carries its own 1-3 paragraph explanation before its options per `feedback_explain_before_options.md` / #556, so explain-before-options is honored even when multiple findings share one structured-question call.
+
+Before posting the design completion marker, follow `agents/Solution-Designer.agent.md` section `Stage 4: Update Issue` -> section `Pre-post YAML integrity check` for AC6: the disposition summary and `finding_dispositions:` block must account for the merged ledger before the marker is posted.
 
 See `adversarial-review` for the full prosecution workflow and output schemas that each pass follows.
 

@@ -77,30 +77,54 @@ Load `skills/design-exploration/SKILL.md` for the reusable workflow — research
 
 ## Stage 3: Adversarial Design Challenge
 
-Run the 3-pass Design Challenge per `skills/design-exploration/SKILL.md` after decisions are confirmed. Non-blocking — prosecution only (no defense or judge). Incorporate, dismiss with rationale, or escalate each finding before proceeding to Stage 4.
+Run the 3-pass Design Challenge per `skills/design-exploration/SKILL.md` after decisions are confirmed. Non-blocking — prosecution only (no defense or judge). Before Stage 4, handle the merged finding ledger in this literal order: classify → escalate load-bearing → incorporate/dismiss remainder → emit summary → update issue body. Use `skills/solution-authoring/SKILL.md` section `Applying the gate to adversarial-review dispositions` for the per-finding classification gate and marker schema, and use `skills/design-exploration/SKILL.md` section `Dispositions` for the disposition workflow and summary requirements. Stage 3 emits the merged finding ledger as inline prose in the agent's running response; Stage 4 may use it only when that same-conversation ledger is still present and verifiable. If Stage 4 resumes and the Stage 3 inline merged ledger is absent, incomplete, or unverifiable, hard-stop before posting the marker and rerun Stage 3 or reload a durable Stage 3 ledger artifact before running the self-check.
 
 ## Stage 4: Update Issue
 
 Load `skills/frame-credit-emission/SKILL.md` for the deferred-emission terminal-step contract.
 
-Update the GitHub issue body with full design details per `skills/design-exploration/SKILL.md` (decisions, acceptance criteria, testing scope, rejected alternatives), then post:
+Update the GitHub issue body with full design details per `skills/design-exploration/SKILL.md` (decisions, acceptance criteria, testing scope, rejected alternatives).
 
-```markdown
+### Pre-post YAML integrity check
+
+Before posting the `design-phase-complete` marker, compare the merged ledger and the `finding_dispositions:` YAML block about to be posted by both count and identity set over `(finding_id, pass)`. The counts must match exactly, and the identity sets must be equal; missing or extra `(finding_id, pass)` keys are failures even when counts match. If the ledger has zero findings, an empty `entries: []` block passes; the Phase summary still says `all findings dismissed` or `all classified routine` when applicable. If the YAML is malformed, the counts differ, or the identity sets differ, halt and do not post the marker. Use this literal halt template: `YAML integrity check failed: ledger has N finding(s); block has M; missing from block: {ids_or_none}; extra in block: {ids_or_none}`.
+
+Post the `design-phase-complete` marker using this literal template:
+
+````markdown
 <!-- design-phase-complete-{ISSUE_NUMBER} -->
 
 Technical design complete — decisions documented, acceptance criteria defined, adversarial design challenge complete. Ready for planning with @Issue-Planner.
+
+Phase summary: N finding(s) classified, M load-bearing, K dismissed. Decisions taken: {decisions_taken}. When the ledger has zero findings, write `0 findings classified, 0 load-bearing, 0 dismissed`. When all findings are dismissed, include `all findings dismissed`; when every classified finding is routine, include `all classified routine`.
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [{passes_run}]
+  entries:
+    - finding_id: F1
+      pass: 1
+      disposition: dismiss
+      classification: routine
+      disposition_rationale: "{rationale}"
+      # artifact_citation: "{optional_artifact_citation}"
+      # also_flagged_by: [2, 3]
 ```
+````
+
+`passes_run` must equal the set of passes represented by the merged ledger and `entries[]`. A degraded pass-1-only ledger is valid when only pass 1 ran, but the template must then use `passes_run: [1]` and contain only pass-1 finding entries.
 
 Immediately after posting the completion marker, post a credit-input marker comment (SMC-17 deferred-emission):
 
-```markdown
+````markdown
 <!-- credit-input-design-{ISSUE_NUMBER} -->
 ```yaml
 port: design
 adapter: work-adapter
 evidence: "issue #{ISSUE_NUMBER}; design-phase-complete marker posted"
 ```
-```
+````
 
 Retain the comment text returned by the post call so Code-Conductor harvest can use the `-InMemoryMarkers` fallback.
 
@@ -112,6 +136,7 @@ Hard-stop: never conclude without durable artifacts.
 - [ ] **Rejected alternatives documented** with brief rationale.
 - [ ] **Completion comment posted** with the `<!-- design-phase-complete-{ISSUE_NUMBER} -->` marker.
 - [ ] **Credit-input marker** `<!-- credit-input-design-{ISSUE_NUMBER} -->` posted immediately after.
+- [ ] **YAML integrity check** passed (ledger-finding count equals finding_dispositions entries count, and `(finding_id, pass)` identity sets are equal; halt and surface error if not).
 
 A `Documents/Design/` file is **not** created during design — Doc-Keeper creates it as part of the implementation PR.
 

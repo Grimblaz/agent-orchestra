@@ -100,6 +100,14 @@ Each caller decides how to handle the challenge report:
 - **Solution-Designer**: incorporate / dismiss / escalate for user decision (with `vscode/askQuestions` gate before writing to GitHub if any item is escalated)
 - **Issue-Planner**: incorporate / dismiss / escalate for user decision; append `**Plan Stress-Test**` summary block to plan
 
+### Solution-Designer Disposition Contract
+
+For Solution-Designer's design challenge, each merged adversarial-review finding is run through the `solution-authoring` classification gate before the issue body is updated. The gate classifies the maintainer action for that finding, not the review pass as a whole: load-bearing dispositions are surfaced with a structured question, while routine dispositions are summarized with per-finding rationale and recorded without prompting.
+
+The `<!-- design-phase-complete-{ID} -->` marker carries a `finding_dispositions:` YAML block with `schema_version`, `passes_run`, and `entries[]`. Each entry records `finding_id`, `pass`, `disposition`, `classification`, and `disposition_rationale`, with optional `artifact_citation` and optional `also_flagged_by` for inherited-artifact evidence and multi-pass concurrence.
+
+Before posting the marker, Stage 4 compares the merged ledger and `finding_dispositions:` block by count and by identity set over `(finding_id, pass)`. `passes_run` must equal the actual represented passes, including degraded one-pass ledgers such as `passes_run: [1]`.
+
 ### Vocabulary Standardization
 
 Both Solution-Designer and Issue-Planner use a three-way disposition for challenge findings:

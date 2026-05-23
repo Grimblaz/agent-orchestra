@@ -1,0 +1,13 @@
+<!-- design-phase-complete-586 -->
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1]
+  entries:
+    - finding_id: F10
+      pass: one
+      disposition: dismiss
+      classification: routine
+      disposition_rationale: "The entry pass contains a non-numeric value."
+```

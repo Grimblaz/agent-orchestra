@@ -1,0 +1,20 @@
+<!-- design-phase-complete-586 -->
+
+Phase summary: degraded review ran one prosecution pass and resolved all findings.
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1]
+  entries:
+    - finding_id: F1
+      pass: 1
+      disposition: incorporate
+      classification: load-bearing
+      disposition_rationale: "The proposed change affects the user-visible escalation boundary."
+    - finding_id: F2
+      pass: 1
+      disposition: dismiss
+      classification: routine
+      disposition_rationale: "The finding is a local wording cleanup with no effect on the escalation boundary."
+```

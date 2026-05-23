@@ -1,0 +1,28 @@
+<!-- design-phase-complete-586 -->
+
+Phase summary: all three prosecution passes ran and one finding was flagged by later passes too.
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1, 2, 3]
+  entries:
+    - finding_id: F1
+      pass: 1
+      disposition: escalate
+      classification: load-bearing
+      disposition_rationale: "The finding changes whether the maintainer must make a decision."
+      also_flagged_by: [2, 3]
+    - finding_id: F2
+      pass: 2
+      disposition: incorporate
+      classification: routine
+      disposition_rationale: "The wording correction is reversible and backed by existing docs."
+      artifact_citation: "skills/solution-authoring/SKILL.md#rule-non-overridability"
+    - finding_id: F3
+      pass: 3
+      disposition: dismiss
+      classification: routine
+      disposition_rationale: "The evidence points to an already documented non-goal."
+      artifact_citation: "Documents/Design/session-memory-contract.md#non-goals"
+```

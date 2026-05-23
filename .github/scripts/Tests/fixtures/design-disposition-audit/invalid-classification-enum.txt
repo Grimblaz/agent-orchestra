@@ -1,0 +1,13 @@
+<!-- design-phase-complete-586 -->
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [2]
+  entries:
+    - finding_id: F2
+      pass: 2
+      disposition: incorporate
+      classification: advisory
+      disposition_rationale: "Classification must use the supported enum."
+```

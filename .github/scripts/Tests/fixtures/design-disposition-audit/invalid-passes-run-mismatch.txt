@@ -1,0 +1,13 @@
+<!-- design-phase-complete-586 -->
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1, 2]
+  entries:
+    - finding_id: F1
+      pass: 1
+      disposition: incorporate
+      classification: load-bearing
+      disposition_rationale: "Only pass 1 appears in the entries set."
+```

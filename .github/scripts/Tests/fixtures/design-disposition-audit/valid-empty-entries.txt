@@ -1,0 +1,10 @@
+<!-- design-phase-complete-586 -->
+
+Phase summary: all findings dismissed before disposition entries were needed.
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1]
+  entries: []
+```

@@ -1,0 +1,15 @@
+<!-- design-phase-complete-586 -->
+
+Phase summary: routine disposition explains that no inherited citation-backed artifact is being used.
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1]
+  entries:
+    - finding_id: F8
+      pass: 1
+      disposition: dismiss
+      classification: routine
+      disposition_rationale: "Routine because this does not rely on inherited documentation or any citation-backed artifact."
+```

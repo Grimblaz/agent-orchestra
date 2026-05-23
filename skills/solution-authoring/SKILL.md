@@ -72,6 +72,46 @@ articulation_captures:
 
 **Glossary and forward-compat note**: The YAML field `teaching_paragraph_excerpt` is preserved from the locked #571 engagement-record marker payload (`<!-- engagement-record-design-571 -->`). This skill uses "decision brief" in prose; #575 owns harmonizing the YAML field name. Until #575 ships, `teaching_paragraph_excerpt` and "decision brief" refer to the same concept and both remain valid.
 
+## Applying the gate to adversarial-review dispositions
+
+For each adversarial-review finding that the calling workflow must disposition, run the classification gate against the action the maintainer would take for that finding, not against the review pass as a whole. Use the Code-Critic Finding Categories contract for the input identity: `id` values are sequential `F1 | F2 | F3 | ...` labels within the review cycle, and `pass` is `1 | 2 | 3` for the prosecution pass that originated code, design, or plan findings. The disposition enum is `incorporate | dismiss | escalate`; the classification enum is `load-bearing | routine`. If a finding is routine, record the disposition without firing the platform's structured-question tool. If a finding is load-bearing, render the normal `audit_rationale`, decision brief, and structured question before recording the disposition.
+The marker payload schema is the `finding_dispositions:` block validated by `.github/scripts/Tests/design-disposition-audit.Tests.ps1`: `schema_version: 1`, non-empty `passes_run` as a subset of `[1, 2, 3]`, and `entries[]` carrying `finding_id`, `pass`, `disposition`, `classification`, and `disposition_rationale`. Routine entries require `artifact_citation` when the routine classification rests on an inherited artifact settling the finding; routine entries classified for another non-load-bearing reason do not require a citation. Multi-pass concurrence may include `also_flagged_by` with secondary pass ids.
+
+`disposition_rationale` explains why this specific finding received this specific `incorporate`, `dismiss`, or `escalate` outcome. It is not the v0 `audit_rationale`: `audit_rationale` proves why a decision is load-bearing before asking; `disposition_rationale` persists the final per-finding outcome after the gate decision, including routine outcomes that never asked the maintainer.
+
+The re-audit handler is symmetric. If a load-bearing disposition is challenged with a plausible artifact citation, rerun Leg 2 and, when the citation holds, emit `trigger: classification-re-audit` and revise the finding to routine. If a routine disposition is challenged with evidence that no inherited artifact actually settles the action, rerun all three legs and, when they hold, emit `trigger: classification-re-audit-routine` and revise the finding to load-bearing before asking.
+Map maintainer input to recommendation-shift triggers as follows: new facts or changed upstream content after the initial classification maps to `new-evidence`; direct disagreement with the recommended disposition or option maps to `engineer-pushback`; a claim that a load-bearing finding is already answered by an inherited artifact maps to `classification-re-audit`; a claim that a routine finding is not actually answered by inherited content maps to `classification-re-audit-routine`. If a maintainer message could fit more than one pattern or does not identify the challenged finding, ask one clarifying question before changing classification.
+YAML marker invariant: `finding_dispositions:` lives only on the `<!-- design-phase-complete-{ID} -->` marker body, never on `<!-- credit-input-{port}-{ID} -->` markers. Credit-input markers remain limited to frame credit deferred-emission payloads. Until the engagement-record resume contract ships, keep this block independent of engagement-record markers and do not use it to suppress repeated questions. <!-- pending-575 -->
+
+Worked exemplar:
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1, 2, 3]
+  entries:
+    - finding_id: F1
+      pass: 1
+      disposition: dismiss
+      classification: routine
+      disposition_rationale: "Dismissed because the cited acceptance criterion already requires the behavior the finding asks to add; no maintainer choice remains."
+      artifact_citation: "Documents/Design/session-memory-contract.md#durable-marker-precedence"
+    - finding_id: F2
+      pass: 2
+      disposition: incorporate
+      classification: routine
+      disposition_rationale: "Incorporated as a wording correction because the existing named-decision row already settles the outcome and only the citation text changes."
+      artifact_citation: "skills/solution-authoring/SKILL.md#rule-classification-gate"
+    - finding_id: F3
+      pass: 1
+      disposition: escalate
+      classification: load-bearing
+      disposition_rationale: "Escalated because choosing whether to reject or preserve the review finding changes the durable design contract and no inherited artifact settles that tradeoff."
+      also_flagged_by: [2, 3]
+```
+
+The exemplar rationales name the disposition outcome and why it follows from the finding evidence. They intentionally do not repeat the v0 `audit_rationale` tone, which is reserved for proving that a structured question is warranted before the platform's structured-question tool fires.
+
 ### Template: Decision brief
 
 Render as a block-quoted paragraph immediately after the `audit_rationale` sentence:
@@ -111,7 +151,7 @@ Agent re-audits, finds citation in #571 D-customer section, reclassifies, and em
 
 Emit immediately before the revised recommendation:
 
-> `**Recommendation shift** — {decision_id}: previously {old_recommendation}; now {new_recommendation}; trigger: {engineer-pushback | new-evidence | classification-re-audit}; reason: {one-sentence reason}.`
+> `**Recommendation shift** — {decision_id}: previously {old_recommendation}; now {new_recommendation}; trigger: {engineer-pushback | new-evidence | classification-re-audit | classification-re-audit-routine}; reason: {one-sentence reason}.`
 
 **Exemplar** (D-gap-visibility, from #571 R1+R2 — inline token, then phase-exit YAML aggregate):
 
@@ -126,7 +166,7 @@ recommendation_shifts:
     - decision_id: <id>
       previous: <old_recommendation>
       revised: <new_recommendation>
-      trigger: engineer-pushback | new-evidence | classification-re-audit
+      trigger: engineer-pushback | new-evidence | classification-re-audit | classification-re-audit-routine
       reason: <one-sentence>
       capture_phase: experience | design | plan
 ```
@@ -141,16 +181,18 @@ Render at phase exit after all load-bearing decisions are locked:
 
 > "I chose solution-authoring first because upstream-onboarding surfaces prior decisions that have already been answered — if the engagement gate ran after, it would fire on settled content. If upstream-onboarding had run first, the gate would have intercepted the brief's inherited decisions and manufactured false load-bearing signal. The order had to put classification before context so the falsifier could operate on genuinely unanchored decisions only."
 
+## Related Guidance
+
+- Load `upstream-onboarding` after this skill per the D-load-directive declared in each agent body dispatcher.
+- Load `bdd-scenarios` when scenario IDs and G/W/T formatting are needed for CE Gate scenarios.
+
 ## Gotchas
 
 | Trigger | Gotcha | Fix |
 | --- | --- | --- |
 | Treating a pacing directive as an engagement decline | The agent silently skips a load-bearing classification gate even though no explicit decline was given | Fire the structured question unless the engineer selects the explicit decline option or writes `decline:` |
-
-## Related Guidance
-
-- Load `upstream-onboarding` after this skill per the D-load-directive declared in each agent body dispatcher.
-- Load `bdd-scenarios` when scenario IDs and G/W/T formatting are needed for CE Gate scenarios.
+| A routine decision is treated as load-bearing | The agent asks for engagement on content already settled by an inherited artifact | Re-audit Leg 2 against the citation and emit the appropriate recommendation shift |
+| A load-bearing decision is treated as routine | The durable artifact changes without surfacing the maintainer choice | Rerun all three gate legs and ask before recording the final decision |
 
 ## Frame Ports Filled By This Skill
 
