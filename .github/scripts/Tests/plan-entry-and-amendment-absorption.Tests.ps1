@@ -6,6 +6,7 @@ BeforeAll {
     $script:PlanAuthoringPath = Join-Path $script:RepoRoot 'skills/plan-authoring/SKILL.md'
     $script:CodeConductorPath = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
     $script:SpineRunnerPath = Join-Path $script:RepoRoot 'agents/Spine-Runner.agent.md'
+    $script:ResponsibilityMapPath = Join-Path $script:RepoRoot 'Documents/Design/code-conductor-responsibility-map.md'
 
     function script:Get-PEAMMarkdownText {
         param(
@@ -42,6 +43,69 @@ BeforeAll {
         }
 
         return $sectionMatch.Groups['section'].Value
+    }
+
+    function script:Get-PEAMMarkdownH2Heading {
+        param(
+            [Parameter(Mandatory)]
+            [string]$Markdown
+        )
+
+        return @(
+            [regex]::Matches($Markdown, '(?m)^##\s+(?<heading>.+?)\s*$') | ForEach-Object {
+                [pscustomobject]@{
+                    Heading = $_.Groups['heading'].Value
+                    Index   = $_.Index
+                }
+            }
+        )
+    }
+
+    function script:Test-PEAMHasAdjacentH2Sequence {
+        param(
+            [Parameter(Mandatory)]
+            [string]$Markdown,
+
+            [Parameter(Mandatory)]
+            [string[]]$Headings
+        )
+
+        $h2Headings = @(script:Get-PEAMMarkdownH2Heading -Markdown $Markdown)
+        $positions = @()
+
+        foreach ($heading in $Headings) {
+            $headingMatches = @($h2Headings | Where-Object { $_.Heading -eq $heading })
+            if ($headingMatches.Count -ne 1) {
+                return $false
+            }
+
+            $positions += [array]::IndexOf($h2Headings, $headingMatches[0])
+        }
+
+        for ($index = 1; $index -lt $positions.Count; $index++) {
+            if ($positions[$index] -ne ($positions[$index - 1] + 1)) {
+                return $false
+            }
+
+            if ($h2Headings[$positions[$index]].Index -le $h2Headings[$positions[$index - 1]].Index) {
+                return $false
+            }
+        }
+
+        return $true
+    }
+
+    function script:Get-PEAMResponsibilityRow {
+        param(
+            [Parameter(Mandatory)]
+            [string]$Markdown
+        )
+
+        return @(
+            [regex]::Matches($Markdown, '(?ms)^-\s+source:\s+.*?(?=^-\s+source:\s+|^```\s*$|\z)') | ForEach-Object {
+                $_.Value
+            }
+        )
     }
 
     function script:Get-PEAMIssueTransitionSection {
@@ -157,6 +221,8 @@ Describe 'Plan entry and amendment absorption into plan-authoring' {
         $planAuthoring = script:Get-PEAMMarkdownText -Path $script:PlanAuthoringPath
         $codeConductor = script:Get-PEAMMarkdownText -Path $script:CodeConductorPath
         $spineRunner = script:Get-PEAMMarkdownText -Path $script:SpineRunnerPath
+        $responsibilityMap = script:Get-PEAMMarkdownText -Path $script:ResponsibilityMapPath
+        $planEntryAndAmendmentTriggers = script:Get-PEAMMarkdownSection -Markdown $planAuthoring -Heading 'Plan Entry and Amendment Triggers' -Level 2
         $planCreationStrategy = script:Get-PEAMMarkdownSection -Markdown $codeConductor -Heading 'Plan Creation Strategy' -Level 2
         $issueTransition = script:Get-PEAMIssueTransitionSection -Markdown $codeConductor
         $violations = [System.Collections.Generic.List[string]]::new()
@@ -164,6 +230,55 @@ Describe 'Plan entry and amendment absorption into plan-authoring' {
         # AC1
         if ($planAuthoring -notmatch '(?m)^## Plan Entry and Amendment Triggers\s*$') {
             $violations.Add('AC1: skills/plan-authoring/SKILL.md must contain H2 heading ## Plan Entry and Amendment Triggers.')
+        }
+
+        if (-not (script:Test-PEAMHasAdjacentH2Sequence -Markdown $planAuthoring -Headings @('Purpose', 'Plan Entry and Amendment Triggers', 'Discovery Workflow'))) {
+            $violations.Add('AC1: skills/plan-authoring/SKILL.md must keep H2 adjacency/order as ## Purpose, then ## Plan Entry and Amendment Triggers, then ## Discovery Workflow.')
+        }
+
+        if ([string]::IsNullOrWhiteSpace($planEntryAndAmendmentTriggers)) {
+            $violations.Add('AC1: skills/plan-authoring/SKILL.md must include content under ## Plan Entry and Amendment Triggers.')
+        }
+        else {
+            foreach ($requiredProvenanceTerm in @(
+                    '08c55e7bbf9ca2386a20fc6db2aaa931a626798d',
+                    'agents/Code-Conductor.agent.md',
+                    '107-110',
+                    '130',
+                    '#557',
+                    '#590'
+                )) {
+                if (-not $planEntryAndAmendmentTriggers.Contains($requiredProvenanceTerm)) {
+                    $violations.Add("F3: Plan Entry and Amendment Triggers provenance must include '$requiredProvenanceTerm'.")
+                }
+            }
+        }
+
+        # AC10 / F3
+        $issue590Action = 'Absorbed by issue https://github.com/Grimblaz/agent-orchestra/issues/590 into skills/plan-authoring/SKILL.md {0} Plan Entry and Amendment Triggers' -f ([char]0x00A7)
+        $issue590ActionOccurrences = [regex]::Matches($responsibilityMap, [regex]::Escape($issue590Action)).Count
+        if ($issue590ActionOccurrences -ne 2) {
+            $violations.Add("F3: Documents/Design/code-conductor-responsibility-map.md must contain exactly two occurrences of the #590 absorption action; found $issue590ActionOccurrences.")
+        }
+
+        $issue590Rows = @(
+            script:Get-PEAMResponsibilityRow -Markdown $responsibilityMap | Where-Object {
+                $_ -match ("(?m)^\s*action:\s+`"{0}`"\s*$" -f [regex]::Escape($issue590Action))
+            }
+        )
+
+        if ($issue590Rows.Count -ne 2) {
+            $violations.Add("F3: Responsibility map must contain exactly two structured rows with the #590 absorption action; found $($issue590Rows.Count).")
+        }
+
+        foreach ($issue590Row in $issue590Rows) {
+            if ($issue590Row -notmatch '(?m)^\s*verification_status:\s+verified\s*$') {
+                $violations.Add('F3: Each #590 responsibility-map row must have verification_status: verified.')
+            }
+
+            if ($issue590Row -notmatch '(?m)^\s*verified-against-sha:\s+"467f0ee5111e6417b653341ae1090ea7c698aea6"\s*$') {
+                $violations.Add('AC10/F3: Each #590 responsibility-map row must keep verified-against-sha as the post-pointer Code-Conductor blob 467f0ee5111e6417b653341ae1090ea7c698aea6.')
+            }
         }
 
         # AC2, AC8, AC9

@@ -23,7 +23,7 @@ Reduce ambiguity before implementation starts. Discovery should produce evidence
 
 ## Plan Entry and Amendment Triggers
 
-Provenance: absorbed from plan-entry rules in agents/Code-Conductor.agent.md:107-110 and the plan-amendment trigger in agents/Code-Conductor.agent.md:130 for issues #557 and #590.
+Provenance: absorbed from historical Code-Conductor sources for plan entry (`agents/Code-Conductor.agent.md@08c55e7bbf9ca2386a20fc6db2aaa931a626798d:107-110`) and plan amendment (`agents/Code-Conductor.agent.md@08c55e7bbf9ca2386a20fc6db2aaa931a626798d:130`) for issues #557 and #590.
 
 When the requested scope is well-defined and the acceptance criteria are stable, produce a direct execution plan. Stable scope can go directly into planning because the plan author's work is to convert known goals, constraints, and verification needs into executable steps without reopening settled decisions.
 
