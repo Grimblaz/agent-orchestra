@@ -106,8 +106,7 @@ You are an ORCHESTRATOR AGENT, NOT an implementation agent. You MUST delegate al
 
 ## Plan Creation Strategy
 
-- **Well-defined scope**: use Issue-Planner to produce a direct execution plan.
-- **Exploratory scope**: use Issue-Planner to stabilize AC and constraints first, then generate execution steps.
+- For plan-entry mode selection and plan-amendment triggers, see [skills/plan-authoring/SKILL.md](../skills/plan-authoring/SKILL.md) § Plan Entry and Amendment Triggers.
 - If plan assumptions drift from code reality, adapt steps before delegation and record rationale.
 - **No scope exemption**: Code-Conductor must NEVER create plans directly, regardless of change size, scope classification tier, or multi-issue bundling. All plans are created by Issue-Planner — unconditionally.
 
@@ -124,10 +123,9 @@ For terminal and validation execution guardrails, load `skills/terminal-hygiene/
 Any future pre-response trigger step runs **before** the Core Workflow, stays outside the numbered workflow list, and does not renumber, replace, or subsume Step 0. Issue Transition remains Step 0 and the first numbered workflow step after any pre-response trigger handling completes.
 
 <!-- markdownlint-disable-next-line MD029 -->
-
 0. **Issue Transition (Step 0, before implementation)**:
    - Cleanup note: The `session-startup` skill (loaded by pipeline-entry agents) detects stale tracking files from merged branches and prompts you at the start of your next conversation — cleanup requires one confirmation. If stale artifacts persist, run `pwsh "skills/session-startup/scripts/post-merge-cleanup.ps1" -IssueNumber {N} -FeatureBranch feature/issue-{N}-description` directly (path is relative to the agent-orchestra plugin or repo clone).
-   - Optional planning lane: If scope/acceptance criteria changed or are ambiguous, call Issue-Planner to confirm whether plan updates are needed before execution.
+   - Plan-entry mode selection and plan-amendment triggers live in [skills/plan-authoring/SKILL.md](../skills/plan-authoring/SKILL.md) § Plan Entry and Amendment Triggers; use Issue-Planner when that section requires plan creation or amendment before execution.
    - If planning is unnecessary, explicitly note "Step 0 skipped: no planning transition required" and continue.
 
 ### Hub Mode & Smart Resume
