@@ -166,11 +166,11 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-via-pr-sha: ""
 - source: "Process"
   responsibility: "Track the cross-session engagement-state limitation that may re-fire settled structured questions."
-  disposition: defer
-  action: "Revisit when https://github.com/Grimblaz/agent-orchestra/issues/575 resolves cross-session engagement-state preservation."
+  disposition: adapter-handles
+  action: "Use the SMC-20 engagement-record-{phase}-{ID} marker payload contract and the same-decision-resume skip rule to preserve engagement state across sessions."
   revisit-trigger: "issue:#575"
-  verification_status: unverified
-  verified-against-sha: ""
+  verification_status: verified
+  verified-against-sha: "0672028396a2b22bceac7910960a7e2f32c20abe"
   verified-via-pr-sha: ""
 - source: "Process"
   responsibility: "Load terminal-hygiene for validation execution, continuation-prompt hazards, and non-fatal diagnostics."

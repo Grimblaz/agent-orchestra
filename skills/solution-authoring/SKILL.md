@@ -51,7 +51,7 @@ The classification gate and the structured question it produces are unconditiona
 
 - **gate-fails**: The classification gate returns routine. No structured question fires. Skip is automatic.
 - **engineer-declined-engagement**: The engineer selects `Decline engagement — proceed without classification` or writes `decline:` free-text. Skip immediately; capture decline verbatim.
-- **same-decision-resume**: <!-- v0: do not apply; see #575 for marker-driven activation --> When the engagement-record marker contract ships (#575), this rule suppresses re-firing on a decision already locked in a prior session.
+- **same-decision-resume**: When `Read-EngagementRecords` (from `.github/scripts/lib/frame-engagement-record-core.ps1`) returns a prior load-bearing decision with the same `decision_id` as a pending classification, suppress the structured-question firing and reuse the captured `engineer_choice`. The reader contract lives in `skills/engagement-record-emission/SKILL.md` § Resume-Read Protocol. The activation applies per agent at phase re-entry; consult the SMC-20 row for survival semantics. **Until #576 lands emission, this rule will return empty on all in-flight issues (graceful no-op)** — that is the v1.1/v1.2 boundary.
 
 ### Rule: Thin-articulation criterion
 
@@ -70,7 +70,7 @@ articulation_captures:
       capture_session: manual-ce-gate-v0
 ```
 
-**Glossary and forward-compat note**: The YAML field `teaching_paragraph_excerpt` is preserved from the locked #571 engagement-record marker payload (`<!-- engagement-record-design-571 -->`). This skill uses "decision brief" in prose; #575 owns harmonizing the YAML field name. Until #575 ships, `teaching_paragraph_excerpt` and "decision brief" refer to the same concept and both remain valid.
+**Glossary and harmonization note**: The YAML field `teaching_paragraph_excerpt` is preserved from the locked #571 engagement-record marker payload (`<!-- engagement-record-design-571 -->`). This skill uses "decision brief" in prose; `decision_brief` and `teaching_paragraph_excerpt` refer to the same concept and both remain valid.
 
 ## Applying the gate to adversarial-review dispositions
 
@@ -81,7 +81,7 @@ The marker payload schema is the `finding_dispositions:` block validated by `.gi
 
 The re-audit handler is symmetric. If a load-bearing disposition is challenged with a plausible artifact citation, rerun Leg 2 and, when the citation holds, emit `trigger: classification-re-audit` and revise the finding to routine. If a routine disposition is challenged with evidence that no inherited artifact actually settles the action, rerun all three legs and, when they hold, emit `trigger: classification-re-audit-routine` and revise the finding to load-bearing before asking.
 Map maintainer input to recommendation-shift triggers as follows: new facts or changed upstream content after the initial classification maps to `new-evidence`; direct disagreement with the recommended disposition or option maps to `engineer-pushback`; a claim that a load-bearing finding is already answered by an inherited artifact maps to `classification-re-audit`; a claim that a routine finding is not actually answered by inherited content maps to `classification-re-audit-routine`. If a maintainer message could fit more than one pattern or does not identify the challenged finding, ask one clarifying question before changing classification.
-YAML marker invariant: `finding_dispositions:` lives only on the `<!-- design-phase-complete-{ID} -->` marker body, never on `<!-- credit-input-{port}-{ID} -->` markers. Credit-input markers remain limited to frame credit deferred-emission payloads. Until the engagement-record resume contract ships, keep this block independent of engagement-record markers and do not use it to suppress repeated questions. <!-- pending-575 -->
+YAML marker invariant: `finding_dispositions:` lives only on the `<!-- design-phase-complete-{ID} -->` marker body, never on `<!-- credit-input-{port}-{ID} -->` markers. Credit-input markers remain limited to frame credit deferred-emission payloads. The `finding_dispositions:` block lives only on `<!-- design-phase-complete-{ID} -->` markers (SMC-19) and is independent of `<!-- engagement-record-{phase}-{ID} -->` markers (SMC-20). The two payloads serve distinct audits — finding-dispositions tracks per-finding incorporate/dismiss outcomes; engagement-records track load-bearing classification with cross-session resume semantics via `same-decision-resume`. Do not mirror or merge content between them.
 
 Worked exemplar:
 
