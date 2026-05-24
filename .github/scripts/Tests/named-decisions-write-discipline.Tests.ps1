@@ -49,7 +49,7 @@ BeforeAll {
 
         $lines = $MarkdownText -split "`r?\n"
         foreach ($line in $lines) {
-            if ($line -match '^###\s+([a-z][a-z0-9-]{1,63})$') {
+            if ($line -match '^###\s+([a-z][a-z0-9-]{0,62}[a-z0-9])\s*$') {
                 if ($currentDecisionId) {
                     $decisions[$currentDecisionId] = $currentFields
                 }
@@ -671,7 +671,7 @@ load_bearing_decisions:
         $records[0].decision_id | Should -Be 'good-decision'
     }
 
-    It 'Read-EngagementRecords skips marker with unknown schema_version and continues scanning' {
+    It 'Read-EngagementRecords throws on unknown schema_version (SKILL.md MUST-throw contract)' {
         if (-not (Get-Command Read-EngagementRecords -ErrorAction SilentlyContinue)) {
             Set-ItResult -Skipped -Because 'Read-EngagementRecords not available'
             return
@@ -687,25 +687,8 @@ load_bearing_decisions: []
 ```
 '@
 
-        $goodMarker = @'
-<!-- engagement-record-design-999 -->
-```yaml
-schema_version: 2
-phase: design
-capture_session: "normal-design-v2"
-load_bearing_decisions:
-  - decision_id: good-decision
-    classification: load-bearing
-    audit_rationale: "test"
-    engineer_choice: "test"
-    teaching_paragraph_excerpt: "test"
-    articulation_text: ""
-    articulation_status: pending
-```
-'@
-
-        $records = Read-EngagementRecords -IssueNumber 999 -InMemoryMarkers @($badMarker, $goodMarker) -Phase design -WarningAction SilentlyContinue
-        $records.Count | Should -Be 1
-        $records[0].decision_id | Should -Be 'good-decision'
+        # Unknown schema_version throws before the CF13b per-marker try/catch —
+        # it propagates as a hard error per the SKILL.md Schema Versioning Policy.
+        { Read-EngagementRecords -IssueNumber 999 -InMemoryMarkers @($badMarker) -Phase design } | Should -Throw
     }
 }

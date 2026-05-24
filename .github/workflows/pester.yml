@@ -14,6 +14,7 @@ jobs:
         run: |
           Install-Module -Name Pester -Force -SkipPublisherCheck -MinimumVersion 5.0.0
           Import-Module Pester
+          Install-Module -Name powershell-yaml -Force -SkipPublisherCheck
       - name: Run Pester tests (issue #243 audit-paths drift gate + grammar + safety)
         shell: pwsh
         run: |
@@ -26,7 +27,9 @@ jobs:
           $config.Run.Path = @(
             '.github/scripts/Tests/audit-hub-artifact-paths.Tests.ps1',
             '.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1',
-            '.github/scripts/Tests/script-safety-contract.Tests.ps1'
+            '.github/scripts/Tests/script-safety-contract.Tests.ps1',
+            '.github/scripts/Tests/named-decisions-write-discipline.Tests.ps1',
+            '.github/scripts/Tests/engagement-record-marker-roundtrip.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'

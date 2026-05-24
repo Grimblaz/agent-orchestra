@@ -136,7 +136,7 @@ Describe 'Read-EngagementRecords: marker-parse v1' {
 # (c) schema-conformance
 # ---------------------------------------------------------------------------
 Describe 'Read-EngagementRecords: schema conformance and version validation' {
-    It 'skips marker with unknown schema_version and emits warning (CF13b)' {
+    It 'throws on unknown schema_version' {
         if (-not (Get-Command Read-EngagementRecords -ErrorAction SilentlyContinue)) {
             Set-ItResult -Skipped -Because 'Read-EngagementRecords not available'
             return
@@ -149,12 +149,10 @@ phase: design
 capture_session: "normal-design-v1"
 load_bearing_decisions: []
 ```'
-        # CF13b: per-marker validation failures now warn-and-skip instead of aborting the entire scan,
-        # so single-malformed-marker fixtures must not throw and must return an empty record set.
-        $records = $null
-        { $records = Read-EngagementRecords -IssueNumber $script:IssueId -InMemoryMarkers @($invalidVersionFixture) -Phase design -WarningAction SilentlyContinue } |
-            Should -Not -Throw
-        $records.Count | Should -Be 0
+        # F-CO1: unknown schema_version is now thrown OUTSIDE the CF13b per-marker try/catch,
+        # so it propagates as a hard error. The call must throw.
+        { Read-EngagementRecords -IssueNumber $script:IssueId -InMemoryMarkers @($invalidVersionFixture) -Phase design } |
+            Should -Throw
     }
 }
 

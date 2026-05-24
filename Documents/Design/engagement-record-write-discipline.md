@@ -48,7 +48,7 @@ To guarantee that all upstream agents are trained on the exact same formatting d
 
 ### D3 - Strict Slug Validation (`Test-EngagementRecordSlug`)
 
-Slugs must strictly match the regex `^[a-z][a-z0-9-]{1,63}$` and cannot end with a hyphen. The helper `Test-EngagementRecordSlug` enforces this at the core library level, and any non-legacy parser run throws an immediate, standardized exception if an invalid slug is encountered.
+Slugs must strictly match the regex `^[a-z][a-z0-9-]{0,62}[a-z0-9]\z` (start `[a-z]`, 0–62 middle chars `[a-z0-9-]`, end `[a-z0-9]`; 2–64 chars total; no trailing hyphen encoded in the pattern; `\z` anchors to true string end, preventing trailing-newline false positives). The helper `Test-EngagementRecordSlug` enforces this at the core library level, and any non-legacy parser run throws an immediate, standardized exception if an invalid slug is encountered.
 
 ### D4 - Multi-Line Injection Policy
 
@@ -84,7 +84,7 @@ The canonical schema in `skills/engagement-record-emission/SKILL.md` is extended
 - `schema_version` bumped to `2` (see D4 rollout policy).
 - The `adversarial_verdicts` block is **deferred** from #576's scope; SKILL.md strikes it from the canonical schema until a follow-up issue defines its shape. The existing `<!-- design-phase-complete-{ID} -->` marker's `finding_dispositions:` YAML block remains the authoritative adversarial-review audit surface per SMC-19.
 
-The helper at `.github/scripts/lib/frame-engagement-record-core.ps1` is updated in lockstep: the `[ValidateSet]` attribute on `-Phase`, the body-level enum check, the header doc-comment, and the previous "throws on plan" MF10 test guard all accept the three-phase set. The unknown-`schema_version` throw is preserved.
+The helper at `.github/scripts/lib/frame-engagement-record-core.ps1` is updated in lockstep: the `[ValidateSet]` attribute on `-Phase`, the body-level enum check, the header doc-comment, and the previous "throws on plan" MF10 test guard all accept the three-phase set. D8: Unknown `schema_version` throws are propagated to the caller. The check runs before the CF13b per-marker try/catch, so an unrecognized version aborts the scan rather than silently skipping the marker. Recoverable per-marker failures (invalid phase, bad slug, invalid enum values) are caught by CF13b and warn-and-skipped; schema-version violations are not.
 
 ### D9 - `capture_session` Literals Per Phase
 

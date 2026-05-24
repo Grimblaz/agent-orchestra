@@ -40,7 +40,7 @@
 # Decision-ID slug contract (D3 globally unique + always-filter-by-phase).
 # Case-sensitive; lowercase only; 2-64 chars; must start with [a-z]; must not end with hyphen.
 # Pattern uses \z (not $) to forbid trailing newline.
-$script:DecisionIdSlugRegex = '^[a-z][a-z0-9-]{1,63}\z'
+$script:DecisionIdSlugRegex = '^[a-z][a-z0-9-]{0,62}[a-z0-9]\z'
 $script:DecisionIdSlugDescription = "lowercase only (case-sensitive); 2-64 chars; must start with [a-z]; must not end with hyphen"
 
 function Read-EngagementRecords {
@@ -193,20 +193,19 @@ function Read-EngagementRecords {
                 }
             }
 
-            # CF13b: wrap schema/enum validations so a single malformed marker does not abort the scan.
-            # The YAML-parse path is already wrapped above (:160); this block covers per-marker
-            # schema_version / phase / slug / classification / articulation_status validation.
-            try {
-                # Throw on unknown schema_version
-                if (-not $isLegacy -and $null -ne $parsedYaml.schema_version -and $parsedYaml.schema_version -notin @(1, 2)) {
-                    throw [System.InvalidOperationException]::new("unknown schema_version: $($parsedYaml.schema_version)")
-                }
+            # CF13b: wrap per-marker schema/enum validations so a single malformed marker does not abort the scan.
+            # Exception: unknown schema_version MUST propagate (SKILL.md Schema Versioning Policy).
+            if (-not $isLegacy -and $null -ne $parsedYaml.schema_version -and $parsedYaml.schema_version -notin @(1, 2)) {
+                throw [System.InvalidOperationException]::new("unknown schema_version: $($parsedYaml.schema_version)")
+            }
 
-                # Enum validation for v1
+            try {
+                # Enum validation for non-legacy markers
                 if (-not $isLegacy) {
-                    # MF10: v1.1 only supports 'experience' and 'design'; 'plan' is deferred
-                    if ($parsedYaml.phase -notin @('experience', 'design', 'plan')) {
-                        throw [System.InvalidOperationException]::new("Invalid phase value: $($parsedYaml.phase)")
+                    # Supported non-legacy phases: experience, design, and plan (plan requires schema_version >= 2).
+                    if ($parsedYaml.phase -notin @('experience', 'design', 'plan') -or
+                        ($parsedYaml.phase -eq 'plan' -and [int]$parsedYaml.schema_version -lt 2)) {
+                        throw [System.InvalidOperationException]::new("Invalid phase value: $($parsedYaml.phase) (phase 'plan' requires schema_version >= 2)")
                     }
                 }
 
@@ -303,6 +302,6 @@ function Test-EngagementRecordSlug {
     if ([string]::IsNullOrWhiteSpace($DecisionId)) {
         return $false
     }
-    return $DecisionId -cmatch $script:DecisionIdSlugRegex -and $DecisionId -cnotmatch '-\z'
+    return $DecisionId -cmatch $script:DecisionIdSlugRegex
 }
 
