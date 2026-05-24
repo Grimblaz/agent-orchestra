@@ -132,9 +132,9 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
 - source: "Plan Creation Strategy"
   responsibility: "Route well-defined and exploratory scopes through Issue-Planner for plan creation."
   disposition: planner-should-absorb
-  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/590; keep plan-creation strategy owned by Issue-Planner and skills/plan-authoring/SKILL.md so the conductor only requests or consumes plans."
-  verification_status: unverified
-  verified-against-sha: ""
+  action: "Absorbed by issue https://github.com/Grimblaz/agent-orchestra/issues/590 into skills/plan-authoring/SKILL.md § Plan Entry and Amendment Triggers"
+  verification_status: verified
+  verified-against-sha: "467f0ee5111e6417b653341ae1090ea7c698aea6"
   verified-via-pr-sha: ""
 - source: "Plan Creation Strategy"
   responsibility: "Adapt steps when plan assumptions drift from code reality and record the rationale."
@@ -196,9 +196,9 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
 - source: "Core Workflow / Step protocols Step 0-5 / Issue Transition Step 0"
   responsibility: "Call Issue-Planner when scope or acceptance criteria have changed or are ambiguous before execution."
   disposition: planner-should-absorb
-  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/590; make plan-amendment criteria explicit in skills/plan-authoring/SKILL.md and Issue-Planner handoff wording."
-  verification_status: unverified
-  verified-against-sha: ""
+  action: "Absorbed by issue https://github.com/Grimblaz/agent-orchestra/issues/590 into skills/plan-authoring/SKILL.md § Plan Entry and Amendment Triggers"
+  verification_status: verified
+  verified-against-sha: "467f0ee5111e6417b653341ae1090ea7c698aea6"
   verified-via-pr-sha: ""
 - source: "Hub Mode & Smart Resume"
   responsibility: "Treat non-specific Code-Conductor invocation and /orchestrate as hub mode from framing through PR creation."
