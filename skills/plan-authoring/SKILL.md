@@ -21,6 +21,24 @@ Reusable methodology for turning researched scope into an executable implementat
 
 Reduce ambiguity before implementation starts. Discovery should produce evidence, alignment should resolve open decisions, and the draft plan should be specific enough that downstream agents can execute it without re-deriving the work.
 
+## Plan Entry and Amendment Triggers
+
+Provenance: absorbed from plan-entry rules in agents/Code-Conductor.agent.md:107-110 and the plan-amendment trigger in agents/Code-Conductor.agent.md:130 for issues #557 and #590.
+
+When the requested scope is well-defined and the acceptance criteria are stable, produce a direct execution plan. Stable scope can go directly into planning because the plan author's work is to convert known goals, constraints, and verification needs into executable steps without reopening settled decisions.
+
+When the requested scope is exploratory, stabilize the acceptance criteria and constraints before drafting execution steps. Ambiguous or exploratory work needs this stabilization because implementation plans should not force runtime agents to infer product boundaries, acceptance criteria, or constraint trade-offs during execution.
+
+When an approved plan already exists but scope or acceptance criteria have changed, gone stale, or become ambiguous, route the work back through Issue-Planner for amendment before runtime execution. Drift and stale criteria must be reconciled before execution so downstream agents act on the current contract rather than adapting an obsolete one at runtime.
+
+Quick checklist before plan entry or amendment:
+
+- Well-defined scope + stable acceptance criteria -> draft a direct execution plan
+- Exploratory scope -> stabilize acceptance criteria and constraints before drafting steps
+- Changed, stale, or ambiguous approved plan -> call Issue-Planner for amendment before execution
+
+After selecting the entry or amendment path, continue to `## Discovery Workflow` and gather the evidence needed to support that path.
+
 ## Discovery Workflow
 
 ### 1. Gather Read-Only Evidence
