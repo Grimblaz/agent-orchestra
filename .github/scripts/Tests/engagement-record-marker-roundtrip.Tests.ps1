@@ -136,7 +136,7 @@ Describe 'Read-EngagementRecords: marker-parse v1' {
 # (c) schema-conformance
 # ---------------------------------------------------------------------------
 Describe 'Read-EngagementRecords: schema conformance and version validation' {
-    It 'throws InvalidOperationException on unknown schema_version' {
+    It 'throws on unknown schema_version' {
         if (-not (Get-Command Read-EngagementRecords -ErrorAction SilentlyContinue)) {
             Set-ItResult -Skipped -Because 'Read-EngagementRecords not available'
             return
@@ -144,14 +144,15 @@ Describe 'Read-EngagementRecords: schema conformance and version validation' {
 
         $invalidVersionFixture = '<!-- engagement-record-design-575 -->
 ```yaml
-schema_version: 2
+schema_version: 3
 phase: design
 capture_session: "normal-design-v1"
 load_bearing_decisions: []
 ```'
-        {
-            Read-EngagementRecords -IssueNumber $script:IssueId -InMemoryMarkers @($invalidVersionFixture) -Phase design
-        } | Should -Throw -ExpectedMessage "*unknown schema_version*" -ExceptionType ([System.InvalidOperationException])
+        # F-CO1: unknown schema_version is now thrown OUTSIDE the CF13b per-marker try/catch,
+        # so it propagates as a hard error. The call must throw.
+        { Read-EngagementRecords -IssueNumber $script:IssueId -InMemoryMarkers @($invalidVersionFixture) -Phase design } |
+            Should -Throw
     }
 }
 
@@ -408,3 +409,59 @@ load_bearing_decisions:
         } | Should -Not -Throw -Because 'additive-field policy: readers must ignore unknown optional fields'
     }
 }
+
+# ---------------------------------------------------------------------------
+# (l) phase plan validation: accepts phase: plan + schema_version: 2 round-trip
+# ---------------------------------------------------------------------------
+Describe 'Read-EngagementRecords: phase plan validation' {
+    It 'accepts phase: plan and schema_version: 2 round-trip' {
+        if (-not (Get-Command Read-EngagementRecords -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Read-EngagementRecords not available'
+            return
+        }
+
+        $planFixture = '<!-- engagement-record-plan-576 -->
+```yaml
+schema_version: 2
+phase: plan
+capture_session: "normal-plan-v2"
+load_bearing_decisions:
+  - decision_id: plan-write-target
+    classification: load-bearing
+    audit_rationale: "We locked the write target."
+    engineer_choice: "Plan comment"
+    teaching_paragraph_excerpt: "Colocate plan and decisions."
+    articulation_text: ""
+    articulation_status: pending
+```'
+
+        $records = Read-EngagementRecords -IssueNumber 576 -InMemoryMarkers @($planFixture) -Phase plan
+        $records | Should -Not -BeNullOrEmpty
+        $records.Count | Should -Be 1
+        $records[0].decision_id | Should -Be 'plan-write-target'
+        $records[0].phase | Should -Be 'plan'
+        $records[0].schema_version | Should -Be 2
+    }
+
+    It 'skips marker with unknown fourth phase and emits warning (CF13b)' {
+        if (-not (Get-Command Read-EngagementRecords -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Read-EngagementRecords not available'
+            return
+        }
+
+        $badPhaseFixture = '<!-- engagement-record-unknown-576 -->
+```yaml
+schema_version: 2
+phase: unknown
+capture_session: "normal-plan-v2"
+load_bearing_decisions: []
+```'
+
+        # CF13b: per-marker validation failures now warn-and-skip; the call must not throw.
+        $records = $null
+        { $records = Read-EngagementRecords -IssueNumber 576 -InMemoryMarkers @($badPhaseFixture) -Phase plan -WarningAction SilentlyContinue } |
+            Should -Not -Throw
+        $records.Count | Should -Be 0
+    }
+}
+

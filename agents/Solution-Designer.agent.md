@@ -61,7 +61,7 @@ High-level design thinking — "what are we building and why?" Operates at conce
 
 ## Process
 
-Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires a structured question. Then load `skills/upstream-onboarding/SKILL.md` and follow its protocol. (Note: cross-session engagement-state will be preserved via the SMC-20 engagement-record markers and the same-decision-resume skip rule, preventing repeated questioning on settled decisions across sessions (engagement-record read path active; write path — marker emission by agents — deferred to #576). The classification gate applies only once a target artifact is established — on greenfield invocations, defer until an issue is created.)
+Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires a structured question. Then load `skills/upstream-onboarding/SKILL.md` and follow its protocol. (Note: cross-session engagement-state will be preserved via the SMC-20 engagement-record markers and the same-decision-resume skip rule, preventing repeated questioning on settled decisions across sessions (SMC-20 engagement-record markers active for both read and write paths per #576). The classification gate applies only once a target artifact is established — on greenfield invocations, defer until an issue is created.)
 
 ## Stage 1: GitHub Setup
 
@@ -115,14 +115,44 @@ finding_dispositions:
 
 `passes_run` must equal the set of passes represented by the merged ledger and `entries[]`. A degraded pass-1-only ledger is valid when only pass 1 ran, but the template must then use `passes_run: [1]` and contain only pass-1 finding entries.
 
-Immediately after posting the completion marker, post a credit-input marker comment (SMC-17 deferred-emission):
+### Named Decisions write-discipline
+
+When persisting this phase, you MUST author the `## Named Decisions` H2 section in the issue body H2 immediately after ## Scenarios per D12, or immediately before ## Design Decisions H2 if ## Scenarios is absent (SD fallback), wrapped in `<!-- named-decisions:begin -->` ... `<!-- named-decisions:end -->` sentinels, using this H3-per-decision format:
+
+### {decision_id}
+
+- **Classification**: {load-bearing | routine}
+- **Engineer choice**: "{verbatim}"
+- **Audit rationale**: "{one sentence}"
+- **Decision brief excerpt**: "{one sentence}"
+- **Articulation text**: |
+    <!-- CE Gate articulation pending per #578 -->
+- **Articulation status**: pending
+
+If a recommendation shift occurred in this session, you MAY append:
+- **Recommendation shift trigger**: {engineer-pushback | new-evidence | classification-re-audit | classification-re-audit-routine}
+
+If zero load-bearing decisions were captured, the section MUST contain the literal sentence "No load-bearing decisions captured in this session." between sentinels.
+
+When persisting or amending the target phase artifact, you MUST monitor the total size of the persisted payload; if the payload size approaches 60,000 bytes, you MUST emit a warning to the terminal.
+
+**Burst order (load-bearing — D6 canonical ordering):**
+
+1. Post the phase completion artifact described above in this agent body.
+2. **Immediately** post the `<!-- engagement-record-design-{ISSUE_NUMBER} -->` comment using `capture_session: "normal-design-v2"`, `schema_version: 2`, and `load_bearing_decisions: [...]` containing one YAML block-scalar mirror entry per decision slug matching the Markdown section exactly. Valid slugs MUST conform to the regex `^[a-z][a-z0-9-]{0,62}[a-z0-9]\z` validated by `Test-EngagementRecordSlug`. You MUST use YAML block-scalar `|-` for all multi-line user-typed fields (`audit_rationale`, `articulation_text`, `engineer_choice`); literal triple-backticks in those fields are strictly rejected.
+   - **If engagement-record emission fails:** emit a terminal warning `⚠️ Engagement-record emission failed for design-{ISSUE_NUMBER}: {reason}`, HALT the burst, and do NOT post the credit-input marker comment. The phase remains complete (the phase completion artifact is durable), but `same-decision-resume` next session will degrade to v1.1 behavior.
+3. **Only after successful engagement-record emission**, post the credit-input marker (see § Credit-input emission below).
+
+### Credit-input emission
+
+**After successful engagement-record emission** (see § Named Decisions write-discipline above), post a credit-input marker comment (SMC-17 deferred-emission):
 
 ````markdown
 <!-- credit-input-design-{ISSUE_NUMBER} -->
 ```yaml
 port: design
 adapter: work-adapter
-evidence: "issue #{ISSUE_NUMBER}; design-phase-complete marker posted"
+evidence: "issue #{ISSUE_NUMBER}; design completion marker posted"
 ```
 ````
 

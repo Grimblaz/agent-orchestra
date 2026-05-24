@@ -51,7 +51,7 @@ The classification gate and the structured question it produces are unconditiona
 
 - **gate-fails**: The classification gate returns routine. No structured question fires. Skip is automatic.
 - **engineer-declined-engagement**: The engineer selects `Decline engagement — proceed without classification` or writes `decline:` free-text. Skip immediately; capture decline verbatim.
-- **same-decision-resume**: When `Read-EngagementRecords` (from `.github/scripts/lib/frame-engagement-record-core.ps1`) returns a prior load-bearing decision with the same `decision_id` as a pending classification, suppress the structured-question firing and reuse the captured `engineer_choice`. The reader contract lives in `skills/engagement-record-emission/SKILL.md` § Resume-Read Protocol. The activation applies per agent at phase re-entry; consult the SMC-20 row for survival semantics. **Until #576 lands emission, this rule will return empty on all in-flight issues (graceful no-op)** — that is the v1.1/v1.2 boundary.
+- **same-decision-resume**: When `Read-EngagementRecords` (from `.github/scripts/lib/frame-engagement-record-core.ps1`) returns a prior load-bearing decision with the same `decision_id` as a pending classification, suppress the structured-question firing and reuse the captured `engineer_choice`. The reader contract lives in `skills/engagement-record-emission/SKILL.md` § Resume-Read Protocol. The activation applies per agent at phase re-entry; consult the SMC-20 row for survival semantics. **Prior to #576, this rule returned empty on all in-flight issues as a graceful no-op; post-#576, emission is active and same-decision-resume is functional** — that is the v1.1/v1.2 boundary.
 
 ### Rule: Thin-articulation criterion
 
