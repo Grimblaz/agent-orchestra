@@ -21,6 +21,24 @@ Reusable methodology for turning researched scope into an executable implementat
 
 Reduce ambiguity before implementation starts. Discovery should produce evidence, alignment should resolve open decisions, and the draft plan should be specific enough that downstream agents can execute it without re-deriving the work.
 
+## Plan Entry and Amendment Triggers
+
+Provenance: absorbed from historical Code-Conductor sources for plan entry (`agents/Code-Conductor.agent.md@08c55e7bbf9ca2386a20fc6db2aaa931a626798d:107-110`) and plan amendment (`agents/Code-Conductor.agent.md@08c55e7bbf9ca2386a20fc6db2aaa931a626798d:130`) for issues #557 and #590.
+
+When the requested scope is well-defined and the acceptance criteria are stable, produce a direct execution plan. Stable scope can go directly into planning because the plan author's work is to convert known goals, constraints, and verification needs into executable steps without reopening settled decisions.
+
+When the requested scope is exploratory, stabilize the acceptance criteria and constraints before drafting execution steps. Ambiguous or exploratory work needs this stabilization because implementation plans should not force runtime agents to infer product boundaries, acceptance criteria, or constraint trade-offs during execution.
+
+When an approved plan already exists but scope or acceptance criteria have changed, gone stale, or become ambiguous, route the work back through Issue-Planner for amendment before runtime execution. Drift and stale criteria must be reconciled before execution so downstream agents act on the current contract rather than adapting an obsolete one at runtime.
+
+Quick checklist before plan entry or amendment:
+
+- Well-defined scope + stable acceptance criteria -> draft a direct execution plan
+- Exploratory scope -> stabilize acceptance criteria and constraints before drafting steps
+- Changed, stale, or ambiguous approved plan -> call Issue-Planner for amendment before execution
+
+After selecting the entry or amendment path, continue to `## Discovery Workflow` and gather the evidence needed to support that path.
+
 ## Discovery Workflow
 
 ### 1. Gather Read-Only Evidence
@@ -59,6 +77,8 @@ If the user's answer materially changes scope or mechanism, loop back through di
 ### 1. Build the Execution Skeleton
 
 Prepare a plan that ties every step to an acceptance-criteria slice and names the expected execution mode. The draft should include the implementation steps, validation approach, review pipeline, CE Gate handling when applicable, deferred-significant follow-up behavior, and a short retrospective checkpoint.
+
+Use `Execution mode selection` below when choosing and recording each step's execution mode.
 
 ### 2. Write Requirement Contracts
 
@@ -184,6 +204,21 @@ Do not infer methodology from a skill directory when no adapter file matches. Ei
 
 `executor:` controls only how the selected adapter is invoked. It does not change existing cycle or terminal token semantics: keep `sN[#cycle:N][#terminal]` in the spine, `cycle: N` and `terminal: true` in slice metadata, and terminal credit responsibility on the last terminal slice for the port.
 
+### Execution mode selection
+
+Provenance: this heuristic is absorbed from Code-Conductor's prior execution-mode policy for issue #589; plan authors own selection while runtime agents consume the declared mode.
+
+For each implementation step, make a per-step declaration: declare the execution mode in the visible plan step for human readers and in the frame-spine `slices.sN.execution_mode` entry as the authoritative machine-readable location. Do not add `execution_mode` to per-step `frame-slice` blocks. Keep the requirement contract and convergence gates identical for serial and parallel work; the mode changes coordination style, not the acceptance bar.
+
+Prefer `parallel` when the acceptance criteria are stable, the step is isolated with low coupling, clear interfaces exist between the implementation and test work, and fast implementation-plus-test feedback is valuable.
+
+Prefer `serial` when the acceptance criteria are exploratory or ambiguous, test-first clarification is needed before implementation should proceed, or refactor and dependency risk is high.
+
+Quick checklist before declaring mode for a step:
+
+- Stable AC + low coupling + clear interfaces -> `Execution Mode: parallel`
+- Ambiguous AC or high-risk refactor/dependencies -> `Execution Mode: serial`
+
 ### Plan-markdown template
 
 ```markdown
@@ -237,6 +272,7 @@ slices:
 {How to test: commands, tests, manual checks}
 
 <!-- verification-evidence -->
+
 **Verification Evidence**
 
 - **AC{N}** ({category: text-presence | structure-presence | downstream-consumer | numeric-or-structural | named-standard}): {verification action and result}. **{disposition: verified | revised | exempted | planned}** - evidence: {grep/read command with path:line, consumer path/function, numeric or structural source, or named-standard reference}. {Required for revised/exempted: rationale. Required for planned: slice anchor s{N} and category the future artifact will satisfy.}
@@ -326,6 +362,6 @@ If discovery becomes long or tool-heavy, compact before drafting. Preserve the k
 
 ## Frame Ports Filled By This Skill
 
-| Port   | Work adapter                                                         | Auto-N/A adapter                                     | Explicit-skip adapter                                            |
-| ------ | -------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------- |
+| Port   | Work adapter                                                         | Auto-N/A adapter                                                     | Explicit-skip adapter                                                            |
+| ------ | -------------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `plan` | [agents/Issue-Planner.agent.md](../../agents/Issue-Planner.agent.md) | [adapters/plan-auto-na-adapter.md](adapters/plan-auto-na-adapter.md) | [adapters/plan-explicit-skip-adapter.md](adapters/plan-explicit-skip-adapter.md) |

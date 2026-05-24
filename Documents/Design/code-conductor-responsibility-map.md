@@ -110,16 +110,16 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
 - source: "Overview"
   responsibility: "Declare serial or parallel execution mode per implementation step with identical requirement contracts and convergence gates."
   disposition: planner-should-absorb
-  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/589; move execution-mode declaration defaults into skills/plan-authoring/SKILL.md execution-step responsibilities while runtime still honors slice metadata."
-  verification_status: unverified
-  verified-against-sha: ""
+  action: "Absorbed by issue https://github.com/Grimblaz/agent-orchestra/issues/589 into skills/plan-authoring/SKILL.md Execution mode selection: plan authors declare execution mode in the plan and slice metadata while runtime agents consume the declared mode. Frame-slice template reconciliation remains tracked by issue https://github.com/Grimblaz/agent-orchestra/issues/613."
+  verification_status: verified
+  verified-against-sha: "d7460c79b6292e2636094c76c44346ed1f388149"
   verified-via-pr-sha: ""
 - source: "Overview"
   responsibility: "Choose parallel for stable isolated work and serial for exploratory or high-risk work."
   disposition: planner-should-absorb
-  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/589; encode mode-selection heuristics in skills/plan-authoring/SKILL.md and generated frame-slice metadata."
-  verification_status: unverified
-  verified-against-sha: ""
+  action: "Absorbed by issue https://github.com/Grimblaz/agent-orchestra/issues/589 into skills/plan-authoring/SKILL.md Execution mode selection: plan authors own the parallel-vs-serial heuristic and runtime agents consume the declared mode. Out-of-scope skills/parallel-execution/SKILL.md ownership wording remains tracked by issue https://github.com/Grimblaz/agent-orchestra/issues/614."
+  verification_status: verified
+  verified-against-sha: "d7460c79b6292e2636094c76c44346ed1f388149"
   verified-via-pr-sha: ""
 - source: "Usage Examples"
   responsibility: "Describe example flows for full implementation and research-first work."
@@ -132,9 +132,9 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
 - source: "Plan Creation Strategy"
   responsibility: "Route well-defined and exploratory scopes through Issue-Planner for plan creation."
   disposition: planner-should-absorb
-  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/590; keep plan-creation strategy owned by Issue-Planner and skills/plan-authoring/SKILL.md so the conductor only requests or consumes plans."
-  verification_status: unverified
-  verified-against-sha: ""
+  action: "Absorbed by issue https://github.com/Grimblaz/agent-orchestra/issues/590 into skills/plan-authoring/SKILL.md § Plan Entry and Amendment Triggers"
+  verification_status: verified
+  verified-against-sha: "467f0ee5111e6417b653341ae1090ea7c698aea6"
   verified-via-pr-sha: ""
 - source: "Plan Creation Strategy"
   responsibility: "Adapt steps when plan assumptions drift from code reality and record the rationale."
@@ -196,9 +196,9 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
 - source: "Core Workflow / Step protocols Step 0-5 / Issue Transition Step 0"
   responsibility: "Call Issue-Planner when scope or acceptance criteria have changed or are ambiguous before execution."
   disposition: planner-should-absorb
-  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/590; make plan-amendment criteria explicit in skills/plan-authoring/SKILL.md and Issue-Planner handoff wording."
-  verification_status: unverified
-  verified-against-sha: ""
+  action: "Absorbed by issue https://github.com/Grimblaz/agent-orchestra/issues/590 into skills/plan-authoring/SKILL.md § Plan Entry and Amendment Triggers"
+  verification_status: verified
+  verified-against-sha: "467f0ee5111e6417b653341ae1090ea7c698aea6"
   verified-via-pr-sha: ""
 - source: "Hub Mode & Smart Resume"
   responsibility: "Treat non-specific Code-Conductor invocation and /orchestrate as hub mode from framing through PR creation."
