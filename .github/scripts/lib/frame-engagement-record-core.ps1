@@ -18,7 +18,7 @@
     The GitHub issue ID. Mandatory.
 
 .PARAMETER Phase
-    Optional. If specified, must be 'experience' or 'design'. Filters records to this phase.
+    Optional. If specified, must be 'experience', 'design', or 'plan'. Filters records to this phase.
 
 .PARAMETER Repo
     Optional. The GitHub repository in owner/name format. Defaults to current repo.
@@ -37,6 +37,12 @@
     [PSCustomObject[]] Array of parsed decision objects.
 #>
 
+# Decision-ID slug contract (D3 globally unique + always-filter-by-phase).
+# Case-sensitive; lowercase only; 2-64 chars; must start with [a-z]; must not end with hyphen.
+# Pattern uses \z (not $) to forbid trailing newline.
+$script:DecisionIdSlugRegex = '^[a-z][a-z0-9-]{1,63}\z'
+$script:DecisionIdSlugDescription = "lowercase only (case-sensitive); 2-64 chars; must start with [a-z]; must not end with hyphen"
+
 function Read-EngagementRecords {
     [CmdletBinding()]
     param(
@@ -44,7 +50,7 @@ function Read-EngagementRecords {
         [int]$IssueNumber,
 
         [Parameter(Mandatory = $false)]
-        [ValidateSet('experience', 'design')]
+        [ValidateSet('experience', 'design', 'plan')]
         [string]$Phase,
 
         [Parameter(Mandatory = $false)]
@@ -187,63 +193,79 @@ function Read-EngagementRecords {
                 }
             }
 
-            # Throw on unknown schema_version
-            if (-not $isLegacy -and $null -ne $parsedYaml.schema_version -and $parsedYaml.schema_version -ne 1) {
-                throw [System.InvalidOperationException]::new("unknown schema_version: $($parsedYaml.schema_version)")
-            }
-
-            # Enum validation for v1
-            if (-not $isLegacy) {
-                # MF10: v1.1 only supports 'experience' and 'design'; 'plan' is deferred
-                if ($parsedYaml.phase -notin @('experience', 'design')) {
-                    throw [System.InvalidOperationException]::new("Invalid phase value: $($parsedYaml.phase)")
+            # CF13b: wrap schema/enum validations so a single malformed marker does not abort the scan.
+            # The YAML-parse path is already wrapped above (:160); this block covers per-marker
+            # schema_version / phase / slug / classification / articulation_status validation.
+            try {
+                # Throw on unknown schema_version
+                if (-not $isLegacy -and $null -ne $parsedYaml.schema_version -and $parsedYaml.schema_version -notin @(1, 2)) {
+                    throw [System.InvalidOperationException]::new("unknown schema_version: $($parsedYaml.schema_version)")
                 }
-            }
 
-            $resolvedPhase = if (-not [string]::IsNullOrWhiteSpace($parsedYaml.phase)) {
-                $parsedYaml.phase.ToLowerInvariant()
-            } else {
-                $commentPhase
-            }
-
-            # Process decisions
-            $decisionsList = @()
-            if ($null -ne $parsedYaml.load_bearing_decisions) {
-                foreach ($dec in $parsedYaml.load_bearing_decisions) {
-                    # Validate decision-level enums in non-legacy mode
-                    if (-not $isLegacy) {
-                        if ($null -ne $dec.classification -and $dec.classification -notin @('load-bearing', 'routine')) {
-                            throw [System.InvalidOperationException]::new("Invalid classification value: $($dec.classification)")
-                        }
-                        if ($null -ne $dec.articulation_status -and $dec.articulation_status -notin @('pending', 'complete', 'incomplete')) {
-                            throw [System.InvalidOperationException]::new("Invalid articulation_status value: $($dec.articulation_status)")
-                        }
+                # Enum validation for v1
+                if (-not $isLegacy) {
+                    # MF10: v1.1 only supports 'experience' and 'design'; 'plan' is deferred
+                    if ($parsedYaml.phase -notin @('experience', 'design', 'plan')) {
+                        throw [System.InvalidOperationException]::new("Invalid phase value: $($parsedYaml.phase)")
                     }
-
-                    # MF5/MF11: Pass through raw field values; no decision_brief harmonization
-                    $decObj = [PSCustomObject]@{
-                        decision_id                = $dec.decision_id
-                        classification             = $dec.classification
-                        audit_rationale            = $dec.audit_rationale
-                        engineer_choice            = $dec.engineer_choice
-                        teaching_paragraph_excerpt = $dec.teaching_paragraph_excerpt
-                        articulation_text          = $dec.articulation_text
-                        articulation_status        = $dec.articulation_status
-                    }
-
-                    if ($isLegacy) {
-                        $decObj | Add-Member -MemberType NoteProperty -Name "_legacy" -Value $true
-                        $decObj | Add-Member -MemberType NoteProperty -Name "_missing_fields" -Value $missingFields
-                    }
-
-                    $decisionsList += $decObj
                 }
-            }
 
-            $processedMarkers += [PSCustomObject]@{
-                Phase     = $resolvedPhase
-                CreatedAt = $m.CreatedAt
-                Decisions = $decisionsList
+                $resolvedPhase = if (-not [string]::IsNullOrWhiteSpace($parsedYaml.phase)) {
+                    $parsedYaml.phase.ToLowerInvariant()
+                } else {
+                    $commentPhase
+                }
+
+                # Process decisions
+                $decisionsList = @()
+                if ($null -ne $parsedYaml.load_bearing_decisions) {
+                    foreach ($dec in $parsedYaml.load_bearing_decisions) {
+                        # Validate decision-level enums in non-legacy mode
+                        if (-not $isLegacy) {
+                            # Slug validation (enforced for schema_version 2+)
+                            if ($parsedYaml.schema_version -eq 2 -and -not (Test-EngagementRecordSlug -DecisionId $dec.decision_id)) {
+                                throw [System.InvalidOperationException]::new("Invalid decision_id slug: '$($dec.decision_id)' - $script:DecisionIdSlugDescription (must match $script:DecisionIdSlugRegex)")
+                            }
+                            if ($null -ne $dec.classification -and $dec.classification -notin @('load-bearing', 'routine')) {
+                                throw [System.InvalidOperationException]::new("Invalid classification value: $($dec.classification)")
+                            }
+                            if ($null -ne $dec.articulation_status -and $dec.articulation_status -notin @('pending', 'complete', 'incomplete')) {
+                                throw [System.InvalidOperationException]::new("Invalid articulation_status value: $($dec.articulation_status)")
+                            }
+                        }
+
+                        # CF22: build the returned PSCustomObject from a hashtable seeded with the raw
+                        # parsed decision dict, so additive optional fields (per SKILL.md line 55)
+                        # survive the round-trip. Derived fields (phase, schema_version) overlay last
+                        # so they win over any like-named keys in the source dict.
+                        $decisionFields = @{}
+                        if ($null -ne $dec) {
+                            foreach ($key in $dec.Keys) {
+                                $decisionFields[$key] = $dec[$key]
+                            }
+                        }
+                        $decisionFields['phase'] = $resolvedPhase
+                        $decisionFields['schema_version'] = $parsedYaml.schema_version
+                        $decObj = [PSCustomObject]$decisionFields
+
+                        if ($isLegacy) {
+                            $decObj | Add-Member -MemberType NoteProperty -Name "_legacy" -Value $true -Force
+                            $decObj | Add-Member -MemberType NoteProperty -Name "_missing_fields" -Value $missingFields -Force
+                        }
+
+                        $decisionsList += $decObj
+                    }
+                }
+
+                $processedMarkers += [PSCustomObject]@{
+                    Phase     = $resolvedPhase
+                    CreatedAt = $m.CreatedAt
+                    Decisions = $decisionsList
+                }
+            } catch [System.InvalidOperationException] {
+                # CF13b: emit a warning and skip this marker so the resume read still surfaces other valid markers.
+                Write-Warning "Skipping malformed engagement-record marker on issue $IssueNumber : $($_.Exception.Message)"
+                continue
             }
         }
     }
@@ -270,3 +292,17 @@ function Read-EngagementRecords {
 
     return $allDecisions
 }
+
+function Test-EngagementRecordSlug {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowNull()]
+        [AllowEmptyString()]
+        [string]$DecisionId
+    )
+    if ([string]::IsNullOrWhiteSpace($DecisionId)) {
+        return $false
+    }
+    return $DecisionId -cmatch $script:DecisionIdSlugRegex -and $DecisionId -cnotmatch '-\z'
+}
+

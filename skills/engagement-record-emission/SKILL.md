@@ -21,7 +21,7 @@ Engagement records are emitted as GitHub issue comments containing a YAML code b
 
 `<!-- engagement-record-{phase}-{ISSUE_ID} -->`
 
-Where `{phase}` is one of `experience` or `design` (for v1.1; the `plan` phase is deferred to a later release), and `{ISSUE_ID}` is the numerical GitHub issue ID.
+Where `{phase}` is one of `experience`, `design`, or `plan` (introduced in v1.2 / #576 at `schema_version: 2`), and `{ISSUE_ID}` is the numerical GitHub issue ID.
 
 For example:
 `<!-- engagement-record-design-575 -->`
@@ -31,9 +31,9 @@ For example:
 The canonical YAML schema for the engagement-record payload is structured as follows:
 
 ```yaml
-schema_version: 1
-phase: design                         # Valid values: experience | design
-capture_session: "normal-design-v1"  # Session tracking string
+schema_version: 2
+phase: design                         # Valid values: experience | design | plan
+capture_session: "normal-design-v2"  # Session tracking string
 load_bearing_decisions:
   - decision_id: schema-location      # Unique decision identifier
     classification: load-bearing      # Valid values: load-bearing | routine
@@ -42,6 +42,7 @@ load_bearing_decisions:
     teaching_paragraph_excerpt: "..." # Excerpt of the decision's context
     articulation_text: "..."          # Short paragraph detailing the engineer's rationale
     articulation_status: pending      # Valid values: pending | complete | incomplete
+    recommendation_shift_trigger: engineer-pushback # Optional. Valid values: engineer-pushback | new-evidence | classification-re-audit | classification-re-audit-routine
 ```
 
 ## Persistence Rule
@@ -51,13 +52,13 @@ Multiple engagement-record markers may be written to the same issue for a given 
 ## Schema Versioning Policy
 
 Tooling that reads engagement records MUST throw an error on encountering an unknown `schema_version` value.
-- **Additive-field policy**: Within `schema_version: 1`, new optional fields may be added by writers. Readers MUST ignore unknown optional fields without throwing errors.
-- **Breaking changes**: Any renamed fields, changed enum sets, or new required fields require incrementing to `schema_version: 2`.
+- **Additive-field policy**: Within a schema version, new optional fields may be added by writers. Readers MUST ignore unknown optional fields without throwing errors.
+- **Breaking changes**: Any renamed fields, changed enum sets, or new required fields require incrementing the schema version. Readers built against v1.1 throw on v2 markers — this is intentional; per #576 D4 the helper is updated in lockstep and `.claude-plugin/plugin.json` is bumped to invalidate cached older readers.
 
 ## Resume-Read Protocol
 
 Downstream/upstream agents load engagement records at phase startup by calling the helper:
-`Read-EngagementRecords -IssueNumber {ID} [-Phase experience|design] [-InMemoryMarkers <string[]>] [-AcceptLegacy]`
+`Read-EngagementRecords -IssueNumber {ID} [-Phase experience|design|plan] [-InMemoryMarkers <string[]>] [-AcceptLegacy]`
 
 If a record is returned for a given `decision_id`, the agent activates the `same-decision-resume` skip rule in `skills/solution-authoring/SKILL.md` to reuse the captured decision and suppress re-firing the structured question.
 
@@ -67,6 +68,26 @@ If a record is returned for a given `decision_id`, the agent activates the `same
 - `complete` / `incomplete`: Written by the CE Gate evaluator after assessing the evidence.
 
 > **Initial state**: writers SHOULD emit `articulation_text: ""` (empty string) paired with `articulation_status: pending` at phase exit. This is the documented initial state, not an error. The CE Gate (#578) closes the loop by evaluating and transitioning to `complete` or `incomplete`.
+
+## Markdown Bullet ↔ YAML Key Map
+
+Writers and validation tooling MUST enforce the following mapping when translating between the Markdown mirror's bullet fields and the YAML engagement-record's keys:
+
+| Markdown Bullet Field | YAML Payload Key |
+|---|---|
+| `**Classification**` | `classification` |
+| `**Engineer choice**` | `engineer_choice` |
+| `**Audit rationale**` | `audit_rationale` |
+| `**Decision brief excerpt**` | `teaching_paragraph_excerpt` |
+| `**Articulation text**` | `articulation_text` |
+| `**Articulation status**` | `articulation_status` |
+| `**Recommendation shift trigger**` | `recommendation_shift_trigger` |
+
+## Injection Policy
+
+To prevent Markdown escaping and parsing errors on user-typed fields, writers MUST adhere to the following injection policy:
+- Writers MUST use YAML block-scalar `|-` for all multi-line user-typed fields (`audit_rationale`, `articulation_text`, `engineer_choice`).
+- Literal triple-backtick fence lines within those fields are strictly rejected at write time.
 
 ## capture_session Policy
 
@@ -83,6 +104,7 @@ Readers MUST NOT reject malformed values, but validation tooling may emit warnin
 - [session-memory-contract](../session-memory-contract/SKILL.md) (`SMC-20`)
 - [solution-authoring](../solution-authoring/SKILL.md) (`same-decision-resume` skip rule)
 - [frame-engagement-record-core](../../.github/scripts/lib/frame-engagement-record-core.ps1) (`Read-EngagementRecords` helper)
+- **Note on Slug Disambiguation**: The customer-experience skill's prose use of "named decisions" refers to the same concept; engagement-record emission persists load-bearing classifications under the same unique slug namespace.
 
 ## Gotchas
 
@@ -90,7 +112,10 @@ Readers MUST NOT reject malformed values, but validation tooling may emit warnin
 |---|---|---|
 | Mismatched schema version | An older reader reads a v2 marker and crashes or drops decisions. | Enforce throwing on unknown schema_version and coordinate version bumps across all tools. |
 | `-AcceptLegacy` cross-issue contamination | Before the MF2 fix, `-AcceptLegacy` bypassed the issue-number check, allowing markers from foreign issues to appear in results. | Never pass foreign-issue markers alongside `-AcceptLegacy`; the issue-number check is now always enforced. |
-| v1.1 / #576 emission gap | The read path (`Read-EngagementRecords`) is live; the write path (agents emitting markers) is deferred to #576. Downstream consumers should tolerate missing markers gracefully. | Treat absent records as empty; do not hard-fail when no marker exists for a phase. |
+| Mixed-state issues | Issues that completed earlier phases pre-#576 and later phases post-#576 carry asymmetric resume coverage. | **`schema_version: 1` markers (from #575) ARE read by the helper** — `Read-EngagementRecords` accepts both v1 and v2 markers at parse time, so mixed-state issues with v1 design-phase markers and v2 plan-phase markers resume correctly across both phases. Only purely-pre-#571 markers (lacking `schema_version` entirely) require `-AcceptLegacy` to read; without that switch, they ARE opaque. |
+| Comment-burst halt-on-failure | If engagement-record emission fails after the completion marker is posted, credit-input would still be posted. | Treat engagement-record post failure as a blocking error: halt the comment-burst, do NOT emit the credit-input marker, and log a warning to the terminal. |
+| Markdown summary policy | Markdown bullet lists are human-readable mirrors of the YAML marker payload. | Automation tools must read only the YAML block; the Markdown bullets are for human review/audits only. |
+| Articulation_text empty-window UX | `articulation_text: ""` renders as a blank bullet block in the human-readable Markdown section, which looks like an authoring error. | The Markdown mirror H3 sub-section in agent bodies appends the comment `<!-- CE Gate articulation pending per #578 -->` to clarify that evaluation has not yet occurred. |
 
 ## Frame Ports Filled By This Skill
 
