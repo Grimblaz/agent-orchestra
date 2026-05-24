@@ -190,7 +190,7 @@ Do not infer methodology from a skill directory when no adapter file matches. Ei
 
 Provenance: this heuristic is absorbed from Code-Conductor's prior execution-mode policy for issue #589; plan authors own selection while runtime agents consume the declared mode.
 
-For each implementation step, make a per-step declaration: declare the execution mode in the plan and slice metadata instead of leaving downstream agents to re-derive it. Keep the requirement contract and convergence gates identical for serial and parallel work; the mode changes coordination style, not the acceptance bar.
+For each implementation step, make a per-step declaration: declare the execution mode in the visible plan step for human readers and in the frame-spine `slices.sN.execution_mode` entry as the authoritative machine-readable location. Do not add `execution_mode` to per-step `frame-slice` blocks. Keep the requirement contract and convergence gates identical for serial and parallel work; the mode changes coordination style, not the acceptance bar.
 
 Prefer `parallel` when the acceptance criteria are stable, the step is isolated with low coupling, clear interfaces exist between the implementation and test work, and fast implementation-plus-test feedback is valuable.
 
@@ -254,6 +254,7 @@ slices:
 {How to test: commands, tests, manual checks}
 
 <!-- verification-evidence -->
+
 **Verification Evidence**
 
 - **AC{N}** ({category: text-presence | structure-presence | downstream-consumer | numeric-or-structural | named-standard}): {verification action and result}. **{disposition: verified | revised | exempted | planned}** - evidence: {grep/read command with path:line, consumer path/function, numeric or structural source, or named-standard reference}. {Required for revised/exempted: rationale. Required for planned: slice anchor s{N} and category the future artifact will satisfy.}
@@ -343,6 +344,6 @@ If discovery becomes long or tool-heavy, compact before drafting. Preserve the k
 
 ## Frame Ports Filled By This Skill
 
-| Port   | Work adapter                                                         | Auto-N/A adapter                                     | Explicit-skip adapter                                            |
-| ------ | -------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------- |
+| Port   | Work adapter                                                         | Auto-N/A adapter                                                     | Explicit-skip adapter                                                            |
+| ------ | -------------------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
 | `plan` | [agents/Issue-Planner.agent.md](../../agents/Issue-Planner.agent.md) | [adapters/plan-auto-na-adapter.md](adapters/plan-auto-na-adapter.md) | [adapters/plan-explicit-skip-adapter.md](adapters/plan-explicit-skip-adapter.md) |

@@ -75,19 +75,19 @@ BeforeAll {
 
         $semanticChecks = @(
             [ordered]@{
-                Name = 'per-step declaration cue'
+                Name  = 'per-step declaration cue'
                 Terms = @('per-step', 'declare')
             },
             [ordered]@{
-                Name = 'requirement contract and convergence gates co-occurrence'
+                Name  = 'requirement contract and convergence gates co-occurrence'
                 Terms = @('requirement contract', 'convergence gates')
             },
             [ordered]@{
-                Name = 'parallel preference cue'
+                Name  = 'parallel preference cue'
                 Terms = @('stable AC', 'low coupling')
             },
             [ordered]@{
-                Name = 'serial preference cue'
+                Name  = 'serial preference cue'
                 Terms = @('ambiguous AC', 'high-risk')
             }
         )
@@ -132,27 +132,28 @@ Describe 'Execution mode absorption into plan-authoring' {
 
         if ([string]::IsNullOrWhiteSpace($codeConductorOverview)) {
             $violations.Add('AC2: agents/Code-Conductor.agent.md must keep an Overview area for the replacement pointer.')
-        } else {
+        }
+        else {
             $sectionSign = [char]0x00A7
             $requiredPointerTerms = @(
                 [ordered]@{
-                    Term = 'skills/plan-authoring/SKILL.md'
+                    Term    = 'skills/plan-authoring/SKILL.md'
                     Message = 'AC2: Code-Conductor Overview must name skills/plan-authoring/SKILL.md.'
                 },
                 [ordered]@{
-                    Term = "$sectionSign Execution mode selection"
+                    Term    = "$sectionSign Execution mode selection"
                     Message = "AC2: Code-Conductor Overview must point to $sectionSign Execution mode selection."
                 },
                 [ordered]@{
-                    Term = 'per-step execution-mode declaration'
+                    Term    = 'per-step execution-mode declaration'
                     Message = 'AC2: Code-Conductor Overview must mention the per-step execution-mode declaration.'
                 },
                 [ordered]@{
-                    Term = 'parallel-vs-serial selection heuristic'
+                    Term    = 'parallel-vs-serial selection heuristic'
                     Message = 'AC2: Code-Conductor Overview must mention the parallel-vs-serial selection heuristic.'
                 },
                 [ordered]@{
-                    Term = "at runtime, honor the mode surfaced from each plan slice's metadata"
+                    Term    = "at runtime, honor the mode surfaced from each plan slice's metadata"
                     Message = "AC2: Code-Conductor Overview must preserve the runtime-consumer clause that honors the mode surfaced from each plan slice's metadata."
                 }
             )
@@ -172,7 +173,8 @@ Describe 'Execution mode absorption into plan-authoring' {
         # AC10
         if ([string]::IsNullOrWhiteSpace($executionSkeleton)) {
             $violations.Add('AC10: skills/plan-authoring/SKILL.md must keep the ### 1. Build the Execution Skeleton section.')
-        } elseif ($executionSkeleton -notmatch [regex]::Escape('Execution mode selection')) {
+        }
+        elseif ($executionSkeleton -notmatch [regex]::Escape('Execution mode selection')) {
             $violations.Add('AC10: Build the Execution Skeleton must point forward to Execution mode selection.')
         }
 
