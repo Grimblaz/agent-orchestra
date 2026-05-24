@@ -170,9 +170,9 @@ When persisting or amending the target phase artifact, you MUST monitor the tota
 
 **Burst order (load-bearing — D6 canonical ordering):**
 
-1. Post the `<!-- plan-issue-{ISSUE_NUMBER} -->` plan comment (above).
+1. Post the phase completion artifact described above in this agent body.
 2. **Immediately** post the `<!-- engagement-record-plan-{ISSUE_NUMBER} -->` comment using `capture_session: "normal-plan-v2"`, `schema_version: 2`, and `load_bearing_decisions: [...]` containing one YAML block-scalar mirror entry per decision slug matching the Markdown section exactly. Valid slugs MUST conform to the regex `^[a-z][a-z0-9-]{1,63}$` validated by `Test-EngagementRecordSlug`. You MUST use YAML block-scalar `|-` for all multi-line user-typed fields (`audit_rationale`, `articulation_text`, `engineer_choice`); literal triple-backticks in those fields are strictly rejected.
-   - **If engagement-record emission fails:** emit a terminal warning `⚠️ Engagement-record emission failed for plan-{ISSUE_NUMBER}: {reason}`, HALT the burst, and do NOT post the credit-input marker comment. The phase remains complete (the plan-issue comment is durable), but `same-decision-resume` next session will degrade to v1.1 behavior.
+   - **If engagement-record emission fails:** emit a terminal warning `⚠️ Engagement-record emission failed for plan-{ISSUE_NUMBER}: {reason}`, HALT the burst, and do NOT post the credit-input marker comment. The phase remains complete (the phase completion artifact is durable), but `same-decision-resume` next session will degrade to v1.1 behavior.
 3. **Only after successful engagement-record emission**, post the credit-input marker (see § Credit-input emission below).
 
 ### Credit-input emission
@@ -181,15 +181,18 @@ When persisting or amending the target phase artifact, you MUST monitor the tota
 
 ````markdown
 <!-- credit-input-plan-{ISSUE_NUMBER} -->
-
 ```yaml
 port: plan
 adapter: work-adapter
-evidence: "issue #{ISSUE_NUMBER}; plan-issue marker posted"
+evidence: "issue #{ISSUE_NUMBER}; plan completion marker posted"
 ```
 ````
 
-Retain the comment text returned by each post call so Code-Conductor harvest can use the `-InMemoryMarkers` fallback. After all three burst comments are successfully posted, stop — do not take any further action in this turn.
+Retain the comment text returned by the post call so Code-Conductor harvest can use the `-InMemoryMarkers` fallback.
+
+## Phase-specific persistence notes
+
+After all three burst comments are successfully posted, stop — do not take any further action in this turn.
 
 The canonical session-memory handoff artifacts remain `/memories/session/plan-issue-{id}.md` for the plan and `/memories/session/design-issue-{id}.md` for the design snapshot.
 
