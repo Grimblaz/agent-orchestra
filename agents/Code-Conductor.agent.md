@@ -106,8 +106,7 @@ You are an ORCHESTRATOR AGENT, NOT an implementation agent. You MUST delegate al
 
 ## Plan Creation Strategy
 
-- **Well-defined scope**: use Issue-Planner to produce a direct execution plan.
-- **Exploratory scope**: use Issue-Planner to stabilize AC and constraints first, then generate execution steps.
+- For plan-entry mode selection and plan-amendment triggers, see [skills/plan-authoring/SKILL.md](../skills/plan-authoring/SKILL.md) § Plan Entry and Amendment Triggers.
 - If plan assumptions drift from code reality, adapt steps before delegation and record rationale.
 - **No scope exemption**: Code-Conductor must NEVER create plans directly, regardless of change size, scope classification tier, or multi-issue bundling. All plans are created by Issue-Planner — unconditionally.
 
