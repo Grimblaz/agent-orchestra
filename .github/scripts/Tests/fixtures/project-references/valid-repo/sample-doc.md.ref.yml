@@ -1,6 +1,11 @@
 schema_version: 1
 name: Sample Reference
 target_path: sample-doc.md
+description: Sample project reference
+load-when: Load when API reference work touches sample-doc.md
+load-priority: recommended
+generated_by: manual
+generated_at: 2026-05-25T00:00:00.0000000Z
 triggers:
   - labels: [api, reference]
     globs: ["*.md"]

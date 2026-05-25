@@ -1,6 +1,6 @@
 ---
 description: "Set up Agent Orchestra project-reference sidecars and indexes with deterministic scripts."
-argument-hint: "[help|init|generate|validate|undo] [target repo root]"
+argument-hint: "[help|init|generate|validate|undo|dismiss-nudge] [target repo root]"
 ---
 
 # /setup-references
@@ -23,6 +23,7 @@ Resolve the project-reference script directory from the loaded skill location. U
 - `generate` or `index`: run `generate-references-index.ps1` against the target root to refresh `.references/index.json` and `Documents/INDEX.md`. This is an explicit mutating action.
 - `validate`: run `validate-references-index.ps1` against the target root and report stale targets, orphan sidecars, duplicate names, unknown schema versions, uncovered docs, citation checks, and budget status. This is read-only.
 - `undo`: run `init-references.ps1 --undo` against the target root only when the init manifest exists or the user explicitly confirms undo. This removes files recorded by init and should not be used as a broad cleanup command.
+- `dismiss-nudge`: run `init-references.ps1 --dismiss-nudge` against the target root to record `.copilot-tracking/references-state.yml` with `references_nudge_dismissed: true`. This is an explicit mutating action and does not create sidecars.
 - `help`: explain these actions and do not run scripts.
 
 ## Script Commands
@@ -34,6 +35,7 @@ pwsh -NoProfile -NonInteractive -File "<script-root>/init-references.ps1" -Root 
 pwsh -NoProfile -NonInteractive -File "<script-root>/generate-references-index.ps1" -Root "<target-root>"
 pwsh -NoProfile -NonInteractive -File "<script-root>/validate-references-index.ps1" -Root "<target-root>"
 pwsh -NoProfile -NonInteractive -File "<script-root>/init-references.ps1" -Root "<target-root>" --undo
+pwsh -NoProfile -NonInteractive -File "<script-root>/init-references.ps1" -Root "<target-root>" --dismiss-nudge
 ```
 
 After `init` or `generate`, run `validate` unless the user asked to skip validation.

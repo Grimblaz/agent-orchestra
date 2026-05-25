@@ -8,7 +8,7 @@ New-Item -ItemType Directory -Path $referencesDir -Force | Out-Null
 New-Item -ItemType Directory -Path $documentsDir -Force | Out-Null
 
 $entries = @(Get-PRSidecarList -Root $Root | ForEach-Object {
-    ConvertTo-PRIndexEntry -Sidecar (Read-PRSidecar -Path $_.FullName)
+    ConvertTo-PRIndexEntry -Sidecar (Read-PRSidecar -Path $_.FullName -Root $Root)
 } | Sort-Object { $_.name })
 
 $indexJson = ConvertTo-PRJson -Value $entries

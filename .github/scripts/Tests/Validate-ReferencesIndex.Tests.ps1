@@ -32,4 +32,56 @@ Describe 'Validate-ReferencesIndex.ps1' {
         $uncoveredRelative | Should -Contain 'Documents/uncovered-inside-root.md'
         $uncoveredRelative | Should -Not -Contain 'README.md'
     }
+
+    It 'marks out-of-root target paths stale and computes configured projected budget overrun' {
+        $repoRoot = Join-Path $TestDrive 'unsafe-targets'
+        New-Item -ItemType Directory -Path $repoRoot | Out-Null
+        $outside = Join-Path $TestDrive 'outside.md'
+        Set-Content -Path $outside -Value 'outside'
+        Set-Content -Path (Join-Path $repoRoot '.agent-orchestra.yml') -Value @(
+            'references:'
+            '  max_total_loaded_bytes: 3'
+        )
+        Set-Content -Path (Join-Path $repoRoot 'inside.md') -Value '12345'
+        Set-Content -Path (Join-Path $repoRoot 'inside.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Inside Budget'
+            'target_path: inside.md'
+            'description: Inside budget fixture'
+            'load-when: Load for budget validation'
+            'load-priority: optional'
+            'generated_by: manual'
+            'generated_at: 2026-05-25T00:00:00.0000000Z'
+        )
+        Set-Content -Path (Join-Path $repoRoot 'absolute.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Absolute Escape'
+            "target_path: $outside"
+            'description: Unsafe absolute target fixture'
+            'load-when: Never load outside root'
+            'load-priority: optional'
+            'generated_by: manual'
+            'generated_at: 2026-05-25T00:00:00.0000000Z'
+        )
+        Set-Content -Path (Join-Path $repoRoot 'traversal.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Traversal Escape'
+            'target_path: ../outside.md'
+            'description: Unsafe traversal target fixture'
+            'load-when: Never load outside root'
+            'load-priority: optional'
+            'generated_by: manual'
+            'generated_at: 2026-05-25T00:00:00.0000000Z'
+        )
+
+        $repoRootPath = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $projectReferenceScriptRoot = Join-Path $repoRootPath 'skills/project-references/scripts'
+        $json = & (Join-Path $projectReferenceScriptRoot 'validate-references-index.ps1') -Root $repoRoot | ConvertFrom-Json
+
+        $json.stale | Should -Contain 'Absolute Escape'
+        $json.stale | Should -Contain 'Traversal Escape'
+        $json.projected_budget_overrun | Should -BeTrue
+        $json.projected_loaded_bytes | Should -BeGreaterThan 3
+        $json.max_total_loaded_bytes | Should -Be 3
+    }
 }

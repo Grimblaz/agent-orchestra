@@ -27,6 +27,9 @@ Describe 'Generate-ReferencesIndex.ps1' {
         $json = $actual | ConvertFrom-Json
         $names = $json | ForEach-Object { $_.name }
         $names | Should -Be ($names | Sort-Object)
+        ($json | Where-Object name -EQ 'Sample Reference').'load-priority' | Should -BeExactly 'recommended'
+        ($json | Where-Object name -EQ 'Sample Reference').description | Should -BeExactly 'Sample project reference'
+        ($json | Where-Object name -EQ 'Sample Reference').'load-when' | Should -BeExactly 'Load when API reference work touches sample-doc.md'
     }
     It 'is deterministic on rerun after normalizing generated_at' {
         $repoRoot = Join-Path $TestDrive 'repo2'
