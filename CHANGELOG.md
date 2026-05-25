@@ -6,6 +6,7 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ### Added
 
+- **Project-reference discoverability** (#627) — new `skills/project-references` with sidecar/index schema, content-trust rules, setup/loader scripts, and platform notes. New `/setup-references` command surfaces for Claude Code and Copilot, plus examples and customization docs. Reference loading and citation-discipline guidance integrated into upstream onboarding and customer/design/plan skills so upstream agents can surface authoritative repo docs before authoring decisions.
 - **Structural-criteria deferral gate** (#610) — verdict-decision text is now driven by structural criteria rather than effort estimates. New `skills/review-judgment/scripts/Test-DeferralCriteria.ps1` exposes the canonical criterion taxonomy (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment`).
 - **`Add-FollowUpIssue` helper** (#610) — `skills/safe-operations/scripts/Add-FollowUpIssue.ps1` ships `Add-FollowUpIssue`, `ConvertTo-CanonicalFollowupTitle`, and `New-FollowupSentinelBlock` for follow-up issue filing with GraphQL parenting and the `<!-- code-conductor-filed-followup -->` sentinel contract (AC8).
 - **`Get-StructuralVerdict` / `Get-AcRefsFromIssue` helpers** (#610) — additional public review-judgment surface used by Code-Conductor and code-review-intake to share a single deferral-decision implementation across both filing paths.
