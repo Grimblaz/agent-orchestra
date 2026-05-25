@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: ecb259b21b55a1164166f59f24f010cd8742c68f
-generated-at: 2026-05-18T01:46:37Z
+last-verified: 314c536cac0530f2ee56422fcd036eee96854c98
+generated-at: 2026-05-25T14:53:14Z
 -->
 
 ## Purpose
@@ -259,6 +259,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `.github/scripts/Tests/fixtures/subagent-env-handshake-verifier.ps1`
 - **notes**: Test fixture scripts. Missing fixture causes the referencing Pester test to fail with a visible error rather than hard-blocking a pipeline run.
 
+### `.references/index.json`
+
+- **claude_resolves**: none
+- **copilot_resolves**: none
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `.references/index.json`
+- **notes**: Generated project-reference lookup index in consumer repos. Not a hub distribution artifact; refreshed by /setup-references from sidecars in the active repository. Attempting to resolve it from the plugin cache or another repo is a wasted tool call.
+
 ### `.vscode/settings.json`
 
 - **claude_resolves**: none
@@ -317,6 +327,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `commands/orchestra-review.md`
 - **notes**: Claude Code slash command entry points registered via the commands[] array in .claude-plugin/plugin.json. Copilot slash commands are a distinct surface — these .md command files are not applicable from Copilot's perspective.
 
+### `Documents/.references.yml`
+
+- **claude_resolves**: none
+- **copilot_resolves**: none
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `Documents/.references.yml`
+- **notes**: Optional directory-level project-reference sidecar in consumer repos. Per-document sidecars override it; it is not a hub distribution artifact. Attempting to resolve it from the plugin cache or another repo is a wasted tool call.
+
 ### `Documents/Design/*.md`
 
 - **claude_resolves**: source-tree
@@ -338,6 +358,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `Documents/Design/hub-artifact-paths-classification.yml`
 - **notes**: Hub-repo design YAML data files (e.g., classification schemas). Intentionally hub-only per the plan (carved out). Same resolution and experience semantics as Documents/Design/*.md — agents that cross-reference these for schema or classification data will proceed without that context if the file is absent (visible-warning).
+
+### `Documents/INDEX.md`
+
+- **claude_resolves**: none
+- **copilot_resolves**: none
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `Documents/INDEX.md`
+- **notes**: Generated project-reference documentation index in consumer repos. Not a hub distribution artifact; refreshed by /setup-references from the active repo's reference sidecars. Attempting to resolve it from the plugin cache or another repo is a wasted tool call.
 
 ### `examples/{stack}/*.md`
 
