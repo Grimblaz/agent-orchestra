@@ -1,0 +1,9 @@
+{
+  "finding_id": "F_new_abs",
+  "finding_text": "Introduce a new skill called skills/new-protocol/SKILL.md to handle the new network messages.",
+  "finding_file_set": ["skills/new-protocol/SKILL.md"],
+  "pr_file_set": ["skills/new-protocol/SKILL.md"],
+  "ac_refs": [],
+  "expected_criterion_ids": ["S-new-abstraction"],
+  "expected_verdict": "DEFERRED-SIGNIFICANT (structural)"
+}

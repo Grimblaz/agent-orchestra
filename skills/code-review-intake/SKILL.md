@@ -13,6 +13,10 @@ Slim entryway for GitHub review intake, proxy-prosecution guardrails, and the ex
 
 Activate this skill when the request includes `github review`, `review github`, or `cr review`. It is the entryway for deterministic intake and judgment of GitHub-originated review feedback before implementation begins, while shared mechanics stay indexed in extracted references.
 
+### Shared judgment surface with non-GitHub review
+
+The GitHub-intake path consumes the same `agents/Code-Review-Response.agent.md` judge body as the non-GitHub review path and therefore the same structural-criteria deferral gate. Findings ingested from GitHub are classified against the canonical criterion taxonomy in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1` (the predicates), and any `DEFERRED-SIGNIFICANT (structural)` outcome is filed via `skills/safe-operations/scripts/Add-FollowUpIssue.ps1` (the filing helper). To guarantee AC7 dedup correctness across both paths, the GitHub-intake filing call canonicalizes the title with `ConvertTo-CanonicalFollowupTitle` (from the same helper file) and runs §2c dedup-on-create against the canonicalized title before invoking `Add-FollowUpIssue` — identical to the Code-Conductor non-GitHub path.
+
 ## GitHub Review Mode (Proxy Prosecution Pipeline)
 
 1. Ingest all review items from GitHub (threads, top-level comments, review summaries).
@@ -46,8 +50,8 @@ Judgment is evidence-first and deterministic:
 
 Converged when all items are in a terminal state:
 
-- ✅ ACCEPT
-- 📋 DEFERRED-SIGNIFICANT
+- ✅ ACCEPT (fix inline)
+- 📋 DEFERRED-SIGNIFICANT (structural)
 - ❌ REJECT
 
 Plus:
@@ -67,7 +71,7 @@ The proxy prosecution pipeline is single-shot: prosecution → defense → judge
 | Trigger                                                                          | Gotcha                                                                                       | Fix                                                                                             |
 | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | Spotting a new bug while reading GitHub review comments                          | Adding it informally bypasses the prosecution → defense pipeline and breaks ledger integrity | Surface as `NEW-CRITICAL` with concrete evidence only; present to user explicitly for decision  |
-| Routing implementation work before all judgment states are explicit              | Fixes applied to some findings may contradict pending rulings on others                      | All items must reach terminal state (ACCEPT / REJECT / DEFERRED-SIGNIFICANT) before any routing |
+| Routing implementation work before all judgment states are explicit              | Fixes applied to some findings may contradict pending rulings on others                      | All items must reach terminal state (ACCEPT / REJECT / DEFERRED-SIGNIFICANT (structural)) before any routing |
 | Treating a reviewer preference comment as a defect                               | Evidence-free rejection inflates fix scope and wastes implementation cycles                  | Reject by default; require cited code, test output, or acceptance criteria evidence             |
 | Running rebuttal rounds after the judge rules                                    | Proxy prosecution is single-shot; post-judge rebuttals break convergence                     | Judge rules final; unresolved low-confidence items go async via GitHub comment                  |
 | Accepting a finding just because it's consistently raised across multiple passes | Repetition is not evidence of correctness                                                    | Each finding still requires concrete evidence regardless of how many passes surface it          |
