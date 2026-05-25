@@ -50,7 +50,7 @@ function Test-SCriterionNewAbstraction {
         $reason = "S-new-abstraction: Finding text requests a new abstraction: '$($Matches[0])'"
     } elseif ($Finding.files) {
         foreach ($file in $Finding.files) {
-            if ($file -match "(?i)^agents/.*\.md$" -or $file -match "(?i)^skills/.*\.md$") {
+            if ($file -match "(?i)^agents/.*\.md$" -or $file -match "(?i)^skills/.*\.md$" -or $file -match "(?i)^commands/.*\.md$") {
                 # M4: resolve against repo root rather than $PWD.
                 $resolved = $file
                 if ($RepoRoot) {

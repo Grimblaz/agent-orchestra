@@ -1052,7 +1052,7 @@ Replaced the effort-based estimation model (`<1 day` vs `>1 day`) with a robust 
 | D35 | Deferral mechanism | Programmatic structural-criteria gate (`Get-StructuralVerdict`) | Replaces subjective and inaccurate effort-based time estimates with objective, testable structural conditions. |
 | D36 | S-different-surface | File-set disjointness | A finding matches this criterion iff its referenced files are entirely disjoint from the files touched by the PR diff. |
 | D37 | S-maintainer-judgment | Gated escape valve with structured reasons | Gated by a required reason field: `requires multi-session investigation`, `requires infra/CI change`, or `explicit maintainer carve-out`. |
-| D38 | Outcome instrumentation | Filed-issue sentinel `<!-- code-conductor-filed-followup -->` | Enables tracking of survival rate and calibration without delaying ship. Contains matched `criterion_id`(s) and originating PR number. |
+| D38 | Outcome instrumentation | Filed-issue sentinel `<!-- code-conductor-filed-followup -->` | Enables tracking of survival rate and calibration without delaying ship. Contains matched `criterion_ids` and originating PR number. |
 | D39 | Precedence rule | AC Cross-Check prioritizes ACCEPT | Acceptance Criteria check takes absolute precedence over all structural gates, forcing an inline `ACCEPT` verdict. |
 | D40 | Parent linkage | GraphQL `addSubIssue` with 2-attempt retry & `Parent: #X` fallback | Resolves sub-issue parenting robustly with an automated fallback to human-readable text on permission/API failures. |
 

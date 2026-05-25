@@ -137,7 +137,7 @@ function Add-FollowUpIssue {
         $parentId = gh issue view $ParentIssue --json id --jq .id 2>$null
         $childId = gh issue view $childNumber --json id --jq .id 2>$null
     } catch {
-        # Fail silent, handled below
+        Write-Warning "Failed to resolve GraphQL node IDs for parent #$ParentIssue or child #${childNumber}`: $($_.Exception.Message)"
     }
 
     $graphqlSuccess = $false
@@ -157,9 +157,15 @@ mutation {
         while (-not $graphqlSuccess -and $attempts -lt 2) {
             $attempts++
             try {
-                $result = gh api graphql -H "GraphQL-Features: sub_issues" -f query=$mutation 2>$null
+                $result = gh api graphql -H "GraphQL-Features: sub_issues" -f "query=$mutation" 2>$null
                 if ($LASTEXITCODE -eq 0 -and $result) {
-                    $graphqlSuccess = $true
+                    # G4: check for GraphQL-level errors returned with exit code 0
+                    $parsed = $result | ConvertFrom-Json -ErrorAction SilentlyContinue
+                    if ($parsed -and $parsed.errors) {
+                        Write-Warning "GraphQL addSubIssue returned errors: $($parsed.errors | ConvertTo-Json -Compress)"
+                    } else {
+                        $graphqlSuccess = $true
+                    }
                 }
             } catch {
                 # Try again

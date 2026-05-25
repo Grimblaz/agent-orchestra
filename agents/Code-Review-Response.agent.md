@@ -53,7 +53,7 @@ Receive the prosecution ledger and defense report together, then rule once.
 
 **Convergence rule**: All findings reach a final disposition (✅ SUSTAINED / ❌ DEFENSE SUSTAINED / 🔄 SIGNIFICANT) before implementation begins.
 
-> **Vocabulary note**: The judgment protocol uses `SUSTAINED / DEFENSE SUSTAINED` for prosecution vs. defense rulings. The categorization output uses `ACCEPT (fix inline) / REJECT / DEFERRED-SIGNIFICANT (structural)` labels. These map directly: SUSTAINED = ACCEPT (fix inline), DEFENSE SUSTAINED = REJECT, SIGNIFICANT (clear improvement matching structural criteria) = DEFERRED-SIGNIFICANT (structural). Out-of-scope or quality-debt findings that would otherwise be "TECH DEBT" categorize as 📋 DEFERRED-SIGNIFICANT (structural) (with a note indicating the tech-debt nature). Code-Review-Response outputs categorization; Code-Conductor routes accepted fixes to specialists.
+> **Vocabulary note**: The judgment protocol uses `SUSTAINED / DEFENSE SUSTAINED` for prosecution vs. defense rulings. The categorization output uses `ACCEPT (fix inline) / REJECT / DEFERRED-SIGNIFICANT (structural)` labels. These map directly: SUSTAINED = ACCEPT (fix inline), DEFENSE SUSTAINED = REJECT, SIGNIFICANT (clear improvement matching structural criteria) = DEFERRED-SIGNIFICANT (structural). Out-of-scope or quality-debt findings that would otherwise be "TECH DEBT" are categorized as 📋 DEFERRED-SIGNIFICANT (structural) (with a note indicating the tech-debt nature). Code-Review-Response outputs categorization; Code-Conductor routes accepted fixes to specialists.
 
 ## Response Location Policy
 

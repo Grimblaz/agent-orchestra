@@ -23,13 +23,17 @@ jobs:
           # .github/scripts/Tests/ suite contains pre-existing failures in unrelated
           # subsystems (OTel install, frame-credit ledger, SKILL.md size lints, etc.)
           # which are out of scope for #243 and tracked separately in issue #566.
+          # Issue #610: structural deferral gate tests added to the allowlist.
           $config = New-PesterConfiguration
           $config.Run.Path = @(
             '.github/scripts/Tests/audit-hub-artifact-paths.Tests.ps1',
             '.github/scripts/Tests/hub-artifact-paths-coverage.Tests.ps1',
             '.github/scripts/Tests/script-safety-contract.Tests.ps1',
             '.github/scripts/Tests/named-decisions-write-discipline.Tests.ps1',
-            '.github/scripts/Tests/engagement-record-marker-roundtrip.Tests.ps1'
+            '.github/scripts/Tests/engagement-record-marker-roundtrip.Tests.ps1',
+            '.github/scripts/Tests/Test-DeferralCriteria.Tests.ps1',
+            '.github/scripts/Tests/Add-FollowUpIssue.Tests.ps1',
+            '.github/scripts/Tests/code-review-deferral-integration.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
