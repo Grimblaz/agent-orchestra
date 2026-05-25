@@ -21,4 +21,15 @@ Describe 'Validate-ReferencesIndex.ps1' {
         $valid = '[ref:Sample Reference](Documents/sample-doc.md)'
         $json.citation_valid | Should -Contain $valid
     }
+
+    It 'scopes uncovered docs to references.declared_roots when configured' {
+        $fixtureRoot = Join-Path $PSScriptRoot 'fixtures/project-references/declared-roots'
+        $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $projectReferenceScriptRoot = Join-Path $repoRoot 'skills/project-references/scripts'
+        $json = & (Join-Path $projectReferenceScriptRoot 'validate-references-index.ps1') -Root $fixtureRoot | ConvertFrom-Json
+        $uncoveredRelative = @($json.uncovered | ForEach-Object { [System.IO.Path]::GetRelativePath($fixtureRoot, $_).Replace('\', '/') })
+
+        $uncoveredRelative | Should -Contain 'Documents/uncovered-inside-root.md'
+        $uncoveredRelative | Should -Not -Contain 'README.md'
+    }
 }

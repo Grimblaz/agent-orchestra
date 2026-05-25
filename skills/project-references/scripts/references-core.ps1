@@ -38,6 +38,53 @@ function ConvertFrom-PRScalar {
     return $trimmed.Trim('"').Trim("'")
 }
 
+function Get-PRDeclaredRootConfig {
+    param([Parameter(Mandatory)][string] $Root)
+    $configPath = Join-Path $Root '.agent-orchestra.yml'
+    $roots = [System.Collections.Generic.List[string]]::new()
+    $found = $false
+    if (-not (Test-Path -LiteralPath $configPath)) {
+        return [pscustomobject]@{ Found = $false; Roots = @() }
+    }
+
+    $inReferences = $false
+    $inDeclaredRoots = $false
+    foreach ($line in [System.IO.File]::ReadAllLines($configPath)) {
+        if ($line -match '^\s*$' -or $line -match '^\s*#') { continue }
+        if ($line -match '^references\s*:\s*$') {
+            $inReferences = $true
+            $inDeclaredRoots = $false
+            continue
+        }
+        if (-not $inReferences) { continue }
+        if ($line -match '^\S') {
+            $inReferences = $false
+            $inDeclaredRoots = $false
+            continue
+        }
+        if ($line -match '^\s+declared_roots\s*:\s*(.*)$') {
+            $found = $true
+            $value = $Matches[1].Trim()
+            if (-not [string]::IsNullOrWhiteSpace($value)) {
+                @(ConvertFrom-PRInlineArray $value) | ForEach-Object { $roots.Add([string]$_) }
+                $inDeclaredRoots = $false
+            } else {
+                $inDeclaredRoots = $true
+            }
+            continue
+        }
+        if ($inDeclaredRoots -and $line -match '^\s+-\s*(.+)$') {
+            $roots.Add([string](ConvertFrom-PRScalar $Matches[1]))
+            continue
+        }
+        if ($inDeclaredRoots -and $line -match '^\s+\S') {
+            $inDeclaredRoots = $false
+        }
+    }
+
+    return [pscustomobject]@{ Found = $found; Roots = @($roots.ToArray()) }
+}
+
 function Read-PRSidecar {
     param([Parameter(Mandatory)][string] $Path)
     $metadata = [ordered]@{

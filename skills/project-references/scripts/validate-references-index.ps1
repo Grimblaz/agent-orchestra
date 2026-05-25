@@ -20,7 +20,15 @@ foreach ($meta in $metas) {
     if ([int]$meta.schema_version -ne 1) { $unknown += [string]$meta.name }
 }
 
+$declaredRootConfig = Get-PRDeclaredRootConfig -Root $Root
+$rootFullPath = (Resolve-Path -LiteralPath $Root).Path
 $docs = @(Get-ChildItem -Path $Root -Recurse -File -Filter '*.md' | Where-Object { $_.Name -ne 'INDEX.md' })
+if ($declaredRootConfig.Found) {
+    $docs = @($docs | Where-Object {
+        $relativePath = [System.IO.Path]::GetRelativePath($rootFullPath, $_.FullName).Replace('\', '/')
+        Test-PRGlobMatch -Paths @($relativePath) -Globs @($declaredRootConfig.Roots)
+    })
+}
 $covered = @{}
 foreach ($meta in $metas) {
     $sidecarDirectory = Split-Path -Parent ([string]$meta.sidecar_path)

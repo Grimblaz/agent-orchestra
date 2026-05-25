@@ -1,0 +1,7 @@
+schema_version: 1
+references:
+  declared_roots:
+    - "Documents/**"
+  doc_count_threshold: 5
+  max_critical_loaded: 10
+  max_total_loaded_bytes: 102400

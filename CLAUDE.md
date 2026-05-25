@@ -12,6 +12,10 @@ Install the plugin from the marketplace if you have not already. Run this inside
 
 The plugin exposes the upstream pipeline, the review surface, the `/orchestrate` entry point, and a library of shared skills. Claude Code discovers them automatically once the plugin is installed.
 
+### Project references
+
+`/setup-references` helps maintainers initialize, generate, validate, and undo Agent Orchestra project-reference sidecars and indexes. Project references are optional, non-blocking discoverability aids for long-lived project docs: sidecars name when a document should load, `.references/index.json` records the generated lookup surface, and citations use `[ref:{name}](target_path)`. The authoritative schema, content-trust rules, and hard caps live in [skills/project-references/SKILL.md](skills/project-references/SKILL.md); compact examples live in [examples/project-references](examples/project-references).
+
 ### Path resolution for downstream consumers
 
 Consumer repositories are zero-config after install: Claude Code loads the agent bodies and skills from the installed plugin cache, so the working repository does not need a local `agents/` directory.
@@ -178,7 +182,7 @@ Run these three checks in Claude Code to audit the auto-mode boundary in your se
 
 - `agents/*.agent.md` — shared, tool-agnostic agent bodies used by both Copilot and Claude Code (capitalized filename, `.agent.md` extension)
 - `agents/{name}.md` — Claude-native subagent shells that point at the shared bodies (lowercase filename, plain `.md`). Claude registers only the lowercase shells via the explicit `agents` array in `.claude-plugin/plugin.json`; bodies are loaded by paired shells via `Read` and are intentionally excluded from `subagent_type` registration.
-- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/code-conductor`, `/review-github`, `/polish`, `/raw`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
+- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/code-conductor`, `/review-github`, `/setup-references`, `/polish`, `/raw`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
 - `skills/` — reusable methodology loaded by both platforms; each skill has `platforms/claude.md` for Claude-specific invocation details
 - `platforms/` (at skill root) — platform-specific routing notes
 
