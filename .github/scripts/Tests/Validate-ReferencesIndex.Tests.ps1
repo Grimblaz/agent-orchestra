@@ -1,11 +1,9 @@
-
 Describe 'Validate-ReferencesIndex.ps1' {
     It 'reports stale target_path, orphan sidecar, duplicate names, unknown schema_version, uncovered doc, and citation regex' {
         $fixtureRoot = Join-Path $PSScriptRoot 'fixtures/project-references'
             $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
             $script:ProjectReferenceScriptRoot = Join-Path $script:RepoRoot 'skills/project-references/scripts'
-            $result = & (Join-Path $script:ProjectReferenceScriptRoot 'validate-references-index.ps1') -Root $fixtureRoot | ConvertFrom-Json
-        $json = $result | ConvertFrom-Json
+            $json = & (Join-Path $script:ProjectReferenceScriptRoot 'validate-references-index.ps1') -Root $fixtureRoot | ConvertFrom-Json
         # Stale target_path
         $json.stale | Should -Contain 'Stale Target'
         # Orphan sidecar
@@ -15,7 +13,7 @@ Describe 'Validate-ReferencesIndex.ps1' {
         # Unknown schema_version
         $json.unknown_schema | Should -Contain 'Unknown Schema'
         # Uncovered doc (should be present if fixture added)
-        if ($json.uncovered) { $json.uncovered | Should -NotBeNullOrEmpty }
+        if ($json.uncovered) { $json.uncovered | Should -Not -BeNullOrEmpty }
         # Citation parser: false positive
         $falsePos = '[ref:sample-reference](Documents/sample-doc.md)'
         $json.citation_false_positives | Should -Contain $falsePos

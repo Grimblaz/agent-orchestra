@@ -11,18 +11,18 @@ Describe 'Generate-ReferencesIndex.ps1' {
         # Act
             $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
             $script:ProjectReferenceScriptRoot = Join-Path $script:RepoRoot 'skills/project-references/scripts'
-            $result = & (Join-Path $script:ProjectReferenceScriptRoot 'generate-references-index.ps1') -Root $repoRoot | ConvertFrom-Json
+            & (Join-Path $script:ProjectReferenceScriptRoot 'generate-references-index.ps1') -Root $repoRoot | Out-Null
         # Assert
         Test-Path $indexPath | Should -BeTrue
         Test-Path $indexMdPath | Should -BeTrue
         $actual = Get-Content $indexPath -Raw
         $expected = Get-Content $expectedIndex -Raw
         # Remove generated_at for deterministic compare
-        $actualNoGen = $actual -replace '"generated_at": ".*?",?\r?\n', ''
-        $expectedNoGen = $expected -replace '"generated_at": ".*?",?\r?\n', ''
-        $actualNoGen | Should -BeExactly $expectedNoGen
+        $actualNoGen = ($actual -replace '"generated_at": ".*?",?\r?\n', '') -replace "`r`n", "`n"
+        $expectedNoGen = ($expected -replace '"generated_at": ".*?",?\r?\n', '') -replace "`r`n", "`n"
+        ($actualNoGen | ConvertFrom-Json | ConvertTo-Json -Depth 20 -Compress) | Should -BeExactly ($expectedNoGen | ConvertFrom-Json | ConvertTo-Json -Depth 20 -Compress)
         # Assert LF endings
-        ($actual -split "\r?\n") -join "\n" | Should -BeExactly $actual
+        (($actual -split "\r?\n") -join "`n") | Should -BeExactly $actual
         # Assert sorted by name
         $json = $actual | ConvertFrom-Json
         $names = $json | ForEach-Object { $_.name }

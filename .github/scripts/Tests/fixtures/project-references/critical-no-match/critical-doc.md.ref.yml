@@ -3,6 +3,6 @@ name: Critical No Match
 target_path: critical-doc.md
 triggers:
   - labels: [critical]
-    globs: ["*.md"]
+    globs: ["critical-only/**"]
     keywords: [critical]
     critical: true

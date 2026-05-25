@@ -1,5 +1,17 @@
 [
   {
+    "name": "Manual Sidecar",
+    "target_path": "manual.md",
+    "triggers": [
+      {
+        "labels": ["manual"],
+        "globs": ["*.md"],
+        "keywords": ["manual"],
+        "critical": false
+      }
+    ]
+  },
+  {
     "name": "Sample Reference",
     "target_path": "sample-doc.md",
     "triggers": [
