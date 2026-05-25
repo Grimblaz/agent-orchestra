@@ -1,0 +1,25 @@
+[
+  {
+    "name": "payment-domain",
+    "target_path": "Documents/payment-domain.md",
+    "triggers": [
+      {
+        "labels": [
+          "payments",
+          "checkout"
+        ],
+        "globs": [
+          "src/payments/**",
+          "src/checkout/**"
+        ],
+        "keywords": [
+          "payment",
+          "refund",
+          "provider",
+          "checkout"
+        ],
+        "critical": true
+      }
+    ]
+  }
+]

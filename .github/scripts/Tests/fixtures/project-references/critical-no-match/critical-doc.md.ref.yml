@@ -1,0 +1,13 @@
+schema_version: 1
+name: Critical No Match
+target_path: critical-doc.md
+description: Critical reference that should report under-match
+load-when: Load when critical-doc.md is relevant
+load-priority: critical
+generated_by: manual
+generated_at: 2026-05-25T00:00:00.0000000Z
+triggers:
+  - labels: [critical]
+    globs: ["critical-only/**"]
+    keywords: [critical]
+    critical: false

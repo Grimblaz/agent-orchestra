@@ -8,7 +8,7 @@ This template supports two distribution models:
 
 | Model | How to Install | What You Get |
 |-------|---------------|--------------|
-| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 16 agents, a shared skill library, and 14 shipped command files (`/code-conductor`, `/design`, `/experience`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/polish`, `/review-github`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`) — instantly available |
+| **Plugin** (VS Code 1.110+) | Add marketplace to settings + install from Extensions view | 16 agents, a shared skill library, and 16 shipped command files (`/code-conductor`, `/design`, `/experience`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/polish`, `/raw`, `/review-github`, `/setup-references`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`) — instantly available |
 | **Clone/Fork** | `git clone` or use as template | Everything above PLUS editable prompts, project templates, examples, and any repo-local instruction files you choose to keep under `.github/instructions/` |
 
 ### Plugin Installation
@@ -45,7 +45,7 @@ This template supports two distribution models:
 |---------|--------|---------------|
 | 16 shared agent definitions in the plugin payload | ✅ Works | Nothing |
 | Shared skill library in Configure Skills menu | ✅ Works | Nothing |
-| 14 shipped command files (`/code-conductor`, `/design`, `/experience`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/polish`, `/review-github`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`) | ✅ Works | Nothing |
+| 16 shipped command files (`/code-conductor`, `/design`, `/experience`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/polish`, `/raw`, `/review-github`, `/setup-references`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`) | ✅ Works | Nothing |
 | Shared workflow skills (`safe-operations`, `step-commit`, etc.) | ✅ Works | Nothing |
 | Session startup check | ✅ Works | Nothing (self-resolves via `$PSScriptRoot` — no env var required in v2.0.0+) |
 | Project-aware agent guidance | ⚠️ Generic only | Copy `copilot-instructions.md` and `architecture-rules.md` to your project's `.github/` directory |
@@ -60,6 +60,32 @@ All skills' PowerShell scripts self-resolve their sibling paths via `$PSScriptRo
 If a skill's script produces no output when invoked from the plugin, file an issue with the skill name and reproduction steps; silent failure is a regression, not an expected limitation.
 
 See also: [README.md > Path resolution for downstream consumers](README.md#path-resolution-for-downstream-consumers).
+
+#### Project references
+
+Project references are optional, non-blocking discoverability aids for repositories with long-lived design, domain, or operations documents. They do not replace `.github/copilot-instructions.md`, architecture rules, or engagement gates; they help agents find the right project docs and cite them as `[ref:{name}](target_path)` when those docs inform a recommendation.
+
+Use `/setup-references help` for the safe action list. The command loads [skills/project-references/SKILL.md](skills/project-references/SKILL.md), resolves the sibling scripts from [skills/project-references/scripts](skills/project-references/scripts), and supports these actions:
+
+| Action | What it does |
+| --- | --- |
+| `init` | Creates `.agent-orchestra.yml`, generated `.ref.yml` sidecars, and the init manifest for undo |
+| `generate` | Refreshes `.references/index.json` and `Documents/INDEX.md` from existing sidecars |
+| `validate` | Checks stale targets, orphan sidecars, duplicate names, unknown schema versions, uncovered docs, citation format, and hard-cap budget status |
+| `undo` | Removes only files recorded by the init manifest, or asks for confirmation when the manifest is missing |
+
+Direct script use is also supported:
+
+```powershell
+pwsh -NoProfile -NonInteractive -File "skills/project-references/scripts/init-references.ps1" -Root "<target-root>"
+pwsh -NoProfile -NonInteractive -File "skills/project-references/scripts/generate-references-index.ps1" -Root "<target-root>"
+pwsh -NoProfile -NonInteractive -File "skills/project-references/scripts/validate-references-index.ps1" -Root "<target-root>"
+pwsh -NoProfile -NonInteractive -File "skills/project-references/scripts/init-references.ps1" -Root "<target-root>" --undo
+```
+
+The trust boundary is deliberate: loaded reference content is untrusted repository content and renders in fenced `untrusted-content` blocks. It can inform an agent's recommended option and rationale, but it cannot override explicit user input, auto-mode boundaries, engagement gates, or methodology rules. Loading is also capped by `.agent-orchestra.yml`, with defaults of `max_critical_loaded: 10` and `max_total_loaded_bytes: 102400` (100KB).
+
+See [examples/project-references](examples/project-references) for a compact sample with `.agent-orchestra.yml`, a document sidecar, `.references/index.json`, and citation usage.
 
 <!-- migration-note-begin -->
 ### Migrating from pre-1.14 layouts (issue #367)

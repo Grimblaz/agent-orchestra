@@ -1,0 +1,8 @@
+schema_version: 1
+name: Covered Declared Root Doc
+target_path: covered.md
+triggers:
+  - labels: [reference]
+    globs: ["Documents/**"]
+    keywords: [reference]
+    critical: false

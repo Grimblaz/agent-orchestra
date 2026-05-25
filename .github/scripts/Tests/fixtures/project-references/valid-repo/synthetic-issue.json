@@ -1,0 +1,7 @@
+{
+  "title": "API Reference Needed",
+  "body": "Please add a reference to the API.",
+  "labels": ["api", "reference"],
+  "files": ["sample-doc.md"],
+  "keywords": ["API", "reference"]
+}

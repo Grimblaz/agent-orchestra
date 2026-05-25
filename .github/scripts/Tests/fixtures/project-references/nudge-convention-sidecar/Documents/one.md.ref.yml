@@ -1,0 +1,6 @@
+name: One
+target_path: one.md
+triggers:
+  labels: []
+  globs: []
+  keywords: []

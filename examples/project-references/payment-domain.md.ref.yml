@@ -1,0 +1,13 @@
+schema_version: 1
+target_path: Documents/payment-domain.md
+name: payment-domain
+description: Payment capture, refund, and provider-error conventions for checkout work.
+load-when: Load when work touches checkout payment capture, refunds, provider integration, or payment error handling.
+load-priority: critical
+triggers:
+  - labels: [payments, checkout]
+    globs: ["src/payments/**", "src/checkout/**"]
+    keywords: [payment, refund, provider, checkout]
+    critical: true
+generated_by: manual
+generated_at: 2026-05-25T00:00:00Z

@@ -1,0 +1,8 @@
+schema_version: 1
+name: Duplicate Name
+target_path: doc2.md
+triggers:
+  - labels: [dup]
+    globs: ["*.md"]
+    keywords: [dup]
+    critical: false

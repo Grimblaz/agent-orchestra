@@ -1,0 +1,8 @@
+schema_version: 1
+name: Orphan Sidecar
+target_path: null
+triggers:
+  - labels: [orphan]
+    globs: ["*.md"]
+    keywords: [orphan]
+    critical: false

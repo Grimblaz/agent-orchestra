@@ -1,0 +1,8 @@
+schema_version: 1
+name: Stale Target
+target_path: missing-doc.md
+triggers:
+  - labels: [stale]
+    globs: ["*.md"]
+    keywords: [stale]
+    critical: false

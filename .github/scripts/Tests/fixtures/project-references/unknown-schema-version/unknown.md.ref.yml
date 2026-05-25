@@ -1,0 +1,8 @@
+schema_version: 99
+name: Unknown Schema
+target_path: unknown.md
+triggers:
+  - labels: [unknown]
+    globs: ["*.md"]
+    keywords: [unknown]
+    critical: false
