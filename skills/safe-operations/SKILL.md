@@ -64,10 +64,12 @@ These PowerShell commands silently corrupt files through encoding issues (e.g., 
 
 ### 2a. Improvement-First Decision Rule
 
-When any agent discovers an out-of-scope or non-blocking improvement during its work:
+When any agent discovers an out-of-scope or non-blocking improvement during its work, classify it against the structural-criteria gate (canonical taxonomy in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`):
 
-- **< 1 day effort**: Address within the current task (or current PR if one is open) if the change is low-risk and does not expand scope significantly; otherwise defer.
-- **> 1 day effort (significant)**: Create a follow-up GitHub issue **immediately** using `gh issue create`, then continue with in-scope work. Do not block the current PR on the deferred improvement.
+- **Inline (fix-in-PR) eligibility**: the change is small, single-file or single-system, doesn't introduce a new abstraction, doesn't cross architecture layer boundaries, and doesn't require a separate design decision. Address within the current task (or current PR if one is open).
+- **Follow-up issue creation**: the change matches at least one structural criterion (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment`). Create a follow-up GitHub issue **immediately** using `gh issue create` (or the `Add-FollowUpIssue` helper in `scripts/Add-FollowUpIssue.ps1` for the canonical sentinel + GraphQL parenting), then continue with in-scope work. Do not block the current PR on the deferred improvement.
+
+> Supplementary rationale: as a quick sanity check, deferred (structural) issues typically represent more than a day of work, but structural-criteria match — not the effort estimate — is the load-bearing deferral criterion.
 
 **Output capture**: After `gh issue create` succeeds, capture the returned issue URL. Do not re-run the command if it already returned a URL. If terminal output is unclear or truncated, verify by listing recent open issues before retrying:
 

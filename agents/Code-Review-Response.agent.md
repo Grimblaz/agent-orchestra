@@ -206,6 +206,8 @@ Delegation guidance:
 - ❌ WRONG: "📋 DEFERRED-SIGNIFICANT (structural) — no skill uses this yet, wire it later"
 - ✅ CORRECT: "✅ ACCEPT (fix inline) — this is an explicit acceptance criterion, must be wired now"
 
+**Runtime AC-refs contract**: The judge does NOT extract AC refs autonomously. Code-Conductor pre-populates `$AcRefs` by invoking `Get-AcRefsFromIssue` before calling `Get-StructuralVerdict`, and passes the resulting array in as `-AcRefs` so AC precedence fires at runtime. If the judge predicate is invoked outside the conductor flow (e.g., a maintainer running `pwsh skills/review-judgment/scripts/Test-DeferralCriteria.ps1` directly), the caller is responsible for passing `$AcRefs` — either by invoking `Get-AcRefsFromIssue` first or by passing `@()` to skip AC precedence. Helper path: `skills/review-judgment/scripts/Get-AcRefsFromIssue.ps1`.
+
 ## 🚨 CRITICAL: Significant Improvements Auto-Track (→ G3)
 
 **Deferral policy is replaced by automatic significant-improvement tracking.**

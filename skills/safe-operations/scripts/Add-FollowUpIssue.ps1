@@ -2,6 +2,25 @@
 <#
 .SYNOPSIS
     Helper script to create follow-up issues and parent them via GraphQL.
+
+.DESCRIPTION
+    M1: Writes the <!-- code-conductor-filed-followup --> sentinel into the
+        filed issue body carrying matched criterion_id(s) and the originating
+        PR. The sentinel is the AC8 contract and is written unconditionally
+        (empty criterion_ids list and missing originating_pr are both legal).
+
+    M3: Emits a defensive Write-Warning when any element of -Labels contains
+        a comma, which would cause `gh issue create --label <csv>` to mis-split
+        label boundaries. Per Agent-Orchestra label conventions this is rare,
+        but the warning is the contract per the judge.
+
+    M13: Appends a <!-- parent-link-mode: graphql|text-fallback --> marker as
+         the last line of the filed body so calibration can measure GraphQL
+         survival rate.
+
+    M15: Emits Write-Error (ErrorAction Continue) when GraphQL parent/child
+         Node IDs cannot be resolved so the "GraphQL skipped" path is
+         machine-detectable on stderr instead of invisible.
 #>
 
 function ConvertTo-CanonicalFollowupTitle {
@@ -23,6 +42,37 @@ function ConvertTo-CanonicalFollowupTitle {
     return "[Structural] ${crit}: $cleaned"
 }
 
+function New-FollowupSentinelBlock {
+    <#
+    .SYNOPSIS
+        Build the AC8 outcome sentinel block (M1).
+    #>
+    param(
+        [string[]]$CriterionIds,
+        [string]$OriginatingPr
+    )
+
+    $ids = @()
+    if ($CriterionIds) { $ids = @($CriterionIds | Where-Object { $_ }) }
+    $idList = if ($ids.Count -gt 0) { "[" + ($ids -join ', ') + "]" } else { "[]" }
+
+    $lines = @()
+    $lines += '<!-- code-conductor-filed-followup'
+    $lines += "criterion_ids: $idList"
+    if ($OriginatingPr) {
+        $lines += "originating_pr: $OriginatingPr"
+    }
+    $lines += '-->'
+    return ($lines -join "`n")
+}
+
+# CONTRACT — caller responsibility:
+# The caller MUST run skills/safe-operations/SKILL.md § 2c (Deduplication Check) BEFORE invoking
+# Add-FollowUpIssue. This helper performs no dedup of its own; it will create duplicate issues
+# if invoked twice with the same title. Both the Code-Conductor follow-up filing path and the
+# code-review-intake bot-review filing path must canonicalize the title (via the
+# ConvertTo-CanonicalFollowupTitle helper or equivalent) and run §2c dedup-on-create against
+# the canonicalized title before calling this function.
 function Add-FollowUpIssue {
     param(
         [Parameter(Mandatory=$true)]
@@ -37,12 +87,29 @@ function Add-FollowUpIssue {
         [Parameter(Mandatory=$true)]
         [string[]]$Labels,
 
-        [string[]]$CriterionId
+        [string[]]$CriterionId,
+
+        # M1: criterion IDs persisted into the sentinel block.
+        [string[]]$CriterionIds = @(),
+
+        # M1: PR number/URL this follow-up was triggered from.
+        [string]$OriginatingPr
     )
 
-    # Prepend human-readable parentage text reference to the body per D2 transition rule
+    # M1: Compose the body with parent ref, caller body, and sentinel block.
+    # Layout: "Parent: #X\n\n<Body>\n\n<sentinel>"
     $parentRef = "Parent: #$ParentIssue"
-    $bodyWithParent = "$parentRef`n`n$Body"
+    # If CriterionIds parameter is empty but the legacy -CriterionId alias is supplied, use that.
+    $effectiveCriterionIds = if ($CriterionIds -and $CriterionIds.Count -gt 0) { $CriterionIds } elseif ($CriterionId) { $CriterionId } else { @() }
+    $sentinel = New-FollowupSentinelBlock -CriterionIds $effectiveCriterionIds -OriginatingPr $OriginatingPr
+    $bodyWithParent = "$parentRef`n`n$Body`n`n$sentinel"
+
+    # M3: Warn on comma-bearing labels before constructing the CSV.
+    foreach ($label in $Labels) {
+        if ($label -and $label.Contains(',')) {
+            Write-Warning "Label '$label' contains a comma; gh issue create may misinterpret label boundaries."
+        }
+    }
 
     # 1. Create the issue via gh
     $labelCsv = $Labels -join ','
@@ -70,39 +137,56 @@ function Add-FollowUpIssue {
         $parentId = gh issue view $ParentIssue --json id --jq .id 2>$null
         $childId = gh issue view $childNumber --json id --jq .id 2>$null
     } catch {
-        # Fail silent, handled by the loop
+        # Fail silent, handled below
     }
+
+    $graphqlSuccess = $false
 
     if ($parentId -and $childId) {
         $mutation = @"
 mutation {
   addSubIssue(input: {
-    issueId: "$parentId", 
+    issueId: "$parentId",
     subIssueId: "$childId"
   }) {
     issue { title }
   }
 }
 "@
-        $success = $false
         $attempts = 0
-        while (-not $success -and $attempts -lt 2) {
+        while (-not $graphqlSuccess -and $attempts -lt 2) {
             $attempts++
             try {
                 $result = gh api graphql -H "GraphQL-Features: sub_issues" -f query=$mutation 2>$null
                 if ($LASTEXITCODE -eq 0 -and $result) {
-                    $success = $true
+                    $graphqlSuccess = $true
                 }
             } catch {
                 # Try again
             }
         }
 
-        if (-not $success) {
+        if (-not $graphqlSuccess) {
             Write-Warning "Failed to link issue #$childNumber to parent issue #$ParentIssue via GitHub GraphQL sub-issues after 2 attempts."
         }
     } else {
+        # M15: machine-detectable structured failure.
+        Write-Error "addSubIssue prerequisite failed: childId=$childId parentId=$parentId; fallback to text-only parenting" -ErrorAction Continue
         Write-Warning "Could not retrieve GraphQL Node IDs for parent #$ParentIssue or child #$childNumber."
+    }
+
+    # M13: append parent-link-mode marker AFTER sentinel as final body line.
+    $linkMode = if ($graphqlSuccess) { 'graphql' } else { 'text-fallback' }
+    $linkMarker = "<!-- parent-link-mode: $linkMode -->"
+    $finalBody = "$bodyWithParent`n$linkMarker"
+
+    try {
+        gh issue edit $childNumber --body $finalBody 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Failed to append parent-link-mode marker to issue #$childNumber body."
+        }
+    } catch {
+        Write-Warning "Exception while appending parent-link-mode marker to issue #$childNumber."
     }
 
     return $issueUrl

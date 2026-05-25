@@ -9,6 +9,6 @@
   ],
   "pr_file_set": ["agents/Code-Conductor.agent.md"],
   "ac_refs": [],
-  "expected_criterion_ids": ["S-cross-cutting"],
+  "expected_criterion_ids": ["S-cross-cutting", "S-different-surface"],
   "expected_verdict": "DEFERRED-SIGNIFICANT (structural)"
 }

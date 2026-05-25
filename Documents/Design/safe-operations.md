@@ -32,7 +32,7 @@ These instructions are global — they apply to every agent in the pipeline when
 ### Issue Creation Rules (Section 2)
 
 - Issues created without a priority label are invisible in triage and cannot be scheduled; the label requirement ensures every follow-up issue is actionable from creation.
-- The improvement-first decision rule gives agents a deterministic fork: small changes (< 1 day) may be folded into the current PR if low-risk and in-scope; larger changes (> 1 day) must immediately become tracked issues rather than being silently deferred or scope-creeping the ongoing PR.
+- The improvement-first decision rule gives agents a deterministic fork against the structural-criteria gate (canonical taxonomy in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`): changes that do not match any structural criterion are eligible for inline fix-in-PR (verdict label `✅ ACCEPT (fix inline)`) and may be folded into the current PR; changes that match at least one structural criterion must immediately become tracked follow-up issues (verdict label `📋 DEFERRED-SIGNIFICANT (structural)`), filed via the `Add-FollowUpIssue` helper, rather than being silently deferred or scope-creeping the ongoing PR.
 - The default priority for automatically-created follow-up issues is `priority: medium`, preventing agents from defaulting to high-severity labels for speculative improvements.
 - Three priority label definitions (`priority: high`, `priority: medium`, `priority: low`) are included with recommended colors and descriptions so any new repository can bootstrap the label set with a single copy-paste block.
 

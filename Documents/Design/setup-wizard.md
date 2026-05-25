@@ -57,7 +57,7 @@ Phase 0 also runs `code --version`, `pwsh --version`, `git --version`, and `gh -
 Originally introduced as an instruction file, then migrated to `.github/skills/safe-operations/SKILL.md`. It contains two sections:
 
 1. **File Operation Rules** — correct tools by operation, FORBIDDEN PowerShell write commands (Set-Content, Out-File, Add-Content, New-Item -Value, echo redirect, .NET static IO methods), read-only operation preferences.
-2. **Issue Creation Rules** — improvement-first decision rule (< 1 day: in-PR; > 1 day: create follow-up issue), priority label requirement for every `gh issue create` call.
+2. **Issue Creation Rules** — improvement-first decision rule (issue triage follows the structural-criteria gate documented in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`; see also `Documents/Design/code-review.md`), priority label requirement for every `gh issue create` call.
 
 For clone-based setups, it is loaded from `.github/skills/` via `chat.agentSkillsLocations`. For plugin users, it ships with the plugin because it is a skill.
 
