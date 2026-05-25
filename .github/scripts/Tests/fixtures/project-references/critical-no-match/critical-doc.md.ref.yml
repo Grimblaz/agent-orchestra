@@ -1,0 +1,8 @@
+schema_version: 1
+name: Critical No Match
+target_path: critical-doc.md
+triggers:
+  - labels: [critical]
+    globs: ["*.md"]
+    keywords: [critical]
+    critical: true

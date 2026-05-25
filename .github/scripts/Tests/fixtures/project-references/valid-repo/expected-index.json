@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Sample Reference",
+    "target_path": "sample-doc.md",
+    "triggers": [
+      {
+        "labels": ["api", "reference"],
+        "globs": ["*.md"],
+        "keywords": ["API", "reference"],
+        "critical": false
+      }
+    ]
+  }
+]

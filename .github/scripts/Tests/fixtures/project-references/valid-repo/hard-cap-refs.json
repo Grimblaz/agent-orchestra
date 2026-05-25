@@ -1,0 +1,14 @@
+[
+  {"name": "Ref1", "target_path": "doc1.md"},
+  {"name": "Ref2", "target_path": "doc2.md"},
+  {"name": "Ref3", "target_path": "doc3.md"},
+  {"name": "Ref4", "target_path": "doc4.md"},
+  {"name": "Ref5", "target_path": "doc5.md"},
+  {"name": "Ref6", "target_path": "doc6.md"},
+  {"name": "Ref7", "target_path": "doc7.md"},
+  {"name": "Ref8", "target_path": "doc8.md"},
+  {"name": "Ref9", "target_path": "doc9.md"},
+  {"name": "Ref10", "target_path": "doc10.md"},
+  {"name": "Ref11", "target_path": "doc11.md"},
+  {"name": "Ref12", "target_path": "doc12.md"}
+]

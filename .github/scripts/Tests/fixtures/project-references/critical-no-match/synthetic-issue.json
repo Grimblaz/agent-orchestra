@@ -1,0 +1,7 @@
+{
+  "title": "Unrelated Issue",
+  "body": "This issue does not match any triggers.",
+  "labels": ["not-critical"],
+  "files": ["unrelated.md"],
+  "keywords": ["none"]
+}
