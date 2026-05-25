@@ -1,0 +1,9 @@
+{
+  "finding_id": "F_design_dec",
+  "finding_text": "This change requires a formal design decision with a trade-off analysis between Option A and Option B.",
+  "finding_file_set": ["agents/Code-Review-Response.agent.md"],
+  "pr_file_set": ["agents/Code-Review-Response.agent.md"],
+  "ac_refs": [],
+  "expected_criterion_ids": ["S-design-decision"],
+  "expected_verdict": "DEFERRED-SIGNIFICANT (structural)"
+}

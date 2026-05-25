@@ -1034,3 +1034,42 @@ Process-Review §4.9 Step 4 delegates to `create-improvement-issue.ps1` rather t
 | `.github/scripts/Tests/aggregate-review-scores.Tests.ps1` | 16 new Pester tests across 3 contexts (systemic patterns, kaizen metric, proposals write-back) |
 | `.github/agents/Process-Review.agent.md` | Added §4.9 section; updated §4.7 integration note and subagent invocation note |
 | `Documents/Design/code-review.md` | This section |
+
+---
+
+## Structural Deferral Gates & GraphQL Sub-Issue Linkage
+
+**Issue**: #610 | **Depends on**: None
+
+### Summary
+
+Replaced the effort-based estimation model (`<1 day` vs `>1 day`) with a robust programmatic structural-criteria gate for deferring findings as follow-up tracking issues. Refactored `Code-Review-Response` to programmatically evaluate structural predicates, renamed categories to eliminate effort-based wording, and added explicit Acceptance Criteria (AC) cross-check precedence. Implemented a new safe-operations `Add-FollowUpIssue` script executing GraphQL `addSubIssue` mutations with failure fallback and outcome instrumentation.
+
+### Decision Log
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|-----------|
+| D35 | Deferral mechanism | Programmatic structural-criteria gate (`Get-StructuralVerdict`) | Replaces subjective and inaccurate effort-based time estimates with objective, testable structural conditions. |
+| D36 | S-different-surface | File-set disjointness | A finding matches this criterion iff its referenced files are entirely disjoint from the files touched by the PR diff. |
+| D37 | S-maintainer-judgment | Gated escape valve with structured reasons | Gated by a required reason field: `requires multi-session investigation`, `requires infra/CI change`, or `explicit maintainer carve-out`. |
+| D38 | Outcome instrumentation | Filed-issue sentinel `<!-- code-conductor-filed-followup -->` | Enables tracking of survival rate and calibration without delaying ship. Contains matched `criterion_id`(s) and originating PR number. |
+| D39 | Precedence rule | AC Cross-Check prioritizes ACCEPT | Acceptance Criteria check takes absolute precedence over all structural gates, forcing an inline `ACCEPT` verdict. |
+| D40 | Parent linkage | GraphQL `addSubIssue` with 2-attempt retry & `Parent: #X` fallback | Resolves sub-issue parenting robustly with an automated fallback to human-readable text on permission/API failures. |
+
+### Structural Criteria Taxonomy
+
+- **`S-new-abstraction`**: References a new file, new agent, new skill, or public abstraction.
+- **`S-cross-cutting`**: Touches files across 4+ modules (excluding docs-only and test-only files) or crosses architectural layers.
+- **`S-design-decision`**: References named design decisions, trade-offs, or architectural choices.
+- **`S-schema-or-contract`**: References data models, schemas, persisted configurations, or public API contracts.
+- **`S-different-surface`**: Referenced files are entirely disjoint from the PR diff file-set.
+- **`S-maintainer-judgment`**: Gated escape valve for explicit maintainer carve-outs or complex investigations.
+
+### Acceptance Criteria (from issue #610)
+
+- Programmatic structural criteria evaluated under `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`.
+- Category labels renamed: `✅ ACCEPT (<1 day)` -> `✅ ACCEPT (fix inline)` and `📋 DEFERRED-SIGNIFICANT (>1 day, non-blocking)` -> `📋 DEFERRED-SIGNIFICANT (structural)`.
+- Effort-based language completely removed from `Code-Review-Response.agent.md` including the G3 enforcement gate row.
+- AC Cross-Check precedence explicitly documented and behaviorally enforced.
+- Conductor filing path refactored to execute sequential steps: canonicalize -> §2d -> §2c -> `Add-FollowUpIssue`.
+- `Add-FollowUpIssue` script implements GraphQL `addSubIssue` parenting with retry, `Parent: #X` fallback, multi-label support, and title canonicalization.

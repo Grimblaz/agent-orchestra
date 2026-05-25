@@ -53,7 +53,7 @@ Receive the prosecution ledger and defense report together, then rule once.
 
 **Convergence rule**: All findings reach a final disposition (✅ SUSTAINED / ❌ DEFENSE SUSTAINED / 🔄 SIGNIFICANT) before implementation begins.
 
-> **Vocabulary note**: The judgment protocol uses `SUSTAINED / DEFENSE SUSTAINED` for prosecution vs. defense rulings. The categorization output uses `ACCEPT / REJECT / DEFERRED-SIGNIFICANT` labels. These map directly: SUSTAINED = ACCEPT, DEFENSE SUSTAINED = REJECT, SIGNIFICANT (clear improvement) = DEFERRED-SIGNIFICANT. Out-of-scope or quality-debt findings that would otherwise be "TECH DEBT" categorize as 📋 DEFERRED-SIGNIFICANT (with a note indicating the tech-debt nature). Code-Review-Response outputs categorization; Code-Conductor routes accepted fixes to specialists.
+> **Vocabulary note**: The judgment protocol uses `SUSTAINED / DEFENSE SUSTAINED` for prosecution vs. defense rulings. The categorization output uses `ACCEPT (fix inline) / REJECT / DEFERRED-SIGNIFICANT (structural)` labels. These map directly: SUSTAINED = ACCEPT (fix inline), DEFENSE SUSTAINED = REJECT, SIGNIFICANT (clear improvement matching structural criteria) = DEFERRED-SIGNIFICANT (structural). Out-of-scope or quality-debt findings that would otherwise be "TECH DEBT" categorize as 📋 DEFERRED-SIGNIFICANT (structural) (with a note indicating the tech-debt nature). Code-Review-Response outputs categorization; Code-Conductor routes accepted fixes to specialists.
 
 ## Response Location Policy
 
@@ -71,7 +71,7 @@ The following rules are enforced at all judgment phases. Each `## 🚨 CRITICAL:
 | ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | G1 — No plain-text questions          | Every question MUST use `#tool:vscode/askQuestions`                                                                               |
 | G2 — Always call Code-Review-Response | Within the review pipeline, Code-Critic prosecution output must pass through Code-Review-Response judgment before reaching users. |
-| G3 — Deferred-Significant threshold   | 1+ day effort estimate → auto-track, never abandon                                                                                |
+| G3 — Deferred-Significant gate        | matches ≥1 structural criterion → auto-track, never abandon                                                                       |
 | G4 — Score summary mandatory          | Every judgment MUST include the score summary table                                                                               |
 
 ## 🚨 CRITICAL: Review Intake Modes
@@ -94,7 +94,7 @@ Behavior:
 5. **Defense pass**: Call Code-Critic with the selector line `Review mode selector: "Use defense review perspectives"`, passing the prosecution ledger.
 6. **Judge**: Receive prosecution ledger + defense report, apply the Single-Shot Judgment Protocol per this agent's rules, and emit a score summary.
 7. **Share details with the user before asking for approval**: quote or summarize each finding, state verification evidence, disposition, and score.
-8. **Only after details are shared**: Present the judgment output and categorization to the user. For significant non-blocking items, note they are categorized as 📋 DEFERRED-SIGNIFICANT for Code-Conductor to auto-track.
+8. **Only after details are shared**: Present the judgment output and categorization to the user. For significant non-blocking items, note they are categorized as 📋 DEFERRED-SIGNIFICANT (structural) for Code-Conductor to auto-track.
 9. **Emit judgment output.** Follow the sentinel + judge-rulings ordering from `skills/review-judgment/SKILL.md § Structured Judge Output`: first write the `<!-- review-judge-produced-{PR} -->` sentinel (idempotent, via `gh pr comment`), then emit the `judge-rulings` YAML block in a single PR comment. The `<!-- code-review-complete-{PR} -->` marker is retired as of issue #441 Step 11 — do not emit it. **Scope boundary**: Code-Review-Response owns the sentinel and the `judge-rulings` comment only. Pipeline-metrics body emission (`## Pipeline Metrics`) is owned by Code-Conductor (see `agents/Code-Conductor.agent.md § Pipeline Metrics`). A narrow exception is allowed when Code-Conductor supplies a target `dispatch-cost-samples` sample: back-fill only that sample's `judge-disposition` by `(step-id, mode)`, without emitting or rewriting general pipeline metrics. Code-Conductor (or the user) handles fix routing from the categorization. If invoked directly by the user (not as a subagent), the handoff button to Code-Conductor is available for routing accepted fixes.
 
 ### GitHub Ledger Rule (Mandatory)
@@ -152,25 +152,18 @@ Accept changes that improve the code. Reject changes that would make it worse. A
 - **Design decisions with trade-offs**: Note in categorization output; flag for user/Conductor decision
 - **Harmful changes**: ❌ REJECT with evidence
 
-## 🚨 CRITICAL: Effort Estimation Guidelines (→ G3)
+## 🚨 CRITICAL: Structural Deferral Guidelines (→ G3)
 
-**Default to SMALLER (<1 day) unless you can justify why it's larger.**
+A finding is deferred if and only if it matches one or more of the programmatic structural criteria evaluated by `Test-SCriterion*` / `Get-StructuralVerdict` (dot-sourced from `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`):
 
-**Quick estimation checklist** (if ANY apply, it's <1 day):
+- **S-new-abstraction**: Finding text or files refer to a new abstraction, new agent, new skill, or public API.
+- **S-cross-cutting**: Finding touches files across 4+ modules (excluding docs-only and test-only files) or crosses architectural layer boundaries (agents, skills, commands).
+- **S-design-decision**: Finding references a named design decision, trade-off, or architectural choice.
+- **S-schema-or-contract**: Finding references or modifies a data model, schema, contract, or public API interface.
+- **S-different-surface**: Finding referenced files are entirely disjoint from the PR diff file-set.
+- **S-maintainer-judgment**: Finding explicitly requires a multi-session investigation, infra/CI change, or has an explicit maintainer carve-out.
 
-- Adding data to existing maps/constants: <1 day
-- **Integrating data that was just added in this PR**: <1 day (this is NOT tech debt - it's completing the feature)
-- Adding a field to an interface + updating consumers: <1 day
-- Modifying 1-3 functions in 1-3 files: <1 day
-- Adding validation/filtering logic: <1 day
-- Fixing a design flaw in a single system: <1 day
-
-**Only defer if ALL of these apply**:
-
-- Requires architectural changes across 5+ files
-- Requires new system/subsystem design
-- Requires research into unknown patterns
-- Cannot be tested incrementally
+If NO structural criteria are matched, the finding must be addressed immediately as `✅ ACCEPT (fix inline)`.
 
 ## 🚨 CRITICAL: Line-Limit Lint Failures Require Real Refactors
 
@@ -195,11 +188,13 @@ Delegation guidance:
 
 ## 🚨 CRITICAL: Acceptance Criteria Cross-Check (Before ANY Deferral or Rejection)
 
+**Precedence Rule**: The Acceptance Criteria (AC) cross-check takes absolute precedence over all structural deferral gates. If a finding maps to an explicit AC, it MUST be classified as `✅ ACCEPT (fix inline)` even if it matches one or more structural criteria (e.g. `S-cross-cutting` or `S-new-abstraction`).
+
 **Before categorizing ANY finding as 📋 DEFERRED-SIGNIFICANT or ❌ REJECT, you MUST**:
 
 1. **Read the parent issue's acceptance criteria** (use `gh issue view {N} --json body` or read from the plan in session memory or a plan issue comment)
 2. **Check**: Does this finding relate to an explicit acceptance criterion?
-3. **If YES**: The finding **CANNOT be deferred or rejected** — it is a feature gap, not tech debt. Reclassify as ✅ ACCEPT regardless of effort estimate.
+3. **If YES**: The finding **CANNOT be deferred or rejected** — it is a feature gap, not tech debt. Reclassify as ✅ ACCEPT (fix inline) regardless of structural match.
 4. **If NO**: Proceed with normal categorization.
 
 **Rationale**: If the issue says "system supports X" and the review finds X is not wired, that's an incomplete feature — not optional future work. Deferring acceptance criteria violations means shipping a PR that doesn't meet its own requirements.
@@ -208,22 +203,22 @@ Delegation guidance:
 
 - Issue says: "Event trigger system supports on-event-complete"
 - Code-Critic finds: `on-event-complete` handler exists but is never called in production
-- ❌ WRONG: "📋 DEFERRED-SIGNIFICANT — no skill uses this yet, wire it later"
-- ✅ CORRECT: "✅ ACCEPT — this is an explicit acceptance criterion, must be wired now"
+- ❌ WRONG: "📋 DEFERRED-SIGNIFICANT (structural) — no skill uses this yet, wire it later"
+- ✅ CORRECT: "✅ ACCEPT (fix inline) — this is an explicit acceptance criterion, must be wired now"
 
 ## 🚨 CRITICAL: Significant Improvements Auto-Track (→ G3)
 
 **Deferral policy is replaced by automatic significant-improvement tracking.**
 
-When a finding is a real improvement but significant (>1 day) and non-blocking/out-of-scope:
+When a finding is a real improvement matching a structural criterion (S-*) and non-blocking/out-of-scope:
 
-1. Mark it as 📋 DEFERRED-SIGNIFICANT in the categorization output
+1. Mark it as 📋 DEFERRED-SIGNIFICANT (structural) in the categorization output
 2. Code-Conductor will create a GitHub tracking issue automatically (include PR link + review comment link + acceptance target)
 3. Continue ruling on remaining findings
 
 Do not require explicit user approval just to create the tracking issue.
 
-**Anti-pattern to AVOID**: Categorizing integration of just-added data as ">1 day tech debt". If the PR adds data (e.g., a `supportedTypes` field), integrating that data in its immediate consumers (e.g., assignment/selection services) is PART OF THE SAME WORK, not a separate issue.
+**Anti-pattern to AVOID**: Categorizing integration of just-added data as DEFERRED-SIGNIFICANT when no structural criterion (S-*) matches. If the PR adds data (e.g., a `supportedTypes` field), integrating that data in its immediate consumers (e.g., assignment/selection services) is PART OF THE SAME WORK, not a separate issue.
 
 ## 🚨 CRITICAL: Judgment-Only Mode
 
@@ -255,9 +250,9 @@ Categorize and respond to each review item with clear acknowledgment, honest ass
 
 **Response Categories**:
 
-1. **✅ ACCEPT (<1 day)** — Finding verified; fix improves code. Output categorization — Code-Conductor routes.
+1. **✅ ACCEPT (fix inline)** — Finding verified; fix improves code. Output categorization — Code-Conductor routes.
 2. **⚠️ INVESTIGATE** — Evidence weak or unclear. Read the code, verify yourself, then reclassify.
-3. **📋 DEFERRED-SIGNIFICANT (>1 day, non-blocking)** — Valid improvement but large. Check AC first (see AC Cross-Check above). Code-Conductor auto-tracks.
+3. **📋 DEFERRED-SIGNIFICANT (structural)** — Valid improvement matching structural criteria. Check AC first (see AC Cross-Check above). Code-Conductor auto-tracks.
 4. **❌ REJECT** — Change would harm code, or finding factually wrong. Cite evidence.
 
 **After Judgment**: When invoked as a subagent (by Code-Conductor), the judgment output returns to Code-Conductor for routing. When invoked directly by the user, the **Execute Fixes** handoff button routes the judgment to Code-Conductor. Code-Conductor is responsible for running validation after executing accepted fixes.
