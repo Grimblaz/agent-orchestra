@@ -43,8 +43,9 @@ function Get-PRDeclaredRootConfig {
     $configPath = Join-Path $Root '.agent-orchestra.yml'
     $roots = [System.Collections.Generic.List[string]]::new()
     $found = $false
+    $docCountThreshold = 5
     if (-not (Test-Path -LiteralPath $configPath)) {
-        return [pscustomobject]@{ Found = $false; Roots = @() }
+        return [pscustomobject]@{ Found = $false; Roots = @(); DocCountThreshold = $docCountThreshold }
     }
 
     $inReferences = $false
@@ -60,6 +61,11 @@ function Get-PRDeclaredRootConfig {
         if ($line -match '^\S') {
             $inReferences = $false
             $inDeclaredRoots = $false
+            continue
+        }
+        if ($line -match '^\s+doc_count_threshold\s*:\s*(.+)$') {
+            $value = ConvertFrom-PRScalar $Matches[1]
+            if ($value -is [int] -and $value -gt 0) { $docCountThreshold = $value }
             continue
         }
         if ($line -match '^\s+declared_roots\s*:\s*(.*)$') {
@@ -82,7 +88,38 @@ function Get-PRDeclaredRootConfig {
         }
     }
 
-    return [pscustomobject]@{ Found = $found; Roots = @($roots.ToArray()) }
+    return [pscustomobject]@{ Found = $found; Roots = @($roots.ToArray()); DocCountThreshold = $docCountThreshold }
+}
+
+function Get-PRReferenceRoot {
+    param([Parameter(Mandatory)][string] $IndexJsonPath)
+    $indexDirectory = Split-Path -Parent $IndexJsonPath
+    if ((Split-Path -Leaf $indexDirectory) -eq '.references') {
+        return (Split-Path -Parent $indexDirectory)
+    }
+    return $indexDirectory
+}
+
+function Test-PRReferenceConventionPresent {
+    param([Parameter(Mandatory)][string] $Root)
+    $indexPath = Join-Path $Root '.references/index.json'
+    if (Test-Path -LiteralPath $indexPath) { return $true }
+    return (@(Get-PRSidecarList -Root $Root).Count -gt 0)
+}
+
+function Get-PRMarkdownDocCount {
+    param(
+        [Parameter(Mandatory)][string] $Root,
+        [Parameter(Mandatory)][string[]] $DocRoots
+    )
+    if (-not (Test-Path -LiteralPath $Root)) { return 0 }
+    $rootFullPath = (Resolve-Path -LiteralPath $Root).Path
+    $docs = @(Get-ChildItem -Path $Root -Recurse -File -Filter '*.md' | Where-Object { $_.Name -notin @('INDEX.md', 'index.md') })
+    $scopedDocs = @($docs | Where-Object {
+        $relativePath = [System.IO.Path]::GetRelativePath($rootFullPath, $_.FullName).Replace('\', '/')
+        Test-PRGlobMatch -Paths @($relativePath) -Globs $DocRoots
+    })
+    return $scopedDocs.Count
 }
 
 function Read-PRSidecar {

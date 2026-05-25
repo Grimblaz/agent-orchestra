@@ -1,9 +1,12 @@
 
 Describe 'Invoke-ReferenceLoader.ps1' {
-    It 'matches triggers, emits critical no-match, escapes fences, marks untrusted, truncates, state drives nudge' {
-        $fixtureRoot = Join-Path $PSScriptRoot 'fixtures/project-references/valid-repo'
+    BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ProjectReferenceScriptRoot = Join-Path $script:RepoRoot 'skills/project-references/scripts'
+    }
+
+    It 'matches triggers, emits critical no-match, escapes fences, marks untrusted, truncates, state drives nudge' {
+        $fixtureRoot = Join-Path $PSScriptRoot 'fixtures/project-references/valid-repo'
         $issuePayloadPath = Join-Path $fixtureRoot 'synthetic-issue.json'
         $indexJsonPath = Join-Path $fixtureRoot 'index.json'
         $stateFilePath = Join-Path $fixtureRoot 'state.json'
@@ -50,7 +53,37 @@ Describe 'Invoke-ReferenceLoader.ps1' {
         $stateStateFilePath = Join-Path $fixtureRoot 'state.json'
         $stateDeclaredRoots = @((Join-Path -Path $fixtureRoot -ChildPath 'root1'), (Join-Path -Path $fixtureRoot -ChildPath 'root2'))
         $stateResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath $stateIssuePayloadPath -IndexJsonPath $stateIndexJsonPath -StateFilePath $stateStateFilePath -DeclaredRoots $stateDeclaredRoots | ConvertFrom-Json
-        $stateResult.nudge_due | Should -BeTrue
+        $stateResult.nudge_due | Should -BeFalse
         $stateResult.nudge_dismissed | Should -BeFalse
+    }
+
+    It 'sets nudge_due for no-convention repos only when threshold and state gates pass' {
+        $aboveRoot = Join-Path $PSScriptRoot 'fixtures/project-references/nudge-no-convention-above-threshold'
+        $belowRoot = Join-Path $PSScriptRoot 'fixtures/project-references/nudge-no-convention-below-threshold'
+        $missingIssuePath = Join-Path $aboveRoot 'missing-issue.json'
+        $missingStatePath = Join-Path $aboveRoot 'missing-state.json'
+        $missingIndexPath = Join-Path $aboveRoot '.references/index.json'
+
+        $aboveResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath $missingIssuePath -IndexJsonPath $missingIndexPath -StateFilePath $missingStatePath | ConvertFrom-Json
+        $aboveResult.nudge_due | Should -BeTrue
+
+        @('state-references-dismissed.json', 'state-legacy-dismissed.json', 'state-setup-complete.json') | ForEach-Object {
+            $stateResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath $missingIssuePath -IndexJsonPath $missingIndexPath -StateFilePath (Join-Path $aboveRoot $_) | ConvertFrom-Json
+            $stateResult.nudge_due | Should -BeFalse
+        }
+
+        $belowResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath (Join-Path $belowRoot 'missing-issue.json') -IndexJsonPath (Join-Path $belowRoot '.references/index.json') -StateFilePath (Join-Path $belowRoot 'missing-state.json') | ConvertFrom-Json
+        $belowResult.nudge_due | Should -BeFalse
+    }
+
+    It 'suppresses nudge_due when a reference convention is already present' {
+        $sidecarRoot = Join-Path $PSScriptRoot 'fixtures/project-references/nudge-convention-sidecar'
+        $indexRoot = Join-Path $PSScriptRoot 'fixtures/project-references/nudge-convention-index'
+
+        $sidecarResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath (Join-Path $sidecarRoot 'missing-issue.json') -IndexJsonPath (Join-Path $sidecarRoot '.references/index.json') -StateFilePath (Join-Path $sidecarRoot 'missing-state.json') | ConvertFrom-Json
+        $sidecarResult.nudge_due | Should -BeFalse
+
+        $indexResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath (Join-Path $indexRoot 'missing-issue.json') -IndexJsonPath (Join-Path $indexRoot '.references/index.json') -StateFilePath (Join-Path $indexRoot 'missing-state.json') | ConvertFrom-Json
+        $indexResult.nudge_due | Should -BeFalse
     }
 }
