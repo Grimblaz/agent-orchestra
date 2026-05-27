@@ -4,9 +4,10 @@ provides: review
 suggested-next-step: /orchestra:review
 applies-when: scope.isProxyGithub
 integrity-contract:
-  pass-blocks: []
+  pipeline-stages: [proxy-prosecution]
+  atomic: n/a
+  prosecution-passes: []
   exempt: true
-  exempt-reason: "external review intake; single proxy prosecution pass replaces the three-pass structure"
 ---
 
 # Review Proxy GitHub

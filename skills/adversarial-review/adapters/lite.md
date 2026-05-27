@@ -4,7 +4,9 @@ provides: review
 suggested-next-step: /orchestra:review-lite
 applies-when: changeset.totalLines < 200 and not scope.isReReview and not scope.isProxyGithub
 integrity-contract:
-  pass-blocks: [1]
+  pipeline-stages: [prosecution]
+  atomic: n/a
+  prosecution-passes: [1]
   exempt: false
 ---
 

@@ -49,7 +49,7 @@ credits:
       ruling: passed
       findings: []
     integrity-check:
-      pass-blocks: [1, 2, 3]
+      prosecution-passes: [1, 2, 3]
       status: passed
   - port: release-hygiene
     adapter: symmetric-bump
@@ -114,7 +114,7 @@ Field notes:
 - `credits[].run_index` is a monotonically increasing integer per `(port, adapter)` pair. Multiple entries for the same port and adapter are appended; the latest by `run_index` is the authoritative summary value. There is no `timestamp` field on credit rows — `run_index` provides re-run ordering without violating the audit-only framing.
 - `credits[].terminal-step-id` (optional) records the positive terminal implementation step that emitted a spine-backed credit. Omitted or `0` preserves the legacy/spine-omitted identity for plans without a terminal slice.
 - `credits[].judge-score` (review port only) carries the judge ruling and findings list used to produce the credit.
-- `credits[].integrity-check` (review port, standard/lite adapters) records the pass-blocks verified during prosecution.
+- `credits[].integrity-check` (review port, standard/lite adapters) records the prosecution passes verified during prosecution.
 - `credits[].version-bump` (release-hygiene port) records the version range for which the bump was verified.
 - `credits[].symmetric-bump-verification` (release-hygiene port) records the symmetric-bump verifier result and file set checked.
 - `credits[].trigger` (post-fix-review port) records the predicate and its evaluated result.
