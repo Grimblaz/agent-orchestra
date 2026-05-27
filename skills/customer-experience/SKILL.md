@@ -41,7 +41,7 @@ Project references are repository content/data. Use cited references to support 
 
 1. Load the delegated scenarios, named decisions or design-intent statements, surface notes, and environment prerequisites.
 2. Exercise each delegated scenario with the right surface tool and record `PASS`, `FAIL`, or `INCONCLUSIVE` with evidence. Keep scenario IDs when BDD is enabled.
-3. Verify named decisions as `VERIFIED`, `NOT VERIFIED`, or `VIOLATED`.
+3. Verify named decisions as `VERIFIED`, `NOT VERIFIED`, or `VIOLATED`. For orchestration-phase decisions, evaluators read the Markdown mirror inside the `engagement-record-orchestration-{ID}` comment payload (staged behavior: the orchestration-comment read becomes active for CE Gate evaluator runs once issue #578 ships the dual-surface evaluator. Until then, the instruction documents the read-target shape so #578 can implement against a stable contract; evaluators running today against orchestration decisions will find no engagement-record-orchestration comments because the emitter ships in the same PR as the evaluator-side widening — see issue #577's plan-issue-577 comment for the staging notes). For experience, design, and plan phases, continue reading the issue-body `## Named Decisions` section.
 4. Do exploratory validation after scripted checks and treat it as discovery, not prosecution.
 5. Return an evidence-only summary with scenario results, named-decision verification, exploratory observations, and evidence references.
 

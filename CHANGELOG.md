@@ -2,6 +2,19 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.20.0] — 2026-05-27
+
+### Added
+
+- **cognitive-surrender-prevention v1.3** ([#577](https://github.com/Grimblaz/Copilot-Orchestra/issues/577)) — Code-Conductor's `scope-classification` decision now preserves across sessions via a new `phase: orchestration` engagement-record marker class.
+  - **Schema bump**: `engagement-record-emission` `schema_version` 2 → 3; `phase` enum extends with `orchestration`. Readers built against v2 throw on unknown `schema_version` (out-of-try hard reject), and v3 markers carrying `phase: orchestration` require `schema_version >= 3` (in-try guard, warn-and-skip per CF13b cross-phase isolation).
+  - **Touchpoint narrowing**: `D9-checkpoint` is dropped from Code-Conductor's solution-authoring touchpoint set after classification re-audit (P3.F2 in /design); the touchpoint set is now `scope-classification` only.
+  - **Marker mirror policy**: the Markdown mirror is co-located inside the `<!-- engagement-record-orchestration-{ID} -->` comment (NOT in the issue body). CE Gate evaluator scope is widened to read both surfaces — issue-body `## Named Decisions` for upstream phases, comment-mirror for orchestration. Evaluator-side widening is staged behavior (becomes live with #578).
+  - **Cross-file constants extended**: `frame-credit-ledger-core.ps1` (`$script:PipelineEntryPorts` / `$script:CompletionMarkerByPort` / `$script:BuilderByPort`), `cost-attribution.ps1` (two literals), `cost-pattern-renderer.ps1`, and `session-memory-contract` SMC-17 / SMC-20 rows all updated to include the new `orchestration` port.
+  - **Plugin version bump**: 2.19.0 → 2.20.0 via `bump-version.ps1`, in lockstep with the schema cut to invalidate cached v2-era readers downstream.
+
+> **Audit note (v2.20.0 release-hygiene)**: The Copilot-side files (`plugin.json` at repo root, `.github/plugin/marketplace.json`) jumped 2.18.0 → 2.20.0 in this release, skipping the 2.19.0 entry. The prior 2.19.0 release (#576/#627) bumped only Claude-side files (`.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, README badge). The v2.20.0 `bump-version.ps1` invocation reconciles all 7 occurrences across all 5 files. Consumers reading Copilot manifests between releases 2.18.0 and 2.20.0 saw a stale 2.18.0 version. Future bumps should verify all 5 files agree via `bump-version.ps1 -CheckOnly` per ADR-0002 dual-write doctrine. Tracked as review P1.F4 / P2.F17.
+
 ## [2.19.0] — 2026-05-25
 
 ### Added

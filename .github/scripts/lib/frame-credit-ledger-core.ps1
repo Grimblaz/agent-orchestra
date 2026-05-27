@@ -1935,6 +1935,39 @@ function Build-PlanCreditRow {
 }
 
 # ---------------------------------------------------------------------------
+# Build-OrchestrationCreditRow
+# ---------------------------------------------------------------------------
+# NOTE: This function shadow-duplicates Build-ExperienceCreditRow / Build-DesignCreditRow / Build-PlanCreditRow.
+# A future refactor (see issue #577 review P1.F7) should extract a shared Build-FCLPipelineEntryCreditRow
+# helper accepting -Port, -CompletionMarkerTemplate, and -AgentName, mirroring the implement-* family's
+# Build-FCLImplementCreditRow consolidation pattern. Tracked as routine technical debt.
+function Build-OrchestrationCreditRow {
+    [CmdletBinding()]
+    param(
+        [bool]$MarkerPresent = $false,
+        [bool]$AutoNaResult = $false,
+        [string]$AdapterName = 'work-adapter',
+        [int]$IssueNumber = 0,
+        [string]$Evidence = '',
+        [int]$Step = 0
+    )
+
+    $status = script:Resolve-PipelineEntryCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -MarkerPresent $MarkerPresent
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        elseif ($status -eq 'passed') { "Code-Conductor scope-classification engagement-record present on issue #$IssueNumber." }
+                        elseif ($status -eq 'not-applicable') { "Pipeline-entry change is trivial; orchestration port not applicable." }
+                        else { "$AdapterName adapter; status: $status." }
+
+    $row = [pscustomobject]@{
+        port     = 'orchestration'
+        adapter  = $AdapterName
+        status   = $status
+        evidence = $resolvedEvidence
+    }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
+}
+
+# ---------------------------------------------------------------------------
 # Shared helper: resolve implement-* status from validation evidence list.
 # ---------------------------------------------------------------------------
 function script:Resolve-ImplementCreditStatus {
@@ -2221,18 +2254,20 @@ function Invoke-CreditInputHarvest {
         [double]$InitialBackoffSec = 1
     )
 
-    $script:PipelineEntryPorts = @('experience', 'design', 'plan')
+    $script:PipelineEntryPorts = @('experience', 'design', 'plan', 'orchestration')
 
     $script:CompletionMarkerByPort = @{
-        'experience' = "<!-- experience-owner-complete-$IssueNumber -->"
-        'design'     = "<!-- design-phase-complete-$IssueNumber -->"
-        'plan'       = "<!-- plan-issue-$IssueNumber -->"
+        'experience'    = "<!-- experience-owner-complete-$IssueNumber -->"
+        'design'        = "<!-- design-phase-complete-$IssueNumber -->"
+        'plan'          = "<!-- plan-issue-$IssueNumber -->"
+        'orchestration' = "<!-- engagement-record-orchestration-$IssueNumber -->"
     }
 
     $script:BuilderByPort = @{
-        'experience' = 'Build-ExperienceCreditRow'
-        'design'     = 'Build-DesignCreditRow'
-        'plan'       = 'Build-PlanCreditRow'
+        'experience'    = 'Build-ExperienceCreditRow'
+        'design'        = 'Build-DesignCreditRow'
+        'plan'          = 'Build-PlanCreditRow'
+        'orchestration' = 'Build-OrchestrationCreditRow'
     }
 
     function script:ConvertFrom-SingleCreditInputMarker {
@@ -2276,18 +2311,37 @@ function Invoke-CreditInputHarvest {
 
     # Build lookup from in-memory markers (port → payload hashtable)
     $inMemoryByPort = @{}
+    # Also build in-memory completion-marker presence lookup so the in-memory branch enforces
+    # the same burst-halt-on-engagement-record-failure invariant as the gh-fetched branch
+    # (P2.F5 / burst-ordering invariant — Test-Writer scenario (l) negative test).
+    $inMemoryCompletionByPort = @{}
     foreach ($markerText in $InMemoryMarkers) {
         $parsed = script:ConvertFrom-SingleCreditInputMarker -Text $markerText
         if ($null -ne $parsed -and $parsed.ContainsKey('port')) {
             $inMemoryByPort[$parsed['port']] = $parsed
+        }
+        # Detect completion markers by matching the per-port completion-marker prefix.
+        foreach ($portKey in $script:CompletionMarkerByPort.Keys) {
+            $completionPrefix = $script:CompletionMarkerByPort[$portKey] -replace '\{0\}', "$IssueNumber"
+            if ($markerText -like "*$completionPrefix*") {
+                $inMemoryCompletionByPort[$portKey] = $true
+            }
         }
     }
 
     $results = @()
 
     foreach ($port in $script:PipelineEntryPorts) {
-        # Use in-memory marker when available (bypasses gh for this port)
+        # Use in-memory marker when available (bypasses gh for this port).
+        # Enforce burst-halt invariant: credit-input is only honored when the corresponding
+        # engagement-record completion marker is also present (parallels the gh-fetched
+        # branch's `$null -ne $completionPresent` guard at the bottom of this function).
         if ($inMemoryByPort.ContainsKey($port)) {
+            if (-not $inMemoryCompletionByPort.ContainsKey($port)) {
+                # Credit-input present without engagement-record → burst halted upstream;
+                # do not emit a credit row. This mirrors the gh-fetched branch behavior.
+                continue
+            }
             $payload = $inMemoryByPort[$port]
             $evidence    = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
             $adapterName = if ($payload.ContainsKey('adapter'))  { $payload['adapter']  } else { '' }

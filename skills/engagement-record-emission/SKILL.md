@@ -21,21 +21,22 @@ Engagement records are emitted as GitHub issue comments containing a YAML code b
 
 `<!-- engagement-record-{phase}-{ISSUE_ID} -->`
 
-Where `{phase}` is one of `experience`, `design`, or `plan` (introduced in v1.2 / #576 at `schema_version: 2`), and `{ISSUE_ID}` is the numerical GitHub issue ID.
+Where `{phase}` is one of `experience`, `design`, `plan` (at `schema_version: 2`), or `orchestration` (introduced in v1.3 / #577 at `schema_version: 3`), and `{ISSUE_ID}` is the numerical GitHub issue ID.
 
 For example:
 `<!-- engagement-record-design-575 -->`
+`<!-- engagement-record-orchestration-577 -->`
 
 ## Canonical Schema
 
 The canonical YAML schema for the engagement-record payload is structured as follows:
 
 ```yaml
-schema_version: 2
-phase: design                         # Valid values: experience | design | plan
-capture_session: "normal-design-v2"  # Session tracking string
+schema_version: 3
+phase: orchestration                  # Valid values: experience | design | plan | orchestration
+capture_session: "normal-orchestration-v3"  # Session tracking string
 load_bearing_decisions:
-  - decision_id: schema-location      # Unique decision identifier
+  - decision_id: conductor-scope-classification  # Unique decision identifier
     classification: load-bearing      # Valid values: load-bearing | routine
     audit_rationale: "Rationale..."   # Short description of the why
     engineer_choice: "Choice..."      # Technical or design choice made
@@ -53,7 +54,7 @@ Multiple engagement-record markers may be written to the same issue for a given 
 
 Tooling that reads engagement records MUST throw an error on encountering an unknown `schema_version` value.
 - **Additive-field policy**: Within a schema version, new optional fields may be added by writers. Readers MUST ignore unknown optional fields without throwing errors.
-- **Breaking changes**: Any renamed fields, changed enum sets, or new required fields require incrementing the schema version. Readers built against v1.1 throw on v2 markers — this is intentional; per #576 D4 the helper is updated in lockstep and `.claude-plugin/plugin.json` is bumped to invalidate cached older readers.
+- **Breaking changes**: Any renamed fields, changed enum sets, or new required fields require incrementing the schema version. Readers built against v1.1 throw on v2 markers, and readers built against v1.2 throw on v3 markers — this is intentional; per #576 D4 and #577 D4 the helper is updated in lockstep and `.claude-plugin/plugin.json` is bumped to invalidate cached older readers. A backward-compatibility guard ensures that `phase: orchestration` requires `schema_version >= 3` to prevent reading orchestration markers with older schemas.
 
 ## Resume-Read Protocol
 
@@ -95,7 +96,7 @@ The `capture_session` is a free-form string field that tracks the execution cont
 `{trigger}-{phase}-v{major}[.{minor}]`
 Where:
 - `{trigger}` ∈ `normal` | `manual` | `replay`
-- `{phase}` ∈ `experience` | `design` | `plan`
+- `{phase}` ∈ `experience` | `design` | `plan` | `orchestration`
 
 Readers MUST NOT reject malformed values, but validation tooling may emit warnings on non-conforming strings.
 
