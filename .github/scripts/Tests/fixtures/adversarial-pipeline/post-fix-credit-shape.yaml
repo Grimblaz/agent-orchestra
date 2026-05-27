@@ -1,0 +1,4 @@
+adapter: post-fix
+integrity-check:
+  prosecution-passes: [1]
+  status: passed
