@@ -124,11 +124,13 @@ Code-Conductor writes its own decisions to the issue comments under the `orchest
 - **Skip behavior**: Direct `/implement {ID}` paths (Copilot-only — Claude does not ship `/implement`) bypass scope-classification and are read-only with respect to the orchestration record (do not emit; may still read for resume-note display). `/code-conductor [text]` prose-routed paths that bypass scope-classification via specialist-dispatch also do not emit. Only flows that actually fire the scope-classification gate emit the burst.
 - **Override semantics**: Standard `same-decision-resume` override rules apply. When the engineer shifts choice, Code-Conductor re-fires the gate for the shift-requested decision, carries reused decisions forward, and emits a full revised marker with `recommendation_shift_trigger: engineer-pushback | new-evidence`. Partial re-emit is forbidden.
 - **Two-comment burst sequence**: When scope-classification resolves, Code-Conductor posts the comment containing the `<!-- engagement-record-orchestration-{ID} -->` marker and the Markdown mirror first. Immediately after, it posts `<!-- credit-input-orchestration-{ID} -->` carrying:
+
   ```yaml
   port: orchestration
   adapter: scope-classification
   evidence: "issue #{ID}; scope-classification engagement-record emitted"
   ```
+
   On engagement-record post-failure, the burst halts immediately and the credit-input marker is NOT posted.
 - **Resume-note format**: When `same-decision-resume` reuses a prior orchestration decision, Code-Conductor emits the canonical resume-note format: `Reusing prior {decision_id}: {engineer_choice}` (comma-separated when multiple decisions resume in a session). This applies uniformly with upstream phases per `skills/solution-authoring/SKILL.md` § `resume-note-format` rule.
 

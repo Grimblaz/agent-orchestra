@@ -138,7 +138,7 @@ Fix candidates — a disclosure notice on resume activation, an in-band "re-open
 
 ### D16 — Orchestration Phase Entry (v1.3)
 
-The orchestration phase (introduced in v1.3 / #577) extends the state-preservation contract to Code-Conductor dispatches. This decision bundles four sub-concerns; sub-headers are provided so maintainers can locate any specific aspect quickly. See [D-577 in agent-body-architecture.md](agent-body-architecture.md) for the touchpoint-narrowing rationale this decision composes with.
+The orchestration phase (introduced in v1.3 / #577) extends the state-preservation contract to Code-Conductor dispatches. This decision bundles four sub-concerns; sub-headers are provided so maintainers can locate any specific aspect quickly. See [ref:D-577](agent-body-architecture.md) for the touchpoint-narrowing rationale this decision composes with.
 
 **Phase-enum extension**: The `phase` enum now accepts `orchestration` in addition to `experience | design | plan`. The `[ValidateSet]` attribute on `-Phase` in `frame-engagement-record-core.ps1`, the body-level enum check, the header doc-comment, and the canonical schema in `skills/engagement-record-emission/SKILL.md` move together. Issue-level mixed state is expected: an issue may carry `phase: experience` (v1 or v2) markers alongside a `phase: orchestration` (v3) marker; the per-marker scan honors each one independently.
 
@@ -155,13 +155,13 @@ The orchestration-phase guard at lines 210–212 is a soft reject by design — 
 
 **Comment-mirror policy deviation**: Unlike upstream phases (Experience-Owner, Solution-Designer, Issue-Planner) that write the Markdown mirror to the issue body or plan comment, Code-Conductor does not edit the issue body. The Markdown mirror is co-located directly inside the comment carrying the `<!-- engagement-record-orchestration-{ID} -->` payload. This minimizes issue-body churn during orchestration dispatches and keeps each orchestration record self-contained as a single durable comment. To support this, the CE Gate evaluator scope is widened to a dual-surface read: issue body `## Named Decisions` H2 for upstream phases, comment-mirror inside `engagement-record-orchestration-{ID}` for orchestration. The widened evaluator behavior becomes live with #578; the writer-side mirror co-location ships in #577.
 
-## Pre-merge Coordination Notes
+## Coordination History
 
-The `schema_version: 2` hard cut requires coordinated reader updates before the writer side merges:
+The v2 rollout (experience/design/plan phases) completed with #576. The v3 orchestration phase shipped with #577. Both phases are now active.
 
-- **#577 (Code-Conductor solution-authoring integration)**: confirms its `Read-EngagementRecords` consumer paths accept `schema_version: 2` markers before #576 merges, OR confirms explicitly that Code-Conductor's runtime coupling stays no-op for now. Without that confirmation, the v2 cut creates a window where pre-#577 read paths throw on every v2 marker.
-- **#578 (CE Gate exercise)**: scoped to read `schema_version: 2` markers and exercise the cross-tool resume axis (Copilot ↔ Claude) per AC6's cross-tool coverage hand-off.
-- **`.claude-plugin/plugin.json` version bump**: included in #576's PR per `plugin-release-hygiene`. Same-version installs would otherwise serve the older cached helper that throws on v2 markers.
+- **#576**: shipped `schema_version: 2` for the upstream phases (experience, design, plan) with the coordinated reader update and `.claude-plugin/plugin.json` version bump.
+- **#577**: shipped `schema_version: 3` for the orchestration phase (Code-Conductor) alongside the v2-reader compatibility guard that soft-rejects unknown phase/version pairings without losing access to other markers on the same issue.
+- **#578 (CE Gate exercise)**: scoped to read engagement-record markers across all phases and exercise the cross-tool resume axis (Copilot ↔ Claude) per AC6's cross-tool coverage hand-off.
 
 ## Related Sources
 

@@ -139,7 +139,7 @@ claude plugin uninstall <plugin@marketplace>
 
 User pacing directives — including but not limited to "work without stopping," "don't pause to ask," "make the reasonable call," and semantically equivalent phrasing — apply to **preference-clarifying questions**: questions the agent would otherwise ask to gather requirements, options, or non-load-bearing preferences. Pacing directives do **NOT** apply to **engagement-gate methodology checkpoints**:
 
-- `solution-authoring` classification gates (including Code-Conductor's `scope-classification` touchpoint per body line 117; pacing directives do not suppress orchestration touchpoints; same-decision-resume is the cross-session suppression mechanism for prior settled decisions)
+- `solution-authoring` classification gates (including Code-Conductor's `scope-classification` touchpoint per the Code-Conductor body's `### Scope Classification Gate` section; pacing directives do not suppress orchestration touchpoints; same-decision-resume is the cross-session suppression mechanism for prior settled decisions)
 - `upstream-onboarding` standards-check questions
 - `plan-authoring` plan-approval prompts
 - design-convergence decisions

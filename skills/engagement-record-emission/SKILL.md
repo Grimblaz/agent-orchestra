@@ -59,7 +59,7 @@ Tooling that reads engagement records MUST throw an error on encountering an unk
 ## Resume-Read Protocol
 
 Downstream/upstream agents load engagement records at phase startup by calling the helper:
-`Read-EngagementRecords -IssueNumber {ID} [-Phase experience|design|plan] [-InMemoryMarkers <string[]>] [-AcceptLegacy]`
+`Read-EngagementRecords -IssueNumber {ID} [-Phase experience|design|plan|orchestration] [-InMemoryMarkers <string[]>] [-AcceptLegacy]`
 
 If a record is returned for a given `decision_id`, the agent activates the `same-decision-resume` skip rule in `skills/solution-authoring/SKILL.md` to reuse the captured decision and suppress re-firing the structured question.
 

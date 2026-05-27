@@ -18,7 +18,7 @@
     The GitHub issue ID. Mandatory.
 
 .PARAMETER Phase
-    Optional. If specified, must be 'experience', 'design', or 'plan'. Filters records to this phase.
+    Optional. If specified, must be 'experience', 'design', 'plan', or 'orchestration'. Filters records to this phase.
 
 .PARAMETER Repo
     Optional. The GitHub repository in owner/name format. Defaults to current repo.
@@ -232,6 +232,7 @@ function Read-EngagementRecords {
                         # Validate decision-level enums in non-legacy mode
                         if (-not $isLegacy) {
                             # Slug validation (enforced for schema_version 2+)
+                            # powershell-yaml parses unquoted integers as [int]; -ge 2 is numeric here.
                             if ($parsedYaml.schema_version -ge 2 -and -not (Test-EngagementRecordSlug -DecisionId $dec.decision_id)) {
                                 throw [System.InvalidOperationException]::new("Invalid decision_id slug: '$($dec.decision_id)' - $script:DecisionIdSlugDescription (must match $script:DecisionIdSlugRegex)")
                             }

@@ -489,6 +489,16 @@ Describe 'orchestration burst-harvest invariants' {
     BeforeAll {
         $script:LedgerCoreLib = Join-Path $script:RepoRoot '.github/scripts/lib/frame-credit-ledger-core.ps1'
         if (Test-Path $script:LedgerCoreLib) { . $script:LedgerCoreLib }
+
+        # Temp dir for mock gh scripts used in this Describe block.
+        $script:BurstTempDir = Join-Path ([System.IO.Path]::GetTempPath()) "pester-burst-invariants-$([Guid]::NewGuid().ToString('N'))"
+        New-Item -ItemType Directory -Path $script:BurstTempDir -Force | Out-Null
+    }
+
+    AfterAll {
+        if ($null -ne $script:BurstTempDir -and (Test-Path $script:BurstTempDir)) {
+            Remove-Item -Recurse -Force $script:BurstTempDir -ErrorAction SilentlyContinue
+        }
     }
 
     It 'harvests credit-input-orchestration marker into orchestration credit row when both burst comments are present' {
@@ -540,13 +550,30 @@ adapter: scope-classification
 evidence: "issue #999; scope-classification engagement-record emitted"
 ```'
 
-        # Per the harvester gh-path guard `if ($null -ne $payload -and $null -ne $completionPresent)`,
-        # missing engagement-record means no row is emitted. This invariant must hold uniformly across
-        # the in-memory path as well — a credit-input marker without the paired engagement-record marker
-        # represents a halted burst, not a successful one.
-        $result = Invoke-CreditInputHarvest -IssueNumber 999 -Repo 'test/test' -InMemoryMarkers @($creditInput)
+        # Burst-halt invariant: when gh IS reachable but has no engagement-record-orchestration
+        # comment, the harvester must suppress the credit row even when credit-input is in-memory.
+        # This covers the cross-session case (F9): credit-input in-memory, completion only on gh,
+        # but gh confirms no completion exists → no row emitted.
+        #
+        # A mock gh that returns a reachable JSON response with the credit-input comment only
+        # (no completion marker) is required so the harvester can distinguish "gh reachable but
+        # no completion" from "gh unreachable" (the fail-open path for purely in-session credits).
+        $creditInputJson = $creditInput | ConvertTo-Json -Compress
+        $mockGhPath = Join-Path $script:BurstTempDir 'gh-no-completion-orchestration.ps1'
+        @"
+param()
+Write-Output '{"comments": [{"body": $creditInputJson}]}'
+exit 0
+"@ | Set-Content $mockGhPath -Encoding UTF8
+
+        $result = Invoke-CreditInputHarvest `
+            -IssueNumber     999 `
+            -Repo            'test/test' `
+            -GhCliPath       $mockGhPath `
+            -InMemoryMarkers @($creditInput) `
+            -MaxRetries      0
         $orchestrationRow = $result | Where-Object { $_.port -eq 'orchestration' }
 
-        $orchestrationRow | Should -BeNullOrEmpty -Because 'harvester must NOT emit orchestration row when engagement-record is missing (burst halt-on-failure invariant)'
+        $orchestrationRow | Should -BeNullOrEmpty -Because 'harvester must NOT emit orchestration row when gh is reachable but engagement-record is missing (burst halt-on-failure invariant)'
     }
 }

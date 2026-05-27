@@ -2322,7 +2322,7 @@ function Invoke-CreditInputHarvest {
         }
         # Detect completion markers by matching the per-port completion-marker prefix.
         foreach ($portKey in $script:CompletionMarkerByPort.Keys) {
-            $completionPrefix = $script:CompletionMarkerByPort[$portKey] -replace '\{0\}', "$IssueNumber"
+            $completionPrefix = $script:CompletionMarkerByPort[$portKey]
             if ($markerText -like "*$completionPrefix*") {
                 $inMemoryCompletionByPort[$portKey] = $true
             }
@@ -2336,12 +2336,13 @@ function Invoke-CreditInputHarvest {
         # Enforce burst-halt invariant: credit-input is only honored when the corresponding
         # engagement-record completion marker is also present (parallels the gh-fetched
         # branch's `$null -ne $completionPresent` guard at the bottom of this function).
-        if ($inMemoryByPort.ContainsKey($port)) {
-            if (-not $inMemoryCompletionByPort.ContainsKey($port)) {
-                # Credit-input present without engagement-record → burst halted upstream;
-                # do not emit a credit row. This mirrors the gh-fetched branch behavior.
-                continue
-            }
+        #
+        # When in-memory completion IS present: emit the credit row directly (no gh needed).
+        # When in-memory completion is NOT present but credit-input IS in-memory: fall through
+        # to the gh-fetch path to check whether remote completion exists (cross-session case,
+        # F9). The pre-parsed $payload is carried into the gh-fetch path so the credit-input
+        # gh lookup is skipped; only the completion-marker check is performed via gh.
+        if ($inMemoryByPort.ContainsKey($port) -and $inMemoryCompletionByPort.ContainsKey($port)) {
             $payload = $inMemoryByPort[$port]
             $evidence    = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
             $adapterName = if ($payload.ContainsKey('adapter'))  { $payload['adapter']  } else { '' }
@@ -2358,13 +2359,28 @@ function Invoke-CreditInputHarvest {
         $completionMarker = $script:CompletionMarkerByPort[$port]
         $creditMarkerPrefix = "<!-- credit-input-$port-$IssueNumber"
 
-        $payload = $null
+        # $payloadFromInMemory tracks whether the payload was pre-populated from the in-memory
+        # branch (cross-session F9 path). When true, the gh credit-input lookup is skipped and
+        # the completion check uses fail-open semantics: if gh is unreachable, emit the row
+        # (the in-memory source is trusted; fail-open preserves the original bypass contract).
+        $payloadFromInMemory = $inMemoryByPort.ContainsKey($port)
+        $payload = if ($payloadFromInMemory) { $inMemoryByPort[$port] } else { $null }
         $attempt = 0
         $backoff = $InitialBackoffSec
+        $completionPresent = $null
+        $comments = @()
 
         while ($attempt -le $MaxRetries) {
             $comments = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
             $completionPresent = $comments | Where-Object { $_ -like "*$completionMarker*" }
+
+            if ($payloadFromInMemory) {
+                # Payload already known from in-memory; no retry needed — just confirm
+                # completion marker presence via gh (cross-session F9 check).
+                break
+            }
+
+            # Normal gh-fetch path: look for the credit-input comment.
             $creditComment = $comments | Where-Object { $_ -like "*$creditMarkerPrefix*" } | Select-Object -First 1
 
             if ($null -ne $creditComment) {
@@ -2380,7 +2396,19 @@ function Invoke-CreditInputHarvest {
             $attempt++
         }
 
-        if ($null -ne $payload -and $null -ne $completionPresent) {
+        # Emit a credit row when:
+        #   • payload is present AND completion is confirmed via gh (both paths), OR
+        #   • payload came from in-memory AND gh was unreachable (fail-open: the in-memory
+        #     source is trusted, and gh failure must not silently drop in-session credits).
+        #     When gh IS reachable but returns no completion marker, the row is suppressed
+        #     (burst-halt invariant for the cross-session case).
+        $ghReachable = ($null -ne $comments -and $comments.Count -gt 0)
+        $shouldEmit = ($null -ne $payload) -and (
+            ($null -ne $completionPresent) -or
+            ($payloadFromInMemory -and -not $ghReachable)
+        )
+
+        if ($shouldEmit) {
             $evidence    = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
             $adapterName = if ($payload.ContainsKey('adapter'))  { $payload['adapter']  } else { '' }
             $builderName = $script:BuilderByPort[$port]
