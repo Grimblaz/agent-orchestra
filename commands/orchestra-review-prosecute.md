@@ -19,29 +19,8 @@ Run only the Code-Critic prosecution stage and return the resulting prosecution 
 3. After prosecution completes, write the same atomic front matter contract with only `prosecution_complete: true` forced in this command, preserve any readable stored values for the other fields, and update `last_updated`.
 4. Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`.
 
-**Handshake preamble** (required for this `code-critic` dispatch, per `skills/subagent-env-handshake/SKILL.md`):
-
-1. Capture live parent-side working-tree state via the `Bash` tool. Run, in order:
-   - `git rev-parse HEAD`
-   - `git rev-parse --abbrev-ref HEAD`
-   - `pwd`
-   - `git status --porcelain | tr -d '\r' | (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-12`
-2. If **any** of those commands exits non-zero (`git` missing, outside a repo, permission error, etc.), **skip handshake construction entirely** and proceed without the block. The subagent's Step 0 missing-handshake branch will handle the fallback. Do not fabricate placeholder values.
-3. Otherwise, construct the handshake block by copying the SKILL.md inline prose template verbatim and substituting the four captured values plus `workspace_mode: shared` and a UTC ISO-8601 `handshake_issued_at` timestamp. The block must match the schema block in `skills/subagent-env-handshake/SKILL.md` field-for-field and in canonical order. Do not rename, reorder, or omit fields.
-4. Prepend the handshake block as the **first content** of the `prompt` parameter passed to the `Agent` dispatch below.
-
-**Dispatch**:
-
-1. Use the `Agent` tool with `subagent_type: code-critic`.
-2. Prepend the authoritative selector line `Review mode selector: "Use code review perspectives"` immediately after any handshake block and before any carried review context so the prosecution stays in canonical code-review mode even if the supplied context also mentions other markers.
-3. Return the prosecution ledger unchanged. This command stops before defense and judge.
-
 **Singleton dispatch shape**:
 
-This command intentionally invokes Code-Critic exactly once. The selector marker `Review mode selector: "Use code review perspectives"` resolves in `routing-config.json` to a 3-pass parallel canonical default for full-pipeline use, but this power-user command treats the marker as routing context (selecting `code_prosecution` perspectives) and dispatches a single prosecution pass. Use `/orchestra:review` for the canonical 3-pass parallel run with merge-and-defense; use this command when a single ad-hoc prosecution ledger is the desired output.
-
-**Body-load failure policy**:
-
-This command runs a singleton Code-Critic prosecution stage. If the prosecution body-load fails, cannot load the shared body, is missing, or is malformed, halt-strict and stop; do not continue. No 2-of-3 or `pipeline-degraded` degradation applies to this singleton prosecution path.
+Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller using the singleton prosecution shape: one Code-Critic prosecution dispatch with the standard code-review selector, then stop before defense and judge. Pass the resolved review target, diff, linked issue or plan context, prior review notes, active issue id if available, and review-state persistence target as the pre-dispatch context. Return the prosecution ledger unchanged.
 
 ARGUMENTS: $ARGUMENTS
