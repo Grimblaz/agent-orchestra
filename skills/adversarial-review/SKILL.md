@@ -21,6 +21,37 @@ Reusable review methodology for prosecution and defense passes.
 
 Hunt for real defects without inventing them. The goal is to apply a repeatable adversarial method, gather concrete evidence, and emit findings or disproofs that another agent can judge.
 
+## Pipeline Flow
+
+Adversarial review adapters run one of these stage shapes:
+
+- `prosecution` - Code-Critic gathers evidence and emits a prosecution ledger.
+- `prosecution -> defense -> judge` - Code-Critic prosecutes, Code-Critic defense attempts to disprove the ledger, and Code-Review-Response issues the terminal ruling.
+- `proxy-prosecution -> defense -> judge` - external review findings are represented as the prosecution input, then defended and judged through the same terminal sequence.
+
+The named adversarial review adapters are:
+
+| Adapter | Adapter class | Port-filling | Pipeline stages | Prosecution passes | Exempt | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| `standard` | multi-variant work adapter | Yes, `review` | `prosecution`, `defense`, `judge` | `1`, `2`, `3` | No | Full local adversarial review |
+| `lite` | multi-variant work adapter | Yes, `review` | `prosecution`, `defense`, `judge` | `1` | No | Compact local adversarial review |
+| `judge-only` | multi-variant work adapter | Yes, `review` | `judge` | none | Yes | Terminal ruling over already-collected evidence |
+| `proxy-github` | multi-variant work adapter | Yes, `review` | `proxy-prosecution`, `defense`, `judge` | none | Yes | GitHub review intake represented as prosecution |
+| `post-fix` | multi-variant work adapter | Yes, `post-fix-review` | `prosecution` | `1` | No | Post-fix targeted prosecution only |
+| `design-challenge` | methodology-variant work adapter | No | `prosecution` | `1`, `2`, `3` | No | Non-blocking design challenge methodology reused by design surfaces |
+
+Port-filling adapters declare `provides:` and fill frame ports such as `review` or `post-fix-review`. Methodology-variant adapters do not declare `provides:`; they package a reusable adversarial method for a caller-owned port or phase.
+
+Prosecution findings may include `requires_pipeline_pause: { reason: artifact-missing | runtime-output-required | user-input-required-by-decision-class }`. Prosecutors set this field only when the finding cannot be responsibly evaluated inside the current atomic window without missing artifacts, runtime output, or a decision-class user input requirement.
+
+## Atomic Pipeline Discipline
+
+When an adapter's `integrity-contract.atomic` value is `true`, the caller must run prosecution through the terminal stage as one uninterrupted pipeline. Between prosecution and the terminal stage, do not surface interim findings for action, do not edit files or mutate the working tree, and do not ask questions, including `AskUserQuestion` or equivalent engagement prompts.
+
+The retry exception is limited to re-running the same failed stage when a tool, model, or transport failure prevents the stage artifact from being produced. The retry must not change scope, dispatch edits, or ask the user for a decision.
+
+The prosecutor-set interrupt exception applies only when a prosecution finding includes `requires_pipeline_pause` with one of the closed reasons. In that case, the caller pauses the pipeline after the current prosecution artifact is safely captured, reports the pause reason, obtains the missing artifact/output/input through the owning workflow, and resumes the same pipeline without treating interim findings as judged work.
+
 ## Core Method
 
 ### 1. Establish Review Scope
@@ -317,18 +348,28 @@ When representing an external review ledger:
 | `review` | [agents/Code-Review-Response.agent.md](../../agents/Code-Review-Response.agent.md); [adapters/standard.md](adapters/standard.md); [adapters/lite.md](adapters/lite.md); [adapters/judge-only.md](adapters/judge-only.md); [adapters/proxy-github.md](adapters/proxy-github.md) | [adapters/review-explicit-skip-adapter.md](adapters/review-explicit-skip-adapter.md) |
 | `post-fix-review` | [adapters/post-fix.md](adapters/post-fix.md) | [adapters/post-fix-review-explicit-skip-adapter.md](adapters/post-fix-review-explicit-skip-adapter.md) |
 
-## Integrity Contract (Decision 6 — per-adapter exemptions)
+## Integrity Contract (Decision 6 - per-adapter exemptions)
 
-Each `review` adapter declares its expected prosecution pass-blocks in YAML frontmatter under the `integrity-contract:` key. The frame credit ledger uses this declaration to verify that the prosecution structure matches what the adapter promises.
+Each adversarial review adapter declares its expected pipeline shape in YAML frontmatter under the `integrity-contract:` key. The frame credit ledger and dispatcher checks use this declaration to verify that the produced artifacts match what the adapter promises.
 
-| Adapter | Pass-blocks expected | Exempt | Reason |
-| ------- | -------------------- | ------ | ------ |
-| `standard` | `[1, 2, 3]` | No | Runs full three-pass prosecution (design, prerequisites, product-alignment) |
-| `lite` | `[1]` | No | Runs one compact prosecution pass |
-| `judge-only` | `[]` | Yes | Re-review scope; prior prosecution and defense evidence already exists |
-| `proxy-github` | `[]` | Yes | External review intake; single proxy prosecution pass replaces the three-pass structure |
+Required keys:
 
-Pass-block IDs correspond to the three Code-Critic prosecution modes:
+- `pipeline-stages:` ordered stage names such as `prosecution`, `proxy-prosecution`, `defense`, and `judge`
+- `atomic:` boolean indicating whether the declared stages must run as one uninterrupted pipeline
+- `prosecution-passes:` ordered prosecution pass IDs expected for that adapter, or an empty list when the adapter is exempt from numbered prosecution output
+- `exempt:` boolean indicating whether missing numbered prosecution output is expected for that adapter
+
+| Adapter | Pipeline stages | Atomic | Prosecution passes | Exempt | Reason |
+| --- | --- | --- | --- | --- | --- |
+| `standard` | `prosecution`, `defense`, `judge` | Yes | `[1, 2, 3]` | No | Runs full three-pass prosecution before defense and judge |
+| `lite` | `prosecution`, `defense`, `judge` | Yes | `[1]` | No | Runs one compact prosecution pass before defense and judge |
+| `judge-only` | `judge` | No | `[]` | Yes | Re-review scope; prior prosecution and defense evidence already exists |
+| `proxy-github` | `proxy-prosecution`, `defense`, `judge` | Yes | `[]` | Yes | External review intake; proxy prosecution replaces numbered local passes |
+| `post-fix` | `prosecution` | No | `[1]` | No | Runs one targeted prosecution pass after fixes |
+| `design-challenge` | `prosecution` | No | `[1, 2, 3]` | No | Methodology-variant design challenge; no frame port ownership |
+
+Prosecution pass IDs correspond to the three Code-Critic prosecution modes:
+
 - **Pass 1**: design review perspectives (`Review mode selector: "Use design review perspectives"`)
 - **Pass 2**: implementation prerequisites, CE Gate, persistence, cross-tool (`Review mode selector: "Use design review perspectives"` second pass)
 - **Pass 3**: product-alignment perspectives (`Review mode selector: "Use product-alignment perspectives"`)
