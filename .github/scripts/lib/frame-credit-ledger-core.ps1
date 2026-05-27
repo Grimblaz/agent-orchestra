@@ -11,6 +11,8 @@
       - Resolve-NotPersistedSynthesis     : synthesize not-persisted credit when sentinel present
       - Build-ReviewCreditRow             : construct a v4 review credit row from judge-rulings
                                            comment + adapter integrity contract (issue #441, Step 8b)
+    - Resolve-AdversarialPipelineAtomicMarkerPresence
+                             : classify warn-only presence of <!-- adversarial-pipeline-atomic-{ISSUE_ID} -->
       - ConvertFrom-JudgeRulingsComment   : parse the <!-- judge-rulings --> YAML block from a
                                            PR comment body into structured finding objects
       - Get-PortFiles                     : enumerate frame/ports/*.yaml as objects
@@ -1055,6 +1057,60 @@ function script:Add-FCLTerminalStepId {
     return $Row
 }
 
+function Resolve-AdversarialPipelineAtomicMarkerPresence {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$AdapterAtomicState = $false,
+        [AllowEmptyString()][string]$Text = '',
+        [AllowEmptyString()][string]$IssueId = '',
+        [AllowEmptyString()][string]$MarkerTemplate = '<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->'
+    )
+
+    $atomicValue = if ($null -eq $AdapterAtomicState) { '' } else { ([string]$AdapterAtomicState).Trim() }
+    $adapterDeclaresAtomic = $false
+    if ($AdapterAtomicState -is [bool]) {
+        $adapterDeclaresAtomic = [bool]$AdapterAtomicState
+    }
+    elseif ($atomicValue.Equals('true', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $adapterDeclaresAtomic = $true
+    }
+
+    if (-not $adapterDeclaresAtomic) {
+        return [pscustomobject]@{
+            adversarial_pipeline_atomic_marker_present = 'not-applicable'
+            marker = $MarkerTemplate
+            warning = ''
+        }
+    }
+
+    $marker = $MarkerTemplate
+    if (-not [string]::IsNullOrWhiteSpace($IssueId)) {
+        $marker = $MarkerTemplate.Replace('{ISSUE_ID}', $IssueId.Trim())
+    }
+
+    $markerPresent = $false
+    if (-not [string]::IsNullOrEmpty($Text)) {
+        if ($Text.Contains($marker)) {
+            $markerPresent = $true
+        }
+        elseif ([string]::IsNullOrWhiteSpace($IssueId) -and $Text -match '<!--\s*adversarial-pipeline-atomic-\d+\s*-->') {
+            $markerPresent = $true
+        }
+    }
+
+    $status = if ($markerPresent) { 'true' } else { 'false-warn-only' }
+    $warning = if ($status -eq 'false-warn-only') {
+        "adversarial_pipeline_atomic_marker_present=false-warn-only; expected marker $marker for an applicable atomic adversarial adapter"
+    }
+    else { '' }
+
+    return [pscustomobject]@{
+        adversarial_pipeline_atomic_marker_present = $status
+        marker = $marker
+        warning = $warning
+    }
+}
+
 function Build-ReviewCreditRow {
     [CmdletBinding()]
     param(
@@ -1091,7 +1147,9 @@ function Build-ReviewCreditRow {
     }
 
     # Integrity contract from adapter frontmatter (optional live lookup).
-    $passBlocks      = @(1, 2, 3)   # default for standard
+    # No legacy compatibility shim for pass-blocks is needed here because this
+    # builder reads current-tree adapter frontmatter, not historical PR bodies.
+    $prosecutionPasses = @(1, 2, 3)   # default for standard
     $integrityStatus = 'passed'
 
     if (-not [string]::IsNullOrWhiteSpace($AdaptersDir)) {
@@ -1101,13 +1159,13 @@ function Build-ReviewCreditRow {
             if ($content -match '(?ms)integrity-contract:.*?exempt:\s*(?<val>true|false)') {
                 $isExempt = [System.Boolean]::Parse($matches['val'].Trim())
                 if ($isExempt) {
-                    $passBlocks      = @()
+                    $prosecutionPasses = @()
                     $integrityStatus = 'not-applicable'
                 }
-                elseif ($content -match '(?ms)integrity-contract:.*?pass-blocks:\s*\[(?<blocks>[^\]]*)\]') {
-                    $blockStr  = $matches['blocks']
-                    $passBlocks = @(
-                        $blockStr -split '[,\s]+' |
+                elseif ($content -match '(?ms)integrity-contract:.*?prosecution-passes:\s*\[(?<passes>[^\]]*)\]') {
+                    $passStr = $matches['passes']
+                    $prosecutionPasses = @(
+                        $passStr -split '[,\s]+' |
                         Where-Object { $_ -match '^\d+$' } |
                         ForEach-Object { [int]$_ }
                     )
@@ -1115,11 +1173,14 @@ function Build-ReviewCreditRow {
             }
         }
     }
+    elseif ($AdapterName -eq 'post-fix') {
+        $prosecutionPasses = @(1)
+    }
     elseif ($AdapterName -eq 'lite') {
-        $passBlocks = @(1)
+        $prosecutionPasses = @(1)
     }
     elseif ($AdapterName -in @('judge-only', 'proxy-github')) {
-        $passBlocks      = @()
+        $prosecutionPasses = @()
         $integrityStatus = 'not-applicable'
     }
 
@@ -1139,8 +1200,8 @@ function Build-ReviewCreditRow {
             })
         }
         'integrity-check' = [pscustomobject]@{
-            'pass-blocks' = $passBlocks
-            status        = $integrityStatus
+            'prosecution-passes' = $prosecutionPasses
+            status               = $integrityStatus
         }
     }
 

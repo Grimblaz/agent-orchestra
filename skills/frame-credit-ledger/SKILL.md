@@ -48,6 +48,29 @@ The conductor's only contract with this skill is:
 - Pass the new PR number.
 - Do not branch on the result. The ledger either posts a comment, posts nothing (pre-v3 short-circuit), or fails open silently. None of those outcomes change the conductor flow.
 
+## Review Integrity Contract
+
+Review and post-fix-review adapters declare their integrity contract in adapter frontmatter under `integrity-contract:`. The ledger consumes the current-tree declarations; historical PR-body back-derivation does not read legacy adapter frontmatter, so no `pass-blocks` compatibility shim is needed in the review credit builder.
+
+The supported sibling keys are:
+
+- `pipeline-stages:` — ordered stage names that the adapter runs, such as `[prosecution, defense, judge]`.
+- `atomic:` — `true` when the declared stages must run as one uninterrupted adversarial pipeline; `n/a` for single-stage or exempt adapters.
+- `prosecution-passes:` — ordered prosecution pass IDs expected in the prosecution output, or an empty list for exempt adapters.
+- `exempt:` — `true` when the adapter has no numbered prosecution pass output to verify.
+
+`Build-ReviewCreditRow` emits the review credit integrity field as `integrity-check.prosecution-passes`. The standard adapter emits `[1, 2, 3]`; lite and post-fix emit `[1]`; exempt adapters emit an empty list with `status: not-applicable`.
+
+## Atomic Marker Hook
+
+For applicable adapters declaring `atomic: true`, the ledger performs a warn-only marker check for the exact completion marker `<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->`. The hook searches available PR body/comment text and, when the linked issue can be resolved, issue comments. It never blocks PR creation.
+
+The hook records `adversarial_pipeline_atomic_marker_present` with one of these values:
+
+- `true` — an applicable atomic adapter was detected and its completion marker was present.
+- `false-warn-only` — an applicable atomic adapter was detected but the marker was absent; the ledger emits a warning and continues.
+- `not-applicable` — no applicable atomic adapter was detected.
+
 ## Related Guidance
 
 - [`customer-experience/SKILL.md`](../customer-experience/SKILL.md) — CE Gate is a sibling concern. The ledger reports the credit status of any triggered `ce-gate-*` port; it never *runs* CE Gate. Execution stays with the customer-experience skill and the Experience-Owner agent.

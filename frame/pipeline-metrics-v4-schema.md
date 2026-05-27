@@ -50,6 +50,7 @@ credits:
       findings: []
     integrity-check:
       prosecution-passes: [1, 2, 3]
+      adversarial_pipeline_atomic_marker_present: true
       status: passed
   - port: release-hygiene
     adapter: symmetric-bump
@@ -114,7 +115,7 @@ Field notes:
 - `credits[].run_index` is a monotonically increasing integer per `(port, adapter)` pair. Multiple entries for the same port and adapter are appended; the latest by `run_index` is the authoritative summary value. There is no `timestamp` field on credit rows — `run_index` provides re-run ordering without violating the audit-only framing.
 - `credits[].terminal-step-id` (optional) records the positive terminal implementation step that emitted a spine-backed credit. Omitted or `0` preserves the legacy/spine-omitted identity for plans without a terminal slice.
 - `credits[].judge-score` (review port only) carries the judge ruling and findings list used to produce the credit.
-- `credits[].integrity-check` (review port, standard/lite adapters) records the prosecution passes verified during prosecution.
+- `credits[].integrity-check` (review port, standard/lite/post-fix adapters) records the prosecution passes verified during prosecution. Atomic adversarial adapters also use `adversarial_pipeline_atomic_marker_present` as a warn-only ledger field for the completion marker `<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->`; values are `true`, `false-warn-only`, or `not-applicable`.
 - `credits[].version-bump` (release-hygiene port) records the version range for which the bump was verified.
 - `credits[].symmetric-bump-verification` (release-hygiene port) records the symmetric-bump verifier result and file set checked.
 - `credits[].trigger` (post-fix-review port) records the predicate and its evaluated result.

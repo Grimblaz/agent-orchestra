@@ -196,6 +196,7 @@ function Get-FrameCreditLedgerAdapters {
 
             $appliesWhen = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'applies-when'
             $suggestedNextStep = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'suggested-next-step'
+            $integrityAtomic = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'atomic'
 
             $name = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'name'
             if ($null -eq $name) {
@@ -208,6 +209,7 @@ function Get-FrameCreditLedgerAdapters {
                     Provides          = $providesValue
                     AppliesWhen       = $appliesWhen
                     SuggestedNextStep = $suggestedNextStep
+                    IntegrityAtomic   = $integrityAtomic
                 }) | Out-Null
         }
         catch {
@@ -1305,6 +1307,20 @@ function Invoke-FrameCreditLedger {
     # 5. v4 path: discover adapters and classify ports.
     $repoRoot = script:Resolve-FCLRepoRoot -ScriptPath $PSCommandPath
     $adapters = Get-FrameCreditLedgerAdapters -RepoRoot $repoRoot
+    # Atomic completion marker template: <!-- adversarial-pipeline-atomic-{ISSUE_ID} -->
+    $atomicMarkerSearchText = $prBody
+    if ($null -ne $script:PrComments) {
+        $atomicMarkerSearchText += "`n" + ((@($script:PrComments) | ForEach-Object { script:Get-FCLCommentBody -Comment $_ }) -join "`n")
+    }
+    $currentBranch = ''
+    try { $currentBranch = [string](& git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null) } catch { $currentBranch = '' }
+    $atomicMarkerIssueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $prBody -Branch $currentBranch
+    if ($null -ne $atomicMarkerIssueNumber) {
+        $issueCommentsForAtomicMarker = @(script:Get-FCLIssueCommentsForSpine -IssueNumber ([int]$atomicMarkerIssueNumber))
+        if ($issueCommentsForAtomicMarker.Count -gt 0) {
+            $atomicMarkerSearchText += "`n" + (($issueCommentsForAtomicMarker | ForEach-Object { script:Get-FCLCommentBody -Comment $_ }) -join "`n")
+        }
+    }
 
     $portsDir = Join-Path $repoRoot 'frame/ports'
     $ports = Get-PortFiles -PortsDir $portsDir
@@ -1346,12 +1362,21 @@ function Invoke-FrameCreditLedger {
 
     # Build per-port reports.
     $portReports = [System.Collections.Generic.List[object]]::new()
+    $applicableAtomicAdapterSeen = $false
 
     if (@($ports).Count -gt 0) {
         foreach ($port in $ports) {
             $portName = [string]$port.Name
             $matchingAdapters = @($adapters | Where-Object { [string]$_.Provides -eq $portName })
             $applicableMap = Resolve-FrameCreditLedgerApplicableMap -PortName $portName -Adapters $matchingAdapters -Changeset $changeset
+            foreach ($adapter in $matchingAdapters) {
+                if ([string]$adapter.IntegrityAtomic -ne 'true') { continue }
+                $adapterName = [string]$adapter.Name
+                if ($applicableMap.ContainsKey($adapterName) -and [string]$applicableMap[$adapterName] -eq 'true') {
+                    $applicableAtomicAdapterSeen = $true
+                    break
+                }
+            }
             $credit = Select-AuthoritativeCreditForPort -Credits $credits -Port $portName
 
             $report = Resolve-PortStatus -Port $port -WorkAdapters $matchingAdapters -ApplicableMap $applicableMap -Credit $credit
@@ -1367,6 +1392,15 @@ function Invoke-FrameCreditLedger {
             $report = Resolve-PortStatus -Port $synthPort -WorkAdapters @() -ApplicableMap @{} -Credit $credit
             $portReports.Add($report) | Out-Null
         }
+    }
+
+    $atomicMarkerStatus = Resolve-AdversarialPipelineAtomicMarkerPresence `
+        -AdapterAtomicState $applicableAtomicAdapterSeen `
+        -Text $atomicMarkerSearchText `
+        -IssueId $(if ($null -eq $atomicMarkerIssueNumber) { '' } else { [string]$atomicMarkerIssueNumber })
+    $atomicMarkerStatusValue = [string]$atomicMarkerStatus.adversarial_pipeline_atomic_marker_present
+    if (-not [string]::IsNullOrWhiteSpace([string]$atomicMarkerStatus.warning)) {
+        [Console]::Error.WriteLine("frame-credit-ledger: $($atomicMarkerStatus.warning)")
     }
 
     foreach ($incompleteCycleReport in @(script:Resolve-FCLIncompleteCycleReports -Pr $Pr -PrBody $prBody -PrComments $script:PrComments -LedgerRows $credits)) {
@@ -1567,6 +1601,7 @@ function Invoke-FrameCreditLedger {
         ExitCode      = if ($Mode -eq 'enforce' -and $hasNotCovered) { 1 } else { 0 }
         HasNotCovered = $hasNotCovered
         Comment       = $comment
+        adversarial_pipeline_atomic_marker_present = $atomicMarkerStatusValue
     }
 }
 

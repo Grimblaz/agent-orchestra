@@ -322,11 +322,20 @@ Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)'
             -AdapterName 'standard' -AdaptersDir $script:AdaptersPath
 
         @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1, 2, 3)
+        $legacyFieldName = 'pass' + '-blocks'
+        $row.'integrity-check'.PSObject.Properties.Name | Should -Not -Contain $legacyFieldName
     }
 
     It 'integrity-check.prosecution-passes is [1] for lite adapter' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
             -AdapterName 'lite' -AdaptersDir $script:AdaptersPath
+
+        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1)
+    }
+
+    It 'integrity-check.prosecution-passes is [1] for post-fix adapter without live adapter lookup' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'post-fix'
 
         @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1)
     }
@@ -384,5 +393,38 @@ Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)'
 '@
         $row = Build-ReviewCreditRow -JudgeRulingsComment $veryHighPointsComment
         $row.status | Should -Be 'passed' -Because 'P+1000 must not match the P+10 boundary pattern'
+    }
+}
+
+Describe 'Adversarial atomic marker hook' {
+    It 'reports true when an atomic adapter marker is present' {
+        $result = Resolve-AdversarialPipelineAtomicMarkerPresence `
+            -AdapterAtomicState 'true' `
+            -IssueId '629' `
+            -Text 'done <!-- adversarial-pipeline-atomic-629 -->'
+
+        $result.adversarial_pipeline_atomic_marker_present | Should -Be 'true'
+        $result.warning | Should -Be ''
+    }
+
+    It 'reports false-warn-only when an atomic adapter marker is absent' {
+        $result = Resolve-AdversarialPipelineAtomicMarkerPresence `
+            -AdapterAtomicState 'true' `
+            -IssueId '629' `
+            -Text 'review completed without marker'
+
+        $result.adversarial_pipeline_atomic_marker_present | Should -Be 'false-warn-only'
+        $result.marker | Should -Be '<!-- adversarial-pipeline-atomic-629 -->'
+        $result.warning | Should -Match 'false-warn-only'
+    }
+
+    It 'reports not-applicable when the adapter is not atomic' {
+        $result = Resolve-AdversarialPipelineAtomicMarkerPresence `
+            -AdapterAtomicState 'n/a' `
+            -IssueId '629' `
+            -Text 'review completed without marker'
+
+        $result.adversarial_pipeline_atomic_marker_present | Should -Be 'not-applicable'
+        $result.warning | Should -Be ''
     }
 }
