@@ -11,8 +11,14 @@
 #>
 
 # Canonical port ordering for the table (ports not in this list appear in insertion order after)
+# Canonical port-display order for the cost-pattern Markdown table. Pipeline-entry ports appear first
+# (experience, design, plan, orchestration) in semantic insertion order; implement-* and CE-Gate ports
+# follow. Consumers MUST iterate by-name and MUST NOT positional-index (e.g., $arr[0..2] to mean "the
+# upstream three") — the array semantics describe display ordering, not membership cohorts. Adding a new
+# pipeline-entry port (#577 added 'orchestration') extends the prefix; positional consumers would silently
+# include the new port in their slice.
 $script:CostRendererPortOrder = @(
-    'experience', 'design', 'plan',
+    'experience', 'design', 'plan', 'orchestration',
     'implement-code', 'implement-test', 'implement-refactor', 'implement-docs',
     'review', 'process-review'
 )

@@ -1935,6 +1935,39 @@ function Build-PlanCreditRow {
 }
 
 # ---------------------------------------------------------------------------
+# Build-OrchestrationCreditRow
+# ---------------------------------------------------------------------------
+# NOTE: This function shadow-duplicates Build-ExperienceCreditRow / Build-DesignCreditRow / Build-PlanCreditRow.
+# A future refactor (see issue #577 review P1.F7) should extract a shared Build-FCLPipelineEntryCreditRow
+# helper accepting -Port, -CompletionMarkerTemplate, and -AgentName, mirroring the implement-* family's
+# Build-FCLImplementCreditRow consolidation pattern. Tracked as routine technical debt.
+function Build-OrchestrationCreditRow {
+    [CmdletBinding()]
+    param(
+        [bool]$MarkerPresent = $false,
+        [bool]$AutoNaResult = $false,
+        [string]$AdapterName = 'work-adapter',
+        [int]$IssueNumber = 0,
+        [string]$Evidence = '',
+        [int]$Step = 0
+    )
+
+    $status = script:Resolve-PipelineEntryCreditStatus -AdapterName $AdapterName -AutoNaResult $AutoNaResult -MarkerPresent $MarkerPresent
+    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) { $Evidence }
+                        elseif ($status -eq 'passed') { "Code-Conductor scope-classification engagement-record present on issue #$IssueNumber." }
+                        elseif ($status -eq 'not-applicable') { "Pipeline-entry change is trivial; orchestration port not applicable." }
+                        else { "$AdapterName adapter; status: $status." }
+
+    $row = [pscustomobject]@{
+        port     = 'orchestration'
+        adapter  = $AdapterName
+        status   = $status
+        evidence = $resolvedEvidence
+    }
+    return script:Add-FCLTerminalStepId -Row $row -Step $Step
+}
+
+# ---------------------------------------------------------------------------
 # Shared helper: resolve implement-* status from validation evidence list.
 # ---------------------------------------------------------------------------
 function script:Resolve-ImplementCreditStatus {
@@ -2221,18 +2254,20 @@ function Invoke-CreditInputHarvest {
         [double]$InitialBackoffSec = 1
     )
 
-    $script:PipelineEntryPorts = @('experience', 'design', 'plan')
+    $script:PipelineEntryPorts = @('experience', 'design', 'plan', 'orchestration')
 
     $script:CompletionMarkerByPort = @{
-        'experience' = "<!-- experience-owner-complete-$IssueNumber -->"
-        'design'     = "<!-- design-phase-complete-$IssueNumber -->"
-        'plan'       = "<!-- plan-issue-$IssueNumber -->"
+        'experience'    = "<!-- experience-owner-complete-$IssueNumber -->"
+        'design'        = "<!-- design-phase-complete-$IssueNumber -->"
+        'plan'          = "<!-- plan-issue-$IssueNumber -->"
+        'orchestration' = "<!-- engagement-record-orchestration-$IssueNumber -->"
     }
 
     $script:BuilderByPort = @{
-        'experience' = 'Build-ExperienceCreditRow'
-        'design'     = 'Build-DesignCreditRow'
-        'plan'       = 'Build-PlanCreditRow'
+        'experience'    = 'Build-ExperienceCreditRow'
+        'design'        = 'Build-DesignCreditRow'
+        'plan'          = 'Build-PlanCreditRow'
+        'orchestration' = 'Build-OrchestrationCreditRow'
     }
 
     function script:ConvertFrom-SingleCreditInputMarker {
@@ -2259,35 +2294,61 @@ function Invoke-CreditInputHarvest {
     function script:Get-IssueComments {
         param([string]$IssueNum, [string]$RepoArg, [string]$Gh)
 
+        # Returns a hashtable distinguishing "gh outage" from "gh succeeded, empty comments".
+        # Reachable=$true with Comments=@() means gh confirmed zero comments on the issue.
+        # Reachable=$false means the fetch failed (CLI error, non-zero exit, empty raw, or parse fail).
+        # The fail-open emission path in Invoke-CreditInputHarvest depends on this disambiguation.
         try {
             $raw = & $Gh issue view $IssueNum --repo $RepoArg --json comments --paginate 2>$null
         } catch {
-            return @()
+            return @{ Reachable = $false; Comments = @() }
         }
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) { return @() }
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) {
+            return @{ Reachable = $false; Comments = @() }
+        }
 
         try {
             $parsed = $raw | ConvertFrom-Json
-            return @($parsed.comments | ForEach-Object { $_.body })
+            return @{ Reachable = $true; Comments = @($parsed.comments | ForEach-Object { $_.body }) }
         } catch {
-            return @()
+            return @{ Reachable = $false; Comments = @() }
         }
     }
 
     # Build lookup from in-memory markers (port → payload hashtable)
     $inMemoryByPort = @{}
+    # Also build in-memory completion-marker presence lookup so the in-memory branch enforces
+    # the same burst-halt-on-engagement-record-failure invariant as the gh-fetched branch
+    # (P2.F5 / burst-ordering invariant — Test-Writer scenario (l) negative test).
+    $inMemoryCompletionByPort = @{}
     foreach ($markerText in $InMemoryMarkers) {
         $parsed = script:ConvertFrom-SingleCreditInputMarker -Text $markerText
         if ($null -ne $parsed -and $parsed.ContainsKey('port')) {
             $inMemoryByPort[$parsed['port']] = $parsed
+        }
+        # Detect completion markers by matching the per-port completion-marker prefix.
+        foreach ($portKey in $script:CompletionMarkerByPort.Keys) {
+            $completionPrefix = $script:CompletionMarkerByPort[$portKey]
+            if ($markerText -like "*$completionPrefix*") {
+                $inMemoryCompletionByPort[$portKey] = $true
+            }
         }
     }
 
     $results = @()
 
     foreach ($port in $script:PipelineEntryPorts) {
-        # Use in-memory marker when available (bypasses gh for this port)
-        if ($inMemoryByPort.ContainsKey($port)) {
+        # Use in-memory marker when available (bypasses gh for this port).
+        # Enforce burst-halt invariant: credit-input is only honored when the corresponding
+        # engagement-record completion marker is also present (parallels the gh-fetched
+        # branch's `$null -ne $completionPresent` guard at the bottom of this function).
+        #
+        # When in-memory completion IS present: emit the credit row directly (no gh needed).
+        # When in-memory completion is NOT present but credit-input IS in-memory: fall through
+        # to the gh-fetch path to check whether remote completion exists (cross-session case,
+        # F9). The pre-parsed $payload is carried into the gh-fetch path so the credit-input
+        # gh lookup is skipped; only the completion-marker check is performed via gh.
+        if ($inMemoryByPort.ContainsKey($port) -and $inMemoryCompletionByPort.ContainsKey($port)) {
             $payload = $inMemoryByPort[$port]
             $evidence    = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
             $adapterName = if ($payload.ContainsKey('adapter'))  { $payload['adapter']  } else { '' }
@@ -2304,13 +2365,31 @@ function Invoke-CreditInputHarvest {
         $completionMarker = $script:CompletionMarkerByPort[$port]
         $creditMarkerPrefix = "<!-- credit-input-$port-$IssueNumber"
 
-        $payload = $null
+        # $payloadFromInMemory tracks whether the payload was pre-populated from the in-memory
+        # branch (cross-session F9 path). When true, the gh credit-input lookup is skipped and
+        # the completion check uses fail-open semantics: if gh is unreachable, emit the row
+        # (the in-memory source is trusted; fail-open preserves the original bypass contract).
+        $payloadFromInMemory = $inMemoryByPort.ContainsKey($port)
+        $payload = if ($payloadFromInMemory) { $inMemoryByPort[$port] } else { $null }
         $attempt = 0
         $backoff = $InitialBackoffSec
+        $completionPresent = $null
+        $comments = @()
+        $ghFetchSucceeded = $false
 
         while ($attempt -le $MaxRetries) {
-            $comments = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
+            $fetchResult = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
+            $comments = @($fetchResult.Comments)
+            $ghFetchSucceeded = [bool]$fetchResult.Reachable
             $completionPresent = $comments | Where-Object { $_ -like "*$completionMarker*" }
+
+            if ($payloadFromInMemory) {
+                # Payload already known from in-memory; no retry needed — just confirm
+                # completion marker presence via gh (cross-session F9 check).
+                break
+            }
+
+            # Normal gh-fetch path: look for the credit-input comment.
             $creditComment = $comments | Where-Object { $_ -like "*$creditMarkerPrefix*" } | Select-Object -First 1
 
             if ($null -ne $creditComment) {
@@ -2326,7 +2405,22 @@ function Invoke-CreditInputHarvest {
             $attempt++
         }
 
-        if ($null -ne $payload -and $null -ne $completionPresent) {
+        # Emit a credit row when:
+        #   • payload is present AND completion is confirmed via gh (both paths), OR
+        #   • payload came from in-memory AND gh was unreachable (fail-open: the in-memory
+        #     source is trusted, and gh failure must not silently drop in-session credits).
+        #     When gh IS reachable but returns no completion marker, the row is suppressed
+        #     (burst-halt invariant for the cross-session case).
+        # $ghReachable is derived from an explicit fetch-success flag (not from $comments.Count),
+        # so an issue with zero comments on a reachable gh is correctly treated as "reachable
+        # but completion absent" → suppress, rather than "outage" → fail-open emit.
+        $ghReachable = $ghFetchSucceeded
+        $shouldEmit = ($null -ne $payload) -and (
+            ($null -ne $completionPresent) -or
+            ($payloadFromInMemory -and -not $ghReachable)
+        )
+
+        if ($shouldEmit) {
             $evidence    = if ($payload.ContainsKey('evidence')) { $payload['evidence'] } else { '' }
             $adapterName = if ($payload.ContainsKey('adapter'))  { $payload['adapter']  } else { '' }
             $builderName = $script:BuilderByPort[$port]

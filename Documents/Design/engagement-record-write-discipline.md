@@ -136,13 +136,32 @@ F24 from the design challenge surfaced a concern that `same-decision-resume`'s s
 
 Fix candidates — a disclosure notice on resume activation, an in-band "re-open D-foo" lever, or a TTL on cached classifications — are intentionally out of scope for #576. The work is tracked as a #580 checklist item.
 
-## Pre-merge Coordination Notes
+### D16 — Orchestration Phase Entry (v1.3)
 
-The `schema_version: 2` hard cut requires coordinated reader updates before the writer side merges:
+The orchestration phase (introduced in v1.3 / #577) extends the state-preservation contract to Code-Conductor dispatches. This decision bundles four sub-concerns; sub-headers are provided so maintainers can locate any specific aspect quickly. See [ref:D-577](agent-body-architecture.md) for the touchpoint-narrowing rationale this decision composes with.
 
-- **#577 (Code-Conductor solution-authoring integration)**: confirms its `Read-EngagementRecords` consumer paths accept `schema_version: 2` markers before #576 merges, OR confirms explicitly that Code-Conductor's runtime coupling stays no-op for now. Without that confirmation, the v2 cut creates a window where pre-#577 read paths throw on every v2 marker.
-- **#578 (CE Gate exercise)**: scoped to read `schema_version: 2` markers and exercise the cross-tool resume axis (Copilot ↔ Claude) per AC6's cross-tool coverage hand-off.
-- **`.claude-plugin/plugin.json` version bump**: included in #576's PR per `plugin-release-hygiene`. Same-version installs would otherwise serve the older cached helper that throws on v2 markers.
+**Phase-enum extension**: The `phase` enum now accepts `orchestration` in addition to `experience | design | plan`. The `[ValidateSet]` attribute on `-Phase` in `frame-engagement-record-core.ps1`, the body-level enum check, the header doc-comment, and the canonical schema in `skills/engagement-record-emission/SKILL.md` move together. Issue-level mixed state is expected: an issue may carry `phase: experience` (v1 or v2) markers alongside a `phase: orchestration` (v3) marker; the per-marker scan honors each one independently.
+
+**Schema-version 2 → 3 cut**: `schema_version` is bumped from `2` to `3` in lockstep with the enum extension and the plugin version bump (`2.19.0 → 2.20.0`) so stale v2-era cached readers downstream invalidate on update. The reader distinguishes two categories of version-related rejection:
+
+- **Hard reject** (unknown `schema_version`, missing required fields): throws `InvalidOperationException` outside the per-marker try/catch (`frame-engagement-record-core.ps1:198`). Propagates to the caller; `Read-EngagementRecords` returns no result for the issue. This is the path for genuinely-unknown reader-version-mismatch scenarios (e.g., a v2-era reader encountering a `schema_version: 4` marker after a future bump).
+- **Soft reject** (known `schema_version` with invalid phase/version pairing — e.g., `phase: orchestration` paired with `schema_version: 2`): throws inside the per-marker CF13b try/catch (lines 210–212); caught at `frame-engagement-record-core.ps1:267` and emitted as `Write-Warning "Skipping malformed engagement-record marker on issue {N} : {message}"`. The per-marker scan continues; other markers on the same issue still parse. This is the cross-phase isolation path: a v2 reader on a mixed-state issue still gets its v1/v2 markers without crashing on the v3 orchestration marker.
+
+The orchestration-phase guard at lines 210–212 is a soft reject by design — forward-incompatibility for one phase must not lose access to the issue's other phase markers. This preserves D8's hard-reject-on-unknown-version contract for the `schema_version` field itself while adding a narrower in-try guard for phase/version pairing.
+
+**Test-fixture maintenance contract**: When `schema_version` increments (v3 → v4 → ...), the roundtrip test's "throws on unknown `schema_version`" fixture in `.github/scripts/Tests/engagement-record-marker-roundtrip.Tests.ps1` must be bumped to the next boundary value (currently `4`, one past the highest accepted version). The fixture value, the throw-set in `frame-engagement-record-core.ps1:198`, the `[ValidateSet]` on `-Phase`, and the canonical schema in `skills/engagement-record-emission/SKILL.md` must all move in lockstep. Drift between any two causes silent test pass-by-accident: a fixture that no longer represents an *unknown* version trivially passes the throw assertion for the wrong reason. The inline `# bump in lockstep with schema_version` comment in the test file anchors this contract at the touch point.
+
+**Capture-session literal**: Code-Conductor locks `capture_session: "normal-orchestration-v3"`. The version suffix mirrors the schema bump so the byte-equivalence diff for capture-session literals across agent bodies (Experience-Owner `normal-experience-v2`, Solution-Designer `normal-design-v2`, Issue-Planner `normal-plan-v2`, Code-Conductor `normal-orchestration-v3`) stays self-documenting.
+
+**Comment-mirror policy deviation**: Unlike upstream phases (Experience-Owner, Solution-Designer, Issue-Planner) that write the Markdown mirror to the issue body or plan comment, Code-Conductor does not edit the issue body. The Markdown mirror is co-located directly inside the comment carrying the `<!-- engagement-record-orchestration-{ID} -->` payload. This minimizes issue-body churn during orchestration dispatches and keeps each orchestration record self-contained as a single durable comment. To support this, the CE Gate evaluator scope is widened to a dual-surface read: issue body `## Named Decisions` H2 for upstream phases, comment-mirror inside `engagement-record-orchestration-{ID}` for orchestration. The widened evaluator behavior becomes live with #578; the writer-side mirror co-location ships in #577.
+
+## Coordination History
+
+The v2 rollout (experience/design/plan phases) completed with #576. The v3 orchestration phase shipped with #577. Both phases are now active.
+
+- **#576**: shipped `schema_version: 2` for the upstream phases (experience, design, plan) with the coordinated reader update and `.claude-plugin/plugin.json` version bump.
+- **#577**: shipped `schema_version: 3` for the orchestration phase (Code-Conductor) alongside the v2-reader compatibility guard that soft-rejects unknown phase/version pairings without losing access to other markers on the same issue.
+- **#578 (CE Gate exercise)**: scoped to read engagement-record markers across all phases and exercise the cross-tool resume axis (Copilot ↔ Claude) per AC6's cross-tool coverage hand-off.
 
 ## Related Sources
 

@@ -622,8 +622,14 @@ function Get-PhaseMarkerAttributionTarget {
     if ($null -eq $markerPort -or $markerPort -eq '') { return $null }
 
     $markerPortName = ([string]$markerPort).ToLowerInvariant()
+    # Forward-compat: 'orchestration' is reachable today only via the engagement-record-orchestration harvester path
+    # (frame-credit-ledger-core.ps1 $script:PipelineEntryPorts). The cost-walker's slash-command regex
+    # (cost-walker.ps1:33) does not yet emit 'orchestration' as a portHint — that path is reserved for a
+    # future enhancement where Code-Conductor's transcript-level events get distinct cost-attribution
+    # (separate from /orchestrate and /code-conductor slash commands which map to orchestrator-overhead).
+    # Keep this arm so cost-attribution does not regress when that wiring lands.
     switch ($markerPortName) {
-        { $_ -in @('experience', 'design', 'plan') } { return $markerPortName }
+        { $_ -in @('experience', 'design', 'plan', 'orchestration') } { return $markerPortName }
         'orchestrate' { return 'orchestrator-overhead' }
         'code-conductor' { return 'orchestrator-overhead' }
         default { return $null }
@@ -746,7 +752,13 @@ function Get-CostAttribution {
 
             if ($agentDispatches.Count -eq 0) {
                 $phaseMarkerTarget = Get-PhaseMarkerAttributionTarget -Evt $evt
-                if ($phaseMarkerTarget -in @('experience', 'design', 'plan')) {
+                # Forward-compat: 'orchestration' is reachable today only via the engagement-record-orchestration harvester path
+                # (frame-credit-ledger-core.ps1 $script:PipelineEntryPorts). The cost-walker's slash-command regex
+                # (cost-walker.ps1:33) does not yet emit 'orchestration' as a portHint — that path is reserved for a
+                # future enhancement where Code-Conductor's transcript-level events get distinct cost-attribution
+                # (separate from /orchestrate and /code-conductor slash commands which map to orchestrator-overhead).
+                # Keep this arm so cost-attribution does not regress when that wiring lands.
+                if ($phaseMarkerTarget -in @('experience', 'design', 'plan', 'orchestration')) {
                     if (-not $ports.ContainsKey($phaseMarkerTarget)) {
                         $ports[$phaseMarkerTarget] = New-PortBucket
                     }

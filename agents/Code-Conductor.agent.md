@@ -114,7 +114,37 @@ You are an ORCHESTRATOR AGENT, NOT an implementation agent. You MUST delegate al
 
 Load `skills/solution-authoring/SKILL.md` first and follow its protocol before any subsequent skill fires a structured question. Then load `skills/upstream-onboarding/SKILL.md` and follow its protocol. (Note: cross-session engagement-state will be preserved via the SMC-20 engagement-record markers and the same-decision-resume skip rule, preventing repeated questioning on settled decisions across sessions (SMC-20 engagement-record markers active for both read and write paths per #576). The classification gate applies only once a target artifact is established — on greenfield invocations, defer until an issue is created.)
 
-Content-authoring touchpoints where the solution-authoring classification gate applies in this agent: scope-classification and D9-checkpoint. These qualify under the gate-scope ambiguity tiebreaker ("When the boundary is ambiguous, default to intercepting") because scope-classification shapes the plan-issue scope section content and D9-checkpoint shapes the checkpoint marker payload — both produce durable, authored artifacts. The articulation prompt for these touchpoints fires at D9-checkpoint completion, when the agent hands off to implementation.
+Content-authoring touchpoints where the solution-authoring classification gate applies in this agent: scope-classification. These qualify under the gate-scope ambiguity tiebreaker ("When the boundary is ambiguous, default to intercepting") because scope-classification shapes the plan-issue scope section content. The articulation prompt for these touchpoints fires at scope-classification completion.
+
+### Orchestration engagement-record contract
+
+Code-Conductor writes its own decisions to the issue comments under the `orchestration` phase.
+- **Read trigger**: Extends Step 0's smart-resume comment scan; it calls `Read-EngagementRecords -IssueNumber {ID} -Phase orchestration` to look for existing orchestration records.
+- **Emit trigger**: Immediately after the `scope-classification` gate resolves. Emits the full-state marker to overwrite prior states (latest-comment-wins).
+- **Skip behavior**: Direct `/implement {ID}` paths (Copilot-only — Claude does not ship `/implement`) bypass scope-classification and are read-only with respect to the orchestration record (do not emit; may still read for resume-note display). `/code-conductor [text]` prose-routed paths that bypass scope-classification via specialist-dispatch also do not emit. Only flows that actually fire the scope-classification gate emit the burst.
+- **Override semantics**: Standard `same-decision-resume` override rules apply. When the engineer shifts choice, Code-Conductor re-fires the gate for the shift-requested decision, carries reused decisions forward, and emits a full revised marker with `recommendation_shift_trigger: engineer-pushback | new-evidence`. Partial re-emit is forbidden.
+- **Two-comment burst sequence**: When scope-classification resolves, Code-Conductor posts the comment containing the `<!-- engagement-record-orchestration-{ID} -->` marker and the Markdown mirror first. Immediately after, it posts `<!-- credit-input-orchestration-{ID} -->` carrying:
+
+  ```yaml
+  port: orchestration
+  adapter: scope-classification
+  evidence: "issue #{ID}; scope-classification engagement-record emitted"
+  ```
+
+  On engagement-record post-failure, the burst halts immediately and the credit-input marker is NOT posted.
+- **Resume-note format**: When `same-decision-resume` reuses a prior orchestration decision, Code-Conductor emits the canonical resume-note format: `Reusing prior {decision_id}: {engineer_choice}` (comma-separated when multiple decisions resume in a session). This applies uniformly with upstream phases per `skills/solution-authoring/SKILL.md` § `resume-note-format` rule.
+
+### Named Decisions write-discipline
+
+Code-Conductor does not author the issue body. The human-readable Named Decisions Markdown mirror is co-located directly inside the comment containing the `<!-- engagement-record-orchestration-{ID} -->` marker payload.
+
+Because the CE Gate evaluation occurs later (under #578), the YAML payload and Markdown mirror are allowed to diverge on the `articulation_text` field:
+- The YAML payload MUST carry `articulation_text: ""` (empty string) to prevent premature self-judgment.
+- The Markdown mirror MUST carry the literal HTML comment `<!-- CE Gate articulation pending per #578 -->` within its `**Articulation text**` bullet list block to clarify pending status.
+
+> The `#578` issue reference appears in three locations (this bullet, `skills/engagement-record-emission/SKILL.md` D10 guidance, and the canonical Markdown-mirror placeholder used by all engagement-record-emitting agents). If `#578` is renumbered or absorbed, update all three locations as a coordinated sweep.
+
+All other fields (classification, engineer_choice, audit_rationale, etc.) must match field-for-field.
 
 For terminal and validation execution guardrails, load `skills/terminal-hygiene/SKILL.md` — especially the **Multiline Continuation-Prompt Hazard** and **Non-Fatal Diagnostic Wrapper Pattern** sections when dispatching subagent diagnostics.
 
@@ -137,6 +167,7 @@ When the user invokes Code-Conductor without a specific slash command (e.g., `@c
 - `<!-- experience-owner-complete-{ID} -->` found → customer framing done; skip Experience-Owner upstream call
 - `<!-- design-phase-complete-{ID} -->` found → technical design done; skip Solution-Designer
 - Plan found (session memory or `<!-- plan-issue-{ID} -->` comment) → skip upstream phases; in hub mode, D9 still applies unless the later tier-aware prior-session artifact rules suppress it
+- `<!-- engagement-record-orchestration-{ID} -->` found → prior orchestration decisions exist; on entry to the Scope Classification Gate, invoke `Read-EngagementRecords -IssueNumber {ID} -Phase orchestration` (against the same comment scan already retrieved above — no separate gh round-trip) and apply solution-authoring's `same-decision-resume` rule to suppress re-firing the gate when the prior `conductor-scope-classification` decision still applies. Emit the canonical resume-note `Reusing prior conductor-scope-classification: {engineer_choice}` when reuse fires.
 
 Skip hub mode entirely when the user invokes a specific slash command (e.g., `/implement #N`, `/plan #N`, `/design #N`, `/code-conductor [text]`) — these execute the named phase directly; smart resume applies at the phase level, not the hub level. Exception: `/orchestrate` is a slash command that explicitly triggers hub mode — treat it as equivalent to `@code-conductor issue #N` (single issue) or `@code-conductor issues #A #B #C` (multi-issue bundle, per the Multi-Issue Bundling section).
 
@@ -155,6 +186,8 @@ Before calling any upstream agent, classify the issue scope to determine the app
 Load `skills/routing-tables/SKILL.md` and evaluate the canonical abbreviated-tier rubric with `Test-GateCriteria -Gate scope_classification -Criteria @{ ... }`. The five abbreviated-tier criteria, the default-to-`full` rule when any criterion is absent, and the authoritative full-vs-abbreviated phase matrix all live in `skills/routing-tables/assets/gate-criteria.json`.
 
 **User override**: Always present both tiers as options and recommend one — the user may choose either regardless of your analysis. This is how scope override (D5) is implemented.
+
+**Orchestration engagement-record emission** (per `## Process` § Orchestration engagement-record contract above): once the engineer responds to the structured question and the tier choice is locked, immediately execute the two-comment burst — post the engagement-record-orchestration-{ID} comment first (containing the YAML payload with `phase: orchestration`, `schema_version: 3`, `capture_session: "normal-orchestration-v3"`, and the load_bearing_decisions list for `conductor-scope-classification`, plus the human-readable Markdown mirror with the `<!-- CE Gate articulation pending per #578 -->` placeholder in the Articulation text field), then post the credit-input-orchestration-{ID} comment with payload `{port: orchestration, adapter: scope-classification, evidence: "issue #{ID}; scope-classification engagement-record emitted"}`. On engagement-record post failure, HALT the burst and do NOT post credit-input. When `same-decision-resume` reuses a prior decision (no fresh classification fired), do NOT emit a new marker — the prior marker remains authoritative under latest-comment-wins.
 
 **Escalation check (after Issue-Planner returns)**: After receiving the plan from Issue-Planner, read the plan YAML frontmatter. If `escalation_recommended: true` is present, present the user via `#tool:vscode/askQuestions` with the `escalation_reason` and offer to re-enter the full pipeline from the appropriate upstream phase (for abbreviated-tier sessions, re-enter at Experience-Owner — the first full-pipeline phase; for full-tier sessions with prior-session partial completion, re-enter at the first non-completed phase — Solution-Designer if Experience-Owner was completed, or Experience-Owner if neither was completed; for full-tier sessions where all phases ran in this session, present the `escalation_reason` and offer re-entry at Solution-Designer — Issue-Planner's scope discovery supersedes the completed SD pass) before proceeding to D9. If the user declines the re-entry offer, proceed to D9 as normal without re-entering any upstream phase.
 
