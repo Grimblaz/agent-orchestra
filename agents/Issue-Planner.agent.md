@@ -183,6 +183,7 @@ When persisting or amending the target phase artifact, you MUST monitor the tota
 
 ````markdown
 <!-- credit-input-plan-{ISSUE_NUMBER} -->
+
 ```yaml
 port: plan
 adapter: work-adapter

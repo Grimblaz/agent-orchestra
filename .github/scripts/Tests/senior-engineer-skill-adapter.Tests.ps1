@@ -85,7 +85,8 @@ Describe 'Issue #552 Senior Engineer skill-as-adapter contracts (grep/YAML/valid
                 ForEach-Object {
                     $adaptersPath = Join-Path $_.FullName 'adapters'
                     if (Test-Path -LiteralPath $adaptersPath) {
-                        Get-ChildItem -LiteralPath $adaptersPath -Filter '*-adapter.md' -File
+                        Get-ChildItem -LiteralPath $adaptersPath -Filter '*-adapter.md' -File |
+                            Where-Object { $_.Name -notmatch '-(auto-na|explicit-skip)-adapter\.md$' }
                     }
                 } |
                 Sort-Object -Property FullName

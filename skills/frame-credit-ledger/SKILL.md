@@ -73,7 +73,7 @@ The hook records `adversarial_pipeline_atomic_marker_present` with one of these 
 
 ## Related Guidance
 
-- [`customer-experience/SKILL.md`](../customer-experience/SKILL.md) — CE Gate is a sibling concern. The ledger reports the credit status of any triggered `ce-gate-*` port; it never *runs* CE Gate. Execution stays with the customer-experience skill and the Experience-Owner agent.
+- [`customer-experience/SKILL.md`](../customer-experience/SKILL.md) — CE Gate is a sibling concern. The ledger reports the credit status of any triggered `ce-gate-*` port; it never _runs_ CE Gate. Execution stays with the customer-experience skill and the Experience-Owner agent.
 - [`plugin-release-hygiene/SKILL.md`](../plugin-release-hygiene/SKILL.md) — separate concern. Release-hygiene fires on plugin entry-point edits and proposes version bumps; the credit-ledger fires on PR creation regardless of whether entry-point files were touched. The two skills are co-resident, not overlapping.
 - [`post-pr-review/SKILL.md`](../post-pr-review/SKILL.md) — separate concern. Post-PR-review runs after merge for archival, documentation, and tagging; the credit-ledger runs before merge as a pre-PR observation pass.
 - [`Documents/Design/frame-architecture.md`](../../Documents/Design/frame-architecture.md) — the **Pre-PR Hook Contract** section is the design reference for the ledger's behavior shape. The **Adapter Model** section governs why this skill is methodology and not a port-filling adapter.

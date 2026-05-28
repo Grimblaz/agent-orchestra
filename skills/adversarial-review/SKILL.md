@@ -26,19 +26,21 @@ Hunt for real defects without inventing them. The goal is to apply a repeatable 
 Adversarial review adapters run one of these stage shapes:
 
 - `prosecution` - Code-Critic gathers evidence and emits a prosecution ledger.
+- `prosecution -> defense` - Code-Critic prosecutes, then Code-Critic defense attempts to disprove the ledger.
 - `prosecution -> defense -> judge` - Code-Critic prosecutes, Code-Critic defense attempts to disprove the ledger, and Code-Review-Response issues the terminal ruling.
-- `proxy-prosecution -> defense -> judge` - external review findings are represented as the prosecution input, then defended and judged through the same terminal sequence.
+- `proxy-prosecution` - external review findings are represented as the prosecution input for GitHub review intake.
+- `judge` - Code-Review-Response rules on already-collected prosecution and defense evidence.
 
 The named adversarial review adapters are:
 
-| Adapter | Adapter class | Port-filling | Pipeline stages | Prosecution passes | Exempt | Notes |
-| --- | --- | --- | --- | --- | --- | --- |
-| `standard` | multi-variant work adapter | Yes, `review` | `prosecution`, `defense`, `judge` | `1`, `2`, `3` | No | Full local adversarial review |
-| `lite` | multi-variant work adapter | Yes, `review` | `prosecution`, `defense`, `judge` | `1` | No | Compact local adversarial review |
-| `judge-only` | multi-variant work adapter | Yes, `review` | `judge` | none | Yes | Terminal ruling over already-collected evidence |
-| `proxy-github` | multi-variant work adapter | Yes, `review` | `proxy-prosecution`, `defense`, `judge` | none | Yes | GitHub review intake represented as prosecution |
-| `post-fix` | multi-variant work adapter | Yes, `post-fix-review` | `prosecution` | `1` | No | Post-fix targeted prosecution only |
-| `design-challenge` | methodology-variant work adapter | No | `prosecution` | `1`, `2`, `3` | No | Non-blocking design challenge methodology reused by design surfaces |
+| Adapter            | Adapter class                    | Port-filling           | Pipeline stages                   | Prosecution passes | Exempt | Notes                                                               |
+| ------------------ | -------------------------------- | ---------------------- | --------------------------------- | ------------------ | ------ | ------------------------------------------------------------------- |
+| `standard`         | multi-variant work adapter       | Yes, `review`          | `prosecution`, `defense`, `judge` | `1`, `2`, `3`      | No     | Full local adversarial review                                       |
+| `lite`             | multi-variant work adapter       | Yes, `review`          | `prosecution`                     | `1`                | No     | Compact local prosecution ledger                                    |
+| `judge-only`       | multi-variant work adapter       | Yes, `review`          | `judge`                           | none               | Yes    | Terminal ruling over already-collected evidence                     |
+| `proxy-github`     | multi-variant work adapter       | Yes, `review`          | `proxy-prosecution`               | none               | Yes    | GitHub review intake represented as proxy prosecution               |
+| `post-fix`         | multi-variant work adapter       | Yes, `post-fix-review` | `prosecution`, `defense`          | `1`                | No     | Post-fix targeted prosecution and defense                           |
+| `design-challenge` | methodology-variant work adapter | No                     | `prosecution`                     | `1`, `2`, `3`      | No     | Non-blocking design challenge methodology reused by design surfaces |
 
 Port-filling adapters declare `provides:` and fill frame ports such as `review` or `post-fix-review`. Methodology-variant adapters do not declare `provides:`; they package a reusable adversarial method for a caller-owned port or phase.
 
@@ -343,10 +345,10 @@ When representing an external review ledger:
 
 ## Frame Ports Filled By This Skill
 
-| Port | Work adapter | Explicit-skip adapter |
-| --- | --- | --- |
-| `review` | [agents/Code-Review-Response.agent.md](../../agents/Code-Review-Response.agent.md); [adapters/standard.md](adapters/standard.md); [adapters/lite.md](adapters/lite.md); [adapters/judge-only.md](adapters/judge-only.md); [adapters/proxy-github.md](adapters/proxy-github.md) | [adapters/review-explicit-skip-adapter.md](adapters/review-explicit-skip-adapter.md) |
-| `post-fix-review` | [adapters/post-fix.md](adapters/post-fix.md) | [adapters/post-fix-review-explicit-skip-adapter.md](adapters/post-fix-review-explicit-skip-adapter.md) |
+| Port              | Work adapter                                                                                                                                                                                                                                                                   | Explicit-skip adapter                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `review`          | [agents/Code-Review-Response.agent.md](../../agents/Code-Review-Response.agent.md); [adapters/standard.md](adapters/standard.md); [adapters/lite.md](adapters/lite.md); [adapters/judge-only.md](adapters/judge-only.md); [adapters/proxy-github.md](adapters/proxy-github.md) | [adapters/review-explicit-skip-adapter.md](adapters/review-explicit-skip-adapter.md)                   |
+| `post-fix-review` | [adapters/post-fix.md](adapters/post-fix.md)                                                                                                                                                                                                                                   | [adapters/post-fix-review-explicit-skip-adapter.md](adapters/post-fix-review-explicit-skip-adapter.md) |
 
 ## Integrity Contract (Decision 6 - per-adapter exemptions)
 
@@ -355,18 +357,18 @@ Each adversarial review adapter declares its expected pipeline shape in YAML fro
 Required keys:
 
 - `pipeline-stages:` ordered stage names such as `prosecution`, `proxy-prosecution`, `defense`, and `judge`
-- `atomic:` boolean indicating whether the declared stages must run as one uninterrupted pipeline
+- `atomic:` `true` when the declared stages must run as one uninterrupted pipeline, or `n/a` for single-stage and exempt adapters
 - `prosecution-passes:` ordered prosecution pass IDs expected for that adapter, or an empty list when the adapter is exempt from numbered prosecution output
 - `exempt:` boolean indicating whether missing numbered prosecution output is expected for that adapter
 
-| Adapter | Pipeline stages | Atomic | Prosecution passes | Exempt | Reason |
-| --- | --- | --- | --- | --- | --- |
-| `standard` | `prosecution`, `defense`, `judge` | Yes | `[1, 2, 3]` | No | Runs full three-pass prosecution before defense and judge |
-| `lite` | `prosecution`, `defense`, `judge` | Yes | `[1]` | No | Runs one compact prosecution pass before defense and judge |
-| `judge-only` | `judge` | No | `[]` | Yes | Re-review scope; prior prosecution and defense evidence already exists |
-| `proxy-github` | `proxy-prosecution`, `defense`, `judge` | Yes | `[]` | Yes | External review intake; proxy prosecution replaces numbered local passes |
-| `post-fix` | `prosecution` | No | `[1]` | No | Runs one targeted prosecution pass after fixes |
-| `design-challenge` | `prosecution` | No | `[1, 2, 3]` | No | Methodology-variant design challenge; no frame port ownership |
+| Adapter            | Pipeline stages                   | Atomic | Prosecution passes | Exempt | Reason                                                                   |
+| ------------------ | --------------------------------- | ------ | ------------------ | ------ | ------------------------------------------------------------------------ |
+| `standard`         | `prosecution`, `defense`, `judge` | `true` | `[1, 2, 3]`        | No     | Runs full three-pass prosecution before defense and judge                |
+| `lite`             | `prosecution`                     | `n/a`  | `[1]`              | No     | Runs one compact prosecution pass                                        |
+| `judge-only`       | `judge`                           | `n/a`  | `[]`               | Yes    | Re-review scope; prior prosecution and defense evidence already exists   |
+| `proxy-github`     | `proxy-prosecution`               | `n/a`  | `[]`               | Yes    | External review intake; proxy prosecution replaces numbered local passes |
+| `post-fix`         | `prosecution`, `defense`          | `true` | `[1]`              | No     | Runs one targeted prosecution pass and defense after fixes               |
+| `design-challenge` | `prosecution`                     | `n/a`  | `[1, 2, 3]`        | No     | Methodology-variant design challenge; no frame port ownership            |
 
 Prosecution pass IDs correspond to the three Code-Critic prosecution modes:
 

@@ -116,14 +116,14 @@ BeforeAll {
         return ''
     }
 
-    function script:Normalize-FlowText {
+    function script:ConvertTo-FlowText {
         param([Parameter(Mandatory)][string]$Text)
 
         $arrow = [string][char]0x2192
         return (($Text -replace $arrow, '->') -replace '\s+', ' ').Trim()
     }
 
-    function script:Get-PassBlocksReferences {
+    function script:Get-LegacyPassBlockReference {
         $roots = @('agents', 'commands', 'skills', 'frame', 'Documents', '.github/scripts', '.github/templates', '.github/workflows')
         $results = [System.Collections.Generic.List[object]]::new()
 
@@ -314,7 +314,7 @@ Describe 'Atomic adversarial pipeline structural contract' {
 
             $stressPrep = script:Get-MarkdownSection -Text $planAuthoring -Heading 'Stress-Test Preparation'
             $designChallenge = script:Get-MarkdownSection -Text $designExploration -Heading 'Design Challenge (3-Pass, Non-Blocking)'
-            $normalizedDesignPath = script:Normalize-FlowText -Text ($solutionDesigner + "`n" + $designExploration)
+            $normalizedDesignPath = script:ConvertTo-FlowText -Text ($solutionDesigner + "`n" + $designExploration)
 
             $stressPrep | Should -Match 'skills/adversarial-review/platforms/claude\.md'
             $planAuthoring | Should -Match 'Plan Stress-Test.*skills/adversarial-review/platforms/claude\.md'
@@ -350,17 +350,21 @@ Describe 'Atomic adversarial pipeline structural contract' {
     Context 'Review credit ledger schema and legacy terminology' {
         It 'Build-ReviewCreditRow reads and emits prosecution-passes and treats post-fix as one prosecution pass' {
             $core = script:Read-RepoText -Path '.github/scripts/lib/frame-credit-ledger-core.ps1'
+            $integrityBlock = script:Get-FunctionBlock -Text $core -FunctionName 'script:Resolve-FCLReviewIntegrityContract' -NextFunctionName 'Build-ReviewCreditRow'
             $functionBlock = script:Get-FunctionBlock -Text $core -FunctionName 'Build-ReviewCreditRow' -NextFunctionName 'Build-ProcessReviewCreditRow'
 
+            $integrityBlock | Should -Not -BeNullOrEmpty
+            $integrityBlock | Should -Match 'prosecution-passes'
+            $integrityBlock | Should -Match "AdapterName\s+-in\s+@\([^\)]*'post-fix'"
+            $integrityBlock | Should -Match "post-fix(?s).*@\(1\)|@\(1\)(?s).*post-fix"
             $functionBlock | Should -Not -BeNullOrEmpty
             $functionBlock | Should -Match 'prosecution-passes'
             $functionBlock | Should -Match "'prosecution-passes'\s*="
-            $functionBlock | Should -Match "AdapterName\s+-eq\s+'post-fix'|AdapterName\s+-in\s+@\([^\)]*'post-fix'"
-            $functionBlock | Should -Match "post-fix(?s).*@\(1\)|@\(1\)(?s).*post-fix"
+            $functionBlock | Should -Match 'Resolve-FCLReviewIntegrityContract'
         }
 
         It 'removes active pass-blocks terminology except explicitly documented compatibility shims' {
-            $legacyReferences = @(script:Get-PassBlocksReferences)
+            $legacyReferences = @(script:Get-LegacyPassBlockReference)
             $unexpected = @($legacyReferences | Where-Object {
                 $_.Context -notmatch '(?is)compat[- ]shim|compatibility shim|legacy compatibility'
             })

@@ -149,7 +149,7 @@ Methodology checkpoints fire unconditionally per D3. The user's only in-band lev
 - `upstream-onboarding`: selecting an alternative option in the structured question
 - `plan-authoring`: the documented `Reject` or equivalent plan-approval option
 
-See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate (the three-leg load-bearing test that defines an engagement-gate methodology checkpoint); `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #576 (engagement-record-{phase}-{ID} marker contract, active for experience/design/plan phases) for the Segment-A maintainer-evidence path.
+See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate (the three-leg load-bearing test that defines an engagement-gate methodology checkpoint); `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #575 and #576 (engagement-record-{phase}-{ID} marker contract, active for experience/design/plan phases) for the Segment-A maintainer-evidence path.
 
 <!-- engagement-gate-non-overridability:end -->
 

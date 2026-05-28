@@ -1111,6 +1111,55 @@ function Resolve-AdversarialPipelineAtomicMarkerPresence {
     }
 }
 
+function script:ConvertFrom-FCLInlineIntegerList {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$ListValue)
+
+    return @(
+        $ListValue -split '[,\s]+' |
+        Where-Object { $_ -match '^\d+$' } |
+        ForEach-Object { [int]$_ }
+    )
+}
+
+function script:Resolve-FCLReviewIntegrityContract {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$AdapterName,
+        [AllowEmptyString()][string]$AdaptersDir = ''
+    )
+
+    $prosecutionPasses = @(1, 2, 3)
+    $integrityStatus = 'passed'
+
+    if (-not [string]::IsNullOrWhiteSpace($AdaptersDir)) {
+        $adapterMd = Join-Path $AdaptersDir "$AdapterName.md"
+        if (Test-Path $adapterMd) {
+            $content = Get-Content $adapterMd -Raw
+            if ($content -match '(?ms)integrity-contract:.*?exempt:\s*(?<val>true|false)') {
+                $isExempt = [System.Boolean]::Parse($matches['val'].Trim())
+                if ($isExempt) {
+                    $prosecutionPasses = @()
+                    $integrityStatus = 'not-applicable'
+                }
+                elseif ($content -match '(?ms)integrity-contract:.*?prosecution-passes:\s*\[(?<passes>[^\]]*)\]') {
+                    $prosecutionPasses = @(script:ConvertFrom-FCLInlineIntegerList -ListValue $matches['passes'])
+                }
+            }
+        }
+    }
+    elseif ($AdapterName -in @('post-fix', 'lite')) {
+        $prosecutionPasses = @(1)
+    }
+    elseif ($AdapterName -in @('judge-only', 'proxy-github')) {
+        $prosecutionPasses = @()
+        $integrityStatus = 'not-applicable'
+    }
+
+    return [pscustomobject]@{
+        ProsecutionPasses = $prosecutionPasses
+        IntegrityStatus   = $integrityStatus
+    }
+}
+
 function Build-ReviewCreditRow {
     [CmdletBinding()]
     param(
@@ -1149,40 +1198,7 @@ function Build-ReviewCreditRow {
     # Integrity contract from adapter frontmatter (optional live lookup).
     # No legacy compatibility shim for pass-blocks is needed here because this
     # builder reads current-tree adapter frontmatter, not historical PR bodies.
-    $prosecutionPasses = @(1, 2, 3)   # default for standard
-    $integrityStatus = 'passed'
-
-    if (-not [string]::IsNullOrWhiteSpace($AdaptersDir)) {
-        $adapterMd = Join-Path $AdaptersDir "$AdapterName.md"
-        if (Test-Path $adapterMd) {
-            $content = Get-Content $adapterMd -Raw
-            if ($content -match '(?ms)integrity-contract:.*?exempt:\s*(?<val>true|false)') {
-                $isExempt = [System.Boolean]::Parse($matches['val'].Trim())
-                if ($isExempt) {
-                    $prosecutionPasses = @()
-                    $integrityStatus = 'not-applicable'
-                }
-                elseif ($content -match '(?ms)integrity-contract:.*?prosecution-passes:\s*\[(?<passes>[^\]]*)\]') {
-                    $passStr = $matches['passes']
-                    $prosecutionPasses = @(
-                        $passStr -split '[,\s]+' |
-                        Where-Object { $_ -match '^\d+$' } |
-                        ForEach-Object { [int]$_ }
-                    )
-                }
-            }
-        }
-    }
-    elseif ($AdapterName -eq 'post-fix') {
-        $prosecutionPasses = @(1)
-    }
-    elseif ($AdapterName -eq 'lite') {
-        $prosecutionPasses = @(1)
-    }
-    elseif ($AdapterName -in @('judge-only', 'proxy-github')) {
-        $prosecutionPasses = @()
-        $integrityStatus = 'not-applicable'
-    }
+    $integrityContract = script:Resolve-FCLReviewIntegrityContract -AdapterName $AdapterName -AdaptersDir $AdaptersDir
 
     $row = [pscustomobject]@{
         port             = 'review'
@@ -1200,8 +1216,8 @@ function Build-ReviewCreditRow {
             })
         }
         'integrity-check' = [pscustomobject]@{
-            'prosecution-passes' = $prosecutionPasses
-            status               = $integrityStatus
+            'prosecution-passes' = $integrityContract.ProsecutionPasses
+            status               = $integrityContract.IntegrityStatus
         }
     }
 

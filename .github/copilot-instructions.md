@@ -12,7 +12,7 @@ Multi-agent workflow system for GitHub Copilot. Provides specialized agents, ski
 
 1. Plugin processes are the default chat experience. Natural-language requests matching the `nl_intent_routing` table route to the corresponding slash command with a visible confirmation; `/raw` opts out.
 2. Recommended order: (1) VS Code dropdown for VS Code users; (2) slash commands for both platforms; (3) natural-language with auto-routing confirmation; (4) @-mention is NOT recommended (unreliable in every plugin surface tested).
-3. Slash commands diverge between Claude (commands/*.md) and Copilot (.github/prompts/*.prompt.md); the nl_intent_routing table carries both column names so the canonical command name is platform-portable.
+3. Slash commands diverge between Claude (commands/_.md) and Copilot (.github/prompts/_.prompt.md); the nl_intent_routing table carries both column names so the canonical command name is platform-portable.
 4. Source of truth: `skills/routing-tables/assets/routing-config.json` anchors natural-language routing in `nl_intent_routing`.
 5. First match per command-family per conversation uses `#tool:vscode/askQuestions` with options `Run /X for this (Recommended)`, `Continue as raw chat`, and `Don't ask again for this command-family this conversation`; use Copilot-native visible confirmation wording, with final phrasing locked during CE Gate capture. Subsequent same-family matches use inline confirmation: `Routing to /X — say /raw to opt out, otherwise proceed.`
 6. Routing detection runs only on top-level user messages outside an active slash-command turn and outside subagent dispatches, and only after the session-startup run-once marker is recorded.
@@ -85,7 +85,7 @@ User pacing directives — including but not limited to "work without stopping,"
 
 Methodology checkpoints fire unconditionally. The user's only in-band lever to skip an engagement-gate question is the option built into that specific question (e.g., `solution-authoring`'s `Decline engagement — proceed without classification`, `upstream-onboarding`'s alternative-option selection, `plan-authoring`'s `Reject` plan-approval path).
 
-See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate; `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: SMC-20 + `skills/engagement-record-emission/SKILL.md` (engagement-record-{phase}-{ID} marker contract; #576 v1.2) for the Segment-A maintainer-evidence path.
+See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate; `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #575 and SMC-20 + `skills/engagement-record-emission/SKILL.md` (engagement-record-{phase}-{ID} marker contract; #576 v1.2) for the Segment-A maintainer-evidence path.
 
 <!-- engagement-gate-non-overridability:end -->
 

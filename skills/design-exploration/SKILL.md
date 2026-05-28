@@ -1,5 +1,4 @@
 ---
-
 name: design-exploration
 description: "Reusable technical design exploration methodology. Use when researching design options, grounding UI changes in the current experience, or converging trade-offs into one recommended design direction. DO NOT USE FOR: GitHub issue update ownership, adversarial design challenge orchestration, or approval-policy enforcement (keep those in Solution-Designer.agent.md)"
 ---
@@ -142,8 +141,8 @@ Before posting the design completion marker, follow `agents/Solution-Designer.ag
 
 ## Frame Ports Filled By This Skill
 
-| Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
-| --- | --- | --- | --- |
+| Port     | Work adapter                                                                 | Auto-N/A adapter                                                         | Explicit-skip adapter                                                                |
+| -------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | `design` | [agents/Solution-Designer.agent.md](../../agents/Solution-Designer.agent.md) | [adapters/design-auto-na-adapter.md](adapters/design-auto-na-adapter.md) | [adapters/design-explicit-skip-adapter.md](adapters/design-explicit-skip-adapter.md) |
 
 ## Platform-specific invocation

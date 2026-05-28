@@ -126,7 +126,7 @@ Render as a block-quoted paragraph immediately after the `audit_rationale` sente
 
 **Exemplar** (D-load-directive, from #571 R1+R2):
 
-*Audit rationale: The load-order direction for solution-authoring vs upstream-onboarding is not settled in any prior phase comment or umbrella decision — no named-decision row pins this ordering, so the non-inheritance leg holds.*
+_Audit rationale: The load-order direction for solution-authoring vs upstream-onboarding is not settled in any prior phase comment or umbrella decision — no named-decision row pins this ordering, so the non-inheritance leg holds._
 
 > **Decision brief — D-load-directive**: The `## Process` section of each agent body is where load-order instructions land. The decision is whether solution-authoring fires before upstream-onboarding or after — this determines whether the engagement gate runs before the brief surfaces inherited decisions. If upstream-onboarding fired first, the gate would intercept questions about content the engineer just read from someone else's output — manufacturing load-bearing signal on settled content.
 
@@ -194,11 +194,11 @@ Render at phase exit after all load-bearing decisions are locked:
 
 ## Gotchas
 
-| Trigger | Gotcha | Fix |
-| --- | --- | --- |
+| Trigger                                              | Gotcha                                                                                                | Fix                                                                                                       |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | Treating a pacing directive as an engagement decline | The agent silently skips a load-bearing classification gate even though no explicit decline was given | Fire the structured question unless the engineer selects the explicit decline option or writes `decline:` |
-| A routine decision is treated as load-bearing | The agent asks for engagement on content already settled by an inherited artifact | Re-audit Leg 2 against the citation and emit the appropriate recommendation shift |
-| A load-bearing decision is treated as routine | The durable artifact changes without surfacing the maintainer choice | Rerun all three gate legs and ask before recording the final decision |
+| A routine decision is treated as load-bearing        | The agent asks for engagement on content already settled by an inherited artifact                     | Re-audit Leg 2 against the citation and emit the appropriate recommendation shift                         |
+| A load-bearing decision is treated as routine        | The durable artifact changes without surfacing the maintainer choice                                  | Rerun all three gate legs and ask before recording the final decision                                     |
 
 ## Frame Ports Filled By This Skill
 

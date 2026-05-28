@@ -80,9 +80,7 @@ catch {
 }
 
 # ---------------------------------------------------------------------------
-# Read a single scalar field from an adapter's frontmatter block. Strips a
-# pair of balanced single or double quotes when present. Returns $null when
-# the field is absent.
+# Read a single scalar field from an adapter's frontmatter block.
 # ---------------------------------------------------------------------------
 function script:Get-FCLAdapterFrontmatterScalar {
     param(
@@ -90,18 +88,7 @@ function script:Get-FCLAdapterFrontmatterScalar {
         [Parameter(Mandatory)][string]$Field
     )
 
-    $pattern = '(?m)^\s*' + [regex]::Escape($Field) + '\s*:\s*(?<v>.+?)\s*$'
-    $m = [regex]::Match($Frontmatter, $pattern)
-    if (-not $m.Success) { return $null }
-
-    $value = $m.Groups['v'].Value.Trim()
-    if ($value.Length -ge 2) {
-        $first = $value[0]; $last = $value[$value.Length - 1]
-        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
-            $value = $value.Substring(1, $value.Length - 2)
-        }
-    }
-    return $value
+    return script:Get-FCLScalar -Block $Frontmatter -Name $Field
 }
 
 # ---------------------------------------------------------------------------
@@ -1314,9 +1301,9 @@ function Invoke-FrameCreditLedger {
     }
     $currentBranch = ''
     try { $currentBranch = [string](& git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null) } catch { $currentBranch = '' }
-    $atomicMarkerIssueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $prBody -Branch $currentBranch
-    if ($null -ne $atomicMarkerIssueNumber) {
-        $issueCommentsForAtomicMarker = @(script:Get-FCLIssueCommentsForSpine -IssueNumber ([int]$atomicMarkerIssueNumber))
+    $atomicMarkerIssueId = script:Resolve-FCLLinkedIssueNumber -PrBody $prBody -Branch $currentBranch
+    if ($null -ne $atomicMarkerIssueId) {
+        $issueCommentsForAtomicMarker = @(script:Get-FCLIssueCommentsForSpine -IssueNumber ([int]$atomicMarkerIssueId))
         if ($issueCommentsForAtomicMarker.Count -gt 0) {
             $atomicMarkerSearchText += "`n" + (($issueCommentsForAtomicMarker | ForEach-Object { script:Get-FCLCommentBody -Comment $_ }) -join "`n")
         }
@@ -1362,7 +1349,7 @@ function Invoke-FrameCreditLedger {
 
     # Build per-port reports.
     $portReports = [System.Collections.Generic.List[object]]::new()
-    $applicableAtomicAdapterSeen = $false
+    $hasApplicableAtomicAdapter = $false
 
     if (@($ports).Count -gt 0) {
         foreach ($port in $ports) {
@@ -1373,7 +1360,7 @@ function Invoke-FrameCreditLedger {
                 if ([string]$adapter.IntegrityAtomic -ne 'true') { continue }
                 $adapterName = [string]$adapter.Name
                 if ($applicableMap.ContainsKey($adapterName) -and [string]$applicableMap[$adapterName] -eq 'true') {
-                    $applicableAtomicAdapterSeen = $true
+                    $hasApplicableAtomicAdapter = $true
                     break
                 }
             }
@@ -1395,9 +1382,9 @@ function Invoke-FrameCreditLedger {
     }
 
     $atomicMarkerStatus = Resolve-AdversarialPipelineAtomicMarkerPresence `
-        -AdapterAtomicState $applicableAtomicAdapterSeen `
+        -AdapterAtomicState $hasApplicableAtomicAdapter `
         -Text $atomicMarkerSearchText `
-        -IssueId $(if ($null -eq $atomicMarkerIssueNumber) { '' } else { [string]$atomicMarkerIssueNumber })
+        -IssueId $(if ($null -eq $atomicMarkerIssueId) { '' } else { [string]$atomicMarkerIssueId })
     $atomicMarkerStatusValue = [string]$atomicMarkerStatus.adversarial_pipeline_atomic_marker_present
     if (-not [string]::IsNullOrWhiteSpace([string]$atomicMarkerStatus.warning)) {
         [Console]::Error.WriteLine("frame-credit-ledger: $($atomicMarkerStatus.warning)")

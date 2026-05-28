@@ -101,7 +101,7 @@ Phase summary: N finding(s) classified, M load-bearing, K dismissed. Decisions t
 ```yaml
 finding_dispositions:
   schema_version: 1
-  passes_run: [{passes_run}]
+  passes_run: [{ passes_run }]
   entries:
     - finding_id: F1
       pass: 1
@@ -130,6 +130,7 @@ When persisting this phase, you MUST author the `## Named Decisions` H2 section 
 - **Articulation status**: pending
 
 If a recommendation shift occurred in this session, you MAY append:
+
 - **Recommendation shift trigger**: {engineer-pushback | new-evidence | classification-re-audit | classification-re-audit-routine}
 
 If zero load-bearing decisions were captured, the section MUST contain the literal sentence "No load-bearing decisions captured in this session." between sentinels.
@@ -149,6 +150,7 @@ When persisting or amending the target phase artifact, you MUST monitor the tota
 
 ````markdown
 <!-- credit-input-design-{ISSUE_NUMBER} -->
+
 ```yaml
 port: design
 adapter: work-adapter

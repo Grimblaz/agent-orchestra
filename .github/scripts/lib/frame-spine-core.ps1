@@ -21,6 +21,22 @@ param(
 $script:FSCSupportedSpineSchemaVersions = [string[]]@('1', '2')
 $script:FSCPortTokenPattern = '^(?<step>s\d+)(?:#cycle:(?<cycle>\d+))?(?<terminal>#terminal)?$'
 
+function script:Get-FSCSupportedSpineSchemaVersions {
+    if ($null -eq $script:FSCSupportedSpineSchemaVersions -or @($script:FSCSupportedSpineSchemaVersions).Count -eq 0) {
+        $script:FSCSupportedSpineSchemaVersions = [string[]]@('1', '2')
+    }
+
+    return , ([string[]]$script:FSCSupportedSpineSchemaVersions)
+}
+
+function script:Get-FSCPortTokenPattern {
+    if ([string]::IsNullOrWhiteSpace($script:FSCPortTokenPattern)) {
+        $script:FSCPortTokenPattern = '^(?<step>s\d+)(?:#cycle:(?<cycle>\d+))?(?<terminal>#terminal)?$'
+    }
+
+    return [string]$script:FSCPortTokenPattern
+}
+
 function script:ConvertTo-FSCNormalizedText {
     param([AllowNull()][string]$Text)
 
@@ -116,7 +132,7 @@ function script:ConvertFrom-FSCPortToken {
         [Parameter(Mandatory)][hashtable]$SliceByStepId
     )
 
-    $match = [regex]::Match($TokenText, $script:FSCPortTokenPattern)
+    $match = [regex]::Match($TokenText, (script:Get-FSCPortTokenPattern))
     if (-not $match.Success) { return $null }
 
     $stepId = $match.Groups['step'].Value
@@ -163,7 +179,7 @@ function script:ConvertFrom-FSCSpineYamlInternal {
         if ([string]::IsNullOrWhiteSpace($normalized)) { return $null }
 
         $schemaVersion = script:Get-FSCScalarValue -Block $normalized -Name 'spine_schema_version'
-        if ($schemaVersion -notin $script:FSCSupportedSpineSchemaVersions) { return $null }
+        if ($schemaVersion -notin (script:Get-FSCSupportedSpineSchemaVersions)) { return $null }
 
         $generatedAtValue = script:Get-FSCScalarValue -Block $normalized -Name 'generated_at'
         if ($null -eq $generatedAtValue) { return $null }
