@@ -1,0 +1,14 @@
+{
+  "finding_id": "F_cross_cut",
+  "finding_text": "Requires modifying files across four separate directories.",
+  "finding_file_set": [
+    "agents/Code-Smith.agent.md",
+    "skills/implementation-discipline/SKILL.md",
+    "commands/plan.md",
+    "hooks/pre-commit.ps1"
+  ],
+  "pr_file_set": ["agents/Code-Conductor.agent.md"],
+  "ac_refs": [],
+  "expected_criterion_ids": ["S-cross-cutting", "S-different-surface"],
+  "expected_verdict": "DEFERRED-SIGNIFICANT (structural)"
+}

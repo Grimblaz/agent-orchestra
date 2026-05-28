@@ -4,6 +4,8 @@ description: "Run GitHub review intake through Code-Conductor, including proxy p
 argument-hint: "[optional PR number; auto-resolves active PR or asks]"
 ---
 
+<!-- Read: agents/Code-Review-Response.agent.md -->
+
 # /review-github
 
 Run the Code-Conductor GitHub review intake path for: {{input}}

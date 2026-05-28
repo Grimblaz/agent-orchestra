@@ -95,6 +95,7 @@ Handoffs between phases use durable GitHub issue comments rather than session-lo
 - `<!-- engagement-record-experience-{ID} -->` — durable engagement audit for /experience phase: load-bearing decisions, audit rationale, articulation text persisted alongside the experience-owner-complete marker for cross-session decision memory (SMC-20)
 - `<!-- engagement-record-design-{ID} -->` — durable engagement audit for /design phase: load-bearing decisions persisted alongside the design-phase-complete marker; consumed by solution-authoring's same-decision-resume rule on phase re-entry (SMC-20)
 - `<!-- engagement-record-plan-{ID} -->` — durable engagement audit for /plan phase: load-bearing decisions persisted alongside the plan-issue marker; consumed by solution-authoring's same-decision-resume rule on phase re-entry (SMC-20)
+- `<!-- engagement-record-orchestration-{ID} -->` — durable engagement audit for orchestration touchpoint (`scope-classification`): persisted as an issue comment when scope-classification resolves; payload Markdown mirror co-located in the comment; consumed by solution-authoring's same-decision-resume rule on Code-Conductor re-entry (SMC-20)
 - `<!-- design-issue-{ID} -->` — durable design snapshot handoff used for D9 pause/resume and full-pipeline smart resume
 - `<!-- plan-issue-{ID} -->` — approved plan persisted
 - `<!-- frame-credit-ledger-{PR} -->` — warn-only frame credit-ledger comment posted by the pre-PR hook (sub-issue #429 of frame umbrella #425); idempotently upserted on every PR after `gh pr create`
@@ -138,7 +139,7 @@ claude plugin uninstall <plugin@marketplace>
 
 User pacing directives — including but not limited to "work without stopping," "don't pause to ask," "make the reasonable call," and semantically equivalent phrasing — apply to **preference-clarifying questions**: questions the agent would otherwise ask to gather requirements, options, or non-load-bearing preferences. Pacing directives do **NOT** apply to **engagement-gate methodology checkpoints**:
 
-- `solution-authoring` classification gates
+- `solution-authoring` classification gates (including Code-Conductor's `scope-classification` touchpoint per the Code-Conductor body's `### Scope Classification Gate` section; pacing directives do not suppress orchestration touchpoints; same-decision-resume is the cross-session suppression mechanism for prior settled decisions)
 - `upstream-onboarding` standards-check questions
 - `plan-authoring` plan-approval prompts
 - design-convergence decisions
@@ -149,7 +150,7 @@ Methodology checkpoints fire unconditionally per D3. The user's only in-band lev
 - `upstream-onboarding`: selecting an alternative option in the structured question
 - `plan-authoring`: the documented `Reject` or equivalent plan-approval option
 
-See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate (the three-leg load-bearing test that defines an engagement-gate methodology checkpoint); `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #575 and #576 (engagement-record-{phase}-{ID} marker contract, active for experience/design/plan phases) for the Segment-A maintainer-evidence path.
+See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate (the three-leg load-bearing test that defines an engagement-gate methodology checkpoint); `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #575 and #576 (engagement-record-{phase}-{ID} marker contract, active for experience/design/plan/orchestration phases) for the Segment-A maintainer-evidence path.
 
 <!-- engagement-gate-non-overridability:end -->
 

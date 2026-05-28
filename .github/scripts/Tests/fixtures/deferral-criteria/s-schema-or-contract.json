@@ -1,0 +1,9 @@
+{
+  "finding_id": "F_schema_contract",
+  "finding_text": "This changes the persisted database schema and downstream interface contract.",
+  "finding_file_set": ["skills/routing-tables/assets/routing-config.json"],
+  "pr_file_set": ["agents/Code-Conductor.agent.md"],
+  "ac_refs": [],
+  "expected_criterion_ids": ["S-schema-or-contract", "S-different-surface"],
+  "expected_verdict": "DEFERRED-SIGNIFICANT (structural)"
+}

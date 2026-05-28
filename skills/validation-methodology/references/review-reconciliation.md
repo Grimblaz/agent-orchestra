@@ -115,7 +115,7 @@ During judgment and execution planning:
 - If a proposed change is a clear improvement, do it.
 - If improvement is uncertain or the change is not an improvement, reject it.
 - Out-of-scope/non-blocking improvements should still be done when small.
-- If an out-of-scope/non-blocking improvement is significant (>1 day), create a follow-up issue automatically and continue with in-scope fixes.
+- If an out-of-scope/non-blocking improvement matches at least one structural criterion (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment` — see `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`), create a follow-up issue automatically (via `skills/safe-operations/scripts/Add-FollowUpIssue.ps1`) and continue with in-scope fixes.
 
 ### Post-Judgment Fix Routing
 
@@ -123,11 +123,11 @@ After Code-Review-Response emits the judgment and score summary, route accepted 
 
 #### AC Cross-Check Gate
 
-Before treating any DEFERRED-SIGNIFICANT or REJECT categorization as final, read the parent issue's acceptance criteria (`gh issue view {N} --json body`). If no parent issue exists (e.g., standalone GitHub review PR), skip this gate. If the finding relates to an explicit AC item, reclassify as ✅ ACCEPT regardless of effort estimate. Acceptance criteria violations cannot be deferred or rejected - they are incomplete features.
+Before treating any `DEFERRED-SIGNIFICANT (structural)` or REJECT categorization as final, read the parent issue's acceptance criteria (`gh issue view {N} --json body`). If no parent issue exists (e.g., standalone GitHub review PR), skip this gate. If the finding relates to an explicit AC item, reclassify as `✅ ACCEPT (fix inline)` regardless of structural-criteria match. Acceptance criteria violations cannot be deferred or rejected - they are incomplete features.
 
-#### Effort Estimation Checklist (Cross-Reference)
+#### Structural-Criteria Checklist (Cross-Reference)
 
-Default to <1 day. Only defer if ALL of these apply: 5+ files, new subsystem design, unknown patterns, non-incremental testing. Quick checklist - any of these alone means <1 day: adding data to existing maps/constants, integrating data added in this PR, adding a field + consumers, modifying 1-3 functions in 1-3 files, adding validation/filtering, fixing a single-system design flaw. (Authoritative source: Code-Review-Response Effort Estimation section.)
+Default to `✅ ACCEPT (fix inline)`. Only defer when the finding matches at least one structural criterion in the canonical taxonomy (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment`). Quick checklist - any of these alone means inline-eligible: adding data to existing maps/constants, integrating data added in this PR, adding a field + consumers, modifying 1-3 functions in 1-3 files, adding validation/filtering, fixing a single-system design flaw. (Authoritative source: `agents/Code-Review-Response.agent.md` § Structural Deferral Guidelines; predicate implementation: `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`.)
 
 #### Auto-Tracking
 

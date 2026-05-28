@@ -181,10 +181,19 @@ Describe '4-body load directive' {
         }
     }
 
-    It 'AC11.c — Code-Conductor body explicitly enumerates scope-classification and D9-checkpoint touchpoints' {
+    It 'AC11.c — Code-Conductor body explicitly enumerates scope-classification touchpoint' {
         $cc = $script:AgentFiles | Where-Object { $_.Name -like '*Code-Conductor*' }
         $cc.Content | Should -Match 'scope-classification' -Because 'Code-Conductor must enumerate scope-classification as a content-authoring touchpoint near the directive'
-        $cc.Content | Should -Match 'D9-checkpoint' -Because 'Code-Conductor must enumerate D9-checkpoint as a content-authoring touchpoint near the directive'
+    }
+
+    It 'AC11.c-neg — Code-Conductor body does NOT enumerate D9-checkpoint as a solution-authoring touchpoint (D-577 narrowing lock)' {
+        $cc = $script:AgentFiles | Where-Object { $_.Name -like '*Code-Conductor*' }
+        # The line-117 touchpoint sentence must not list D9-checkpoint as a content-authoring touchpoint.
+        # D9 remains referenced elsewhere in the body (Allowed D9 values, D9 Model-Switch Checkpoint section) —
+        # this assertion targets only the solution-authoring touchpoint enumeration sentence.
+        $touchpointSentence = [regex]::Match($cc.Content, 'Content-authoring touchpoints where the solution-authoring classification gate applies in this agent:[^.]+\.').Value
+        $touchpointSentence | Should -Not -BeNullOrEmpty -Because 'touchpoint enumeration sentence must exist in the body'
+        $touchpointSentence | Should -Not -Match 'D9-checkpoint' -Because 'D-577 narrowed the touchpoint set to scope-classification only; D9-checkpoint must not reappear without an explicit re-audit'
     }
 }
 

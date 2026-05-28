@@ -18,7 +18,7 @@
     The GitHub issue ID. Mandatory.
 
 .PARAMETER Phase
-    Optional. If specified, must be 'experience', 'design', or 'plan'. Filters records to this phase.
+    Optional. If specified, must be 'experience', 'design', 'plan', or 'orchestration'. Filters records to this phase.
 
 .PARAMETER Repo
     Optional. The GitHub repository in owner/name format. Defaults to current repo.
@@ -50,7 +50,7 @@ function Read-EngagementRecords {
         [int]$IssueNumber,
 
         [Parameter(Mandatory = $false)]
-        [ValidateSet('experience', 'design', 'plan')]
+        [ValidateSet('experience', 'design', 'plan', 'orchestration')]
         [string]$Phase,
 
         [Parameter(Mandatory = $false)]
@@ -195,17 +195,27 @@ function Read-EngagementRecords {
 
             # CF13b: wrap per-marker schema/enum validations so a single malformed marker does not abort the scan.
             # Exception: unknown schema_version MUST propagate (SKILL.md Schema Versioning Policy).
-            if (-not $isLegacy -and $null -ne $parsedYaml.schema_version -and $parsedYaml.schema_version -notin @(1, 2)) {
+            if (-not $isLegacy -and $null -ne $parsedYaml.schema_version -and $parsedYaml.schema_version -notin @(1, 2, 3)) {
                 throw [System.InvalidOperationException]::new("unknown schema_version: $($parsedYaml.schema_version)")
             }
 
             try {
                 # Enum validation for non-legacy markers
                 if (-not $isLegacy) {
-                    # Supported non-legacy phases: experience, design, and plan (plan requires schema_version >= 2).
-                    if ($parsedYaml.phase -notin @('experience', 'design', 'plan') -or
+                    # Supported non-legacy phases: experience, design, plan, and orchestration (plan requires schema_version >= 2).
+                    if ($parsedYaml.phase -notin @('experience', 'design', 'plan', 'orchestration') -or
                         ($parsedYaml.phase -eq 'plan' -and [int]$parsedYaml.schema_version -lt 2)) {
                         throw [System.InvalidOperationException]::new("Invalid phase value: $($parsedYaml.phase) (phase 'plan' requires schema_version >= 2)")
+                    }
+                    # NOTE (review P1.F1/P2.F4): this throw fires inside the CF13b try/catch at lines 202-271 and is caught
+                    # as Write-Warning, then 'continue'd past. The test `It 'v2-orchestration rejection'` in
+                    # conductor-engagement-record.Tests.ps1 uses -WarningAction Stop to convert the swallowed warning to a
+                    # terminating action, asserting via wildcard match against the warning text. This is structurally fragile;
+                    # a future PR should either (a) move this throw outside the per-marker try/catch (matching the
+                    # unknown-schema_version throw at line 198 pattern, but losing cross-phase isolation) or (b) refactor the
+                    # test to use -WarningVariable and assert the warning record content directly. Tracked as routine debt.
+                    if ($parsedYaml.phase -eq 'orchestration' -and [int]$parsedYaml.schema_version -lt 3) {
+                        throw [System.InvalidOperationException]::new("orchestration phase requires schema_version >= 3")
                     }
                 }
 
@@ -222,7 +232,8 @@ function Read-EngagementRecords {
                         # Validate decision-level enums in non-legacy mode
                         if (-not $isLegacy) {
                             # Slug validation (enforced for schema_version 2+)
-                            if ($parsedYaml.schema_version -eq 2 -and -not (Test-EngagementRecordSlug -DecisionId $dec.decision_id)) {
+                            # powershell-yaml parses unquoted integers as [int]; -ge 2 is numeric here.
+                            if ($parsedYaml.schema_version -ge 2 -and -not (Test-EngagementRecordSlug -DecisionId $dec.decision_id)) {
                                 throw [System.InvalidOperationException]::new("Invalid decision_id slug: '$($dec.decision_id)' - $script:DecisionIdSlugDescription (must match $script:DecisionIdSlugRegex)")
                             }
                             if ($null -ne $dec.classification -and $dec.classification -notin @('load-bearing', 'routine')) {
@@ -230,6 +241,11 @@ function Read-EngagementRecords {
                             }
                             if ($null -ne $dec.articulation_status -and $dec.articulation_status -notin @('pending', 'complete', 'incomplete')) {
                                 throw [System.InvalidOperationException]::new("Invalid articulation_status value: $($dec.articulation_status)")
+                            }
+                            # Validate recommendation_shift_trigger when present (optional field)
+                            if ($null -ne $dec.recommendation_shift_trigger -and
+                                $dec.recommendation_shift_trigger -notin @('engineer-pushback', 'new-evidence', 'classification-re-audit', 'classification-re-audit-routine')) {
+                                throw [System.InvalidOperationException]::new("Invalid recommendation_shift_trigger value: $($dec.recommendation_shift_trigger) (allowed: engineer-pushback | new-evidence | classification-re-audit | classification-re-audit-routine)")
                             }
                         }
 

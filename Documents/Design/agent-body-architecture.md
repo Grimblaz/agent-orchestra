@@ -124,6 +124,7 @@ platform-neutral whenever the behavior itself is not platform-specific.
 
 | # | Decision | Current choice | Rationale |
 |---|----------|----------------|-----------|
+| D-577 | Code-Conductor solution-authoring touchpoint set | Narrowed to scope-classification | Restricts the orchestrator's load-bearing decisions to scope-classification, decoupling D9-checkpoint from solution-authoring to prevent cognitive-surrender UX overhead on routine touchpoints |
 | D3 | Platform-specific wording location | Per-agent platform footer, Claude shell mapping table, or command wrapper | Keeps shared role sections tool-neutral while making platform bindings visible at the call site |
 | D4 | BDD classification rubric in Issue-Planner | Keep inline and synchronized with `bdd-scenarios` | The table is consulted repeatedly during plan authoring, and a skill-load interruption would add latency without reducing synchronization work |
 | D7 | Command dispatch strategy | Direct `/experience`, `/design`, `/plan`, and `/orchestrate` use inline role adoption on Claude; downstream specialist work uses `Agent` dispatch | Inline commands preserve live user-question pacing, while specialist dispatch keeps orchestration single-level and preserves the shared-body contract |
