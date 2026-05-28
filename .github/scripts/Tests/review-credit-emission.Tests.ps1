@@ -340,6 +340,48 @@ Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)'
         @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1)
     }
 
+    It 'integrity-check.prosecution-passes is read when live adapter omits exempt' {
+        $adapterDir = Join-Path $TestDrive 'adapters-no-exempt'
+        New-Item -ItemType Directory -Path $adapterDir -Force | Out-Null
+        @'
+---
+name: review-lite-no-exempt
+integrity-contract:
+  pipeline-stages: [prosecution]
+  atomic: n/a
+  prosecution-passes: [1]
+---
+
+# Review Lite No Exempt
+'@ | Set-Content -Path (Join-Path $adapterDir 'lite.md') -Encoding UTF8
+
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'lite' -AdaptersDir $adapterDir
+
+        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1)
+        $row.'integrity-check'.status | Should -Be 'passed'
+    }
+
+    It 'falls back to adapter-name defaults when supplied adapter file is missing or unparsable' {
+        $missingAdapterDir = Join-Path $TestDrive 'missing-adapters'
+        New-Item -ItemType Directory -Path $missingAdapterDir -Force | Out-Null
+
+        $missingRow = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'post-fix' -AdaptersDir $missingAdapterDir
+
+        @($missingRow.'integrity-check'.'prosecution-passes') | Should -Be @(1)
+
+        $unparsableAdapterDir = Join-Path $TestDrive 'unparsable-adapters'
+        New-Item -ItemType Directory -Path $unparsableAdapterDir -Force | Out-Null
+        'not yaml frontmatter' | Set-Content -Path (Join-Path $unparsableAdapterDir 'judge-only.md') -Encoding UTF8
+
+        $unparsableRow = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllDefense `
+            -AdapterName 'judge-only' -AdaptersDir $unparsableAdapterDir
+
+        @($unparsableRow.'integrity-check'.'prosecution-passes').Count | Should -Be 0
+        $unparsableRow.'integrity-check'.status | Should -Be 'not-applicable'
+    }
+
     It 'integrity-check.status is not-applicable for exempt adapters (judge-only)' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllDefense `
             -AdapterName 'judge-only' -AdaptersDir $script:AdaptersPath

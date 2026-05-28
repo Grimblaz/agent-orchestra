@@ -1130,28 +1130,37 @@ function script:Resolve-FCLReviewIntegrityContract {
     $prosecutionPasses = @(1, 2, 3)
     $integrityStatus = 'passed'
 
+    if ($AdapterName -in @('post-fix', 'lite')) {
+        $prosecutionPasses = @(1)
+    }
+    elseif ($AdapterName -in @('judge-only', 'proxy-github')) {
+        $prosecutionPasses = @()
+        $integrityStatus = 'not-applicable'
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($AdaptersDir)) {
         $adapterMd = Join-Path $AdaptersDir "$AdapterName.md"
-        if (Test-Path $adapterMd) {
-            $content = Get-Content $adapterMd -Raw
-            if ($content -match '(?ms)integrity-contract:.*?exempt:\s*(?<val>true|false)') {
-                $isExempt = [System.Boolean]::Parse($matches['val'].Trim())
+        if (Test-Path -LiteralPath $adapterMd) {
+            try {
+                $content = Get-Content -LiteralPath $adapterMd -Raw -ErrorAction Stop
+                $isExempt = $false
+                if ($content -match '(?ms)integrity-contract:.*?exempt:\s*(?<val>true|false)') {
+                    $isExempt = [System.Boolean]::Parse($matches['val'].Trim())
+                }
+
                 if ($isExempt) {
                     $prosecutionPasses = @()
                     $integrityStatus = 'not-applicable'
                 }
                 elseif ($content -match '(?ms)integrity-contract:.*?prosecution-passes:\s*\[(?<passes>[^\]]*)\]') {
                     $prosecutionPasses = @(script:ConvertFrom-FCLInlineIntegerList -ListValue $matches['passes'])
+                    $integrityStatus = 'passed'
                 }
             }
+            catch {
+                $null = $_
+            }
         }
-    }
-    elseif ($AdapterName -in @('post-fix', 'lite')) {
-        $prosecutionPasses = @(1)
-    }
-    elseif ($AdapterName -in @('judge-only', 'proxy-github')) {
-        $prosecutionPasses = @()
-        $integrityStatus = 'not-applicable'
     }
 
     return [pscustomobject]@{

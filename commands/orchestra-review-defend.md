@@ -21,6 +21,6 @@ Run only the Code-Critic defense stage against an existing prosecution ledger an
 
 **Shared dispatcher checklist**:
 
-Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller using the defense-singleton flow: one Code-Critic defense dispatch, then stop before judge. Pass the prosecution ledger, review target context, active issue id if available, and review-state persistence target as the pre-dispatch context. Return the defense report unchanged.
+Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller using a defense-only override of the `standard` adapter contract: dispatch one Code-Critic defense pass with `Review mode selector: "Use defense review perspectives"` against the supplied prosecution ledger, then stop before judge. Pass the prosecution ledger, review target context, active issue id if available, and review-state persistence target as the pre-dispatch context. Return the defense report unchanged.
 
 ARGUMENTS: $ARGUMENTS

@@ -370,7 +370,7 @@ Required keys:
 | `post-fix`         | `prosecution`, `defense`          | `true` | `[1]`              | No     | Runs one targeted prosecution pass and defense after fixes               |
 | `design-challenge` | `prosecution`                     | `n/a`  | `[1, 2, 3]`        | No     | Methodology-variant design challenge; no frame port ownership            |
 
-Prosecution pass IDs correspond to the three Code-Critic prosecution modes:
+For the `design-challenge` methodology variant only, prosecution pass IDs correspond to these design/product-alignment Code-Critic prosecution modes. This mapping is not global and does not override the `standard`, `lite`, or `post-fix` code-review adapter contracts listed above.
 
 - **Pass 1**: design review perspectives (`Review mode selector: "Use design review perspectives"`)
 - **Pass 2**: implementation prerequisites, CE Gate, persistence, cross-tool (`Review mode selector: "Use design review perspectives"` second pass)

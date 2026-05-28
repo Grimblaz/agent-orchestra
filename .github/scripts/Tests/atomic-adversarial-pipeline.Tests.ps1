@@ -69,6 +69,16 @@ BeforeAll {
         return $Map.PSObject.Properties[$Key].Value
     }
 
+    function script:Assert-YamlBooleanTrue {
+        param(
+            [object]$Value,
+            [Parameter(Mandatory)][string]$Because
+        )
+
+        ($Value -is [bool]) | Should -BeTrue -Because "$Because; value must be a YAML boolean, not a truthy string"
+        $Value | Should -BeExactly $true -Because $Because
+    }
+
     function script:ConvertTo-ValueArray {
         param([object]$Value)
 
@@ -222,7 +232,7 @@ Describe 'Atomic adversarial pipeline structural contract' {
 
                 $stages = @(script:ConvertTo-ValueArray -Value (script:Get-YamlValue -Map $contract -Key 'pipeline-stages'))
                 if ($stages.Count -gt 1) {
-                    [bool](script:Get-YamlValue -Map $contract -Key 'atomic') | Should -BeTrue -Because "$adapterName spans multiple stages and must be atomic"
+                    script:Assert-YamlBooleanTrue -Value (script:Get-YamlValue -Map $contract -Key 'atomic') -Because "$adapterName spans multiple stages and must be atomic"
                 }
             }
         }
