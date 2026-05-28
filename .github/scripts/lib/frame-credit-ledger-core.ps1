@@ -2294,18 +2294,24 @@ function Invoke-CreditInputHarvest {
     function script:Get-IssueComments {
         param([string]$IssueNum, [string]$RepoArg, [string]$Gh)
 
+        # Returns a hashtable distinguishing "gh outage" from "gh succeeded, empty comments".
+        # Reachable=$true with Comments=@() means gh confirmed zero comments on the issue.
+        # Reachable=$false means the fetch failed (CLI error, non-zero exit, empty raw, or parse fail).
+        # The fail-open emission path in Invoke-CreditInputHarvest depends on this disambiguation.
         try {
             $raw = & $Gh issue view $IssueNum --repo $RepoArg --json comments --paginate 2>$null
         } catch {
-            return @()
+            return @{ Reachable = $false; Comments = @() }
         }
-        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) { return @() }
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) {
+            return @{ Reachable = $false; Comments = @() }
+        }
 
         try {
             $parsed = $raw | ConvertFrom-Json
-            return @($parsed.comments | ForEach-Object { $_.body })
+            return @{ Reachable = $true; Comments = @($parsed.comments | ForEach-Object { $_.body }) }
         } catch {
-            return @()
+            return @{ Reachable = $false; Comments = @() }
         }
     }
 
@@ -2369,9 +2375,12 @@ function Invoke-CreditInputHarvest {
         $backoff = $InitialBackoffSec
         $completionPresent = $null
         $comments = @()
+        $ghFetchSucceeded = $false
 
         while ($attempt -le $MaxRetries) {
-            $comments = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
+            $fetchResult = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
+            $comments = @($fetchResult.Comments)
+            $ghFetchSucceeded = [bool]$fetchResult.Reachable
             $completionPresent = $comments | Where-Object { $_ -like "*$completionMarker*" }
 
             if ($payloadFromInMemory) {
@@ -2402,7 +2411,10 @@ function Invoke-CreditInputHarvest {
         #     source is trusted, and gh failure must not silently drop in-session credits).
         #     When gh IS reachable but returns no completion marker, the row is suppressed
         #     (burst-halt invariant for the cross-session case).
-        $ghReachable = ($null -ne $comments -and $comments.Count -gt 0)
+        # $ghReachable is derived from an explicit fetch-success flag (not from $comments.Count),
+        # so an issue with zero comments on a reachable gh is correctly treated as "reachable
+        # but completion absent" → suppress, rather than "outage" → fail-open emit.
+        $ghReachable = $ghFetchSucceeded
         $shouldEmit = ($null -ne $payload) -and (
             ($null -ne $completionPresent) -or
             ($payloadFromInMemory -and -not $ghReachable)
