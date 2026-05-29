@@ -77,7 +77,7 @@ Load `skills/design-exploration/SKILL.md` for the reusable workflow — research
 
 ## Stage 3: Adversarial Design Challenge
 
-Run the 3-pass Design Challenge per `skills/design-exploration/SKILL.md` after decisions are confirmed. Non-blocking — prosecution only (no defense or judge). Before Stage 4, handle the merged finding ledger in this literal order: classify → escalate load-bearing → incorporate/dismiss remainder → emit summary → update issue body. Use `skills/solution-authoring/SKILL.md` section `Applying the gate to adversarial-review dispositions` for the per-finding classification gate and marker schema, and use `skills/design-exploration/SKILL.md` section `Dispositions` for the disposition workflow and summary requirements. Stage 3 emits the merged finding ledger as inline prose in the agent's running response; Stage 4 may use it only when that same-conversation ledger is still present and verifiable. If Stage 4 resumes and the Stage 3 inline merged ledger is absent, incomplete, or unverifiable, hard-stop before posting the marker and rerun Stage 3 or reload a durable Stage 3 ledger artifact before running the self-check.
+Run the 3-pass Design Challenge per `skills/design-exploration/SKILL.md` after decisions are confirmed; that skill loads `skills/adversarial-review/platforms/claude.md` and follows the design-challenge adapter. Non-blocking — prosecution only (no defense or judge). Before Stage 4, handle the merged finding ledger in this literal order: classify → escalate load-bearing → incorporate/dismiss remainder → emit summary → update issue body. Use `skills/solution-authoring/SKILL.md` section `Applying the gate to adversarial-review dispositions` for the per-finding classification gate and marker schema, and use `skills/design-exploration/SKILL.md` section `Dispositions` for the disposition workflow and summary requirements. Stage 3 emits the merged finding ledger as inline prose in the agent's running response; Stage 4 may use it only when that same-conversation ledger is still present and verifiable. If Stage 4 resumes and the Stage 3 inline merged ledger is absent, incomplete, or unverifiable, hard-stop before posting the marker and rerun Stage 3 or reload a durable Stage 3 ledger artifact before running the self-check.
 
 ## Stage 4: Update Issue
 
@@ -101,7 +101,7 @@ Phase summary: N finding(s) classified, M load-bearing, K dismissed. Decisions t
 ```yaml
 finding_dispositions:
   schema_version: 1
-  passes_run: [{passes_run}]
+  passes_run: [{ passes_run }]
   entries:
     - finding_id: F1
       pass: 1
@@ -130,6 +130,7 @@ When persisting this phase, you MUST author the `## Named Decisions` H2 section 
 - **Articulation status**: pending
 
 If a recommendation shift occurred in this session, you MAY append:
+
 - **Recommendation shift trigger**: {engineer-pushback | new-evidence | classification-re-audit | classification-re-audit-routine}
 
 If zero load-bearing decisions were captured, the section MUST contain the literal sentence "No load-bearing decisions captured in this session." between sentinels.
@@ -149,6 +150,7 @@ When persisting or amending the target phase artifact, you MUST monitor the tota
 
 ````markdown
 <!-- credit-input-design-{ISSUE_NUMBER} -->
+
 ```yaml
 port: design
 adapter: work-adapter

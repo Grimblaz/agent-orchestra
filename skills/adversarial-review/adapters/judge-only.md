@@ -4,9 +4,10 @@ provides: review
 suggested-next-step: /orchestra:review-judge
 applies-when: scope.isReReview
 integrity-contract:
-  pass-blocks: []
+  pipeline-stages: [judge]
+  atomic: n/a
+  prosecution-passes: []
   exempt: true
-  exempt-reason: "re-review scope; prior prosecution and defense evidence already exists — no new prosecution phase runs"
 ---
 
 # Review Judge Only

@@ -3,6 +3,11 @@ name: post-fix-review
 provides: post-fix-review
 suggested-next-step: /orchestra:review
 applies-when: review.sustainedCriticalOrHigh == true
+integrity-contract:
+  pipeline-stages: [prosecution, defense]
+  atomic: true
+  prosecution-passes: [1]
+  exempt: false
 ---
 
 # Post-Fix Review

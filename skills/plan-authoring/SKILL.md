@@ -152,21 +152,19 @@ Specialized rule: when a Verification Evidence row reaches the same conclusion a
 
 Before approval, prepare the draft plan for adversarial review:
 
-1. Run three independent Code-Critic prosecution passes. Passes 1 and 2 use design review perspectives and must tag each finding with the current pass number. Pass 3 uses product-alignment perspectives, must tag each finding with the current pass number, and should include the plan plus any available issue-body, design-doc, decision-doc, guidance-file, and planned-work context needed to judge alignment. Each pass must receive the full plan content rather than a partial excerpt.
-1. Merge and deduplicate the findings. Treat the same perspective target plus the same failure mode as a duplicate, keep the earliest pass's finding as the primary entry, and annotate cross-pass or cross-perspective repeats on that entry instead of counting them twice.
-1. Decide which findings to incorporate, dismiss, or escalate.
-1. Run defense and judge passes.
-1. Reconcile the draft against the judge outcome before presenting approval.
+1. Load `skills/adversarial-review/platforms/claude.md` and follow the `standard` adapter checklist from `skills/adversarial-review/adapters/standard.md` for atomic prosecution, defense, and judge dispatch.
+1. Do not consume prosecution dispositions, edit the plan, or ask for finding-level maintainer action until the judge rules.
+1. After the judge rules, perform Post-Judge Reconciliation, update the `Plan Stress-Test` summary, and present approval using `## Plan Approval Prompt Format`.
 
 The agent remains responsible for the approval prompt contract and for persisting the approved plan.
 
 ### Post-Judge Reconciliation
 
-After the judge rules, cross-check any plan changes made during the prosecution incorporation phase against the judge's final rulings. If a prosecution finding that was incorporated was subsequently disproved by defense and confirmed rejected by the judge, revert the plan change derived from that finding.
+After the judge rules, cross-check any proposed plan changes derived from prosecution findings against the judge's final rulings. If a prosecution finding was disproved by defense and confirmed rejected by the judge, do not incorporate the plan change derived from that finding.
 
 Exception: if the incorporation was user-confirmed (the finding was escalated via the platform's structured-question tool and the user confirmed it), do not silently revert — instead, flag the conflict in the Plan Stress-Test entry as `judge-rejected / user-confirmed` and surface it for user reconsideration before presenting the final plan draft.
 
-Update the `Plan Stress-Test` summary block by replacing the `Judge: pending` placeholder in each entry with the judge's final ruling. Keep the Prosecution field intact.
+Update the `Plan Stress-Test` summary block with the judge's final ruling and maintainer disposition. Prosecution-only adapters such as `design-challenge` keep the pre-judge disposition triad: `incorporate | dismiss | escalate`.
 
 ## Plan Style Guide
 
@@ -287,9 +285,9 @@ slices:
 
 - {Decision: chose X over Y}
 
-**Plan Stress-Test** (summary of Code-Critic review)
+**Plan Stress-Test** (summary of Code-Critic review via `skills/adversarial-review/platforms/claude.md` `standard` adapter)
 
-- Challenge: {finding} - Prosecution: {incorporated | dismissed with rationale | escalated+confirmed | escalated+rejected} - Judge: {pending -> replaced with: sustained | rejected | judge-rejected/user-confirmed}
+- Challenge: {finding} - Prosecution: {pass/source summary} - Post-judge ruling: {sustained|defense-sustained|judge-rejected/user-confirmed} - Maintainer disposition: {incorporate|dismiss|escalate}
 - Overall confidence: {high | medium | low} - {one-sentence rationale}
 ```
 
@@ -300,7 +298,8 @@ slices:
 - Include execution metadata (mode + requirement contract expectations) so implementers can execute without re-deriving process rules.
 - Treat the frame spine and slices as required plan output, not optional documentation, whenever the D8 size threshold is met.
 - When a step crosses a layer boundary (as defined in `.github/architecture-rules.md`), note the dependency direction and verify it aligns with documented architecture rules. Scope steps to a single layer where feasible.
-- Insert a dedicated **`[CE GATE]`** numbered step as the final implementation step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Format: `N. [CE GATE] - Surface: {type} - Design Intent: {link or one-line summary} - Scenarios: {functional + intent} - Method: {how each scenario is exercised}`. When BDD is enabled, list each scenario by concrete ID with classification, e.g., `S1: {description} [auto/manual]` or placeholder `S{N}: {description} [auto/manual]`. The `[CE GATE]` step is blocking - advancement past it requires either completion or the documented skip marker. Omit only when `ce_gate: false`.
+- Insert a dedicated **`[CE GATE]`** numbered step as the final implementation step after the Code-Critic review step (and after all accepted Code-Critic findings are resolved). Format: `N. [CE GATE] - Surface: {type} - Design Intent: {link or one-line summary} - Scenarios: {functional + intent} - Method: {how each scenario is exercised}`. When BDD is enabled, list each scenario by concrete ID with classification, e.g., `S1: {description} [auto/manual]` or placeholder `S{N}: {description} [auto/manual]`. The `[CE GATE]` step is blocking - advancement past it requires either completion or the documented skip marker.
+- When `ce_gate: false`, omit the CE Gate step and state the no-customer-facing-surface rationale.
 - For backend/non-UI/CLI projects, the CE Gate surface is the API or CLI - identify appropriate scenarios for customer-perspective verification.
 - Keep the plan scannable.
 

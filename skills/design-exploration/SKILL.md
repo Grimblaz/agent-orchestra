@@ -1,5 +1,4 @@
 ---
-
 name: design-exploration
 description: "Reusable technical design exploration methodology. Use when researching design options, grounding UI changes in the current experience, or converging trade-offs into one recommended design direction. DO NOT USE FOR: GitHub issue update ownership, adversarial design challenge orchestration, or approval-policy enforcement (keep those in Solution-Designer.agent.md)"
 ---
@@ -100,22 +99,13 @@ The agent remains responsible for the actual GitHub issue update and completion 
 
 ## Design Challenge (3-Pass, Non-Blocking)
 
-After design decisions are confirmed with the user and before updating the issue body, stress-test the design with three independent Code-Critic prosecution passes. This is **non-blocking** — challenges inform the design but do not gate it, and the design-challenge pipeline intentionally stops after prosecution (no defense or judge pass). The full prosecution + defense + judge pipeline is reserved for implementation-plan stress-testing in `plan-authoring`.
+After design decisions are confirmed with the user and before updating the issue body, load `skills/adversarial-review/adapters/design-challenge.md`, then load `skills/adversarial-review/platforms/claude.md` and follow it with adapter `design-challenge`. This is **non-blocking**: challenges inform the design but do not gate it, and the design-challenge pipeline intentionally stops after prosecution with no defense or judge pass. The full prosecution + defense + judge pipeline is reserved for implementation-plan stress-testing in `plan-authoring`.
 
-### Pass composition
-
-- **Passes 1 and 2** — design review perspectives (Feasibility & Risk, Scope & Completeness, Integration & Impact). Tag each finding with `pass: 1` or `pass: 2`. Give each pass the full design content, acceptance criteria, scope, and confirmed constraints.
-- **Pass 3** — product-alignment perspectives (Product Direction Fit, Customer Experience Coherence, Planned-Work Alignment). Tag with `pass: 3`. In addition to the design content, provide the issue body, any `Documents/Design/` and `Documents/Decisions/` files, project guidance (`README.md`, `CUSTOMIZATION.md`, `copilot-instructions.md`), and planned-work artifacts (`ROADMAP.md`, `NEXT-STEPS.md`) if present. Note absence of planned-work artifacts explicitly.
-
-Per `skills/subagent-env-handshake/SKILL.md` section Subagent working-tree discipline: under `workspace_mode: shared`, you MUST NOT write to the working tree of this repository during analysis. Reads are permitted; scratch space goes outside the repo root (`mktemp -d` on POSIX, `$env:TEMP/$(New-Guid)` on Windows; no `Bash` redirects into the repo).
-
-Run all three passes independently — do not share findings between passes before merging.
-
-### Merge and deduplicate
-
-After all three reports return, merge into a single ledger. Deduplication rule: same perspective target (the specific decision, AC, or scope element being questioned) + same failure mode = duplicate. Keep the earliest pass's finding and annotate with `also_flagged_by: [pass N]`. Cross-perspective duplicates (e.g., §D2 and §P2 flagging the same concern) are also merged.
+Use the adapter and dispatcher to run the three independent prosecution passes, enforce subagent working-tree discipline, and merge/deduplicate the returned findings before dispositions. Do not share findings between passes before merging.
 
 ### Dispositions
+
+Handle the merged finding ledger in this literal order: classify -> escalate load-bearing -> incorporate/dismiss remainder -> emit summary -> update issue body.
 
 For each merged finding, assign one disposition while invoking the per-finding classification gate inline with that assignment:
 
@@ -130,8 +120,6 @@ Always emit a disposition summary after classification and before any issue-body
 For load-bearing findings, use a batched AskUserQuestion flow. When there are <=4 load-bearing findings, ask them in one batched call; when there are >4, ask in successive batched rounds, each preceded by a running-decisions summary covering findings already locked in earlier rounds. Each finding in a batched call still carries its own 1-3 paragraph explanation before its options per `feedback_explain_before_options.md` / #556, so explain-before-options is honored even when multiple findings share one structured-question call.
 
 Before posting the design completion marker, follow `agents/Solution-Designer.agent.md` section `Stage 4: Update Issue` -> section `Pre-post YAML integrity check` for AC6: the disposition summary and `finding_dispositions:` block must account for the merged ledger before the marker is posted.
-
-See `adversarial-review` for the full prosecution workflow and output schemas that each pass follows.
 
 ## Related Guidance
 
@@ -153,8 +141,8 @@ See `adversarial-review` for the full prosecution workflow and output schemas th
 
 ## Frame Ports Filled By This Skill
 
-| Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
-| --- | --- | --- | --- |
+| Port     | Work adapter                                                                 | Auto-N/A adapter                                                         | Explicit-skip adapter                                                                |
+| -------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
 | `design` | [agents/Solution-Designer.agent.md](../../agents/Solution-Designer.agent.md) | [adapters/design-auto-na-adapter.md](adapters/design-auto-na-adapter.md) | [adapters/design-explicit-skip-adapter.md](adapters/design-explicit-skip-adapter.md) |
 
 ## Platform-specific invocation

@@ -19,25 +19,8 @@ Run only the Code-Critic defense stage against an existing prosecution ledger an
 3. After defense completes, write the same atomic front matter contract with only `defense_complete: true` forced in this command, preserve any readable stored values for the other fields, and update `last_updated`.
 4. Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`.
 
-**Handshake preamble** (required for this `code-critic` dispatch, per `skills/subagent-env-handshake/SKILL.md`):
+**Stage-only defense override**:
 
-1. Capture live parent-side working-tree state via the `Bash` tool. Run, in order:
-   - `git rev-parse HEAD`
-   - `git rev-parse --abbrev-ref HEAD`
-   - `pwd`
-   - `git status --porcelain | tr -d '\r' | (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-12`
-2. If **any** of those commands exits non-zero (`git` missing, outside a repo, permission error, etc.), **skip handshake construction entirely** and proceed without the block. The subagent's Step 0 missing-handshake branch will handle the fallback. Do not fabricate placeholder values.
-3. Otherwise, construct the handshake block by copying the SKILL.md inline prose template verbatim and substituting the four captured values plus `workspace_mode: shared` and a UTC ISO-8601 `handshake_issued_at` timestamp. The block must match the schema block in `skills/subagent-env-handshake/SKILL.md` field-for-field and in canonical order. Do not rename, reorder, or omit fields.
-4. Prepend the handshake block as the **first content** of the `prompt` parameter passed to the `Agent` dispatch below.
-
-**Dispatch**:
-
-1. Use the `Agent` tool with `subagent_type: code-critic`.
-2. Prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` immediately after any handshake block and before the prosecution ledger so carried marker text inside the ledger cannot reroute defense mode.
-3. Return the defense report unchanged. This command stops before judge.
-
-**Body-load failure policy**:
-
-This command runs a singleton Code-Critic defense stage. If the defense body-load fails, cannot load the shared body, is missing, or is malformed, halt-strict and stop; do not continue. No 2-of-3 or `pipeline-degraded` degradation applies to this singleton defense path.
+Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller for a standalone defense rerun outside adapter execution. Use the defense selector against the supplied prosecution ledger, but do not claim or execute the atomic multi-stage `standard` adapter contract: dispatch one Code-Critic defense pass with `Review mode selector: "Use defense review perspectives"`, then stop before judge. Pass the prosecution ledger, review target context, active issue id if available, and review-state persistence target as the pre-dispatch context. Return the defense report unchanged.
 
 ARGUMENTS: $ARGUMENTS

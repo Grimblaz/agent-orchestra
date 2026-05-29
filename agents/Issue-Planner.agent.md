@@ -91,7 +91,7 @@ When BDD is enabled, write the full `## Scenarios` section back into the GitHub 
 
 - Before stress-test invocation, run the Tree-State Verification Discipline from `skills/plan-authoring/SKILL.md` and populate the plan's `**Verification Evidence**` block.
 
-Before presenting the plan, run the three-pass adversarial stress test from `skills/plan-authoring/SKILL.md`. Apply Post-Judge Reconciliation before surfacing the final draft.
+Before presenting the plan, preserve this ordering: (1) Tree-State Verification Discipline first from `skills/plan-authoring/SKILL.md`, (2) adversarial-review dispatch atomically by loading `skills/adversarial-review/platforms/claude.md` and following the `standard` adapter, (3) post-judge reconciliation from `skills/plan-authoring/SKILL.md` before surfacing the final draft.
 
 ## 5. Refinement
 
@@ -163,6 +163,7 @@ When persisting this phase, you MUST author the `## Named Decisions` H2 section 
 - **Articulation status**: pending
 
 If a recommendation shift occurred in this session, you MAY append:
+
 - **Recommendation shift trigger**: {engineer-pushback | new-evidence | classification-re-audit | classification-re-audit-routine}
 
 If zero load-bearing decisions were captured, the section MUST contain the literal sentence "No load-bearing decisions captured in this session." between sentinels.
@@ -182,6 +183,7 @@ When persisting or amending the target phase artifact, you MUST monitor the tota
 
 ````markdown
 <!-- credit-input-plan-{ISSUE_NUMBER} -->
+
 ```yaml
 port: plan
 adapter: work-adapter

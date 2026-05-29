@@ -80,9 +80,7 @@ catch {
 }
 
 # ---------------------------------------------------------------------------
-# Read a single scalar field from an adapter's frontmatter block. Strips a
-# pair of balanced single or double quotes when present. Returns $null when
-# the field is absent.
+# Read a single scalar field from an adapter's frontmatter block.
 # ---------------------------------------------------------------------------
 function script:Get-FCLAdapterFrontmatterScalar {
     param(
@@ -90,18 +88,7 @@ function script:Get-FCLAdapterFrontmatterScalar {
         [Parameter(Mandatory)][string]$Field
     )
 
-    $pattern = '(?m)^\s*' + [regex]::Escape($Field) + '\s*:\s*(?<v>.+?)\s*$'
-    $m = [regex]::Match($Frontmatter, $pattern)
-    if (-not $m.Success) { return $null }
-
-    $value = $m.Groups['v'].Value.Trim()
-    if ($value.Length -ge 2) {
-        $first = $value[0]; $last = $value[$value.Length - 1]
-        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
-            $value = $value.Substring(1, $value.Length - 2)
-        }
-    }
-    return $value
+    return script:Get-FCLScalar -Block $Frontmatter -Name $Field
 }
 
 # ---------------------------------------------------------------------------
@@ -196,6 +183,7 @@ function Get-FrameCreditLedgerAdapters {
 
             $appliesWhen = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'applies-when'
             $suggestedNextStep = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'suggested-next-step'
+            $integrityAtomic = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'atomic'
 
             $name = script:Get-FCLAdapterFrontmatterScalar -Frontmatter $fm -Field 'name'
             if ($null -eq $name) {
@@ -208,6 +196,7 @@ function Get-FrameCreditLedgerAdapters {
                     Provides          = $providesValue
                     AppliesWhen       = $appliesWhen
                     SuggestedNextStep = $suggestedNextStep
+                    IntegrityAtomic   = $integrityAtomic
                 }) | Out-Null
         }
         catch {
@@ -1305,6 +1294,20 @@ function Invoke-FrameCreditLedger {
     # 5. v4 path: discover adapters and classify ports.
     $repoRoot = script:Resolve-FCLRepoRoot -ScriptPath $PSCommandPath
     $adapters = Get-FrameCreditLedgerAdapters -RepoRoot $repoRoot
+    # Atomic completion marker template: <!-- adversarial-pipeline-atomic-{ISSUE_ID} -->
+    $atomicMarkerSearchText = $prBody
+    if ($null -ne $script:PrComments) {
+        $atomicMarkerSearchText += "`n" + ((@($script:PrComments) | ForEach-Object { script:Get-FCLCommentBody -Comment $_ }) -join "`n")
+    }
+    $currentBranch = ''
+    try { $currentBranch = [string](& git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null) } catch { $currentBranch = '' }
+    $atomicMarkerIssueId = script:Resolve-FCLLinkedIssueNumber -PrBody $prBody -Branch $currentBranch
+    if ($null -ne $atomicMarkerIssueId) {
+        $issueCommentsForAtomicMarker = @(script:Get-FCLIssueCommentsForSpine -IssueNumber ([int]$atomicMarkerIssueId))
+        if ($issueCommentsForAtomicMarker.Count -gt 0) {
+            $atomicMarkerSearchText += "`n" + (($issueCommentsForAtomicMarker | ForEach-Object { script:Get-FCLCommentBody -Comment $_ }) -join "`n")
+        }
+    }
 
     $portsDir = Join-Path $repoRoot 'frame/ports'
     $ports = Get-PortFiles -PortsDir $portsDir
@@ -1346,12 +1349,21 @@ function Invoke-FrameCreditLedger {
 
     # Build per-port reports.
     $portReports = [System.Collections.Generic.List[object]]::new()
+    $hasApplicableAtomicAdapter = $false
 
     if (@($ports).Count -gt 0) {
         foreach ($port in $ports) {
             $portName = [string]$port.Name
             $matchingAdapters = @($adapters | Where-Object { [string]$_.Provides -eq $portName })
             $applicableMap = Resolve-FrameCreditLedgerApplicableMap -PortName $portName -Adapters $matchingAdapters -Changeset $changeset
+            foreach ($adapter in $matchingAdapters) {
+                if ([string]$adapter.IntegrityAtomic -ne 'true') { continue }
+                $adapterName = [string]$adapter.Name
+                if ($applicableMap.ContainsKey($adapterName) -and [string]$applicableMap[$adapterName] -eq 'true') {
+                    $hasApplicableAtomicAdapter = $true
+                    break
+                }
+            }
             $credit = Select-AuthoritativeCreditForPort -Credits $credits -Port $portName
 
             $report = Resolve-PortStatus -Port $port -WorkAdapters $matchingAdapters -ApplicableMap $applicableMap -Credit $credit
@@ -1367,6 +1379,15 @@ function Invoke-FrameCreditLedger {
             $report = Resolve-PortStatus -Port $synthPort -WorkAdapters @() -ApplicableMap @{} -Credit $credit
             $portReports.Add($report) | Out-Null
         }
+    }
+
+    $atomicMarkerStatus = Resolve-AdversarialPipelineAtomicMarkerPresence `
+        -AdapterAtomicState $hasApplicableAtomicAdapter `
+        -Text $atomicMarkerSearchText `
+        -IssueId $(if ($null -eq $atomicMarkerIssueId) { '' } else { [string]$atomicMarkerIssueId })
+    $atomicMarkerStatusValue = [string]$atomicMarkerStatus.adversarial_pipeline_atomic_marker_present
+    if (-not [string]::IsNullOrWhiteSpace([string]$atomicMarkerStatus.warning)) {
+        [Console]::Error.WriteLine("frame-credit-ledger: $($atomicMarkerStatus.warning)")
     }
 
     foreach ($incompleteCycleReport in @(script:Resolve-FCLIncompleteCycleReports -Pr $Pr -PrBody $prBody -PrComments $script:PrComments -LedgerRows $credits)) {
@@ -1567,6 +1588,7 @@ function Invoke-FrameCreditLedger {
         ExitCode      = if ($Mode -eq 'enforce' -and $hasNotCovered) { 1 } else { 0 }
         HasNotCovered = $hasNotCovered
         Comment       = $comment
+        adversarial_pipeline_atomic_marker_present = $atomicMarkerStatusValue
     }
 }
 

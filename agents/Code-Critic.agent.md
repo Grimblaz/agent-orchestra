@@ -184,6 +184,7 @@ Every finding must also include these automation-routing fields:
 - `blast_radius`: use the canonical `enums.blast_radius` values
 - `authority_needed`: use the canonical `enums.authority_needed` values
 - `systemic_fix_type`: use the canonical `enums.systemic_fix_type` values — root cause classification: what kind of guardrail would prevent this defect class? Filled in by prosecutor during each prosecution pass (code, design/plan, product-alignment, CE, and proxy prosecution). Always emit this field; use `none` when no specific guardrail type applies.
+- `requires_pipeline_pause: { reason: artifact-missing | runtime-output-required | user-input-required-by-decision-class }`: prosecutor-set interrupt field for atomic adversarial pipelines. Emit only when the current prosecution cannot responsibly continue to defense or judge without a missing artifact, runtime output, or decision-class user input that the owning workflow must collect. Do not use it for preference clarification, low-confidence findings, or normal fix routing.
 
 **Root cause tagging**: After identifying each finding, tag the `systemic_fix_type` — ask: _What kind of guardrail would prevent this defect class?_ This is a lightweight classification, not a full root cause analysis — Process-Review will perform deeper analysis on sustained findings retrospectively (Sub C).
 

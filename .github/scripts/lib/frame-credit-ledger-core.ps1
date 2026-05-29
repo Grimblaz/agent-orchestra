@@ -11,6 +11,8 @@
       - Resolve-NotPersistedSynthesis     : synthesize not-persisted credit when sentinel present
       - Build-ReviewCreditRow             : construct a v4 review credit row from judge-rulings
                                            comment + adapter integrity contract (issue #441, Step 8b)
+    - Resolve-AdversarialPipelineAtomicMarkerPresence
+                             : classify warn-only presence of <!-- adversarial-pipeline-atomic-{ISSUE_ID} -->
       - ConvertFrom-JudgeRulingsComment   : parse the <!-- judge-rulings --> YAML block from a
                                            PR comment body into structured finding objects
       - Get-PortFiles                     : enumerate frame/ports/*.yaml as objects
@@ -1055,6 +1057,126 @@ function script:Add-FCLTerminalStepId {
     return $Row
 }
 
+function Resolve-AdversarialPipelineAtomicMarkerPresence {
+    [CmdletBinding()]
+    param(
+        [AllowNull()][object]$AdapterAtomicState = $false,
+        [AllowEmptyString()][string]$Text = '',
+        [AllowEmptyString()][string]$IssueId = '',
+        [AllowEmptyString()][string]$MarkerTemplate = '<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->'
+    )
+
+    $atomicValue = if ($null -eq $AdapterAtomicState) { '' } else { ([string]$AdapterAtomicState).Trim() }
+    $adapterDeclaresAtomic = $false
+    if ($AdapterAtomicState -is [bool]) {
+        $adapterDeclaresAtomic = [bool]$AdapterAtomicState
+    }
+    elseif ($atomicValue.Equals('true', [System.StringComparison]::OrdinalIgnoreCase)) {
+        $adapterDeclaresAtomic = $true
+    }
+
+    if (-not $adapterDeclaresAtomic) {
+        return [pscustomobject]@{
+            adversarial_pipeline_atomic_marker_present = 'not-applicable'
+            marker = $MarkerTemplate
+            warning = ''
+        }
+    }
+
+    $marker = $MarkerTemplate
+    if (-not [string]::IsNullOrWhiteSpace($IssueId)) {
+        $marker = $MarkerTemplate.Replace('{ISSUE_ID}', $IssueId.Trim())
+    }
+
+    $markerPresent = $false
+    if (-not [string]::IsNullOrEmpty($Text)) {
+        if ($Text.Contains($marker)) {
+            $markerPresent = $true
+        }
+        elseif ([string]::IsNullOrWhiteSpace($IssueId) -and $Text -match '<!--\s*adversarial-pipeline-atomic-\d+\s*-->') {
+            $markerPresent = $true
+        }
+    }
+
+    $status = if ($markerPresent) {
+        'true'
+    }
+    elseif ([string]::IsNullOrWhiteSpace($IssueId)) {
+        'not-applicable'
+    }
+    else {
+        'false-warn-only'
+    }
+    $warning = if ($status -eq 'false-warn-only') {
+        "adversarial_pipeline_atomic_marker_present=false-warn-only; expected marker $marker for an applicable atomic adversarial adapter"
+    }
+    else { '' }
+
+    return [pscustomobject]@{
+        adversarial_pipeline_atomic_marker_present = $status
+        marker = $marker
+        warning = $warning
+    }
+}
+
+function script:ConvertFrom-FCLInlineIntegerList {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$ListValue)
+
+    return @(
+        $ListValue -split '[,\s]+' |
+        Where-Object { $_ -match '^\d+$' } |
+        ForEach-Object { [int]$_ }
+    )
+}
+
+function script:Resolve-FCLReviewIntegrityContract {
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$AdapterName,
+        [AllowEmptyString()][string]$AdaptersDir = ''
+    )
+
+    $prosecutionPasses = @(1, 2, 3)
+    $integrityStatus = 'passed'
+
+    if ($AdapterName -in @('post-fix', 'lite')) {
+        $prosecutionPasses = @(1)
+    }
+    elseif ($AdapterName -in @('judge-only', 'proxy-github')) {
+        $prosecutionPasses = @()
+        $integrityStatus = 'not-applicable'
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($AdaptersDir)) {
+        $adapterMd = Join-Path $AdaptersDir "$AdapterName.md"
+        if (Test-Path -LiteralPath $adapterMd) {
+            try {
+                $content = Get-Content -LiteralPath $adapterMd -Raw -ErrorAction Stop
+                $isExempt = $false
+                if ($content -match '(?ms)integrity-contract:.*?exempt:\s*(?<val>true|false)') {
+                    $isExempt = [System.Boolean]::Parse($matches['val'].Trim())
+                }
+
+                if ($isExempt) {
+                    $prosecutionPasses = @()
+                    $integrityStatus = 'not-applicable'
+                }
+                elseif ($content -match '(?ms)integrity-contract:.*?prosecution-passes:\s*\[(?<passes>[^\]]*)\]') {
+                    $prosecutionPasses = @(script:ConvertFrom-FCLInlineIntegerList -ListValue $matches['passes'])
+                    $integrityStatus = 'passed'
+                }
+            }
+            catch {
+                $null = $_
+            }
+        }
+    }
+
+    return [pscustomobject]@{
+        ProsecutionPasses = $prosecutionPasses
+        IntegrityStatus   = $integrityStatus
+    }
+}
+
 function Build-ReviewCreditRow {
     [CmdletBinding()]
     param(
@@ -1091,37 +1213,9 @@ function Build-ReviewCreditRow {
     }
 
     # Integrity contract from adapter frontmatter (optional live lookup).
-    $passBlocks      = @(1, 2, 3)   # default for standard
-    $integrityStatus = 'passed'
-
-    if (-not [string]::IsNullOrWhiteSpace($AdaptersDir)) {
-        $adapterMd = Join-Path $AdaptersDir "$AdapterName.md"
-        if (Test-Path $adapterMd) {
-            $content = Get-Content $adapterMd -Raw
-            if ($content -match '(?ms)integrity-contract:.*?exempt:\s*(?<val>true|false)') {
-                $isExempt = [System.Boolean]::Parse($matches['val'].Trim())
-                if ($isExempt) {
-                    $passBlocks      = @()
-                    $integrityStatus = 'not-applicable'
-                }
-                elseif ($content -match '(?ms)integrity-contract:.*?pass-blocks:\s*\[(?<blocks>[^\]]*)\]') {
-                    $blockStr  = $matches['blocks']
-                    $passBlocks = @(
-                        $blockStr -split '[,\s]+' |
-                        Where-Object { $_ -match '^\d+$' } |
-                        ForEach-Object { [int]$_ }
-                    )
-                }
-            }
-        }
-    }
-    elseif ($AdapterName -eq 'lite') {
-        $passBlocks = @(1)
-    }
-    elseif ($AdapterName -in @('judge-only', 'proxy-github')) {
-        $passBlocks      = @()
-        $integrityStatus = 'not-applicable'
-    }
+    # No legacy compatibility shim for pass-blocks is needed here because this
+    # builder reads current-tree adapter frontmatter, not historical PR bodies.
+    $integrityContract = script:Resolve-FCLReviewIntegrityContract -AdapterName $AdapterName -AdaptersDir $AdaptersDir
 
     $row = [pscustomobject]@{
         port             = 'review'
@@ -1139,8 +1233,8 @@ function Build-ReviewCreditRow {
             })
         }
         'integrity-check' = [pscustomobject]@{
-            'pass-blocks' = $passBlocks
-            status        = $integrityStatus
+            'prosecution-passes' = $integrityContract.ProsecutionPasses
+            status               = $integrityContract.IntegrityStatus
         }
     }
 
