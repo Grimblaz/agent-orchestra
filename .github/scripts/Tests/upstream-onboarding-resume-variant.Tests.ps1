@@ -16,8 +16,8 @@ Describe 'upstream onboarding resume variant' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SkillFile = Join-Path $script:RepoRoot 'skills\upstream-onboarding\SKILL.md'
-        $script:ConductorFile = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
+        $script:SkillFile = Join-Path $script:RepoRoot 'skills/upstream-onboarding/SKILL.md'
+        $script:ConductorFile = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
 
         $script:SkillContent = Get-Content -Path $script:SkillFile -Raw
         $script:ConductorContent = Get-Content -Path $script:ConductorFile -Raw

@@ -62,6 +62,7 @@ This design originally sequenced `upstream-onboarding` after `provenance-gate` o
 Issue #633 extends the `upstream-onboarding` brief with a terse **resume variant** to cut the flow-break of opening GitHub at pickup and resume.
 
 ### Design Details
+
 - **Trigger**: Same-agent resume (which previously skipped the brief entirely) now renders this resume-variant snapshot. The standards check is still skipped to prevent re-firing questions.
 - **Content**: A terse ~4–6 line inline orientation snapshot assembled ONLY from already-loaded context to keep token cost bounded.
 - **Field Mapping (D3)**:

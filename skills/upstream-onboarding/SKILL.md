@@ -110,7 +110,7 @@ The snapshot fields map directly to durable artifacts (D3):
 - **last decision**: derived from the most recent `engagement-record-{phase}-{ID}` comment's `load_bearing_decisions[]` or the YAML audit payload.
 - **next step**: derived from the next incomplete step in the active pipeline position.
 
-Surfacing this snapshot orientates the developer and active agent immediately without re-firing the Standards Check Protocol. This snapshot fires at user-invocable resume entries only, and is skipped for subagent dispatches.
+Surfacing this snapshot orients the developer and active agent immediately without re-firing the Standards Check Protocol. This snapshot fires at user-invocable resume entries only, and is skipped for subagent dispatches.
 
 #### Missing-Record Fallback
 
