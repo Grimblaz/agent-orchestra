@@ -6,7 +6,7 @@ The `upstream-onboarding` skill uses Claude Code's `AskUserQuestion` tool for st
 
 ## Brief rendering
 
-Render the brief as inline markdown text in the conversation before any role-specific work begins. No tool call is needed for the brief itself.
+Render the brief (or the resume variant snapshot) as inline markdown text in the conversation before any role-specific work begins. No tool call is needed for the brief or snapshot itself. On same-agent resume, skip standard standards check tool calls, rendering only the inline snapshot.
 
 ## Standards check — raising a concern
 

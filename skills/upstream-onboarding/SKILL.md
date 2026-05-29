@@ -16,7 +16,7 @@ Load this skill as an opening-phase action when a user-invocable upstream agent 
 
 ## When to Skip
 
-- **Same-agent resume**: the most recent upstream completion marker on the issue belongs to the active agent's own role (e.g., Solution-Designer re-entering when `<!-- design-phase-complete-{ID} -->` is the latest marker). In this case the brief and standards check are skipped — the agent proceeds directly to its next phase action.
+- **Same-agent resume**: the most recent upstream completion marker on the issue belongs to the active agent's own role (e.g., Solution-Designer re-entering when `<!-- design-phase-complete-{ID} -->` is the latest marker). In this case the brief and standards check are skipped (the agent proceeds directly to its next phase action), but the **resume-variant orientation snapshot** now renders. Distinguish: the brief and the non-overridable standards check still skip on same-agent resume, but the resume-variant orientation snapshot now renders.
 - **No issue ID and not a Greenfield start**: if no issue ID can be determined and the developer is not describing a brand-new idea (i.e., the request is unrelated to issue work), skip silently.
 - **Greenfield Mode is the exception**: when the developer is describing a brand-new idea in plain language with no issue yet, the brief and issue-creation prompt **do** run — see Greenfield Mode below. Greenfield Mode takes precedence over the "No issue ID" skip rule above.
 
@@ -30,16 +30,16 @@ The standards check fires only when the active agent is picking up work complete
 
 1. Read the GitHub issue comments for upstream completion markers: `<!-- experience-owner-complete-{ID} -->`, `<!-- design-phase-complete-{ID} -->`.
 2. Identify the most recent marker.
-3. If the most recent marker belongs to the **current agent's own role**, skip (same-agent resume).
-4. If the most recent marker belongs to a **different upstream role**, proceed to the brief and standards check.
+3. If the most recent marker belongs to the **current agent's own role**, skip the brief and standards check (same-agent resume), but render the **resume-variant orientation snapshot**.
+4. If the most recent marker belongs to a **different upstream role**, proceed to the standard brief and standards check.
 
 | Most recent marker | Agent now active | Result |
 | --- | --- | --- |
-| `experience-owner-complete` | Solution-Designer | ✅ Fire |
-| `experience-owner-complete` | Issue-Planner | ✅ Fire |
-| `design-phase-complete` | Issue-Planner | ✅ Fire |
-| `design-phase-complete` | Solution-Designer | ⏭️ Skip (same-agent resume) |
-| `experience-owner-complete` | Experience-Owner | ⏭️ Skip (same-agent resume) |
+| `experience-owner-complete` | Solution-Designer | ✅ Fire brief & standards check |
+| `experience-owner-complete` | Issue-Planner | ✅ Fire brief & standards check |
+| `design-phase-complete` | Issue-Planner | ✅ Fire brief & standards check |
+| `design-phase-complete` | Solution-Designer | ⏭️ Skip brief & standards check; render resume snapshot (same-agent resume) |
+| `experience-owner-complete` | Experience-Owner | ⏭️ Skip brief & standards check; render resume snapshot (same-agent resume) |
 
 ### Sequencing
 
@@ -98,6 +98,31 @@ Project-reference loading follows the same bounded-scope principle: load the sma
 ### Empty-Section Omission Rule
 
 Do not render empty section headers or `(none)` placeholders. If a conditional section has nothing to report, omit the heading entirely. A trivial change may produce a brief of two lines (What + Scope tier) with no conditional sections at all.
+
+### Resume Variant
+
+When picking up an issue or performing a same-agent resume (e.g. re-entering paused work), a terse ~4-6 line inline orientation snapshot surfaces instead of the full brief and standards check. This snapshot is assembled ONLY from already-loaded context to avoid extra reads or expensive model summarization passes.
+
+The snapshot fields map directly to durable artifacts (D3):
+- **current phase**: derived from the latest phase marker (e.g. `<!-- plan-issue-{ID} -->`).
+- **last decision**: derived from the most recent `engagement-record-{phase}-{ID}` comment's `load_bearing_decisions[]` or the YAML audit payload.
+- **next step**: derived from the next incomplete step in the active pipeline position.
+
+Surfacing this snapshot orientates the developer and active agent immediately without re-firing the Standards Check Protocol. This snapshot fires at user-invocable resume entries only, and is skipped for subagent dispatches.
+
+#### Missing-Record Fallback
+
+When a real issue does not yet carry any durable `engagement-record` markers (e.g., due to pre-#576 historical issues or a failed/halted emission), the **last decision** field gracefully degrades to reflect the latest completion marker or phase state, rendering exactly: `last decision: not recorded`. It must never be left blank or fabricated. Greenfield mode is the exception and renders `no durable state yet`.
+
+#### On-Demand Expand (D4)
+
+If a richer context or the full issue details are needed, an on-demand summary is available via natural language (e.g., typing "expand" or "full picture"). This is handled in-turn as a context-local follow-up, is NOT registered in `nl_intent_routing`, and is never suppressed by `/raw`.
+
+#### Affordance-Hint Predicate (D5)
+
+A single-line affordance hint (e.g. "Type 'expand' for richer details") appears below the snapshot only when a cheap, deterministic check resolves to true:
+1. At least one prior `engagement-record` decision exists on the issue, OR
+2. The issue body length materially exceeds the size of the terse default snapshot.
 
 ### Greenfield Mode
 
@@ -226,7 +251,7 @@ This skill is **supporting methodology** — it does not fill a frame port and d
 
 | Trigger | Gotcha | Fix |
 | --- | --- | --- |
-| Re-entering the same upstream phase | Running the brief again can make a same-agent resume look like inherited work | Check the latest upstream completion marker first and skip when it belongs to the active role |
+| Re-entering the same upstream phase | Running the brief and standards check again can make a same-agent resume look like inherited work | Check the latest upstream completion marker first; skip the standard brief & standards check when it belongs to the active role, but render the **resume-variant orientation snapshot** |
 | Starting from a brand-new idea with no issue ID | Treating the missing issue as a silent skip loses the greenfield brief and issue-creation prompt | Apply Greenfield Mode when the developer is describing new issue work |
 | Project-reference sidecars or indexes are absent | Treating optional reference metadata as required setup blocks the upstream pipeline | Surface the adoption nudge once, point to `skills/project-references/scripts/init-references.ps1`, and continue onboarding |
 

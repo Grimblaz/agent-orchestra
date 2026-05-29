@@ -57,6 +57,23 @@ Each upstream agent applies the standards check through its own lens. The lenses
 
 This design originally sequenced `upstream-onboarding` after `provenance-gate` on cold pickups, deferring to the gate's stop outcomes. After this design landed, the gate was retired (the two-stage cold-pickup self-classification was unintuitive in practice) and its responsibilities were collapsed into `upstream-onboarding`. The skill now serves as the single opening-phase protocol regardless of whether the developer is cold-picking-up the issue or already briefed; the brief is descriptive (no upfront question to answer), and the standards check uses targeted structured questions only when concerns actually fire.
 
+## Resume Variant (#633)
+
+Issue #633 extends the `upstream-onboarding` brief with a terse **resume variant** to cut the flow-break of opening GitHub at pickup and resume.
+
+### Design Details
+- **Trigger**: Same-agent resume (which previously skipped the brief entirely) now renders this resume-variant snapshot. The standards check is still skipped to prevent re-firing questions.
+- **Content**: A terse ~4–6 line inline orientation snapshot assembled ONLY from already-loaded context to keep token cost bounded.
+- **Field Mapping (D3)**:
+  - **current phase** ⟵ latest phase marker (`<!-- plan-issue-{ID} -->`).
+  - **last decision** ⟵ most recent `engagement-record-{phase}-{ID}` decisions.
+  - **next step** ⟵ current plan position.
+- **Missing-Record Fallback**: If no `engagement-record` exists on a real issue, the **last decision** field renders exactly `last decision: not recorded`.
+- **On-Demand Expand (D4)**: Typing "expand" or "full picture" triggers the richer summary. This is handled in-turn as a context-local follow-up and is not suppressed by `/raw`.
+- **Affordance-Hint Predicate (D5)**: A single-line hint appears below the snapshot only when a cheap check is true (≥1 engagement-record decision exists, or issue body materially exceeds the terse default snapshot size).
+- **Code-Conductor smart-resume**: Independently authors and renders the same snapshot inline on marker detection.
+- **Always-on risk (D7 watch item)**: Recorded the risk of the always-on snapshot becoming "wallpaper" and raising rubber-stamping; mitigated by keeping it strictly orientational.
+
 ## Relationship to Issue #375
 
 Issue #375 introduces a lightweight scope tier for trivial changes. The `upstream-onboarding` brief scaling uses the `changeset.complexity` predicate as a forward-compatible hook: when #375 lands, its classifier wires into that predicate, automatically scaling the brief depth for trivial changes without any change to the `upstream-onboarding` skill itself. Issue #481 lands first; #375 builds on it.

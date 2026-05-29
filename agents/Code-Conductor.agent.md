@@ -164,10 +164,16 @@ When the user invokes Code-Conductor without a specific slash command (e.g., `@c
 
 **Smart resume**: Before calling any upstream agent, check issue state markers via `mcp_github_issue_read` with `method: get_comments` to detect completed phases:
 
-- `<!-- experience-owner-complete-{ID} -->` found → customer framing done; skip Experience-Owner upstream call
-- `<!-- design-phase-complete-{ID} -->` found → technical design done; skip Solution-Designer
-- Plan found (session memory or `<!-- plan-issue-{ID} -->` comment) → skip upstream phases; in hub mode, D9 still applies unless the later tier-aware prior-session artifact rules suppress it
+- `<!-- experience-owner-complete-{ID} -->` found → customer framing done; skip Experience-Owner upstream call, and independently assemble and render the **resume-variant orientation snapshot** inline (using the field mapping and fallback rules from the `upstream-onboarding` skill) before proceeding past this phase.
+- `<!-- design-phase-complete-{ID} -->` found → technical design done; skip Solution-Designer upstream call, and independently assemble and render the **resume-variant orientation snapshot** inline (using the field mapping and fallback rules from the `upstream-onboarding` skill) before proceeding past this phase.
+- Plan found (session memory or `<!-- plan-issue-{ID} -->` comment) → skip upstream phases; in hub mode, D9 still applies unless the later tier-aware prior-session artifact rules suppress it. Independently assemble and render the **resume-variant orientation snapshot** inline (using the same field mapping and fallback rules) before continuing implementation.
 - `<!-- engagement-record-orchestration-{ID} -->` found → prior orchestration decisions exist; on entry to the Scope Classification Gate, invoke `Read-EngagementRecords -IssueNumber {ID} -Phase orchestration` (against the same comment scan already retrieved above — no separate gh round-trip) and apply solution-authoring's `same-decision-resume` rule to suppress re-firing the gate when the prior `conductor-scope-classification` decision still applies. Emit the canonical resume-note `Reusing prior conductor-scope-classification: {engineer_choice}` when reuse fires.
+
+Because the conductor skips the upstream agent, it cannot inherit its render and must independently author and output the terse snapshot:
+- **current phase**: latest phase marker detected.
+- **last decision**: most recent `engagement-record` decision or "last decision: not recorded" fallback.
+- **next step**: active plan step position.
+A one-line expand hint is included under the same predicate conditions.
 
 Skip hub mode entirely when the user invokes a specific slash command (e.g., `/implement #N`, `/plan #N`, `/design #N`, `/code-conductor [text]`) — these execute the named phase directly; smart resume applies at the phase level, not the hub level. Exception: `/orchestrate` is a slash command that explicitly triggers hub mode — treat it as equivalent to `@code-conductor issue #N` (single issue) or `@code-conductor issues #A #B #C` (multi-issue bundle, per the Multi-Issue Bundling section).
 
