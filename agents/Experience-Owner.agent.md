@@ -107,6 +107,7 @@ When persisting this phase, you MUST author the `## Named Decisions` H2 section 
 - **Articulation status**: pending
 
 If a recommendation shift occurred in this session, you MAY append:
+
 - **Recommendation shift trigger**: {engineer-pushback | new-evidence | classification-re-audit | classification-re-audit-routine}
 
 If zero load-bearing decisions were captured, the section MUST contain the literal sentence "No load-bearing decisions captured in this session." between sentinels.
@@ -126,6 +127,7 @@ When persisting or amending the target phase artifact, you MUST monitor the tota
 
 ````markdown
 <!-- credit-input-experience-{ISSUE_NUMBER} -->
+
 ```yaml
 port: experience
 adapter: work-adapter
