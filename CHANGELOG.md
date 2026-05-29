@@ -2,6 +2,16 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.21.0] — 2026-05-29
+
+### Added
+- **Resume-variant orientation snapshot** (`skills/upstream-onboarding/SKILL.md` `### Resume Variant`): a terse ~4-6 line inline snapshot renders on same-agent resume instead of the standards check (the full brief already skips on same-agent resume), assembled from already-loaded context (durable phase markers + engagement-record decisions). Cuts the flow-break of opening GitHub at pickup/resume (#633).
+- **Code-Conductor smart-resume render** (`agents/Code-Conductor.agent.md` `### Hub Mode & Smart Resume`): the conductor independently authors and renders the resume-variant snapshot on marker detection before continuing (experience-complete / design-complete / plan-found paths), without delegating to the skipped upstream agent.
+- **On-demand expand (D4)**: typing "expand" or "full picture" triggers a richer in-turn context summary; not registered in `nl_intent_routing`; not suppressed by `/raw`.
+- **Affordance-hint predicate (D5)**: a one-line expand hint appears only when ≥1 prior engagement-record decision exists on the issue.
+- **Missing-record fallback**: when no engagement-record exists on a real issue, the last-decision field renders exactly `last decision: not recorded` (never blank or fabricated).
+- **Structural Pester guard** (`.github/scripts/Tests/upstream-onboarding-resume-variant.Tests.ps1`): locks the resume-variant contract at both render sites (SKILL.md and Code-Conductor.agent.md) including the standards-check-not-re-fired regression guard.
+
 ## [2.20.0] — 2026-05-27
 
 ### Added

@@ -54,7 +54,7 @@ Describe 'upstream onboarding resume variant' {
     }
 
     It 'requires Code-Conductor smart-resume to declare the snapshot render in Code-Conductor.agent.md' {
-        $script:ConductorContent | Should -Match '(?i)smart-resume' -Because 'smart-resume section must exist'
+        $script:ConductorContent | Should -Match '(?i)Because the conductor skips the upstream agent' -Because 'Code-Conductor must explain why it independently renders (not inherits) the snapshot'
         $script:ConductorContent | Should -Match '(?i)independently assemble and render the \*\*resume-variant orientation snapshot\*\* inline' -Because 'Code-Conductor must independently render the snapshot'
         $script:ConductorContent | Should -Match '(?i)last decision: not recorded' -Because 'Code-Conductor snapshot must specify the last decision fallback'
     }

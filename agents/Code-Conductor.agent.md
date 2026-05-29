@@ -172,7 +172,7 @@ When the user invokes Code-Conductor without a specific slash command (e.g., `@c
 Because the conductor skips the upstream agent, it cannot inherit its render and must independently author and output the terse snapshot:
 - **current phase**: latest phase marker detected.
 - **last decision**: most recent `engagement-record` decision or "last decision: not recorded" fallback.
-- **next step**: active plan step position.
+- **next step**: next incomplete step in the active pipeline position.
 A one-line expand hint is included under the same predicate conditions.
 
 Skip hub mode entirely when the user invokes a specific slash command (e.g., `/implement #N`, `/plan #N`, `/design #N`, `/code-conductor [text]`) — these execute the named phase directly; smart resume applies at the phase level, not the hub level. Exception: `/orchestrate` is a slash command that explicitly triggers hub mode — treat it as equivalent to `@code-conductor issue #N` (single issue) or `@code-conductor issues #A #B #C` (multi-issue bundle, per the Multi-Issue Bundling section).

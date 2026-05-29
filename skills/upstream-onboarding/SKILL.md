@@ -101,10 +101,12 @@ Do not render empty section headers or `(none)` placeholders. If a conditional s
 
 ### Resume Variant
 
-When picking up an issue or performing a same-agent resume (e.g. re-entering paused work), a terse ~4-6 line inline orientation snapshot surfaces instead of the full brief and standards check. This snapshot is assembled ONLY from already-loaded context to avoid extra reads or expensive model summarization passes.
+When performing a **same-agent resume** (re-entering paused work on an issue the active agent already owns), a terse ~4-6 line inline orientation snapshot surfaces **instead of** the standards check. On cross-role issue pickup (e.g., Issue-Planner picking up a Solution-Designer's work), the full scaled brief and standards check fire (rule 4 in the Marker-Boundary Trigger table) — the brief already surfaces What / Scope tier / inherited decisions / next phase, satisfying the AC1 pickup-orientation goal. The resume snapshot is the **additive same-agent-resume case**.
+
+This snapshot is assembled ONLY from already-loaded context to avoid extra reads or expensive model summarization passes.
 
 The snapshot fields map directly to durable artifacts (D3):
-- **current phase**: derived from the latest phase marker (e.g. `<!-- plan-issue-{ID} -->`).
+- **current phase**: derived from the latest phase marker (e.g., `<!-- experience-owner-complete-{ID} -->` → Experience phase; `<!-- design-phase-complete-{ID} -->` → Design phase; `<!-- plan-issue-{ID} -->` → Plan / Implementation phase).
 - **last decision**: derived from the most recent `engagement-record-{phase}-{ID}` comment's `load_bearing_decisions[]` or the YAML audit payload.
 - **next step**: derived from the next incomplete step in the active pipeline position.
 
@@ -112,7 +114,7 @@ Surfacing this snapshot orientates the developer and active agent immediately wi
 
 #### Missing-Record Fallback
 
-When a real issue does not yet carry any durable `engagement-record` markers (e.g., due to pre-#576 historical issues or a failed/halted emission), the **last decision** field gracefully degrades to reflect the latest completion marker or phase state, rendering exactly: `last decision: not recorded`. It must never be left blank or fabricated. Greenfield mode is the exception and renders `no durable state yet`.
+When a real issue does not yet carry any durable `engagement-record` markers (e.g., due to pre-#576 historical issues or a failed/halted emission), the **last decision** field gracefully degrades to reflect the latest completion marker or phase state, rendering exactly: `last decision: not recorded`. It must never be left blank or fabricated.
 
 #### On-Demand Expand (D4)
 
@@ -120,9 +122,22 @@ If a richer context or the full issue details are needed, an on-demand summary i
 
 #### Affordance-Hint Predicate (D5)
 
-A single-line affordance hint (e.g. "Type 'expand' for richer details") appears below the snapshot only when a cheap, deterministic check resolves to true:
+A single-line affordance hint (e.g. "Type 'expand' for richer details") appears below the snapshot only when a cheap check resolves to true:
 1. At least one prior `engagement-record` decision exists on the issue, OR
-2. The issue body length materially exceeds the size of the terse default snapshot.
+2. The issue body's rendered length exceeds the snapshot's rendered length by more than 1 000 characters.
+
+#### Example snapshot (same-agent resume)
+
+```text
+**Resume snapshot — Issue #633**
+Current phase: Plan / Implementation
+Last decision: summary-strategy — bounded reuse-only default + on-demand expand
+Next step: Step 2 — Code-Conductor smart-resume render (s2, in progress)
+
+Type "expand" for full issue context.
+```
+
+*(Fields are derived from already-loaded markers and engagement-records. The affordance hint appears when the predicate fires. Greenfield resumes render `(proposed)`-suffixed fields via the Greenfield Mode brief — see Greenfield Mode below.)*
 
 ### Greenfield Mode
 
