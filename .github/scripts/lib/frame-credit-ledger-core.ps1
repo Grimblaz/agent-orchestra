@@ -1098,7 +1098,15 @@ function Resolve-AdversarialPipelineAtomicMarkerPresence {
         }
     }
 
-    $status = if ($markerPresent) { 'true' } else { 'false-warn-only' }
+    $status = if ($markerPresent) {
+        'true'
+    }
+    elseif ([string]::IsNullOrWhiteSpace($IssueId)) {
+        'not-applicable'
+    }
+    else {
+        'false-warn-only'
+    }
     $warning = if ($status -eq 'false-warn-only') {
         "adversarial_pipeline_atomic_marker_present=false-warn-only; expected marker $marker for an applicable atomic adversarial adapter"
     }

@@ -460,6 +460,17 @@ Describe 'Adversarial atomic marker hook' {
         $result.warning | Should -Match 'false-warn-only'
     }
 
+    It 'reports not-applicable without warning when an atomic adapter marker cannot be expected because IssueId is blank' {
+        $result = Resolve-AdversarialPipelineAtomicMarkerPresence `
+            -AdapterAtomicState 'true' `
+            -IssueId '' `
+            -Text 'review completed without marker'
+
+        $result.adversarial_pipeline_atomic_marker_present | Should -Be 'not-applicable'
+        $result.marker | Should -Be '<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->'
+        $result.warning | Should -Be ''
+    }
+
     It 'reports not-applicable when the adapter is not atomic' {
         $result = Resolve-AdversarialPipelineAtomicMarkerPresence `
             -AdapterAtomicState 'n/a' `

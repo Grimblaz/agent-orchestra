@@ -19,8 +19,8 @@ Run only the Code-Critic defense stage against an existing prosecution ledger an
 3. After defense completes, write the same atomic front matter contract with only `defense_complete: true` forced in this command, preserve any readable stored values for the other fields, and update `last_updated`.
 4. Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`.
 
-**Shared dispatcher checklist**:
+**Stage-only defense override**:
 
-Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller using a defense-only override of the `standard` adapter contract: dispatch one Code-Critic defense pass with `Review mode selector: "Use defense review perspectives"` against the supplied prosecution ledger, then stop before judge. Pass the prosecution ledger, review target context, active issue id if available, and review-state persistence target as the pre-dispatch context. Return the defense report unchanged.
+Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller for a standalone defense rerun outside adapter execution. Use the defense selector against the supplied prosecution ledger, but do not claim or execute the atomic multi-stage `standard` adapter contract: dispatch one Code-Critic defense pass with `Review mode selector: "Use defense review perspectives"`, then stop before judge. Pass the prosecution ledger, review target context, active issue id if available, and review-state persistence target as the pre-dispatch context. Return the defense report unchanged.
 
 ARGUMENTS: $ARGUMENTS
