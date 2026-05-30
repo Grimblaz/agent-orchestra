@@ -380,6 +380,7 @@
     ],
     "blast_radius": ["localized", "module", "cross-module", "system-wide"],
     "authority_needed": ["yes", "no"],
-    "systemic_fix_type": ["instruction", "skill", "agent-prompt", "plan-template", "none"]
+    "systemic_fix_type": ["instruction", "skill", "agent-prompt", "plan-template", "none"],
+    "requires_pipeline_pause_reason": ["artifact-missing", "runtime-output-required", "user-input-required-by-decision-class"]
   }
 }

@@ -76,11 +76,17 @@ articulation_captures:
 ## Applying the gate to adversarial-review dispositions
 
 For each adversarial-review finding that the calling workflow must disposition, run the classification gate against the action the maintainer would take for that finding, not against the review pass as a whole. Use the Code-Critic Finding Categories contract for the input identity: `id` values are sequential `F1 | F2 | F3 | ...` labels within the review cycle, and `pass` is `1 | 2 | 3` for the prosecution pass that originated code, design, or plan findings. The disposition enum is `incorporate | dismiss | escalate`; the classification enum is `load-bearing | routine`. If a finding is routine, record the disposition without firing the platform's structured-question tool. If a finding is load-bearing, render the normal `audit_rationale`, decision brief, and structured question before recording the disposition.
+
+Firing-position rule: for an atomic multi-stage adapter declaring `integrity-contract.atomic: true` and more than one `pipeline-stages` entry, the classification gate fires only on terminal-stage sustained findings after the terminal stage. For adapters whose terminal stage is judge, those are judge-sustained findings after judge; for adapters whose terminal stage is defense, those are defense-sustained findings after defense. The gate does not fire on prosecution output or defense dialogue inside the atomic window. CLAUDE.md Engagement-gate non-overridability D3 still applies: once the terminal-stage sustained input exists, the gate fires unconditionally; only the firing position changes for atomic multi-stage adapters. For prosecution-only adapters (`design-challenge`, `lite`), the gate fires on merged-ledger findings as today.
+
 The marker payload schema is the `finding_dispositions:` block validated by `.github/scripts/Tests/design-disposition-audit.Tests.ps1`: `schema_version: 1`, non-empty `passes_run` as a subset of `[1, 2, 3]`, and `entries[]` carrying `finding_id`, `pass`, `disposition`, `classification`, and `disposition_rationale`. Routine entries require `artifact_citation` when the routine classification rests on an inherited artifact settling the finding; routine entries classified for another non-load-bearing reason do not require a citation. Multi-pass concurrence may include `also_flagged_by` with secondary pass ids.
 
 `disposition_rationale` explains why this specific finding received this specific `incorporate`, `dismiss`, or `escalate` outcome. It is not the v0 `audit_rationale`: `audit_rationale` proves why a decision is load-bearing before asking; `disposition_rationale` persists the final per-finding outcome after the gate decision, including routine outcomes that never asked the maintainer.
 
 The re-audit handler is symmetric. If a load-bearing disposition is challenged with a plausible artifact citation, rerun Leg 2 and, when the citation holds, emit `trigger: classification-re-audit` and revise the finding to routine. If a routine disposition is challenged with evidence that no inherited artifact actually settles the action, rerun all three legs and, when they hold, emit `trigger: classification-re-audit-routine` and revise the finding to load-bearing before asking.
+
+Re-audit timing: under an atomic multi-stage adapter, re-audit triggers apply to the terminal-stage sustained findings set, which is the input to the terminal-stage classification gate. For judge-terminal adapters, this remains the judge-sustained findings set after judge; for defense-terminal adapters, this is the defense-sustained findings set after defense. For prosecution-only adapters, re-audit applies to merged-ledger findings as today. Re-audit cannot retroactively invalidate a terminal-stage ruling or report; it can only revise the maintainer disposition classification/decision.
+
 Map maintainer input to recommendation-shift triggers as follows: new facts or changed upstream content after the initial classification maps to `new-evidence`; direct disagreement with the recommended disposition or option maps to `engineer-pushback`; a claim that a load-bearing finding is already answered by an inherited artifact maps to `classification-re-audit`; a claim that a routine finding is not actually answered by inherited content maps to `classification-re-audit-routine`. If a maintainer message could fit more than one pattern or does not identify the challenged finding, ask one clarifying question before changing classification.
 YAML marker invariant: `finding_dispositions:` lives only on the `<!-- design-phase-complete-{ID} -->` marker body, never on `<!-- credit-input-{port}-{ID} -->` markers. Credit-input markers remain limited to frame credit deferred-emission payloads. The `finding_dispositions:` block lives only on `<!-- design-phase-complete-{ID} -->` markers (SMC-19) and is independent of `<!-- engagement-record-{phase}-{ID} -->` markers (SMC-20). The two payloads serve distinct audits — finding-dispositions tracks per-finding incorporate/dismiss outcomes; engagement-records track load-bearing classification with cross-session resume semantics via `same-decision-resume`. Do not mirror or merge content between them.
 
@@ -121,7 +127,7 @@ Render as a block-quoted paragraph immediately after the `audit_rationale` sente
 
 **Exemplar** (D-load-directive, from #571 R1+R2):
 
-*Audit rationale: The load-order direction for solution-authoring vs upstream-onboarding is not settled in any prior phase comment or umbrella decision — no named-decision row pins this ordering, so the non-inheritance leg holds.*
+_Audit rationale: The load-order direction for solution-authoring vs upstream-onboarding is not settled in any prior phase comment or umbrella decision — no named-decision row pins this ordering, so the non-inheritance leg holds._
 
 > **Decision brief — D-load-directive**: The `## Process` section of each agent body is where load-order instructions land. The decision is whether solution-authoring fires before upstream-onboarding or after — this determines whether the engagement gate runs before the brief surfaces inherited decisions. If upstream-onboarding fired first, the gate would intercept questions about content the engineer just read from someone else's output — manufacturing load-bearing signal on settled content.
 
@@ -183,16 +189,17 @@ Render at phase exit after all load-bearing decisions are locked:
 > "I chose solution-authoring first because upstream-onboarding surfaces prior decisions that have already been answered — if the engagement gate ran after, it would fire on settled content. If upstream-onboarding had run first, the gate would have intercepted the brief's inherited decisions and manufactured false load-bearing signal. The order had to put classification before context so the falsifier could operate on genuinely unanchored decisions only."
 
 ## Related Guidance
+
 - Load `upstream-onboarding` after this skill per the D-load-directive declared in each agent body dispatcher.
 - Load `bdd-scenarios` when scenario IDs and G/W/T formatting are needed for CE Gate scenarios.
 
 ## Gotchas
 
-| Trigger | Gotcha | Fix |
-| --- | --- | --- |
+| Trigger                                              | Gotcha                                                                                                | Fix                                                                                                       |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
 | Treating a pacing directive as an engagement decline | The agent silently skips a load-bearing classification gate even though no explicit decline was given | Fire the structured question unless the engineer selects the explicit decline option or writes `decline:` |
-| A routine decision is treated as load-bearing | The agent asks for engagement on content already settled by an inherited artifact | Re-audit Leg 2 against the citation and emit the appropriate recommendation shift |
-| A load-bearing decision is treated as routine | The durable artifact changes without surfacing the maintainer choice | Rerun all three gate legs and ask before recording the final decision |
+| A routine decision is treated as load-bearing        | The agent asks for engagement on content already settled by an inherited artifact                     | Re-audit Leg 2 against the citation and emit the appropriate recommendation shift                         |
+| A load-bearing decision is treated as routine        | The durable artifact changes without surfacing the maintainer choice                                  | Rerun all three gate legs and ask before recording the final decision                                     |
 
 ## Frame Ports Filled By This Skill
 

@@ -32,6 +32,13 @@ Describe 'inline dispatch contract' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:SessionStartupSkill = Join-Path $script:RepoRoot 'skills\session-startup\SKILL.md'
+        $script:ClaudeDispatcherPath = Join-Path $script:RepoRoot 'skills\adversarial-review\platforms\claude.md'
+        $script:ClaudeDispatcherContent = Get-Content -Path $script:ClaudeDispatcherPath -Raw -ErrorAction Stop
+
+        $script:GetPlanEffectiveContract = {
+            $planContent = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+            return ($planContent + "`n" + $script:ClaudeDispatcherContent)
+        }
 
         $script:GetCanonicalLabelYaml = {
             param(
@@ -281,11 +288,12 @@ Describe 'inline dispatch contract' {
     }
 
     It 'requires /plan to document live Code-Critic handshake recapture at dispatch time' {
-        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+        $content = & $script:GetPlanEffectiveContract
 
         $liveRecapturePatterns = @(
             '(?is)(?:before each|immediately before each|for each|for every|per-dispatch).{0,180}(?:Code-Critic\s+)?`?Agent`?.{0,120}dispatch.{0,240}(?:reconstruct|recapture|capture|construct).{0,220}(?:HEAD|parent_head|git rev-parse HEAD).{0,220}(?:branch|parent_branch|git rev-parse --abbrev-ref HEAD).{0,220}(?:CWD|parent_cwd|pwd).{0,220}(?:dirty fingerprint|parent_dirty_fingerprint|git status --porcelain)',
-            '(?is)(?:reconstruct|recapture|capture|construct).{0,220}(?:HEAD|parent_head|git rev-parse HEAD).{0,220}(?:branch|parent_branch|git rev-parse --abbrev-ref HEAD).{0,220}(?:CWD|parent_cwd|pwd).{0,220}(?:dirty fingerprint|parent_dirty_fingerprint|git status --porcelain).{0,260}(?:before each|immediately before each|for each|for every|per-dispatch).{0,180}(?:Code-Critic\s+)?`?Agent`?.{0,120}dispatch'
+            '(?is)(?:reconstruct|recapture|capture|construct).{0,220}(?:HEAD|parent_head|git rev-parse HEAD).{0,220}(?:branch|parent_branch|git rev-parse --abbrev-ref HEAD).{0,220}(?:CWD|parent_cwd|pwd).{0,220}(?:dirty fingerprint|parent_dirty_fingerprint|git status --porcelain).{0,260}(?:before each|immediately before each|for each|for every|per-dispatch).{0,180}(?:Code-Critic\s+)?`?Agent`?.{0,120}dispatch',
+            '(?is)Immediately before each Code-Critic dispatch or retry, capture.{0,260}git rev-parse HEAD.{0,180}git rev-parse --abbrev-ref HEAD.{0,120}pwd.{0,220}git status --porcelain'
         )
 
         $liveRecaptureDocumented = $false
@@ -299,23 +307,10 @@ Describe 'inline dispatch contract' {
     }
 
     It 'requires /plan to name fresh Code-Critic handshakes for every prosecution and defense dispatch' {
-        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+        $content = & $script:GetPlanEffectiveContract
 
-        $dispatchStages = @(
-            [pscustomobject]@{ Name = 'Pass 1'; Pattern = '(?is)1\.\s+Pass 1:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' },
-            [pscustomobject]@{ Name = 'Pass 2'; Pattern = '(?is)2\.\s+Pass 2:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' },
-            [pscustomobject]@{ Name = 'Pass 3'; Pattern = '(?is)3\.\s+Pass 3:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' },
-            [pscustomobject]@{ Name = 'Defense'; Pattern = '(?is)Defense:.{0,520}(?:fresh|new|live|per-dispatch|recapture|reconstruct).{0,140}(?:handshake|capture)' }
-        )
-
-        $missingStageNames = @()
-        foreach ($stage in $dispatchStages) {
-            if ($content -notmatch $stage.Pattern) {
-                $missingStageNames += $stage.Name
-            }
-        }
-
-        $missingStageNames | Should -BeNullOrEmpty -Because "/plan must make every Code-Critic prosecution and defense dispatch use a freshly recaptured handshake; missing stages: $($missingStageNames -join ', ')"
+        $content | Should -Match '(?is)parallel prosecution batch.{0,240}recapture HEAD, branch, CWD, and dirty fingerprint once.{0,220}immediately before the parallel block.{0,220}one handshake block per prosecution dispatch' -Because '/plan must make every Code-Critic prosecution pass in the standard batch use a fresh batch-time handshake'
+        $content | Should -Match '(?is)`standard`:.{0,220}defense pass.{0,220}Recapture state immediately before dispatch.{0,180}fresh handshake block' -Because '/plan must make the Code-Critic defense dispatch use a freshly recaptured handshake'
     }
 
     It 'forbids /plan from documenting a single once-per-invocation pipeline handshake' {
@@ -325,19 +320,19 @@ Describe 'inline dispatch contract' {
     }
 
     It 'requires /plan to explicitly reject reusing stale handshakes across pipeline dispatches' {
-        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+        $content = & $script:GetPlanEffectiveContract
 
-        $content | Should -Match '(?is)((do not|must not).{0,160}(reuse|carry forward).{0,160}(single|once-per-invocation|command-entry|entry-time|earlier).{0,140}handshake|(single|once-per-invocation|command-entry|entry-time|earlier).{0,140}handshake.{0,160}(must not|do not).{0,120}(reuse|carry forward))' -Because '/plan must explicitly reject reuse of a single stale handshake across prosecution, defense, or judge dispatches'
+        $content | Should -Match '(?is)Do not reuse an entry-time, command-entry, prior-stage, or prior-dispatch block|No command-entry or once-per-invocation handshake reuse' -Because '/plan must explicitly reject reuse of a single stale handshake across prosecution, defense, or judge dispatches'
     }
 
     It 'keeps /plan judge handshake context metadata-only until Code-Review-Response has Step 0 verification' {
-        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+        $content = & $script:GetPlanEffectiveContract
 
         $content | Should -Match '(?is)Code-Review-Response.{0,180}judge.{0,240}(contextual metadata only|context only).{0,260}(unless|until).{0,180}(shell|Code-Review-Response).{0,180}(Step 0|environment handshake verification).{0,220}(separate issue|separate follow-up|future issue)' -Because '/plan must clarify that judge handshake data is contextual metadata only unless the Code-Review-Response shell gains Step 0 verification in a separate issue'
     }
 
     It 'scopes /plan pipeline-degraded recovery to redundant prosecution body-load pass failures' {
-        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+        $content = & $script:GetPlanEffectiveContract
 
         $matchesAnyPattern = {
             param(
@@ -363,7 +358,7 @@ Describe 'inline dispatch contract' {
 
         $content | Should -Match '(?is)\bretry\b.{0,80}\bonce\b|\bonce\b.{0,80}\bretry\b' -Because '/plan must retry a failed or malformed redundant prosecution body-load pass once before degrading'
         $content | Should -Match '(?is)\bpipeline-degraded\b' -Because '/plan must preserve the visible degraded-pipeline note for redundant prosecution partial failure'
-        $content | Should -Match '(?is)(?:2-of-3|two-of-three|two of three).{0,200}(?:merged\s+)?prosecution ledger|(?:merged\s+)?prosecution ledger.{0,200}(?:2-of-3|two-of-three|two of three)' -Because '/plan must tie pipeline-degraded continuation to the 2-of-3 merged prosecution ledger'
+        $content | Should -Match '(?is)continue only when enough valid passes remain to form the adapter''s allowed merged prosecution ledger' -Because '/plan must tie pipeline-degraded continuation to the allowed merged prosecution ledger'
 
         foreach ($singletonStage in @(
                 [pscustomobject]@{ Name = 'defense'; Body = 'Code-Critic'; StagePattern = 'defense' },

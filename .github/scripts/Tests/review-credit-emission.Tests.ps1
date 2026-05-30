@@ -4,8 +4,8 @@
 # Tests for per-adapter integrity contract declarations (issue #441, Step 8a).
 #
 # Decision 6 (per-adapter integrity exemptions):
-#   standard adapter  — expects pass-blocks 1, 2, and 3 in the prosecution ledger
-#   lite adapter      — expects pass-block 1 only
+#   standard adapter  — expects prosecution passes 1, 2, and 3 in the prosecution ledger
+#   lite adapter      — expects prosecution pass 1 only
 #   judge-only        — exempt (re-review scope; no new prosecution)
 #   proxy-github      — exempt (external review intake; single proxy pass)
 #
@@ -25,9 +25,10 @@ BeforeAll {
     # Frontmatter YAML parser (regex-based — no YAML module required)
     # Handles the narrow schema used in adapter frontmatter:
     #   integrity-contract:
-    #     pass-blocks: [1, 2, 3]
+    #     pipeline-stages: [prosecution, defense, judge]
+    #     atomic: true|n/a
+    #     prosecution-passes: [1, 2, 3]
     #     exempt: true|false
-    #     exempt-reason: "..."
     # ---------------------------------------------------------------------------
 
     function script:Get-AdapterIntegrityContract {
@@ -52,12 +53,28 @@ BeforeAll {
             return $null
         }
 
-        # Parse pass-blocks: [...] from the indented section.
-        $passBlocks = @()
-        if ($fm -match '(?ms)integrity-contract:.*?pass-blocks:\s*\[(?<blocks>[^\]]*)\]') {
-            $blockStr = $matches['blocks']
-            $passBlocks = @(
-                $blockStr -split '[,\s]+' |
+        # Parse pipeline-stages: [...] from the indented section.
+        $pipelineStages = @()
+        if ($fm -match '(?ms)integrity-contract:.*?pipeline-stages:\s*\[(?<stages>[^\]]*)\]') {
+            $stageStr = $matches['stages']
+            $pipelineStages = @(
+                $stageStr -split '[,\s]+' |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+            )
+        }
+
+        # Parse atomic: true|false|n/a from the indented section.
+        $atomic = $null
+        if ($fm -match '(?ms)integrity-contract:.*?atomic:\s*(?<val>true|false|n/a)') {
+            $atomic = $matches['val'].Trim()
+        }
+
+        # Parse prosecution-passes: [...] from the indented section.
+        $prosecutionPasses = @()
+        if ($fm -match '(?ms)integrity-contract:.*?prosecution-passes:\s*\[(?<passes>[^\]]*)\]') {
+            $passStr = $matches['passes']
+            $prosecutionPasses = @(
+                $passStr -split '[,\s]+' |
                 Where-Object { $_ -match '^\d+$' } |
                 ForEach-Object { [int]$_ }
             )
@@ -69,16 +86,11 @@ BeforeAll {
             $exempt = [System.Boolean]::Parse($matches['val'].Trim())
         }
 
-        # Parse optional exempt-reason.
-        $exemptReason = $null
-        if ($fm -match '(?ms)integrity-contract:.*?exempt-reason:\s*"(?<reason>[^"]*)"') {
-            $exemptReason = $matches['reason']
-        }
-
         return [pscustomobject]@{
-            PassBlocks   = $passBlocks
-            Exempt       = $exempt
-            ExemptReason = $exemptReason
+            PipelineStages    = $pipelineStages
+            Atomic            = $atomic
+            ProsecutionPasses = $prosecutionPasses
+            Exempt            = $exempt
         }
     }
 }
@@ -89,61 +101,71 @@ BeforeAll {
 
 Describe 'Per-adapter integrity contract declarations (Step 8a — Decision 6)' {
 
-    It 'standard adapter declares integrity-contract with pass-blocks [1, 2, 3]' {
+    It 'standard adapter declares integrity-contract with prosecution-passes [1, 2, 3]' {
         $contract = script:Get-AdapterIntegrityContract `
             (Join-Path $script:AdaptersPath 'standard.md')
 
-        $contract             | Should -Not -BeNullOrEmpty -Because 'standard.md must have integrity-contract frontmatter'
-        $contract.Exempt      | Should -Be $false -Because 'standard adapter is not exempt'
-        $contract.PassBlocks  | Should -Be @(1, 2, 3) -Because 'standard review runs all three prosecution passes'
+        $contract                   | Should -Not -BeNullOrEmpty -Because 'standard.md must have integrity-contract frontmatter'
+        $contract.PipelineStages    | Should -Be @('prosecution', 'defense', 'judge')
+        $contract.Atomic            | Should -Be 'true'
+        $contract.Exempt            | Should -Be $false -Because 'standard adapter is not exempt'
+        $contract.ProsecutionPasses | Should -Be @(1, 2, 3) -Because 'standard review runs all three prosecution passes'
     }
 
-    It 'lite adapter declares integrity-contract with pass-blocks [1]' {
+    It 'lite adapter declares integrity-contract with prosecution-passes [1]' {
         $contract = script:Get-AdapterIntegrityContract `
             (Join-Path $script:AdaptersPath 'lite.md')
 
-        $contract             | Should -Not -BeNullOrEmpty -Because 'lite.md must have integrity-contract frontmatter'
-        $contract.Exempt      | Should -Be $false -Because 'lite adapter is not exempt'
-        $contract.PassBlocks  | Should -Be @(1) -Because 'lite review runs only one compact prosecution pass'
+        $contract                   | Should -Not -BeNullOrEmpty -Because 'lite.md must have integrity-contract frontmatter'
+        $contract.PipelineStages    | Should -Be @('prosecution')
+        $contract.Atomic            | Should -Be 'n/a'
+        $contract.Exempt            | Should -Be $false -Because 'lite adapter is not exempt'
+        $contract.ProsecutionPasses | Should -Be @(1) -Because 'lite review runs only one compact prosecution pass'
     }
 
     It 'judge-only adapter declares exempt=true in integrity-contract' {
         $contract = script:Get-AdapterIntegrityContract `
             (Join-Path $script:AdaptersPath 'judge-only.md')
 
-        $contract        | Should -Not -BeNullOrEmpty -Because 'judge-only.md must have integrity-contract frontmatter'
-        $contract.Exempt | Should -Be $true  -Because 'judge-only has no prosecution phase'
+        $contract                   | Should -Not -BeNullOrEmpty -Because 'judge-only.md must have integrity-contract frontmatter'
+        $contract.PipelineStages    | Should -Be @('judge')
+        $contract.Atomic            | Should -Be 'n/a'
+        $contract.ProsecutionPasses.Count | Should -Be 0
+        $contract.Exempt            | Should -Be $true -Because 'judge-only has no prosecution phase'
     }
 
     It 'proxy-github adapter declares exempt=true in integrity-contract' {
         $contract = script:Get-AdapterIntegrityContract `
             (Join-Path $script:AdaptersPath 'proxy-github.md')
 
-        $contract        | Should -Not -BeNullOrEmpty -Because 'proxy-github.md must have integrity-contract frontmatter'
-        $contract.Exempt | Should -Be $true  -Because 'proxy-github replaces multi-pass with a single proxy pass'
+        $contract                   | Should -Not -BeNullOrEmpty -Because 'proxy-github.md must have integrity-contract frontmatter'
+        $contract.PipelineStages    | Should -Be @('proxy-prosecution')
+        $contract.Atomic            | Should -Be 'n/a'
+        $contract.ProsecutionPasses.Count | Should -Be 0
+        $contract.Exempt            | Should -Be $true -Because 'proxy-github replaces multi-pass with a single proxy pass'
     }
 
-    It 'standard adapter declares more pass-blocks than lite adapter' {
+    It 'standard adapter declares more prosecution passes than lite adapter' {
         $standard = script:Get-AdapterIntegrityContract (Join-Path $script:AdaptersPath 'standard.md')
         $lite     = script:Get-AdapterIntegrityContract (Join-Path $script:AdaptersPath 'lite.md')
 
-        $standard.PassBlocks.Count | Should -BeGreaterThan $lite.PassBlocks.Count
+        $standard.ProsecutionPasses.Count | Should -BeGreaterThan $lite.ProsecutionPasses.Count
     }
 
-    It 'exempt adapters declare an empty pass-blocks list' {
+    It 'exempt adapters declare an empty prosecution-passes list' {
         $judgeOnly   = script:Get-AdapterIntegrityContract (Join-Path $script:AdaptersPath 'judge-only.md')
         $proxyGithub = script:Get-AdapterIntegrityContract (Join-Path $script:AdaptersPath 'proxy-github.md')
 
-        $judgeOnly.PassBlocks.Count   | Should -Be 0
-        $proxyGithub.PassBlocks.Count | Should -Be 0
+        $judgeOnly.ProsecutionPasses.Count   | Should -Be 0
+        $proxyGithub.ProsecutionPasses.Count | Should -Be 0
     }
 
-    It 'exempt adapters carry a non-empty exempt-reason' {
+    It 'exempt adapters declare non-atomic integrity contracts' {
         $judgeOnly   = script:Get-AdapterIntegrityContract (Join-Path $script:AdaptersPath 'judge-only.md')
         $proxyGithub = script:Get-AdapterIntegrityContract (Join-Path $script:AdaptersPath 'proxy-github.md')
 
-        [string]::IsNullOrWhiteSpace($judgeOnly.ExemptReason)   | Should -Be $false
-        [string]::IsNullOrWhiteSpace($proxyGithub.ExemptReason) | Should -Be $false
+        $judgeOnly.Atomic   | Should -Be 'n/a'
+        $proxyGithub.Atomic | Should -Be 'n/a'
     }
 }
 
@@ -162,13 +184,13 @@ Describe 'adversarial-review SKILL.md integrity contract table (Step 8a)' {
         $script:Skill | Should -Match 'Integrity Contract' -Because 'SKILL.md must document the per-adapter integrity contract'
     }
 
-    It 'SKILL.md names the standard adapter as expecting three pass-blocks' {
+    It 'SKILL.md names the standard adapter as expecting three prosecution passes' {
         $script:Skill | Should -Match 'standard' -Because 'SKILL.md must name the standard adapter'
-        # The table should reference 1, 2, 3 pass-blocks for standard.
-        $script:Skill | Should -Match '1.*2.*3|pass.blocks.*1.*2.*3|\[1, 2, 3\]' -Because 'standard must show 3 pass-blocks'
+        # The table should reference 1, 2, 3 prosecution passes for standard.
+        $script:Skill | Should -Match '1.*2.*3|prosecution.passes.*1.*2.*3|\[1, 2, 3\]' -Because 'standard must show 3 prosecution passes'
     }
 
-    It 'SKILL.md names the lite adapter as expecting one pass-block' {
+    It 'SKILL.md names the lite adapter as expecting one prosecution pass' {
         $script:Skill | Should -Match 'lite' -Because 'SKILL.md must name the lite adapter'
     }
 
@@ -188,6 +210,7 @@ Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)'
     BeforeAll {
     # Fixture judge-rulings comment: two findings, one sustained (medium), one defense-sustained.
     $script:JudgeRulingsAllPassed = @'
+
 ### Adversarial Review Score Summary
 
 | Finding | Pass | Prosecution (severity, pts) | Defense verdict | Ruling | Confidence | Points |
@@ -231,7 +254,6 @@ Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)'
 -->
 '@
     }
-
 
     It 'returns a credit row with all required v4 fields' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
@@ -295,18 +317,69 @@ Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)'
         $f1.ruling | Should -Be 'defense-sustained'
     }
 
-    It 'integrity-check.pass-blocks is [1,2,3] for standard adapter' {
+    It 'integrity-check.prosecution-passes is [1,2,3] for standard adapter' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
             -AdapterName 'standard' -AdaptersDir $script:AdaptersPath
 
-        @($row.'integrity-check'.'pass-blocks') | Should -Be @(1, 2, 3)
+        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1, 2, 3)
+        $legacyFieldName = 'pass' + '-blocks'
+        $row.'integrity-check'.PSObject.Properties.Name | Should -Not -Contain $legacyFieldName
     }
 
-    It 'integrity-check.pass-blocks is [1] for lite adapter' {
+    It 'integrity-check.prosecution-passes is [1] for lite adapter' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
             -AdapterName 'lite' -AdaptersDir $script:AdaptersPath
 
-        @($row.'integrity-check'.'pass-blocks') | Should -Be @(1)
+        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1)
+    }
+
+    It 'integrity-check.prosecution-passes is [1] for post-fix adapter without live adapter lookup' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'post-fix'
+
+        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1)
+    }
+
+    It 'integrity-check.prosecution-passes is read when live adapter omits exempt' {
+        $adapterDir = Join-Path $TestDrive 'adapters-no-exempt'
+        New-Item -ItemType Directory -Path $adapterDir -Force | Out-Null
+        @'
+---
+name: review-lite-no-exempt
+integrity-contract:
+  pipeline-stages: [prosecution]
+  atomic: n/a
+  prosecution-passes: [1]
+---
+
+# Review Lite No Exempt
+'@ | Set-Content -Path (Join-Path $adapterDir 'lite.md') -Encoding UTF8
+
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'lite' -AdaptersDir $adapterDir
+
+        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1)
+        $row.'integrity-check'.status | Should -Be 'passed'
+    }
+
+    It 'falls back to adapter-name defaults when supplied adapter file is missing or unparsable' {
+        $missingAdapterDir = Join-Path $TestDrive 'missing-adapters'
+        New-Item -ItemType Directory -Path $missingAdapterDir -Force | Out-Null
+
+        $missingRow = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'post-fix' -AdaptersDir $missingAdapterDir
+
+        @($missingRow.'integrity-check'.'prosecution-passes') | Should -Be @(1)
+
+        $unparsableAdapterDir = Join-Path $TestDrive 'unparsable-adapters'
+        New-Item -ItemType Directory -Path $unparsableAdapterDir -Force | Out-Null
+        'not yaml frontmatter' | Set-Content -Path (Join-Path $unparsableAdapterDir 'judge-only.md') -Encoding UTF8
+
+        $unparsableRow = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllDefense `
+            -AdapterName 'judge-only' -AdaptersDir $unparsableAdapterDir
+
+        @($unparsableRow.'integrity-check'.'prosecution-passes').Count | Should -Be 0
+        $unparsableRow.'integrity-check'.status | Should -Be 'not-applicable'
     }
 
     It 'integrity-check.status is not-applicable for exempt adapters (judge-only)' {
@@ -362,5 +435,49 @@ Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)'
 '@
         $row = Build-ReviewCreditRow -JudgeRulingsComment $veryHighPointsComment
         $row.status | Should -Be 'passed' -Because 'P+1000 must not match the P+10 boundary pattern'
+    }
+}
+
+Describe 'Adversarial atomic marker hook' {
+    It 'reports true when an atomic adapter marker is present' {
+        $result = Resolve-AdversarialPipelineAtomicMarkerPresence `
+            -AdapterAtomicState 'true' `
+            -IssueId '629' `
+            -Text 'done <!-- adversarial-pipeline-atomic-629 -->'
+
+        $result.adversarial_pipeline_atomic_marker_present | Should -Be 'true'
+        $result.warning | Should -Be ''
+    }
+
+    It 'reports false-warn-only when an atomic adapter marker is absent' {
+        $result = Resolve-AdversarialPipelineAtomicMarkerPresence `
+            -AdapterAtomicState 'true' `
+            -IssueId '629' `
+            -Text 'review completed without marker'
+
+        $result.adversarial_pipeline_atomic_marker_present | Should -Be 'false-warn-only'
+        $result.marker | Should -Be '<!-- adversarial-pipeline-atomic-629 -->'
+        $result.warning | Should -Match 'false-warn-only'
+    }
+
+    It 'reports not-applicable without warning when an atomic adapter marker cannot be expected because IssueId is blank' {
+        $result = Resolve-AdversarialPipelineAtomicMarkerPresence `
+            -AdapterAtomicState 'true' `
+            -IssueId '' `
+            -Text 'review completed without marker'
+
+        $result.adversarial_pipeline_atomic_marker_present | Should -Be 'not-applicable'
+        $result.marker | Should -Be '<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->'
+        $result.warning | Should -Be ''
+    }
+
+    It 'reports not-applicable when the adapter is not atomic' {
+        $result = Resolve-AdversarialPipelineAtomicMarkerPresence `
+            -AdapterAtomicState 'n/a' `
+            -IssueId '629' `
+            -Text 'review completed without marker'
+
+        $result.adversarial_pipeline_atomic_marker_present | Should -Be 'not-applicable'
+        $result.warning | Should -Be ''
     }
 }

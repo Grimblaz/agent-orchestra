@@ -50,8 +50,8 @@ Describe 'orchestra-review lite mode trigger contract' {
     }
 
     It 'keeps the lite command wording tied to one compact all-perspectives prosecution pass' {
-        $script:LiteCommand | Should -Match 'Run the compact review pipeline: one all-perspectives prosecution pass, then defense, then judge\.' -Because 'the user-facing command summary must describe lite mode as one compact prosecution pass'
-        $script:LiteCommand | Should -Match 'The lite shape is fixed for this command: one compact prosecution pass that still covers all six standard review perspectives in a single ledger before moving on\.' -Because 'lite mode must not silently drop any of the six standard perspectives'
+        $script:LiteCommand | Should -Match 'Run the compact review pipeline: one all-perspectives prosecution pass\.' -Because 'the user-facing command summary must describe lite mode as one compact prosecution pass'
+        $script:LiteCommand | Should -Match 'The `lite` adapter is prosecution-only\.' -Because 'lite mode must not imply defense or judge stages are part of the adapter contract'
     }
 
     It 'maps the exact lite-mode marker to the single-pass non-parallel routing entry' {

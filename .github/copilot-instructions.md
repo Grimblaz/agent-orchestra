@@ -85,7 +85,7 @@ User pacing directives — including but not limited to "work without stopping,"
 
 Methodology checkpoints fire unconditionally. The user's only in-band lever to skip an engagement-gate question is the option built into that specific question (e.g., `solution-authoring`'s `Decline engagement — proceed without classification`, `upstream-onboarding`'s alternative-option selection, `plan-authoring`'s `Reject` plan-approval path).
 
-See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate; `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: SMC-20 + `skills/engagement-record-emission/SKILL.md` (engagement-record-{phase}-{ID} marker contract; #576 v1.2) for the Segment-A maintainer-evidence path.
+See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate; `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #575 and SMC-20 + `skills/engagement-record-emission/SKILL.md` (engagement-record-{phase}-{ID} marker contract; #576 v1.2) for the Segment-A maintainer-evidence path.
 
 <!-- engagement-gate-non-overridability:end -->
 

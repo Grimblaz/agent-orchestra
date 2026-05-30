@@ -335,7 +335,7 @@ load_bearing_decisions:
 Describe 'Read-EngagementRecords: mirror integrity' {
     It 'verifies the Markdown mirror co-located inside the comment contains the HTML pending comment' {
         $body = $script:MarkdownMirrorCommentBody
-        
+
         # Test mirror matches YAML key list
         $body | Should -Match '\*\*Classification\*\*:\s*load-bearing'
         $body | Should -Match '\*\*Engineer choice\*\*:\s*abbreviated'
@@ -400,7 +400,7 @@ Describe 'Read-EngagementRecords: byte-equivalence operational definition' {
 Describe 'Code-Conductor.agent.md structure checks' {
     It 'contains the orchestration contract and Named Decisions headings and core text' {
         $agentBody = Get-Content -Path (Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md') -Raw
-        
+
         $agentBody | Should -Match '### Orchestration engagement-record contract'
         $agentBody | Should -Match '### Named Decisions write-discipline'
         $agentBody | Should -Match 'Content-authoring touchpoints where the solution-authoring classification gate applies'

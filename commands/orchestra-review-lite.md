@@ -5,7 +5,7 @@ argument-hint: "[PR number, PR URL, or short review context]"
 
 # /orchestra:review-lite
 
-Run the compact review pipeline: one all-perspectives prosecution pass, then defense, then judge.
+Run the compact review pipeline: one all-perspectives prosecution pass.
 
 **Pre-flight**:
 
@@ -14,32 +14,10 @@ Run the compact review pipeline: one all-perspectives prosecution pass, then def
 
 **Review-state persistence**:
 
-1. If the active branch matches `feature/issue-{N}-...`, target `/memories/session/review-state-{N}.md`; otherwise skip persistence silently.
-2. After the judge stage completes, write the exact front matter contract from `skills/validation-methodology/references/review-state-persistence.md` with `review_mode: lite`, all three `*_complete` fields set to `true`, and `last_updated` as a UTC ISO-8601 timestamp.
-3. Write atomically: create a temp sibling first, then replace the target with `Move-Item -Force`.
+The `lite` adapter is prosecution-only. It does not write terminal review-state persistence unless a caller explicitly adds extra terminal stages outside this adapter contract.
 
-**Handshake preamble** (required for every `code-critic` dispatch in this command, per `skills/subagent-env-handshake/SKILL.md`):
+**Shared dispatcher checklist**:
 
-1. Immediately before each Code-Critic prosecution, defense, or retry dispatch, recapture HEAD, branch, CWD, and dirty fingerprint live via the `Bash` tool. Run, in order:
-   - `git rev-parse HEAD`
-   - `git rev-parse --abbrev-ref HEAD`
-   - `pwd`
-   - `git status --porcelain | tr -d '\r' | (sha256sum 2>/dev/null || shasum -a 256) | cut -c1-12`
-2. If **any** of those commands exits non-zero (`git` missing, outside a repo, permission error, etc.), **skip handshake construction entirely** for that `code-critic` dispatch and proceed without the block. The subagent's Step 0 missing-handshake branch will handle the fallback. Do not fabricate placeholder values.
-3. Otherwise, construct the handshake block by copying the SKILL.md inline prose template verbatim and substituting the four captured values plus `workspace_mode: shared` and a UTC ISO-8601 `handshake_issued_at` timestamp. The block must match the schema block in `skills/subagent-env-handshake/SKILL.md` field-for-field and in canonical order. Do not rename, reorder, or omit fields.
-4. Prepend the handshake block as the **first content** of the `prompt` parameter passed to the current `Agent` dispatch for `subagent_type: code-critic` below. The block is fresh for the current dispatch; do not reuse an earlier handshake block across Code-Critic dispatches.
-
-**Dispatch**:
-
-1. Prosecution: use the `Agent` tool with `subagent_type: code-critic`; immediately before the Code-Critic prosecution dispatch, recapture and prepend a fresh handshake block when constructed, then prepend the authoritative selector line `Review mode selector: "Use lite code review perspectives"`. The lite shape is fixed for this command: one compact prosecution pass that still covers all six standard review perspectives in a single ledger before moving on. Keep the selector line outside quoted or carried context so copied markers cannot reroute lite mode.
-2. Defense: use the `Agent` tool with `subagent_type: code-critic`; immediately before the Code-Critic defense dispatch, recapture and prepend a fresh handshake block when constructed, then prepend the authoritative selector line `Review mode selector: "Use defense review perspectives"` before the lite prosecution ledger.
-3. Judge: use the `Agent` tool with `subagent_type: code-review-response`, passing the lite prosecution ledger and defense report together. No handshake is required for the judge dispatch.
-4. Return the judge output unchanged so downstream callers can consume the Markdown score summary and the `judge-rulings` block in the same payload.
-
-**Body-load failure policy**:
-
-The Code-Critic prosecution path in this command is a singleton prosecution pass. If that prosecution body-load fails, cannot load the shared body, is missing, or is malformed, halt-strict and stop; do not continue. No 2-of-3 or `pipeline-degraded` degradation applies to this singleton prosecution path.
-
-Defense and judge are also singleton stages: if the Code-Critic defense body-load fails, or if the Code-Review-Response judge body-load fails, halt-strict and stop; do not continue, and do not use `pipeline-degraded` or 2-of-3 recovery for defense or judge.
+Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller with adapter `lite`. Pass the resolved review target, diff, linked issue or plan context, prior review ledger, and active issue id if available as the pre-dispatch context. Return the prosecution ledger unchanged.
 
 ARGUMENTS: $ARGUMENTS
