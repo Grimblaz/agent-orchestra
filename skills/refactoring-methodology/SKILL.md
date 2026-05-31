@@ -104,7 +104,9 @@ Use a concise analysis with these sections when reporting refactor work:
 
 ## Conductor Integration
 
-In Code-Conductor workflows, **ALWAYS call Refactor-Specialist after Code-Smith completes.**
+In the Code-Conductor hub flow, **ALWAYS call Refactor-Specialist after Code-Smith completes.** Hub-mode Code-Conductor still runs the mandatory Refactor-Specialist pass.
+
+In `/spine-run`, the `implement-refactor` port resolves through [skills/refactoring-methodology/adapters/implement-refactor-adapter.md](adapters/implement-refactor-adapter.md), and predicate adapters may resolve the port as auto-N/A or explicit skip before the work adapter runs.
 
 Refactor-Specialist will:
 
@@ -113,7 +115,7 @@ Refactor-Specialist will:
 3. Report findings (even if no action taken)
 4. Make improvements where beneficial
 
-**There is no "skip refactoring" option.** The Refactor-Specialist decides what needs improvement, not the plan or Code-Conductor.
+**In the Code-Conductor hub flow, there is no "skip refactoring" option.** The Refactor-Specialist decides what needs improvement, not the plan or Code-Conductor.
 
 **Flow**: Code-Smith -> Refactor-Specialist -> Code-Critic
 
@@ -154,4 +156,4 @@ Refactor-Specialist will:
 
 | Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
 | --- | --- | --- | --- |
-| `implement-refactor` | [agents/Refactor-Specialist.agent.md](../../agents/Refactor-Specialist.agent.md) | [adapters/implement-refactor-auto-na-adapter.md](adapters/implement-refactor-auto-na-adapter.md) | [adapters/implement-refactor-explicit-skip-adapter.md](adapters/implement-refactor-explicit-skip-adapter.md) |
+| `implement-refactor` | [adapters/implement-refactor-adapter.md](adapters/implement-refactor-adapter.md) | [adapters/implement-refactor-auto-na-adapter.md](adapters/implement-refactor-auto-na-adapter.md) | [adapters/implement-refactor-explicit-skip-adapter.md](adapters/implement-refactor-explicit-skip-adapter.md) |

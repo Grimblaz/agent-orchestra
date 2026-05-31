@@ -221,6 +221,7 @@ None.
                     'skills/customer-experience/adapters/ce-gate-canvas.md'  = 'ce-gate-canvas'
                     'skills/customer-experience/adapters/ce-gate-cli.md'     = 'ce-gate-cli'
                     'skills/implementation-discipline/adapters/implement-code-adapter.md' = 'implement-code'
+                    'skills/refactoring-methodology/adapters/implement-refactor-adapter.md' = 'implement-refactor'
                     'skills/plugin-release-hygiene/SKILL.md'                 = 'release-hygiene'
                     'skills/post-pr-review/SKILL.md'                         = 'post-pr'
                     'skills/process-retrospective/SKILL.md'                  = 'process-retrospective'
