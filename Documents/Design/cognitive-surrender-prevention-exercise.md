@@ -18,6 +18,8 @@ To ensure clear tracking, the table below maps this exercise document's local sc
 | **S4** | **S5** (Articulation-Debt)| Articulation-debt marker is captured by live phase-exit machinery. |
 | **S5** | **S6** (Direction-Change) | Direction change engages and summarizes recommendations. |
 
+> **Note**: Umbrella #571 scenarios S1 (greenfield-onboarding) and S3 (orchestration-phase resume) are out of scope for this exercise. Orchestration-phase (S3) coverage is tracked in #571 CE Gate Readiness per `d-orchestration-scope`.
+
 ---
 
 ## (b) Scenario Provisioning Table
@@ -27,10 +29,12 @@ Use the following provisioning recipe to prepare test issues, manage marker stat
 | Scenario | Target Test Issue | Starting Marker State | Provisioned By | Pipeline Command(s) to Run |
 | --- | --- | --- | --- | --- |
 | **S1** | `#TEST-578-S1` | None | Maintainer | `pwsh -File .github/scripts/quick-validate.ps1` |
-| **S2** | `#TEST-578-S2` | `<!-- engagement-record-experience-TEST-578-S2 -->` with genuine `articulation_text` | Maintainer / Session 1 | `pwsh -File .github/scripts/run-session.ps1 -Issue TEST-578-S2 -Phase experience` |
+| **S2** | `#TEST-578-S2` | `<!-- engagement-record-experience-TEST-578-S2 -->` with genuine `articulation_text` | Maintainer / Session 1 | Manual — start a fresh Claude Code session and run `/experience TEST-578-S2` (or equivalent upstream-phase slash command) |
 | **S3** | `#TEST-578-S3` | `<!-- engagement-record-design-TEST-578-S3 -->` with raw text | Maintainer | Manual inspection of the raw `articulation_text` |
-| **S4** | `#TEST-578-S4` | Phase exit without articulation | Maintainer / CE Gate Evaluator | `pwsh -File .github/scripts/run-session.ps1 -Issue TEST-578-S4 -Phase design` |
-| **S5** | `#TEST-578-S5` | material review verdict shift | Maintainer / Critic | `pwsh -File .github/scripts/run-session.ps1 -Issue TEST-578-S5 -Phase plan` |
+| **S4** | `#TEST-578-S4` | Phase exit without articulation | Maintainer / CE Gate Evaluator | Manual — start a fresh Claude Code session and run `/design TEST-578-S4` (or equivalent) |
+| **S5** | `#TEST-578-S5` | material review verdict shift | Maintainer / Critic | Manual — start a fresh Claude Code session and run `/plan TEST-578-S5` (or equivalent) |
+
+> **Note**: S2/S4/S5 provisioning requires a manual Claude Code session (no automated runner exists). S2 must follow the two-session discipline in section (c); S4 follows the live-machinery-capture rule in section (g); S5 follows the falsifiable-artifact confirmation bar in section (e).
 
 ---
 
@@ -47,7 +51,7 @@ To verify cross-session same-decision-resume, a strict **two-session discipline*
 
 Every maintainer verification of the same-decision-resume capability must run a **negative control** to distinguish genuine resume behavior from body re-derivation:
 
-- **Procedure**: Run a control session where either (1) the issue body does NOT restate the decision, or (2) the `engagement-record` marker comment is temporarily withheld (e.g., deleted or hidden from the issue comment thread).
+- **Procedure**: Use a **separate, distinct negative-control test issue** (do not reuse the same test issue from the positive scenario). Create this issue WITHOUT first running Session 1, so no engagement-record marker exists. Then run Session 2 (fresh session, re-enter the workflow on this fresh issue). Confirm that the workflow prompts the maintainer again for classification — because no engagement-record marker is present to trigger same-decision-resume. This is non-destructive: the positive-scenario test issue and its markers remain intact throughout.
 - **Control Bar**: Confirm that the workflow is forced to prompt the maintainer again for classification. If the scenario passes equally (bypasses the structured question) with and without the marker present, it must be recorded as a **FAIL**.
 
 ---
@@ -100,7 +104,8 @@ Any ambiguous results, failed exercise scenarios, or verification gaps (specific
 - **Upsert Command**:
 
 ```powershell
-pwsh -File .github/scripts/lib/find-or-upsert-comment.ps1 -Type issue -Number 571 -Sentinel "ce-gate-readiness-571" -Body "..."
+. .github/scripts/lib/find-or-upsert-comment.ps1
+Find-OrUpsertComment -Type issue -Number 571 -Marker 'ce-gate-readiness-571' -Body '...'
 ```
 
 This establishes the readiness section on first run and updates it idempotently thereafter.
