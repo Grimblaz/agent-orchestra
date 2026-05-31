@@ -2,6 +2,20 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.21.1] — 2026-05-31
+
+### Changed
+
+- **CE Gate read-gate re-point** (`skills/customer-experience/SKILL.md`): the orchestration-phase engagement-record dual-surface read gate now references `#571` instead of `#578` (`gated on #571. Until #571 merges`), aligning the skill with the umbrella that owns CE Gate dual-surface read enablement (#578).
+
+### Added
+
+- **Cognitive-surrender-prevention exercise procedure** (`Documents/Design/cognitive-surrender-prevention-exercise.md`): new maintainer verification procedure proving the cognitive-surrender prevention machinery (S2/S4/S5/S6) holds across sessions using falsifiable, durable evidence (#578).
+
+### Note
+
+- Patch bump invalidates the Claude Code plugin cache so consumers on 2.21.0 pick up the `customer-experience` skill edit (entry-point file change per release-hygiene).
+
 ## [2.21.0] — 2026-05-29
 
 ### Added
