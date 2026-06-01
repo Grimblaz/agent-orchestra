@@ -71,6 +71,11 @@ if ($null -eq $IssueNumber -and
     exit 1
 }
 
+# Warn about -TmpRoot-only (scratch clearing requires -IssueNumber)
+if (-not [string]::IsNullOrWhiteSpace($TmpRoot) -and $null -eq $IssueNumber) {
+    Write-Warning "-TmpRoot supplied without -IssueNumber; no scratch files will be cleared."
+}
+
 function Get-RepoFromOrigin {
     $originUrl = (git remote get-url origin) 2>$null
     if (-not $originUrl) { return $null }
@@ -285,7 +290,10 @@ function Remove-IssueTmpScratch {
 
     $resolvedTmpRoot = $TmpRoot
     if (-not [System.IO.Path]::IsPathRooted($TmpRoot)) {
-        $resolvedTmpRoot = Join-Path (Get-Location).Path $TmpRoot
+        $gitRootRaw = & git rev-parse --show-toplevel 2>$null
+        $gitRoot = if ($null -ne $gitRootRaw) { $gitRootRaw.Trim() } else { '' }
+        $baseDir = if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($gitRoot)) { $gitRoot } else { (Get-Location).Path }
+        $resolvedTmpRoot = Join-Path $baseDir $TmpRoot
     }
 
     if (-not (Test-Path $resolvedTmpRoot)) {
@@ -294,6 +302,7 @@ function Remove-IssueTmpScratch {
     }
 
     $escapedN = [regex]::Escape($IssueNumber)
+    # Flat scope only — scratch convention uses top-level .tmp/{N}-* files; nested subdirs are not swept.
     $allTmpFiles = Get-ChildItem -Path $resolvedTmpRoot -File -ErrorAction SilentlyContinue
     $filesToRemove = @($allTmpFiles | Where-Object {
         $name = $_.Name

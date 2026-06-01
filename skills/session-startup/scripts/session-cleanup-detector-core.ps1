@@ -1133,7 +1133,7 @@ function Invoke-SessionCleanupDetector {
             $compositeArgs += "-FeatureBranch '$escaped'"
             # Auto-wire -TmpRoot when .tmp/ exists and we have an issue number to clear scratch for
             if (Test-Path (Join-Path $RepoRoot '.tmp')) {
-                $compositeArgs += "-TmpRoot '$RepoRoot/.tmp'"
+                $compositeArgs += " -TmpRoot '$safeRoot/.tmp'"
             }
         }
         # C1+G4+C6: Route no-issue-id stale-branch cleanup through the composite

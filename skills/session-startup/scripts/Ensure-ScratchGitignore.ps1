@@ -51,7 +51,7 @@ try {
         $newContent = $current.TrimEnd() + "`n" + ($missing -join "`n") + "`n"
         Set-Content -Path $gitignorePath -Value $newContent -NoNewline -ErrorAction Stop
     } else {
-        Set-Content -Path $gitignorePath -Value ($requiredLines -join "`n") -ErrorAction Stop
+        Set-Content -Path $gitignorePath -Value (($requiredLines -join "`n") + "`n") -NoNewline -ErrorAction Stop
     }
 
     Write-Output "Ensure-ScratchGitignore: appended $($missing.Count) missing pattern(s) to .gitignore."
