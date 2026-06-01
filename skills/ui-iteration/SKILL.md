@@ -38,6 +38,8 @@ Improve the UI through short, measurable polish loops. Each pass should identify
 - Keep captures focused on the target surface, not the full desktop
 - Use programmatic screenshots when browser tools are available; otherwise follow the repo's fallback process
 
+**Screenshot output**: save screenshots to `.tmp/` per `skills/terminal-hygiene/SKILL.md` `## Scratch & Temp-File Hygiene`.
+
 ## Aesthetic Evaluation Criteria
 
 ### Generic UI Principles

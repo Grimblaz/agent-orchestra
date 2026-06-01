@@ -79,6 +79,36 @@ Scope notes:
 - Kill-before-retry and Terminal Cleanup are complementary, not substitutes. If both target the same terminal ID, the first successful kill wins and later attempts are harmless no-ops.
 - Both `kill_terminal` failures and `check-port.ps1` errors are non-blocking. Degrade gracefully to retry-without-kill when necessary.
 
+## Scratch & Temp-File Hygiene
+
+**Single source of truth** for where agents write scratch/output files. All other skills cross-reference this section; do NOT duplicate the rule.
+
+### Rule: use repo-relative `.tmp/` — never host-native absolute paths
+
+When a Bash-tool shell command writes a scratch or output file:
+
+- **DO**: write to a relative `.tmp/` path, e.g. `.tmp/issue-643-body.md`, `.tmp/643-comments.json`
+- **DO NOT**: construct a Windows-style absolute path (`C:\Users\...\Temp\...`) or pass it to a POSIX/git-bash shell — the drive letter and backslashes do not translate and the path collapses to a repo-root filename
+
+If a Windows-native tool requires an absolute path (e.g. a screenshot tool that cannot accept a relative save target):
+
+- Use forward-slash git-bash form: `/c/Users/.../Temp/...`
+- Or use the PowerShell tool with `$env:TEMP` — never `C:\...` inside a bash redirect
+
+**Consumer snippet** — add these lines to your repo `.gitignore` to keep `.tmp/` and collapsed-mangle-literal shapes out of `git status`:
+
+```gitignore
+# Agent scratch — keep out of git status
+.tmp/
+/[A-Za-z][A-Za-z]sers*
+/[A-Za-z]:*
+/*[Tt]emp*
+/var*folders*
+/[Rr][Uu][Nn][Nn][Ee][Rr]*[Tt][Ee][Mm][Pp]*
+```
+
+These patterns cover the Windows default-temp mangle (`UsersXAppDataLocalTempfoo.png`) and a root-anchored set of other shapes. They are best-effort — the author-time grep guard (see `skills/terminal-hygiene/SKILL.md` `## Scratch & Temp-File Hygiene`) is the authoritative prevention, not the gitignore net.
+
 ## Multiline Continuation-Prompt Hazard
 
 PowerShell enters a continuation prompt (`>>`) and bash enters a `>` prompt when a command is syntactically incomplete: unclosed here-strings (`@'`/`@"`), parentheses, braces, or backtick line continuations in PowerShell; unclosed heredocs, quotes, or backslash continuations in bash.
@@ -89,7 +119,7 @@ PowerShell enters a continuation prompt (`>>`) and bash enters a `>` prompt when
 
 **Recovery**: do not attempt `^C` — from the agent side, sending literal `"^C"` adds more input to the here-string rather than interrupting the shell. Use `kill_terminal` on the stalled terminal ID, then open a fresh terminal. This extends the existing kill-before-retry pattern from `## Terminal Retry Hygiene`.
 
-**Prevention**: prefer one-line commands. When a multiline construct is genuinely required, write it to a temporary `.ps1` or `.sh` file and invoke the file, rather than passing the block inline to the terminal.
+**Prevention**: prefer one-line commands. When a multiline construct is genuinely required, write it to a temporary `.ps1` or `.sh` file and invoke the file, rather than passing the block inline to the terminal. Those temporary `.ps1` and `.sh` files must themselves land under `.tmp/` per `## Scratch & Temp-File Hygiene` above.
 
 ## Non-Fatal Diagnostic Wrapper Pattern
 
