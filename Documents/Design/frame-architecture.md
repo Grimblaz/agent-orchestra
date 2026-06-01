@@ -166,7 +166,7 @@ coverage: GREEN code action
 | `plan` | Issue-Planner | `changeset.complexity == 'trivial'` |
 | `implement-code` | Code-Smith | no source files changed |
 | `implement-test` | Test-Writer | no testable code changed |
-| `implement-refactor` | Refactor-Specialist | no touched-area debt above threshold |
+| `implement-refactor` | Refactor-Specialist hub flow; refactoring-methodology skill-as-adapter for `/spine-run` | no touched-area debt above threshold |
 | `implement-docs` | Doc-Keeper | no behavior or interface in docs changed |
 | `review` | Code-Critic + Code-Review-Response (variants: standard, lite, judge-only, proxy-github) | (always applies) |
 | `ce-gate-cli` | CLI-surface scenario exercise | CLI surface not touched |
@@ -288,7 +288,7 @@ New single-variant work adapters should prefer the skill-as-adapter path: declar
 | `plan` | always | `agents/Issue-Planner.agent.md` | (single adapter) | `skills/plan-authoring/adapters/plan-auto-na-adapter.md` — `changeset.complexity == 'trivial'` | `skills/plan-authoring/adapters/plan-explicit-skip-adapter.md` |
 | `implement-code` | always | `agents/Code-Smith.agent.md` | `changeset.touchesSource()` | `skills/implementation-discipline/adapters/implement-code-auto-na-adapter.md` — `not changeset.touchesSource()` | `skills/implementation-discipline/adapters/implement-code-explicit-skip-adapter.md` |
 | `implement-test` | always | `agents/Test-Writer.agent.md` | `changeset.touchesTestableCode()` | `skills/test-driven-development/adapters/implement-test-auto-na-adapter.md` — `not changeset.touchesTestableCode()` | `skills/test-driven-development/adapters/implement-test-explicit-skip-adapter.md` |
-| `implement-refactor` | always | `agents/Refactor-Specialist.agent.md` | `changeset.touchedAreaHasRefactorableDebt()` | `skills/refactoring-methodology/adapters/implement-refactor-auto-na-adapter.md` — `not changeset.touchedAreaHasRefactorableDebt()` | `skills/refactoring-methodology/adapters/implement-refactor-explicit-skip-adapter.md` |
+| `implement-refactor` | always | `agents/Refactor-Specialist.agent.md` for hub flow; `skills/refactoring-methodology/adapters/implement-refactor-adapter.md` for `/spine-run` | `changeset.touchedAreaHasRefactorableDebt()` | `skills/refactoring-methodology/adapters/implement-refactor-auto-na-adapter.md` — `not changeset.touchedAreaHasRefactorableDebt()` | `skills/refactoring-methodology/adapters/implement-refactor-explicit-skip-adapter.md` |
 | `implement-docs` | always | `agents/Doc-Keeper.agent.md` | `changeset.changesBehaviorOrInterface()` | `skills/documentation-finalization/adapters/implement-docs-auto-na-adapter.md` — `not changeset.changesBehaviorOrInterface()` | `skills/documentation-finalization/adapters/implement-docs-explicit-skip-adapter.md` |
 | `review` standard | always | `agents/Code-Review-Response.agent.md`; `skills/adversarial-review/adapters/standard.md` | `changeset.totalLines >= 200 and not scope.isReReview and not scope.isProxyGithub` | none — always applies | `skills/adversarial-review/adapters/review-explicit-skip-adapter.md` |
 | `review` lite | always | `agents/Code-Review-Response.agent.md`; `skills/adversarial-review/adapters/lite.md` | `changeset.totalLines < 200 and not scope.isReReview and not scope.isProxyGithub` | none — always applies | `skills/adversarial-review/adapters/review-explicit-skip-adapter.md` |
@@ -690,12 +690,12 @@ Two distinct emission paths with structurally distinguishable row shapes:
 
 | Category | Ports | When credit is written | Who writes it |
 |---|---|---|---|
-| 1 — Agent-owned, post-PR | `implement-code`, `implement-test`, `implement-refactor`†, `implement-docs` | Specialist's terminal step, after PR creation | Specialist agent, directly into PR-body pipeline-metrics block |
+| 1 — Agent-owned, post-PR | `implement-code`, `implement-test`, `implement-refactor`†, `implement-docs` | Specialist's terminal step, after PR creation | Specialist agent for hub flow; resolved work-adapter executor for `/spine-run`, directly into PR-body pipeline-metrics block |
 | 2 — Agent-owned, pre-PR (deferred emission) | `experience`, `design`, `plan` | Stage A: agent posts `<!-- credit-input-{port}-{ID} -->` YAML comment alongside its completion marker. Stage B: Code-Conductor harvests at `gh pr create` time | Pipeline-entry agent (stage A); Code-Conductor (stage B) |
 | 3 — Skill-only | `post-pr` | Post-merge cleanup phase | Code-Conductor, after reading `frame/ports/post-pr.yaml` and invoking the post-pr-review skill |
 | 4 — CE Gate surface | `ce-gate-{cli,browser,canvas,api}` | Per-surface terminal step; missing-surface credits emitted by orchestration wrapper on crash | Experience-Owner / CE Gate orchestration |
 
-† **`implement-refactor` — deferred-by-design (sub-B, #442)**: The `changeset.touchedAreaHasDebt(threshold)` predicate requires the changeset's `FileMetadata` field (per-file `LineCount` and `MaxComplexity`) to be populated by the changeset constructor. No production caller populates `FileMetadata` in sub-B. Until a `FileMetadata` populator is wired into the changeset construction path, `Resolve-FVChangesetTouchedAreaHasDebt` always returns `$false`, making `implement-refactor` structurally unreachable as a live (non-auto-N/A) port. Sub-issue #13 or a dedicated follow-up must wire the populator before this port can produce non-N/A credits.
+† **`implement-refactor` — split declaration state (#639)**: Code-Conductor hub flow retains the legacy `agents/Refactor-Specialist.agent.md` work declaration. The `/spine-run` surface now discovers the skill-as-adapter work declaration at `skills/refactoring-methodology/adapters/implement-refactor-adapter.md`. Auto-N/A and explicit-skip predicate adapters remain unchanged; runtime `/spine-run` exercise for this port is deferred to #641.
 
 ### D11 — Adapter stub bodies
 

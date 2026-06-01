@@ -1,5 +1,6 @@
 .copilot-tracking/
 .copilot-tracking-archive/
+.tmp/
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
