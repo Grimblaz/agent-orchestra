@@ -48,7 +48,10 @@ param(
     [string[]]$SiblingWorktrees = @(),
 
     [Parameter()]
-    [string[]]$UntaggedTrackingFiles = @()
+    [string[]]$UntaggedTrackingFiles = @(),
+
+    [Parameter()]
+    [string]$TmpRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,8 +65,9 @@ if ($null -eq $IssueNumber -and
     [string]::IsNullOrWhiteSpace($FeatureBranch) -and
     $OrphanBranches.Count -eq 0 -and
     $SiblingWorktrees.Count -eq 0 -and
-    $UntaggedTrackingFiles.Count -eq 0) {
-    Write-Error "Must specify -IssueNumber, -FeatureBranch, or at least one of -OrphanBranches, -SiblingWorktrees, -UntaggedTrackingFiles."
+    $UntaggedTrackingFiles.Count -eq 0 -and
+    [string]::IsNullOrWhiteSpace($TmpRoot)) {
+    Write-Error "Must specify -IssueNumber, -FeatureBranch, or at least one of -OrphanBranches, -SiblingWorktrees, -UntaggedTrackingFiles, -TmpRoot."
     exit 1
 }
 
@@ -269,6 +273,43 @@ function Remove-SiblingWorktree {
     $DeletedPaths.Add($WorktreePath)
 }
 
+function Remove-IssueTmpScratch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        $IssueNumber,
+
+        [Parameter(Mandatory)]
+        [string]$TmpRoot
+    )
+
+    $resolvedTmpRoot = $TmpRoot
+    if (-not [System.IO.Path]::IsPathRooted($TmpRoot)) {
+        $resolvedTmpRoot = Join-Path (Get-Location).Path $TmpRoot
+    }
+
+    if (-not (Test-Path $resolvedTmpRoot)) {
+        Write-Output "Cleaned 0 .tmp/ scratch files for issue #$IssueNumber"
+        return
+    }
+
+    $patterns = @(
+        Join-Path $resolvedTmpRoot "$IssueNumber-*"
+        Join-Path $resolvedTmpRoot "issue-$IssueNumber*"
+    )
+
+    $removedCount = 0
+    foreach ($pattern in $patterns) {
+        $files = @(Get-Item -Path $pattern -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer })
+        foreach ($file in $files) {
+            Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
+            $removedCount++
+        }
+    }
+
+    Write-Output "Cleaned $removedCount .tmp/ scratch files for issue #$IssueNumber"
+}
+
 if ($null -ne $IssueNumber) {
     Write-Output "== Post-merge cleanup: issue #$IssueNumber =="
 } else {
@@ -311,6 +352,11 @@ foreach ($worktreePath in $SiblingWorktrees) {
 }
 if ($deletedSiblingCount -gt 0) {
     Write-Output "Deleted $deletedSiblingCount sibling worktree(s): $($deletedSiblingPaths -join ', ')"
+}
+
+# ── Issue .tmp/ scratch clearing ──────────────────────────────────────────
+if (-not [string]::IsNullOrWhiteSpace($TmpRoot) -and $null -ne $IssueNumber) {
+    Remove-IssueTmpScratch -IssueNumber $IssueNumber -TmpRoot $TmpRoot
 }
 
 # ── Untagged tracking file archival ───────────────────────────────────────

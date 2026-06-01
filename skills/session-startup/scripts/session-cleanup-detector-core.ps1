@@ -2,6 +2,16 @@
 <#
 .SYNOPSIS
     Library for session-cleanup-detector logic. Dot-source this file and call Invoke-SessionCleanupDetector.
+
+.NOTES
+    Cleanup categories detected and reported by this library:
+      - Current branch: flags the active branch when its upstream is merged/deleted.
+      - Tracking files: flags issue-scoped .copilot-tracking/ files whose feature branch is gone.
+      - Sibling worktrees: flags sibling worktrees on merged/deleted branches.
+      - Orphan branches: flags unattached merged branches (squash-aware via tree-equivalence).
+      - .tmp/ scratch clearing: NOT detected here. Clearing per-issue .tmp/{N}-* and
+        .tmp/issue-{N}* scratch files is performed at cleanup time by Remove-IssueTmpScratch
+        in post-merge-cleanup.ps1 when -TmpRoot and -IssueNumber are both provided.
 #>
 
 . "$PSScriptRoot/session-startup-git-helpers.ps1"
