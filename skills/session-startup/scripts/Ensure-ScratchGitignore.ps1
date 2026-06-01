@@ -30,7 +30,7 @@ $requiredLines = @(
 try {
     # Read current .gitignore (create empty if missing)
     if (Test-Path $gitignorePath) {
-        $current = Get-Content $gitignorePath -Raw -ErrorAction Stop
+        $current = (Get-Content $gitignorePath -Raw -ErrorAction Stop) ?? ''
     } else {
         $current = ''
     }

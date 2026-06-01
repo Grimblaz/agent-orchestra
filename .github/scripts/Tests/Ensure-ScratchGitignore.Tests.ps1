@@ -120,4 +120,27 @@ Describe 'Ensure-ScratchGitignore.ps1' {
         }
     }
 
+    Context 'T5 — handles an empty (zero-byte) .gitignore correctly' {
+        It 'T5: handles an empty (zero-byte) .gitignore correctly' {
+            $tempDir = Join-Path ([System.IO.Path]::GetTempPath()) "ensure-gitignore-t5-$([System.Guid]::NewGuid().ToString('N').Substring(0,8))"
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+            try {
+                # Arrange: zero-byte .gitignore
+                $gitignorePath = Join-Path $tempDir '.gitignore'
+                New-Item -ItemType File -Path $gitignorePath -Force | Out-Null  # zero-byte file
+
+                # Act
+                & $script:ScriptFile -RepoRoot $tempDir
+
+                # Assert: script exits 0 AND patterns are present (not silently abandoned)
+                $LASTEXITCODE | Should -Be 0
+                $content = Get-Content $gitignorePath -Raw
+                $content | Should -Match ([regex]::Escape('.tmp/'))
+            }
+            finally {
+                Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
 }
