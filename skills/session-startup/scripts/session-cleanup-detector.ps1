@@ -23,6 +23,14 @@
 # levels up. No env var configuration needed.
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 
+# AC5: Idempotently ensure consumer repo .gitignore contains the scratch-containment net.
+# Fail-open: any failure in this step is swallowed so the cleanup detector still runs.
+try {
+    & "$PSScriptRoot/Ensure-ScratchGitignore.ps1" -RepoRoot $repoRoot
+} catch {
+    Write-Warning "session-cleanup-detector: Ensure-ScratchGitignore step failed — $($_.Exception.Message). Continuing."
+}
+
 $result = Invoke-SessionCleanupDetector -RepoRoot $repoRoot
 
 if ($result.Output) { Write-Output $result.Output }
