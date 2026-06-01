@@ -33,7 +33,7 @@ Use the skill's analysis workflow, mandatory checks, and output structure as the
 
 At the terminal credit step, emit the `implement-refactor` credit row with the existing `Build-ImplementRefactorCreditRow` builder. This adapter authors the instruction only; do not invoke the builder while creating or editing this file.
 
-Pass the repo-relative adapter path as adapter evidence by setting `-AdapterName 'skills/refactoring-methodology/adapters/implement-refactor-adapter.md'`, include validation evidence from the refactor validation cycle with `-ValidationEvidence`, include a concise execution summary with `-Evidence`, and pass the terminal slice step number with `-Step`. In the example below, replace `<terminal-step-id>` with that numeric terminal slice step number.
+Pass the repo-relative adapter path as adapter evidence by setting `-AdapterName 'skills/refactoring-methodology/adapters/implement-refactor-adapter.md'`, include validation evidence from the refactor validation cycle with `-ValidationEvidence`, include a concise execution summary with `-Evidence`, and pass the terminal slice step number with `-Step`. In the example below, replace `{terminal-step-id}` with that numeric terminal slice step number.
 
 Example invocation shape:
 
@@ -42,7 +42,7 @@ Build-ImplementRefactorCreditRow `
   -AdapterName 'skills/refactoring-methodology/adapters/implement-refactor-adapter.md' `
   -ValidationEvidence @(@{ Name = 'focused refactor validation'; Status = 'passed' }) `
   -Evidence 'skills/refactoring-methodology/adapters/implement-refactor-adapter.md executed with behavior-preserving validation evidence.' `
-  -Step <terminal-step-id>
+  -Step {terminal-step-id}
 ```
 
 Use the additive-merge rule for the PR-body `<!-- pipeline-metrics -->` block: if an `implement-refactor` credit row already exists for the same terminal step, leave it in place.

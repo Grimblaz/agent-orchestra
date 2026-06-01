@@ -106,7 +106,7 @@ Completion evidence must name the changed files, the validation commands, pass/f
 
 At the terminal step, emit the `implement-code` credit row with the existing `Build-ImplementCodeCreditRow` builder. Do not modify the builder from this adapter.
 
-Pass the repo-relative adapter path as the adapter evidence by setting `-AdapterName 'skills/implementation-discipline/adapters/implement-code-adapter.md'`, include validation evidence from the build-test cycle, and pass the terminal slice step number as `-Step <terminal-step-id>` for spine-backed terminal plans. Replace `<terminal-step-id>` with the numeric terminal slice step number.
+Pass the repo-relative adapter path as the adapter evidence by setting `-AdapterName 'skills/implementation-discipline/adapters/implement-code-adapter.md'`, include validation evidence from the build-test cycle, and pass the terminal slice step number as `-Step {terminal-step-id}` for spine-backed terminal plans. Replace `{terminal-step-id}` with the numeric terminal slice step number.
 
 When no spine terminal step is available because the plan legitimately uses `spine-omitted` legacy semantics, omit `-Step` and let the builder keep its default step value.
 
@@ -117,7 +117,7 @@ Build-ImplementCodeCreditRow `
   -AdapterName 'skills/implementation-discipline/adapters/implement-code-adapter.md' `
   -ValidationEvidence @(@{ Name = 'focused validation'; Status = 'passed' }) `
   -Evidence 'skills/implementation-discipline/adapters/implement-code-adapter.md executed with focused validation evidence.' `
-  -Step <terminal-step-id>
+  -Step {terminal-step-id}
 ```
 
 Use the additive-merge rule for the PR-body `<!-- pipeline-metrics -->` block: if an `implement-code` credit row already exists for the same terminal step, leave it in place.
