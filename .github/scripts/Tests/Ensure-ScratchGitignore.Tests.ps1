@@ -18,12 +18,13 @@ Describe 'Ensure-ScratchGitignore.ps1' {
         $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:ScriptFile = Join-Path $script:RepoRoot 'skills\session-startup\scripts\Ensure-ScratchGitignore.ps1'
 
-        # Canonical patterns expected to be present after the script runs
+        # Canonical patterns expected to be present after the script runs.
+        # /*[Tt]emp* intentionally absent (RF4): over-matched template.md/attempt.js;
+        # primary mangle shapes covered by /[A-Za-z]:* and /[A-Za-z][A-Za-z]sers*.
         $script:RequiredPatterns = @(
             '.tmp/',
             '/[A-Za-z][A-Za-z]sers*',
             '/[A-Za-z]:*',
-            '/*[Tt]emp*',
             '/var*folders*',
             '/[Rr][Uu][Nn][Nn][Ee][Rr]*[Tt][Ee][Mm][Pp]*'
         )
@@ -44,6 +45,11 @@ Describe 'Ensure-ScratchGitignore.ps1' {
                 foreach ($pattern in $script:RequiredPatterns) {
                     $content | Should -Match ([regex]::Escape($pattern)) -Because "pattern '$pattern' must be present after script runs"
                 }
+
+                # Pre-existing rules must survive intact and not be fused with the appended comment (RF2)
+                $lines = Get-Content (Join-Path $tempDir '.gitignore')
+                $lines | Should -Contain 'node_modules/' -Because 'pre-existing node_modules/ rule must not be corrupted'
+                $lines | Should -Contain 'build/'        -Because 'pre-existing build/ rule must not be corrupted'
             }
             finally {
                 Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue

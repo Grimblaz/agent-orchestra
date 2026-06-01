@@ -168,4 +168,12 @@ Describe 'Script safety: no host-native absolute-path literals in shipped script
         'pattern:\d+'                  | Should -Not -Match $pattern
         'key:\{'                       | Should -Not -Match $pattern
     }
+
+    It 'documents the known lowercase-host-path miss (by design — trade-off documented in scratch-containment.md)' {
+        # The guard intentionally misses lowercase-first-segment paths to avoid
+        # false positives on regex-escape sequences (\s, \d, \w, Function:\)
+        $pattern = '(?-i)[A-Za-z]:\\[A-Z][A-Za-z0-9_\\]'
+        'C:\temp\foo.txt'    | Should -Not -Match $pattern -Because "lowercase host paths are a documented miss"
+        'C:\dev\out.txt'     | Should -Not -Match $pattern -Because "lowercase host paths are a documented miss"
+    }
 }

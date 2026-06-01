@@ -16,12 +16,13 @@ param(
 $gitignorePath = Join-Path $RepoRoot '.gitignore'
 
 # The canonical scratch-containment net (from terminal-hygiene ## Scratch & Temp-File Hygiene)
+# /*[Tt]emp* intentionally omitted (RF4): over-matched template.md, templates/, attempt.js.
+# Primary mangle shapes are covered by /[A-Za-z]:* and /[A-Za-z][A-Za-z]sers*.
 $requiredLines = @(
     '# Agent scratch — keep out of git status',
     '.tmp/',
     '/[A-Za-z][A-Za-z]sers*',
     '/[A-Za-z]:*',
-    '/*[Tt]emp*',
     '/var*folders*',
     '/[Rr][Uu][Nn][Nn][Ee][Rr]*[Tt][Ee][Mm][Pp]*'
 )
@@ -44,9 +45,11 @@ try {
         exit 0
     }
 
-    # Append the missing lines
+    # Append the missing lines, ensuring the existing content ends with a newline
+    # before the block so patterns are never fused with the last existing line (RF2).
     if (Test-Path $gitignorePath) {
-        Add-Content -Path $gitignorePath -Value ($missing -join "`n") -ErrorAction Stop
+        $newContent = $current.TrimEnd() + "`n" + ($missing -join "`n") + "`n"
+        Set-Content -Path $gitignorePath -Value $newContent -NoNewline -ErrorAction Stop
     } else {
         Set-Content -Path $gitignorePath -Value ($requiredLines -join "`n") -ErrorAction Stop
     }

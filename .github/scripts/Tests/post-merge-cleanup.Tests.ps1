@@ -1248,6 +1248,9 @@ title: "Issue 42 back-compat test"
             # Issue 999 files — in-flight, must be preserved
             Set-Content -Path (Join-Path $tmpDir '999-body.md')       -Value 'in-flight' -Encoding UTF8
             Set-Content -Path (Join-Path $tmpDir '999-engagement.md') -Value 'in-flight' -Encoding UTF8
+            # Issue 6431 files — numeric superset of 643; must survive clearing 643
+            New-Item -ItemType File -Path (Join-Path $tmpDir '6431-body.md') -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $tmpDir 'issue-6431-notes.txt') -Force | Out-Null
 
             # Act
             $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
@@ -1268,6 +1271,9 @@ title: "Issue 42 back-compat test"
             Test-Path (Join-Path $tmpDir '999-body.md')       | Should -Be $true  -Because 'issue 999 is in-flight; its .tmp/ files must be preserved'
             Test-Path (Join-Path $tmpDir '999-engagement.md') | Should -Be $true  -Because 'issue 999 is in-flight; its .tmp/ files must be preserved'
             Test-Path (Join-Path $tmpDir '643-body.md')       | Should -Be $false -Because 'issue 643 is closed; its .tmp/ files must be removed'
+            # Superset fixture: issue 6431 scratch must survive
+            Test-Path (Join-Path $tmpDir '6431-body.md')          | Should -BeTrue  -Because '6431-body.md is a different issue'
+            Test-Path (Join-Path $tmpDir 'issue-6431-notes.txt')  | Should -BeTrue  -Because 'issue-6431-notes.txt is a different issue'
         }
 
         It 'TC-TmpScratch-3: clears scratch for an issue with issue-N prefix naming (.tmp/issue-643-*)' {

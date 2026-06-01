@@ -1131,6 +1131,10 @@ function Invoke-SessionCleanupDetector {
         if ($null -ne $staleBranch -and $staleBranch.IssueId) {
             $compositeArgs += "-IssueNumber $($staleBranch.IssueId)"
             $compositeArgs += "-FeatureBranch '$escaped'"
+            # Auto-wire -TmpRoot when .tmp/ exists and we have an issue number to clear scratch for
+            if (Test-Path (Join-Path $RepoRoot '.tmp')) {
+                $compositeArgs += "-TmpRoot '.tmp'"
+            }
         }
         # C1+G4+C6: Route no-issue-id stale-branch cleanup through the composite
         # script via -FeatureBranch so the fenced block stays a single pwsh call

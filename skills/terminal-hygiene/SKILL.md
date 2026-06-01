@@ -102,7 +102,8 @@ If a Windows-native tool requires an absolute path (e.g. a screenshot tool that 
 .tmp/
 /[A-Za-z][A-Za-z]sers*
 /[A-Za-z]:*
-/*[Tt]emp*
+# /*[Tt]emp* intentionally omitted: over-matched template.md, templates/, attempt.js.
+# Primary mangle shapes are covered by /[A-Za-z]:* and /[A-Za-z][A-Za-z]sers* above.
 /var*folders*
 /[Rr][Uu][Nn][Nn][Ee][Rr]*[Tt][Ee][Mm][Pp]*
 ```

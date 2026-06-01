@@ -31,6 +31,8 @@ Three-layer defense in depth:
 
 The gitignore net catches most shapes but is acknowledged best-effort. Documented miss: `CProgramData...`-prefixed collapsed paths. The grep guard (`script-safety-contract.Tests.ps1`) and the prevention rule together close the prevention gap for agent-authored paths.
 
+**Grep guard lowercase miss**: the guard uses `(?-i)[A-Za-z]:\\[A-Z]...` (case-sensitive, uppercase required after `:\`). This means paths like `C:\temp\foo.png` or `C:\dev\out.txt` are not caught by the guard. This is a deliberate trade-off: a case-insensitive `[A-Za-z]` after `:\` would flag PowerShell regex-escape sequences (`\s`, `\d`, `\w`, `Function:\`) throughout the codebase as false positives. The documented miss is lowercase Windows host-path constructions outside the standard `C:\Users\` + `C:\Windows\` families. The prevention rule (never construct `C:\...` in a POSIX shell context) is the primary guard; the regex guard catches uppercase-family violations as a secondary check.
+
 ## Files involved
 
 - `skills/terminal-hygiene/SKILL.md` — canonical scratch-path rule (single source)

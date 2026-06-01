@@ -293,18 +293,21 @@ function Remove-IssueTmpScratch {
         return
     }
 
-    $patterns = @(
-        Join-Path $resolvedTmpRoot "$IssueNumber-*"
-        Join-Path $resolvedTmpRoot "issue-$IssueNumber*"
-    )
+    $escapedN = [regex]::Escape($IssueNumber)
+    $allTmpFiles = Get-ChildItem -Path $resolvedTmpRoot -File -ErrorAction SilentlyContinue
+    $filesToRemove = @($allTmpFiles | Where-Object {
+        $name = $_.Name
+        # Form 1: {N}-* (literal '-' already anchors the right boundary)
+        ($name -like "$IssueNumber-*") -or
+        # Form 2: issue-{N}.ext, issue-{N}-rest, or bare issue-{N}
+        ($name -match "^issue-$escapedN(\.|-)") -or
+        ($name -eq "issue-$IssueNumber")
+    })
 
     $removedCount = 0
-    foreach ($pattern in $patterns) {
-        $files = @(Get-Item -Path $pattern -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer })
-        foreach ($file in $files) {
-            Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
-            $removedCount++
-        }
+    foreach ($file in $filesToRemove) {
+        Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
+        $removedCount++
     }
 
     Write-Output "Cleaned $removedCount .tmp/ scratch files for issue #$IssueNumber"
