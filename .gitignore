@@ -12,3 +12,11 @@ testResults.xml
 .issue-*-progress.md
 .copilot-cost-collection-installed
 .vscode/settings.json
+
+# Agent scratch — keep out of git status
+.tmp/
+/[A-Za-z][A-Za-z]sers*
+/[A-Za-z]:*
+/*[Tt]emp*
+/var*folders*
+/[Rr][Uu][Nn][Nn][Ee][Rr]*[Tt][Ee][Mm][Pp]*
