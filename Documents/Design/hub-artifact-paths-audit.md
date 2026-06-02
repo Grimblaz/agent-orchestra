@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 314c536cac0530f2ee56422fcd036eee96854c98
-generated-at: 2026-05-25T14:53:14Z
+last-verified: 27f37558145053739375ecd8a48e111c045d060d
+generated-at: 2026-06-02T01:00:22Z
 -->
 
 ## Purpose
@@ -268,6 +268,17 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `.references/index.json`
 - **notes**: Generated project-reference lookup index in consumer repos. Not a hub distribution artifact; refreshed by /setup-references from sidecars in the active repository. Attempting to resolve it from the plugin cache or another repo is a wasted tool call.
+
+### `.tmp/*`
+
+- **claude_resolves**: none
+- **copilot_resolves**: none
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `.tmp/issue-{ISSUE_NUMBER}-body.md`
+  - `.tmp/{N}-comments.json`
+- **notes**: Agent scratch / temp-file workspace (introduced in issue #643). Gitignored, consumer-local scratch directory where agents write transient working files (issue-body drafts, comment payloads, engagement-record mirrors) per skills/terminal-hygiene/SKILL.md Scratch & Temp-File Hygiene. Not a distribution artifact and not committed to any repo. Literal example paths such as .tmp/issue-643-body.md and .tmp/643-comments.json appearing in skill body text map to this family. The agent treats this path as consumer-local session scratch; attempting to resolve it from the hub repo or plugin cache is a wasted tool call.
 
 ### `.vscode/settings.json`
 
