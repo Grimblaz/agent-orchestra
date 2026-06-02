@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 27f37558145053739375ecd8a48e111c045d060d
-generated-at: 2026-06-02T01:00:22Z
+last-verified: a59c5d961627e543f24155d60031901324184503
+generated-at: 2026-06-02T01:15:20Z
 -->
 
 ## Purpose
@@ -536,7 +536,7 @@ The pipeline continues but the consumer sees an error or warning message. A fall
 
 The agent issues a file-read tool call that returns nothing (or an empty result) because the artifact does not exist in the expected location. No error surface; the agent silently proceeds without the content.
 
-**Example families**: `/memories/session/*.md`, `.github/instructions/*.instructions.md`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/.state/*.json`, `.copilot-tracking/*.yml`, `.copilot-tracking/*.json`, `.copilot-tracking/*.md`, `.vscode/settings.json`, `examples/{stack}/*.md`
+**Example families**: `/memories/session/*.md`, `.github/instructions/*.instructions.md`, `.claude/settings.json`, `.claude/settings.local.json`, `.claude/.state/*.json`, `.copilot-tracking/*.yml`, `.copilot-tracking/*.json`, `.copilot-tracking/*.md`, `.tmp/*`, `.vscode/settings.json`, `examples/{stack}/*.md`
 
 ### silent-skip
 
@@ -594,4 +594,5 @@ The following families are present in the classification but are explicitly excl
 - **`.github/instructions/*.instructions.md`**: Consumer-generated VS Code / Copilot instruction files created per consumer repo setup. Not distribution artifacts.
 - **`.claude/settings.json`** and **`.claude/settings.local.json`**: Consumer-generated Claude Code settings files. Each consumer repo creates its own; they are never resolved from the hub repo or plugin cache.
 - **`.vscode/settings.json`**: Consumer-generated VS Code workspace settings. Not a distribution artifact.
+- **`.tmp/*`**: Agent scratch / temp-file workspace (issue #643). Gitignored consumer-local scratch where agents write transient working files per `skills/terminal-hygiene/SKILL.md` Scratch & Temp-File Hygiene. Not a distribution artifact and not committed to any repo.
 - **`examples/{stack}/*.md`**: Reference templates for new consumer repo setup, not loaded at runtime by agents.

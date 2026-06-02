@@ -1,7 +1,11 @@
+#Requires -Version 7.0
 <#
 .SYNOPSIS
     Idempotently appends .tmp/ and mangle-literal patterns to the repo .gitignore.
     Called once per session by the SessionStart hook.
+
+    Requires PowerShell 7+ (uses the ?? null-coalescing operator); the SessionStart
+    hook invokes it under pwsh, matching this contract.
 
 .PARAMETER RepoRoot
     Path to the repository root. Defaults to current directory.

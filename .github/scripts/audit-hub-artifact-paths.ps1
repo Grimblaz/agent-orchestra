@@ -812,7 +812,7 @@ function Invoke-RenderMode {
         '',
         'The agent issues a file-read tool call that returns nothing (or an empty result) because the artifact does not exist in the expected location. No error surface; the agent silently proceeds without the content.',
         '',
-        "**Example families**: ${BT}/memories/session/*.md${BT}, ${BT}.github/instructions/*.instructions.md${BT}, ${BT}.claude/settings.json${BT}, ${BT}.claude/settings.local.json${BT}, ${BT}.claude/.state/*.json${BT}, ${BT}.copilot-tracking/*.yml${BT}, ${BT}.copilot-tracking/*.json${BT}, ${BT}.copilot-tracking/*.md${BT}, ${BT}.vscode/settings.json${BT}, ${BT}examples/{stack}/*.md${BT}",
+        "**Example families**: ${BT}/memories/session/*.md${BT}, ${BT}.github/instructions/*.instructions.md${BT}, ${BT}.claude/settings.json${BT}, ${BT}.claude/settings.local.json${BT}, ${BT}.claude/.state/*.json${BT}, ${BT}.copilot-tracking/*.yml${BT}, ${BT}.copilot-tracking/*.json${BT}, ${BT}.copilot-tracking/*.md${BT}, ${BT}.tmp/*${BT}, ${BT}.vscode/settings.json${BT}, ${BT}examples/{stack}/*.md${BT}",
         '',
         '### silent-skip',
         '',
@@ -876,6 +876,7 @@ function Invoke-RenderMode {
         "- **${BT}.github/instructions/*.instructions.md${BT}**: Consumer-generated VS Code / Copilot instruction files created per consumer repo setup. Not distribution artifacts.",
         "- **${BT}.claude/settings.json${BT}** and **${BT}.claude/settings.local.json${BT}**: Consumer-generated Claude Code settings files. Each consumer repo creates its own; they are never resolved from the hub repo or plugin cache.",
         "- **${BT}.vscode/settings.json${BT}**: Consumer-generated VS Code workspace settings. Not a distribution artifact.",
+        "- **${BT}.tmp/*${BT}**: Agent scratch / temp-file workspace (issue #643). Gitignored consumer-local scratch where agents write transient working files per ${BT}skills/terminal-hygiene/SKILL.md${BT} Scratch & Temp-File Hygiene. Not a distribution artifact and not committed to any repo.",
         "- **${BT}examples/{stack}/*.md${BT}**: Reference templates for new consumer repo setup, not loaded at runtime by agents."
     ) -join "`n"
 
