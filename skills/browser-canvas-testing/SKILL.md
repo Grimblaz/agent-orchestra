@@ -123,6 +123,8 @@ Use `screenshotPage` to:
 - Confirm UI transitions or animations completed
 - Capture evidence of pass/fail for test reports
 
+**Screenshot output**: write captured images to `.tmp/issue-{N}-{name}.png` per `skills/terminal-hygiene/SKILL.md` `## Scratch & Temp-File Hygiene` — never pass a `C:\...` absolute path to a Bash redirect.
+
 **Source**: [screenshotBrowserTool.ts](https://github.com/microsoft/vscode/blob/3487365a09898056546f68899ee94f286a3ca915/src/vs/workbench/contrib/browserView/electron-browser/tools/screenshotBrowserTool.ts)
 
 ---

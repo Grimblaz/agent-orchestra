@@ -2,6 +2,16 @@
 <#
 .SYNOPSIS
     Library for session-cleanup-detector logic. Dot-source this file and call Invoke-SessionCleanupDetector.
+
+.NOTES
+    Cleanup categories detected and reported by this library:
+      - Current branch: flags the active branch when its upstream is merged/deleted.
+      - Tracking files: flags issue-scoped .copilot-tracking/ files whose feature branch is gone.
+      - Sibling worktrees: flags sibling worktrees on merged/deleted branches.
+      - Orphan branches: flags unattached merged branches (squash-aware via tree-equivalence).
+      - .tmp/ scratch clearing: NOT detected here. Clearing per-issue .tmp/{N}-* and
+        .tmp/issue-{N}* scratch files is performed at cleanup time by Remove-IssueTmpScratch
+        in post-merge-cleanup.ps1 when -TmpRoot and -IssueNumber are both provided.
 #>
 
 . "$PSScriptRoot/session-startup-git-helpers.ps1"
@@ -1121,6 +1131,10 @@ function Invoke-SessionCleanupDetector {
         if ($null -ne $staleBranch -and $staleBranch.IssueId) {
             $compositeArgs += "-IssueNumber $($staleBranch.IssueId)"
             $compositeArgs += "-FeatureBranch '$escaped'"
+            # Auto-wire -TmpRoot when .tmp/ exists and we have an issue number to clear scratch for
+            if (Test-Path (Join-Path $RepoRoot '.tmp')) {
+                $compositeArgs += "-TmpRoot '$safeRoot/.tmp'"
+            }
         }
         # C1+G4+C6: Route no-issue-id stale-branch cleanup through the composite
         # script via -FeatureBranch so the fenced block stays a single pwsh call

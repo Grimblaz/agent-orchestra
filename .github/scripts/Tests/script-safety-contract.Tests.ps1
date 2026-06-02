@@ -94,3 +94,86 @@ Describe 'script safety contract' {
         $violations | Should -HaveCount 0 -Because 'test files must use the dot-source + in-process call pattern (dot-source lib/...core.ps1, call Invoke-... directly) instead of spawning a child pwsh process per test; spawning adds significant Pester suite overhead (see issue #257)'
     }
 }
+
+Describe 'Script safety: no host-native absolute-path literals in shipped scripts' {
+    It 'no .ps1 script under skills/ or .github/scripts/ constructs a Windows host-native absolute path' {
+        # Tightened regex: drive letter + colon + backslash + UPPERCASE path-char
+        # (?-i) forces case-sensitive matching: [A-Z] only matches uppercase, which eliminates
+        # false positives from PowerShell regex-escape sequences (\s, \d, \w, \n, etc.) that use
+        # lowercase meta-chars. Real Windows top-level dirs (Users, Windows, Program) start uppercase.
+        # PowerShell Function:\foo PSDrive also uses lowercase after the backslash, so is excluded.
+        # Exclude: full-line comments (TrimStart starts with #)
+        # Exclude: lines inside block comments (<# ... #>) — e.g. .SYNOPSIS/.NOTES doc strings
+        # Exclude: lines containing "# host-path-ok" allow-comment
+        # Exclude: test files under */Tests/* — test fixtures may legitimately reference host paths
+        # Scope: .ps1 files only under skills/ and .github/scripts/ (non-test)
+
+        $pattern = '(?-i)[A-Za-z]:\\[A-Z][A-Za-z0-9_\\]'
+
+        $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $searchPaths = @('skills', '.github/scripts') |
+            ForEach-Object { Join-Path $repoRoot $_ } |
+            Where-Object { Test-Path $_ }
+        $scriptFiles = $searchPaths | ForEach-Object {
+            Get-ChildItem -Path $_ -Recurse -Include '*.ps1' -File |
+                Where-Object { $_.DirectoryName -notmatch '[/\\]Tests([/\\]|$)' }
+        }
+
+        $violations = [System.Collections.Generic.List[object]]::new()
+        foreach ($file in $scriptFiles) {
+            $lines = Get-Content $file.FullName -ErrorAction SilentlyContinue
+            if (-not $lines) { continue }
+            $inBlockComment = $false
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                $line = $lines[$i]
+                # Track block comment state (<# opens, #> closes)
+                if ($line -match '<#') { $inBlockComment = $true }
+                if ($inBlockComment) {
+                    if ($line -match '#>') { $inBlockComment = $false }
+                    continue
+                }
+                # Skip full-line comments
+                if ($line.TrimStart() -like '#*') { continue }
+                # Skip lines with the allow-comment
+                if ($line -match '# host-path-ok') { continue }
+                # Check for the pattern
+                if ($line -match $pattern) {
+                    $violations.Add([PSCustomObject]@{
+                        File    = $file.FullName
+                        Line    = $i + 1
+                        Content = $line.Trim()
+                    })
+                }
+            }
+        }
+
+        $violations | Should -BeNullOrEmpty -Because (
+            "shipped scripts must not construct Windows host-native paths (C:\...). " +
+            "Use relative .tmp/ paths or /c/... git-bash form instead (see skills/terminal-hygiene/SKILL.md ## Scratch & Temp-File Hygiene). " +
+            "To suppress a legitimate reference, add '# host-path-ok' on the same line."
+        )
+    }
+
+    It 'the guard catches an injected C:\ literal (falsifiability check)' {
+        $pattern = '(?-i)[A-Za-z]:\\[A-Z][A-Za-z0-9_\\]'
+        'Get-Content "C:\Users\Foo\bar.txt"'   | Should -Match $pattern
+        'Invoke-Script C:\Windows\System32\foo' | Should -Match $pattern
+    }
+
+    It 'the guard ignores common regex-escape patterns (no false positives)' {
+        $pattern = '(?-i)[A-Za-z]:\\[A-Z][A-Za-z0-9_\\]'
+        'checkpoints:\s*\['            | Should -Not -Match $pattern
+        'Function:\gh'                 | Should -Not -Match $pattern
+        'Remove-Item Function:\ -Force' | Should -Not -Match $pattern
+        'pattern:\d+'                  | Should -Not -Match $pattern
+        'key:\{'                       | Should -Not -Match $pattern
+    }
+
+    It 'documents the known lowercase-host-path miss (by design — trade-off documented in scratch-containment.md)' {
+        # The guard intentionally misses lowercase-first-segment paths to avoid
+        # false positives on regex-escape sequences (\s, \d, \w, Function:\)
+        $pattern = '(?-i)[A-Za-z]:\\[A-Z][A-Za-z0-9_\\]'
+        'C:\temp\foo.txt'    | Should -Not -Match $pattern -Because "lowercase host paths are a documented miss"
+        'C:\dev\out.txt'     | Should -Not -Match $pattern -Because "lowercase host paths are a documented miss"
+    }
+}

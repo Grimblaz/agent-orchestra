@@ -1194,4 +1194,165 @@ title: "Issue 42 back-compat test"
             $result.Output | Should -Not -Match 'Archived 1 untagged file' -Because 'no archival should occur when path traversal is blocked'
         }
     }
+
+    # =========================================================================
+    # Remove-IssueTmpScratch — per-issue .tmp/ disk clearing (Issue #643)
+    # RED-phase tests: Remove-IssueTmpScratch and the -TmpRoot / -IssueScratch
+    # parameters do not yet exist in post-merge-cleanup.ps1. All tests here
+    # FAIL because either (a) the script rejects the unknown parameter with a
+    # non-zero exit and ExitCode-based assertions fire, or (b) the script
+    # exits 0 but the expected .tmp/-clearing output / file-removal side effects
+    # are absent.
+    # =========================================================================
+    Describe 'Remove-IssueTmpScratch — per-issue .tmp/ disk clearing' {
+
+        It 'TC-TmpScratch-1: removes .tmp/ scratch files for a closed/merged issue (N-N prefix)' {
+            # Arrange
+            $workDir = Join-Path $TestDrive 'tmp-scratch-remove'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $tmpDir = Join-Path $workDir '.tmp'
+            New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+            Set-Content -Path (Join-Path $tmpDir '643-body.md')        -Value 'body content'   -Encoding UTF8
+            Set-Content -Path (Join-Path $tmpDir '643-engagement.md')  -Value 'engagement'     -Encoding UTF8
+            Set-Content -Path (Join-Path $tmpDir '643-credit-input.md') -Value 'credit'        -Encoding UTF8
+
+            # Act: pass -TmpRoot (new parameter — does not exist yet; script rejects it)
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit' = 0
+            } -ScriptParams @{
+                IssueNumber   = 643
+                TmpRoot       = '.tmp'
+                SkipGitUpdate    = $true
+                SkipRemoteDelete = $true
+                SkipLocalDelete  = $true
+            }
+
+            # Assert: script must succeed and scratch files must be gone
+            # RED: script fails (non-zero) because -TmpRoot is an unknown parameter,
+            # OR exits 0 but the files are still present because no clearing logic exists.
+            $result.ExitCode | Should -Be 0 -Because 'Remove-IssueTmpScratch must succeed after clearing scratch files'
+            Test-Path (Join-Path $tmpDir '643-body.md')       | Should -Be $false -Because '.tmp/643-* files must be removed for issue 643'
+            Test-Path (Join-Path $tmpDir '643-engagement.md') | Should -Be $false -Because '.tmp/643-* files must be removed for issue 643'
+        }
+
+        It 'TC-TmpScratch-2: preserves .tmp/ scratch for open/in-flight issues when clearing issue 643' {
+            # Arrange
+            $workDir = Join-Path $TestDrive 'tmp-scratch-preserve'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $tmpDir = Join-Path $workDir '.tmp'
+            New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+            # Issue 643 files to be removed
+            Set-Content -Path (Join-Path $tmpDir '643-body.md') -Value 'done' -Encoding UTF8
+            # Issue 999 files — in-flight, must be preserved
+            Set-Content -Path (Join-Path $tmpDir '999-body.md')       -Value 'in-flight' -Encoding UTF8
+            Set-Content -Path (Join-Path $tmpDir '999-engagement.md') -Value 'in-flight' -Encoding UTF8
+            # Issue 6431 files — numeric superset of 643; must survive clearing 643
+            New-Item -ItemType File -Path (Join-Path $tmpDir '6431-body.md') -Force | Out-Null
+            New-Item -ItemType File -Path (Join-Path $tmpDir 'issue-6431-notes.txt') -Force | Out-Null
+
+            # Act
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit' = 0
+            } -ScriptParams @{
+                IssueNumber      = 643
+                TmpRoot          = '.tmp'
+                SkipGitUpdate    = $true
+                SkipRemoteDelete = $true
+                SkipLocalDelete  = $true
+            }
+
+            # Assert
+            # RED: script fails on unknown -TmpRoot param, so ExitCode != 0 and file assertions fire.
+            $result.ExitCode | Should -Be 0 -Because 'clearing issue 643 scratch must not fail'
+            Test-Path (Join-Path $tmpDir '999-body.md')       | Should -Be $true  -Because 'issue 999 is in-flight; its .tmp/ files must be preserved'
+            Test-Path (Join-Path $tmpDir '999-engagement.md') | Should -Be $true  -Because 'issue 999 is in-flight; its .tmp/ files must be preserved'
+            Test-Path (Join-Path $tmpDir '643-body.md')       | Should -Be $false -Because 'issue 643 is closed; its .tmp/ files must be removed'
+            # Superset fixture: issue 6431 scratch must survive
+            Test-Path (Join-Path $tmpDir '6431-body.md')          | Should -BeTrue  -Because '6431-body.md is a different issue'
+            Test-Path (Join-Path $tmpDir 'issue-6431-notes.txt')  | Should -BeTrue  -Because 'issue-6431-notes.txt is a different issue'
+        }
+
+        It 'TC-TmpScratch-3: clears scratch for an issue with issue-N prefix naming (.tmp/issue-643-*)' {
+            # Arrange: the alternate naming convention used by some agents
+            $workDir = Join-Path $TestDrive 'tmp-scratch-issue-prefix'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $tmpDir = Join-Path $workDir '.tmp'
+            New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+            Set-Content -Path (Join-Path $tmpDir 'issue-643-comments.txt')    -Value 'comments' -Encoding UTF8
+            Set-Content -Path (Join-Path $tmpDir 'issue-643-utf8.md')         -Value 'utf8 body' -Encoding UTF8
+            # Unrelated file (different issue prefix) — must survive
+            Set-Content -Path (Join-Path $tmpDir 'issue-610.md')              -Value 'other issue' -Encoding UTF8
+
+            # Act
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit' = 0
+            } -ScriptParams @{
+                IssueNumber      = 643
+                TmpRoot          = '.tmp'
+                SkipGitUpdate    = $true
+                SkipRemoteDelete = $true
+                SkipLocalDelete  = $true
+            }
+
+            # Assert
+            # RED: -TmpRoot unknown → non-zero exit, file presence assertions also fail.
+            $result.ExitCode | Should -Be 0 -Because 'clearing issue-N-prefixed scratch files must succeed'
+            Test-Path (Join-Path $tmpDir 'issue-643-comments.txt') | Should -Be $false -Because '.tmp/issue-643-* files must be removed'
+            Test-Path (Join-Path $tmpDir 'issue-643-utf8.md')      | Should -Be $false -Because '.tmp/issue-643-* files must be removed'
+            Test-Path (Join-Path $tmpDir 'issue-610.md')           | Should -Be $true  -Because '.tmp/issue-610.md belongs to a different issue and must not be removed'
+        }
+
+        It 'TC-TmpScratch-4: Remove-IssueTmpScratch output appears after orphan-branch output (call-order observable)' {
+            # Arrange: set up both an orphan branch AND a .tmp/ scratch file for the same issue
+            $workDir = Join-Path $TestDrive 'tmp-scratch-call-order'
+            New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+            $tmpDir = Join-Path $workDir '.tmp'
+            New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+            Set-Content -Path (Join-Path $tmpDir '643-body.md') -Value 'body' -Encoding UTF8
+            $orphanBranch = 'pester-temp/issue-643-scratch-call-order'
+
+            # Act
+            $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+                'symbolic-ref-origin-HEAD'         = 'refs/remotes/origin/main'
+                'show-ref-refs/remotes/origin/main' = 0
+                'fetch-exit'                        = 0
+                "cherry-$orphanBranch"              = ''   # merged
+                'branch-d-exit'                     = 0
+            } -ScriptParams @{
+                IssueNumber    = 643
+                TmpRoot        = '.tmp'
+                OrphanBranches = [string[]]@($orphanBranch)
+                SkipGitUpdate    = $true
+                SkipRemoteDelete = $true
+                SkipLocalDelete  = $true
+            }
+
+            # Assert: output ordering — orphan deletion line appears before .tmp/ clearing line.
+            # RED: script fails on unknown -TmpRoot, so ExitCode != 0 and line-order assertion fires.
+            $result.ExitCode | Should -Be 0 -Because 'combined orphan + tmp-scratch invocation must exit 0'
+
+            # Verify both output lines are present
+            $result.Output | Should -Match 'Deleted 1 orphan branch'        -Because 'orphan deletion summary must appear'
+            $result.Output | Should -Match '(?i)(tmp.*scratch|scratch.*643|removed.*\.tmp|cleared.*643)' `
+                -Because 'Remove-IssueTmpScratch must emit a summary line for the cleared .tmp/ files'
+
+            # Verify the ordering: the orphan-branch summary line's index in the output
+            # must be strictly less than the tmp-scratch summary line's index.
+            $outputLines = $result.Output -split "`r?`n"
+            $orphanLineIdx = ($outputLines | Select-String -Pattern 'Deleted \d+ orphan branch' |
+                Select-Object -First 1).LineNumber
+            $scratchLineIdx = ($outputLines | Select-String -Pattern '(?i)(tmp.*scratch|scratch.*643|removed.*\.tmp|cleared.*643)' |
+                Select-Object -First 1).LineNumber
+
+            $orphanLineIdx  | Should -Not -BeNullOrEmpty -Because 'orphan summary line must be present to test ordering'
+            $scratchLineIdx | Should -Not -BeNullOrEmpty -Because 'tmp-scratch summary line must be present to test ordering'
+            $orphanLineIdx  | Should -BeLessThan $scratchLineIdx -Because 'orphan-branch cleanup must complete before .tmp/ scratch clearing'
+        }
+    }
 }

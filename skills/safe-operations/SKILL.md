@@ -43,6 +43,8 @@ For operations that only inspect state or compute values, **always prefer dedica
 
 **Rule**: By default, use dedicated VS Code tools for all inspection and read operations. Reserve `run_in_terminal` for: build commands, test runners, file move/delete operations, `gh` CLI calls, git workflow operations (commit, push, checkout, branch, merge), project validation commands (e.g., quick-validate checks in `.github/copilot-instructions.md`), targets outside the workspace, and operations with no built-in equivalent (e.g., file timestamps, git log history, complex path-exclusion filters).
 
+**Scratch files**: write all agent scratch to `.tmp/` per `skills/terminal-hygiene/SKILL.md` `## Scratch & Temp-File Hygiene` — never construct host-native absolute paths in a POSIX/git-bash shell.
+
 ---
 
 ### FORBIDDEN PowerShell Write Commands

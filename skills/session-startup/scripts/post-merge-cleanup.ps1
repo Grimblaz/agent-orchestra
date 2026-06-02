@@ -48,7 +48,10 @@ param(
     [string[]]$SiblingWorktrees = @(),
 
     [Parameter()]
-    [string[]]$UntaggedTrackingFiles = @()
+    [string[]]$UntaggedTrackingFiles = @(),
+
+    [Parameter()]
+    [string]$TmpRoot = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,9 +65,15 @@ if ($null -eq $IssueNumber -and
     [string]::IsNullOrWhiteSpace($FeatureBranch) -and
     $OrphanBranches.Count -eq 0 -and
     $SiblingWorktrees.Count -eq 0 -and
-    $UntaggedTrackingFiles.Count -eq 0) {
-    Write-Error "Must specify -IssueNumber, -FeatureBranch, or at least one of -OrphanBranches, -SiblingWorktrees, -UntaggedTrackingFiles."
+    $UntaggedTrackingFiles.Count -eq 0 -and
+    [string]::IsNullOrWhiteSpace($TmpRoot)) {
+    Write-Error "Must specify -IssueNumber, -FeatureBranch, or at least one of -OrphanBranches, -SiblingWorktrees, -UntaggedTrackingFiles, -TmpRoot."
     exit 1
+}
+
+# Warn about -TmpRoot-only (scratch clearing requires -IssueNumber)
+if (-not [string]::IsNullOrWhiteSpace($TmpRoot) -and $null -eq $IssueNumber) {
+    Write-Warning "-TmpRoot supplied without -IssueNumber; no scratch files will be cleared."
 }
 
 function Get-RepoFromOrigin {
@@ -269,6 +278,50 @@ function Remove-SiblingWorktree {
     $DeletedPaths.Add($WorktreePath)
 }
 
+function Remove-IssueTmpScratch {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        $IssueNumber,
+
+        [Parameter(Mandatory)]
+        [string]$TmpRoot
+    )
+
+    $resolvedTmpRoot = $TmpRoot
+    if (-not [System.IO.Path]::IsPathRooted($TmpRoot)) {
+        $gitRootRaw = & git rev-parse --show-toplevel 2>$null
+        $gitRoot = if ($null -ne $gitRootRaw) { $gitRootRaw.Trim() } else { '' }
+        $baseDir = if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($gitRoot)) { $gitRoot } else { (Get-Location).Path }
+        $resolvedTmpRoot = Join-Path $baseDir $TmpRoot
+    }
+
+    if (-not (Test-Path $resolvedTmpRoot)) {
+        Write-Output "Cleaned 0 .tmp/ scratch files for issue #$IssueNumber"
+        return
+    }
+
+    $escapedN = [regex]::Escape($IssueNumber)
+    # Flat scope only — scratch convention uses top-level .tmp/{N}-* files; nested subdirs are not swept.
+    $allTmpFiles = Get-ChildItem -Path $resolvedTmpRoot -File -ErrorAction SilentlyContinue
+    $filesToRemove = @($allTmpFiles | Where-Object {
+        $name = $_.Name
+        # Form 1: {N}-* (literal '-' already anchors the right boundary)
+        ($name -like "$IssueNumber-*") -or
+        # Form 2: issue-{N}.ext, issue-{N}-rest, or bare issue-{N}
+        ($name -match "^issue-$escapedN(\.|-)") -or
+        ($name -eq "issue-$IssueNumber")
+    })
+
+    $removedCount = 0
+    foreach ($file in $filesToRemove) {
+        Remove-Item -LiteralPath $file.FullName -Force -ErrorAction SilentlyContinue
+        $removedCount++
+    }
+
+    Write-Output "Cleaned $removedCount .tmp/ scratch files for issue #$IssueNumber"
+}
+
 if ($null -ne $IssueNumber) {
     Write-Output "== Post-merge cleanup: issue #$IssueNumber =="
 } else {
@@ -311,6 +364,11 @@ foreach ($worktreePath in $SiblingWorktrees) {
 }
 if ($deletedSiblingCount -gt 0) {
     Write-Output "Deleted $deletedSiblingCount sibling worktree(s): $($deletedSiblingPaths -join ', ')"
+}
+
+# ── Issue .tmp/ scratch clearing ──────────────────────────────────────────
+if (-not [string]::IsNullOrWhiteSpace($TmpRoot) -and $null -ne $IssueNumber) {
+    Remove-IssueTmpScratch -IssueNumber $IssueNumber -TmpRoot $TmpRoot
 }
 
 # ── Untagged tracking file archival ───────────────────────────────────────
