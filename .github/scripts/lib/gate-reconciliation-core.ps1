@@ -166,12 +166,10 @@ if ($InMemoryMarkers) { $erArgs.InMemoryMarkers = $InMemoryMarkers }
 $engagementRecords = @()
 try { $engagementRecords = Read-EngagementRecords @erArgs } catch {}
 
+# Read-EngagementRecords returns a flat array of decision objects (each with
+# .decision_id), not an array of record wrappers with .load_bearing_decisions.
 $recordedDecisionIds = @()
-foreach ($rec in $engagementRecords) {
-    if ($rec.load_bearing_decisions) {
-        $recordedDecisionIds += $rec.load_bearing_decisions | ForEach-Object { $_.decision_id }
-    }
-}
+$recordedDecisionIds += $engagementRecords | ForEach-Object { $_.decision_id } | Where-Object { $_ }
 
 # 3. Read finding_dispositions finding_id coverage (disposition surface, #615; judge-merge, #605)
 $recordedFindingIds = Read-FindingDispositionIds -Issue $IssueNumber -Repo $Repo -Gh $GhCliPath -InMem $InMemoryMarkers
