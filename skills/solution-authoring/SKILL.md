@@ -201,6 +201,22 @@ Render at phase exit after all load-bearing decisions are locked:
 | A routine decision is treated as load-bearing        | The agent asks for engagement on content already settled by an inherited artifact                     | Re-audit Leg 2 against the citation and emit the appropriate recommendation shift                         |
 | A load-bearing decision is treated as routine        | The durable artifact changes without surfacing the maintainer choice                                  | Rerun all three gate legs and ask before recording the final decision                                     |
 
+## L2 Reconciliation Gate (Review Path)
+
+After implementation steps complete and before the CE Gate, run the warn-only L2 reconciliation validator to produce a review-time ledger:
+
+```powershell
+$result = & .github/scripts/lib/gate-reconciliation-core.ps1 -IssueNumber {ID}
+if ($result.status -eq 'findings') {
+    # Surface warn-only findings in the review step; do not block PR creation
+    $result.findings | ForEach-Object { Write-Warning "Gate finding: $($_.decision_id) — $($_.issue)" }
+}
+```
+
+The validator is **warn-only**: it surfaces missed-gate signals for adversarial review and the CE Gate, but does NOT block `gh issue comment` marker writes or PR creation. Enforcement is **detection-at-review** — caught before merge, within the `d-intent-strictness` detection+recovery envelope.
+
+For Code-Conductor, invoke this validator as part of the review-phase pre-PR checks, after the `standard` adversarial review pipeline completes.
+
 ## L0 Gate Token (Classification-Decision Self-Report)
 
 At each gate decision point, the agent MUST emit a classification-decision token to the session event log before calling `AskUserQuestion` (or before recording a lawful-skip outcome). The token schema is defined in `skills/solution-authoring/schemas/gate-decision-token.schema.json`.
