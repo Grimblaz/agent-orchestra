@@ -201,6 +201,51 @@ Render at phase exit after all load-bearing decisions are locked:
 | A routine decision is treated as load-bearing        | The agent asks for engagement on content already settled by an inherited artifact                     | Re-audit Leg 2 against the citation and emit the appropriate recommendation shift                         |
 | A load-bearing decision is treated as routine        | The durable artifact changes without surfacing the maintainer choice                                  | Rerun all three gate legs and ask before recording the final decision                                     |
 
+## L0 Gate Token (Classification-Decision Self-Report)
+
+At each gate decision point, the agent MUST emit a classification-decision token to the session event log before calling `AskUserQuestion` (or before recording a lawful-skip outcome). The token schema is defined in `skills/solution-authoring/schemas/gate-decision-token.schema.json`.
+
+**Emit contract:**
+- `decision_id` MUST match the `decision_id` used in the engagement-record or `finding_id` used in `finding_dispositions:`.
+- `outcome` MUST be one of `asked | gate-fails | declined | same-decision-resume | greenfield-defer`.
+- `window_position` MUST reflect the firing position per the Firing-position rule: `pre-ask` for upstream structured questions, `disposition` for adversarial finding dispositions (#615 surface), `judge-merge` for plan judge-merge dispositions (#605 surface).
+- `timestamp` MUST be the ISO-8601 UTC time of emission.
+- When the PostToolUse event logger (L1) is active, include `session_key` so the L2 reconciliation validator can locate corroborating L1 events without re-deriving the session key.
+
+**Lawful-skip tokens** (`outcome ≠ asked`) MUST still be emitted — they are the discriminator that distinguishes a lawful skip from an illegitimate silent skip. A missing token for a load-bearing decision that also has no recorded decision is the signal the L2 validator and L3 Code-Critic use to flag a potential never-surfaced skip.
+
+**Event log location:** Append tokens to `/memories/session/gate-events-{session_key}.jsonl` (one JSON object per line). Fallback: `.copilot-tracking/gate-events.jsonl` when session memory is unavailable.
+
+**Parity:** Token emission applies identically on Claude and Copilot. No platform-specific divergence in the token contract.
+
+### Token emit example (load-bearing, asked)
+
+```json
+{
+  "decision_id": "d-load-directive",
+  "phase": "design",
+  "outcome": "asked",
+  "classification": "load-bearing",
+  "window_position": "pre-ask",
+  "timestamp": "2026-06-02T00:00:00Z",
+  "session_key": "issue-617"
+}
+```
+
+### Token emit example (lawful skip — same-decision-resume)
+
+```json
+{
+  "decision_id": "d-load-directive",
+  "phase": "design",
+  "outcome": "same-decision-resume",
+  "classification": "load-bearing",
+  "window_position": "pre-ask",
+  "timestamp": "2026-06-02T00:00:00Z",
+  "skip_reason": "Prior decision reused from engagement-record-design-617"
+}
+```
+
 ## Frame Ports Filled By This Skill
 
 This skill is **supporting methodology** — it declares no `provides:` field and fills no frame port. Classification per `Documents/Design/frame-architecture.md` Adapter Model: the credit-author test confirms this skill adds no frame credit row.
