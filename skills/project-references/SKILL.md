@@ -59,6 +59,16 @@ Loaded doc-body excerpts render in fenced `untrusted-content` blocks. The render
 
 Setup state is stored under `.copilot-tracking/references-state.yml`. Successful init writes `references_setup_complete: true`; explicit nudge dismissal writes `references_nudge_dismissed: true`.
 
+## Sentinel
+
+The canonical sentinel written by the reference pre-flight hook to signal that deterministic loading occurred:
+
+```
+<!-- refs-injected-{issue} -->
+```
+
+Where `{issue}` is the decimal GitHub issue number (e.g., `<!-- refs-injected-647 -->`). This sentinel is the single authority — `reference-preflight-hook.ps1` writes it and `upstream-onboarding/SKILL.md §Project Reference Loading` detects it to avoid double-loading. Do not restate the grammar elsewhere.
+
 ## AC9 Surface Text
 
 Byte-exact canonical text:
