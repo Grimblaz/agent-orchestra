@@ -63,7 +63,7 @@ Setup state is stored under `.copilot-tracking/references-state.yml`. Successful
 
 The canonical sentinel written by the reference pre-flight hook to signal that deterministic loading occurred:
 
-```
+```html
 <!-- refs-injected-{issue} -->
 ```
 

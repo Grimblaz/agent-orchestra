@@ -111,6 +111,7 @@ When performing a **same-agent resume** (re-entering paused work on an issue the
 This snapshot is assembled ONLY from already-loaded context to avoid extra reads or expensive model summarization passes.
 
 The snapshot fields map directly to durable artifacts (D3):
+
 - **current phase**: derived from the latest phase marker (e.g., `<!-- experience-owner-complete-{ID} -->` → Experience phase; `<!-- design-phase-complete-{ID} -->` → Design phase; `<!-- plan-issue-{ID} -->` → Plan / Implementation phase).
 - **last decision**: derived from the most recent `engagement-record-{phase}-{ID}` comment's `load_bearing_decisions[]` or the YAML audit payload.
 - **next step**: derived from the next incomplete step in the active pipeline position.
@@ -128,6 +129,7 @@ If a richer context or the full issue details are needed, an on-demand summary i
 #### Affordance-Hint Predicate (D5)
 
 A single-line affordance hint (e.g. "Type 'expand' for richer details") appears below the snapshot only when a cheap check resolves to true:
+
 1. At least one prior `engagement-record` decision exists on the issue, OR
 2. The issue body's rendered length exceeds the snapshot's rendered length by more than 1 000 characters.
 
