@@ -82,15 +82,29 @@ foreach ($entry in $entries) {
     $target = Get-PRTargetAbsolutePath -Root $fixtureRoot -Entry $entry
     if ($null -eq $target -or -not (Test-Path -LiteralPath $target)) { $stale += "[stale-ref: $($entry.name) $arrow $($entry.target_path)]" }
 }
-$firstLoaded = $loaded | Select-Object -First 1
 $rendered = ''
-if ($firstLoaded) {
-    $target = Get-PRTargetAbsolutePath -Root $fixtureRoot -Entry $firstLoaded
+$loadedBodies = [System.Collections.Generic.List[string]]::new()
+foreach ($entry in $loaded) {
+    $target = Get-PRTargetAbsolutePath -Root $fixtureRoot -Entry $entry
     if ($null -ne $target -and (Test-Path -LiteralPath $target)) {
-        $body = Get-Content $target -Raw
-        $fence = Get-PRUntrustedFence -Body $body
-        $rendered = "$fence untrusted-content`n$body`n$fence"
+        $loadedBodies.Add((Get-Content $target -Raw))
     }
+}
+if ($loadedBodies.Count -gt 0) {
+    # Compute the global maximum backtick run across ALL bodies before sizing the fence.
+    # This ensures no body's content can close another body's untrusted-content fence (MF7).
+    $globalMaxRun = 0
+    foreach ($b in $loadedBodies) {
+        foreach ($match in [regex]::Matches([string]$b, '`+')) {
+            if ($match.Value.Length -gt $globalMaxRun) { $globalMaxRun = $match.Value.Length }
+        }
+    }
+    $fence = '`' * ([Math]::Max(3, $globalMaxRun + 1))
+    $fencedBlocks = [System.Collections.Generic.List[string]]::new()
+    foreach ($b in $loadedBodies) {
+        $fencedBlocks.Add("$fence untrusted-content`n$b`n$fence")
+    }
+    $rendered = $fencedBlocks -join "`n"
 }
 $criticalNotes = @($underMatch | ForEach-Object { $_.note })
 if ($criticalNotes.Count -eq 0 -and $loaded.Count -eq 0) { $criticalNotes = @($underMatchText) }
@@ -115,7 +129,7 @@ $result = [ordered]@{
     nudge_due = $nudgeDue
     nudge_dismissed = $nudgeDismissed
     declared_root_count = $declaredRootCount
-    untrusted = [bool]$firstLoaded
+    untrusted = [bool]($loaded.Count -gt 0 -and $rendered -ne '')
     rendered = $rendered
 }
 ConvertTo-PRJson -Value $result

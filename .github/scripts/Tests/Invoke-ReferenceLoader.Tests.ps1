@@ -39,7 +39,11 @@ Describe 'Invoke-ReferenceLoader.ps1' {
         $fenceDeclaredRoots = @((Join-Path -Path $fenceRoot -ChildPath 'root1'), (Join-Path -Path $fenceRoot -ChildPath 'root2'))
         $fenceResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath $fenceIssuePayloadPath -IndexJsonPath $fenceIndexJsonPath -StateFilePath $fenceStateFilePath -DeclaredRoots $fenceDeclaredRoots | ConvertFrom-Json
         $fenceResult.untrusted | Should -BeTrue
-        $fenceResult.rendered | Should -Match '^````` untrusted-content'
+        # After render-all, rendered starts with a fence-open line; the global-max fence for this
+        # body (longest run is 4 backticks) sizes to 5 backticks. The output must contain the
+        # body sentinel and begin with an untrusted-content fence opener.
+        $fenceResult.rendered | Should -Match '````` untrusted-content'
+        $fenceResult.rendered | Should -Match 'Fence Escape'
         # Assert: default caps are surfaced; configured cap behavior is covered below
         $truncIssuePayloadPath = Join-Path $fixtureRoot 'synthetic-issue.json'
         $truncIndexJsonPath = Join-Path $fixtureRoot 'index.json'
@@ -152,6 +156,127 @@ Describe 'Invoke-ReferenceLoader.ps1' {
         $byteResult.matched.Count | Should -Be 1
         @($byteResult.budget_skipped | Where-Object reason -EQ 'max_total_loaded_bytes').Count | Should -Be 1
         $byteResult.loaded_bytes | Should -BeLessOrEqual 20
+    }
+
+    It 'renders ALL matched critical bodies and preserves fence integrity across bodies (AC2 + MF7)' {
+        # Two critical refs both matching the issue — caps set high so neither is budget-skipped.
+        $renderAllRoot = Join-Path $TestDrive 'render-all'
+        New-Item -ItemType Directory -Path $renderAllRoot | Out-Null
+        Set-Content -Path (Join-Path $renderAllRoot '.agent-orchestra.yml') -Value @(
+            'references:'
+            '  max_critical_loaded: 10'
+            '  max_total_loaded_bytes: 102400'
+        )
+        Set-Content -Path (Join-Path $renderAllRoot 'body-alpha.md') -Value "# Alpha Body`nSENTINEL_ALPHA"
+        Set-Content -Path (Join-Path $renderAllRoot 'body-alpha.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Alpha'
+            'target_path: body-alpha.md'
+            'description: Alpha fixture'
+            'load-when: Load for render-all test'
+            'load-priority: critical'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: []'
+            '    keywords: [renderall]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $renderAllRoot 'body-beta.md') -Value "# Beta Body`nSENTINEL_BETA"
+        Set-Content -Path (Join-Path $renderAllRoot 'body-beta.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Beta'
+            'target_path: body-beta.md'
+            'description: Beta fixture'
+            'load-when: Load for render-all test'
+            'load-priority: critical'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: []'
+            '    keywords: [renderall]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $renderAllRoot 'issue.json') -Value '{"title":"renderall","body":"renderall","labels":[],"files":[],"changed_paths":[]}'
+        & (Join-Path $script:ProjectReferenceScriptRoot 'generate-references-index.ps1') -Root $renderAllRoot | Out-Null
+
+        $renderAllResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath (Join-Path $renderAllRoot 'issue.json') -IndexJsonPath (Join-Path $renderAllRoot '.references/index.json') -StateFilePath (Join-Path $renderAllRoot 'missing-state.yml') | ConvertFrom-Json
+
+        # Both bodies must appear in rendered output
+        $renderAllResult.rendered | Should -Match 'SENTINEL_ALPHA'
+        $renderAllResult.rendered | Should -Match 'SENTINEL_BETA'
+        # Exactly 2 untrusted-content fence-open lines
+        $fenceOpenMatches = ([regex]::Matches($renderAllResult.rendered, '`+ untrusted-content')).Count
+        $fenceOpenMatches | Should -Be 2
+        # untrusted must be true
+        $renderAllResult.untrusted | Should -BeTrue
+        # Both entries loaded — neither budget-skipped
+        $renderAllResult.matched | Should -Contain 'Alpha'
+        $renderAllResult.matched | Should -Contain 'Beta'
+        $renderAllResult.budget_skipped.Count | Should -Be 0
+    }
+
+    It 'uses a uniform global-max fence so a longer backtick run in body B cannot close body A fence (MF7)' {
+        # Body A has a 3-backtick run (standard triple fence); body B has a 5-backtick run.
+        # Without global-max sizing, body A would get a 4-backtick fence which body B's 5-run
+        # would not close — but A's 4-tick fence COULD be closed by content in B that has 4 ticks.
+        # The uniform global-max fence (6 ticks here) must wrap BOTH bodies.
+        $safetyRoot = Join-Path $TestDrive 'fence-safety'
+        New-Item -ItemType Directory -Path $safetyRoot | Out-Null
+        Set-Content -Path (Join-Path $safetyRoot '.agent-orchestra.yml') -Value @(
+            'references:'
+            '  max_critical_loaded: 10'
+            '  max_total_loaded_bytes: 102400'
+        )
+        # Body A: contains a triple-backtick run
+        Set-Content -Path (Join-Path $safetyRoot 'doc-a.md') -Value "# Doc A`n``````text`ncode`n```````nSENTINEL_A"
+        Set-Content -Path (Join-Path $safetyRoot 'doc-a.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: DocA'
+            'target_path: doc-a.md'
+            'description: Fence safety fixture A'
+            'load-when: Load for fence safety test'
+            'load-priority: critical'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: []'
+            '    keywords: [fencesafety]'
+            '    critical: false'
+        )
+        # Body B: contains a 5-backtick run (longer than A's 3-run)
+        Set-Content -Path (Join-Path $safetyRoot 'doc-b.md') -Value "# Doc B`n`````````````text`ncode`n`````````````SENTINEL_B"
+        Set-Content -Path (Join-Path $safetyRoot 'doc-b.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: DocB'
+            'target_path: doc-b.md'
+            'description: Fence safety fixture B'
+            'load-when: Load for fence safety test'
+            'load-priority: critical'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: []'
+            '    keywords: [fencesafety]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $safetyRoot 'issue.json') -Value '{"title":"fencesafety","body":"fencesafety","labels":[],"files":[],"changed_paths":[]}'
+        & (Join-Path $script:ProjectReferenceScriptRoot 'generate-references-index.ps1') -Root $safetyRoot | Out-Null
+
+        $safetyResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath (Join-Path $safetyRoot 'issue.json') -IndexJsonPath (Join-Path $safetyRoot '.references/index.json') -StateFilePath (Join-Path $safetyRoot 'missing-state.yml') | ConvertFrom-Json
+
+        # Both sentinels present
+        $safetyResult.rendered | Should -Match 'SENTINEL_A'
+        $safetyResult.rendered | Should -Match 'SENTINEL_B'
+        # Exactly 2 untrusted-content fence-open lines (one per body)
+        $safetyFenceOpens = ([regex]::Matches($safetyResult.rendered, '`+ untrusted-content')).Count
+        $safetyFenceOpens | Should -Be 2
+        # The fence delimiter must be at least 6 backticks (5-run in body B + 1)
+        $safetyResult.rendered | Should -Match '```````+ untrusted-content'
     }
 
     It 'does not read out-of-root target paths and reports them stale' {
