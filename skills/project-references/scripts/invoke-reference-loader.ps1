@@ -70,7 +70,9 @@ foreach ($entry in @($matchedEntries | Sort-Object @{ Expression = { $priority =
     $target = Get-PRTargetAbsolutePath -Root $referenceRoot -Entry $entry
     # Skip entries whose target resolves outside the repo root — they will appear in $stale.
     if ($null -eq $target) { continue }
-    $targetBytes = if (Test-Path -LiteralPath $target) { (Get-Item -LiteralPath $target).Length } else { 0 }
+    # Skip entries whose target path is valid in-root but the file doesn't exist on disk — they will appear in $stale.
+    if (-not (Test-Path -LiteralPath $target)) { continue }
+    $targetBytes = (Get-Item -LiteralPath $target).Length
     if (($loadedBytes + $targetBytes) -gt $referenceConfig.MaxTotalLoadedBytes) {
         $budgetSkipped += [ordered]@{ name = $entry.name; reason = 'max_total_loaded_bytes' }
         continue
@@ -124,7 +126,7 @@ $result = [ordered]@{
     matched = @($loaded | ForEach-Object { $_.name })
     stale = @($stale)
     critical_under_match = @($criticalNotes)
-    no_match = [bool]($loaded.Count -eq 0)
+    no_match = [bool]($matchedEntries.Count -eq 0)
     budget_skipped = @($budgetSkipped)
     loaded_bytes = $loadedBytes
     max_critical_loaded = $referenceConfig.MaxCriticalLoaded

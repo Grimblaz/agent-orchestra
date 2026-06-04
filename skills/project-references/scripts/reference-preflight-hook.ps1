@@ -512,6 +512,10 @@ function Invoke-RPHHookEntrypoint {
     try {
         # Read stdin unless PayloadJson was injected (testability)
         if ([string]::IsNullOrWhiteSpace($PayloadJson)) {
+            if (-not [Console]::IsInputRedirected) {
+                Write-Error "rph-hook: no stdin input (interactive mode); use -PayloadJson for testing or invoke via the Claude hook runner"
+                return
+            }
             try {
                 $PayloadJson = [Console]::In.ReadToEnd()
             }

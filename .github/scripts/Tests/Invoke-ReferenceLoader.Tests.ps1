@@ -346,6 +346,82 @@ Describe 'Invoke-ReferenceLoader.ps1' {
         $indexResult.nudge_due | Should -BeFalse
     }
 
+    It 'does not add a missing-target entry to matched; entry appears only in stale (G5)' {
+        # A sidecar whose target_path resolves to a valid in-root path that does not exist on disk
+        # must NOT appear in matched. It must appear in stale.
+        $missingTargetRoot = Join-Path $TestDrive 'missing-target-g5'
+        New-Item -ItemType Directory -Path $missingTargetRoot | Out-Null
+        Set-Content -Path (Join-Path $missingTargetRoot 'ghost.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Ghost Doc'
+            'target_path: ghost.md'
+            'description: Target that does not exist on disk'
+            'load-when: Always'
+            'load-priority: recommended'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: ["*.md"]'
+            '    keywords: [ghost]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $missingTargetRoot 'issue.json') -Value '{"title":"ghost","body":"ghost","labels":[],"files":[],"changed_paths":[]}'
+
+        $result = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') `
+            -IssuePayloadPath (Join-Path $missingTargetRoot 'issue.json') `
+            -IndexJsonPath    (Join-Path $missingTargetRoot '.references/index.json') `
+            -StateFilePath    (Join-Path $missingTargetRoot 'missing-state.yml') | ConvertFrom-Json
+
+        # Entry must NOT appear in matched
+        @($result.matched).Count | Should -Be 0
+        # Entry must appear in stale
+        $result.stale | Should -Contain "[stale-ref: Ghost Doc $([char]0x2192) ghost.md]"
+    }
+
+    It 'sets no_match to false when triggers match but all entries are budget-skipped (G4)' {
+        # When entries match triggers but all are skipped because the byte cap is exhausted,
+        # the triggers DID match — no_match must be false (not a true no-match scenario).
+        # max_total_loaded_bytes: 1 ensures the document (> 1 byte) is always budget-skipped.
+        $budgetSkipRoot = Join-Path $TestDrive 'budget-skip-g4'
+        New-Item -ItemType Directory -Path $budgetSkipRoot | Out-Null
+        Set-Content -Path (Join-Path $budgetSkipRoot '.agent-orchestra.yml') -Value @(
+            'references:'
+            '  max_critical_loaded: 10'
+            '  max_total_loaded_bytes: 1'
+        )
+        Set-Content -Path (Join-Path $budgetSkipRoot 'doc.md') -Value '# Budget Skip Doc (this content is longer than 1 byte)'
+        Set-Content -Path (Join-Path $budgetSkipRoot 'doc.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Budget Skip'
+            'target_path: doc.md'
+            'description: Budget-skip fixture for G4 no_match test'
+            'load-when: Always'
+            'load-priority: recommended'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: ["*.md"]'
+            '    keywords: [budgetskip]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $budgetSkipRoot 'issue.json') -Value '{"title":"budgetskip","body":"budgetskip","labels":[],"files":[],"changed_paths":[]}'
+        & (Join-Path $script:ProjectReferenceScriptRoot 'generate-references-index.ps1') -Root $budgetSkipRoot | Out-Null
+
+        $result = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') `
+            -IssuePayloadPath (Join-Path $budgetSkipRoot 'issue.json') `
+            -IndexJsonPath    (Join-Path $budgetSkipRoot '.references/index.json') `
+            -StateFilePath    (Join-Path $budgetSkipRoot 'missing-state.yml') | ConvertFrom-Json
+
+        # Triggers matched (matchedEntries.Count > 0), so no_match must be false
+        $result.no_match | Should -BeFalse
+        # The single entry was budget-skipped due to byte cap
+        @($result.budget_skipped | Where-Object reason -EQ 'max_total_loaded_bytes').Count | Should -Be 1
+        # matched is empty (nothing loaded), but no_match is still false
+        @($result.matched).Count | Should -Be 0
+    }
+
     It 'suppresses nudge_due after init writes setup-complete state even if generated sidecars are later undone' {
         $repoRoot = Join-Path $TestDrive 'setup-state'
         Copy-Item $PSScriptRoot/fixtures/project-references/nudge-no-convention-above-threshold $repoRoot -Recurse
