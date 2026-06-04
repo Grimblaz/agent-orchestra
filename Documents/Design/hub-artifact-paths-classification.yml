@@ -158,6 +158,19 @@ families:
       text are relative references that map to this family. Routing logic that reads these
       files will hard-fail if they are missing."
 
+  "skills/*/schemas/*.json":
+    claude_resolves: both
+    copilot_resolves: source-tree
+    requires_version_bump: true
+    experience: hard-failure
+    examples:
+      - skills/solution-authoring/schemas/gate-decision-token.schema.json
+    notes: "JSON Schema definitions nested within skill directories. The
+      gate-decision-token schema (#617) defines the L0 classification-decision token
+      consumed by gate-reconciliation-core.ps1 (L2) and the Code-Critic missed-gate
+      perspective (L3). Consumers that reference or validate against the schema will
+      hard-fail if it is missing."
+
   ".claude-plugin/*.json":
     claude_resolves: plugin-cache
     copilot_resolves: not-applicable

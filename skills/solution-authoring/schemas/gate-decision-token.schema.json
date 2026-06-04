@@ -1,0 +1,53 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "gate-decision-token",
+  "description": "Classification-decision token emitted by the solution-authoring gate at decision time. Written by the agent (L0) and optionally corroborated by the PostToolUse event logger (L1). Consumed by gate-reconciliation-core.ps1 (L2) and the Code-Critic missed-gate perspective (L3).",
+  "type": "object",
+  "required": ["decision_id", "phase", "outcome", "classification", "window_position", "timestamp", "issue_number"],
+  "properties": {
+    "decision_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}[a-z0-9]$",
+      "description": "Slug identifying this decision — matches the engagement-record decision_id or finding_dispositions finding_id."
+    },
+    "phase": {
+      "type": "string",
+      "enum": ["experience", "design", "plan", "orchestration"],
+      "description": "Pipeline phase in which the gate fired."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["asked", "gate-fails", "declined", "same-decision-resume", "greenfield-defer"],
+      "description": "How the gate resolved. 'asked' = structured question was fired. All other values = lawful skip."
+    },
+    "classification": {
+      "type": "string",
+      "enum": ["load-bearing", "routine", "not-applicable"],
+      "description": "The gate's classification of the decision. 'not-applicable' when outcome is gate-fails or greenfield-defer."
+    },
+    "window_position": {
+      "type": "string",
+      "enum": ["pre-ask", "disposition", "judge-merge", "unknown"],
+      "description": "Which gate firing position this token belongs to. 'pre-ask' = upstream structured question. 'disposition' = adversarial finding disposition (#615 surface). 'judge-merge' = plan judge-merge disposition (#605 surface)."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC timestamp when the token was emitted."
+    },
+    "session_key": {
+      "type": "string",
+      "description": "Optional: the session key used by the event logger hook (L1) so the L2 validator can locate corroborating L1 events without re-deriving the key."
+    },
+    "issue_number": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The GitHub issue number this decision belongs to. Required for per-issue scoping in the L2 reconciliation validator."
+    },
+    "skip_reason": {
+      "type": "string",
+      "description": "Optional human-readable note when outcome is a lawful skip. Never present when outcome = 'asked'."
+    }
+  },
+  "additionalProperties": false
+}

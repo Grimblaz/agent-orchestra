@@ -9,3 +9,7 @@ Use `vscode/askQuestions` with the decision brief as the question body. Include 
 ## Skip rule invocation
 
 When `gate-fails` or `engineer-declined-engagement` applies, proceed without calling `vscode/askQuestions`. Capture the decline verbatim in the conversation text.
+
+## L0 token emission
+
+Before calling `vscode/askQuestions` for a load-bearing decision (or before recording a lawful skip), emit a classification-decision token per `## L0 Gate Token (Classification-Decision Self-Report)` in `skills/solution-authoring/SKILL.md`. Use the schema at `skills/solution-authoring/schemas/gate-decision-token.schema.json`. When the PostToolUse event logger (L1) is active for `vscode/askQuestions`, include `session_key` so the L2 validator can locate corroborating events.
