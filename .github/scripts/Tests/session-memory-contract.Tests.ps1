@@ -52,7 +52,11 @@ Describe 'session-memory contract structural surface' {
             [pscustomobject]@{ Id = 'SMC-14'; Label = 'subagent-env-handshake state'; Pending384 = $false; FollowUp379 = $false },
             [pscustomobject]@{ Id = 'SMC-15'; Label = 'rate-limit deferred work state'; Pending384 = $false; FollowUp379 = $false },
             [pscustomobject]@{ Id = 'SMC-16'; Label = 'review-judge-produced sentinel'; Pending384 = $false; FollowUp379 = $false },
-            [pscustomobject]@{ Id = 'SMC-17'; Label = 'credit-input deferred-emission marker'; Pending384 = $false; FollowUp379 = $false }
+            [pscustomobject]@{ Id = 'SMC-17'; Label = 'credit-input deferred-emission marker'; Pending384 = $false; FollowUp379 = $false },
+            [pscustomobject]@{ Id = 'SMC-18'; Label = 'cost-collection install-prompt suppression key'; Pending384 = $false; FollowUp379 = $false },
+            [pscustomobject]@{ Id = 'SMC-19'; Label = 'design finding-dispositions marker payload'; Pending384 = $false; FollowUp379 = $false },
+            [pscustomobject]@{ Id = 'SMC-20'; Label = 'engagement-record marker payload'; Pending384 = $false; FollowUp379 = $false },
+            [pscustomobject]@{ Id = 'SMC-21'; Label = 'reference pre-flight run-once marker'; Pending384 = $false; FollowUp379 = $false }
         )
 
         $script:GetRelativePath = {
@@ -154,7 +158,7 @@ Describe 'session-memory contract structural surface' {
         $script:ContractContent | Should -Match '(?is)(\{base\}:\{surface\}|base:\s*surface|surface-naming|surface naming|surface-specific label)' -Because 'the contract must require surface-specific labels when survival changes by surface'
     }
 
-    It 'lists SMC-01 through SMC-17 in order with the required row labels' {
+    It 'lists SMC-01 through SMC-21 in order with the required row labels' {
         $lastIndex = -1
 
         foreach ($row in $script:ContractRows) {
@@ -227,6 +231,16 @@ Describe 'session-memory contract structural surface' {
         $segment | Should -Match 'durable plan/PR/issue context can restart the phase but does not preserve the pending payload' -Because 'SMC-15 must distinguish durable re-entry from preserving the deferred payload'
         $rateLimitSection.Length | Should -BeGreaterThan 0 -Because 'the error-handling reference must keep a rate-limit deferral section for SMC-15'
         $rateLimitSection | Should -Not -Match '(?i)\bnext session\b' -Because 'rate-limit deferral is same-conversation only; the reference must not promise next-session payload survival'
+    }
+
+    It 'defines SMC-21 as the reference pre-flight run-once marker with within-conversation:hooks survival and refs-injected sentinel reference' {
+        $segment = & $script:GetContractRowSegment -RowId 'SMC-21'
+
+        $segment | Should -Match 'SMC-21' -Because 'SMC-21 must be defined in the canonical session-memory contract skill'
+        $segment | Should -Match '`within-conversation:hooks`' -Because 'SMC-21 must carry the within-conversation:hooks survival label'
+        $segment | Should -Match 'refs-injected' -Because 'SMC-21 must reference the canonical <!-- refs-injected-{issue} --> sentinel'
+        $segment | Should -Match '(?is)(fail.{0,30}open|fail open)' -Because 'SMC-21 must document the fail-open behavior for inline/headless paths that cannot read the marker'
+        $segment | Should -Not -Match '(?is)SMC-07' -Because 'SMC-21 must be a new row and not an extension of the startup-check-marker row SMC-07'
     }
 
     It 'requires every SMC row to carry a citation or explicit delegated/informational note' {
