@@ -83,6 +83,29 @@ Describe 'plugin hooks config contract' -Tag 'unit' {
         $entries[0].hooks[0].command | Should -Match ([regex]::Escape($script:ReleaseHygieneScript))
     }
 
+    # UserPromptSubmit is a Claude-only hook event with no Copilot analog.
+    # hooks/hooks.json (Claude) must declare it; the root hooks.json (Copilot) must not.
+    It 'declares a Claude UserPromptSubmit hook for the project-references preflight' {
+        $config = Get-JsonFile -Path $script:ClaudeHooksConfig
+        # JSON key-presence check: parse the object and inspect property names
+        $config.hooks.PSObject.Properties.Name | Should -Contain 'UserPromptSubmit' `
+            -Because 'hooks/hooks.json must register UserPromptSubmit for Claude reference preflight'
+
+        $entries = Get-HookEntries -HooksConfig $config -EventName 'UserPromptSubmit'
+        $entries.Count | Should -Be 1
+        $entries[0].matcher | Should -Be '' -Because 'UserPromptSubmit fires on every prompt; matcher should be empty string'
+        @($entries[0].hooks).Count | Should -Be 1
+        $entries[0].hooks[0].type | Should -Be 'command'
+        $entries[0].hooks[0].command | Should -Match ([regex]::Escape('reference-preflight-hook.ps1'))
+    }
+
+    It 'does not declare UserPromptSubmit in the Copilot root hooks.json (intentional Claude-only asymmetry)' {
+        $config = Get-JsonFile -Path $script:CopilotHooksConfig
+        # JSON key-absence check: parse the object and verify UserPromptSubmit is not present
+        $config.hooks.PSObject.Properties.Name | Should -Not -Contain 'UserPromptSubmit' `
+            -Because 'root hooks.json is the Copilot hooks file; UserPromptSubmit has no Copilot analog'
+    }
+
     It 'declares Copilot hook commands that resolve the installed plugin cache path' {
         $config = Get-JsonFile -Path $script:CopilotHooksConfig
         $rootManifest = Get-JsonFile -Path $script:RootPluginManifest
