@@ -96,9 +96,13 @@ function Read-GateTokens {
     foreach ($p in $paths) {
         if (-not (Test-Path $p)) { continue }
         Get-Content $p -Encoding UTF8 | Where-Object { $_ -match '\{' } | ForEach-Object {
-            try { $tokens += $_ | ConvertFrom-Json -ErrorAction Stop } catch {}
+            try { $tokens += $_ | ConvertFrom-Json -ErrorAction Stop } catch {
+                Write-Warning "gate-reconciliation: failed to parse token line in $p — $($_.Exception.Message); skipping line"
+            }
         }
     }
+    # Filter out L1 hook events (which have event_type but no decision_id)
+    $tokens = $tokens | Where-Object { $_.decision_id }
     return $tokens
 }
 
@@ -112,15 +116,32 @@ function Read-FindingDispositionIds {
         $repoTarget = $Repo
         if (-not $repoTarget) {
             $remoteUrl = git remote get-url origin 2>$null
-            $match = [regex]::Match($remoteUrl, 'github\.com[:/](.+?)(?:\.git)?$')
-            if ($match.Success) { $repoTarget = $match.Groups[1].Value }
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remoteUrl)) {
+                if (-not [string]::IsNullOrWhiteSpace($Repo)) {
+                    $repoTarget = $Repo
+                } else {
+                    Write-Warning "gate-reconciliation: cannot determine repo from git remote; skipping finding_dispositions reconciliation"
+                    return $recordedIds
+                }
+            } else {
+                $match = [regex]::Match($remoteUrl, 'github\.com[:/](.+?)(?:\.git)?$')
+                if ($match.Success) { $repoTarget = $match.Groups[1].Value }
+            }
+        }
+        # Format-validate the resolved repo slug (mirrors frame-engagement-record-core.ps1 MF3 guard)
+        if ($repoTarget -notmatch '^[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+$') {
+            Write-Warning "gate-reconciliation: cannot resolve repo target (got: '$repoTarget'); skipping finding_dispositions reconciliation"
+            return $recordedIds
         }
 
         if ($InMem -and $InMem.Count -gt 0) {
             $allBodies = $InMem
         }
         elseif ($repoTarget) {
-            $comments = & $Gh api "repos/$repoTarget/issues/$Issue/comments" 2>$null | ConvertFrom-Json
+            $comments = & $Gh api "repos/$repoTarget/issues/$Issue/comments" --paginate --slurp 2>$null | ConvertFrom-Json
+            if ($comments -is [array] -and $comments[0] -is [array]) {
+                $comments = $comments | ForEach-Object { $_ }
+            }
             $allBodies = $comments | ForEach-Object { $_.body }
         }
         else {
@@ -140,9 +161,13 @@ function Read-FindingDispositionIds {
                         if ($entry['finding_id']) { $recordedIds += $entry['finding_id'] }
                     }
                 }
-            } catch {}
+            } catch {
+                Write-Warning "gate-reconciliation: failed to parse YAML in design-phase-complete comment — $($_.Exception.Message); skipping this marker"
+            }
         }
-    } catch {}
+    } catch {
+        Write-Warning "gate-reconciliation: Read-FindingDispositionIds failed — $($_.Exception.Message); finding_dispositions coverage unavailable"
+    }
 
     return $recordedIds
 }
@@ -155,6 +180,9 @@ $LAWFUL_SKIP_OUTCOMES = @('gate-fails', 'declined', 'same-decision-resume', 'gre
 $tokens = Read-GateTokens -ExplicitPath $EventLogPath
 if ($Phase) {
     $tokens = $tokens | Where-Object { $_.phase -eq $Phase }
+}
+if ($IssueNumber -and $IssueNumber -gt 0) {
+    $tokens = $tokens | Where-Object { $_.issue_number -eq $IssueNumber -or -not $_.issue_number }
 }
 
 # 2. Read recorded engagement-record decisions (decision_id coverage)

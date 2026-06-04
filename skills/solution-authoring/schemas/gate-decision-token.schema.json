@@ -3,7 +3,7 @@
   "$id": "gate-decision-token",
   "description": "Classification-decision token emitted by the solution-authoring gate at decision time. Written by the agent (L0) and optionally corroborated by the PostToolUse event logger (L1). Consumed by gate-reconciliation-core.ps1 (L2) and the Code-Critic missed-gate perspective (L3).",
   "type": "object",
-  "required": ["decision_id", "phase", "outcome", "classification", "window_position", "timestamp"],
+  "required": ["decision_id", "phase", "outcome", "classification", "window_position", "timestamp", "issue_number"],
   "properties": {
     "decision_id": {
       "type": "string",
@@ -38,6 +38,11 @@
     "session_key": {
       "type": "string",
       "description": "Optional: the session key used by the event logger hook (L1) so the L2 validator can locate corroborating L1 events without re-deriving the key."
+    },
+    "issue_number": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The GitHub issue number this decision belongs to. Required for per-issue scoping in the L2 reconciliation validator."
     },
     "skip_reason": {
       "type": "string",

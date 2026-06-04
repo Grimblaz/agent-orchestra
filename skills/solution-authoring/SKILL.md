@@ -226,6 +226,7 @@ At each gate decision point, the agent MUST emit a classification-decision token
 - `outcome` MUST be one of `asked | gate-fails | declined | same-decision-resume | greenfield-defer`.
 - `window_position` MUST reflect the firing position per the Firing-position rule: `pre-ask` for upstream structured questions, `disposition` for adversarial finding dispositions (#615 surface), `judge-merge` for plan judge-merge dispositions (#605 surface).
 - `timestamp` MUST be the ISO-8601 UTC time of emission.
+- `issue_number` MUST be the GitHub issue number this decision belongs to.
 - When the PostToolUse event logger (L1) is active, include `session_key` so the L2 reconciliation validator can locate corroborating L1 events without re-deriving the session key.
 
 **Lawful-skip tokens** (`outcome ≠ asked`) MUST still be emitted — they are the discriminator that distinguishes a lawful skip from an illegitimate silent skip. A missing token for a load-bearing decision that also has no recorded decision is the signal the L2 validator and L3 Code-Critic use to flag a potential never-surfaced skip.
@@ -244,7 +245,8 @@ At each gate decision point, the agent MUST emit a classification-decision token
   "classification": "load-bearing",
   "window_position": "pre-ask",
   "timestamp": "2026-06-02T00:00:00Z",
-  "session_key": "issue-617"
+  "session_key": "issue-617",
+  "issue_number": 617
 }
 ```
 
@@ -258,7 +260,8 @@ At each gate decision point, the agent MUST emit a classification-decision token
   "classification": "load-bearing",
   "window_position": "pre-ask",
   "timestamp": "2026-06-02T00:00:00Z",
-  "skip_reason": "Prior decision reused from engagement-record-design-617"
+  "skip_reason": "Prior decision reused from engagement-record-design-617",
+  "issue_number": 617
 }
 ```
 
