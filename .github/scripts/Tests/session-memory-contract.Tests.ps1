@@ -242,6 +242,10 @@ Describe 'session-memory contract structural surface' {
         $segment | Should -Match 'refs-injected' -Because 'SMC-22 must reference the canonical <!-- refs-injected-{issue} --> sentinel'
         $segment | Should -Match '(?is)(fail.{0,30}open|fail open)' -Because 'SMC-22 must document the fail-open behavior for inline/headless paths that cannot read the marker'
         $segment | Should -Not -Match '(?is)SMC-07' -Because 'SMC-22 must be a new row and not an extension of the startup-check-marker row SMC-07'
+        # G7b: assert the load-bearing run-once key semantics are documented
+        $segment | Should -Match '(?is)\(issue.*conversation\)|issue.*conversation.*keying' -Because 'SMC-22 must document the (issue, conversation) keying semantics'
+        $segment | Should -Match "(?is)session_id.*'unknown'|'unknown'.*session_id" -Because "SMC-22 must document the session_id → 'unknown' fallback caveat"
+        $segment | Should -Match '(?is)body_hash|body.{0,10}hash' -Because 'SMC-22 must document the body_hash recheck for detecting issue edits'
     }
 
     It 'requires every SMC row to carry a citation or explicit delegated/informational note' {

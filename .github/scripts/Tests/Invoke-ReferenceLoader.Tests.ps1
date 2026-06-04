@@ -379,6 +379,41 @@ Describe 'Invoke-ReferenceLoader.ps1' {
         $result.stale | Should -Contain "[stale-ref: Ghost Doc $([char]0x2192) ghost.md]"
     }
 
+    It 'does not crash or add to matched when target_path resolves to an in-root directory; directory appears in stale (G6c)' {
+        # A sidecar whose target_path resolves to a directory (not a leaf file) must
+        # NOT appear in matched and must NOT crash the loader (Get-Content -Raw on a
+        # directory throws). It must appear in stale because -PathType Leaf returns false.
+        $dirTargetRoot = Join-Path $TestDrive 'dir-target-g6c'
+        New-Item -ItemType Directory -Path $dirTargetRoot | Out-Null
+        # Create a subdirectory that will be the (invalid) target
+        $subDir = Join-Path $dirTargetRoot 'docs'
+        New-Item -ItemType Directory -Path $subDir | Out-Null
+        Set-Content -Path (Join-Path $dirTargetRoot 'dir-ref.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Dir Target'
+            'target_path: docs'   # a directory, not a file
+            'description: Target is a directory'
+            'load-when: Always'
+            'load-priority: recommended'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: ["*.md"]'
+            '    keywords: [dirtest]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $dirTargetRoot 'issue.json') -Value '{"title":"dirtest","body":"dirtest","labels":[],"files":[],"changed_paths":[]}'
+
+        # Loader must not throw; directory target must be excluded from matched and appear in stale
+        { $script:G6cResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') `
+            -IssuePayloadPath (Join-Path $dirTargetRoot 'issue.json') `
+            -IndexJsonPath    (Join-Path $dirTargetRoot '.references/index.json') `
+            -StateFilePath    (Join-Path $dirTargetRoot 'dir-state.yml') | ConvertFrom-Json } | Should -Not -Throw
+        @($script:G6cResult.matched).Count | Should -Be 0 -Because 'a directory target must not be counted as a loaded reference'
+        $script:G6cResult.stale | Should -Contain "[stale-ref: Dir Target $([char]0x2192) docs]" -Because 'directory targets must appear in stale'
+    }
+
     It 'sets no_match to false when triggers match but all entries are budget-skipped (G4)' {
         # When entries match triggers but all are skipped because the byte cap is exhausted,
         # the triggers DID match — no_match must be false (not a true no-match scenario).

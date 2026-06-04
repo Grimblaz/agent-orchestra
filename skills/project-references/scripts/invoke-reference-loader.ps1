@@ -70,8 +70,8 @@ foreach ($entry in @($matchedEntries | Sort-Object @{ Expression = { $priority =
     $target = Get-PRTargetAbsolutePath -Root $referenceRoot -Entry $entry
     # Skip entries whose target resolves outside the repo root — they will appear in $stale.
     if ($null -eq $target) { continue }
-    # Skip entries whose target path is valid in-root but the file doesn't exist on disk — they will appear in $stale.
-    if (-not (Test-Path -LiteralPath $target)) { continue }
+    # Skip entries whose target path is valid in-root but is not a leaf file (missing or is a directory) — they will appear in $stale.
+    if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { continue }
     $targetBytes = (Get-Item -LiteralPath $target).Length
     if (($loadedBytes + $targetBytes) -gt $referenceConfig.MaxTotalLoadedBytes) {
         $budgetSkipped += [ordered]@{ name = $entry.name; reason = 'max_total_loaded_bytes' }
@@ -84,13 +84,13 @@ foreach ($entry in @($matchedEntries | Sort-Object @{ Expression = { $priority =
 $stale = @()
 foreach ($entry in $entries) {
     $target = Get-PRTargetAbsolutePath -Root $referenceRoot -Entry $entry
-    if ($null -eq $target -or -not (Test-Path -LiteralPath $target)) { $stale += "[stale-ref: $($entry.name) $arrow $($entry.target_path)]" }
+    if ($null -eq $target -or -not (Test-Path -LiteralPath $target -PathType Leaf)) { $stale += "[stale-ref: $($entry.name) $arrow $($entry.target_path)]" }
 }
 $rendered = ''
 $loadedBodies = [System.Collections.Generic.List[string]]::new()
 foreach ($entry in $loaded) {
     $target = Get-PRTargetAbsolutePath -Root $referenceRoot -Entry $entry
-    if ($null -ne $target -and (Test-Path -LiteralPath $target)) {
+    if ($null -ne $target -and (Test-Path -LiteralPath $target -PathType Leaf)) {
         $loadedBodies.Add((Get-Content $target -Raw))
     }
 }
