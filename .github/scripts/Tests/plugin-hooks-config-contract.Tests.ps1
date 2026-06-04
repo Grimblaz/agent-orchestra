@@ -73,21 +73,48 @@ Describe 'plugin hooks config contract' -Tag 'unit' {
     It 'declares a Claude PostToolUse hook for plugin release hygiene' {
         $config = Get-JsonFile -Path $script:ClaudeHooksConfig
         $entries = Get-HookEntries -HooksConfig $config -EventName 'PostToolUse'
+        # PostToolUse carries multiple matchers (release-hygiene + the #617 gate-event-logger);
+        # select the release-hygiene entry by its matcher rather than asserting a single entry.
+        $releaseEntry = @($entries | Where-Object { $_.matcher -eq $script:PostToolUseMatcher })
 
+        $releaseEntry.Count | Should -Be 1
+        @($releaseEntry[0].hooks).Count | Should -Be 1
+        $releaseEntry[0].hooks[0].type | Should -Be 'command'
+        $releaseEntry[0].hooks[0].command | Should -Match ([regex]::Escape('pwsh -NoProfile -NonInteractive -File '))
+        $releaseEntry[0].hooks[0].command | Should -Match ([regex]::Escape('"${CLAUDE_PLUGIN_ROOT}'))
+        $releaseEntry[0].hooks[0].command | Should -Match ([regex]::Escape($script:ReleaseHygieneScript))
+    }
+
+    # UserPromptSubmit is a Claude-only hook event with no Copilot analog.
+    # hooks/hooks.json (Claude) must declare it; the root hooks.json (Copilot) must not.
+    It 'declares a Claude UserPromptSubmit hook for the project-references preflight' {
+        $config = Get-JsonFile -Path $script:ClaudeHooksConfig
+        # JSON key-presence check: parse the object and inspect property names
+        $config.hooks.PSObject.Properties.Name | Should -Contain 'UserPromptSubmit' `
+            -Because 'hooks/hooks.json must register UserPromptSubmit for Claude reference preflight'
+
+        $entries = Get-HookEntries -HooksConfig $config -EventName 'UserPromptSubmit'
         $entries.Count | Should -Be 1
-        $entries[0].matcher | Should -Be $script:PostToolUseMatcher
+        $entries[0].matcher | Should -Be '' -Because 'UserPromptSubmit fires on every prompt; matcher should be empty string'
         @($entries[0].hooks).Count | Should -Be 1
         $entries[0].hooks[0].type | Should -Be 'command'
-        $entries[0].hooks[0].command | Should -Match ([regex]::Escape('pwsh -NoProfile -NonInteractive -File '))
-        $entries[0].hooks[0].command | Should -Match ([regex]::Escape('"${CLAUDE_PLUGIN_ROOT}'))
-        $entries[0].hooks[0].command | Should -Match ([regex]::Escape($script:ReleaseHygieneScript))
+        $entries[0].hooks[0].command | Should -Match ([regex]::Escape('reference-preflight-hook.ps1'))
+    }
+
+    It 'does not declare UserPromptSubmit in the Copilot root hooks.json (intentional Claude-only asymmetry)' {
+        $config = Get-JsonFile -Path $script:CopilotHooksConfig
+        # JSON key-absence check: parse the object and verify UserPromptSubmit is not present
+        $config.hooks.PSObject.Properties.Name | Should -Not -Contain 'UserPromptSubmit' `
+            -Because 'root hooks.json is the Copilot hooks file; UserPromptSubmit has no Copilot analog'
     }
 
     It 'declares Copilot hook commands that resolve the installed plugin cache path' {
         $config = Get-JsonFile -Path $script:CopilotHooksConfig
         $rootManifest = Get-JsonFile -Path $script:RootPluginManifest
         $sessionEntries = Get-HookEntries -HooksConfig $config -EventName 'SessionStart'
-        $postToolEntries = Get-HookEntries -HooksConfig $config -EventName 'PostToolUse'
+        # PostToolUse carries multiple matchers (release-hygiene + the #617 gate-event-logger);
+        # select the release-hygiene entry by its matcher.
+        $postToolEntries = @(Get-HookEntries -HooksConfig $config -EventName 'PostToolUse' | Where-Object { $_.matcher -eq $script:PostToolUseMatcher })
         $cacheLocator = Get-CopilotCacheLocator -Manifest $rootManifest
         $requiredEscapedTokens = @(
             '`$productDirs',

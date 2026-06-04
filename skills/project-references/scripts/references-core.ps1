@@ -388,13 +388,3 @@ function Write-PRReferenceState {
     }
     Write-PRTextFile -Path $Path -Content (($lines.ToArray() -join "`n") + "`n")
 }
-
-function Get-PRUntrustedFence {
-    param([AllowNull()][string] $Body)
-    $maxRun = 0
-    foreach ($match in [regex]::Matches([string]$Body, '`+')) {
-        if ($match.Value.Length -gt $maxRun) { $maxRun = $match.Value.Length }
-    }
-    $fenceLength = [Math]::Max(3, $maxRun + 1)
-    return ('`' * $fenceLength)
-}

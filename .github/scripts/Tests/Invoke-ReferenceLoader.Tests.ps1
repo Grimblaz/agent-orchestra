@@ -39,7 +39,11 @@ Describe 'Invoke-ReferenceLoader.ps1' {
         $fenceDeclaredRoots = @((Join-Path -Path $fenceRoot -ChildPath 'root1'), (Join-Path -Path $fenceRoot -ChildPath 'root2'))
         $fenceResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath $fenceIssuePayloadPath -IndexJsonPath $fenceIndexJsonPath -StateFilePath $fenceStateFilePath -DeclaredRoots $fenceDeclaredRoots | ConvertFrom-Json
         $fenceResult.untrusted | Should -BeTrue
-        $fenceResult.rendered | Should -Match '^````` untrusted-content'
+        # After render-all, rendered starts with a fence-open line; the global-max fence for this
+        # body (longest run is 4 backticks) sizes to 5 backticks. The output must contain the
+        # body sentinel and begin with an untrusted-content fence opener.
+        $fenceResult.rendered | Should -Match '````` untrusted-content'
+        $fenceResult.rendered | Should -Match 'Fence Escape'
         # Assert: default caps are surfaced; configured cap behavior is covered below
         $truncIssuePayloadPath = Join-Path $fixtureRoot 'synthetic-issue.json'
         $truncIndexJsonPath = Join-Path $fixtureRoot 'index.json'
@@ -154,6 +158,136 @@ Describe 'Invoke-ReferenceLoader.ps1' {
         $byteResult.loaded_bytes | Should -BeLessOrEqual 20
     }
 
+    It 'renders ALL matched critical bodies and preserves fence integrity across bodies (AC2 + MF7)' {
+        # Two critical refs both matching the issue — caps set high so neither is budget-skipped.
+        $renderAllRoot = Join-Path $TestDrive 'render-all'
+        New-Item -ItemType Directory -Path $renderAllRoot | Out-Null
+        Set-Content -Path (Join-Path $renderAllRoot '.agent-orchestra.yml') -Value @(
+            'references:'
+            '  max_critical_loaded: 10'
+            '  max_total_loaded_bytes: 102400'
+        )
+        Set-Content -Path (Join-Path $renderAllRoot 'body-alpha.md') -Value "# Alpha Body`nSENTINEL_ALPHA"
+        Set-Content -Path (Join-Path $renderAllRoot 'body-alpha.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Alpha'
+            'target_path: body-alpha.md'
+            'description: Alpha fixture'
+            'load-when: Load for render-all test'
+            'load-priority: critical'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: []'
+            '    keywords: [renderall]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $renderAllRoot 'body-beta.md') -Value "# Beta Body`nSENTINEL_BETA"
+        Set-Content -Path (Join-Path $renderAllRoot 'body-beta.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Beta'
+            'target_path: body-beta.md'
+            'description: Beta fixture'
+            'load-when: Load for render-all test'
+            'load-priority: critical'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: []'
+            '    keywords: [renderall]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $renderAllRoot 'issue.json') -Value '{"title":"renderall","body":"renderall","labels":[],"files":[],"changed_paths":[]}'
+        & (Join-Path $script:ProjectReferenceScriptRoot 'generate-references-index.ps1') -Root $renderAllRoot | Out-Null
+
+        $renderAllResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath (Join-Path $renderAllRoot 'issue.json') -IndexJsonPath (Join-Path $renderAllRoot '.references/index.json') -StateFilePath (Join-Path $renderAllRoot 'missing-state.yml') | ConvertFrom-Json
+
+        # Both bodies must appear in rendered output
+        $renderAllResult.rendered | Should -Match 'SENTINEL_ALPHA'
+        $renderAllResult.rendered | Should -Match 'SENTINEL_BETA'
+        # Exactly 2 untrusted-content fence-open lines
+        $fenceOpenMatches = ([regex]::Matches($renderAllResult.rendered, '`+ untrusted-content')).Count
+        $fenceOpenMatches | Should -Be 2
+        # untrusted must be true
+        $renderAllResult.untrusted | Should -BeTrue
+        # Both entries loaded — neither budget-skipped
+        $renderAllResult.matched | Should -Contain 'Alpha'
+        $renderAllResult.matched | Should -Contain 'Beta'
+        $renderAllResult.budget_skipped.Count | Should -Be 0
+    }
+
+    It 'uses a uniform global-max fence so a longer backtick run in body B cannot close body A fence (MF7)' {
+        # Body A has a 3-backtick run (standard triple fence); body B has a 6-backtick run.
+        # Without global-max sizing, body A would get a 4-backtick fence while body B would get
+        # a 7-backtick fence — non-uniform, and A's 4-tick fence could be closed by content in
+        # B that has 4 ticks. The uniform global-max fence (7 ticks here, globalMax=6) must
+        # wrap BOTH bodies with the same delimiter length.
+        $safetyRoot = Join-Path $TestDrive 'fence-safety'
+        New-Item -ItemType Directory -Path $safetyRoot | Out-Null
+        Set-Content -Path (Join-Path $safetyRoot '.agent-orchestra.yml') -Value @(
+            'references:'
+            '  max_critical_loaded: 10'
+            '  max_total_loaded_bytes: 102400'
+        )
+        # Body A: contains a triple-backtick run
+        Set-Content -Path (Join-Path $safetyRoot 'doc-a.md') -Value "# Doc A`n``````text`ncode`n```````nSENTINEL_A"
+        Set-Content -Path (Join-Path $safetyRoot 'doc-a.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: DocA'
+            'target_path: doc-a.md'
+            'description: Fence safety fixture A'
+            'load-when: Load for fence safety test'
+            'load-priority: critical'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: []'
+            '    keywords: [fencesafety]'
+            '    critical: false'
+        )
+        # Body B: contains a 5-backtick run (longer than A's 3-run)
+        Set-Content -Path (Join-Path $safetyRoot 'doc-b.md') -Value "# Doc B`n`````````````text`ncode`n`````````````SENTINEL_B"
+        Set-Content -Path (Join-Path $safetyRoot 'doc-b.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: DocB'
+            'target_path: doc-b.md'
+            'description: Fence safety fixture B'
+            'load-when: Load for fence safety test'
+            'load-priority: critical'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: []'
+            '    keywords: [fencesafety]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $safetyRoot 'issue.json') -Value '{"title":"fencesafety","body":"fencesafety","labels":[],"files":[],"changed_paths":[]}'
+        & (Join-Path $script:ProjectReferenceScriptRoot 'generate-references-index.ps1') -Root $safetyRoot | Out-Null
+
+        $safetyResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath (Join-Path $safetyRoot 'issue.json') -IndexJsonPath (Join-Path $safetyRoot '.references/index.json') -StateFilePath (Join-Path $safetyRoot 'missing-state.yml') | ConvertFrom-Json
+
+        # Both sentinels present
+        $safetyResult.rendered | Should -Match 'SENTINEL_A'
+        $safetyResult.rendered | Should -Match 'SENTINEL_B'
+        # Exactly 2 untrusted-content fence-open lines (one per body)
+        $safetyFenceOpens = ([regex]::Matches($safetyResult.rendered, '`+ untrusted-content')).Count
+        $safetyFenceOpens | Should -Be 2
+        # The fence delimiter must be at least 7 backticks (6-run in body B + 1)
+        $safetyResult.rendered | Should -Match '```````+ untrusted-content'
+
+        # Uniformity assertion: ALL fence-open delimiters must use the SAME length,
+        # equal to globalMax + 1 (i.e., 7 for a 6-backtick max run across both bodies).
+        $fenceOpenLengths = [regex]::Matches($safetyResult.rendered, '(?m)^(`+) untrusted-content') |
+            ForEach-Object { $_.Groups[1].Value.Length }
+        $distinctLengths = @($fenceOpenLengths | Select-Object -Unique)
+        $distinctLengths.Count | Should -Be 1 -Because 'all fence-open delimiters must use the same length (global-max uniformity)'
+        $distinctLengths[0] | Should -Be 7 -Because 'global max backtick run is 6 (body B), so fence must be 7 backticks'
+    }
+
     It 'does not read out-of-root target paths and reports them stale' {
         $repoRoot = Join-Path $TestDrive 'loader-escape'
         New-Item -ItemType Directory -Path $repoRoot | Out-Null
@@ -210,6 +344,117 @@ Describe 'Invoke-ReferenceLoader.ps1' {
 
         $indexResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') -IssuePayloadPath (Join-Path $indexRoot 'missing-issue.json') -IndexJsonPath (Join-Path $indexRoot '.references/index.json') -StateFilePath (Join-Path $indexRoot 'missing-state.json') | ConvertFrom-Json
         $indexResult.nudge_due | Should -BeFalse
+    }
+
+    It 'does not add a missing-target entry to matched; entry appears only in stale (G5)' {
+        # A sidecar whose target_path resolves to a valid in-root path that does not exist on disk
+        # must NOT appear in matched. It must appear in stale.
+        $missingTargetRoot = Join-Path $TestDrive 'missing-target-g5'
+        New-Item -ItemType Directory -Path $missingTargetRoot | Out-Null
+        Set-Content -Path (Join-Path $missingTargetRoot 'ghost.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Ghost Doc'
+            'target_path: ghost.md'
+            'description: Target that does not exist on disk'
+            'load-when: Always'
+            'load-priority: recommended'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: ["*.md"]'
+            '    keywords: [ghost]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $missingTargetRoot 'issue.json') -Value '{"title":"ghost","body":"ghost","labels":[],"files":[],"changed_paths":[]}'
+
+        $result = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') `
+            -IssuePayloadPath (Join-Path $missingTargetRoot 'issue.json') `
+            -IndexJsonPath    (Join-Path $missingTargetRoot '.references/index.json') `
+            -StateFilePath    (Join-Path $missingTargetRoot 'missing-state.yml') | ConvertFrom-Json
+
+        # Entry must NOT appear in matched
+        @($result.matched).Count | Should -Be 0
+        # Entry must appear in stale
+        $result.stale | Should -Contain "[stale-ref: Ghost Doc $([char]0x2192) ghost.md]"
+    }
+
+    It 'does not crash or add to matched when target_path resolves to an in-root directory; directory appears in stale (G6c)' {
+        # A sidecar whose target_path resolves to a directory (not a leaf file) must
+        # NOT appear in matched and must NOT crash the loader (Get-Content -Raw on a
+        # directory throws). It must appear in stale because -PathType Leaf returns false.
+        $dirTargetRoot = Join-Path $TestDrive 'dir-target-g6c'
+        New-Item -ItemType Directory -Path $dirTargetRoot | Out-Null
+        # Create a subdirectory that will be the (invalid) target
+        $subDir = Join-Path $dirTargetRoot 'docs'
+        New-Item -ItemType Directory -Path $subDir | Out-Null
+        Set-Content -Path (Join-Path $dirTargetRoot 'dir-ref.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Dir Target'
+            'target_path: docs'   # a directory, not a file
+            'description: Target is a directory'
+            'load-when: Always'
+            'load-priority: recommended'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: ["*.md"]'
+            '    keywords: [dirtest]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $dirTargetRoot 'issue.json') -Value '{"title":"dirtest","body":"dirtest","labels":[],"files":[],"changed_paths":[]}'
+
+        # Loader must not throw; directory target must be excluded from matched and appear in stale
+        { $script:G6cResult = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') `
+            -IssuePayloadPath (Join-Path $dirTargetRoot 'issue.json') `
+            -IndexJsonPath    (Join-Path $dirTargetRoot '.references/index.json') `
+            -StateFilePath    (Join-Path $dirTargetRoot 'dir-state.yml') | ConvertFrom-Json } | Should -Not -Throw
+        @($script:G6cResult.matched).Count | Should -Be 0 -Because 'a directory target must not be counted as a loaded reference'
+        $script:G6cResult.stale | Should -Contain "[stale-ref: Dir Target $([char]0x2192) docs]" -Because 'directory targets must appear in stale'
+    }
+
+    It 'sets no_match to false when triggers match but all entries are budget-skipped (G4)' {
+        # When entries match triggers but all are skipped because the byte cap is exhausted,
+        # the triggers DID match — no_match must be false (not a true no-match scenario).
+        # max_total_loaded_bytes: 1 ensures the document (> 1 byte) is always budget-skipped.
+        $budgetSkipRoot = Join-Path $TestDrive 'budget-skip-g4'
+        New-Item -ItemType Directory -Path $budgetSkipRoot | Out-Null
+        Set-Content -Path (Join-Path $budgetSkipRoot '.agent-orchestra.yml') -Value @(
+            'references:'
+            '  max_critical_loaded: 10'
+            '  max_total_loaded_bytes: 1'
+        )
+        Set-Content -Path (Join-Path $budgetSkipRoot 'doc.md') -Value '# Budget Skip Doc (this content is longer than 1 byte)'
+        Set-Content -Path (Join-Path $budgetSkipRoot 'doc.md.ref.yml') -Value @(
+            'schema_version: 1'
+            'name: Budget Skip'
+            'target_path: doc.md'
+            'description: Budget-skip fixture for G4 no_match test'
+            'load-when: Always'
+            'load-priority: recommended'
+            'generated_by: manual'
+            'generated_at: 2026-06-01T00:00:00.0000000Z'
+            'triggers:'
+            '  - labels: []'
+            '    globs: ["*.md"]'
+            '    keywords: [budgetskip]'
+            '    critical: false'
+        )
+        Set-Content -Path (Join-Path $budgetSkipRoot 'issue.json') -Value '{"title":"budgetskip","body":"budgetskip","labels":[],"files":[],"changed_paths":[]}'
+        & (Join-Path $script:ProjectReferenceScriptRoot 'generate-references-index.ps1') -Root $budgetSkipRoot | Out-Null
+
+        $result = & (Join-Path $script:ProjectReferenceScriptRoot 'invoke-reference-loader.ps1') `
+            -IssuePayloadPath (Join-Path $budgetSkipRoot 'issue.json') `
+            -IndexJsonPath    (Join-Path $budgetSkipRoot '.references/index.json') `
+            -StateFilePath    (Join-Path $budgetSkipRoot 'missing-state.yml') | ConvertFrom-Json
+
+        # Triggers matched (matchedEntries.Count > 0), so no_match must be false
+        $result.no_match | Should -BeFalse
+        # The single entry was budget-skipped due to byte cap
+        @($result.budget_skipped | Where-Object reason -EQ 'max_total_loaded_bytes').Count | Should -Be 1
+        # matched is empty (nothing loaded), but no_match is still false
+        @($result.matched).Count | Should -Be 0
     }
 
     It 'suppresses nudge_due after init writes setup-complete state even if generated sidecars are later undone' {

@@ -67,6 +67,30 @@ authority.
 - Validation reports stale targets, orphan sidecars, duplicate names, unknown schema
   versions, uncovered docs, citation checks, and projected budget overruns.
 
+## Pre-flight Determinism (Issue #647)
+
+On Claude, project-reference loading is deterministic via the `UserPromptSubmit` hook. Before each issue-referencing upstream-phase turn, `reference-preflight-hook.ps1` (registered in `hooks/hooks.json` under `UserPromptSubmit`) runs the loader automatically:
+
+1. Extracts the issue number from the incoming prompt text.
+2. Fetches the issue via `gh issue view`.
+3. Calls `invoke-reference-loader.ps1` to match `critical` references against the issue's labels, keywords, and title/body tokens.
+4. On match, assembles `additionalContext` containing a trust-framing preamble, the rendered reference bodies (already fenced as `untrusted-content`), and the canonical sentinel `<!-- refs-injected-{issue} -->` (defined in `skills/project-references/SKILL.md §Sentinel`).
+
+`upstream-onboarding/SKILL.md §Project Reference Loading` detects the sentinel and defers its own loading step when the hook has already injected references, preventing double-loading.
+
+**USE obligation**: when references are injected, agents ground their framing, design, or planning reasoning in them or explicitly note why they do not apply. This is a soft obligation — advisory, not a hard block.
+
+**Run-once suppression (SMC-22)**: a two-phase marker keyed by `session_id` + issue number + issue-body hash prevents re-injection within the same conversation. If the issue body changes (e.g., a phase writes new content), the hash changes and re-injection fires once more.
+
+**Fail-open**: every error path exits 0 so the hook never blocks the user's turn. Error breadcrumbs distinguish `no-match` (triggers did not match — no refs injected) from `could-not-check` (gh fetch, payload build, or loader failure).
+
+### Known Limitations
+
+- **Glob-only `critical` references will not match**: at pre-flight time `changed_paths` is empty — no branch diff exists. Matching runs only on label, keyword, and title/body triggers. A `critical` reference keyed solely by a `globs:` trigger is silently skipped. Add at least one non-path trigger to any `critical` reference intended for pre-flight loading.
+- **Trust boundary**: issue-title, issue-body, and label content drives matching. Anyone with issue-create access can author matching text. Label-gated triggers (where only maintainers can apply labels) are the more conservative option for sensitive references. Full hardening is deferred.
+- **Claude-only**: `UserPromptSubmit` has no Copilot analog. Copilot falls back to the prose-instructed loading path in `upstream-onboarding/SKILL.md §Project Reference Loading`.
+- **Advisory posture**: the USE obligation is soft; hard blocking is deferred.
+
 ## Validation And Deferred Items
 
 The shipped validation surface is [validate-references-index.ps1](../../skills/project-references/scripts/validate-references-index.ps1),
@@ -87,5 +111,7 @@ Known deferred items:
 - [skills/project-references/scripts](../../skills/project-references/scripts) - init, generate, validate, loader, and shared core scripts
 - [commands/setup-references.md](../../commands/setup-references.md) - Claude `/setup-references` command
 - [.github/prompts/setup-references.prompt.md](../../.github/prompts/setup-references.prompt.md) - Copilot `/setup-references` prompt
-- [skills/upstream-onboarding/SKILL.md](../../skills/upstream-onboarding/SKILL.md) - opening-phase loader integration and brief behavior
+- [skills/upstream-onboarding/SKILL.md](../../skills/upstream-onboarding/SKILL.md) - opening-phase loader integration, brief behavior, and soft USE obligation
+- [skills/project-references/scripts/reference-preflight-hook.ps1](../../skills/project-references/scripts/reference-preflight-hook.ps1) - UserPromptSubmit hook for deterministic pre-flight loading (Claude only)
+- [hooks/hooks.json](../../hooks/hooks.json) - hook registration (UserPromptSubmit entry)
 - [examples/project-references](../../examples/project-references) - compact sample repository shape
