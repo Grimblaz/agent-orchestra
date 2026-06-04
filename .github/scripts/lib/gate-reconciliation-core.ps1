@@ -139,6 +139,9 @@ function Read-FindingDispositionIds {
         }
         elseif ($repoTarget) {
             $comments = & $Gh api "repos/$repoTarget/issues/$Issue/comments" --paginate --slurp 2>$null | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "gate-reconciliation: gh api --paginate exited $LASTEXITCODE for $repoTarget/issues/$Issue; finding_dispositions results may be partial"
+            }
             if ($comments -is [array] -and $comments[0] -is [array]) {
                 $comments = $comments | ForEach-Object { $_ }
             }
