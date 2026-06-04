@@ -371,6 +371,23 @@ families:
     notes: "Consumer-generated VS Code workspace settings. Not a distribution artifact.
       gitignored or consumer-specific; never resolved from the hub repo or plugin cache."
 
+  ".tmp/*":
+    claude_resolves: none
+    copilot_resolves: none
+    requires_version_bump: false
+    experience: wasted-tool-call
+    examples:
+      - .tmp/issue-{ISSUE_NUMBER}-body.md
+      - .tmp/{N}-comments.json
+    notes: "Agent scratch / temp-file workspace (introduced in issue #643). Gitignored,
+      consumer-local scratch directory where agents write transient working files (issue-body
+      drafts, comment payloads, engagement-record mirrors) per skills/terminal-hygiene/SKILL.md
+      Scratch & Temp-File Hygiene. Not a distribution artifact and not committed to any repo.
+      Literal example paths such as .tmp/issue-643-body.md and .tmp/643-comments.json appearing
+      in skill body text map to this family. The agent treats this path as consumer-local
+      session scratch; attempting to resolve it from the hub repo or plugin cache is a wasted
+      tool call."
+
   "Documents/.references.yml":
     claude_resolves: none
     copilot_resolves: none
