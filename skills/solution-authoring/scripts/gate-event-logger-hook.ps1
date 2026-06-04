@@ -106,7 +106,7 @@ $entry = [ordered]@{
     tool_name       = $toolName
     session_key     = $sessionKey
     question_digest = $questionDigest
-    timestamp       = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ')
+    timestamp       = (Get-Date -AsUTC -Format 'yyyy-MM-ddTHH:mm:ssZ')
     question_count  = if ($toolInput -and $toolInput.questions) {
                           if ($toolInput.questions -is [array]) { $toolInput.questions.Count } else { 1 }
                       } else { 0 }

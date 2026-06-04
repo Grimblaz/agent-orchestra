@@ -64,7 +64,6 @@ $ErrorActionPreference = 'Stop'
 
 # ─── Load dependencies ───────────────────────────────────────────────────────
 
-$libDir = Join-Path $PSScriptRoot '..'
 . (Join-Path $PSScriptRoot 'frame-engagement-record-core.ps1')
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -156,7 +155,6 @@ function Read-FindingDispositionIds {
             $yamlMatch = [regex]::Match($body, '```yaml\s*([\s\S]*?)```')
             if (-not $yamlMatch.Success) { continue }
             try {
-                Import-Module powershell-yaml -ErrorAction Stop
                 $parsed = $yamlMatch.Groups[1].Value | ConvertFrom-Yaml -ErrorAction Stop
                 $disp = $parsed['finding_dispositions']
                 if ($disp -and $disp['entries']) {
@@ -185,6 +183,7 @@ if ($Phase) {
     $tokens = $tokens | Where-Object { $_.phase -eq $Phase }
 }
 if ($IssueNumber -and $IssueNumber -gt 0) {
+    # Backward-compat: include tokens without issue_number (legacy logs pre-MF2; bounded to session-scoped files)
     $tokens = $tokens | Where-Object { $_.issue_number -eq $IssueNumber -or -not $_.issue_number }
 }
 
