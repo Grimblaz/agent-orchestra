@@ -39,27 +39,34 @@ function Get-RPHIssueNumber {
     # Pattern 1: Full GitHub issue URL (most specific — check first)
     # https://github.com/{owner}/{repo}/issues/{N}
     if ($PromptText -match '(?i)github\.com/[^/]+/[^/]+/issues/(\d+)(?:\D|$)') {
-        return [int]$Matches[1]
+        try { $n = [long]$Matches[1]; if ($n -gt 0 -and $n -le [int]::MaxValue) { return [int]$n } } catch {}
+        return $null
     }
 
     # Pattern 2: "issue #N" or "issue N" — explicit "issue" keyword, word-boundary anchored
     # Allows: "issue #647", "Issue 647", "closes issue #647"
     # The word before may not be PR/pull (checked below)
     if ($PromptText -match '(?i)(?<!\bpr\b\s*|\bpull\s+request\s*|\bpull\s*)\bissue\s+#?(\d+)\b') {
-        return [int]$Matches[1]
+        try { $n = [long]$Matches[1]; if ($n -gt 0 -and $n -le [int]::MaxValue) { return [int]$n } } catch {}
+        return $null
     }
 
     # Pattern 3: "#N" with no PR/pull/pull-request prefix and not a CSS/code fragment.
     # Find all "#N" occurrences and check context (up to 25 chars before the # symbol).
     $hashMatches = [regex]::Matches($PromptText, '(?i)(?:^|[\s,.()\[\]{};:!?])#(\d+)\b')
     foreach ($m in $hashMatches) {
-        $num = [int]$m.Groups[1].Value
+        $rawNum = $m.Groups[1].Value
+        $num = $null
+        try { $parsed = [long]$rawNum; if ($parsed -gt 0 -and $parsed -le [int]::MaxValue) { $num = [int]$parsed } } catch {}
+        if ($null -eq $num) { continue }
         $idx = $m.Index
         # Look back up to 25 characters before this match position
         $lookback = [Math]::Max(0, $idx - 25)
         $before = $PromptText.Substring($lookback, $idx - $lookback).ToLower()
-        # Exclude if immediately preceded by PR/pull/pull-request keywords
-        if ($before -match 'pr\s*$' -or $before -match 'pull\s*$' -or $before -match 'pull\s+request\s*$') {
+        # Exclude if immediately preceded by PR/pull/pull-request keywords.
+        # Use word-boundary anchors so words ending in "pr" (e.g., "expr", "compr")
+        # do not accidentally suppress a valid issue reference.
+        if ($before -match '(?:^|\W)pr\s*$' -or $before -match '(?:^|\W)pull\s*$' -or $before -match 'pull\s+request\s*$') {
             continue
         }
         return $num
@@ -321,7 +328,7 @@ function Invoke-RPHHook {
     $indexJsonPath = Join-Path $resolvedRoot '.references' 'index.json'
     if (-not (Test-Path -LiteralPath $indexJsonPath)) { return $null }
 
-    # ---- 5. Phase-1 run-once marker check (before any subprocess) ---------------
+    # ---- 5. Phase-1: load any prior run-once marker state for this issue+session (no short-circuit — gh fetch follows unconditionally) ----
     $stateFilePath = Get-RPHStateFilePath -RepoRoot $resolvedRoot -SessionId $sessionId -IssueNumber $issueNumber
     $existingState = $null
     if (-not [string]::IsNullOrWhiteSpace($stateFilePath) -and (Test-Path -LiteralPath $stateFilePath)) {
@@ -406,7 +413,10 @@ function Invoke-RPHHook {
     $criticalUnderMatch= @(if ($null -ne $loaderResult.critical_under_match) { $loaderResult.critical_under_match } else { @() })
     $matched           = @(if ($null -ne $loaderResult.matched) { $loaderResult.matched } else { @() })
 
-    if ($loaded.Count -eq 0 -and $criticalUnderMatch.Count -eq 0) {
+    # Use $matched.Count (truly-matched entries) as the no-match signal.
+    # $criticalUnderMatch is always non-empty on a genuine no-match (the loader
+    # populates it with the AC9 surface text), so it cannot serve as the gate.
+    if ($loaded.Count -eq 0 -and $matched.Count -eq 0) {
         Write-Error "rph-hook: no-match for issue $issueNumber — no refs injected" -ErrorAction Continue
         return $null
     }

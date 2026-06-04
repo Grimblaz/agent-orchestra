@@ -154,7 +154,8 @@ param([string]$IssuePayloadPath, [string]$IndexJsonPath, [string]$StateFilePath)
     loaded              = @()
     matched             = @()
     stale               = @()
-    critical_under_match = @()
+    critical_under_match = @('[not loaded; triggers did not match — confirm scope does not intersect]')
+    no_match            = $true
     budget_skipped      = @()
     loaded_bytes        = 0
     nudge_due           = $false
@@ -292,7 +293,7 @@ param([string]$IssuePayloadPath, [string]$IndexJsonPath, [string]$StateFilePath)
             $mockLoaderPath = Join-Path $script:BurstTempDir 'mock-loader-large-body.ps1'
             @'
 param([string]$IssuePayloadPath, [string]$IndexJsonPath, [string]$StateFilePath)
-@{ loaded = @(); matched = @(); stale = @(); critical_under_match = @(); budget_skipped = @(); loaded_bytes = 0; rendered = ''; untrusted = $false; nudge_due = $false; nudge_dismissed = $false } | ConvertTo-Json -Depth 10
+@{ loaded = @(); matched = @(); stale = @(); critical_under_match = @('[not loaded; triggers did not match — confirm scope does not intersect]'); no_match = $true; budget_skipped = @(); loaded_bytes = 0; rendered = ''; untrusted = $false; nudge_due = $false; nudge_dismissed = $false } | ConvertTo-Json -Depth 10
 '@ | Set-Content $mockLoaderPath -Encoding UTF8
 
             $payload = New-RPHPayload -Prompt 'issue #12345' -SessionId 'large-body-session'
@@ -463,7 +464,8 @@ param([string]$IssuePayloadPath, [string]$IndexJsonPath, [string]$StateFilePath)
     loaded              = @()
     matched             = @()
     stale               = @()
-    critical_under_match = @()
+    critical_under_match = @('[not loaded; triggers did not match — confirm scope does not intersect]')
+    no_match            = $true
     budget_skipped      = @()
     loaded_bytes        = 0
     rendered            = ''
@@ -611,6 +613,41 @@ param([string]$IssuePayloadPath, [string]$IndexJsonPath, [string]$StateFilePath)
         It 'extracts from "issue #647" even when PR #123 appears later' {
             $result = Get-RPHIssueNumber -PromptText 'fixes issue #647 as tracked in PR #123'
             $result | Should -Be 647
+        }
+
+        It 'extracts from "expr #647" — word ending in "pr" must not be treated as PR prefix (MF2)' {
+            Get-RPHIssueNumber -PromptText 'expr #647' | Should -Be 647
+        }
+
+        It 'extracts from "compr #647" — word ending in "pr" must not suppress issue reference (MF2)' {
+            Get-RPHIssueNumber -PromptText 'compr #647' | Should -Be 647
+        }
+    }
+
+    # =========================================================================
+    # 12. Integration: real loader + empty index → no injection (AC4)
+    # =========================================================================
+
+    Describe 'AC4 integration — real loader, empty index, no-match returns $null' {
+
+        It 'returns $null when loader is called with a real index that has no matching entries' {
+            # Build a consumer repo with a .references/index.json that has entries
+            # but none whose triggers match the issue text.
+            $consumerRoot = New-RPHConsumerRepo
+
+            # Issue text that will not match "API Reference" / "reference" triggers
+            $noMatchIssueJson = '{"title":"Unrelated database migration","body":"Refactor database schema only.","labels":[]}'
+            $ghPath = New-MockGhScript -IssueJson $noMatchIssueJson
+
+            # Use the REAL loader script — this is the integration test
+            $payload = New-RPHPayload -Prompt 'working on issue #9991' -SessionId 'ac4-integration-session'
+            $result = Invoke-RPHHook `
+                -PayloadJson      $payload `
+                -GhCliPath        $ghPath `
+                -LoaderScriptPath $script:LoaderScript `
+                -RepoRoot         $consumerRoot
+
+            $result | Should -BeNullOrEmpty -Because 'AC4: real loader no-match must produce no injection'
         }
     }
 

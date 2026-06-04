@@ -219,10 +219,11 @@ Describe 'Invoke-ReferenceLoader.ps1' {
     }
 
     It 'uses a uniform global-max fence so a longer backtick run in body B cannot close body A fence (MF7)' {
-        # Body A has a 3-backtick run (standard triple fence); body B has a 5-backtick run.
-        # Without global-max sizing, body A would get a 4-backtick fence which body B's 5-run
-        # would not close — but A's 4-tick fence COULD be closed by content in B that has 4 ticks.
-        # The uniform global-max fence (6 ticks here) must wrap BOTH bodies.
+        # Body A has a 3-backtick run (standard triple fence); body B has a 6-backtick run.
+        # Without global-max sizing, body A would get a 4-backtick fence while body B would get
+        # a 7-backtick fence — non-uniform, and A's 4-tick fence could be closed by content in
+        # B that has 4 ticks. The uniform global-max fence (7 ticks here, globalMax=6) must
+        # wrap BOTH bodies with the same delimiter length.
         $safetyRoot = Join-Path $TestDrive 'fence-safety'
         New-Item -ItemType Directory -Path $safetyRoot | Out-Null
         Set-Content -Path (Join-Path $safetyRoot '.agent-orchestra.yml') -Value @(
@@ -275,8 +276,16 @@ Describe 'Invoke-ReferenceLoader.ps1' {
         # Exactly 2 untrusted-content fence-open lines (one per body)
         $safetyFenceOpens = ([regex]::Matches($safetyResult.rendered, '`+ untrusted-content')).Count
         $safetyFenceOpens | Should -Be 2
-        # The fence delimiter must be at least 6 backticks (5-run in body B + 1)
+        # The fence delimiter must be at least 7 backticks (6-run in body B + 1)
         $safetyResult.rendered | Should -Match '```````+ untrusted-content'
+
+        # Uniformity assertion: ALL fence-open delimiters must use the SAME length,
+        # equal to globalMax + 1 (i.e., 7 for a 6-backtick max run across both bodies).
+        $fenceOpenLengths = [regex]::Matches($safetyResult.rendered, '(?m)^(`+) untrusted-content') |
+            ForEach-Object { $_.Groups[1].Value.Length }
+        $distinctLengths = @($fenceOpenLengths | Select-Object -Unique)
+        $distinctLengths.Count | Should -Be 1 -Because 'all fence-open delimiters must use the same length (global-max uniformity)'
+        $distinctLengths[0] | Should -Be 7 -Because 'global max backtick run is 6 (body B), so fence must be 7 backticks'
     }
 
     It 'does not read out-of-root target paths and reports them stale' {

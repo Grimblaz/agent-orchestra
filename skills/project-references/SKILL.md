@@ -67,7 +67,7 @@ The canonical sentinel written by the reference pre-flight hook to signal that d
 <!-- refs-injected-{issue} -->
 ```
 
-Where `{issue}` is the decimal GitHub issue number (e.g., `<!-- refs-injected-647 -->`). This sentinel is the single authority — `reference-preflight-hook.ps1` writes it and `upstream-onboarding/SKILL.md §Project Reference Loading` detects it to avoid double-loading. Do not restate the grammar elsewhere.
+Where `{issue}` is the decimal GitHub issue number (e.g., `<!-- refs-injected-647 -->`). This sentinel is the single authority — `reference-preflight-hook.ps1` writes it and `upstream-onboarding/SKILL.md §Project Reference Loading` detects it to avoid double-loading. Other documents must cite this section as the source; inline restatements must stay byte-identical with this §Sentinel definition.
 
 ## Pre-flight Determinism
 
