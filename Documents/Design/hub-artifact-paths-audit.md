@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: a59c5d961627e543f24155d60031901324184503
-generated-at: 2026-06-02T01:15:20Z
+last-verified: 9f483ca2780a3b155a4f76b8efa9e1ba8d047a17
+generated-at: 2026-06-04T02:19:18Z
 -->
 
 ## Purpose
@@ -468,6 +468,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `skills/validation-methodology/references/post-judgment-routing.md`
   - `skills/parallel-execution/references/error-handling.md`
 - **notes**: Reference sub-documents within skill directories. Bare-relative paths such as 'references/anti-patterns.md', 'references/commands.md', 'references/quality-gates.md', and 'references/test-patterns.md' appearing in skill body text are relative references that map to this family. Missing reference docs produce hard-failure when a skill body tries to Read them during execution.
+
+### `skills/*/schemas/*.json`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
+- **examples**:
+  - `skills/solution-authoring/schemas/gate-decision-token.schema.json`
+- **notes**: JSON Schema definitions nested within skill directories. The gate-decision-token schema (#617) defines the L0 classification-decision token consumed by gate-reconciliation-core.ps1 (L2) and the Code-Critic missed-gate perspective (L3). Consumers that reference or validate against the schema will hard-fail if it is missing.
 
 ### `skills/*/scripts/*.ps1`
 

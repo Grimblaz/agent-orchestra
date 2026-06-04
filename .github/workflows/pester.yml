@@ -33,7 +33,9 @@ jobs:
             '.github/scripts/Tests/engagement-record-marker-roundtrip.Tests.ps1',
             '.github/scripts/Tests/Test-DeferralCriteria.Tests.ps1',
             '.github/scripts/Tests/Add-FollowUpIssue.Tests.ps1',
-            '.github/scripts/Tests/code-review-deferral-integration.Tests.ps1'
+            '.github/scripts/Tests/code-review-deferral-integration.Tests.ps1',
+            '.github/scripts/Tests/gate-reconciliation.Tests.ps1',
+            '.github/scripts/Tests/gate-hook-contract.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'

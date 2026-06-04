@@ -169,3 +169,27 @@ The v2 rollout (experience/design/plan phases) completed with #576. The v3 orche
 - [CLAUDE.md](../../CLAUDE.md) - Cross-tool handoff marker registry
 - [.github/scripts/lib/frame-engagement-record-core.ps1](../../.github/scripts/lib/frame-engagement-record-core.ps1) - Core library implementation
 - [.github/scripts/Tests/named-decisions-write-discipline.Tests.ps1](../../.github/scripts/Tests/named-decisions-write-discipline.Tests.ps1) - Unit and integration tests
+
+## Gate-Skip Detection (issue #617)
+
+The `solution-authoring` classification gate is enforced through three layers added in issue #617:
+
+### L0 — Gate self-report token
+
+At each gate decision point, the agent emits a classification-decision token to the session event log (`memories/session/gate-events-{key}.jsonl`). Schema: `skills/solution-authoring/schemas/gate-decision-token.schema.json`. The `outcome` field (`asked | gate-fails | declined | same-decision-resume | greenfield-defer`) is the discriminator between lawful skips and potential silent skips. The `issue_number` field scopes tokens to their originating issue. The `window_position` field (`pre-ask | disposition | judge-merge`) maps to the three gate firing surfaces unified by `d-scope-boundary`.
+
+### L1 — PostToolUse event logger (corroboration)
+
+A PostToolUse hook (`skills/solution-authoring/scripts/gate-event-logger-hook.ps1`) fires on `AskUserQuestion` (Claude) and `vscode/askQuestions` (Copilot) and appends corroboration events. The `Resolve-GateSessionKey` helper ensures the hook and validator use an identical key (AC12). L1 is designed for Claude; Copilot empirical confirmation is pending (see SMC-21).
+
+### L2 — Warn-only reconciliation validator
+
+`.github/scripts/lib/gate-reconciliation-core.ps1` reconciles L0 tokens against recorded decisions (engagement-record `decision_id` and `finding_dispositions` `finding_id`). It is **warn-only** (never blocks persistence), emitting review-time ledger findings when a load-bearing `asked` token has no corresponding recorded decision. Lawful-skip tokens never raise findings. Invoked by Code-Conductor as a pre-PR warn-only check.
+
+### L3 — Missed-gate Code-Critic perspective
+
+A seventh prosecution perspective in `agents/Code-Critic.agent.md` audits for load-bearing artifact-decisions with no corresponding L0 gate token — the "never-surfaced" class that L0/L1/L2 cannot detect. Category: `missed-gate`, severity: medium.
+
+### Design decision: detection-at-review (not prevention-at-persist)
+
+The original plan proposed "fails persistence of the phase marker" but the adversarial pipeline (3-pass prosecution → defense → judge: 9/11 findings sustained) proved this infeasible — no platform interception seam exists (`PreToolUse` "does not fit the trigger pattern" per `Documents/Design/session-hooks.md` D2; markers post via unhooked `gh issue comment`). The approved mechanism is **detection-at-review** (warn-only, caught before merge), within the `d-intent-strictness` detection+recovery envelope. See issue #617 for the full judge ruling and engagement records.

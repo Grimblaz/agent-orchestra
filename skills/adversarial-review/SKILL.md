@@ -165,6 +165,10 @@ For markdown-only command guidance, audit:
 - Correct post-change counts and expectations
 - Preference for built-in VS Code tools over terminal-first read-only guidance when an equivalent exists
 
+### 7. Missed-gate detection
+
+**7. Missed-gate detection** (gate-skip audit) — See `agents/Code-Critic.agent.md` for the full specification. This perspective audits whether load-bearing decisions in the artifact have corresponding L0 gate tokens; it fires as a detective pass alongside the standard six perspectives when the `solution-authoring` gate is in scope for the reviewed artifact.
+
 ### Browser-Based Review
 
 When the change touches UI implementation:

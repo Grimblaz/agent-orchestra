@@ -73,14 +73,16 @@ Describe 'plugin hooks config contract' -Tag 'unit' {
     It 'declares a Claude PostToolUse hook for plugin release hygiene' {
         $config = Get-JsonFile -Path $script:ClaudeHooksConfig
         $entries = Get-HookEntries -HooksConfig $config -EventName 'PostToolUse'
+        # PostToolUse carries multiple matchers (release-hygiene + the #617 gate-event-logger);
+        # select the release-hygiene entry by its matcher rather than asserting a single entry.
+        $releaseEntry = @($entries | Where-Object { $_.matcher -eq $script:PostToolUseMatcher })
 
-        $entries.Count | Should -Be 1
-        $entries[0].matcher | Should -Be $script:PostToolUseMatcher
-        @($entries[0].hooks).Count | Should -Be 1
-        $entries[0].hooks[0].type | Should -Be 'command'
-        $entries[0].hooks[0].command | Should -Match ([regex]::Escape('pwsh -NoProfile -NonInteractive -File '))
-        $entries[0].hooks[0].command | Should -Match ([regex]::Escape('"${CLAUDE_PLUGIN_ROOT}'))
-        $entries[0].hooks[0].command | Should -Match ([regex]::Escape($script:ReleaseHygieneScript))
+        $releaseEntry.Count | Should -Be 1
+        @($releaseEntry[0].hooks).Count | Should -Be 1
+        $releaseEntry[0].hooks[0].type | Should -Be 'command'
+        $releaseEntry[0].hooks[0].command | Should -Match ([regex]::Escape('pwsh -NoProfile -NonInteractive -File '))
+        $releaseEntry[0].hooks[0].command | Should -Match ([regex]::Escape('"${CLAUDE_PLUGIN_ROOT}'))
+        $releaseEntry[0].hooks[0].command | Should -Match ([regex]::Escape($script:ReleaseHygieneScript))
     }
 
     # UserPromptSubmit is a Claude-only hook event with no Copilot analog.
@@ -110,7 +112,9 @@ Describe 'plugin hooks config contract' -Tag 'unit' {
         $config = Get-JsonFile -Path $script:CopilotHooksConfig
         $rootManifest = Get-JsonFile -Path $script:RootPluginManifest
         $sessionEntries = Get-HookEntries -HooksConfig $config -EventName 'SessionStart'
-        $postToolEntries = Get-HookEntries -HooksConfig $config -EventName 'PostToolUse'
+        # PostToolUse carries multiple matchers (release-hygiene + the #617 gate-event-logger);
+        # select the release-hygiene entry by its matcher.
+        $postToolEntries = @(Get-HookEntries -HooksConfig $config -EventName 'PostToolUse' | Where-Object { $_.matcher -eq $script:PostToolUseMatcher })
         $cacheLocator = Get-CopilotCacheLocator -Manifest $rootManifest
         $requiredEscapedTokens = @(
             '`$productDirs',

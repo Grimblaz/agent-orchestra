@@ -80,7 +80,7 @@ On Claude, project-reference loading is deterministic via the `UserPromptSubmit`
 
 **USE obligation**: when references are injected, agents ground their framing, design, or planning reasoning in them or explicitly note why they do not apply. This is a soft obligation — advisory, not a hard block.
 
-**Run-once suppression (SMC-21)**: a two-phase marker keyed by `session_id` + issue number + issue-body hash prevents re-injection within the same conversation. If the issue body changes (e.g., a phase writes new content), the hash changes and re-injection fires once more.
+**Run-once suppression (SMC-22)**: a two-phase marker keyed by `session_id` + issue number + issue-body hash prevents re-injection within the same conversation. If the issue body changes (e.g., a phase writes new content), the hash changes and re-injection fires once more.
 
 **Fail-open**: every error path exits 0 so the hook never blocks the user's turn. Error breadcrumbs distinguish `no-match` (triggers did not match — no refs injected) from `could-not-check` (gh fetch, payload build, or loader failure).
 

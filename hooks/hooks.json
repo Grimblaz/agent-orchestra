@@ -20,6 +20,15 @@
             "command": "pwsh -NoProfile -NonInteractive -File \"${CLAUDE_PLUGIN_ROOT}/skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1\""
           }
         ]
+      },
+      {
+        "matcher": "^(AskUserQuestion|vscode/askQuestions)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -NonInteractive -File \"${CLAUDE_PLUGIN_ROOT}/skills/solution-authoring/scripts/gate-event-logger-hook.ps1\""
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
