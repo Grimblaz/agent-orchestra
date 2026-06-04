@@ -63,6 +63,8 @@ Project references are optional onboarding context. They supplement the issue bo
 
 When references are injected (via the hook or loaded via this step), ground your framing, design, or plan reasoning in them or explicitly note why they do not apply. This is a soft obligation — advisory, not a hard block.
 
+The deterministic backstop (hook, non-goals, and pre-flight matching limitations) is documented in `skills/project-references/SKILL.md §Pre-flight Determinism`.
+
 #### Content Trust
 
 Caps, content-trust rules, and the `untrusted-content` fence requirement are defined in `skills/project-references/SKILL.md §Content Trust and Rendering`. Apply those rules here.

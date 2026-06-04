@@ -69,6 +69,30 @@ The canonical sentinel written by the reference pre-flight hook to signal that d
 
 Where `{issue}` is the decimal GitHub issue number (e.g., `<!-- refs-injected-647 -->`). This sentinel is the single authority — `reference-preflight-hook.ps1` writes it and `upstream-onboarding/SKILL.md §Project Reference Loading` detects it to avoid double-loading. Do not restate the grammar elsewhere.
 
+## Pre-flight Determinism
+
+### Deterministic backstop (Claude / UserPromptSubmit)
+
+On Claude, project-reference loading is deterministic via the `UserPromptSubmit` hook (`reference-preflight-hook.ps1`, registered in `hooks/hooks.json`). The hook runs the loader before any phase work begins and injects matched `critical` references as `additionalContext`. The canonical sentinel (`<!-- refs-injected-{issue} -->`) is written at that point, and `upstream-onboarding/SKILL.md §Project Reference Loading` detects it to avoid double-loading.
+
+On Copilot and other surfaces that have no `UserPromptSubmit` analog, loading falls back to the prose-instructed path in `upstream-onboarding/SKILL.md §Project Reference Loading`. Full Copilot parity is a follow-up (see Non-goals below).
+
+### Glob-only-critical limitation (design F5, MF9)
+
+At pre-flight time, `changed_paths` is empty — no branch diff exists yet. The loader can therefore match only on label triggers, keyword triggers, and title/body tokens. **A `critical` reference doc keyed only by a `globs:` trigger will silently not match at pre-flight.** Consumers must add at least one `labels:`, `keywords:`, or other non-path trigger to any `critical` reference intended for pre-flight loading.
+
+### Trust boundary (MF11)
+
+At pre-flight, reference selection is driven by the issue title, body, and labels — content that can be authored by anyone with issue-create access. Consumers should not configure `critical` references over content they would not want surfaced to anyone who can author a matching issue. Label-gated triggers (where only maintainers can add labels) are the more conservative option. Full hardening (label-gated-only pre-flight matching) is tracked as a follow-up.
+
+### Non-goals (this issue)
+
+> **Non-goals** — these items are explicitly out of scope for issue #647 and are deferred:
+>
+> - **Hard blocking/enforcement**: the loading and USE rule are advisory. The dogfooded blocking variant in agent-orchestra is deferred.
+> - **Copilot parity**: `UserPromptSubmit` has no Copilot analog. Parity is tracked as a follow-up.
+> - **Confirm `#338` platform**: the originating incident's platform of origin is to be confirmed in a follow-up.
+
 ## AC9 Surface Text
 
 Byte-exact canonical text:
