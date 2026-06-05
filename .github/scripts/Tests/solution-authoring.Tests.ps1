@@ -259,8 +259,16 @@ Describe 'escalation tier — issue #556 structural assertions' {
     }
 
     # AC3 — positive routing for incorporate/dismiss
-    It 'AC3 — SKILL.md contains "load-bearing adversarial-review disposition" (positive routing requirement)' {
-        $script:Content | Should -Match 'load-bearing adversarial-review disposition'
+    It 'AC3 — SKILL.md escalation tier covers load-bearing dispositions regardless of incorporate/dismiss/escalate outcome' {
+        $script:Content | Should -Match 'regardless of whether their final outcome is'
+        $script:Content | Should -Match 'incorporate'
+        $script:Content | Should -Match 'dismiss'
+    }
+
+    # MF3 — base tier presence
+    It 'MF3 — SKILL.md routing partition defines base tier (all other load-bearing decisions)' {
+        $script:Content | Should -Match 'base tier'
+        $script:Content | Should -Match 'all other load-bearing decisions'
     }
 
     # AC4 — evidence fallback chain

@@ -68,7 +68,7 @@ See `upstream-onboarding` standards check (runs at phase entry) and `plan-author
 
 ## 4. Design
 
-Load-bearing adversarial-review dispositions from the plan stress-test use the **escalation tier** per `skills/solution-authoring/SKILL.md §Rule: Decision brief structure` (#556).
+Load-bearing adversarial-review dispositions from the plan stress-test use the **escalation tier** per `skills/solution-authoring/SKILL.md §Rule: Decision brief structure`.
 
 Draft a comprehensive plan per the **Plan Style Guide** in `skills/plan-authoring/SKILL.md`. Include: critical file paths, code patterns, step-by-step approach, execution mode per step, Requirement Contract per step, TDD (red-green-refactor), refactor stage, validation commands, adversarial review pipeline (3 prosecution passes → merged ledger → defense → judge), explicit deferral handling, CE Gate step when applicable, and a post-issue retrospective checkpoint.
 
