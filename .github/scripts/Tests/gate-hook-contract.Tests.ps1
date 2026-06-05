@@ -82,6 +82,21 @@ Describe 'hooks/hooks.json PostToolUse matcher contract' {
     }
 }
 
+Describe 'gate-decision-token schema regression guards — issue #556' {
+
+    BeforeAll {
+        $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:SchemaPath = Join-Path $script:RepoRoot 'skills/solution-authoring/schemas/gate-decision-token.schema.json'
+        $script:Schema     = Get-Content $script:SchemaPath -Raw -ErrorAction Stop
+    }
+
+    # Regression guard: no brief_tier property added (additionalProperties: false already enforces this,
+    # but this assertion makes intent explicit and detects if someone adds the property to properties{}).
+    It 'schema does not contain a "brief_tier" top-level property (regression guard — must stay GREEN)' {
+        $script:Schema | Should -Not -Match '"brief_tier"'
+    }
+}
+
 Describe 'gate-reconciliation-core lib contract' {
 
     BeforeAll {
