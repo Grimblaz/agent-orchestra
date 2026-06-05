@@ -68,6 +68,8 @@ See `upstream-onboarding` standards check (runs at phase entry) and `plan-author
 
 ## 4. Design
 
+Load-bearing adversarial-review dispositions from the plan stress-test use the **escalation tier** per `skills/solution-authoring/SKILL.md §Rule: Decision brief structure` (#556).
+
 Draft a comprehensive plan per the **Plan Style Guide** in `skills/plan-authoring/SKILL.md`. Include: critical file paths, code patterns, step-by-step approach, execution mode per step, Requirement Contract per step, TDD (red-green-refactor), refactor stage, validation commands, adversarial review pipeline (3 prosecution passes → merged ledger → defense → judge), explicit deferral handling, CE Gate step when applicable, and a post-issue retrospective checkpoint.
 
 - **CE Gate multi-path output coverage** — when a script emits a new output block in more than one conditional path, require at least one CE Gate scenario for each path where the block appears. Each scenario's acceptance criterion must specify the expected behavior of every consuming agent in that path, not merely output format. The motivating example is a normal path plus an early-exit or `insufficient_data` path. If the block appears in only one conditional path, this rule is out of scope.
