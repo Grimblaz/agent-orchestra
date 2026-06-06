@@ -5,6 +5,7 @@ All notable changes to agent-orchestra will be documented in this file.
 ## [2.24.0] — 2026-06-06
 
 ### Changed
+
 - GitHub Copilot / VS Code support frozen as of this release — present but unmaintained, retiring after 2026-08-31. Claude Code is the only actively supported platform.
 - Added internal deprecation banners to README.md, CLAUDE.md, and `.github/copilot-instructions.md`.
 - Added `Documents/Design/copilot-deprecation.md` with the full freeze policy, reach-out channel (GitHub Discussions), and reversibility notes.

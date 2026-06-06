@@ -13,7 +13,7 @@ on:
   schedule:
     # Monthly keepalive: runs on the 1st of every month (prevents 60-day auto-disable)
     - cron: '0 9 1 * *'
-    # Retirement review trigger: runs on 2026-09-01 (first run on/after 2026-08-31)
+    # Annual September 1st retirement-review check (date-gated to fire only on/after 2026-08-31)
     - cron: '0 9 1 9 *'
   workflow_dispatch:
     inputs:

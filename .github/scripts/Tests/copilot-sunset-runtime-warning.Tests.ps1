@@ -52,6 +52,7 @@ Describe 'Copilot sunset runtime warning contract (#651)' {
 
     It 'root hooks.json sunset warning fires BEFORE the session-cleanup-detector call' {
         $command = script:Get-SessionStartCommand -HooksPath $script:CopilotHooksPath
+        $command | Should -Not -BeNullOrEmpty -Because 'prerequisite: SessionStart command must be readable to check ordering'
         $ackIdx      = $command.IndexOf('copilot-sunset-ack')
         $detectorIdx = $command.IndexOf('session-cleanup-detector.ps1')
         $ackIdx      | Should -BeGreaterOrEqual 0 -Because 'ack token must be present'
