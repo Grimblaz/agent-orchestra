@@ -1,8 +1,8 @@
 {
   "name": "agent-orchestra",
   "metadata": {
-    "description": "Multi-agent workflow system for GitHub Copilot",
-    "version": "2.23.0"
+    "description": "⚠️ Copilot/VS Code support frozen, retiring after 2026-08-31 — see copilot-deprecation.md. Claude Code is the supported path. Multi-agent workflow system for GitHub Copilot",
+    "version": "2.24.0"
   },
   "owner": {
     "name": "Grimblaz"
@@ -11,8 +11,8 @@
     {
       "name": "agent-orchestra",
       "source": ".",
-      "description": "Multi-agent workflow system for GitHub Copilot with 16 specialized agents, a shared skill library, and pipeline orchestration.",
-      "version": "2.23.0"
+      "description": "⚠️ Copilot/VS Code support frozen, retiring after 2026-08-31 — see copilot-deprecation.md. Claude Code is the supported path. Multi-agent workflow system for GitHub Copilot with 16 specialized agents, a shared skill library, and pipeline orchestration.",
+      "version": "2.24.0"
     }
   ]
 }
