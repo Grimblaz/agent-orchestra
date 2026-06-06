@@ -1,9 +1,10 @@
-<!-- FROZEN: Copilot surface frozen per #651, retiring after 2026-08-31. See Documents/Design/copilot-deprecation.md. Do not add new Copilot parity work. -->
 ---
 agent: Code-Conductor
 description: "Run the full orchestration pipeline for one or more GitHub issues — full pipeline: scope classification, smart resume, D9 checkpoint, implementation, review, PR"
 argument-hint: "Single issue (e.g. issue #177) or multiple issues (e.g. issues #177 #178 #179)"
 ---
+
+<!-- FROZEN: Copilot surface frozen per #651, retiring after 2026-08-31. See Documents/Design/copilot-deprecation.md. Do not add new Copilot parity work. -->
 
 # /orchestrate
 
