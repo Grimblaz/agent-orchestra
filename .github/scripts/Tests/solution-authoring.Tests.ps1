@@ -242,6 +242,8 @@ Describe 'escalation tier — issue #556 structural assertions' {
         $script:Content      = (Get-Content -Path $script:SkillPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
         $script:ClaudeMdPath = Join-Path $script:RepoRoot 'skills\solution-authoring\platforms\claude.md'
         $script:ClaudeMdContent = (Get-Content -Path $script:ClaudeMdPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
+        $copilotMdPath = Join-Path $script:RepoRoot 'skills\solution-authoring\platforms\copilot.md'
+        $script:CopilotMdContent = (Get-Content -Path $copilotMdPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
         $script:SDAgentPath  = Join-Path $script:RepoRoot 'agents\Solution-Designer.agent.md'
         $script:SDContent    = (Get-Content -Path $script:SDAgentPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
         $script:DEPath       = Join-Path $script:RepoRoot 'skills\design-exploration\SKILL.md'
@@ -283,7 +285,7 @@ Describe 'escalation tier — issue #556 structural assertions' {
 
     # AC5 — re-audit tier re-evaluation
     It 'AC5 — SKILL.md contains classification-re-audit paired with tier re-evaluation' {
-        $script:Content | Should -Match 'classification-re-audit.*tier|tier.*classification-re-audit'
+        $script:Content | Should -Match 'classification-re-audit.{0,500}tier|tier.{0,500}classification-re-audit'
     }
 
     # AC8 — Named-Decisions field invariant: Decision brief excerpt stays one sentence
@@ -292,8 +294,9 @@ Describe 'escalation tier — issue #556 structural assertions' {
     }
 
     # AC9 — platform mirrors reference both tiers (RED until s5)
-    It 'AC9 — skills/solution-authoring/platforms/claude.md references "escalation tier"' {
+    It 'AC9 — skills/solution-authoring/platforms/claude.md and copilot.md reference "escalation tier"' {
         $script:ClaudeMdContent | Should -Match 'escalation tier'
+        $script:CopilotMdContent | Should -Match 'escalation tier'
     }
 
     # AC6 / s3 — design-exploration/SKILL.md no longer cites feedback_explain_before_options
