@@ -6,7 +6,7 @@ This skill's methodology is tool-agnostic. Platform-specific detail: Claude Code
 
 ## Structured question invocation
 
-Use `AskUserQuestion` with the decision brief as the question body. Include the `audit_rationale` sentence immediately before the question body in the conversation text (not inside the tool call). Include a `Decline engagement — proceed without classification` option as the last choice.
+Use `AskUserQuestion` with the decision brief as the question body — for load-bearing adversarial-review dispositions, use the escalation tier (full prose per `§Rule: Decision brief structure`); for all other load-bearing decisions, use the base tier (3-sentence brief). Include the `audit_rationale` sentence immediately before the question body in the conversation text (not inside the tool call). Include a `Decline engagement — proceed without classification` option as the last choice.
 
 ## Skip rule invocation
 

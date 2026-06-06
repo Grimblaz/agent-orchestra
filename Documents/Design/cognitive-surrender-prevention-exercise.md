@@ -115,3 +115,13 @@ This establishes the readiness section on first run and updates it idempotently 
 ## (j) Test-Issue Labelling and Cleanup Exemption Note
 
 To prevent provisioned test issues (`#TEST-578-S1` through `#TEST-578-S5`) from being deleted or archived by the session-startup cleanup detector, they must carry the `ce-gate-exemption` label or include the `#ce-gate-exemption` token in the issue body. (Note: This is a configuration/labelling instruction; no exemption logic changes are introduced in #578).
+
+---
+
+## (k) Decision-Brief Escalation Tier (Implemented in #556)
+
+The `solution-authoring` decision-brief rule now has two tiers, relevant when evaluating CE Gate evidence from adversarial-review phases.
+
+The **base tier** (3-sentence brief) remains the default for all load-bearing decisions. The **escalation tier** (full prose — current state + evidence, the conflict, the customer failure mode, then options) is an override that fires for load-bearing adversarial-review dispositions; it is keyed on the load-bearing classification itself, not on the post-hoc `finding_dispositions.disposition == escalate` enum. The partition is exhaustive: non-adversarial load-bearing decisions — including orchestration scope-classification — continue to use the base tier.
+
+CE Gate evaluators reviewing S5 (direction-change) evidence should confirm which tier was triggered: an adversarial-review disposition that cleared the load-bearing test must produce escalation-tier prose; all other load-bearing decisions produce 3-sentence briefs. A base-tier brief appearing where an escalation-tier brief was required is a documentation failure. See `skills/solution-authoring/SKILL.md §Rule: Decision brief structure` for the authoritative rule text.

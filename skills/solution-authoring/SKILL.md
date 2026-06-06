@@ -33,7 +33,15 @@ Failing any one leg collapses to routine. For load-bearing decisions, render the
 
 ### Rule: Decision brief structure
 
-A decision brief has three sentences: (1) **Concrete element** — names the specific artifact, section, or mechanism where the decision lands; (2) **Decision setup** — frames the choice in outcome terms, not implementation jargon; (3) **Conditional misconception** — names the plausible wrong path and its failure mode. The brief precedes the structured question. Teach before asking.
+A decision brief has two tiers.
+
+**Base tier (default for every load-bearing decision)**: Three sentences — (1) **Concrete element** — names the specific artifact, section, or mechanism where the decision lands; (2) **Decision setup** — frames the choice in outcome terms, not implementation jargon; (3) **Conditional misconception** — names the plausible wrong path and its failure mode. The brief precedes the structured question. Teach before asking.
+
+**Escalation tier (override that fires for load-bearing adversarial-review dispositions)**: Same three-part spine expanded to full prose. Fires when a load-bearing adversarial-review disposition is being surfaced to the owner (keyed on the load-bearing classification, known before the structured question fires for that finding — consistent with the firing-position rule in the `## Applying the gate to adversarial-review dispositions` section below — not the post-hoc `finding_dispositions.disposition == escalate` enum value). The escalation tier positively covers load-bearing dispositions regardless of whether their final outcome is `incorporate`, `dismiss`, or `escalate`. Three required elements: (1) **Concrete element → current state**: what today actually does, with evidence (file:line where code exists; or cite the specific artifact + section for doc-level conflicts; or cite the originating prosecution `finding_id` + `pass` from the merged ledger for genuinely greenfield conflicts). (2) **Decision setup → the conflict**: why the proposed design conflicts with the current state. (3) **Conditional misconception → customer failure mode**: the concrete failure the owner would cause by taking the wrong path. All three elements must appear before any option list. Presence of all three elements is the forcing function — not paragraph count (consistent with D-falsifiability: the agent does not grade explanation length in-flight).
+
+**Escalation-tier substantiveness**: An escalation brief is substantive iff the conflict element names both sides of the tradeoff and the failure-mode element names the owner's specific wrong action. Evaluated by CE Gate evaluators, not graded in-flight, per the D-falsifiability principle in `### Rule: Thin-articulation criterion`.
+
+**Re-audit**: On a `classification-re-audit*` recommendation shift, re-evaluate tier selection alongside the classification/disposition revision.
 
 ### Rule: Override semantics
 
@@ -76,6 +84,8 @@ articulation_captures:
 ## Applying the gate to adversarial-review dispositions
 
 For each adversarial-review finding that the calling workflow must disposition, run the classification gate against the action the maintainer would take for that finding, not against the review pass as a whole. Use the Code-Critic Finding Categories contract for the input identity: `id` values are sequential `F1 | F2 | F3 | ...` labels within the review cycle, and `pass` is `1 | 2 | 3` for the prosecution pass that originated code, design, or plan findings. The disposition enum is `incorporate | dismiss | escalate`; the classification enum is `load-bearing | routine`. If a finding is routine, record the disposition without firing the platform's structured-question tool. If a finding is load-bearing, render the normal `audit_rationale`, decision brief, and structured question before recording the disposition.
+
+For adversarial-review findings, the tier is keyed on the load-bearing classification (known before the structured question fires per the above ordering). Load-bearing adversarial-review dispositions use the **escalation tier**; all other load-bearing decisions (upstream content-authoring, orchestration scope-classification, and any non-adversarial surface) use the **base tier**.
 
 Firing-position rule: for an atomic multi-stage adapter declaring `integrity-contract.atomic: true` and more than one `pipeline-stages` entry, the classification gate fires only on terminal-stage sustained findings after the terminal stage. For adapters whose terminal stage is judge, those are judge-sustained findings after judge; for adapters whose terminal stage is defense, those are defense-sustained findings after defense. The gate does not fire on prosecution output or defense dialogue inside the atomic window. CLAUDE.md Engagement-gate non-overridability D3 still applies: once the terminal-stage sustained input exists, the gate fires unconditionally; only the firing position changes for atomic multi-stage adapters. For prosecution-only adapters (`design-challenge`, `lite`), the gate fires on merged-ledger findings as today.
 

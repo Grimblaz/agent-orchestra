@@ -234,6 +234,77 @@ Describe 'upstream-onboarding sweep' {
     }
 }
 
+Describe 'escalation tier — issue #556 structural assertions' {
+
+    BeforeAll {
+        $script:RepoRoot     = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:SkillPath    = Join-Path $script:RepoRoot 'skills\solution-authoring\SKILL.md'
+        $script:Content      = (Get-Content -Path $script:SkillPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
+        $script:ClaudeMdPath = Join-Path $script:RepoRoot 'skills\solution-authoring\platforms\claude.md'
+        $script:ClaudeMdContent = (Get-Content -Path $script:ClaudeMdPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
+        $copilotMdPath = Join-Path $script:RepoRoot 'skills\solution-authoring\platforms\copilot.md'
+        $script:CopilotMdContent = (Get-Content -Path $copilotMdPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
+        $script:SDAgentPath  = Join-Path $script:RepoRoot 'agents\Solution-Designer.agent.md'
+        $script:SDContent    = (Get-Content -Path $script:SDAgentPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
+        $script:DEPath       = Join-Path $script:RepoRoot 'skills\design-exploration\SKILL.md'
+        $script:DEContent    = (Get-Content -Path $script:DEPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
+    }
+
+    # AC1 — escalation tier text
+    It 'AC1 — SKILL.md contains the text "escalation tier"' {
+        $script:Content | Should -Match 'escalation tier'
+    }
+
+    # AC2 — trigger language
+    It 'AC2 — SKILL.md contains trigger phrase "load-bearing adversarial-review"' {
+        $script:Content | Should -Match 'load-bearing adversarial-review'
+    }
+
+    # AC3 — positive routing for incorporate/dismiss
+    It 'AC3 — SKILL.md escalation tier covers load-bearing dispositions regardless of incorporate/dismiss/escalate outcome' {
+        $script:Content | Should -Match 'regardless of whether their final outcome is'
+        $script:Content | Should -Match 'incorporate'
+        $script:Content | Should -Match 'dismiss'
+    }
+
+    # MF3 — base tier presence
+    It 'MF3 — SKILL.md routing partition defines base tier (all other load-bearing decisions)' {
+        $script:Content | Should -Match 'base tier'
+        $script:Content | Should -Match 'all other load-bearing decisions'
+    }
+
+    # AC4 — evidence fallback chain
+    It 'AC4 — SKILL.md contains "file:line" (evidence requirement for escalation tier)' {
+        $script:Content | Should -Match 'file:line'
+    }
+
+    # AC5 — substantiveness criterion
+    It 'AC5 (escalation) — SKILL.md contains "substantive" (CE-Gate-evaluated substantiveness criterion)' {
+        $script:Content | Should -Match 'substantive'
+    }
+
+    # AC5 — re-audit tier re-evaluation
+    It 'AC5 — SKILL.md contains classification-re-audit paired with tier re-evaluation' {
+        $script:Content | Should -Match 'classification-re-audit.{0,500}tier|tier.{0,500}classification-re-audit'
+    }
+
+    # AC8 — Named-Decisions field invariant: Decision brief excerpt stays one sentence
+    It 'AC8 — Solution-Designer.agent.md Decision brief excerpt field carries {one sentence} literal' {
+        $script:SDContent | Should -Match 'Decision brief excerpt.*\{one sentence\}'
+    }
+
+    # AC9 — platform mirrors reference both tiers (RED until s5)
+    It 'AC9 — skills/solution-authoring/platforms/claude.md and copilot.md reference "escalation tier"' {
+        $script:ClaudeMdContent | Should -Match 'escalation tier'
+        $script:CopilotMdContent | Should -Match 'escalation tier'
+    }
+
+    # AC6 / s3 — design-exploration/SKILL.md no longer cites feedback_explain_before_options
+    It 'AC6 — skills/design-exploration/SKILL.md does not cite "feedback_explain_before_options"' {
+        $script:DEContent | Should -Not -Match 'feedback_explain_before_options'
+    }
+}
+
 Describe 'frame-architecture stacking note' {
 
     BeforeAll {
