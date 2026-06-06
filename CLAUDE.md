@@ -1,6 +1,9 @@
 # Agent Orchestra — Claude Code Guide
 
-Agent Orchestra is a multi-agent workflow system originally built for GitHub Copilot and now available to Claude Code through the same plugin.
+> ⚠️ **GitHub Copilot / VS Code support is frozen (no fixes) and retiring after 2026-08-31.**
+> Claude Code is the supported platform. See [Documents/Design/copilot-deprecation.md](Documents/Design/copilot-deprecation.md).
+
+Agent Orchestra is a multi-agent workflow system built for Claude Code.
 
 ## Quick start
 
@@ -41,7 +44,7 @@ See also: [CUSTOMIZATION.md > Script portability for plugin users](CUSTOMIZATION
 
 ## Upstream pipeline
 
-Three agents cover the journey from an issue on the board to an implementation-ready plan. They call each other through durable GitHub-issue markers so a session can span multiple conversations or switch between Copilot and Claude Code.
+Three agents cover the journey from an issue on the board to an implementation-ready plan. They call each other through durable GitHub-issue markers so a session can span multiple conversations. *(Cross-tool handoff between Copilot and Claude Code was supported; Copilot is now frozen — see Documents/Design/copilot-deprecation.md.)*
 
 1. **Experience-Owner** — frames the work in customer language. Writes the problem statement, user journeys, scenarios, and surface/readiness assessment into the issue body. Activated with `/experience` or via the subagent name.
 2. **Solution-Designer** — runs technical design exploration and the 3-pass non-blocking design challenge. Updates the issue body with decisions, acceptance criteria, and rejected alternatives. Activated with `/design` or via the subagent name.
@@ -102,7 +105,7 @@ Handoffs between phases use durable GitHub issue comments rather than session-lo
 - `<!-- review-judge-produced-{PR} -->` — sentinel written by the judge (both Copilot and Claude) immediately after the ruling finalizes, before pipeline-metrics persistence; the warn-only hook detects this to synthesize a `not-persisted` review credit when the PR body carries no review credit yet (SMC-16)
 - `<!-- credit-input-{port}-{ID} -->` — deferred-emission marker written by pipeline-entry agents (Experience-Owner, Solution-Designer, Issue-Planner) immediately after their completion marker; payload is a `yaml` fenced block carrying `{ port, adapter, evidence }`; harvested by Code-Conductor at PR-creation time to emit the corresponding credit row (SMC-17)
 
-Because the markers live on the issue, you can start a feature in Copilot, pick it up in Claude Code, and vice versa without losing context.
+Because the markers live on the issue, you can resume work across sessions without losing context. *(Cross-tool Copilot↔Claude handoff was supported; Copilot is now frozen.)*
 
 The row-level survival and fallback semantics are governed by [skills/session-memory-contract/SKILL.md](skills/session-memory-contract/SKILL.md). [Documents/Design/session-memory-contract.md](Documents/Design/session-memory-contract.md) explains why Claude keeps durable GitHub markers instead of adding a Claude-only session-memory store.
 

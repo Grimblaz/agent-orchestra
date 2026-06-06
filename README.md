@@ -1,9 +1,12 @@
 # Agent Orchestra
 
+> ⚠️ **GitHub Copilot / VS Code support is frozen and retiring after 2026-08-31.**
+> Claude Code is the actively supported path. See [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md) for details and the reach-out channel if you depend on Copilot support.
+
 [![Version](https://img.shields.io/badge/version-v2.23.0-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
-A multi-agent workflow system that orchestrates AI-assisted software development across specialized agents in GitHub Copilot and Claude Code.
+A multi-agent workflow system that orchestrates AI-assisted software development through specialized Claude Code agents. *(GitHub Copilot/VS Code: frozen and retiring after 2026-08-31 — see [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md))*
 
 > **Renamed from `copilot-orchestra` in v2.0.0.** See the [migration section](#migrating-from-copilot-orchestra) below for the one-time steps to switch over.
 
