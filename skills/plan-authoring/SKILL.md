@@ -152,7 +152,7 @@ Specialized rule: when a Verification Evidence row reaches the same conclusion a
 
 Before approval, prepare the draft plan for adversarial review:
 
-1. Load `skills/adversarial-review/platforms/claude.md` and follow the `standard` adapter checklist from `skills/adversarial-review/adapters/standard.md` for atomic prosecution, defense, and judge dispatch.
+1. Load `skills/adversarial-review/platforms/claude.md` and follow the `standard` adapter checklist from `skills/adversarial-review/adapters/standard.md` for atomic prosecution, defense, and judge dispatch. Load-bearing judge-sustained findings that the maintainer must adjudicate use the **escalation tier** per `skills/solution-authoring/SKILL.md §Rule: Decision brief structure` (#556).
 1. Do not consume prosecution dispositions, edit the plan, or ask for finding-level maintainer action until the judge rules.
 1. After the judge rules, perform Post-Judge Reconciliation, update the `Plan Stress-Test` summary, and present approval using `## Plan Approval Prompt Format`.
 
