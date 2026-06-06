@@ -31,7 +31,7 @@ Describe 'Initialize-CopilotCostCollection' {
         }
     }
 
-    It 'additively installs user settings, workspace settings, OTel directory, gitignore entry, and sentinel' {
+    It 'additively installs user settings, workspace settings, OTel directory, gitignore entry, and sentinel' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
         $paths = script:New-IsolatedPaths
         $workspaceSettingsDir = Join-Path -Path $paths.Workspace -ChildPath '.vscode'
         $workspaceSettingsPath = Join-Path -Path $workspaceSettingsDir -ChildPath 'settings.json'
@@ -82,7 +82,7 @@ Describe 'Initialize-CopilotCostCollection' {
         $sentinel | Should -Match 'not durable plan or session memory'
     }
 
-    It 'is idempotent when the workspace is already compliant' {
+    It 'is idempotent when the workspace is already compliant' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
         $paths = script:New-IsolatedPaths
 
         $first = & $script:ScriptPath `
@@ -118,7 +118,7 @@ Describe 'Initialize-CopilotCostCollection' {
         Get-Content -Path $sentinelPath -Raw | Should -Be $before.Sentinel
     }
 
-    It 'only mutates install artifacts that need repair' {
+    It 'only mutates install artifacts that need repair' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
         $paths = script:New-IsolatedPaths
 
         & $script:ScriptPath `
@@ -158,7 +158,7 @@ Describe 'Initialize-CopilotCostCollection' {
         @((Get-Content -Path $gitignorePath) | Where-Object { $_ -eq '.vscode/settings.json' }).Count | Should -Be 1
     }
 
-    It 'additively gitignores workspace settings when writing the literal OTel outfile path' {
+    It 'additively gitignores workspace settings when writing the literal OTel outfile path' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
         $paths = script:New-IsolatedPaths
         $gitignorePath = Join-Path -Path $paths.Workspace -ChildPath '.gitignore'
 
@@ -174,7 +174,7 @@ Describe 'Initialize-CopilotCostCollection' {
         $gitignoreLines | Should -Contain '.vscode/settings.json'
     }
 
-    It 'warns when workspace settings are already tracked because gitignore cannot protect the literal path' {
+    It 'warns when workspace settings are already tracked because gitignore cannot protect the literal path' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
         $paths = script:New-IsolatedPaths
         $workspaceSettingsDir = Join-Path -Path $paths.Workspace -ChildPath '.vscode'
         $workspaceSettingsPath = Join-Path -Path $workspaceSettingsDir -ChildPath 'settings.json'
@@ -203,7 +203,7 @@ Describe 'Initialize-CopilotCostCollection' {
         @(Get-Content -Path $gitignorePath) | Should -Contain '.vscode/settings.json'
     }
 
-    It 'fails clearly in non-interactive mode when install changes need confirmation and -Yes is absent' {
+    It 'fails clearly in non-interactive mode when install changes need confirmation and -Yes is absent' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
         $paths = script:New-IsolatedPaths
 
         { & $script:ScriptPath -UserSettingsPath $paths.UserSettings -WorkspacePath $paths.Workspace -UserHome $paths.UserHome -NonInteractive -ErrorAction Stop } |
@@ -214,7 +214,7 @@ Describe 'Initialize-CopilotCostCollection' {
         Test-Path (Join-Path -Path $paths.Workspace -ChildPath $script:SentinelName) | Should -BeFalse
     }
 
-    It 'honors WhatIf without requiring -Yes or mutating local files' {
+    It 'honors WhatIf without requiring -Yes or mutating local files' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
         $paths = script:New-IsolatedPaths
 
         $result = & $script:ScriptPath `
@@ -232,7 +232,7 @@ Describe 'Initialize-CopilotCostCollection' {
         Test-Path (Join-Path -Path $paths.Workspace -ChildPath $script:SentinelName) | Should -BeFalse
     }
 
-    It 'reports invalid JSON settings instead of rewriting them with string manipulation' {
+    It 'reports invalid JSON settings instead of rewriting them with string manipulation' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
         $paths = script:New-IsolatedPaths
         $null = New-Item -ItemType Directory -Path (Split-Path -Parent $paths.UserSettings) -Force
         '{ invalid json' | Set-Content -Path $paths.UserSettings -Encoding utf8NoBOM
