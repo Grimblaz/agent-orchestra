@@ -106,8 +106,10 @@ function Read-GateTokens {
 }
 
 function Read-FindingDispositionIds {
-    # Returns finding_id values from finding_dispositions: blocks on design-phase-complete markers
-    param([int]$Issue, [string]$Repo, [string]$Gh, [string[]]$InMem)
+    # Returns finding_id values from finding_dispositions on design-phase-complete markers
+    # AND stable_finding_key values from review-dispositions-{PR} markers when PullRequestNumber > 0.
+    # SMC-19: finding_dispositions is design-only (issue-keyed). SMC-23: review-dispositions is PR-keyed.
+    param([int]$Issue, [string]$Repo, [string]$Gh, [string[]]$InMem, [int]$PullRequestNumber = 0)
 
     $recordedIds = @()
 
@@ -133,6 +135,7 @@ function Read-FindingDispositionIds {
             return $recordedIds
         }
 
+        # ── finding_dispositions from design-phase-complete (SMC-19, issue-keyed) ──
         if ($InMem -and $InMem.Count -gt 0) {
             $allBodies = $InMem
         }
@@ -164,6 +167,49 @@ function Read-FindingDispositionIds {
                 }
             } catch {
                 Write-Warning "gate-reconciliation: failed to parse YAML in design-phase-complete comment — $($_.Exception.Message); skipping this marker"
+            }
+        }
+
+        # ── stable_finding_key from review-dispositions-{PR} (SMC-23, PR-keyed) ──
+        if ($PullRequestNumber -gt 0 -and $repoTarget) {
+            $prBodies = @()
+            if ($InMem -and $InMem.Count -gt 0) {
+                # InMem already contains all bodies; filter for review-dispositions marker
+                $prBodies = $InMem
+            } else {
+                # PR review comments (inline code comments)
+                $prReviewComments = & $Gh api "repos/$repoTarget/pulls/$PullRequestNumber/comments" --paginate --slurp 2>$null | ConvertFrom-Json
+                if ($LASTEXITCODE -eq 0 -and $prReviewComments) {
+                    if ($prReviewComments -is [array] -and $prReviewComments[0] -is [array]) {
+                        $prReviewComments = $prReviewComments | ForEach-Object { $_ }
+                    }
+                    $prBodies += $prReviewComments | ForEach-Object { $_.body }
+                }
+                # PR issue-style comments (top-level PR comments, same API as issues)
+                $prIssueComments = & $Gh api "repos/$repoTarget/issues/$PullRequestNumber/comments" --paginate --slurp 2>$null | ConvertFrom-Json
+                if ($LASTEXITCODE -eq 0 -and $prIssueComments) {
+                    if ($prIssueComments -is [array] -and $prIssueComments[0] -is [array]) {
+                        $prIssueComments = $prIssueComments | ForEach-Object { $_ }
+                    }
+                    $prBodies += $prIssueComments | ForEach-Object { $_.body }
+                }
+            }
+
+            $rdPattern = "<!--\s*review-dispositions-$PullRequestNumber\s*-->"
+            foreach ($body in $prBodies) {
+                if ($body -notmatch $rdPattern) { continue }
+                $yamlMatch = [regex]::Match($body, '```yaml\s*([\s\S]*?)```')
+                if (-not $yamlMatch.Success) { continue }
+                try {
+                    $parsed = $yamlMatch.Groups[1].Value | ConvertFrom-Yaml -ErrorAction Stop
+                    if ($parsed['entries']) {
+                        foreach ($entry in $parsed['entries']) {
+                            if ($entry['stable_finding_key']) { $recordedIds += $entry['stable_finding_key'] }
+                        }
+                    }
+                } catch {
+                    Write-Warning "gate-reconciliation: failed to parse YAML in review-dispositions-$PullRequestNumber comment — $($_.Exception.Message); skipping this marker"
+                }
             }
         }
     } catch {
