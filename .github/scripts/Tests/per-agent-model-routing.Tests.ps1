@@ -14,7 +14,7 @@
     - Routing-values oracle:  declared-routing shells match hard-coded expected values (D2+D5+quality).
     - Routing-table parity:   CLAUDE.md routing table matches shell frontmatter for oracle shells and D7 inherit rows.
     - Command enforcement D3: upstream commands (/experience /design /plan /polish) must NOT declare model/effort.
-    - Command enforcement D1: commands/orchestrate.md MUST declare model: sonnet, effort: medium.
+    - Command enforcement D1: commands/orchestrate.md MUST declare model: sonnet, effort: high.
     - Scope guard:            commands/orchestrate.md `# /orchestrate` H1 is permanently followed by <!-- scope: claude-only -->.
 
     Parser strategy: ALL frontmatter parsing uses raw-text regex against the frontmatter slice
@@ -40,7 +40,7 @@ Describe 'Per-agent model + effort routing contract' {
             'agents/code-review-response.md' = @{ model = 'opus'; effort = 'xhigh' }
             'agents/refactor-specialist.md'  = @{ model = 'sonnet'; effort = 'high' }
             'agents/process-review.md'       = @{ model = 'sonnet'; effort = 'high' }
-            'agents/code-conductor.md'       = @{ model = 'sonnet'; effort = 'medium' }
+            'agents/code-conductor.md'       = @{ model = 'sonnet'; effort = 'high' }
         }
 
         # D7: explicit inherit/inherit routing for the minimal frame walker.
@@ -51,9 +51,9 @@ Describe 'Per-agent model + effort routing contract' {
 
         # D1: commands/orchestrate.md required routing
         $script:RequiredCommandRouting = @{
-            'commands/orchestrate.md'     = @{ model = 'sonnet'; effort = 'medium' }
-            'commands/code-conductor.md'  = @{ model = 'sonnet'; effort = 'medium' }
-            'commands/review-github.md'   = @{ model = 'sonnet'; effort = 'medium' }
+            'commands/orchestrate.md'     = @{ model = 'sonnet'; effort = 'high' }
+            'commands/code-conductor.md'  = @{ model = 'sonnet'; effort = 'high' }
+            'commands/review-github.md'   = @{ model = 'sonnet'; effort = 'high' }
         }
 
         # D3: upstream commands that MUST NOT declare model/effort
@@ -342,7 +342,7 @@ Describe 'Per-agent model + effort routing contract' {
         }
     }
 
-    It 'command D1: commands/orchestrate.md must declare model: sonnet and effort: medium' {
+    It 'command D1: commands/orchestrate.md must declare model: sonnet and effort: high' {
         foreach ($relPath in $script:RequiredCommandRouting.Keys) {
             $commandPath = Join-Path $script:RepoRoot $relPath
             Test-Path $commandPath | Should -BeTrue -Because "$relPath must exist"

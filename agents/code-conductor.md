@@ -4,7 +4,7 @@ description: Hub-mode orchestration shell for Claude Code. Use to run an approve
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
 user-invocable: true
 model: sonnet
-effort: medium
+effort: high
 ---
 
 # Code-Conductor (Claude Code shell)

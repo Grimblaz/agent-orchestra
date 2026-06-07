@@ -10,6 +10,7 @@ All notable changes to agent-orchestra will be documented in this file.
 - Added internal deprecation banners to README.md, CLAUDE.md, and `.github/copilot-instructions.md`.
 - Added `Documents/Design/copilot-deprecation.md` with the full freeze policy, reach-out channel (GitHub Discussions), and reversibility notes.
 - De-obligated cross-platform Pester test assertions so new Claude-only work no longer requires Copilot counterparts.
+- Bumped the orchestration tier from `sonnet + medium` to `sonnet + high` for `/orchestrate`, `/code-conductor`, `/review-github`, and `agents/code-conductor.md` — orchestration and review-reconciliation benefit from extended reasoning on the cost-efficient Sonnet tier. The adversarial review pass is unchanged (Code-Critic/Code-Review-Response remain on opus).
 
 ## [2.21.1] — 2026-05-31
 
