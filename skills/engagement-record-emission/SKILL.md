@@ -13,19 +13,20 @@ Use this skill when an upstream agent (Experience-Owner, Solution-Designer, or I
 
 ## When Not to Use
 
-Do not use this skill for runtime code execution, test writing, or PR creation. It is strictly a cognitive-evidence and state-preservation contract. Do not emit these markers in downstream or PR-level review phases.
+Do not use this skill for runtime code execution, test writing, or PR creation. It is strictly a cognitive-evidence and state-preservation contract. Do not emit these markers in downstream phases. **Exception (v2 carve-out, #655 S3)**: the `review` phase is explicitly permitted to emit `<!-- engagement-record-review-{PR} -->` as a PR comment after the review judge verdict; this marker is PR-keyed (not issue-keyed) and governed by SMC-23.
 
 ## Marker Shape
 
 Engagement records are emitted as GitHub issue comments containing a YAML code block wrapped inside a unique HTML comment marker representing the phase:
 
-`<!-- engagement-record-{phase}-{ISSUE_ID} -->`
+`<!-- engagement-record-{phase}-{ISSUE_ID_OR_PR} -->`
 
-Where `{phase}` is one of `experience`, `design`, `plan` (at `schema_version: 2`), or `orchestration` (introduced in v1.3 / #577 at `schema_version: 3`), and `{ISSUE_ID}` is the numerical GitHub issue ID.
+Where `{phase}` is one of `experience`, `design`, `plan` (at `schema_version: 2`), `orchestration` (at `schema_version: 3`, introduced in v1.3 / #577), or `review` (at `schema_version: 4`, introduced in #655 S3, PR-keyed); and `{ISSUE_ID_OR_PR}` is the GitHub issue ID (for experience/design/plan/orchestration phases) or PR number (for the `review` phase).
 
 For example:
 `<!-- engagement-record-design-575 -->`
 `<!-- engagement-record-orchestration-577 -->`
+`<!-- engagement-record-review-42 -->` (PR #42)
 
 ## Canonical Schema
 
@@ -33,7 +34,7 @@ The canonical YAML schema for the engagement-record payload is structured as fol
 
 ```yaml
 schema_version: 3
-phase: orchestration                  # Valid values: experience | design | plan | orchestration
+phase: orchestration                  # Valid values: experience | design | plan | orchestration | review
 capture_session: "normal-orchestration-v3"  # Session tracking string
 load_bearing_decisions:
   - decision_id: conductor-scope-classification  # Unique decision identifier
@@ -59,9 +60,9 @@ Tooling that reads engagement records MUST throw an error on encountering an unk
 ## Resume-Read Protocol
 
 Downstream/upstream agents load engagement records at phase startup by calling the helper:
-`Read-EngagementRecords -IssueNumber {ID} [-Phase experience|design|plan|orchestration] [-InMemoryMarkers <string[]>] [-AcceptLegacy]`
+`Read-EngagementRecords -IssueNumber {ID} [-Phase experience|design|plan|orchestration|review] [-PullRequestNumber {PR}] [-InMemoryMarkers <string[]>] [-AcceptLegacy]`
 
-If a record is returned for a given `decision_id`, the agent activates the `same-decision-resume` skip rule in `skills/solution-authoring/SKILL.md` to reuse the captured decision and suppress re-firing the structured question.
+If a record is returned for a given `decision_id`, the agent activates the `same-decision-resume` skip rule in `skills/solution-authoring/SKILL.md` to reuse the captured decision and suppress re-firing the structured question. For `review`-phase records, pass `-PullRequestNumber {PR}` instead of (or alongside) `-IssueNumber`. See SMC-23.
 
 ## articulation_status Transitions
 
@@ -96,7 +97,7 @@ The `capture_session` is a free-form string field that tracks the execution cont
 `{trigger}-{phase}-v{major}[.{minor}]`
 Where:
 - `{trigger}` ∈ `normal` | `manual` | `replay`
-- `{phase}` ∈ `experience` | `design` | `plan` | `orchestration`
+- `{phase}` ∈ `experience` | `design` | `plan` | `orchestration` | `review`
 
 Readers MUST NOT reject malformed values, but validation tooling may emit warnings on non-conforming strings.
 
