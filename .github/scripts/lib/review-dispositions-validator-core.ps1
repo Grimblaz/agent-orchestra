@@ -107,7 +107,7 @@ foreach ($body in $rawBodies) {
     }
 
     if ([string]::IsNullOrWhiteSpace($yamlContent)) {
-        Add-RdvFinding "review-dispositions-$PullRequestNumber: marker found but no YAML payload"
+        Add-RdvFinding "review-dispositions-${PullRequestNumber}: marker found but no YAML payload"
         continue
     }
 
@@ -115,48 +115,48 @@ foreach ($body in $rawBodies) {
         Import-Module powershell-yaml -ErrorAction Stop
         $payload = ConvertFrom-Yaml -Yaml $yamlContent
     } catch {
-        Add-RdvFinding "review-dispositions-$PullRequestNumber: YAML parse error: $_"
+        Add-RdvFinding "review-dispositions-${PullRequestNumber}: YAML parse error: $_"
         continue
     }
 
     # schema_version
     if ($null -eq $payload.schema_version -or $payload.schema_version -ne 1) {
-        Add-RdvFinding "review-dispositions-$PullRequestNumber: schema_version must be 1, got: $($payload.schema_version)"
+        Add-RdvFinding "review-dispositions-${PullRequestNumber}: schema_version must be 1, got: $($payload.schema_version)"
     }
 
     # passes_run
     if ($null -eq $payload.passes_run -or $payload.passes_run.Count -eq 0) {
-        Add-RdvFinding "review-dispositions-$PullRequestNumber: passes_run must be a non-empty subset of [1,2,3]"
+        Add-RdvFinding "review-dispositions-${PullRequestNumber}: passes_run must be a non-empty subset of [1,2,3]"
     } else {
         foreach ($p in $payload.passes_run) {
             if ($p -notin @(1, 2, 3)) {
-                Add-RdvFinding "review-dispositions-$PullRequestNumber: passes_run contains invalid value: $p (must be 1, 2, or 3)"
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: passes_run contains invalid value: $p (must be 1, 2, or 3)"
             }
         }
     }
 
     # entries
     if ($null -eq $payload.entries) {
-        Add-RdvFinding "review-dispositions-$PullRequestNumber: entries[] is required"
+        Add-RdvFinding "review-dispositions-${PullRequestNumber}: entries[] is required"
     } else {
         $idx = 0
         foreach ($entry in $payload.entries) {
             $entryCount++
             $entryLabel = "entry[$idx]"
             if ([string]::IsNullOrWhiteSpace($entry.stable_finding_key)) {
-                Add-RdvFinding "review-dispositions-$PullRequestNumber: $entryLabel missing required stable_finding_key"
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel missing required stable_finding_key"
             }
             if ($entry.pass -notin @(1, 2, 3)) {
-                Add-RdvFinding "review-dispositions-$PullRequestNumber: $entryLabel pass must be 1, 2, or 3"
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel pass must be 1, 2, or 3"
             }
             if ($entry.disposition -notin @('incorporate', 'dismiss', 'escalate')) {
-                Add-RdvFinding "review-dispositions-$PullRequestNumber: $entryLabel disposition must be incorporate|dismiss|escalate"
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel disposition must be incorporate|dismiss|escalate"
             }
             if ($entry.classification -notin @('load-bearing', 'routine')) {
-                Add-RdvFinding "review-dispositions-$PullRequestNumber: $entryLabel classification must be load-bearing|routine"
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel classification must be load-bearing|routine"
             }
             if ([string]::IsNullOrWhiteSpace($entry.disposition_rationale)) {
-                Add-RdvFinding "review-dispositions-$PullRequestNumber: $entryLabel missing required disposition_rationale"
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel missing required disposition_rationale"
             }
             $idx++
         }
