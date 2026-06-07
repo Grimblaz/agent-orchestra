@@ -5,20 +5,30 @@
     Core helper library for reading and parsing engagement records (SMC-20).
 
 .DESCRIPTION
-    Scans the comments of a GitHub issue (or parses in-memory marker strings)
-    to find <!-- engagement-record-{phase}-{ID} --> markers, decodes their
-    YAML payloads using the powershell-yaml module, and returns the parsed
-    decisions. Supports latest-comment-wins resolution by createdAt timestamp.
+    Scans the comments of a GitHub issue or pull request (or parses in-memory
+    marker strings) to find <!-- engagement-record-{phase}-{ID} --> markers,
+    decodes their YAML payloads using the powershell-yaml module, and returns the
+    parsed decisions. Supports latest-comment-wins resolution by createdAt timestamp.
+
+    Issue-keyed phases (experience, design, plan, orchestration) read issue
+    comments via -IssueNumber. The PR-keyed review phase reads PR top-level
+    comments via -PullRequestNumber; the PR path takes precedence whenever the
+    phase is 'review' or no issue number is supplied (SMC-20, SMC-23).
 
     InMemoryMarkers timestamp-tiebreak rule:
     When -InMemoryMarkers is used, there are no gh createdAt timestamps, so
     latest is resolved by input order (the last element in the array wins).
 
 .PARAMETER IssueNumber
-    The GitHub issue ID. Mandatory.
+    Optional issue ID for issue-keyed phases. Must be > 0 when reading non-review
+    markers. At least one of -IssueNumber or -PullRequestNumber must be > 0.
+
+.PARAMETER PullRequestNumber
+    Optional PR ID for PR-keyed review markers. Must be > 0 when reading review
+    markers. At least one of -IssueNumber or -PullRequestNumber must be > 0.
 
 .PARAMETER Phase
-    Optional. If specified, must be 'experience', 'design', 'plan', or 'orchestration'. Filters records to this phase.
+    Optional. If specified, must be 'experience', 'design', 'plan', 'orchestration', or 'review'. Filters records to this phase.
 
 .PARAMETER Repo
     Optional. The GitHub repository in owner/name format. Defaults to current repo.
