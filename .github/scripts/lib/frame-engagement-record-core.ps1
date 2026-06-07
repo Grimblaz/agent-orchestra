@@ -46,8 +46,7 @@ $script:DecisionIdSlugDescription = "lowercase only (case-sensitive); 2-64 chars
 function Read-EngagementRecords {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
-        [int]$IssueNumber,
+        [int]$IssueNumber = 0,
 
         [Parameter(Mandatory = $false)]
         [int]$PullRequestNumber = 0,
@@ -68,6 +67,10 @@ function Read-EngagementRecords {
         [Parameter(Mandatory = $false)]
         [switch]$AcceptLegacy
     )
+
+    if ($IssueNumber -le 0 -and $PullRequestNumber -le 0) {
+        throw "Read-EngagementRecords: at least one of -IssueNumber or -PullRequestNumber must be > 0"
+    }
 
     # MF1: Import powershell-yaml inside the function to avoid polluting file scope
     try {

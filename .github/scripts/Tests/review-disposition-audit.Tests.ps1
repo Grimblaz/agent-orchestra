@@ -34,37 +34,6 @@ BeforeAll {
         return & $script:ValidatorScript -PullRequestNumber $PR -InMemoryMarkers $Bodies
     }
 
-    # ── Test helper: scan InMem bodies for review-dispositions stable_finding_key values ──
-    # Mirrors the PR-routing branch of Read-FindingDispositionIds in gate-reconciliation-core.ps1
-    # without dot-sourcing that script (which has mandatory script-level params that prevent it).
-    # SMC-23: review-dispositions-{PR} markers are PR-keyed; stable_finding_key is the resume identity.
-    function script:Get-ReviewDispositionStableKeys {
-        param(
-            [string[]] $InMem            = @(),
-            [int]      $PullRequestNumber = 0
-        )
-
-        $recordedIds = @()
-        if ($PullRequestNumber -le 0) { return $recordedIds }
-
-        $rdPattern = "<!--\s*review-dispositions-$PullRequestNumber\s*-->"
-        foreach ($body in $InMem) {
-            if ($body -notmatch $rdPattern) { continue }
-            $yamlMatch = [regex]::Match($body, '```yaml\s*([\s\S]*?)```')
-            if (-not $yamlMatch.Success) { continue }
-            try {
-                $parsed = $yamlMatch.Groups[1].Value | ConvertFrom-Yaml -ErrorAction Stop
-                if ($parsed['entries']) {
-                    foreach ($entry in $parsed['entries']) {
-                        if ($entry['stable_finding_key']) { $recordedIds += $entry['stable_finding_key'] }
-                    }
-                }
-            } catch {
-                Write-Warning "Get-ReviewDispositionStableKeys: YAML parse error — $($_.Exception.Message)"
-            }
-        }
-        return $recordedIds
-    }
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -343,42 +312,45 @@ Describe 'Group 4 — SMC-19/SMC-23 separation invariant (AC8)' {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Group 5 — Read-FindingDispositionIds PR extension (AC review-dispositions scan)
+# Group 5 — Read-FindingDispositionIds PR extension (production function)
 # ─────────────────────────────────────────────────────────────────────────────
-Describe 'Group 5 — Read-FindingDispositionIds PR extension' {
+Describe 'Group 5 — Read-FindingDispositionIds PR extension (production function)' {
 
     BeforeAll {
-        $script:ReviewDispositionsBody42 = @'
+        # Dot-source gate-reconciliation-core.ps1 to import its function definitions
+        # (including Read-FindingDispositionIds) into the test scope.
+        # IssueNumber defaults to 0 after fix 1a; the main body runs but is a no-op:
+        # no event-log files are present, and InMemoryMarkers is empty.
+        . $script:GateReconciliation -IssueNumber 0 -Repo 'owner/repo' -GhCliPath 'gh' -InMemoryMarkers @()
+
+        $script:RdBody42 = @'
 <!-- review-dispositions-42 -->
 
 ```yaml
 schema_version: 1
-passes_run: [1]
+passes_run: [1, 2]
 entries:
   - stable_finding_key: "src/auth.ts:88:token-expiry-b7c1a2f3"
-    finding_id: F1
     pass: 1
     disposition: incorporate
     classification: load-bearing
-    disposition_rationale: "Engineer confirmed: expiry check missing and fix is bounded."
+    disposition_rationale: "Load-bearing fix incorporated."
 ```
 '@
     }
 
-    It 'returns stable_finding_key from review-dispositions InMem when PullRequestNumber matches' {
-        $ids = script:Get-ReviewDispositionStableKeys `
-            -InMem @($script:ReviewDispositionsBody42) `
-            -PullRequestNumber 42
+    It '17: returns stable_finding_key from review-dispositions-42 (production function)' {
+        $result = Read-FindingDispositionIds -Issue 1 -Repo 'owner/repo' -Gh 'gh' `
+            -InMem @($script:RdBody42) -PullRequestNumber 42
 
-        $ids | Should -Contain 'src/auth.ts:88:token-expiry-b7c1a2f3'
+        $result | Should -Contain 'src/auth.ts:88:token-expiry-b7c1a2f3'
     }
 
-    It 'skips review-dispositions stable_finding_key when PullRequestNumber is 0 (not provided)' {
-        $ids = script:Get-ReviewDispositionStableKeys `
-            -InMem @($script:ReviewDispositionsBody42) `
-            -PullRequestNumber 0
-
-        $ids | Should -Not -Contain 'src/auth.ts:88:token-expiry-b7c1a2f3'
+    It '18: skips review-dispositions when PullRequestNumber is 0 (production function)' {
+        $result = Read-FindingDispositionIds -Issue 1 -Repo 'owner/repo' -Gh 'gh' `
+            -InMem @($script:RdBody42)
+        # PullRequestNumber defaults to 0 — review-dispositions branch is skipped
+        $result | Should -Not -Contain 'src/auth.ts:88:token-expiry-b7c1a2f3'
     }
 }
 

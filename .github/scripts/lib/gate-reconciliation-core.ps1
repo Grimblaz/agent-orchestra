@@ -45,8 +45,9 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
-    [int]$IssueNumber,
+    [int]$IssueNumber = 0,
+
+    [int]$PullRequestNumber = 0,
 
     [ValidateSet('experience','design','plan','orchestration','review')]
     [string]$Phase,
@@ -235,6 +236,7 @@ if ($IssueNumber -and $IssueNumber -gt 0) {
 
 # 2. Read recorded engagement-record decisions (decision_id coverage)
 $erArgs = @{ IssueNumber = $IssueNumber; GhCliPath = $GhCliPath }
+if ($PullRequestNumber -gt 0) { $erArgs.PullRequestNumber = $PullRequestNumber }
 if ($Phase)           { $erArgs.Phase = $Phase }
 if ($Repo)            { $erArgs.Repo = $Repo }
 if ($InMemoryMarkers) { $erArgs.InMemoryMarkers = $InMemoryMarkers }
@@ -248,7 +250,7 @@ $recordedDecisionIds = @()
 $recordedDecisionIds += $engagementRecords | ForEach-Object { $_.decision_id } | Where-Object { $_ }
 
 # 3. Read finding_dispositions finding_id coverage (disposition surface, #615; judge-merge, #605)
-$recordedFindingIds = Read-FindingDispositionIds -Issue $IssueNumber -Repo $Repo -Gh $GhCliPath -InMem $InMemoryMarkers
+$recordedFindingIds = Read-FindingDispositionIds -Issue $IssueNumber -Repo $Repo -Gh $GhCliPath -InMem $InMemoryMarkers -PullRequestNumber $PullRequestNumber
 $allRecordedIds = ($recordedDecisionIds + $recordedFindingIds) | Sort-Object -Unique
 
 # 4. Reconcile
