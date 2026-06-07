@@ -167,6 +167,30 @@ Two ordering guarantees are enforced by SMC-16 and the associated `Gotchas` entr
 
 The sentinel is intentionally minimal (a standalone HTML comment, no YAML payload) to distinguish it structurally from the `judge-rulings` block. Any consumer looking for review evidence reads the `judge-rulings` block; the sentinel is only the delivery guarantee signal read by the warn-hook synthesis path.
 
+## Issue #655 SMC-20 Review Phase Extension
+
+Issue #655 extended the `engagement-record` marker contract (SMC-20) to cover the `review` phase. The review phase differs from the upstream issue-keyed phases (`experience`, `design`, `plan`, `orchestration`) in two ways:
+
+1. **PR-keyed, not issue-keyed**: the `<!-- engagement-record-review-{PR} -->` marker is written as a PR comment rather than an issue comment, and the read helper uses `-PullRequestNumber` rather than an issue ID.
+2. **Post-judge timing**: the marker is written after the disposition gate completes (after the judge ruling finalizes), not at phase entry.
+
+Consumers read this record through the same `Read-EngagementRecords` helper from `frame-engagement-record-core.ps1` with the `-Phase review -PullRequestNumber {PR}` parameters. Same-decision-resume behavior applies on re-review of the same PR.
+
+## Issue #655 Review-Dispositions Governance (SMC-23)
+
+Issue #655 introduced the `<!-- review-dispositions-{PR} -->` marker as the durable per-finding disposition record for PR code-review verdicts. This produced contract row SMC-23 in the canonical skill.
+
+The design follows the same Option A approach as the wider contract: rather than adding a new state mechanism, the marker reuses the existing durable GitHub PR comment surface. The pair of markers written after the judge verdict resolves — `<!-- engagement-record-review-{PR} -->` and `<!-- review-dispositions-{PR} -->` — together cover the engagement audit and the per-finding disposition record for the review phase.
+
+Each `review-dispositions` entry carries:
+- `stable_finding_key` — deterministic identifier for the finding across re-review runs
+- `pass` — which prosecution pass produced the finding
+- `disposition` — one of `incorporate`, `dismiss`, or `escalate`
+- `classification` — finding severity tier
+- `disposition_rationale` — prose rationale for the disposition decision
+
+The `schema_version: 1` payload is intentionally minimal to keep the marker small and the read contract stable. Multiple markers per PR are allowed; latest `createdAt` wins on read. The consumer is `gate-reconciliation-core.ps1` via `Read-FindingDispositionIds -PullRequestNumber {PR}`.
+
 ## Related Sources
 
 - [skills/session-memory-contract/SKILL.md](../../skills/session-memory-contract/SKILL.md)
