@@ -50,7 +50,10 @@ function Read-EngagementRecords {
         [int]$IssueNumber,
 
         [Parameter(Mandatory = $false)]
-        [ValidateSet('experience', 'design', 'plan', 'orchestration')]
+        [int]$PullRequestNumber = 0,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('experience', 'design', 'plan', 'orchestration', 'review')]
         [string]$Phase,
 
         [Parameter(Mandatory = $false)]
@@ -138,9 +141,21 @@ function Read-EngagementRecords {
             $commentPhase = $Matches[1].ToLowerInvariant()
             $commentIssue = [int]$Matches[2]
 
-            # MF2: Always enforce issue-number match; -AcceptLegacy only relaxes schema validation
-            if ($commentIssue -ne $IssueNumber) {
-                continue
+            # PR-aware keying: 'review' phase markers are PR-keyed, not issue-keyed (AC5/AC6, #655 S2)
+            if ($commentPhase -eq 'review') {
+                # Collision guard: never let a PR-number marker match an issue-number read
+                if ($PullRequestNumber -gt 0 -and $commentIssue -eq $PullRequestNumber) {
+                    # Match: this is a review marker for the requested PR — proceed to YAML parse
+                } else {
+                    # Skip: either no PR number requested, or number mismatch
+                    continue
+                }
+            } else {
+                # Issue-keyed path (existing behaviour for non-review phases)
+                # MF2: Always enforce issue-number match; -AcceptLegacy only relaxes schema validation
+                if ($commentIssue -ne $IssueNumber) {
+                    continue
+                }
             }
 
             # Extract YAML content
@@ -195,17 +210,17 @@ function Read-EngagementRecords {
 
             # CF13b: wrap per-marker schema/enum validations so a single malformed marker does not abort the scan.
             # Exception: unknown schema_version MUST propagate (SKILL.md Schema Versioning Policy).
-            if (-not $isLegacy -and $null -ne $parsedYaml.schema_version -and $parsedYaml.schema_version -notin @(1, 2, 3)) {
+            if (-not $isLegacy -and $null -ne $parsedYaml.schema_version -and $parsedYaml.schema_version -notin @(1, 2, 3, 4)) {
                 throw [System.InvalidOperationException]::new("unknown schema_version: $($parsedYaml.schema_version)")
             }
 
             try {
                 # Enum validation for non-legacy markers
                 if (-not $isLegacy) {
-                    # Supported non-legacy phases: experience, design, plan, and orchestration (plan requires schema_version >= 2).
-                    if ($parsedYaml.phase -notin @('experience', 'design', 'plan', 'orchestration') -or
+                    # Supported non-legacy phases: experience, design, plan, orchestration, and review (plan requires schema_version >= 2; review requires schema_version >= 4).
+                    if ($parsedYaml.phase -notin @('experience', 'design', 'plan', 'orchestration', 'review') -or
                         ($parsedYaml.phase -eq 'plan' -and [int]$parsedYaml.schema_version -lt 2)) {
-                        throw [System.InvalidOperationException]::new("Invalid phase value: $($parsedYaml.phase) (phase 'plan' requires schema_version >= 2)")
+                        throw [System.InvalidOperationException]::new("Invalid phase value: $($parsedYaml.phase) (phase 'plan' requires schema_version >= 2; phase 'review' requires schema_version >= 4)")
                     }
                     # NOTE (review P1.F1/P2.F4): this throw fires inside the CF13b try/catch at lines 202-271 and is caught
                     # as Write-Warning, then 'continue'd past. The test `It 'v2-orchestration rejection'` in
@@ -216,6 +231,9 @@ function Read-EngagementRecords {
                     # test to use -WarningVariable and assert the warning record content directly. Tracked as routine debt.
                     if ($parsedYaml.phase -eq 'orchestration' -and [int]$parsedYaml.schema_version -lt 3) {
                         throw [System.InvalidOperationException]::new("orchestration phase requires schema_version >= 3")
+                    }
+                    if ($parsedYaml.phase -eq 'review' -and [int]$parsedYaml.schema_version -lt 4) {
+                        throw [System.InvalidOperationException]::new("review phase requires schema_version >= 4")
                     }
                 }
 
