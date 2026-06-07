@@ -109,8 +109,32 @@ function Read-EngagementRecords {
             }
         }
 
+        # Branch selection (F10): the phase is the authoritative signal for which
+        # marker class to read. review-phase markers are PR-keyed, so the PR path
+        # must take precedence whenever the phase is 'review' or no issue number is
+        # supplied — even when a caller forwards BOTH IDs (gate-reconciliation-core.ps1
+        # always forwards IssueNumber via $erArgs). Otherwise the issue-keyed path wins.
+        $preferPrComments = ($PullRequestNumber -gt 0) -and ($Phase -eq 'review' -or $IssueNumber -le 0)
         try {
-            if ($IssueNumber -gt 0) {
+            if ($preferPrComments) {
+                # PR-keyed path (review phase — engagement-record-review-{PR} markers live in PR top-level comments)
+                # Note: 'gh pr view --json comments' caps at 100 comments; markers are emitted
+                # at most twice per review phase per PR, so the cap is never reached in practice.
+                $rawJson = & $GhCliPath pr view $PullRequestNumber --repo $Repo --json comments 2>$null
+                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rawJson)) {
+                    $commentsObj = $rawJson | ConvertFrom-Json
+                    foreach ($comment in $commentsObj.comments) {
+                        $parsedMarkers += [PSCustomObject]@{
+                            Body      = $comment.body
+                            CreatedAt = [DateTime]::Parse($comment.createdAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                        }
+                    }
+                } elseif ($LASTEXITCODE -ne 0) {
+                    Write-Warning "gh pr view exited with code $LASTEXITCODE for PR $PullRequestNumber (repo: $Repo) — engagement-record-review markers may be missing."
+                } else {
+                    Write-Verbose "gh pr view returned no comments for PR $PullRequestNumber (repo: $Repo)."
+                }
+            } elseif ($IssueNumber -gt 0) {
                 # Issue-keyed path (all phases except review)
                 # Note: 'gh issue view --json comments' caps at 100 comments; --paginate is not supported
                 # by this subcommand (it is a 'gh api' flag only). For engagement-record markers this is
@@ -130,27 +154,9 @@ function Read-EngagementRecords {
                 } else {
                     Write-Verbose "gh issue view returned no comments for issue $IssueNumber (repo: $Repo)."
                 }
-            } elseif ($PullRequestNumber -gt 0) {
-                # PR-keyed path (review phase — engagement-record-review-{PR} markers live in PR top-level comments)
-                # Note: same 100-comment cap applies to 'gh pr view --json comments'; markers are emitted
-                # at most twice per review phase per PR, so the cap is never reached in practice.
-                $rawJson = & $GhCliPath pr view $PullRequestNumber --repo $Repo --json comments 2>$null
-                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rawJson)) {
-                    $commentsObj = $rawJson | ConvertFrom-Json
-                    foreach ($comment in $commentsObj.comments) {
-                        $parsedMarkers += [PSCustomObject]@{
-                            Body      = $comment.body
-                            CreatedAt = [DateTime]::Parse($comment.createdAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
-                        }
-                    }
-                } elseif ($LASTEXITCODE -ne 0) {
-                    Write-Warning "gh pr view exited with code $LASTEXITCODE for PR $PullRequestNumber (repo: $Repo) — engagement-record-review markers may be missing."
-                } else {
-                    Write-Verbose "gh pr view returned no comments for PR $PullRequestNumber (repo: $Repo)."
-                }
             }
         } catch {
-            Write-Error "Failed to fetch comments for $($IssueNumber -gt 0 ? "issue $IssueNumber" : "PR $PullRequestNumber") from gh CLI: $_"
+            Write-Error "Failed to fetch comments for $($preferPrComments ? "PR $PullRequestNumber" : "issue $IssueNumber") from gh CLI: $_"
         }
     }
 
