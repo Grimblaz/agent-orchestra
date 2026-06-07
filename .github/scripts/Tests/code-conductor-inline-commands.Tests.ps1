@@ -56,7 +56,7 @@ Describe 'Code-Conductor inline commands contract' {
             $effort = & $script:GetFrontmatterField -Frontmatter $fm -FieldName 'effort'
 
             $model | Should -Be 'sonnet' -Because '/code-conductor must declare model: sonnet'
-            $effort | Should -Be 'medium' -Because '/code-conductor must declare effort: medium'
+            $effort | Should -Be 'high' -Because '/code-conductor must declare effort: high'
         }
 
         It 'requires non-hub-mode routing and Code-Conductor body reference' {
@@ -91,7 +91,7 @@ Describe 'Code-Conductor inline commands contract' {
             $effort = & $script:GetFrontmatterField -Frontmatter $fm -FieldName 'effort'
 
             $model | Should -Be 'sonnet' -Because '/review-github must declare model: sonnet'
-            $effort | Should -Be 'medium' -Because '/review-github must declare effort: medium'
+            $effort | Should -Be 'high' -Because '/review-github must declare effort: high'
         }
 
         It 'requires GitHub review intake routing literals' {

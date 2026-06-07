@@ -1,6 +1,9 @@
 # Agent Orchestra — Claude Code Guide
 
-Agent Orchestra is a multi-agent workflow system originally built for GitHub Copilot and now available to Claude Code through the same plugin.
+> ⚠️ **GitHub Copilot / VS Code support is frozen (no fixes) and retiring after 2026-08-31.**
+> Claude Code is the supported platform. See [Documents/Design/copilot-deprecation.md](Documents/Design/copilot-deprecation.md).
+
+Agent Orchestra is a multi-agent workflow system built for Claude Code.
 
 ## Quick start
 
@@ -36,12 +39,12 @@ See also: [CUSTOMIZATION.md > Script portability for plugin users](CUSTOMIZATION
 6. Routing detection runs only on top-level user messages outside an active slash-command turn and outside subagent dispatches, and only after the session-startup run-once marker is recorded.
 7. `/raw`, `just answer normally`, `don't run the pipeline`, `raw mode`, and `skip routing` activate within-conversation raw mode only: no persistence file, no SMC row, and new conversations start routing-active. Any user-typed slash command clears raw mode. Acknowledge with: `Raw mode active for this conversation — natural-language requests will not be routed. Any explicit slash command you type clears raw mode.`
 8. For commands with explicit `model:` frontmatter (`/orchestrate`, `/code-conductor`, `/review-github`), emit `Please run /X to continue` and stop; do not inline-emulate.
-9. When proposed command frontmatter differs from the user-session model, append a one-line tier hint, e.g. `Will run on sonnet + medium per command frontmatter.`
+9. When proposed command frontmatter differs from the user-session model, append a one-line tier hint, e.g. `Will run on sonnet + high per command frontmatter.`
 10. No-match answers normally; first no-match per conversation appends `Tip: type /help for plugin slash commands, or /raw to suppress these hints.` Ambiguous-match uses a text-only disambiguation prompt, e.g. `Did you mean /orchestra:review (local code) or /review-github (GitHub PR)?`
 
 ## Upstream pipeline
 
-Three agents cover the journey from an issue on the board to an implementation-ready plan. They call each other through durable GitHub-issue markers so a session can span multiple conversations or switch between Copilot and Claude Code.
+Three agents cover the journey from an issue on the board to an implementation-ready plan. They call each other through durable GitHub-issue markers so a session can span multiple conversations. *(Cross-tool handoff between Copilot and Claude Code was supported; Copilot is now frozen — see Documents/Design/copilot-deprecation.md.)*
 
 1. **Experience-Owner** — frames the work in customer language. Writes the problem statement, user journeys, scenarios, and surface/readiness assessment into the issue body. Activated with `/experience` or via the subagent name.
 2. **Solution-Designer** — runs technical design exploration and the 3-pass non-blocking design challenge. Updates the issue body with decisions, acceptance criteria, and rejected alternatives. Activated with `/design` or via the subagent name.
@@ -104,7 +107,7 @@ Handoffs between phases use durable GitHub issue comments rather than session-lo
 - `<!-- review-judge-produced-{PR} -->` — sentinel written by the judge (both Copilot and Claude) immediately after the ruling finalizes, before pipeline-metrics persistence; the warn-only hook detects this to synthesize a `not-persisted` review credit when the PR body carries no review credit yet (SMC-16)
 - `<!-- credit-input-{port}-{ID} -->` — deferred-emission marker written by pipeline-entry agents (Experience-Owner, Solution-Designer, Issue-Planner) immediately after their completion marker; payload is a `yaml` fenced block carrying `{ port, adapter, evidence }`; harvested by Code-Conductor at PR-creation time to emit the corresponding credit row (SMC-17)
 
-Because the markers live on the issue, you can start a feature in Copilot, pick it up in Claude Code, and vice versa without losing context.
+Because the markers live on the issue, you can resume work across sessions without losing context. *(Cross-tool Copilot↔Claude handoff was supported; Copilot is now frozen.)*
 
 The row-level survival and fallback semantics are governed by [skills/session-memory-contract/SKILL.md](skills/session-memory-contract/SKILL.md). [Documents/Design/session-memory-contract.md](Documents/Design/session-memory-contract.md) explains why Claude keeps durable GitHub markers instead of adding a Claude-only session-memory store.
 
@@ -196,12 +199,12 @@ Each Claude subagent shell in `agents/*.md` may declare `model:` and `effort:` i
 
 | Agent shell | `model` | `effort` | Effective model + effort | Why |
 |---|---|---|---|---|
-| `commands/orchestrate.md` | `sonnet` | `medium` | sonnet + medium | D1: command front-end sets the primary dispatch tier |
-| `commands/code-conductor.md` | `sonnet` | `medium` | sonnet + medium | D1: command front-end sets the primary dispatch tier |
-| `commands/review-github.md` | `sonnet` | `medium` | sonnet + medium | D1: command front-end sets the primary dispatch tier |
+| `commands/orchestrate.md` | `sonnet` | `high` | sonnet + high | D1: command front-end sets the primary dispatch tier |
+| `commands/code-conductor.md` | `sonnet` | `high` | sonnet + high | D1: command front-end sets the primary dispatch tier |
+| `commands/review-github.md` | `sonnet` | `high` | sonnet + high | D1: command front-end sets the primary dispatch tier |
 | `commands/spine-run.md` | `inherit` | `inherit` | dispatcher | D7: minimal frame walker inherits dispatcher tier |
 | `commands/orchestra-spine.md` | `inherit` | `inherit` | dispatcher | D4: routine inspection |
-| `agents/code-conductor.md` | `sonnet` | `medium` | sonnet + medium | D2: redundant declaration; ensures orchestrator tier even without command override |
+| `agents/code-conductor.md` | `sonnet` | `high` | sonnet + high | D2: redundant declaration; ensures orchestrator tier even without command override |
 | `agents/spine-runner.md` | `inherit` | `inherit` | dispatcher | D7: minimal frame walker inherits dispatcher tier |
 | `agents/senior-engineer.md` | `inherit` | `inherit` | dispatcher | D4: routine skill-as-adapter execution; inherits dispatcher |
 | `agents/code-critic.md` | `opus` | `high` | opus + high | D5: adversarial review requires maximum reasoning depth |
@@ -227,9 +230,9 @@ Each Claude subagent shell in `agents/*.md` may declare `model:` and `effort:` i
 
 Note: the user-session default (`/model` setting) never propagates to subagents — it applies only to inline commands without `model:` frontmatter (`/experience`, `/design`, `/plan`, `/polish`). Downstream specialist `Agent` dispatches from those commands inherit the dispatcher's model, not the user-session default.
 
-**Multi-turn `/orchestrate` boundary**: the `model: sonnet, effort: medium` override declared in `commands/orchestrate.md` applies for the duration of the command's turn. `/code-conductor` and `/review-github` have their own `sonnet + medium` command-front-end overrides that apply for their respective command turns. If a user interrupts a multi-turn `/orchestrate` session mid-flow, the override resets to the user's session model. Re-invoking `/orchestrate` re-applies the override for the new turn.
+**Multi-turn `/orchestrate` boundary**: the `model: sonnet, effort: high` override declared in `commands/orchestrate.md` applies for the duration of the command's turn. `/code-conductor` and `/review-github` have their own `sonnet + high` command-front-end overrides that apply for their respective command turns. If a user interrupts a multi-turn `/orchestrate` session mid-flow, the override resets to the user's session model. Re-invoking `/orchestrate` re-applies the override for the new turn.
 
-**Sonnet-default trade-off**: `commands/orchestrate.md` and `agents/code-conductor.md` default to `sonnet + medium` because the majority of orchestration work (plan parsing, dispatch, coordination) does not need full reasoning depth. Spine-Runner inherits the dispatcher tier because it is a minimal frame walker. Quality-critical roles (adversarial review, judge synthesis) explicitly upgrade to `opus`. This is an intentional cost-vs-depth trade-off per D3.
+**Sonnet-default trade-off**: `commands/orchestrate.md` and `agents/code-conductor.md` default to `sonnet + high` because orchestration work (plan parsing, dispatch, coordination, review reconciliation) benefits from extended reasoning while staying on the cost-efficient Sonnet tier. Spine-Runner inherits the dispatcher tier because it is a minimal frame walker. Quality-critical roles (adversarial review, judge synthesis) explicitly upgrade to `opus`. This is an intentional cost-vs-depth trade-off per D3.
 
 **Override-discipline rule**: every `agents/*.md` shell must declare both `model:` and `effort:`, or neither (both-or-neither). A shell with only one field is a test failure. The Pester test at `.github/scripts/Tests/per-agent-model-routing.Tests.ps1` enforces this, the enum membership set, the inherit-comment requirement, the D5 oracle, and CLAUDE.md routing-table parity.
 

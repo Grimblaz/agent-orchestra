@@ -1,0 +1,178 @@
+name: Copilot Sunset Retirement Review
+
+# Fires on/after 2026-08-31 to surface the retire-or-keep decision.
+# Also manually triggerable at any time via workflow_dispatch.
+#
+# 60-day-inactivity auto-disable mitigation:
+# - The keepalive monthly cron (first entry) keeps the workflow from being
+#   auto-disabled on repos with no pushes. It is a no-op unless the sunset
+#   date has passed.
+# - The workflow_dispatch trigger provides a manual fallback at any time.
+
+on:
+  schedule:
+    # Monthly keepalive: runs on the 1st of every month (prevents 60-day auto-disable)
+    - cron: '0 9 1 * *'
+    # Annual September 1st retirement-review check (date-gated to fire only on/after 2026-08-31)
+    - cron: '0 9 1 9 *'
+  workflow_dispatch:
+    inputs:
+      force_review:
+        description: 'Force the retirement review regardless of date'
+        required: false
+        default: 'false'
+        type: boolean
+
+permissions:
+  issues: write
+  discussions: read
+  contents: read
+
+concurrency:
+  group: copilot-sunset-review
+  cancel-in-progress: false
+
+jobs:
+  retirement-review:
+    name: Copilot Sunset Retirement Review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check if retirement review is due
+        id: check_date
+        run: |
+          SUNSET_DATE="2026-08-31"
+          TODAY=$(date -u +%Y-%m-%d)
+          FORCE="${{ github.event.inputs.force_review }}"
+
+          if [[ "$TODAY" > "$SUNSET_DATE" ]] || [[ "$TODAY" == "$SUNSET_DATE" ]] || [[ "$FORCE" == "true" ]]; then
+            echo "review_due=true" >> "$GITHUB_OUTPUT"
+            echo "Retirement review due (today=$TODAY, sunset=$SUNSET_DATE, force=$FORCE)"
+          else
+            echo "review_due=false" >> "$GITHUB_OUTPUT"
+            echo "Not yet due — keepalive run (today=$TODAY, sunset=$SUNSET_DATE)"
+          fi
+
+      - name: Query GitHub Discussions for sunset reach-outs
+        id: discussions
+        if: steps.check_date.outputs.review_due == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Discussions are GraphQL-only — no REST API for listing discussions
+          DISCUSSIONS_JSON=$(gh api graphql -f query='
+          {
+            repository(owner: "Grimblaz", name: "agent-orchestra") {
+              discussions(first: 20, orderBy: {field: UPDATED_AT, direction: DESC}) {
+                nodes {
+                  title
+                  url
+                  createdAt
+                  author { login }
+                  comments { totalCount }
+                }
+              }
+            }
+          }') || { echo "discussions_available=false" >> "$GITHUB_OUTPUT"; exit 0; }
+
+          DISCUSSION_COUNT=$(echo "$DISCUSSIONS_JSON" | jq '.data.repository.discussions.nodes | length')
+          SUNSET_DISCUSSIONS=$(echo "$DISCUSSIONS_JSON" | jq '[.data.repository.discussions.nodes[] | select(.title | ascii_downcase | contains("copilot") or contains("vscode") or contains("vs code") or contains("sunset") or contains("deprecat"))] | length')
+
+          echo "discussion_count=$DISCUSSION_COUNT" >> "$GITHUB_OUTPUT"
+          echo "sunset_discussions=$SUNSET_DISCUSSIONS" >> "$GITHUB_OUTPUT"
+          echo "discussions_available=true" >> "$GITHUB_OUTPUT"
+
+          # Surface sunset-related discussions in the log
+          if [[ "$SUNSET_DISCUSSIONS" -gt 0 ]]; then
+            echo "Found $SUNSET_DISCUSSIONS potential Copilot-sunset-related discussion(s):"
+            echo "$DISCUSSIONS_JSON" | jq -r '[.data.repository.discussions.nodes[] | select(.title | ascii_downcase | contains("copilot") or contains("vscode") or contains("vs code") or contains("sunset") or contains("deprecat"))] | .[] | "  - \(.title) (\(.url)) by \(.author.login)"'
+          else
+            echo "No Copilot-sunset-related discussions found."
+          fi
+
+      - name: Open or update retirement review tracking issue
+        if: steps.check_date.outputs.review_due == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SUNSET_DISCUSSIONS="${{ steps.discussions.outputs.sunset_discussions }}"
+          DISCUSSIONS_AVAILABLE="${{ steps.discussions.outputs.discussions_available }}"
+          TODAY=$(date -u +%Y-%m-%d)
+
+          if [[ "$DISCUSSIONS_AVAILABLE" == "true" ]] && [[ "$SUNSET_DISCUSSIONS" -gt 0 ]]; then
+            DISCUSSIONS_NOTE="⚠️ **${SUNSET_DISCUSSIONS} Copilot-related GitHub Discussion(s) found** — review before retiring. Check https://github.com/Grimblaz/agent-orchestra/discussions"
+          elif [[ "$DISCUSSIONS_AVAILABLE" == "true" ]]; then
+            DISCUSSIONS_NOTE="✅ No Copilot-sunset-related GitHub Discussions found — no reach-outs detected."
+          else
+            DISCUSSIONS_NOTE="⚠️ Could not query GitHub Discussions (may need token scope). Check https://github.com/Grimblaz/agent-orchestra/discussions manually."
+          fi
+
+          # Check if a retirement review issue already exists
+          EXISTING=$(gh issue list \
+            --label "copilot-sunset" \
+            --state open \
+            --json number,title \
+            --jq 'length')
+
+          # Write the retirement issue body to a temp file to avoid YAML block-scalar issues
+          cat > /tmp/retirement-issue-body.md <<BODYEOF
+## Copilot / VS Code Sunset Retirement Review
+
+GitHub Copilot/VS Code support was frozen in v2.24.0 (2026-06) and scheduled for retirement after **2026-08-31** (issue #651).
+
+**Today's date**: ${TODAY}
+**Retirement deadline**: 2026-08-31
+
+### Discussions reach-out check
+
+${DISCUSSIONS_NOTE}
+
+### Decision required
+
+- **Retire (Option 1)**: Remove Copilot surfaces — delete \`.github/prompts/\`, \`platforms/copilot.md\` files, \`skills/copilot-cost-collection/\`, root \`hooks.json\`, and related parity tests. See issue #651 for the full scope.
+- **Extend freeze**: Keep the frozen surfaces as-is, update the sunset date, and re-run this review at the new date.
+- **Reactivate**: If a genuine reach-out is present, decide whether to restore Copilot parity investment.
+
+### Removal checklist (if retiring)
+
+Tests to delete (tagged \`#651-option1-remove\`):
+\`\`\`
+grep -r 'TODO(#651-option1-remove)' .github/scripts/Tests
+\`\`\`
+
+Surfaces to remove:
+- \`.github/prompts/*.prompt.md\` (14 files)
+- \`skills/*/platforms/copilot.md\` (12 files)
+- \`skills/copilot-cost-collection/\` (entire dir)
+- Root \`hooks.json\` (Copilot hook)
+- References in \`CLAUDE.md\`, \`README.md\`, \`copilot-instructions.md\`
+
+---
+*Auto-generated by \`.github/workflows/copilot-sunset-review.yml\` on ${TODAY}.*
+*Triggered by: ${{ github.event_name }}*
+BODYEOF
+
+          if [[ "$EXISTING" -gt 0 ]]; then
+            echo "Retirement review issue already open — adding a comment."
+            ISSUE_NUMBER=$(gh issue list \
+              --label "copilot-sunset" \
+              --state open \
+              --json number \
+              --jq '.[0].number')
+            gh issue comment "$ISSUE_NUMBER" --body "**Automated retirement review check — ${TODAY}**
+
+${DISCUSSIONS_NOTE}
+
+No action taken — issue already open. Review the checklist in the issue body."
+          else
+            echo "Creating retirement review tracking issue."
+            gh issue create \
+              --title "Copilot Sunset Retirement Review — action required after 2026-08-31" \
+              --body-file /tmp/retirement-issue-body.md \
+              --label "priority: medium" \
+              --label "copilot-sunset" \
+              || gh issue create \
+                   --title "Copilot Sunset Retirement Review — action required after 2026-08-31" \
+                   --body-file /tmp/retirement-issue-body.md \
+                   --label "priority: medium" \
+                   --label "copilot-sunset"
+          fi

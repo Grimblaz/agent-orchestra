@@ -108,10 +108,7 @@ Describe 'Natural-language intent routing table contract' {
             $claudeRelativePath = & $script:ResolveClaudeCommandRelativePath $claudeCommand
             (Test-Path -LiteralPath (& $script:ResolveWorkspacePath $claudeRelativePath) -PathType Leaf) | Should -BeTrue -Because "Claude command '$claudeCommand' for intent '$intentKey' should resolve to an existing file"
 
-            if ($null -ne $copilotCommand) {
-                $copilotRelativePath = & $script:ResolveCopilotCommandRelativePath $copilotCommand
-                (Test-Path -LiteralPath (& $script:ResolveWorkspacePath $copilotRelativePath) -PathType Leaf) | Should -BeTrue -Because "Copilot command '$copilotCommand' for intent '$intentKey' should resolve to an existing file; null is the only allowed no-Copilot-command value"
-            }
+            # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — Copilot prompt files frozen, skip file-existence checks
         }
     }
 

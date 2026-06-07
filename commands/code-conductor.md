@@ -2,7 +2,7 @@
 description: "Invoke Code-Conductor in explicit non-hub-mode for a free-text task: route to local code review, GitHub review intake, or specialist dispatch (implementation, tests, docs, etc.) without the hub pipeline."
 argument-hint: "Free-text task for Code-Conductor"
 model: sonnet
-effort: medium
+effort: high
 ---
 
 # /code-conductor

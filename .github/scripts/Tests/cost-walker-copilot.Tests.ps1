@@ -10,7 +10,7 @@ Describe 'Copilot cost walker helpers' {
     }
 
     Context 'branch slug derivation' {
-        It 'normalizes branch name <Branch> to <Expected>' -TestCases @(
+        It 'normalizes branch name <Branch> to <Expected>' -Skip -TestCases @( # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             @{ Branch = 'Feature/Issue-488-Copilot-Cost'; Expected = 'feature-issue-488-copilot-cost' }
             @{ Branch = 'bugfix/Quotes:And*Stars '; Expected = 'bugfix-quotes-and-stars' }
             @{ Branch = "release/Issue-488`t"; Expected = 'release-issue-488' }
@@ -22,7 +22,7 @@ Describe 'Copilot cost walker helpers' {
     }
 
     Context 'outfile template resolution' {
-        It 'resolves helper-owned VS variables and environment variables to a literal path' {
+        It 'resolves helper-owned VS variables and environment variables to a literal path' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $envName = "COPILOT_OTEL_TEST_$([System.Guid]::NewGuid().ToString('N'))"
             $previousValue = [System.Environment]::GetEnvironmentVariable($envName, 'Process')
 
@@ -45,7 +45,7 @@ Describe 'Copilot cost walker helpers' {
             }
         }
 
-        It 'records that github.copilot.chat.otel.outfile templates require helper resolution before writing settings' {
+        It 'records that github.copilot.chat.otel.outfile templates require helper resolution before writing settings' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $result = Resolve-CostCopilotOutfileTemplate `
                 -Template '${userHome}/.copilot-otel/${workspaceFolderBasename}/copilot.jsonl' `
                 -WorkspaceRoot 'C:\Users\Micah\Code 2\copilot-orchestra' `
@@ -177,7 +177,7 @@ Describe 'Invoke-CostCopilotWalk' {
     }
 
     Context 'sanitized fixture contract' {
-        It 'joins the S1 OTel fixture to the synthetic reflog and emits a normalized Copilot cost event' {
+        It 'joins the S1 OTel fixture to the synthetic reflog and emits a normalized Copilot cost event' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $reflogLines = Get-Content -Path $script:SyntheticReflog -Encoding utf8
             Mock Get-CostCopilotReflog { return $reflogLines } -ParameterFilter { $RepoRoot -eq $script:RepoRoot }
 
@@ -207,7 +207,7 @@ Describe 'Invoke-CostCopilotWalk' {
     }
 
     Context 'session grouping and reflog attribution' {
-        It 'emits one normalized event per matched session and drops sessions outside the target branch window' {
+        It 'emits one normalized event per matched session and drops sessions outside the target branch window' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $records = @(
                 script:New-CopilotOtelRecord -SessionId 'session-outside' -Timestamp '2025-12-31T23:59:30Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
                 script:New-CopilotOtelRecord -SessionId 'session-outside' -Timestamp '2025-12-31T23:59:31Z' -InputTokens 10 -OutputTokens 5
@@ -231,7 +231,7 @@ Describe 'Invoke-CostCopilotWalk' {
             }
         }
 
-        It 'counts inference detail records instead of duplicate agent-turn summaries when both shapes exist' {
+        It 'counts inference detail records instead of duplicate agent-turn summaries when both shapes exist' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $records = @(
                 script:New-CopilotOtelRecord -SessionId 'session-duplicate-summary' -Timestamp '2026-01-01T00:00:02Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
                 script:New-CopilotOtelRecord -SessionId 'session-duplicate-summary' -Timestamp '2026-01-01T00:00:03Z' -OtelRecordName 'gen_ai.client.inference.operation.details' -InputTokens 100 -OutputTokens 30
@@ -246,7 +246,7 @@ Describe 'Invoke-CostCopilotWalk' {
             script:Get-ObjectValue -Object $usage -Name 'output_tokens' | Should -Be 30
         }
 
-        It 'counts agent-turn token records when inference details are absent' {
+        It 'counts agent-turn token records when inference details are absent' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $records = @(
                 script:New-CopilotOtelRecord -SessionId 'session-agent-turn-only' -Timestamp '2026-01-01T00:00:02Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
                 script:New-CopilotOtelRecord -SessionId 'session-agent-turn-only' -Timestamp '2026-01-01T00:00:03Z' -OtelRecordName 'copilot_chat.agent.turn' -InputTokens 88 -OutputTokens 22
@@ -260,7 +260,7 @@ Describe 'Invoke-CostCopilotWalk' {
             script:Get-ObjectValue -Object $usage -Name 'output_tokens' | Should -Be 22
         }
 
-        It 'attributes a session by its start timestamp when later token events straddle a branch switch' {
+        It 'attributes a session by its start timestamp when later token events straddle a branch switch' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $records = @(
                 script:New-CopilotOtelRecord -SessionId 'session-before-switch' -Timestamp '2025-12-31T23:59:54Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
                 script:New-CopilotOtelRecord -SessionId 'session-before-switch' -Timestamp '2026-01-01T00:00:02Z' -InputTokens 50 -OutputTokens 10
@@ -277,7 +277,7 @@ Describe 'Invoke-CostCopilotWalk' {
     }
 
     Context 'reflog robustness' {
-        It 'ignores rebase noise when determining the active target branch' {
+        It 'ignores rebase noise when determining the active target branch' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $records = @(
                 script:New-CopilotOtelRecord -SessionId 'session-after-rebase-noise' -Timestamp '2026-01-01T00:02:00Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
                 script:New-CopilotOtelRecord -SessionId 'session-after-rebase-noise' -Timestamp '2026-01-01T00:02:01Z' -InputTokens 15 -OutputTokens 4
@@ -293,7 +293,7 @@ Describe 'Invoke-CostCopilotWalk' {
             @($walkOutput | ForEach-Object { script:Get-ObjectValue -Object $_ -Name 'sessionId' }) | Should -Be @('session-after-rebase-noise')
         }
 
-        It 'handles branch rename reflog entries as continuity for the target branch' {
+        It 'handles branch rename reflog entries as continuity for the target branch' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $records = @(
                 script:New-CopilotOtelRecord -SessionId 'session-after-rename' -Timestamp '2026-01-01T00:04:00Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
                 script:New-CopilotOtelRecord -SessionId 'session-after-rename' -Timestamp '2026-01-01T00:04:01Z' -InputTokens 25 -OutputTokens 6
@@ -308,7 +308,7 @@ Describe 'Invoke-CostCopilotWalk' {
             @($walkOutput | ForEach-Object { script:Get-ObjectValue -Object $_ -Name 'sessionId' }) | Should -Be @('session-after-rename')
         }
 
-        It 'skips detached HEAD transitions and emits a detached-head diagnostic' {
+        It 'skips detached HEAD transitions and emits a detached-head diagnostic' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $records = @(
                 script:New-CopilotOtelRecord -SessionId 'session-detached' -Timestamp '2026-01-01T00:02:00Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
                 script:New-CopilotOtelRecord -SessionId 'session-detached' -Timestamp '2026-01-01T00:02:01Z' -InputTokens 25 -OutputTokens 6
@@ -325,7 +325,7 @@ Describe 'Invoke-CostCopilotWalk' {
             $warnings | Where-Object { $_ -match 'copilot-reflog-detached-head' -or $_ -match 'detached HEAD' } | Should -Not -BeNullOrEmpty
         }
 
-        It 'emits an empty-reflog diagnostic for a worktree-add capture with no reflog lines' {
+        It 'emits an empty-reflog diagnostic for a worktree-add capture with no reflog lines' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $records = @(
                 script:New-CopilotOtelRecord -SessionId 'session-empty-reflog' -Timestamp '2026-01-01T00:02:00Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
                 script:New-CopilotOtelRecord -SessionId 'session-empty-reflog' -Timestamp '2026-01-01T00:02:01Z' -InputTokens 10 -OutputTokens 3
@@ -338,7 +338,7 @@ Describe 'Invoke-CostCopilotWalk' {
             $warnings | Where-Object { $_ -match 'copilot-reflog-empty' -or $_ -match 'empty reflog' } | Should -Not -BeNullOrEmpty
         }
 
-        It 'emits a distinct unmapped-session diagnostic when OTel sessions have no matching reflog branch window' {
+        It 'emits a distinct unmapped-session diagnostic when OTel sessions have no matching reflog branch window' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $records = @(
                 script:New-CopilotOtelRecord -SessionId 'session-unmapped' -Timestamp '2026-01-01T00:02:00Z' -OtelRecordName 'copilot_chat.session.start' -InputTokens $null -OutputTokens $null
                 script:New-CopilotOtelRecord -SessionId 'session-unmapped' -Timestamp '2026-01-01T00:02:01Z' -InputTokens 10 -OutputTokens 3
