@@ -234,7 +234,7 @@ At each gate decision point, the agent MUST emit a classification-decision token
 **Emit contract:**
 - `decision_id` MUST match the `decision_id` used in the engagement-record or `finding_id` used in `finding_dispositions:`.
 - `outcome` MUST be one of `asked | gate-fails | declined | same-decision-resume | greenfield-defer`.
-- `window_position` MUST reflect the firing position per the Firing-position rule: `pre-ask` for upstream structured questions, `disposition` for adversarial finding dispositions (#615 surface), `judge-merge` for plan judge-merge dispositions (#605 surface).
+- `window_position` MUST reflect the firing position per the Firing-position rule: `pre-ask` for upstream structured questions, `disposition` for adversarial finding dispositions (#615 surface), `judge-merge` for plan judge-merge dispositions (#605 surface), `review-disposition` for PR review-verdict disposition gate (#655 surface).
 - `timestamp` MUST be the ISO-8601 UTC time of emission.
 - `issue_number` MUST be the GitHub issue number this decision belongs to.
 - When the PostToolUse event logger (L1) is active, include `session_key` so the L2 reconciliation validator can locate corroborating L1 events without re-deriving the session key.

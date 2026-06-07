@@ -48,7 +48,7 @@ param(
     [Parameter(Mandatory)]
     [int]$IssueNumber,
 
-    [ValidateSet('experience','design','plan','orchestration')]
+    [ValidateSet('experience','design','plan','orchestration','review')]
     [string]$Phase,
 
     [string]$Repo = '',

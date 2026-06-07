@@ -12,7 +12,7 @@
     },
     "phase": {
       "type": "string",
-      "enum": ["experience", "design", "plan", "orchestration"],
+      "enum": ["experience", "design", "plan", "orchestration", "review"],
       "description": "Pipeline phase in which the gate fired."
     },
     "outcome": {
@@ -27,8 +27,8 @@
     },
     "window_position": {
       "type": "string",
-      "enum": ["pre-ask", "disposition", "judge-merge", "unknown"],
-      "description": "Which gate firing position this token belongs to. 'pre-ask' = upstream structured question. 'disposition' = adversarial finding disposition (#615 surface). 'judge-merge' = plan judge-merge disposition (#605 surface)."
+      "enum": ["pre-ask", "disposition", "judge-merge", "unknown", "review-disposition"],
+      "description": "Which gate firing position this token belongs to. 'pre-ask' = upstream structured question. 'disposition' = adversarial finding disposition (#615 surface). 'judge-merge' = plan judge-merge disposition (#605 surface). 'review-disposition' = review-verdict disposition gate firing position."
     },
     "timestamp": {
       "type": "string",
