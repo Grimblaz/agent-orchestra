@@ -128,6 +128,10 @@ foreach ($body in $rawBodies) {
     if ($null -eq $payload.passes_run -or $payload.passes_run.Count -eq 0) {
         Add-RdvFinding "review-dispositions-${PullRequestNumber}: passes_run must be a non-empty subset of [1,2,3]"
     } else {
+        $uniquePasses = $payload.passes_run | Select-Object -Unique
+        if ($uniquePasses.Count -ne $payload.passes_run.Count) {
+            Add-RdvFinding "review-dispositions-${PullRequestNumber}: passes_run contains duplicate values (must be unique per schema uniqueItems)"
+        }
         foreach ($p in $payload.passes_run) {
             if ($p -notin @(1, 2, 3)) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: passes_run contains invalid value: $p (must be 1, 2, or 3)"
@@ -157,6 +161,12 @@ foreach ($body in $rawBodies) {
             }
             if ([string]::IsNullOrWhiteSpace($entry.disposition_rationale)) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel missing required disposition_rationale"
+            }
+            if ($null -ne $entry.also_flagged_by -and $entry.also_flagged_by.Count -gt 0) {
+                $uniqueAlso = $entry.also_flagged_by | Select-Object -Unique
+                if ($uniqueAlso.Count -ne $entry.also_flagged_by.Count) {
+                    Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel also_flagged_by contains duplicate pass IDs (must be unique)"
+                }
             }
             $idx++
         }

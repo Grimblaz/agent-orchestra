@@ -172,44 +172,59 @@ function Read-FindingDispositionIds {
         }
 
         # ── stable_finding_key from review-dispositions-{PR} (SMC-23, PR-keyed) ──
+        # SMC-23: multiple markers per PR allowed; latest createdAt wins on read.
         if ($PullRequestNumber -gt 0 -and $repoTarget) {
-            $prBodies = @()
+            $prMarkers = @()
             if ($InMem -and $InMem.Count -gt 0) {
-                # InMem already contains all bodies; filter for review-dispositions marker
-                $prBodies = $InMem
+                # InMem: assign synthetic ascending timestamps to preserve array order as proxy for createdAt
+                for ($i = 0; $i -lt $InMem.Count; $i++) {
+                    $prMarkers += [PSCustomObject]@{
+                        Body      = $InMem[$i]
+                        CreatedAt = [DateTime]::MinValue.AddTicks($i)
+                    }
+                }
             } else {
                 # PR review comments (inline code comments)
-                $prReviewComments = & $Gh api "repos/$repoTarget/pulls/$PullRequestNumber/comments" --paginate --slurp 2>$null | ConvertFrom-Json
-                if ($LASTEXITCODE -eq 0 -and $prReviewComments) {
-                    if ($prReviewComments -is [array] -and $prReviewComments[0] -is [array]) {
-                        $prReviewComments = $prReviewComments | ForEach-Object { $_ }
+                $rawReviewComments = & $Gh api "repos/$repoTarget/pulls/$PullRequestNumber/comments" --paginate --slurp 2>$null | ConvertFrom-Json
+                if ($LASTEXITCODE -eq 0 -and $rawReviewComments) {
+                    if ($rawReviewComments -is [array] -and $rawReviewComments[0] -is [array]) {
+                        $rawReviewComments = $rawReviewComments | ForEach-Object { $_ }
                     }
-                    $prBodies += $prReviewComments | ForEach-Object { $_.body }
+                    $prMarkers += $rawReviewComments | ForEach-Object {
+                        [PSCustomObject]@{ Body = $_.body; CreatedAt = [datetime]$_.created_at }
+                    }
                 }
                 # PR issue-style comments (top-level PR comments, same API as issues)
-                $prIssueComments = & $Gh api "repos/$repoTarget/issues/$PullRequestNumber/comments" --paginate --slurp 2>$null | ConvertFrom-Json
-                if ($LASTEXITCODE -eq 0 -and $prIssueComments) {
-                    if ($prIssueComments -is [array] -and $prIssueComments[0] -is [array]) {
-                        $prIssueComments = $prIssueComments | ForEach-Object { $_ }
+                $rawIssueComments = & $Gh api "repos/$repoTarget/issues/$PullRequestNumber/comments" --paginate --slurp 2>$null | ConvertFrom-Json
+                if ($LASTEXITCODE -eq 0 -and $rawIssueComments) {
+                    if ($rawIssueComments -is [array] -and $rawIssueComments[0] -is [array]) {
+                        $rawIssueComments = $rawIssueComments | ForEach-Object { $_ }
                     }
-                    $prBodies += $prIssueComments | ForEach-Object { $_.body }
+                    $prMarkers += $rawIssueComments | ForEach-Object {
+                        [PSCustomObject]@{ Body = $_.body; CreatedAt = [datetime]$_.created_at }
+                    }
                 }
             }
 
             $rdPattern = "<!--\s*review-dispositions-$PullRequestNumber\s*-->"
-            foreach ($body in $prBodies) {
-                if ($body -notmatch $rdPattern) { continue }
-                $yamlMatch = [regex]::Match($body, '```yaml\s*([\s\S]*?)```')
-                if (-not $yamlMatch.Success) { continue }
-                try {
-                    $parsed = $yamlMatch.Groups[1].Value | ConvertFrom-Yaml -ErrorAction Stop
-                    if ($parsed['entries']) {
-                        foreach ($entry in $parsed['entries']) {
-                            if ($entry['stable_finding_key']) { $recordedIds += $entry['stable_finding_key'] }
+            $latestMarker = $prMarkers |
+                Where-Object { $_.Body -match $rdPattern } |
+                Sort-Object CreatedAt |
+                Select-Object -Last 1
+
+            if ($latestMarker) {
+                $yamlMatch = [regex]::Match($latestMarker.Body, '```yaml\s*([\s\S]*?)```')
+                if ($yamlMatch.Success) {
+                    try {
+                        $parsed = $yamlMatch.Groups[1].Value | ConvertFrom-Yaml -ErrorAction Stop
+                        if ($parsed['entries']) {
+                            foreach ($entry in $parsed['entries']) {
+                                if ($entry['stable_finding_key']) { $recordedIds += $entry['stable_finding_key'] }
+                            }
                         }
+                    } catch {
+                        Write-Warning "gate-reconciliation: failed to parse YAML in review-dispositions-$PullRequestNumber comment — $($_.Exception.Message); skipping this marker"
                     }
-                } catch {
-                    Write-Warning "gate-reconciliation: failed to parse YAML in review-dispositions-$PullRequestNumber comment — $($_.Exception.Message); skipping this marker"
                 }
             }
         }
@@ -229,8 +244,11 @@ $tokens = Read-GateTokens -ExplicitPath $EventLogPath
 if ($Phase) {
     $tokens = $tokens | Where-Object { $_.phase -eq $Phase }
 }
-if ($IssueNumber -and $IssueNumber -gt 0) {
-    # Backward-compat: include tokens without issue_number (legacy logs pre-MF2; bounded to session-scoped files)
+if ($PullRequestNumber -gt 0) {
+    # Review-window: filter by pull_request_number (review-disposition tokens carry PR not issue)
+    $tokens = $tokens | Where-Object { $_.pull_request_number -eq $PullRequestNumber }
+} elseif ($IssueNumber -and $IssueNumber -gt 0) {
+    # Issue-keyed: backward-compat includes tokens without issue_number (legacy logs pre-MF2; bounded to session-scoped files)
     $tokens = $tokens | Where-Object { $_.issue_number -eq $IssueNumber -or -not $_.issue_number }
 }
 

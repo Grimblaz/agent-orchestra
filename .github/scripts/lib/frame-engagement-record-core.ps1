@@ -110,26 +110,47 @@ function Read-EngagementRecords {
         }
 
         try {
-            # Note: 'gh issue view --json comments' caps at 100 comments; --paginate is not supported
-            # by this subcommand (it is a 'gh api' flag only). For engagement-record markers this is
-            # acceptable: markers are emitted at most twice per phase per issue, so the cap is never
-            # reached in practice.
-            $rawJson = & $GhCliPath issue view $IssueNumber --repo $Repo --json comments 2>$null
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rawJson)) {
-                $commentsObj = $rawJson | ConvertFrom-Json
-                foreach ($comment in $commentsObj.comments) {
-                    $parsedMarkers += [PSCustomObject]@{
-                        Body      = $comment.body
-                        CreatedAt = [DateTime]::Parse($comment.createdAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            if ($IssueNumber -gt 0) {
+                # Issue-keyed path (all phases except review)
+                # Note: 'gh issue view --json comments' caps at 100 comments; --paginate is not supported
+                # by this subcommand (it is a 'gh api' flag only). For engagement-record markers this is
+                # acceptable: markers are emitted at most twice per phase per issue, so the cap is never
+                # reached in practice.
+                $rawJson = & $GhCliPath issue view $IssueNumber --repo $Repo --json comments 2>$null
+                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rawJson)) {
+                    $commentsObj = $rawJson | ConvertFrom-Json
+                    foreach ($comment in $commentsObj.comments) {
+                        $parsedMarkers += [PSCustomObject]@{
+                            Body      = $comment.body
+                            CreatedAt = [DateTime]::Parse($comment.createdAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                        }
                     }
+                } elseif ($LASTEXITCODE -ne 0) {
+                    Write-Warning "gh issue view exited with code $LASTEXITCODE for issue $IssueNumber (repo: $Repo) — engagement-record markers may be missing."
+                } else {
+                    Write-Verbose "gh issue view returned no comments for issue $IssueNumber (repo: $Repo)."
                 }
-            } elseif ($LASTEXITCODE -ne 0) {
-                Write-Warning "gh issue view exited with code $LASTEXITCODE for issue $IssueNumber (repo: $Repo) — engagement-record markers may be missing."
-            } else {
-                Write-Verbose "gh issue view returned no comments for issue $IssueNumber (repo: $Repo)."
+            } elseif ($PullRequestNumber -gt 0) {
+                # PR-keyed path (review phase — engagement-record-review-{PR} markers live in PR top-level comments)
+                # Note: same 100-comment cap applies to 'gh pr view --json comments'; markers are emitted
+                # at most twice per review phase per PR, so the cap is never reached in practice.
+                $rawJson = & $GhCliPath pr view $PullRequestNumber --repo $Repo --json comments 2>$null
+                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rawJson)) {
+                    $commentsObj = $rawJson | ConvertFrom-Json
+                    foreach ($comment in $commentsObj.comments) {
+                        $parsedMarkers += [PSCustomObject]@{
+                            Body      = $comment.body
+                            CreatedAt = [DateTime]::Parse($comment.createdAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                        }
+                    }
+                } elseif ($LASTEXITCODE -ne 0) {
+                    Write-Warning "gh pr view exited with code $LASTEXITCODE for PR $PullRequestNumber (repo: $Repo) — engagement-record-review markers may be missing."
+                } else {
+                    Write-Verbose "gh pr view returned no comments for PR $PullRequestNumber (repo: $Repo)."
+                }
             }
         } catch {
-            Write-Error "Failed to fetch comments for issue $IssueNumber from gh CLI: $_"
+            Write-Error "Failed to fetch comments for $($IssueNumber -gt 0 ? "issue $IssueNumber" : "PR $PullRequestNumber") from gh CLI: $_"
         }
     }
 

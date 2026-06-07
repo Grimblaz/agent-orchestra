@@ -61,10 +61,12 @@
     "required": ["window_position"]
   },
   "then": {
-    "required": ["pull_request_number"]
+    "required": ["pull_request_number"],
+    "not": { "required": ["issue_number"] }
   },
   "else": {
-    "required": ["issue_number"]
+    "required": ["issue_number"],
+    "not": { "required": ["pull_request_number"] }
   },
   "additionalProperties": false
 }
