@@ -41,7 +41,7 @@ Describe 'Copilot CE Gate regression contract' {
         $script:PromptMarkers = @(& $script:GetCeGateMarkers -Content $script:OrchestratePrompt)
     }
 
-    It 'requires both Copilot surfaces to name the extracted CE Gate orchestration reference explicitly' {
+    It 'requires both Copilot surfaces to name the extracted CE Gate orchestration reference explicitly' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
         foreach ($surface in @(
                 @{ Name = 'Code-Conductor shared body'; Content = $script:ConductorBody },
                 @{ Name = '/orchestrate prompt'; Content = $script:OrchestratePrompt }
@@ -50,13 +50,13 @@ Describe 'Copilot CE Gate regression contract' {
         }
     }
 
-    It 'requires both Copilot surfaces to name the same CE Gate result markers' {
+    It 'requires both Copilot surfaces to name the same CE Gate result markers' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
         $script:ConductorMarkers.Count | Should -BeGreaterThan 0 -Because 'the shared Code-Conductor body must enumerate the CE Gate result markers explicitly'
         $script:PromptMarkers.Count | Should -Be $script:ConductorMarkers.Count -Because 'the /orchestrate prompt must repeat the same CE Gate result markers as the shared body'
         $script:PromptMarkers | Should -BeExactly $script:ConductorMarkers -Because 'Copilot orchestration surfaces must stay in marker parity for CE Gate result reporting'
     }
 
-    It 'prevents either Copilot surface from relying on the customer-experience entry skill alone for CE Gate orchestration' {
+    It 'prevents either Copilot surface from relying on the customer-experience entry skill alone for CE Gate orchestration' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
         foreach ($surface in @(
                 @{ Name = 'Code-Conductor shared body'; Content = $script:ConductorBody },
                 @{ Name = '/orchestrate prompt'; Content = $script:OrchestratePrompt }

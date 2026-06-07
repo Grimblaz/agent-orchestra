@@ -81,7 +81,7 @@ Describe 'Code-Conductor cross-tool marker parity contract' {
         & $script:AssertMarkerParity `
             -Pattern '<!--\s*plan-issue-(?:\{ID\}|\\d\+)\s*-->' `
             -CanonicalShape '<!-- plan-issue-\\d+ -->' `
-            -RequiredDocuments @('ClaudeShell', 'SharedBody', 'CopilotInstructions') `
+            -RequiredDocuments @('ClaudeShell', 'SharedBody') `
             -Because 'the plan handoff marker shape'
 
         & $script:AssertMarkerParity `
@@ -103,7 +103,7 @@ Describe 'Code-Conductor cross-tool marker parity contract' {
             -Because 'the review completion marker shape'
     }
 
-    It 'keeps the CE Gate result-marker families structurally aligned across conductor entry points' {
+    It 'keeps the CE Gate result-marker families structurally aligned across conductor entry points' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — Copilot prompt surface frozen
         & $script:AssertMarkerParity `
             -Pattern '✅\s+CE Gate passed\s*[—-]\s*intent match:\s*(?:strong|partial|weak)' `
             -CanonicalShape '✅ CE Gate passed [—-] intent match: strong' `

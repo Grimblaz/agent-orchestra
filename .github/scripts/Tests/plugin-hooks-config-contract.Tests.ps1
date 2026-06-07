@@ -140,6 +140,9 @@ Describe 'plugin hooks config contract' -Tag 'unit' {
         $postToolEntries[0].hooks[0].command | Should -Match ([regex]::Escape("`$pluginSuffix = '$cacheLocator'"))
         $sessionEntries[0].hooks[0].command | Should -Match ([regex]::Escape($script:SessionStartScript))
         $postToolEntries[0].hooks[0].command | Should -Match ([regex]::Escape($script:ReleaseHygieneScript))
+        # Copilot sunset warning must precede the detector call (AC4)
+        $sessionEntries[0].hooks[0].command | Should -Match 'copilot-sunset-ack' `
+            -Because 'the Copilot SessionStart command must contain the sunset-warning ack token (#651 D-B)'
         foreach ($token in $requiredEscapedTokens) {
             $sessionEntries[0].hooks[0].command | Should -Match ([regex]::Escape($token))
             $postToolEntries[0].hooks[0].command | Should -Match ([regex]::Escape($token))

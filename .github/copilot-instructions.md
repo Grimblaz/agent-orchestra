@@ -2,6 +2,9 @@
 applyTo: "**"
 ---
 
+> ⚠️ **GitHub Copilot / VS Code support is frozen as of 2026-06 and retiring after 2026-08-31.**
+> Claude Code is the actively maintained path. If you are an agent or contributor: **do not add new Copilot parity** — build Claude-only. See [Documents/Design/copilot-deprecation.md](../Documents/Design/copilot-deprecation.md).
+
 # Project: Agent Orchestra
 
 ## Overview

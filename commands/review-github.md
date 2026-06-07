@@ -2,7 +2,7 @@
 description: "GitHub review intake through Code-Conductor, including proxy prosecution for PR review reconciliation."
 argument-hint: "[optional PR number; auto-resolves active PR or prompts]"
 model: sonnet
-effort: medium
+effort: high
 ---
 
 # /review-github

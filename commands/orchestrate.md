@@ -2,7 +2,7 @@
 description: "Invoke Code-Conductor — run the full orchestration pipeline for one or more GitHub issues: scope classification, smart resume, D9 checkpoint, implementation, review, PR."
 argument-hint: "Single issue (e.g. issue #177) or multiple issues (e.g. issues #177 #178 #179)"
 model: sonnet
-effort: medium
+effort: high
 ---
 
 # /orchestrate
