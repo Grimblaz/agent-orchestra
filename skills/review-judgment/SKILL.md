@@ -274,7 +274,7 @@ pull_request_number: {PR}   # NOT issue_number
 skip_reason: "routine-finding"   # omit when outcome=asked
 ```
 
-Write each token to `.github/events/gate-events.jsonl` as a single JSON line per the existing L0 emission pattern.
+Write each token to the authoritative L0 location per `skills/solution-authoring/SKILL.md` § L0 Gate Token: `/memories/session/gate-events-{session_key}.jsonl` (fallback: `.copilot-tracking/gate-events.jsonl`) as a single JSON line per the existing L0 emission pattern.
 
 ### Stable-Key Resume
 

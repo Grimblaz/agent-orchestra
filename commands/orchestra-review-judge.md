@@ -30,7 +30,7 @@ After the judge emits the `<!-- review-judge-produced-{PR} -->` sentinel and the
 1. Compute a `stable_finding_key` for each sustained finding per the Stable Finding Key derivation rules.
 2. Call `Read-EngagementRecords -Phase review -PullRequestNumber {PR}` to check for prior dispositions (same-decision-resume).
 3. Run the solution-authoring classification gate per finding. Routine findings record silently; load-bearing findings fire `AskUserQuestion` with the escalation-tier decision brief and options: Incorporate / Dismiss / Escalate / Decline engagement.
-4. Emit one L0 gate-decision token per finding to `.github/events/gate-events.jsonl` with `window_position: review-disposition` and `pull_request_number: {PR}`.
+4. Emit one L0 gate-decision token per finding per `skills/solution-authoring/SKILL.md` § L0 Gate Token (authoritative path: `/memories/session/gate-events-{session_key}.jsonl`, fallback: `.copilot-tracking/gate-events.jsonl`) with `window_position: review-disposition` and `pull_request_number: {PR}`.
 5. Persist **in order**: (a) `<!-- review-dispositions-{PR} -->` PR comment, then (b) `<!-- engagement-record-review-{PR} -->` PR comment.
 
 AC-refs: AC1, AC3, AC4, AC5, AC6, AC7.

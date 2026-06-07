@@ -55,7 +55,7 @@ Multiple engagement-record markers may be written to the same issue for a given 
 
 Tooling that reads engagement records MUST throw an error on encountering an unknown `schema_version` value.
 - **Additive-field policy**: Within a schema version, new optional fields may be added by writers. Readers MUST ignore unknown optional fields without throwing errors.
-- **Breaking changes**: Any renamed fields, changed enum sets, or new required fields require incrementing the schema version. Readers built against v1.1 throw on v2 markers, and readers built against v1.2 throw on v3 markers — this is intentional; per #576 D4 and #577 D4 the helper is updated in lockstep and `.claude-plugin/plugin.json` is bumped to invalidate cached older readers. A backward-compatibility guard ensures that `phase: orchestration` requires `schema_version >= 3` to prevent reading orchestration markers with older schemas.
+- **Breaking changes**: Any renamed fields, changed enum sets, or new required fields require incrementing the schema version. Readers built against v1.1 throw on v2 markers, and readers built against v1.2 throw on v3 markers — this is intentional; per #576 D4 and #577 D4 the helper is updated in lockstep and `.claude-plugin/plugin.json` is bumped to invalidate cached older readers. A backward-compatibility guard ensures that `phase: orchestration` requires `schema_version >= 3` to prevent reading orchestration markers with older schemas. A parallel guard requires `phase: review` to have `schema_version >= 4`: `frame-engagement-record-core.ps1` throws if a `review`-phase marker carries `schema_version < 4`.
 
 ## Resume-Read Protocol
 
