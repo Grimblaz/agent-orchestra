@@ -64,15 +64,7 @@ For terminal and validation execution guardrails, load `skills/terminal-hygiene/
 
 ## Documentation Maintenance Responsibilities
 
-This agent is responsible for maintaining:
-
-- **CHANGELOG.md**: Update BEFORE merge - add entry during PR documentation finalization.
-- **NEXT-STEPS.md**: Update BEFORE merge - update priorities during PR finalization.
-- **QUICK-START.md**: Update when tooling or setup instructions change.
-- **Documents/Decisions/**: Create new decision records from issue body design content during the implementation phase - keep existing ADRs accurate.
-- **ROADMAP.md**: Update when present - reflect milestone and priority changes from implemented features.
-
-See also: [Experience-Owner](Experience-Owner.agent.md) for customer framing documentation.
+See `skills/documentation-finalization/SKILL.md` § Documentation Maintenance Responsibilities for the full list of maintained files and their before-merge timing semantics.
 
 ---
 

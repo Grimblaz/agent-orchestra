@@ -48,6 +48,18 @@ Make documentation reflect the shipped state of the repository. Treat deletion o
 - Create a new `Documents/Design/{domain-slug}.md` file only when no current domain doc covers the feature area
 - Keep domain docs focused on the current design state, not as per-issue changelogs
 
+## Documentation Maintenance Responsibilities
+
+The documentation specialist is responsible for maintaining:
+
+- **CHANGELOG.md**: Update BEFORE merge - add entry during PR documentation finalization.
+- **NEXT-STEPS.md**: Update BEFORE merge - update priorities during PR finalization.
+- **QUICK-START.md**: Update when tooling or setup instructions change.
+- **Documents/Decisions/**: Create new decision records from issue body design content during the implementation phase - keep existing ADRs accurate.
+- **ROADMAP.md**: Update when present - reflect milestone and priority changes from implemented features.
+
+See also: [Experience-Owner](../../agents/Experience-Owner.agent.md) for customer framing documentation.
+
 ## Finalization Workflow
 
 1. Review the relevant implementation and determine what actually changed.
