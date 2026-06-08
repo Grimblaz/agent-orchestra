@@ -48,6 +48,18 @@ Make documentation reflect the shipped state of the repository. Treat deletion o
 - Create a new `Documents/Design/{domain-slug}.md` file only when no current domain doc covers the feature area
 - Keep domain docs focused on the current design state, not as per-issue changelogs
 
+## Documentation Maintenance Responsibilities
+
+The documentation specialist is responsible for maintaining:
+
+- **CHANGELOG.md**: Update BEFORE merge - add entry during PR documentation finalization.
+- **NEXT-STEPS.md**: Update BEFORE merge - update priorities during PR finalization.
+- **QUICK-START.md**: Update when tooling or setup instructions change.
+- **Documents/Decisions/**: Create new decision records from issue body design content during the implementation phase - keep existing ADRs accurate.
+- **ROADMAP.md**: Update when present - reflect milestone and priority changes from implemented features.
+
+See also: [Experience-Owner](../../agents/Experience-Owner.agent.md) for customer framing documentation.
+
 ## Finalization Workflow
 
 1. Review the relevant implementation and determine what actually changed.
@@ -92,4 +104,6 @@ Make documentation reflect the shipped state of the repository. Treat deletion o
 
 | Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
 | --- | --- | --- | --- |
-| `implement-docs` | [agents/Doc-Keeper.agent.md](../../agents/Doc-Keeper.agent.md) | [adapters/implement-docs-auto-na-adapter.md](adapters/implement-docs-auto-na-adapter.md) | [adapters/implement-docs-explicit-skip-adapter.md](adapters/implement-docs-explicit-skip-adapter.md) |
+| `implement-docs` | [agents/Doc-Keeper.agent.md](../../agents/Doc-Keeper.agent.md); [adapters/implement-docs-adapter.md](adapters/implement-docs-adapter.md) | [adapters/implement-docs-auto-na-adapter.md](adapters/implement-docs-auto-na-adapter.md) | [adapters/implement-docs-explicit-skip-adapter.md](adapters/implement-docs-explicit-skip-adapter.md) |
+
+In `/spine-run`, the `implement-docs` port resolves through [adapters/implement-docs-adapter.md](adapters/implement-docs-adapter.md) as the work adapter executed by Senior Engineer. Hub-flow dispatch uses `agents/Doc-Keeper.agent.md` directly. This split-declaration state is documented in [Documents/Design/frame-architecture.md](../../Documents/Design/frame-architecture.md); see footnote § (split-declaration #612).

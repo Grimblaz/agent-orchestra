@@ -2,6 +2,13 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.25.0] — 2026-06-07
+
+### Added
+
+- **Work adapters for `implement-test` and `implement-docs` frame ports** (`skills/test-driven-development/adapters/implement-test-adapter.md`, `skills/documentation-finalization/adapters/implement-docs-adapter.md`): thin Senior-Engineer work adapters enabling `/spine-run` to execute test-authoring and documentation slices end-to-end without requiring specialist-agent dispatch (#612).
+- **Fat-skills extraction for documentation maintenance** (`skills/documentation-finalization/SKILL.md`): Documentation Maintenance Responsibilities methodology (CHANGELOG/NEXT-STEPS/QUICK-START/ROADMAP/Documents/Decisions with before-merge timing semantics) moved from `agents/Doc-Keeper.agent.md` body into the skill as the single source of truth (#612). Agent body now holds a heading-preserving pointer; bijection contract preserved.
+
 ## [2.24.0] — 2026-06-06
 
 ### Changed

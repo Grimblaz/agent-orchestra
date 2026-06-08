@@ -219,4 +219,6 @@ For detailed examples of each anti-pattern, see `references/anti-patterns.md`.
 
 | Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
 | --- | --- | --- | --- |
-| `implement-test` | [agents/Test-Writer.agent.md](../../agents/Test-Writer.agent.md) | [adapters/implement-test-auto-na-adapter.md](adapters/implement-test-auto-na-adapter.md) | [adapters/implement-test-explicit-skip-adapter.md](adapters/implement-test-explicit-skip-adapter.md) |
+| `implement-test` | [agents/Test-Writer.agent.md](../../agents/Test-Writer.agent.md); [adapters/implement-test-adapter.md](adapters/implement-test-adapter.md) | [adapters/implement-test-auto-na-adapter.md](adapters/implement-test-auto-na-adapter.md) | [adapters/implement-test-explicit-skip-adapter.md](adapters/implement-test-explicit-skip-adapter.md) |
+
+In `/spine-run`, the `implement-test` port resolves through [adapters/implement-test-adapter.md](adapters/implement-test-adapter.md) as the work adapter executed by Senior Engineer. Hub-flow dispatch uses `agents/Test-Writer.agent.md` directly. This split-declaration state is documented in [Documents/Design/frame-architecture.md](../../Documents/Design/frame-architecture.md); see footnote ‡ (split-declaration #612).
