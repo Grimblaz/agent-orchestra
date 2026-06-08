@@ -2,7 +2,7 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
-## [Unreleased]
+## [2.25.0] — 2026-06-07
 
 ### Added
 
