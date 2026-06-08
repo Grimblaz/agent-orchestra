@@ -16,4 +16,8 @@ Run the standard review pipeline: Code-Critic prosecution -> Code-Critic defense
 
 Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller with adapter `standard`. Pass the resolved review target, diff, linked issue or plan context, prior review ledger, active issue id if available, and review-state persistence target as the pre-dispatch context. Return the judge output unchanged so downstream callers can consume the Markdown score summary and the `judge-rulings` block in the same payload.
 
+**Post-judgment disposition gate**:
+
+After the full prosecution → defense → judgment pipeline completes, load `skills/review-judgment/SKILL.md § Post-Judge Disposition Gate` and run the disposition pass over judge-sustained findings. Follow the same steps as `/orchestra:review-judge` Post-judgment disposition gate: stable-key derivation, same-decision-resume check, per-finding gate classification, L0 token emission, and atomic marker persistence (`<!-- review-dispositions-{PR} -->` then `<!-- engagement-record-review-{PR} -->`). AC-refs: AC1, AC2.
+
 ARGUMENTS: $ARGUMENTS

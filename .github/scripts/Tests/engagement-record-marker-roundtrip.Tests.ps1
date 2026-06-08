@@ -142,12 +142,12 @@ Describe 'Read-EngagementRecords: schema conformance and version validation' {
             return
         }
 
-        # Use schema_version: 4 (the boundary case — next-unknown after v3) rather than a distant value like 99.
-        # When v4 ships, this fixture must be bumped in lockstep with the throw-set in
-        # frame-engagement-record-core.ps1 line 198. Tracking #577 review P3.F8.
+        # Use schema_version: 5 (the boundary case — next-unknown after v4) rather than a distant value like 99.
+        # v4 shipped in #655 (review phase); this fixture was bumped 4→5 in lockstep with the throw-set in
+        # frame-engagement-record-core.ps1 (now @(1, 2, 3, 4)). When v5 ships, bump this fixture again. Tracking #577 review P3.F8.
         $invalidVersionFixture = '<!-- engagement-record-design-575 -->
 ```yaml
-schema_version: 4
+schema_version: 5
 phase: design
 capture_session: "normal-design-v1"
 load_bearing_decisions: []

@@ -5,20 +5,30 @@
     Core helper library for reading and parsing engagement records (SMC-20).
 
 .DESCRIPTION
-    Scans the comments of a GitHub issue (or parses in-memory marker strings)
-    to find <!-- engagement-record-{phase}-{ID} --> markers, decodes their
-    YAML payloads using the powershell-yaml module, and returns the parsed
-    decisions. Supports latest-comment-wins resolution by createdAt timestamp.
+    Scans the comments of a GitHub issue or pull request (or parses in-memory
+    marker strings) to find <!-- engagement-record-{phase}-{ID} --> markers,
+    decodes their YAML payloads using the powershell-yaml module, and returns the
+    parsed decisions. Supports latest-comment-wins resolution by createdAt timestamp.
+
+    Issue-keyed phases (experience, design, plan, orchestration) read issue
+    comments via -IssueNumber. The PR-keyed review phase reads PR top-level
+    comments via -PullRequestNumber; the PR path takes precedence whenever the
+    phase is 'review' or no issue number is supplied (SMC-20, SMC-23).
 
     InMemoryMarkers timestamp-tiebreak rule:
     When -InMemoryMarkers is used, there are no gh createdAt timestamps, so
     latest is resolved by input order (the last element in the array wins).
 
 .PARAMETER IssueNumber
-    The GitHub issue ID. Mandatory.
+    Optional issue ID for issue-keyed phases. Must be > 0 when reading non-review
+    markers. At least one of -IssueNumber or -PullRequestNumber must be > 0.
+
+.PARAMETER PullRequestNumber
+    Optional PR ID for PR-keyed review markers. Must be > 0 when reading review
+    markers. At least one of -IssueNumber or -PullRequestNumber must be > 0.
 
 .PARAMETER Phase
-    Optional. If specified, must be 'experience', 'design', 'plan', or 'orchestration'. Filters records to this phase.
+    Optional. If specified, must be 'experience', 'design', 'plan', 'orchestration', or 'review'. Filters records to this phase.
 
 .PARAMETER Repo
     Optional. The GitHub repository in owner/name format. Defaults to current repo.
@@ -46,11 +56,13 @@ $script:DecisionIdSlugDescription = "lowercase only (case-sensitive); 2-64 chars
 function Read-EngagementRecords {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)]
-        [int]$IssueNumber,
+        [int]$IssueNumber = 0,
 
         [Parameter(Mandatory = $false)]
-        [ValidateSet('experience', 'design', 'plan', 'orchestration')]
+        [int]$PullRequestNumber = 0,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('experience', 'design', 'plan', 'orchestration', 'review')]
         [string]$Phase,
 
         [Parameter(Mandatory = $false)]
@@ -65,6 +77,10 @@ function Read-EngagementRecords {
         [Parameter(Mandatory = $false)]
         [switch]$AcceptLegacy
     )
+
+    if ($IssueNumber -le 0 -and $PullRequestNumber -le 0) {
+        throw "Read-EngagementRecords: at least one of -IssueNumber or -PullRequestNumber must be > 0"
+    }
 
     # MF1: Import powershell-yaml inside the function to avoid polluting file scope
     try {
@@ -103,27 +119,54 @@ function Read-EngagementRecords {
             }
         }
 
+        # Branch selection (F10): the phase is the authoritative signal for which
+        # marker class to read. review-phase markers are PR-keyed, so the PR path
+        # must take precedence whenever the phase is 'review' or no issue number is
+        # supplied — even when a caller forwards BOTH IDs (gate-reconciliation-core.ps1
+        # always forwards IssueNumber via $erArgs). Otherwise the issue-keyed path wins.
+        $preferPrComments = ($PullRequestNumber -gt 0) -and ($Phase -eq 'review' -or $IssueNumber -le 0)
         try {
-            # Note: 'gh issue view --json comments' caps at 100 comments; --paginate is not supported
-            # by this subcommand (it is a 'gh api' flag only). For engagement-record markers this is
-            # acceptable: markers are emitted at most twice per phase per issue, so the cap is never
-            # reached in practice.
-            $rawJson = & $GhCliPath issue view $IssueNumber --repo $Repo --json comments 2>$null
-            if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rawJson)) {
-                $commentsObj = $rawJson | ConvertFrom-Json
-                foreach ($comment in $commentsObj.comments) {
-                    $parsedMarkers += [PSCustomObject]@{
-                        Body      = $comment.body
-                        CreatedAt = [DateTime]::Parse($comment.createdAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            if ($preferPrComments) {
+                # PR-keyed path (review phase — engagement-record-review-{PR} markers live in PR top-level comments)
+                # Note: 'gh pr view --json comments' caps at 100 comments; markers are emitted
+                # at most twice per review phase per PR, so the cap is never reached in practice.
+                $rawJson = & $GhCliPath pr view $PullRequestNumber --repo $Repo --json comments 2>$null
+                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rawJson)) {
+                    $commentsObj = $rawJson | ConvertFrom-Json
+                    foreach ($comment in $commentsObj.comments) {
+                        $parsedMarkers += [PSCustomObject]@{
+                            Body      = $comment.body
+                            CreatedAt = [DateTime]::Parse($comment.createdAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                        }
                     }
+                } elseif ($LASTEXITCODE -ne 0) {
+                    Write-Warning "gh pr view exited with code $LASTEXITCODE for PR $PullRequestNumber (repo: $Repo) — engagement-record-review markers may be missing."
+                } else {
+                    Write-Verbose "gh pr view returned no comments for PR $PullRequestNumber (repo: $Repo)."
                 }
-            } elseif ($LASTEXITCODE -ne 0) {
-                Write-Warning "gh issue view exited with code $LASTEXITCODE for issue $IssueNumber (repo: $Repo) — engagement-record markers may be missing."
-            } else {
-                Write-Verbose "gh issue view returned no comments for issue $IssueNumber (repo: $Repo)."
+            } elseif ($IssueNumber -gt 0) {
+                # Issue-keyed path (all phases except review)
+                # Note: 'gh issue view --json comments' caps at 100 comments; --paginate is not supported
+                # by this subcommand (it is a 'gh api' flag only). For engagement-record markers this is
+                # acceptable: markers are emitted at most twice per phase per issue, so the cap is never
+                # reached in practice.
+                $rawJson = & $GhCliPath issue view $IssueNumber --repo $Repo --json comments 2>$null
+                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rawJson)) {
+                    $commentsObj = $rawJson | ConvertFrom-Json
+                    foreach ($comment in $commentsObj.comments) {
+                        $parsedMarkers += [PSCustomObject]@{
+                            Body      = $comment.body
+                            CreatedAt = [DateTime]::Parse($comment.createdAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                        }
+                    }
+                } elseif ($LASTEXITCODE -ne 0) {
+                    Write-Warning "gh issue view exited with code $LASTEXITCODE for issue $IssueNumber (repo: $Repo) — engagement-record markers may be missing."
+                } else {
+                    Write-Verbose "gh issue view returned no comments for issue $IssueNumber (repo: $Repo)."
+                }
             }
         } catch {
-            Write-Error "Failed to fetch comments for issue $IssueNumber from gh CLI: $_"
+            Write-Error "Failed to fetch comments for $($preferPrComments ? "PR $PullRequestNumber" : "issue $IssueNumber") from gh CLI: $_"
         }
     }
 
@@ -138,9 +181,21 @@ function Read-EngagementRecords {
             $commentPhase = $Matches[1].ToLowerInvariant()
             $commentIssue = [int]$Matches[2]
 
-            # MF2: Always enforce issue-number match; -AcceptLegacy only relaxes schema validation
-            if ($commentIssue -ne $IssueNumber) {
-                continue
+            # PR-aware keying: 'review' phase markers are PR-keyed, not issue-keyed (AC5/AC6, #655 S2)
+            if ($commentPhase -eq 'review') {
+                # Collision guard: never let a PR-number marker match an issue-number read
+                if ($PullRequestNumber -gt 0 -and $commentIssue -eq $PullRequestNumber) {
+                    # Match: this is a review marker for the requested PR — proceed to YAML parse
+                } else {
+                    # Skip: either no PR number requested, or number mismatch
+                    continue
+                }
+            } else {
+                # Issue-keyed path (existing behaviour for non-review phases)
+                # MF2: Always enforce issue-number match; -AcceptLegacy only relaxes schema validation
+                if ($commentIssue -ne $IssueNumber) {
+                    continue
+                }
             }
 
             # Extract YAML content
@@ -195,17 +250,17 @@ function Read-EngagementRecords {
 
             # CF13b: wrap per-marker schema/enum validations so a single malformed marker does not abort the scan.
             # Exception: unknown schema_version MUST propagate (SKILL.md Schema Versioning Policy).
-            if (-not $isLegacy -and $null -ne $parsedYaml.schema_version -and $parsedYaml.schema_version -notin @(1, 2, 3)) {
+            if (-not $isLegacy -and $null -ne $parsedYaml.schema_version -and $parsedYaml.schema_version -notin @(1, 2, 3, 4)) {
                 throw [System.InvalidOperationException]::new("unknown schema_version: $($parsedYaml.schema_version)")
             }
 
             try {
                 # Enum validation for non-legacy markers
                 if (-not $isLegacy) {
-                    # Supported non-legacy phases: experience, design, plan, and orchestration (plan requires schema_version >= 2).
-                    if ($parsedYaml.phase -notin @('experience', 'design', 'plan', 'orchestration') -or
+                    # Supported non-legacy phases: experience, design, plan, orchestration, and review (plan requires schema_version >= 2; review requires schema_version >= 4).
+                    if ($parsedYaml.phase -notin @('experience', 'design', 'plan', 'orchestration', 'review') -or
                         ($parsedYaml.phase -eq 'plan' -and [int]$parsedYaml.schema_version -lt 2)) {
-                        throw [System.InvalidOperationException]::new("Invalid phase value: $($parsedYaml.phase) (phase 'plan' requires schema_version >= 2)")
+                        throw [System.InvalidOperationException]::new("Invalid phase value: $($parsedYaml.phase) (phase 'plan' requires schema_version >= 2; phase 'review' requires schema_version >= 4)")
                     }
                     # NOTE (review P1.F1/P2.F4): this throw fires inside the CF13b try/catch at lines 202-271 and is caught
                     # as Write-Warning, then 'continue'd past. The test `It 'v2-orchestration rejection'` in
@@ -216,6 +271,9 @@ function Read-EngagementRecords {
                     # test to use -WarningVariable and assert the warning record content directly. Tracked as routine debt.
                     if ($parsedYaml.phase -eq 'orchestration' -and [int]$parsedYaml.schema_version -lt 3) {
                         throw [System.InvalidOperationException]::new("orchestration phase requires schema_version >= 3")
+                    }
+                    if ($parsedYaml.phase -eq 'review' -and [int]$parsedYaml.schema_version -lt 4) {
+                        throw [System.InvalidOperationException]::new("review phase requires schema_version >= 4")
                     }
                 }
 

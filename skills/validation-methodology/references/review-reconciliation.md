@@ -137,6 +137,8 @@ Before creating the tracking issue, apply the prevention-analysis advisory from 
 
 #### Batch Specialist Dispatch (R4)
 
+**Disposition filter (review-dispositions gate)**: Before dispatching any sustained finding to a specialist, check the `<!-- review-dispositions-{PR} -->` marker for this PR. Skip findings where `disposition: escalate` — those were explicitly excluded from the current PR's fix scope by the engineer during the post-judge disposition gate. Only `disposition: incorporate` entries proceed to fix dispatch.
+
 Before dispatching any findings to specialists, complete **all** routing decisions first (express-lane partition from the prosecutor pass + judge rulings). Then dispatch in a single batch per specialist agent:
 
 1. **Collect**: Gather all accepted findings into two queues - express-lane findings (partitioned before defense) and judge-accepted findings (from Code-Review-Response ruling). Do not dispatch either queue until both are finalized.

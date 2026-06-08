@@ -4,6 +4,18 @@ This reference pairs the post-judgment prosecution-depth re-activation check wit
 
 The canonical routing mechanics remain in [review-reconciliation.md](review-reconciliation.md) under `Post-Judgment Fix Routing`; this file keeps the pairing discoverable without duplicating the full routing contract.
 
+## Post-Judgment Disposition Gate (AC1, AC2, AC10)
+
+Before any fix routing or re-activation detection, run the review-disposition engagement gate per `skills/review-judgment/SKILL.md § Post-Judge Disposition Gate`. This gate fires in the owning parent workflow after the judge-rulings comment is confirmed written.
+
+**Gate scope**: Judge-sustained findings only (`judge_ruling: sustained`). Defense-sustained findings skip the gate.
+
+**Direct review path** (`/orchestra:review`, `/orchestra:review-judge`): the gate fires immediately after the judge-rulings comment per the commands' Post-judgment disposition gate steps.
+
+**GitHub review path** (`/review-github`, `code-review-intake/SKILL.md` Step 5): after the proxy-prosecution judge pass (Step 5) emits rulings, the owning Code-Conductor run activates the same disposition gate before routing implementation work. This is the AC10 Code-Conductor pre-dispatch gate: if the incoming context carries a `<!-- judge-rulings ... -->` block, the gate fires before any specialist dispatch.
+
+**Ordering invariant**: disposition gate → re-activation detection → fix routing. The gate records engineer intent before fix routing begins; re-activation detection and batch-dispatch (R4) follow.
+
 ## Post-Judgment Re-Activation Detection
 
 After the judge emits rulings, check sustained findings against the prosecution depth map recorded during Prosecution Depth Setup.

@@ -3,7 +3,7 @@
   "$id": "gate-decision-token",
   "description": "Classification-decision token emitted by the solution-authoring gate at decision time. Written by the agent (L0) and optionally corroborated by the PostToolUse event logger (L1). Consumed by gate-reconciliation-core.ps1 (L2) and the Code-Critic missed-gate perspective (L3).",
   "type": "object",
-  "required": ["decision_id", "phase", "outcome", "classification", "window_position", "timestamp", "issue_number"],
+  "required": ["decision_id", "phase", "outcome", "classification", "window_position", "timestamp"],
   "properties": {
     "decision_id": {
       "type": "string",
@@ -12,7 +12,7 @@
     },
     "phase": {
       "type": "string",
-      "enum": ["experience", "design", "plan", "orchestration"],
+      "enum": ["experience", "design", "plan", "orchestration", "review"],
       "description": "Pipeline phase in which the gate fired."
     },
     "outcome": {
@@ -27,8 +27,8 @@
     },
     "window_position": {
       "type": "string",
-      "enum": ["pre-ask", "disposition", "judge-merge", "unknown"],
-      "description": "Which gate firing position this token belongs to. 'pre-ask' = upstream structured question. 'disposition' = adversarial finding disposition (#615 surface). 'judge-merge' = plan judge-merge disposition (#605 surface)."
+      "enum": ["pre-ask", "disposition", "judge-merge", "unknown", "review-disposition"],
+      "description": "Which gate firing position this token belongs to. 'pre-ask' = upstream structured question. 'disposition' = adversarial finding disposition (#615 surface). 'judge-merge' = plan judge-merge disposition (#605 surface). 'review-disposition' = review-verdict disposition gate firing position."
     },
     "timestamp": {
       "type": "string",
@@ -42,12 +42,31 @@
     "issue_number": {
       "type": "integer",
       "minimum": 1,
-      "description": "The GitHub issue number this decision belongs to. Required for per-issue scoping in the L2 reconciliation validator."
+      "description": "The GitHub issue number this decision belongs to. Required for all phases except 'review-disposition' window. For review-disposition tokens, use pull_request_number instead."
+    },
+    "pull_request_number": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The GitHub PR number this decision belongs to. Required when window_position is 'review-disposition'. Mutually exclusive with issue_number for that window."
     },
     "skip_reason": {
       "type": "string",
       "description": "Optional human-readable note when outcome is a lawful skip. Never present when outcome = 'asked'."
     }
+  },
+  "if": {
+    "properties": {
+      "window_position": { "const": "review-disposition" }
+    },
+    "required": ["window_position"]
+  },
+  "then": {
+    "required": ["pull_request_number"],
+    "not": { "required": ["issue_number"] }
+  },
+  "else": {
+    "required": ["issue_number"],
+    "not": { "required": ["pull_request_number"] }
   },
   "additionalProperties": false
 }

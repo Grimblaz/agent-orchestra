@@ -171,3 +171,149 @@ Judgment does not implement fixes. It produces the ruling and the evidence packa
 | Trigger                             | Gotcha                                                         | Fix                                                                |
 | ----------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------ |
 | A ruling omits the `judge-rulings` block | Downstream consumers can miss completion or fail to route cleanly | Emit the `judge-rulings` block immediately after the score summary in the same payload; ensure the `<!-- review-judge-produced-{PR} -->` sentinel was written as a separate PR comment before |
+
+## Post-Judge Disposition Gate
+
+### Purpose
+
+After the judge emits its rulings (sentinel + judge-rulings comment), the owning parent agent runs the review-disposition engagement gate over the judge-sustained findings. This prevents cognitive surrender at the PR code-review verdict point: the engineer must consciously disposition each sustained finding rather than having the agent assume outcomes.
+
+This gate is owned by the calling workflow (e.g. `/orchestra:review-judge`, `/orchestra:review`), not by this skill's judgment pass. The judgment pass ends with the judge-rulings comment. Disposition begins immediately after.
+
+### When to Run
+
+- After the `<!-- review-judge-produced-{PR} -->` sentinel is confirmed written
+- Over the judge-sustained findings from the `<!-- judge-rulings ... -->` block
+- Only for sustained findings (`judge_ruling: sustained`); defense-sustained findings (`judge_ruling: defense-sustained`) are skipped silently (not disposition-gated)
+
+### Classification
+
+For each judge-sustained finding, run the solution-authoring classification gate (`skills/solution-authoring/SKILL.md § Rule: Classification gate`) to determine whether it is **load-bearing** or **routine**.
+
+A finding is **load-bearing** iff all three legs pass:
+
+1. **Reversibility** — acting on this finding would change a published or durable artifact (source file, test, config, doc, or skill).
+2. **Non-inheritance** — no specific inherited artifact (prior design decision, existing AC, approved plan statement, locked methodology rule) already settles the required action. The agent MUST attempt to cite one before declaring non-inheritable.
+3. **Audit-plausibility** — the agent can write a substantive `disposition_rationale` sentence.
+
+Failing any leg collapses the finding to **routine**. The tier rule from `solution-authoring § Applying the gate to adversarial-review dispositions` applies: load-bearing adversarial-review dispositions use the **escalation tier** decision brief; routine findings are recorded silently.
+
+### Stable Finding Key
+
+Before the gate fires, compute a `stable_finding_key` for each finding. This key must survive re-reviews of the same PR. Use the first available:
+
+1. **GitHub comment ID** — if the finding originated from a GitHub review comment, use its comment ID as the key (format: `gh-{comment_id}`).
+2. **file:line:hash** — normalize the finding title (lowercase, remove punctuation, replace spaces with hyphens), then form `{relative_file}:{line}:{normalized-title-hash[:8]}` where hash is the first 8 hex chars of a deterministic hash of the normalized title.
+3. **finding_id fallback** — if neither is available, use the sequential `finding_id` (e.g. `F1`) with a `warn:` prefix to signal instability: `warn:F1`.
+
+The `stable_finding_key` is what the resume-read mechanism uses to detect prior dispositions across re-reviews of the same PR (see § Stable-Key Resume below).
+
+### Routine Findings — Silent Recording
+
+For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`:
+
+```yaml
+- stable_finding_key: "src/foo.ts:42:null-check-missing-a1b2c3d4"
+  finding_id: F2
+  pass: 1
+  disposition: incorporate   # or dismiss — agent's judgment based on judge ruling
+  classification: routine
+  disposition_rationale: "Trivial null-guard already required by the existing type contract; no maintainer choice required."
+  artifact_citation: "src/types/index.ts:18 (NonNullable<T> constraint)"
+```
+
+The agent chooses `incorporate` or `dismiss` based on the judge ruling direction. Routine findings do not fire the gate; they feed directly into the accumulator.
+
+### Load-Bearing Findings — AskUserQuestion
+
+For load-bearing findings, render an **escalation-tier decision brief** (three required elements, all present before the option list):
+
+1. **Concrete element → current state**: what the current code/artifact actually does, with evidence (file:line or artifact citation from the finding).
+2. **Decision setup → the conflict**: why this finding's proposed change conflicts with or extends beyond the current state.
+3. **Conditional misconception → customer failure mode**: the concrete failure the engineer would cause by taking the wrong path.
+
+Then fire `AskUserQuestion` with options:
+
+- `Incorporate — apply the fix` (Recommended if prosecution was sustained on strong evidence)
+- `Dismiss — the finding does not warrant a change`
+- `Escalate — this needs a design decision or a separate issue`
+- `Decline engagement — proceed without classification`
+
+Capture the engineer's choice verbatim. Record as:
+
+```yaml
+- stable_finding_key: "src/auth/session.ts:88:token-expiry-not-checked-b7c1a2f3"
+  finding_id: F1
+  pass: 2
+  disposition: incorporate   # or dismiss or escalate per engineer choice
+  classification: load-bearing
+  disposition_rationale: "Engineer chose incorporate: the expiry check was confirmed missing and the fix is bounded to one function."
+```
+
+### Escalate Semantics
+
+When an engineer selects `Escalate`:
+
+1. Record `disposition: escalate` in the entry.
+2. Emit a concise escalation note inline (not a structured question): `Finding {finding_id} escalated — recommend filing a follow-up issue for: {finding title}. Proceeding without implementing this finding.`
+3. Do NOT implement the finding in the current PR. The current work continues; the escalated finding is noted for tracking.
+4. Record the `escalate` outcome faithfully in `review-dispositions-{PR}` and in the L0 gate-decision token.
+
+### L0 Gate-Decision Tokens
+
+For each finding that was gate-classified (routine or load-bearing), emit an L0 gate-decision token per `skills/solution-authoring/schemas/gate-decision-token.schema.json`:
+
+```yaml
+decision_id: "{stable_finding_key}"
+phase: review
+outcome: asked          # 'asked' for load-bearing, 'gate-fails' for routine
+classification: load-bearing   # or routine
+window_position: review-disposition
+timestamp: "{ISO-8601 UTC}"
+pull_request_number: {PR}   # NOT issue_number
+skip_reason: "routine-finding"   # omit when outcome=asked
+```
+
+Write each token to the authoritative L0 location per `skills/solution-authoring/SKILL.md` § L0 Gate Token: `/memories/session/gate-events-{session_key}.jsonl` (fallback: `.copilot-tracking/gate-events.jsonl`) as a single JSON line per the existing L0 emission pattern.
+
+### Stable-Key Resume
+
+At the start of the disposition pass, call `Read-EngagementRecords -Phase review -PullRequestNumber {PR}` (from `.github/scripts/lib/frame-engagement-record-core.ps1`). If a prior `engagement-record-review-{PR}` exists, extract its `load_bearing_decisions[].decision_id` values. These are `stable_finding_key` values of previously-gate-fired findings.
+
+For each finding in the current judge-sustained set, check whether its `stable_finding_key` appears in the prior record:
+- **Match found** → `same-decision-resume` skip: reuse the prior `engineer_choice`, log `Reusing prior {stable_finding_key}: {engineer_choice}`, do not fire `AskUserQuestion`.
+- **No match** → run the gate normally.
+
+This enables re-review of a PR without re-asking for findings already dispositioned.
+
+### Persistence — Ordering
+
+Write in this order (atomic marker first, engagement-record second):
+
+1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 1`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). This is the atomic per-finding record.
+
+   ~~~
+   <!-- review-dispositions-{PR} -->
+
+   ```yaml
+   schema_version: 1
+   passes_run: [1, 2, 3]
+   entries:
+     - stable_finding_key: "..."
+       ...
+   ```
+   ~~~
+
+2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired `AskUserQuestion` appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.
+
+   The engagement-record carries the `same-decision-resume` identity; the review-dispositions carries the per-finding outcome record. Never merge the two into a single comment.
+
+### SMC References
+
+- **SMC-19** — `finding_dispositions` is design-only (issue-keyed on `design-phase-complete`). This section's `review-dispositions` is a distinct, PR-keyed path.
+- **SMC-23** — governs `review-dispositions-{PR}` + `engagement-record-review-{PR}` survival, write path (PR comments), and cross-tool fungibility.
+- **SMC-20** — extended to include `review` phase; governs `engagement-record-review-{PR}` cross-session resume semantics.
+
+### Gotcha: Gate fires post-judge, not inside judge
+
+The classification gate fires in the **owning parent workflow** after receiving the judge output. The judge body (this skill's judgment pass) ends at the judge-rulings comment. Do not add gate logic inside the judge's verification or scoring steps — doing so would conflate two distinct phases and make re-running the judge independent of dispositions impossible.
