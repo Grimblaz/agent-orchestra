@@ -16,8 +16,8 @@ Describe 'Issue #612 Doc-Keeper fat-skill extraction contract (grep only; NO liv
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:DocKeeperBodyPath = Join-Path $script:RepoRoot 'agents\Doc-Keeper.agent.md'
-        $script:DocFinalizationSkillPath = Join-Path $script:RepoRoot 'skills\documentation-finalization\SKILL.md'
+        $script:DocKeeperBodyPath = Join-Path $script:RepoRoot 'agents/Doc-Keeper.agent.md'
+        $script:DocFinalizationSkillPath = Join-Path $script:RepoRoot 'skills/documentation-finalization/SKILL.md'
 
         $script:ReadText = {
             param([Parameter(Mandatory)][string]$Path)
