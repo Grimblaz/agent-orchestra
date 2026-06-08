@@ -45,10 +45,11 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
-    [int]$IssueNumber,
+    [int]$IssueNumber = 0,
 
-    [ValidateSet('experience','design','plan','orchestration')]
+    [int]$PullRequestNumber = 0,
+
+    [ValidateSet('experience','design','plan','orchestration','review')]
     [string]$Phase,
 
     [string]$Repo = '',
@@ -106,8 +107,10 @@ function Read-GateTokens {
 }
 
 function Read-FindingDispositionIds {
-    # Returns finding_id values from finding_dispositions: blocks on design-phase-complete markers
-    param([int]$Issue, [string]$Repo, [string]$Gh, [string[]]$InMem)
+    # Returns finding_id values from finding_dispositions on design-phase-complete markers
+    # AND stable_finding_key values from review-dispositions-{PR} markers when PullRequestNumber > 0.
+    # SMC-19: finding_dispositions is design-only (issue-keyed). SMC-23: review-dispositions is PR-keyed.
+    param([int]$Issue, [string]$Repo, [string]$Gh, [string[]]$InMem, [int]$PullRequestNumber = 0)
 
     $recordedIds = @()
 
@@ -133,6 +136,7 @@ function Read-FindingDispositionIds {
             return $recordedIds
         }
 
+        # ── finding_dispositions from design-phase-complete (SMC-19, issue-keyed) ──
         if ($InMem -and $InMem.Count -gt 0) {
             $allBodies = $InMem
         }
@@ -166,6 +170,64 @@ function Read-FindingDispositionIds {
                 Write-Warning "gate-reconciliation: failed to parse YAML in design-phase-complete comment — $($_.Exception.Message); skipping this marker"
             }
         }
+
+        # ── stable_finding_key from review-dispositions-{PR} (SMC-23, PR-keyed) ──
+        # SMC-23: multiple markers per PR allowed; latest createdAt wins on read.
+        if ($PullRequestNumber -gt 0 -and $repoTarget) {
+            $prMarkers = @()
+            if ($InMem -and $InMem.Count -gt 0) {
+                # InMem: assign synthetic ascending timestamps to preserve array order as proxy for createdAt
+                for ($i = 0; $i -lt $InMem.Count; $i++) {
+                    $prMarkers += [PSCustomObject]@{
+                        Body      = $InMem[$i]
+                        CreatedAt = [DateTime]::MinValue.AddTicks($i)
+                    }
+                }
+            } else {
+                # PR review comments (inline code comments)
+                $rawReviewComments = & $Gh api "repos/$repoTarget/pulls/$PullRequestNumber/comments" --paginate --slurp 2>$null | ConvertFrom-Json
+                if ($LASTEXITCODE -eq 0 -and $rawReviewComments) {
+                    if ($rawReviewComments -is [array] -and $rawReviewComments[0] -is [array]) {
+                        $rawReviewComments = $rawReviewComments | ForEach-Object { $_ }
+                    }
+                    $prMarkers += $rawReviewComments | ForEach-Object {
+                        [PSCustomObject]@{ Body = $_.body; CreatedAt = [datetime]$_.created_at }
+                    }
+                }
+                # PR issue-style comments (top-level PR comments, same API as issues)
+                $rawIssueComments = & $Gh api "repos/$repoTarget/issues/$PullRequestNumber/comments" --paginate --slurp 2>$null | ConvertFrom-Json
+                if ($LASTEXITCODE -eq 0 -and $rawIssueComments) {
+                    if ($rawIssueComments -is [array] -and $rawIssueComments[0] -is [array]) {
+                        $rawIssueComments = $rawIssueComments | ForEach-Object { $_ }
+                    }
+                    $prMarkers += $rawIssueComments | ForEach-Object {
+                        [PSCustomObject]@{ Body = $_.body; CreatedAt = [datetime]$_.created_at }
+                    }
+                }
+            }
+
+            $rdPattern = "<!--\s*review-dispositions-$PullRequestNumber\s*-->"
+            $latestMarker = $prMarkers |
+                Where-Object { $_.Body -match $rdPattern } |
+                Sort-Object CreatedAt |
+                Select-Object -Last 1
+
+            if ($latestMarker) {
+                $yamlMatch = [regex]::Match($latestMarker.Body, '```yaml\s*([\s\S]*?)```')
+                if ($yamlMatch.Success) {
+                    try {
+                        $parsed = $yamlMatch.Groups[1].Value | ConvertFrom-Yaml -ErrorAction Stop
+                        if ($parsed['entries']) {
+                            foreach ($entry in $parsed['entries']) {
+                                if ($entry['stable_finding_key']) { $recordedIds += $entry['stable_finding_key'] }
+                            }
+                        }
+                    } catch {
+                        Write-Warning "gate-reconciliation: failed to parse YAML in review-dispositions-$PullRequestNumber comment — $($_.Exception.Message); skipping this marker"
+                    }
+                }
+            }
+        }
     } catch {
         Write-Warning "gate-reconciliation: Read-FindingDispositionIds failed — $($_.Exception.Message); finding_dispositions coverage unavailable"
     }
@@ -182,13 +244,17 @@ $tokens = Read-GateTokens -ExplicitPath $EventLogPath
 if ($Phase) {
     $tokens = $tokens | Where-Object { $_.phase -eq $Phase }
 }
-if ($IssueNumber -and $IssueNumber -gt 0) {
-    # Backward-compat: include tokens without issue_number (legacy logs pre-MF2; bounded to session-scoped files)
+if ($PullRequestNumber -gt 0) {
+    # Review-window: filter by pull_request_number (review-disposition tokens carry PR not issue)
+    $tokens = $tokens | Where-Object { $_.pull_request_number -eq $PullRequestNumber }
+} elseif ($IssueNumber -and $IssueNumber -gt 0) {
+    # Issue-keyed: backward-compat includes tokens without issue_number (legacy logs pre-MF2; bounded to session-scoped files)
     $tokens = $tokens | Where-Object { $_.issue_number -eq $IssueNumber -or -not $_.issue_number }
 }
 
 # 2. Read recorded engagement-record decisions (decision_id coverage)
 $erArgs = @{ IssueNumber = $IssueNumber; GhCliPath = $GhCliPath }
+if ($PullRequestNumber -gt 0) { $erArgs.PullRequestNumber = $PullRequestNumber }
 if ($Phase)           { $erArgs.Phase = $Phase }
 if ($Repo)            { $erArgs.Repo = $Repo }
 if ($InMemoryMarkers) { $erArgs.InMemoryMarkers = $InMemoryMarkers }
@@ -202,7 +268,7 @@ $recordedDecisionIds = @()
 $recordedDecisionIds += $engagementRecords | ForEach-Object { $_.decision_id } | Where-Object { $_ }
 
 # 3. Read finding_dispositions finding_id coverage (disposition surface, #615; judge-merge, #605)
-$recordedFindingIds = Read-FindingDispositionIds -Issue $IssueNumber -Repo $Repo -Gh $GhCliPath -InMem $InMemoryMarkers
+$recordedFindingIds = Read-FindingDispositionIds -Issue $IssueNumber -Repo $Repo -Gh $GhCliPath -InMem $InMemoryMarkers -PullRequestNumber $PullRequestNumber
 $allRecordedIds = ($recordedDecisionIds + $recordedFindingIds) | Sort-Object -Unique
 
 # 4. Reconcile
