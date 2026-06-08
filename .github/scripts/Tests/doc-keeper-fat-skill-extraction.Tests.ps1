@@ -70,9 +70,29 @@ Describe 'Issue #612 Doc-Keeper fat-skill extraction contract (grep only; NO liv
             $content | Should -Match 'skills/documentation-finalization/SKILL\.md'
         }
 
-        It 'does NOT contain the full bullet list content that was moved to the skill' {
+        It 'does NOT contain the CHANGELOG bullet that was moved to the skill' {
             $content = & $script:ReadText -Path $script:DocKeeperBodyPath
             $content | Should -Not -Match 'Update BEFORE merge - add entry during PR documentation finalization'
+        }
+
+        It 'does NOT contain the NEXT-STEPS bullet that was moved to the skill' {
+            $content = & $script:ReadText -Path $script:DocKeeperBodyPath
+            $content | Should -Not -Match 'Update BEFORE merge - update priorities during PR finalization'
+        }
+
+        It 'does NOT contain the QUICK-START bullet that was moved to the skill' {
+            $content = & $script:ReadText -Path $script:DocKeeperBodyPath
+            $content | Should -Not -Match 'Update when tooling or setup instructions change'
+        }
+
+        It 'does NOT contain the Documents/Decisions bullet that was moved to the skill' {
+            $content = & $script:ReadText -Path $script:DocKeeperBodyPath
+            $content | Should -Not -Match 'Create new decision records from issue body design content'
+        }
+
+        It 'does NOT contain the ROADMAP bullet that was moved to the skill' {
+            $content = & $script:ReadText -Path $script:DocKeeperBodyPath
+            $content | Should -Not -Match 'Update when present - reflect milestone and priority changes'
         }
     }
 }

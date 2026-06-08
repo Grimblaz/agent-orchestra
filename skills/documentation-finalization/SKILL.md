@@ -104,4 +104,6 @@ See also: [Experience-Owner](../../agents/Experience-Owner.agent.md) for custome
 
 | Port | Work adapter | Auto-N/A adapter | Explicit-skip adapter |
 | --- | --- | --- | --- |
-| `implement-docs` | [agents/Doc-Keeper.agent.md](../../agents/Doc-Keeper.agent.md) | [adapters/implement-docs-auto-na-adapter.md](adapters/implement-docs-auto-na-adapter.md) | [adapters/implement-docs-explicit-skip-adapter.md](adapters/implement-docs-explicit-skip-adapter.md) |
+| `implement-docs` | [agents/Doc-Keeper.agent.md](../../agents/Doc-Keeper.agent.md); [adapters/implement-docs-adapter.md](adapters/implement-docs-adapter.md) | [adapters/implement-docs-auto-na-adapter.md](adapters/implement-docs-auto-na-adapter.md) | [adapters/implement-docs-explicit-skip-adapter.md](adapters/implement-docs-explicit-skip-adapter.md) |
+
+In `/spine-run`, the `implement-docs` port resolves through [adapters/implement-docs-adapter.md](adapters/implement-docs-adapter.md) as the work adapter executed by Senior Engineer. Hub-flow dispatch uses `agents/Doc-Keeper.agent.md` directly. This split-declaration state is documented in [Documents/Design/frame-architecture.md](../../Documents/Design/frame-architecture.md); see footnote § (split-declaration #612).

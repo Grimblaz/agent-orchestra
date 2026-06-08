@@ -234,6 +234,7 @@ Describe 'Issue #552 Senior Engineer skill-as-adapter contracts (grep/YAML/valid
                 if ($content -notmatch '(?m)^## When to use\s*$') { $violations.Add("$relativePath is missing ## When to use") | Out-Null }
                 if ($content -notmatch '(?im)^#{3,6}\s*Pick\b') { $violations.Add("$relativePath is missing Pick guidance") | Out-Null }
                 if ($content -notmatch "(?im)^#{3,6}\s*Don'?t[- ]pick\b") { $violations.Add("$relativePath is missing Don't-pick guidance") | Out-Null }
+                if ($content -notmatch 'Build-\w+CreditRow') { $violations.Add("$relativePath is missing a terminal credit-builder reference (Build-*CreditRow)") | Out-Null }
             }
 
             ($violations -join "`n") | Should -Be ''
