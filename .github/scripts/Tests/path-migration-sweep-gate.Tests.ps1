@@ -232,3 +232,119 @@ Describe 'Issue #367 path-migration sweep gate' -Tag 'issue-367', 'sweep-gate' {
         }
     }
 }
+
+Describe 'Issue #664 backslash-Join-Path hygiene gate' -Tag 'issue-664', 'sweep-gate' {
+    # Gate: no tracked .ps1 file may pass a single-quoted child path containing a
+    # backslash to Join-Path (e.g. Join-Path $x 'a\b') unless exempted.
+    #
+    # Detection regex (verbatim): Join-Path\s.*'[^']*\\[^']*'
+    #
+    # Matches any source line where:
+    #   1. The token "Join-Path" appears.
+    #   2. Followed by at least one whitespace character (\s).
+    #   3. Followed by any characters (.*).
+    #   4. Followed by a single-quoted string containing at least one backslash.
+    #
+    # Documented miss: double-quoted child paths (Join-Path $x "a\b") are NOT
+    # caught because the regex requires a single-quoted string. No known in-tree
+    # double-quoted backslash Join-Path calls exist at the time of authoring.
+    #
+    # Exemption mechanism (same convention as script-safety-contract.Tests.ps1):
+    #   - Full-line comments (TrimStart starts with '#') are skipped.
+    #   - Lines inside block comments are skipped.
+    #   - Lines containing the inline comment "# host-path-ok" are skipped.
+    #
+    # Scope: all git-ls-files-tracked .ps1 files, Tests-inclusive,
+    # excluding paths under .claude/worktrees and excluding this gate file
+    # itself (self-exclusion).
+    #
+    # Gate invariant: AC1 = guard-green.
+    # Non-goal: no conversions in this slice (s1). The gate is intentionally
+    # RED after s1 until s2 (production fixes) and s3 (Tests sweep) complete.
+    #
+    # To suppress a legitimate reference, add '# host-path-ok' on the same line.
+
+    BeforeAll {
+        $script:RepoRoot664 = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:GatePattern = "Join-Path\s.*'[^']*\\[^']*'"
+        # Self-exclusion: the gate file itself contains the pattern string and
+        # self-test literals — exclude it from the production scan.
+        $script:GateRelPath = '.github/scripts/Tests/path-migration-sweep-gate.Tests.ps1'
+
+        Push-Location $script:RepoRoot664
+        try {
+            $allTracked = (& git ls-files) -split "`n" | Where-Object { $_ }
+        }
+        finally {
+            Pop-Location
+        }
+
+        # Scope: tracked .ps1 files, excluding .claude/worktrees, excluding gate file
+        $script:ScanFiles664 = $allTracked | Where-Object {
+            $_ -match '\.ps1$' -and
+            $_ -notmatch '^\.claude[/\\]worktrees[/\\]' -and
+            ($_ -replace '\\', '/') -ne $script:GateRelPath
+        }
+
+        $script:Violations664 = [System.Collections.Generic.List[string]]::new()
+        foreach ($rel in $script:ScanFiles664) {
+            $full = Join-Path $script:RepoRoot664 $rel
+            if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
+            $lines = Get-Content -LiteralPath $full -ErrorAction SilentlyContinue
+            if (-not $lines) { continue }
+            $inBlock = $false
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+                $line = $lines[$i]
+                # Track block-comment state (<# opens, #> closes)
+                if ($line -match '<#') { $inBlock = $true }
+                if ($inBlock) {
+                    if ($line -match '#>') { $inBlock = $false }
+                    continue
+                }
+                # Skip full-line comments
+                if ($line.TrimStart() -like '#*') { continue }
+                # Skip exempted lines
+                if ($line -match '# host-path-ok') { continue }
+                # Detect the pattern
+                if ($line -match $script:GatePattern) {
+                    $script:Violations664.Add(('{0}:{1}: {2}' -f $rel, ($i + 1), $line.Trim()))
+                }
+            }
+        }
+    }
+
+    Context 'Production scan' {
+        It 'No tracked .ps1 passes a backslash child path to Join-Path' {
+            $script:Violations664 | Should -BeNullOrEmpty -Because (
+                "Join-Path child paths must not contain backslashes — use forward slashes or " +
+                "separate path segments as additional Join-Path arguments. " +
+                "To suppress a legitimate Windows-only reference add '# host-path-ok' on the same line. " +
+                "Violations:`n  " + ($script:Violations664 -join "`n  ")
+            )
+        }
+    }
+
+    Context 'Self-tests' {
+        It 'Falsifiability: injected backslash child path is detected' {
+            # A literal that should match the detection regex
+            $injected = "Join-Path `$PSScriptRoot '..\assets\routing-config.json'"
+            $injected | Should -Match $script:GatePattern
+        }
+
+        It 'No false positives: in-tree negative patterns are not flagged' {
+            # Regex character class with backslash — no Join-Path prefix
+            $regexClass = "if (`$rel -match '[/\\]Tests([/\\]|`$)')"
+            $regexClass | Should -Not -Match $script:GatePattern
+
+            # Content assertion with backslash — no Join-Path prefix
+            $contentAssert = "`$content | Should -Be 'path\to\file'"
+            $contentAssert | Should -Not -Match $script:GatePattern
+        }
+
+        It 'Documented miss: double-quoted child path is not caught by regex' {
+            # Double-quoted form is the documented miss — outside regex scope
+            $doubleQuoted = 'Join-Path $x "a\b.md"'
+            $doubleQuoted | Should -Not -Match $script:GatePattern
+        }
+    }
+}
