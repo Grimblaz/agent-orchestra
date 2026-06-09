@@ -164,7 +164,7 @@ last_updated: 2026-04-24 14:00:00
         )
 
         foreach ($case in $cases) {
-            $path = Join-Path $script:TempRoot ("review-state-malformed-{0}.md" -f ($case.Name -replace '/s+', '-'))
+            $path = Join-Path $script:TempRoot ("review-state-malformed-{0}.md" -f ($case.Name -replace '\s+', '-'))
             $case.Content | Set-Content -Path $path -Encoding UTF8
 
             Read-ReviewStateFile -Path $path | Should -BeNullOrEmpty -Because "$($case.Name) must fail closed"

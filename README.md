@@ -14,7 +14,6 @@ A multi-agent workflow system that orchestrates AI-assisted software development
 
 > ⚠️ **Copilot / VS Code support is frozen and retiring after 2026-08-31.**
 > Claude Code is the actively supported path — see [Install as Plugin (Claude Code)](#install-as-plugin-claude-code) below. If you depend on the Copilot/VS Code surface, start a [GitHub Discussion](https://github.com/Grimblaz/agent-orchestra/discussions) before the deadline. See [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md) for details.
-
 > **Experimental**: Agent plugins are available in VS Code 1.110 as an experimental feature. Plugin distribution is the fastest way to get started with no cloning required.
 
 ### Quick Setup (Plugin)
