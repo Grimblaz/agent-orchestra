@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 9f483ca2780a3b155a4f76b8efa9e1ba8d047a17
-generated-at: 2026-06-04T02:19:18Z
+last-verified: 32f983d4f2c599322c3a08b21516b7b06c9fd6e4
+generated-at: 2026-06-09T05:41:59Z
 -->
 
 ## Purpose
@@ -100,6 +100,16 @@ In a **hub-repo run** (the agent-orchestra repository itself, with `.claude-plug
 Copilot always reads from the source tree in the hub repo. This dual-resolved behavior is why the classification records `claude_resolves: both` and `copilot_resolves: source-tree` for the `agents/*.agent.md` family.
 
 ## Catalog
+
+### `../skills/*/scripts/*.ps1`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: visible-warning
+- **examples**:
+  - `../skills/session-startup/scripts/session-cleanup-detector.ps1`
+- **notes**: ../-prefixed form of 'skills/*/scripts/*.ps1' referenced from .github/scripts/ context (e.g., test-session-cleanup-detector.ps1). Resolves to the same physical scripts as the skills/*/scripts/*.ps1 family; introduced by #664 forward-slash path conversion which activated forward-slash path extraction.
 
 ### `.claude-plugin/*.json`
 

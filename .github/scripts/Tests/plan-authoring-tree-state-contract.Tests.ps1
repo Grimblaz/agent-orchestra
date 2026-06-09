@@ -15,8 +15,8 @@ Describe 'Plan-authoring tree-state verification contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:PlanAuthoringPath = Join-Path $script:RepoRoot 'skills\plan-authoring\SKILL.md'
-        $script:IssuePlannerPath = Join-Path $script:RepoRoot 'agents\Issue-Planner.agent.md'
+        $script:PlanAuthoringPath = Join-Path $script:RepoRoot 'skills/plan-authoring/SKILL.md'
+        $script:IssuePlannerPath = Join-Path $script:RepoRoot 'agents/Issue-Planner.agent.md'
 
         $script:GetNormalizedContent = {
             param([string]$Path)

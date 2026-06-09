@@ -16,7 +16,7 @@ Describe 'Ensure-ScratchGitignore.ps1' {
 
     BeforeAll {
         $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot 'skills\session-startup\scripts\Ensure-ScratchGitignore.ps1'
+        $script:ScriptFile = Join-Path $script:RepoRoot 'skills/session-startup/scripts/Ensure-ScratchGitignore.ps1'
 
         # Canonical patterns expected to be present after the script runs.
         # /*[Tt]emp* intentionally absent (RF4): over-matched template.md/attempt.js;

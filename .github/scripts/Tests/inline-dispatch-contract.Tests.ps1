@@ -31,12 +31,12 @@ Describe 'inline dispatch contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SessionStartupSkill = Join-Path $script:RepoRoot 'skills\session-startup\SKILL.md'
-        $script:ClaudeDispatcherPath = Join-Path $script:RepoRoot 'skills\adversarial-review\platforms\claude.md'
+        $script:SessionStartupSkill = Join-Path $script:RepoRoot 'skills/session-startup/SKILL.md'
+        $script:ClaudeDispatcherPath = Join-Path $script:RepoRoot 'skills/adversarial-review/platforms/claude.md'
         $script:ClaudeDispatcherContent = Get-Content -Path $script:ClaudeDispatcherPath -Raw -ErrorAction Stop
 
         $script:GetPlanEffectiveContract = {
-            $planContent = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+            $planContent = Get-Content -Path (Join-Path $script:RepoRoot 'commands/plan.md') -Raw -ErrorAction Stop
             return ($planContent + "`n" + $script:ClaudeDispatcherContent)
         }
 
@@ -272,7 +272,7 @@ Describe 'inline dispatch contract' {
     }
 
     It 'requires /orchestrate to adopt Code-Conductor inline after D1 body resolution' {
-        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\orchestrate.md') -Raw -ErrorAction Stop
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands/orchestrate.md') -Raw -ErrorAction Stop
 
         $content | Should -Match '(?is)(load|resolve).{0,300}agents/Code-Conductor\.agent\.md' -Because '/orchestrate must carry the session-startup load reference naming the Code-Conductor paired body'
 
@@ -280,7 +280,7 @@ Describe 'inline dispatch contract' {
     }
 
     It 'requires /orchestrate to reconstruct downstream Agent handshakes live per dispatch' {
-        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\orchestrate.md') -Raw -ErrorAction Stop
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands/orchestrate.md') -Raw -ErrorAction Stop
 
         $content | Should -Match '(?is)(before each|immediately before each|for each|for every|per-dispatch).{0,180}`?Agent`?.{0,160}dispatch.{0,240}(reconstruct|recapture|capture).{0,220}(HEAD|branch).{0,220}(CWD|dirty)' -Because '/orchestrate must document live handshake reconstruction for each downstream Agent dispatch'
         $content | Should -Match '(?is)((do not|must not).{0,160}(reuse|carry forward).{0,160}(command-entry|entry-time|single).{0,120}handshake|(command-entry|entry-time|single).{0,120}handshake.{0,160}(must not|do not).{0,120}(reuse|carry forward))' -Because '/orchestrate must explicitly reject a single command-entry-captured handshake for downstream Agent calls'
@@ -314,7 +314,7 @@ Describe 'inline dispatch contract' {
     }
 
     It 'forbids /plan from documenting a single once-per-invocation pipeline handshake' {
-        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands\plan.md') -Raw -ErrorAction Stop
+        $content = Get-Content -Path (Join-Path $script:RepoRoot 'commands/plan.md') -Raw -ErrorAction Stop
 
         $content | Should -Not -Match '(?is)construct.{0,100}parent-side\s+environment\s+handshake.{0,100}once.{0,80}`?/plan`?.{0,80}invocation' -Because '/plan must not say or imply that one handshake is constructed once for the whole command invocation'
     }
@@ -384,7 +384,7 @@ Describe 'inline dispatch contract' {
     }
 
     It 'documents the #498 DRY reshape, provenance-gate retirement, and #414 Copilot asymmetry in the test header' {
-        $content = Get-Content -Path (Join-Path $script:RepoRoot '.github\scripts\Tests\inline-dispatch-contract.Tests.ps1') -Raw -ErrorAction Stop
+        $content = Get-Content -Path (Join-Path $script:RepoRoot '.github/scripts/Tests/inline-dispatch-contract.Tests.ps1') -Raw -ErrorAction Stop
 
         $content | Should -Match ([regex]::Escape('Issue #498 reshaped the command-file pre-flight surface')) -Because 'the test header must explain the #498 DRY reshape of the command-file pre-flight prose'
         $content | Should -Match ([regex]::Escape('provenance-gate retirement')) -Because 'the test header must explain the provenance-gate retirement and upstream-onboarding ownership transfer'

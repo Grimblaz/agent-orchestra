@@ -5,7 +5,7 @@ Describe 'frame-architecture.md anchor presence' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:DocPath = Join-Path $script:RepoRoot 'Documents\Design\frame-architecture.md'
+        $script:DocPath = Join-Path $script:RepoRoot 'Documents/Design/frame-architecture.md'
         $script:DocContent = if (Test-Path $script:DocPath) { Get-Content -Raw -Path $script:DocPath } else { '' }
     }
 

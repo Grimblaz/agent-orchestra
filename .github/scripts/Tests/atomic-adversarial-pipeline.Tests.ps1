@@ -5,7 +5,7 @@
 BeforeAll {
     Import-Module powershell-yaml -MinimumVersion 0.4.0
 
-    $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
+    $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:DispatcherPath = 'skills/adversarial-review/platforms/claude.md'
     $script:DispatcherMarker = '<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->'
     $script:PauseReasons = @('artifact-missing', 'runtime-output-required', 'user-input-required-by-decision-class')

@@ -5,8 +5,8 @@ Describe 'review completion gate contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        . (Join-Path $script:RepoRoot 'skills\routing-tables\scripts\routing-tables-core.ps1')
-        . (Join-Path $script:RepoRoot 'skills\routing-tables\scripts\review-state-reader.ps1')
+        . (Join-Path $script:RepoRoot 'skills/routing-tables/scripts/routing-tables-core.ps1')
+        . (Join-Path $script:RepoRoot 'skills/routing-tables/scripts/review-state-reader.ps1')
 
         $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "pester-review-completion-$([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $script:TempRoot -Force | Out-Null
@@ -164,7 +164,7 @@ last_updated: 2026-04-24 14:00:00
         )
 
         foreach ($case in $cases) {
-            $path = Join-Path $script:TempRoot ("review-state-malformed-{0}.md" -f ($case.Name -replace '\s+', '-'))
+            $path = Join-Path $script:TempRoot ("review-state-malformed-{0}.md" -f ($case.Name -replace '/s+', '-'))
             $case.Content | Set-Content -Path $path -Encoding UTF8
 
             Read-ReviewStateFile -Path $path | Should -BeNullOrEmpty -Because "$($case.Name) must fail closed"

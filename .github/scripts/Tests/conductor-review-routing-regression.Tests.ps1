@@ -15,8 +15,8 @@ Describe 'Code-Conductor review routing regression contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ConductorBodyPath = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
-        $script:ReviewReferencePath = Join-Path $script:RepoRoot 'skills\validation-methodology\references\review-reconciliation.md'
+        $script:ConductorBodyPath = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
+        $script:ReviewReferencePath = Join-Path $script:RepoRoot 'skills/validation-methodology/references/review-reconciliation.md'
 
         $script:ConductorBody = (Get-Content -Path $script:ConductorBodyPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
         $script:ReviewReference = (Get-Content -Path $script:ReviewReferencePath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"

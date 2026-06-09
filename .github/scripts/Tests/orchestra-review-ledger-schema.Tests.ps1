@@ -15,7 +15,7 @@ Describe 'orchestra-review ledger schema compatibility contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ReviewJudgmentSkillPath = Join-Path $script:RepoRoot 'skills\review-judgment\SKILL.md'
+        $script:ReviewJudgmentSkillPath = Join-Path $script:RepoRoot 'skills/review-judgment/SKILL.md'
         $script:ReviewJudgmentSkill = Get-Content -Path $script:ReviewJudgmentSkillPath -Raw
         $script:ExpectedKeys = @('id', 'judge_ruling', 'judge_confidence', 'points_awarded')
 

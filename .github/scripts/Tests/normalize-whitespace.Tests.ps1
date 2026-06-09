@@ -24,8 +24,8 @@ Describe 'normalize-whitespace.ps1' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:HelperPath = Join-Path $script:RepoRoot '.github\scripts\normalize-whitespace.ps1'
-        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\normalize-whitespace-core.ps1'
+        $script:HelperPath = Join-Path $script:RepoRoot '.github/scripts/normalize-whitespace.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github/scripts/lib/normalize-whitespace-core.ps1'
         . $script:LibFile
 
         $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
@@ -255,7 +255,7 @@ Describe '.githooks/pre-commit whitespace-lane ownership contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:HookPath = Join-Path $script:RepoRoot '.githooks\pre-commit'
+        $script:HookPath = Join-Path $script:RepoRoot '.githooks/pre-commit'
         $script:HookContent = Get-Content -Path $script:HookPath -Raw
 
         $script:GetGenericSelectorPattern = {

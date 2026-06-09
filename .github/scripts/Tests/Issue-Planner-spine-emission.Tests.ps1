@@ -18,8 +18,8 @@ Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:IssuePlanner = Join-Path $script:RepoRoot 'agents\Issue-Planner.agent.md'
-        $script:PlanAuthoring = Join-Path $script:RepoRoot 'skills\plan-authoring\SKILL.md'
+        $script:IssuePlanner = Join-Path $script:RepoRoot 'agents/Issue-Planner.agent.md'
+        $script:PlanAuthoring = Join-Path $script:RepoRoot 'skills/plan-authoring/SKILL.md'
         $script:Content = Get-Content -Path $script:IssuePlanner -Raw
         $script:PlanAuthoringContent = Get-Content -Path $script:PlanAuthoring -Raw
 

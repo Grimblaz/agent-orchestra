@@ -6,11 +6,11 @@ Describe 'plugin hooks config contract' -Tag 'unit' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:CopilotHooksConfig = Join-Path $script:RepoRoot 'hooks.json'
-        $script:ClaudeHooksConfig = Join-Path $script:RepoRoot 'hooks\hooks.json'
+        $script:ClaudeHooksConfig = Join-Path $script:RepoRoot 'hooks/hooks.json'
         $script:RootPluginManifest = Join-Path $script:RepoRoot 'plugin.json'
-        $script:ClaudePluginManifest = Join-Path $script:RepoRoot '.claude-plugin\plugin.json'
-        $script:CopilotMarketplaceManifest = Join-Path $script:RepoRoot '.github\plugin\marketplace.json'
-        $script:ClaudeMarketplaceManifest = Join-Path $script:RepoRoot '.claude-plugin\marketplace.json'
+        $script:ClaudePluginManifest = Join-Path $script:RepoRoot '.claude-plugin/plugin.json'
+        $script:CopilotMarketplaceManifest = Join-Path $script:RepoRoot '.github/plugin/marketplace.json'
+        $script:ClaudeMarketplaceManifest = Join-Path $script:RepoRoot '.claude-plugin/marketplace.json'
         $script:SessionStartScript = 'skills/session-startup/scripts/session-cleanup-detector.ps1'
         $script:ReleaseHygieneScript = 'skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1'
         $script:SessionStartMatcher = 'startup'

@@ -3,10 +3,10 @@
 
 Describe 'Get-CostTranscriptSlug' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\cost-walker.ps1'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-walker.ps1'
         if (Test-Path $script:LibPath) {
             . $script:LibPath
-            . (Join-Path $PSScriptRoot '..\lib\path-normalize.ps1')
+            . (Join-Path $PSScriptRoot '../lib/path-normalize.ps1')
         }
     }
 
@@ -36,10 +36,10 @@ Describe 'Get-CostTranscriptSlug' {
 
 Describe 'Invoke-CostTranscriptWalk' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\cost-walker.ps1'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-walker.ps1'
         if (Test-Path $script:LibPath) {
             . $script:LibPath
-            . (Join-Path $PSScriptRoot '..\lib\path-normalize.ps1')
+            . (Join-Path $PSScriptRoot '../lib/path-normalize.ps1')
         }
 
         # Helper: write a JSONL file from an array of event hashtables
@@ -441,7 +441,7 @@ Describe 'Invoke-CostTranscriptWalk' {
                 $null = New-Item -ItemType Directory -Path $slugDir -Force
 
                 # Copy committed fixtures into the temp slug dir
-                $fixtureDir = Join-Path $PSScriptRoot 'fixtures\phase-marker-sessions'
+                $fixtureDir = Join-Path $PSScriptRoot 'fixtures/phase-marker-sessions'
                 Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529.jsonl') -Destination (Join-Path $slugDir 'session.jsonl')
                 Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529b.jsonl') -Destination (Join-Path $slugDir 'session2.jsonl')
 
@@ -541,7 +541,7 @@ Describe 'Invoke-CostTranscriptWalk' {
                 $subagDir = Join-Path $slugDir 'subagents'
                 $null = New-Item -ItemType Directory -Path $subagDir -Force
 
-                $fixtureDir = Join-Path $PSScriptRoot 'fixtures\phase-marker-sessions'
+                $fixtureDir = Join-Path $PSScriptRoot 'fixtures/phase-marker-sessions'
                 Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529.jsonl') -Destination (Join-Path $slugDir 'session.jsonl')
                 Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529b.jsonl') -Destination (Join-Path $slugDir 'session2.jsonl')
 
@@ -568,7 +568,7 @@ Describe 'Invoke-CostTranscriptWalk' {
                 $slugDir = Join-Path $tmp $slug
                 $null = New-Item -ItemType Directory -Path $slugDir -Force
 
-                $fixtureDir = Join-Path $PSScriptRoot 'fixtures\phase-marker-sessions'
+                $fixtureDir = Join-Path $PSScriptRoot 'fixtures/phase-marker-sessions'
                 Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529.jsonl') -Destination (Join-Path $slugDir 'session.jsonl')
                 Copy-Item -Path (Join-Path $fixtureDir 'phase-marker-529b.jsonl') -Destination (Join-Path $slugDir 'session2.jsonl')
 

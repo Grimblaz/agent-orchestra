@@ -33,15 +33,15 @@ Describe 'execution handoff persistence contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:IssuePlanner = Join-Path $script:RepoRoot 'agents\Issue-Planner.agent.md'
-        $script:CodeConductor = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
-        $script:CopilotInstructions = Join-Path $script:RepoRoot '.github\copilot-instructions.md'
-        $script:ExperienceOwner = Join-Path $script:RepoRoot 'agents\Experience-Owner.agent.md'
-        $script:SolutionDesigner = Join-Path $script:RepoRoot 'agents\Solution-Designer.agent.md'
-        $script:TrackingInstructions = Join-Path $script:RepoRoot 'skills\tracking-format\SKILL.md'
-        $script:StartIssuePrompt = Join-Path $script:RepoRoot '.github\prompts\start-issue.prompt.md'
-        $script:PlanStorage = Join-Path $script:RepoRoot 'Documents\Design\plan-storage.md'
-        $script:HubModeUx = Join-Path $script:RepoRoot 'Documents\Design\hub-mode-ux.md'
+        $script:IssuePlanner = Join-Path $script:RepoRoot 'agents/Issue-Planner.agent.md'
+        $script:CodeConductor = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
+        $script:CopilotInstructions = Join-Path $script:RepoRoot '.github/copilot-instructions.md'
+        $script:ExperienceOwner = Join-Path $script:RepoRoot 'agents/Experience-Owner.agent.md'
+        $script:SolutionDesigner = Join-Path $script:RepoRoot 'agents/Solution-Designer.agent.md'
+        $script:TrackingInstructions = Join-Path $script:RepoRoot 'skills/tracking-format/SKILL.md'
+        $script:StartIssuePrompt = Join-Path $script:RepoRoot '.github/prompts/start-issue.prompt.md'
+        $script:PlanStorage = Join-Path $script:RepoRoot 'Documents/Design/plan-storage.md'
+        $script:HubModeUx = Join-Path $script:RepoRoot 'Documents/Design/hub-mode-ux.md'
         $script:PipelineEntryAgents = @(
             @{
                 Name = 'Experience-Owner'

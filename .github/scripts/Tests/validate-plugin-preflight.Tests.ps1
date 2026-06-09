@@ -9,7 +9,7 @@ Describe 'Invoke-PluginPreflight' -Tag 'unit' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\validate-plugin-preflight-core.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github/scripts/lib/validate-plugin-preflight-core.ps1'
         . $script:LibFile
 
         # Helper: build a minimal valid fixture with plugin.json at the repo root,
@@ -164,7 +164,7 @@ $($skillEntries -join ",`n")
 
         It 'reports FAIL SkillCountMatch when filesystem has more skills than plugin.json' {
             $root = & $script:NewFixture -SkillCount 39
-            New-Item -ItemType Directory -Path (Join-Path $root 'skills\extra-skill') -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $root 'skills/extra-skill') -Force | Out-Null
             $pjPath = Join-Path $root 'plugin.json'
             $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
             $check = $result.Results | Where-Object { $_.Name -eq 'SkillCountMatch' }
@@ -174,7 +174,7 @@ $($skillEntries -join ",`n")
 
         It 'reports FAIL SkillPathsExist when a declared skill directory is missing' {
             $root = & $script:NewFixture
-            Remove-Item -Path (Join-Path $root 'skills\skill-5') -Recurse -Force
+            Remove-Item -Path (Join-Path $root 'skills/skill-5') -Recurse -Force
             $pjPath = Join-Path $root 'plugin.json'
             $result = Invoke-PluginPreflight -RootPath $root -PluginJsonPath $pjPath
             $check = $result.Results | Where-Object { $_.Name -eq 'SkillPathsExist' }

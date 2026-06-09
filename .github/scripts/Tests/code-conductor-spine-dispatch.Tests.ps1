@@ -19,8 +19,8 @@ Describe 'Code-Conductor frame-spine dispatch contract' -Tag 'contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeConductor = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
-        $script:FrameSpineCore = Join-Path $script:RepoRoot '.github\scripts\lib\frame-spine-core.ps1'
+        $script:CodeConductor = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
+        $script:FrameSpineCore = Join-Path $script:RepoRoot '.github/scripts/lib/frame-spine-core.ps1'
 
         if (Test-Path $script:FrameSpineCore) {
             . $script:FrameSpineCore

@@ -3,8 +3,8 @@
 
 Describe 'cost-rate-table.json' {
     BeforeAll {
-        $script:TablePath = Join-Path $PSScriptRoot '..\lib\cost-rate-table.json'
-        $script:AttributionLibPath = Join-Path $PSScriptRoot '..\lib\cost-attribution.ps1'
+        $script:TablePath = Join-Path $PSScriptRoot '../lib/cost-rate-table.json'
+        $script:AttributionLibPath = Join-Path $PSScriptRoot '../lib/cost-attribution.ps1'
         $script:Table = $null
         if (Test-Path $script:TablePath) {
             $script:Table = Get-Content $script:TablePath -Raw | ConvertFrom-Json

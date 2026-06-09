@@ -6,14 +6,14 @@ Describe 'frame audit-only boundary' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:FrameWrappers = @(
-            (Join-Path $script:RepoRoot '.github\scripts\frame-back-derive.ps1'),
-            (Join-Path $script:RepoRoot '.github\scripts\frame-audit-report.ps1')
+            (Join-Path $script:RepoRoot '.github/scripts/frame-back-derive.ps1'),
+            (Join-Path $script:RepoRoot '.github/scripts/frame-audit-report.ps1')
         )
         $script:HookFiles = @(
             (Join-Path $script:RepoRoot 'hooks.json'),
-            (Join-Path $script:RepoRoot 'hooks\hooks.json')
+            (Join-Path $script:RepoRoot 'hooks/hooks.json')
         ) | Where-Object { Test-Path $_ }
-        $script:WorkflowDir = Join-Path $script:RepoRoot '.github\workflows'
+        $script:WorkflowDir = Join-Path $script:RepoRoot '.github/workflows'
 
         $script:RequireWrappers = {
             $missing = @($script:FrameWrappers | Where-Object { -not (Test-Path $_) })

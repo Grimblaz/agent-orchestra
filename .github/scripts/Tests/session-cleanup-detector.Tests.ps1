@@ -24,8 +24,8 @@ Describe 'session-cleanup-detector.ps1 — repo root resolution' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector.ps1'
-        $script:LibFile = Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector-core.ps1'
+        $script:ScriptFile = Join-Path $script:RepoRoot 'skills/session-startup/scripts/session-cleanup-detector.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot 'skills/session-startup/scripts/session-cleanup-detector-core.ps1'
         . $script:LibFile
     }
 
@@ -67,10 +67,10 @@ Describe 'session-cleanup-detector.ps1 — calibration tracking exclusion' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector.ps1'
-        . (Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector-core.ps1')
+        $script:ScriptFile = Join-Path $script:RepoRoot 'skills/session-startup/scripts/session-cleanup-detector.ps1'
+        . (Join-Path $script:RepoRoot 'skills/session-startup/scripts/session-cleanup-detector-core.ps1')
 
-        $script:CopilotBaselineFixturePath = Join-Path $PSScriptRoot 'fixtures\copilot-baseline-additional-context.txt'
+        $script:CopilotBaselineFixturePath = Join-Path $PSScriptRoot 'fixtures/copilot-baseline-additional-context.txt'
         $script:SavedPath = $env:PATH
 
         $script:NewMockGitDir = {
@@ -1373,7 +1373,7 @@ exit $LASTEXITCODE
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 
             # Create an untagged tracking file (no issue_id frontmatter)
-            $trackingDir = Join-Path $workDir '.copilot-tracking\research'
+            $trackingDir = Join-Path $workDir '.copilot-tracking/research'
             New-Item -ItemType Directory -Path $trackingDir -Force | Out-Null
             Set-Content -Path (Join-Path $trackingDir 'orphan-no-id.md') -Value "# No issue_id header`nSome content" -Encoding UTF8
 
@@ -1441,7 +1441,7 @@ Describe 'Get-OrphanBranchLines — per-line suffix and composite invocation' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        . (Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector-core.ps1')
+        . (Join-Path $script:RepoRoot 'skills/session-startup/scripts/session-cleanup-detector-core.ps1')
     }
 
     It 'appends "; eligible for auto-resolve at cleanup time" to feature/issue-N orphan lines' {

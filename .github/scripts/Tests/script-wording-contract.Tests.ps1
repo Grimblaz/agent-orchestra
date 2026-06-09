@@ -19,8 +19,8 @@ Describe 'cleanup script wording contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:DetectorCore = Get-Content (Join-Path $script:RepoRoot 'skills\session-startup\scripts\session-cleanup-detector-core.ps1') -Raw
-        $script:PostMergeCleanup = Get-Content (Join-Path $script:RepoRoot 'skills\session-startup\scripts\post-merge-cleanup.ps1') -Raw
+        $script:DetectorCore = Get-Content (Join-Path $script:RepoRoot 'skills/session-startup/scripts/session-cleanup-detector-core.ps1') -Raw
+        $script:PostMergeCleanup = Get-Content (Join-Path $script:RepoRoot 'skills/session-startup/scripts/post-merge-cleanup.ps1') -Raw
 
         # Extract Remove-OrphanBranch function body (from "function Remove-OrphanBranch" to the next "^function ")
         # This scopes assertions to avoid false matches from Remove-SiblingWorktree

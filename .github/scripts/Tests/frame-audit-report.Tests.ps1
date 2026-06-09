@@ -5,10 +5,10 @@ Describe 'Invoke-FrameAuditReport' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\frame-audit-report-core.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github/scripts/lib/frame-audit-report-core.ps1'
         $script:FixtureDir = Join-Path $PSScriptRoot 'fixtures'
-        $script:AuditFixtureDir = Join-Path $script:RepoRoot 'frame\audit-fixtures'
-        $script:PortsDir = Join-Path $script:RepoRoot 'frame\ports'
+        $script:AuditFixtureDir = Join-Path $script:RepoRoot 'frame/audit-fixtures'
+        $script:PortsDir = Join-Path $script:RepoRoot 'frame/ports'
 
         if (Test-Path $script:LibFile) {
             . $script:LibFile

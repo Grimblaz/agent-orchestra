@@ -17,7 +17,7 @@ Describe 'orchestra-review handshake contract' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:CommandsDirectory = Join-Path $script:RepoRoot 'commands'
-        $script:ClaudeDispatcherPath = Join-Path $script:RepoRoot 'skills\adversarial-review\platforms\claude.md'
+        $script:ClaudeDispatcherPath = Join-Path $script:RepoRoot 'skills/adversarial-review/platforms/claude.md'
         $script:ClaudeDispatcherContent = Get-Content -Path $script:ClaudeDispatcherPath -Raw -ErrorAction Stop
         $script:RequiredHandshakeCommands = @(
             [pscustomobject]@{ Name = 'orchestra-review'; Path = Join-Path $script:CommandsDirectory 'orchestra-review.md' },

@@ -24,8 +24,8 @@ Describe 'ce gate multi-path output coverage contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:IssuePlanner = Join-Path $script:RepoRoot 'agents\Issue-Planner.agent.md'
-        $script:CodeReviewDesign = Join-Path $script:RepoRoot 'Documents\Design\code-review.md'
+        $script:IssuePlanner = Join-Path $script:RepoRoot 'agents/Issue-Planner.agent.md'
+        $script:CodeReviewDesign = Join-Path $script:RepoRoot 'Documents/Design/code-review.md'
 
         $script:ReadContent = {
             param([string]$Path)

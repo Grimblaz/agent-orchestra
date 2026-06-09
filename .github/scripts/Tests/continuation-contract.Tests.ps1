@@ -22,7 +22,7 @@ Describe 'continuation contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeConductor = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
+        $script:CodeConductor = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
 
         $script:ReadContent = {
             param([string]$Path)

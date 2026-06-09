@@ -3,7 +3,7 @@
 
 Describe 'Find-OrUpsertComment' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\find-or-upsert-comment.ps1'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/find-or-upsert-comment.ps1'
     }
 
     BeforeEach {
@@ -231,7 +231,7 @@ Describe 'Find-OrUpsertComment' {
 Describe 'Get-RestCommentId helper — static structure (AC6)' {
 
     BeforeAll {
-        $script:Ac6LibPath = Join-Path $PSScriptRoot '..\lib\find-or-upsert-comment.ps1'
+        $script:Ac6LibPath = Join-Path $PSScriptRoot '../lib/find-or-upsert-comment.ps1'
         $libContent = Get-Content -Path $script:Ac6LibPath -Raw
         $script:Ac6ParseErrors = $null
         $script:Ac6LibAst = [System.Management.Automation.Language.Parser]::ParseInput(

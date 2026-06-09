@@ -3,7 +3,7 @@
 Describe 'cost walker coverage design documentation' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:DocPath = Join-Path $script:RepoRoot 'Documents\Design\cost-walker-coverage.md'
+        $script:DocPath = Join-Path $script:RepoRoot 'Documents/Design/cost-walker-coverage.md'
         $script:ExpectedH2Headings = @(
             '## Active attribution rules'
             '## Ambiguous-prompt fallback'

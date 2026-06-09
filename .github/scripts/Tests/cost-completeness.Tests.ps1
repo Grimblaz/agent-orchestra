@@ -3,7 +3,7 @@
 
 Describe 'Get-SessionCompleteness' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\cost-completeness.ps1'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-completeness.ps1'
         if (Test-Path $script:LibPath) {
             . $script:LibPath
         }
@@ -180,7 +180,7 @@ Describe 'Get-SessionCompleteness' {
 
 Describe 'Resolve-CostDataPreservation' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\cost-completeness.ps1'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-completeness.ps1'
         if (Test-Path $script:LibPath) {
             . $script:LibPath
         }

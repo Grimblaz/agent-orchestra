@@ -36,7 +36,7 @@ Describe 'Invoke-QuickValidate' -Tag 'unit' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:LibFile = Join-Path $script:RepoRoot '.github\scripts\lib\quick-validate-core.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot '.github/scripts/lib/quick-validate-core.ps1'
         . $script:LibFile
 
         # ---------------------------------------------------------------
@@ -48,8 +48,8 @@ Describe 'Invoke-QuickValidate' -Tag 'unit' {
             param([string]$Root = "TestDrive:\qv-$([System.Guid]::NewGuid().ToString('N'))")
 
             $agentsDir = Join-Path $Root 'agents'
-            $skillDir = Join-Path $Root 'skills\test-skill'
-            $scriptsDir = Join-Path $Root '.github\scripts'
+            $skillDir = Join-Path $Root 'skills/test-skill'
+            $scriptsDir = Join-Path $Root '.github/scripts'
 
             New-Item -ItemType Directory -Path $agentsDir  -Force | Out-Null
             New-Item -ItemType Directory -Path $skillDir   -Force | Out-Null
@@ -133,7 +133,7 @@ Write-Output 'ok'
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
                 -PSScriptAnalyzerSettingsPath $mockSettings `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $legacyChecks = $result.Results | Where-Object {
                 $_.Name -in @('Plan-Architect', 'Janitor', 'Issue-Designer', 'workflow-template')
@@ -145,7 +145,7 @@ Write-Output 'ok'
 
         It 'reports FAIL when Plan-Architect reference found' {
             $root = & $script:NewFixture
-            $agentFile = Join-Path $root 'agents\tainted.agent.md'
+            $agentFile = Join-Path $root 'agents/tainted.agent.md'
             Set-Content -Path $agentFile -Value 'Delegate to Plan-Architect for planning.' -Encoding UTF8
 
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
@@ -153,7 +153,7 @@ Write-Output 'ok'
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'Plan-Architect' }
             $check.Passed | Should -BeFalse -Because 'fixture contains a Plan-Architect reference'
@@ -162,7 +162,7 @@ Write-Output 'ok'
 
         It 'reports FAIL when Janitor reference found' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills/test-skill/SKILL.md'
             # Overwrite with content that still passes SKILL frontmatter checks but has Janitor
             Set-Content -Path $skillFile -Value @'
 ---
@@ -184,7 +184,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'Janitor' }
             $check.Passed | Should -BeFalse -Because 'fixture contains a Janitor reference'
@@ -192,7 +192,7 @@ None.
 
         It 'reports FAIL when Issue-Designer reference found' {
             $root = & $script:NewFixture
-            $agentFile = Join-Path $root 'agents\bad.agent.md'
+            $agentFile = Join-Path $root 'agents/bad.agent.md'
             Set-Content -Path $agentFile -Value 'Route to Issue-Designer.' -Encoding UTF8
 
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
@@ -200,7 +200,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'Issue-Designer' }
             $check.Passed | Should -BeFalse -Because 'fixture contains an Issue-Designer reference'
@@ -208,7 +208,7 @@ None.
 
         It 'reports FAIL when workflow-template reference found' {
             $root = & $script:NewFixture
-            $agentFile = Join-Path $root 'agents\bad.agent.md'
+            $agentFile = Join-Path $root 'agents/bad.agent.md'
             Set-Content -Path $agentFile -Value 'Uses the workflow-template pattern.' -Encoding UTF8
 
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
@@ -216,7 +216,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'workflow-template' }
             $check.Passed | Should -BeFalse -Because 'fixture contains a workflow-template reference'
@@ -224,7 +224,7 @@ None.
 
         It 'excludes copilot-instructions.md from legacy reference checks' {
             $root = & $script:NewFixture
-            $ciFile = Join-Path $root '.github\copilot-instructions.md'
+            $ciFile = Join-Path $root '.github/copilot-instructions.md'
             Set-Content -Path $ciFile -Value 'Plan-Architect is mentioned here for documentation.' -Encoding UTF8
 
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
@@ -232,7 +232,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'Plan-Architect' }
             $check.Passed | Should -BeTrue -Because 'copilot-instructions.md is excluded from legacy reference scanning'
@@ -240,7 +240,7 @@ None.
 
         It 'excludes architecture-rules.md from legacy reference checks' {
             $root = & $script:NewFixture
-            $arFile = Join-Path $root '.github\architecture-rules.md'
+            $arFile = Join-Path $root '.github/architecture-rules.md'
             Set-Content -Path $arFile -Value 'Plan-Architect mentioned in architecture rules.' -Encoding UTF8
 
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
@@ -248,7 +248,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'Plan-Architect' }
             $check.Passed | Should -BeTrue -Because 'architecture-rules.md is excluded from legacy reference scanning'
@@ -256,7 +256,7 @@ None.
 
         It 'excludes setup.prompt.md from workflow-template check' {
             $root = & $script:NewFixture
-            $promptFile = Join-Path $root '.github\prompts\setup.prompt.md'
+            $promptFile = Join-Path $root '.github/prompts/setup.prompt.md'
             New-Item -ItemType Directory -Path (Split-Path $promptFile) -Force | Out-Null
             Set-Content -Path $promptFile -Value 'Clone the workflow-template repo.' -Encoding UTF8
 
@@ -265,7 +265,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'workflow-template' }
             $check.Passed | Should -BeTrue -Because 'setup.prompt is excluded from workflow-template scanning'
@@ -284,7 +284,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $skillChecks = $result.Results | Where-Object {
                 $_.Name -in @('SKILL-UseWhen', 'SKILL-DoNotUseFor', 'SKILL-Gotchas')
@@ -296,7 +296,7 @@ None.
 
         It 'reports FAIL when SKILL.md missing Use when/before in description' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills/test-skill/SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 name: test-skill
@@ -315,7 +315,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'SKILL-UseWhen' }
             $check.Passed | Should -BeFalse -Because 'SKILL.md is missing Use when/before in description'
@@ -324,7 +324,7 @@ None.
 
         It 'reports FAIL when SKILL.md missing DO NOT USE FOR: in description' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills/test-skill/SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 name: test-skill
@@ -343,7 +343,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'SKILL-DoNotUseFor' }
             $check.Passed | Should -BeFalse -Because 'SKILL.md is missing DO NOT USE FOR: in description'
@@ -351,7 +351,7 @@ None.
 
         It 'reports FAIL when SKILL.md missing ## Gotchas heading' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills/test-skill/SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 name: test-skill
@@ -368,7 +368,7 @@ No gotchas section here.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'SKILL-Gotchas' }
             $check.Passed | Should -BeFalse -Because 'SKILL.md is missing ## Gotchas heading'
@@ -387,7 +387,7 @@ No gotchas section here.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'GuidanceComplexity' }
             $check.Passed | Should -BeTrue -Because 'mock returns empty agents_over_ceiling'
@@ -400,7 +400,7 @@ No gotchas section here.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'GuidanceComplexity' }
             $check.Passed | Should -BeFalse -Because 'mock returns a non-empty agents_over_ceiling array'
@@ -415,7 +415,7 @@ No gotchas section here.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $badScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             # 1. GuidanceComplexity should FAIL
             $check = $result.Results | Where-Object { $_.Name -eq 'GuidanceComplexity' }
@@ -443,7 +443,7 @@ No gotchas section here.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'PSScriptAnalyzer' }
             $check.Passed | Should -Be 'SKIP' -Because 'PSScriptAnalyzer is not installed; check should be skipped, not passed or failed'
@@ -464,7 +464,7 @@ No gotchas section here.
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
                 -PSScriptAnalyzerSettingsPath $mockSettings `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'PSScriptAnalyzer' }
             $check.Passed | Should -BeTrue -Because 'PSScriptAnalyzer found no issues'
@@ -488,7 +488,7 @@ No gotchas section here.
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
                 -PSScriptAnalyzerSettingsPath $mockSettings `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'PSScriptAnalyzer' }
             $check.Passed | Should -BeFalse -Because 'PSScriptAnalyzer found 2 issues'
@@ -508,7 +508,7 @@ No gotchas section here.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'SkillNameMatch' }
             $check.Passed | Should -BeTrue -Because 'fixture SKILL.md has name: test-skill matching directory test-skill'
@@ -516,7 +516,7 @@ No gotchas section here.
 
         It 'reports FAIL when name field does not match directory name' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills/test-skill/SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 name: wrong-name
@@ -537,7 +537,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'SkillNameMatch' }
             $check.Passed | Should -BeFalse -Because "name 'wrong-name' does not match directory 'test-skill'"
@@ -547,7 +547,7 @@ None.
 
         It 'reports FAIL when name contains an invalid character (slash)' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills/test-skill/SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 name: test-skill/bad
@@ -568,7 +568,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'SkillNameMatch' }
             $check.Passed | Should -BeFalse -Because 'name containing / is invalid for VS Code skill loading'
@@ -576,7 +576,7 @@ None.
 
         It 'reports FAIL when name field is missing from SKILL.md' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills/test-skill/SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 description: Test skill. Use when testing. DO NOT USE FOR: nothing.
@@ -596,7 +596,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'SkillNameMatch' }
             $check.Passed | Should -BeFalse -Because 'SKILL.md has no name: field'
@@ -605,7 +605,7 @@ None.
 
         It 'reports FAIL when name appears only in body (not frontmatter)' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills/test-skill/SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
 description: Test skill. Use when testing. DO NOT USE FOR: nothing.
@@ -625,7 +625,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'SkillNameMatch' }
             $check.Passed | Should -BeFalse -Because 'name in body should not satisfy frontmatter requirement'
@@ -634,7 +634,7 @@ None.
 
         It 'reports PASS when name has indented frontmatter key' {
             $root = & $script:NewFixture
-            $skillFile = Join-Path $root 'skills\test-skill\SKILL.md'
+            $skillFile = Join-Path $root 'skills/test-skill/SKILL.md'
             Set-Content -Path $skillFile -Value @'
 ---
   name: test-skill
@@ -653,7 +653,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'SkillNameMatch' }
             $check.Passed | Should -BeTrue -Because 'leading whitespace before name: is valid YAML'
@@ -662,13 +662,13 @@ None.
         It 'reports PASS when no skills directory exists' {
             $root = "TestDrive:\qv-noskills-$([System.Guid]::NewGuid().ToString('N'))"
             New-Item -ItemType Directory -Path (Join-Path $root 'agents') -Force | Out-Null
-            New-Item -ItemType Directory -Path (Join-Path $root '.github\scripts') -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $root '.github/scripts') -Force | Out-Null
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
 
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $check = $result.Results | Where-Object { $_.Name -eq 'SkillNameMatch' }
             $check.Passed | Should -BeTrue -Because 'no skills directory means no mismatches to detect'
@@ -694,7 +694,7 @@ None.
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
                 -PSScriptAnalyzerSettingsPath $mockSettings `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $result.ExitCode | Should -Be 0 -Because 'all checks pass in a clean fixture'
         }
@@ -702,7 +702,7 @@ None.
         It 'returns ExitCode 1 when any check fails' {
             $root = & $script:NewFixture
             # Inject a single legacy reference to cause one failure
-            $agentFile = Join-Path $root 'agents\tainted.agent.md'
+            $agentFile = Join-Path $root 'agents/tainted.agent.md'
             Set-Content -Path $agentFile -Value 'See Plan-Architect for details.' -Encoding UTF8
 
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
@@ -710,7 +710,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $result.ExitCode | Should -Be 1 -Because 'at least one check failed (Plan-Architect reference)'
         }
@@ -723,7 +723,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts') `
+                -ScriptsPath (Join-Path $root '.github/scripts') `
                 -InformationVariable infoOutput
 
             $summaryLine = ($infoOutput | Out-String) + ($result | Out-String)
@@ -739,7 +739,7 @@ None.
             $result = Invoke-QuickValidate `
                 -RootPath $root `
                 -GuidanceComplexityScriptPath $mockScript `
-                -ScriptsPath (Join-Path $root '.github\scripts')
+                -ScriptsPath (Join-Path $root '.github/scripts')
 
             $result.Results | Should -Not -BeNullOrEmpty -Because 'Results array must be populated'
             $result.TotalCount | Should -BeGreaterOrEqual 9 -Because 'there are at least 9 structural checks'

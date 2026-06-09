@@ -16,7 +16,7 @@ Describe 'solution-authoring SKILL body' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SkillPath = Join-Path $script:RepoRoot 'skills\solution-authoring\SKILL.md'
+        $script:SkillPath = Join-Path $script:RepoRoot 'skills/solution-authoring/SKILL.md'
         $script:Content = (Get-Content -Path $script:SkillPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
     }
 
@@ -88,8 +88,8 @@ Describe 'solution-authoring platforms parity' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ClaudePath  = Join-Path $script:RepoRoot 'skills\solution-authoring\platforms\claude.md'
-        $script:CopilotPath = Join-Path $script:RepoRoot 'skills\solution-authoring\platforms\copilot.md'
+        $script:ClaudePath  = Join-Path $script:RepoRoot 'skills/solution-authoring/platforms/claude.md'
+        $script:CopilotPath = Join-Path $script:RepoRoot 'skills/solution-authoring/platforms/copilot.md'
 
         $script:GetH2Headings = {
             param([string]$Content)
@@ -203,7 +203,7 @@ Describe 'upstream-onboarding sweep' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:UOPath    = Join-Path $script:RepoRoot 'skills\upstream-onboarding\SKILL.md'
+        $script:UOPath    = Join-Path $script:RepoRoot 'skills/upstream-onboarding/SKILL.md'
         $script:UOContent = (Get-Content -Path $script:UOPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
     }
 
@@ -238,15 +238,15 @@ Describe 'escalation tier — issue #556 structural assertions' {
 
     BeforeAll {
         $script:RepoRoot     = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SkillPath    = Join-Path $script:RepoRoot 'skills\solution-authoring\SKILL.md'
+        $script:SkillPath    = Join-Path $script:RepoRoot 'skills/solution-authoring/SKILL.md'
         $script:Content      = (Get-Content -Path $script:SkillPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
-        $script:ClaudeMdPath = Join-Path $script:RepoRoot 'skills\solution-authoring\platforms\claude.md'
+        $script:ClaudeMdPath = Join-Path $script:RepoRoot 'skills/solution-authoring/platforms/claude.md'
         $script:ClaudeMdContent = (Get-Content -Path $script:ClaudeMdPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
-        $copilotMdPath = Join-Path $script:RepoRoot 'skills\solution-authoring\platforms\copilot.md'
+        $copilotMdPath = Join-Path $script:RepoRoot 'skills/solution-authoring/platforms/copilot.md'
         $script:CopilotMdContent = (Get-Content -Path $copilotMdPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
-        $script:SDAgentPath  = Join-Path $script:RepoRoot 'agents\Solution-Designer.agent.md'
+        $script:SDAgentPath  = Join-Path $script:RepoRoot 'agents/Solution-Designer.agent.md'
         $script:SDContent    = (Get-Content -Path $script:SDAgentPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
-        $script:DEPath       = Join-Path $script:RepoRoot 'skills\design-exploration\SKILL.md'
+        $script:DEPath       = Join-Path $script:RepoRoot 'skills/design-exploration/SKILL.md'
         $script:DEContent    = (Get-Content -Path $script:DEPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
     }
 
@@ -309,7 +309,7 @@ Describe 'frame-architecture stacking note' {
 
     BeforeAll {
         $script:RepoRoot  = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:FAPath    = Join-Path $script:RepoRoot 'Documents\Design\frame-architecture.md'
+        $script:FAPath    = Join-Path $script:RepoRoot 'Documents/Design/frame-architecture.md'
         $script:FAContent = (Get-Content -Path $script:FAPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
     }
 

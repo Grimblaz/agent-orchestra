@@ -3,7 +3,7 @@
 
 Describe 'Get-CostAnomalyFlags' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\cost-anomaly.ps1'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-anomaly.ps1'
         if (Test-Path $script:LibPath) {
             . $script:LibPath
         }

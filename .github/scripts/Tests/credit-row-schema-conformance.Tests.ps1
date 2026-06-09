@@ -37,10 +37,10 @@ BeforeAll {
         . $script:BackDeriveLib
     }
 
-    $script:AuditFixtureDir = Join-Path $script:RepoRoot 'frame\audit-fixtures'
+    $script:AuditFixtureDir = Join-Path $script:RepoRoot 'frame/audit-fixtures'
     $script:FixtureDir = Join-Path $PSScriptRoot 'fixtures'
-    $script:PortsDir = Join-Path $script:RepoRoot 'frame\ports'
-    $script:CeGateAdaptersDir = Join-Path $script:RepoRoot 'skills\customer-experience\adapters'
+    $script:PortsDir = Join-Path $script:RepoRoot 'frame/ports'
+    $script:CeGateAdaptersDir = Join-Path $script:RepoRoot 'skills/customer-experience/adapters'
 
     # Per-port allowed-status enum map.
     $script:AllowedStatusByPortPattern = @{

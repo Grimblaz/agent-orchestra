@@ -3,7 +3,7 @@
 
 Describe 'Copilot cost walker helpers' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\cost-walker-copilot.ps1'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-walker-copilot.ps1'
         if (Test-Path $script:LibPath) {
             . $script:LibPath
         }
@@ -61,12 +61,12 @@ Describe 'Copilot cost walker helpers' {
 
 Describe 'Invoke-CostCopilotWalk' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\cost-walker-copilot.ps1'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-walker-copilot.ps1'
         if (Test-Path $script:LibPath) {
             . $script:LibPath
         }
 
-        $script:FixtureDir = Join-Path $PSScriptRoot 'fixtures\cost-walker-copilot'
+        $script:FixtureDir = Join-Path $PSScriptRoot 'fixtures/cost-walker-copilot'
         $script:FixtureJsonl = Join-Path $script:FixtureDir 'copilot-chat.jsonl'
         $script:SyntheticReflog = Join-Path $script:FixtureDir 'synthetic-reflog.txt'
         $script:RepoRoot = 'C:\Users\Micah\Code 2\copilot-orchestra'

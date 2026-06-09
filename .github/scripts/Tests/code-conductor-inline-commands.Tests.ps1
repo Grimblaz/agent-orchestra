@@ -21,9 +21,9 @@ Describe 'Code-Conductor inline commands contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeConductorCommandPath = Join-Path $script:RepoRoot 'commands\code-conductor.md'
-        $script:ReviewGithubCommandPath = Join-Path $script:RepoRoot 'commands\review-github.md'
-        $script:CodeConductorAgentPath = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
+        $script:CodeConductorCommandPath = Join-Path $script:RepoRoot 'commands/code-conductor.md'
+        $script:ReviewGithubCommandPath = Join-Path $script:RepoRoot 'commands/review-github.md'
+        $script:CodeConductorAgentPath = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
 
         $script:ExtractFrontmatter = {
             param([string]$Content)

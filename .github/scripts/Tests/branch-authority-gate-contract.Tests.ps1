@@ -22,8 +22,8 @@ Describe 'branch authority gate contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeConductor = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
-        $script:HubModeUx = Join-Path $script:RepoRoot 'Documents\Design\hub-mode-ux.md'
+        $script:CodeConductor = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
+        $script:HubModeUx = Join-Path $script:RepoRoot 'Documents/Design/hub-mode-ux.md'
 
         $script:ReadContent = {
             param([string]$Path)

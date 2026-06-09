@@ -3,9 +3,9 @@
 
 Describe 'Get-CostAttribution' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\cost-attribution.ps1'
-        $script:RendererPath = Join-Path $PSScriptRoot '..\lib\cost-pattern-renderer.ps1'
-        $script:RateTablePath = Join-Path $PSScriptRoot '..\lib\cost-rate-table.json'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-attribution.ps1'
+        $script:RendererPath = Join-Path $PSScriptRoot '../lib/cost-pattern-renderer.ps1'
+        $script:RateTablePath = Join-Path $PSScriptRoot '../lib/cost-rate-table.json'
 
         if (Test-Path $script:LibPath) {
             . $script:LibPath

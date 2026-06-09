@@ -24,8 +24,8 @@ Describe 'plan approval prompt contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:IssuePlanner = Join-Path $script:RepoRoot 'agents\Issue-Planner.agent.md'
-        $script:HubModeUx = Join-Path $script:RepoRoot 'Documents\Design\hub-mode-ux.md'
+        $script:IssuePlanner = Join-Path $script:RepoRoot 'agents/Issue-Planner.agent.md'
+        $script:HubModeUx = Join-Path $script:RepoRoot 'Documents/Design/hub-mode-ux.md'
 
         $script:ReadContent = {
             param([string]$Path)

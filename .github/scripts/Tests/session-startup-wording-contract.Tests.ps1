@@ -21,8 +21,8 @@ Describe 'session startup wording contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SessionStartupSkill = Join-Path $script:RepoRoot 'skills\session-startup\SKILL.md'
-        $script:SessionStartupClaudePlatform = Join-Path $script:RepoRoot 'skills\session-startup\platforms\claude.md'
+        $script:SessionStartupSkill = Join-Path $script:RepoRoot 'skills/session-startup/SKILL.md'
+        $script:SessionStartupClaudePlatform = Join-Path $script:RepoRoot 'skills/session-startup/platforms/claude.md'
         $script:CanonicalMarkerPath = '/memories/session/session-startup-check-complete.md'
         $script:RetiredTriggerText = 'Before the first substantive response in a new conversation, load the `session-startup` skill and follow its protocol.'
         $script:LegacySilentSkipSummary = 'Skip the automatic startup check silently when neither `$env:COPILOT_ORCHESTRA_ROOT` nor `$env:WORKFLOW_TEMPLATE_ROOT` is set, `pwsh` is unavailable, or the detector returns non-JSON output.'
@@ -33,19 +33,19 @@ Describe 'session startup wording contract' {
         $script:PipelineEntryAgents = @(
             @{
                 Name = 'Experience-Owner'
-                Path = Join-Path $script:RepoRoot 'agents\Experience-Owner.agent.md'
+                Path = Join-Path $script:RepoRoot 'agents/Experience-Owner.agent.md'
             },
             @{
                 Name = 'Solution-Designer'
-                Path = Join-Path $script:RepoRoot 'agents\Solution-Designer.agent.md'
+                Path = Join-Path $script:RepoRoot 'agents/Solution-Designer.agent.md'
             },
             @{
                 Name = 'Issue-Planner'
-                Path = Join-Path $script:RepoRoot 'agents\Issue-Planner.agent.md'
+                Path = Join-Path $script:RepoRoot 'agents/Issue-Planner.agent.md'
             },
             @{
                 Name = 'Code-Conductor'
-                Path = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
+                Path = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
             }
         )
         # Issue #498 DRY pass: command files no longer duplicate Step 7b prose — owning skill and
