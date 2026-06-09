@@ -15,18 +15,18 @@ Describe 'Issue #552 Senior Engineer skill-as-adapter contracts (grep/YAML/valid
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SeniorEngineerBodyPath = Join-Path $script:RepoRoot 'agents\Senior-Engineer.agent.md'
-        $script:SeniorEngineerShellPath = Join-Path $script:RepoRoot 'agents\senior-engineer.md'
-        $script:SpineRunnerPath = Join-Path $script:RepoRoot 'agents\Spine-Runner.agent.md'
-        $script:FrameValidateLibPath = Join-Path $script:RepoRoot '.github\scripts\lib\frame-validate-core.ps1'
-        $script:FrameCreditEmissionPath = Join-Path $script:RepoRoot 'skills\frame-credit-emission\SKILL.md'
-        $script:LedgerCorePath = Join-Path $script:RepoRoot '.github\scripts\lib\frame-credit-ledger-core.ps1'
+        $script:SeniorEngineerBodyPath = Join-Path $script:RepoRoot 'agents/Senior-Engineer.agent.md'
+        $script:SeniorEngineerShellPath = Join-Path $script:RepoRoot 'agents/senior-engineer.md'
+        $script:SpineRunnerPath = Join-Path $script:RepoRoot 'agents/Spine-Runner.agent.md'
+        $script:FrameValidateLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/frame-validate-core.ps1'
+        $script:FrameCreditEmissionPath = Join-Path $script:RepoRoot 'skills/frame-credit-emission/SKILL.md'
+        $script:LedgerCorePath = Join-Path $script:RepoRoot '.github/scripts/lib/frame-credit-ledger-core.ps1'
         $script:ClaudeMdPath = Join-Path $script:RepoRoot 'CLAUDE.md'
-        $script:PlanAuthoringPath = Join-Path $script:RepoRoot 'skills\plan-authoring\SKILL.md'
-        $script:FrameArchitecturePath = Join-Path $script:RepoRoot 'Documents\Design\frame-architecture.md'
-        $script:ImplementCodeAdapterPath = Join-Path $script:RepoRoot 'skills\implementation-discipline\adapters\implement-code-adapter.md'
-        $script:AdversarialAdaptersPath = Join-Path $script:RepoRoot 'skills\adversarial-review\adapters'
-        $script:CanonicalHandshakeShellPath = Join-Path $script:RepoRoot 'agents\code-critic.md'
+        $script:PlanAuthoringPath = Join-Path $script:RepoRoot 'skills/plan-authoring/SKILL.md'
+        $script:FrameArchitecturePath = Join-Path $script:RepoRoot 'Documents/Design/frame-architecture.md'
+        $script:ImplementCodeAdapterPath = Join-Path $script:RepoRoot 'skills/implementation-discipline/adapters/implement-code-adapter.md'
+        $script:AdversarialAdaptersPath = Join-Path $script:RepoRoot 'skills/adversarial-review/adapters'
+        $script:CanonicalHandshakeShellPath = Join-Path $script:RepoRoot 'agents/code-critic.md'
 
         . $script:FrameValidateLibPath
         . $script:LedgerCorePath

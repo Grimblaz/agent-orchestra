@@ -5,8 +5,8 @@ Describe 'review completion gate contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        . (Join-Path $script:RepoRoot 'skills\routing-tables\scripts\routing-tables-core.ps1')
-        . (Join-Path $script:RepoRoot 'skills\routing-tables\scripts\review-state-reader.ps1')
+        . (Join-Path $script:RepoRoot 'skills/routing-tables/scripts/routing-tables-core.ps1')
+        . (Join-Path $script:RepoRoot 'skills/routing-tables/scripts/review-state-reader.ps1')
 
         $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "pester-review-completion-$([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $script:TempRoot -Force | Out-Null

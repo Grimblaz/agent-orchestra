@@ -303,7 +303,7 @@ Describe 'ConvertTo-FVPredicate' -Tag 'unit' {
 
 Describe 'Test-FVPredicateAgainstChangeset' {
     BeforeAll {
-        $script:CorePath = Join-Path $PSScriptRoot '..\lib\frame-predicate-core.ps1'
+        $script:CorePath = Join-Path $PSScriptRoot '../lib/frame-predicate-core.ps1'
         . $script:CorePath
     }
 

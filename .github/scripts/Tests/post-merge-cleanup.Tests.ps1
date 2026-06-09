@@ -27,7 +27,7 @@ Describe 'post-merge-cleanup.ps1 — new parameters (Issue #500)' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot 'skills\session-startup\scripts\post-merge-cleanup.ps1'
+        $script:ScriptFile = Join-Path $script:RepoRoot 'skills/session-startup/scripts/post-merge-cleanup.ps1'
         $script:SavedPath = $env:PATH
 
         # Record pre-test branch state for leak detection in AfterAll
@@ -705,7 +705,7 @@ exit $LASTEXITCODE
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 
             # Create a tracking file without issue_id frontmatter
-            $trackingDir = Join-Path $workDir '.copilot-tracking\research'
+            $trackingDir = Join-Path $workDir '.copilot-tracking/research'
             New-Item -ItemType Directory -Path $trackingDir -Force | Out-Null
             $trackingFile = Join-Path $trackingDir 'unknown-tracking.md'
             Set-Content -Path $trackingFile -Value "# No issue_id header`nSome content" -Encoding UTF8
@@ -736,8 +736,8 @@ exit $LASTEXITCODE
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 
             # Create two tracking files with the same name in different subdirs
-            $trackingDir1 = Join-Path $workDir '.copilot-tracking\research'
-            $trackingDir2 = Join-Path $workDir '.copilot-tracking\planning'
+            $trackingDir1 = Join-Path $workDir '.copilot-tracking/research'
+            $trackingDir2 = Join-Path $workDir '.copilot-tracking/planning'
             New-Item -ItemType Directory -Path $trackingDir1, $trackingDir2 -Force | Out-Null
             $file1 = Join-Path $trackingDir1 'issue-plan.md'
             $file2 = Join-Path $trackingDir2 'issue-plan.md'
@@ -1010,7 +1010,7 @@ exit $LASTEXITCODE
             New-Item -ItemType Directory -Path $workDir -Force | Out-Null
 
             # Create a tracking file for issue 42
-            $trackingDir = Join-Path $workDir '.copilot-tracking\research'
+            $trackingDir = Join-Path $workDir '.copilot-tracking/research'
             New-Item -ItemType Directory -Path $trackingDir -Force | Out-Null
             Set-Content -Path (Join-Path $trackingDir 'issue-42-plan.md') -Value @"
 ---
@@ -1058,7 +1058,7 @@ title: "Issue 42 back-compat test"
             New-Item -ItemType Directory -Path $script:CombinedWorkDir, $script:CombinedSiblingDir -Force | Out-Null
 
             # Create untagged tracking file in the work dir
-            $trackingDir = Join-Path $script:CombinedWorkDir '.copilot-tracking\misc'
+            $trackingDir = Join-Path $script:CombinedWorkDir '.copilot-tracking/misc'
             New-Item -ItemType Directory -Path $trackingDir -Force | Out-Null
             $script:CombinedTrackingFile = Join-Path $trackingDir 'combined-untagged.md'
             Set-Content -Path $script:CombinedTrackingFile -Value '# No issue_id frontmatter' -Encoding UTF8

@@ -13,14 +13,14 @@ BeforeAll {
         if ($gitRoot) { $script:RepoRoot = $gitRoot.Trim().Replace('/', '\') }
     }
 
-    $script:LibDir              = Join-Path $script:RepoRoot '.github\scripts\lib'
+    $script:LibDir              = Join-Path $script:RepoRoot '.github/scripts/lib'
     $script:ValidatorScript     = Join-Path $script:LibDir 'review-dispositions-validator-core.ps1'
     $script:GateReconciliation  = Join-Path $script:LibDir 'gate-reconciliation-core.ps1'
     $script:EngagementRecord    = Join-Path $script:LibDir 'frame-engagement-record-core.ps1'
-    $script:TokenSchema         = Join-Path $script:RepoRoot 'skills\solution-authoring\schemas\gate-decision-token.schema.json'
-    $script:ReviewJudgeCmd      = Join-Path $script:RepoRoot 'commands\orchestra-review-judge.md'
-    $script:ReviewCmd           = Join-Path $script:RepoRoot 'commands\orchestra-review.md'
-    $script:ReviewJudgmentSkill = Join-Path $script:RepoRoot 'skills\review-judgment\SKILL.md'
+    $script:TokenSchema         = Join-Path $script:RepoRoot 'skills/solution-authoring/schemas/gate-decision-token.schema.json'
+    $script:ReviewJudgeCmd      = Join-Path $script:RepoRoot 'commands/orchestra-review-judge.md'
+    $script:ReviewCmd           = Join-Path $script:RepoRoot 'commands/orchestra-review.md'
+    $script:ReviewJudgmentSkill = Join-Path $script:RepoRoot 'skills/review-judgment/SKILL.md'
     $script:DesignDispositionTestFile = Join-Path $PSScriptRoot 'design-disposition-audit.Tests.ps1'
 
     # ── Helper: invoke review-dispositions-validator-core.ps1 in-process ─────

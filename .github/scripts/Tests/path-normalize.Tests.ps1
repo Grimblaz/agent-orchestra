@@ -3,7 +3,7 @@
 
 Describe 'Get-NormalizedPath' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\path-normalize.ps1'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/path-normalize.ps1'
         if (Test-Path $script:LibPath) { . $script:LibPath }
     }
 

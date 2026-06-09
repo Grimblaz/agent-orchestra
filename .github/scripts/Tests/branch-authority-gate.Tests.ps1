@@ -22,7 +22,7 @@ Describe 'branch-authority-gate.ps1' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:HelperPath = Join-Path $script:RepoRoot '.github\scripts\lib\branch-authority-gate.ps1'
+        $script:HelperPath = Join-Path $script:RepoRoot '.github/scripts/lib/branch-authority-gate.ps1'
         $script:SavedPath = $env:PATH
 
         $script:LoadSubject = {

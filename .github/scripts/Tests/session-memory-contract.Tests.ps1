@@ -16,8 +16,8 @@ Describe 'session-memory contract structural surface' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ContractSkill = Join-Path $script:RepoRoot 'skills\session-memory-contract\SKILL.md'
-        $script:RoutingConfigPath = Join-Path $script:RepoRoot 'skills\routing-tables\assets\routing-config.json'
+        $script:ContractSkill = Join-Path $script:RepoRoot 'skills/session-memory-contract/SKILL.md'
+        $script:RoutingConfigPath = Join-Path $script:RepoRoot 'skills/routing-tables/assets/routing-config.json'
 
         $script:ReadContent = {
             param([string]$Path)
@@ -223,7 +223,7 @@ Describe 'session-memory contract structural surface' {
 
     It 'documents rate-limit deferred work as bounded same-conversation state' {
         $segment = & $script:GetContractRowSegment -RowId 'SMC-15'
-        $errorHandlingContent = & $script:ReadContent -Path (Join-Path $script:RepoRoot 'skills\parallel-execution\references\error-handling.md')
+        $errorHandlingContent = & $script:ReadContent -Path (Join-Path $script:RepoRoot 'skills/parallel-execution/references/error-handling.md')
         $rateLimitSection = ([regex]::Match($errorHandlingContent, '(?is)## Subagent Call Resilience \(R5\).*?(?=## Error Handling)')).Value
 
         $segment | Should -Match '^\s*SMC-15\s*\|[^|]*\|\s*`within-conversation`\s*\|' -Because 'SMC-15 must be bounded to the current conversation rather than durable resume'
@@ -302,7 +302,7 @@ Describe 'session-memory contract structural surface' {
     }
 
     It 'requires /orchestrate command handoff prose to anchor plan, design, and phase markers to SMC rows' {
-        $path = Join-Path $script:RepoRoot 'commands\orchestrate.md'
+        $path = Join-Path $script:RepoRoot 'commands/orchestrate.md'
         $content = & $script:ReadContent -Path $path
 
         $content | Should -Match '(?is)<!-- plan-issue-\{ID\} -->.{0,420}SMC-01|SMC-01.{0,420}<!-- plan-issue-\{ID\} -->' -Because '/orchestrate must tie the durable plan handoff marker to SMC-01'
@@ -311,7 +311,7 @@ Describe 'session-memory contract structural surface' {
     }
 
     It 'requires tracking-format to delegate or retire the Cloud Agent Handoff Protocol' {
-        $path = Join-Path $script:RepoRoot 'skills\tracking-format\SKILL.md'
+        $path = Join-Path $script:RepoRoot 'skills/tracking-format/SKILL.md'
         $content = & $script:ReadContent -Path $path
 
         $content | Should -Match '(?is)Cloud Agent Handoff Protocol.{0,500}(skills/session-memory-contract/SKILL\.md|SMC-\d{2}).{0,500}(delegat|retir|canonical|contract)' -Because 'tracking-format must delegate the old cloud handoff guidance to the canonical session-memory contract'

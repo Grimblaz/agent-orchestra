@@ -19,9 +19,9 @@ Describe 'orchestra-review marker emission contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeReviewResponseShellPath = Join-Path $script:RepoRoot 'agents\code-review-response.md'
-        $script:CodeReviewResponseBodyPath = Join-Path $script:RepoRoot 'agents\Code-Review-Response.agent.md'
-        $script:ReviewJudgmentSkillPath = Join-Path $script:RepoRoot 'skills\review-judgment\SKILL.md'
+        $script:CodeReviewResponseShellPath = Join-Path $script:RepoRoot 'agents/code-review-response.md'
+        $script:CodeReviewResponseBodyPath = Join-Path $script:RepoRoot 'agents/Code-Review-Response.agent.md'
+        $script:ReviewJudgmentSkillPath = Join-Path $script:RepoRoot 'skills/review-judgment/SKILL.md'
         $script:JudgeRulingsPattern = '(?s)<!--\s*judge-rulings\s*\r?\n.*?\r?\n-->'
         $script:ScoreSummaryPattern = '###\s+Adversarial Review Score Summary'
         $script:SamePayloadPattern = '(?s)###\s+Adversarial Review Score Summary.*<!--\s*judge-rulings\s*\r?\n.*?\r?\n-->'

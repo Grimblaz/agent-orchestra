@@ -35,8 +35,8 @@ Describe 'Composite skill structure contract' {
         $script:CompositeSkills = @(
             @{
                 Name                      = 'customer-experience'
-                SkillPath                 = Join-Path $script:RepoRoot 'skills\customer-experience\SKILL.md'
-                ReferencesPath            = Join-Path $script:RepoRoot 'skills\customer-experience\references'
+                SkillPath                 = Join-Path $script:RepoRoot 'skills/customer-experience/SKILL.md'
+                ReferencesPath            = Join-Path $script:RepoRoot 'skills/customer-experience/references'
                 DisallowedHeadingPatterns = @(
                     '(?m)^## Customer Experience Gate \(CE Gate\)\s*$',
                     '(?m)^## Two-Track Defect Response\s*$'
@@ -44,8 +44,8 @@ Describe 'Composite skill structure contract' {
             },
             @{
                 Name                      = 'calibration-pipeline'
-                SkillPath                 = Join-Path $script:RepoRoot 'skills\calibration-pipeline\SKILL.md'
-                ReferencesPath            = Join-Path $script:RepoRoot 'skills\calibration-pipeline\references'
+                SkillPath                 = Join-Path $script:RepoRoot 'skills/calibration-pipeline/SKILL.md'
+                ReferencesPath            = Join-Path $script:RepoRoot 'skills/calibration-pipeline/references'
                 DisallowedHeadingPatterns = @(
                     '(?m)^## Pipeline Metrics\s*$',
                     '(?m)^## Verdict Mapping\s*$',
@@ -54,8 +54,8 @@ Describe 'Composite skill structure contract' {
             },
             @{
                 Name                      = 'validation-methodology'
-                SkillPath                 = Join-Path $script:RepoRoot 'skills\validation-methodology\SKILL.md'
-                ReferencesPath            = Join-Path $script:RepoRoot 'skills\validation-methodology\references'
+                SkillPath                 = Join-Path $script:RepoRoot 'skills/validation-methodology/SKILL.md'
+                ReferencesPath            = Join-Path $script:RepoRoot 'skills/validation-methodology/references'
                 DisallowedHeadingPatterns = @(
                     '(?m)^## Review Reconciliation Loop\s*$',
                     '(?m)^## Post-Judgment Re-Activation Detection\s*$'
@@ -63,16 +63,16 @@ Describe 'Composite skill structure contract' {
             },
             @{
                 Name                      = 'code-review-intake'
-                SkillPath                 = Join-Path $script:RepoRoot 'skills\code-review-intake\SKILL.md'
-                ReferencesPath            = Join-Path $script:RepoRoot 'skills\code-review-intake\references'
+                SkillPath                 = Join-Path $script:RepoRoot 'skills/code-review-intake/SKILL.md'
+                ReferencesPath            = Join-Path $script:RepoRoot 'skills/code-review-intake/references'
                 DisallowedHeadingPatterns = @(
                     '(?m)^## Express Lane Gate.*$'
                 )
             },
             @{
                 Name                      = 'parallel-execution'
-                SkillPath                 = Join-Path $script:RepoRoot 'skills\parallel-execution\SKILL.md'
-                ReferencesPath            = Join-Path $script:RepoRoot 'skills\parallel-execution\references'
+                SkillPath                 = Join-Path $script:RepoRoot 'skills/parallel-execution/SKILL.md'
+                ReferencesPath            = Join-Path $script:RepoRoot 'skills/parallel-execution/references'
                 DisallowedHeadingPatterns = @(
                     '(?m)^## Subagent Call Resilience \(R5\)\s*$',
                     '(?m)^## Error Handling\s*$',

@@ -19,7 +19,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-$libFile = Join-Path $PSScriptRoot 'lib\validate-plugin-preflight-core.ps1'
+$libFile = Join-Path $PSScriptRoot 'lib/validate-plugin-preflight-core.ps1'
 . $libFile
 
 $result = Invoke-PluginPreflight

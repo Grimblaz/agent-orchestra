@@ -35,8 +35,8 @@ Describe 'write-calibration-entry.ps1' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ScriptFile = Join-Path $script:RepoRoot 'skills\calibration-pipeline\scripts\write-calibration-entry.ps1'
-        $script:LibFile = Join-Path $script:RepoRoot 'skills\calibration-pipeline\scripts\write-calibration-entry-core.ps1'
+        $script:ScriptFile = Join-Path $script:RepoRoot 'skills/calibration-pipeline/scripts/write-calibration-entry.ps1'
+        $script:LibFile = Join-Path $script:RepoRoot 'skills/calibration-pipeline/scripts/write-calibration-entry-core.ps1'
         . $script:LibFile
 
         # Master temp root — all per-test dirs live under here
@@ -114,7 +114,7 @@ Describe 'write-calibration-entry.ps1' {
         # ------------------------------------------------------------------
         $script:SeedFile = {
             param([string]$WorkDir, [object]$Entry)
-            $calibDir = Join-Path $WorkDir '.copilot-tracking\calibration'
+            $calibDir = Join-Path $WorkDir '.copilot-tracking/calibration'
             New-Item -ItemType Directory -Path $calibDir -Force | Out-Null
             $data = [ordered]@{
                 calibration_version = 1
@@ -146,7 +146,7 @@ Describe 'write-calibration-entry.ps1' {
 
             & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
 
-            $calibDir = Join-Path $workDir '.copilot-tracking\calibration'
+            $calibDir = Join-Path $workDir '.copilot-tracking/calibration'
             $calibDir | Should -Exist -Because 'the script must create the calibration directory on first run'
         }
 
@@ -156,7 +156,7 @@ Describe 'write-calibration-entry.ps1' {
 
             & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $dataFile | Should -Exist -Because 'review-data.json must be created'
 
             $data = Get-Content $dataFile -Raw | ConvertFrom-Json
@@ -202,7 +202,7 @@ Describe 'write-calibration-entry.ps1' {
             $entryJson = $newEntry | ConvertTo-Json -Depth 10 -Compress
             & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $data = Get-Content $dataFile -Raw | ConvertFrom-Json
             $data.entries.Count | Should -Be 2 -Because 'appending a different pr_number must result in two entries'
         }
@@ -239,7 +239,7 @@ Describe 'write-calibration-entry.ps1' {
             $entryJson = $updatedEntry | ConvertTo-Json -Depth 10 -Compress
             & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $data = Get-Content $dataFile -Raw | ConvertFrom-Json
             $data.entries.Count | Should -Be 1 -Because 'same pr_number must be overwritten, not duplicated'
             # ConvertFrom-Json returns created_at as DateTime; normalise to UTC string for comparison
@@ -410,7 +410,7 @@ Describe 'write-calibration-entry.ps1' {
             $entryJson = $bad | ConvertTo-Json -Depth 10 -Compress
             & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $dataFile | Should -Not -Exist `
                 -Because 'no file should be created or modified when validation fails'
         }
@@ -481,7 +481,7 @@ Describe 'write-calibration-entry.ps1' {
             $entryJson = $entry | ConvertTo-Json -Depth 10 -Compress
             & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $data = Get-Content $dataFile -Raw | ConvertFrom-Json
             $data.entries[0].findings[0].systemic_fix_type | Should -Be 'refactor-extract-method' `
                 -Because 'systemic_fix_type must be stored as a passthrough field'
@@ -496,7 +496,7 @@ Describe 'write-calibration-entry.ps1' {
             $result.ExitCode | Should -Be 0 `
                 -Because 'absence of systemic_fix_type must not cause failure'
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $data = Get-Content $dataFile -Raw | ConvertFrom-Json
             $data.entries.Count | Should -Be 1 -Because 'entry without systemic_fix_type must be stored'
         }
@@ -531,7 +531,7 @@ Describe 'write-calibration-entry.ps1' {
             $result.ExitCode | Should -Be 0 `
                 -Because 'review_stage accepts any non-empty string — no enum restriction'
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $data = Get-Content $dataFile -Raw | ConvertFrom-Json
             $data.entries[0].findings[0].review_stage | Should -Be 'custom-stage' `
                 -Because 'custom review_stage value must be stored verbatim'
@@ -544,7 +544,7 @@ Describe 'write-calibration-entry.ps1' {
             $entryJson = $script:ValidEntry | ConvertTo-Json -Depth 10 -Compress
             & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $data = Get-Content $dataFile -Raw | ConvertFrom-Json
             $findings = $data.entries[0].findings
             $findings.GetType().IsArray | Should -BeTrue `
@@ -565,7 +565,7 @@ Describe 'write-calibration-entry.ps1' {
 
             $result.ExitCode | Should -Be 0 -Because 'successful write must exit 0'
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $dataFile | Should -Exist -Because 'review-data.json must exist after a successful write'
 
             $raw = Get-Content $dataFile -Raw
@@ -573,7 +573,7 @@ Describe 'write-calibration-entry.ps1' {
                 -Because 'review-data.json must contain valid JSON'
 
             # No leftover .tmp file
-            $tmpFiles = Get-ChildItem -Path (Join-Path $workDir '.copilot-tracking\calibration') `
+            $tmpFiles = Get-ChildItem -Path (Join-Path $workDir '.copilot-tracking/calibration') `
                 -Filter '*.tmp' -ErrorAction SilentlyContinue
             $tmpFiles | Should -BeNullOrEmpty `
                 -Because 'atomic write must not leave .tmp files behind after success'
@@ -650,7 +650,7 @@ Describe 'write-calibration-entry.ps1' {
             $result.ExitCode | Should -Be 0 `
                 -Because 'a valid event-only write must succeed'
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $data = Get-Content $dataFile -Raw | ConvertFrom-Json
 
             # Existing entries must be preserved
@@ -676,7 +676,7 @@ Describe 'write-calibration-entry.ps1' {
             $result.ExitCode | Should -Be 0 `
                 -Because 'combined entry + event write must succeed'
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $data = Get-Content $dataFile -Raw | ConvertFrom-Json
 
             $data.entries.Count | Should -Be 1 `
@@ -705,7 +705,7 @@ Describe 'write-calibration-entry.ps1' {
             $eventJson2 = $updatedEvent | ConvertTo-Json -Depth 10 -Compress
             & $script:Invoke -WorkDir $workDir -EventJson $eventJson2
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $data = Get-Content $dataFile -Raw | ConvertFrom-Json
 
             $data.re_activation_events.Count | Should -Be 1 `
@@ -752,10 +752,10 @@ Describe 'write-calibration-entry.ps1' {
             $result.ExitCode | Should -Be 0 `
                 -Because 'valid event write must succeed'
 
-            $dataFile = Join-Path $workDir '.copilot-tracking\calibration\review-data.json'
+            $dataFile = Join-Path $workDir '.copilot-tracking/calibration/review-data.json'
             $dataFile | Should -Exist -Because 'review-data.json must exist after event write'
 
-            $tmpFiles = Get-ChildItem -Path (Join-Path $workDir '.copilot-tracking\calibration') `
+            $tmpFiles = Get-ChildItem -Path (Join-Path $workDir '.copilot-tracking/calibration') `
                 -Filter '*.tmp' -ErrorAction SilentlyContinue
             $tmpFiles | Should -BeNullOrEmpty `
                 -Because 'atomic write must not leave .tmp files behind after success'

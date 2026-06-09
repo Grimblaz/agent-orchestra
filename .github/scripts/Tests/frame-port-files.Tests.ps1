@@ -29,7 +29,7 @@ Describe 'frame port manifest' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:PortsDir = Join-Path $script:RepoRoot 'frame\ports'
+        $script:PortsDir = Join-Path $script:RepoRoot 'frame/ports'
 
         $script:RequirePortsDir = {
             if (-not (Test-Path $script:PortsDir)) {

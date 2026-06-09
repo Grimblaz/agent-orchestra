@@ -19,9 +19,9 @@ Describe 'orchestra-review command contract' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:CommandsDirectory = Join-Path $script:RepoRoot 'commands'
-        $script:ClaudeDispatcherPath = Join-Path $script:RepoRoot 'skills\adversarial-review\platforms\claude.md'
+        $script:ClaudeDispatcherPath = Join-Path $script:RepoRoot 'skills/adversarial-review/platforms/claude.md'
         $script:ClaudeDispatcherContent = Get-Content -Path $script:ClaudeDispatcherPath -Raw -ErrorAction Stop
-        $script:RoutingConfigPath = Join-Path $script:RepoRoot 'skills\routing-tables\assets\routing-config.json'
+        $script:RoutingConfigPath = Join-Path $script:RepoRoot 'skills/routing-tables/assets/routing-config.json'
         $script:RoutingConfig = Get-Content -Path $script:RoutingConfigPath -Raw | ConvertFrom-Json -AsHashtable
         $script:CanonicalMarkers = @(
             $script:RoutingConfig.review_mode_routing.entries |

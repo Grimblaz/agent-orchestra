@@ -26,9 +26,9 @@ Describe 'terminal hygiene guardrails contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SkillPath     = Join-Path $script:RepoRoot 'skills\terminal-hygiene\SKILL.md'
-        $script:ConductorPath = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
-        $script:DesignDocPath = Join-Path $script:RepoRoot 'Documents\Design\terminal-test-hygiene.md'
+        $script:SkillPath     = Join-Path $script:RepoRoot 'skills/terminal-hygiene/SKILL.md'
+        $script:ConductorPath = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
+        $script:DesignDocPath = Join-Path $script:RepoRoot 'Documents/Design/terminal-test-hygiene.md'
 
         $script:MultilineHeading = '## Multiline Continuation-Prompt Hazard'
         $script:WrapperHeading   = '## Non-Fatal Diagnostic Wrapper Pattern'

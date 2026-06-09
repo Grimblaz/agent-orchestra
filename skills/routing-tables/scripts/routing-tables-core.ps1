@@ -1,11 +1,11 @@
 #Requires -Version 7.0
 
 function Get-RTConfigPath {
-    return Join-Path $PSScriptRoot '..\assets\routing-config.json'
+    return Join-Path $PSScriptRoot '../assets/routing-config.json'
 }
 
 function Get-RTGateCriteriaPath {
-    return Join-Path $PSScriptRoot '..\assets\gate-criteria.json'
+    return Join-Path $PSScriptRoot '../assets/gate-criteria.json'
 }
 
 function Read-RTJsonFile {

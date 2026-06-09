@@ -15,7 +15,7 @@ Describe 'Natural-language intent routing collision fixture contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:FixturePath = Join-Path $script:RepoRoot '.github\scripts\Tests\fixtures\intent-routing-collisions.yml'
+        $script:FixturePath = Join-Path $script:RepoRoot '.github/scripts/Tests/fixtures/intent-routing-collisions.yml'
         $script:YamlText = Get-Content -Path $script:FixturePath -Raw
 
         $script:ConvertCollisionFixtureValue = {

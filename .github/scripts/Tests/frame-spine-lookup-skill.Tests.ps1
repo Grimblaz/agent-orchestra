@@ -14,7 +14,7 @@ Describe 'frame-spine-lookup skill contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SkillPath = Join-Path $script:RepoRoot 'skills\frame-spine-lookup\SKILL.md'
+        $script:SkillPath = Join-Path $script:RepoRoot 'skills/frame-spine-lookup/SKILL.md'
         $script:ClaudeSpecialistShellPaths = @(
             'agents/code-smith.md',
             'agents/test-writer.md',
@@ -33,7 +33,7 @@ Describe 'frame-spine-lookup skill contract' {
         )
 
         # Research-Agent deferral: excluded because it has no execute/* grant; Copilot spine lookup deferred per #514 Step 12
-        $script:ClaudePlatformPath = Join-Path $script:RepoRoot 'skills\frame-spine-lookup\platforms\claude.md'
+        $script:ClaudePlatformPath = Join-Path $script:RepoRoot 'skills/frame-spine-lookup/platforms/claude.md'
 
         $script:ReadContent = {
             param([Parameter(Mandatory)][string]$Path)
@@ -134,7 +134,7 @@ Describe 'frame-spine-lookup skill contract' {
             # Copilot parity shipped in #514 - the "deferred to #514" claim must be retired
             $script:SkillContent | Should -Not -Match '(?is)Copilot\s+tool\s+shim.{0,160}deferred' -Because 'Copilot spine lookup shipped in #514; the deferred claim must be retired'
             # platforms/copilot.md must exist as evidence Copilot parity landed
-            Test-Path -LiteralPath (Join-Path $script:RepoRoot 'skills\frame-spine-lookup\platforms\copilot.md') | Should -BeTrue -Because 'Copilot parity shipped in #514 requires platforms/copilot.md to exist'
+            Test-Path -LiteralPath (Join-Path $script:RepoRoot 'skills/frame-spine-lookup/platforms/copilot.md') | Should -BeTrue -Because 'Copilot parity shipped in #514 requires platforms/copilot.md to exist'
             $script:SkillContent | Should -Match '(?is)custom\s+MCP\s+server.{0,160}(deferred|non-goals?|non-goal)|(deferred|non-goals?|non-goal).{0,160}custom\s+MCP\s+server' -Because 'custom MCP server work is out of scope for this skill'
         }
     }

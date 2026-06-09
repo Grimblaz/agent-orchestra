@@ -21,8 +21,8 @@ Describe 'routing tables deterministic contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:RoutingTablesCore = Join-Path $script:RepoRoot 'skills\routing-tables\scripts\routing-tables-core.ps1'
-        $script:RoutingConfigAssetSourcePath = Join-Path $script:RepoRoot 'skills\routing-tables\assets\routing-config.json'
+        $script:RoutingTablesCore = Join-Path $script:RepoRoot 'skills/routing-tables/scripts/routing-tables-core.ps1'
+        $script:RoutingConfigAssetSourcePath = Join-Path $script:RepoRoot 'skills/routing-tables/assets/routing-config.json'
         $script:RoutingConfigTempRoot = Join-Path ([System.IO.Path]::GetTempPath()) `
             "pester-routing-tables-$([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $script:RoutingConfigTempRoot -Force | Out-Null
@@ -162,8 +162,8 @@ Describe 'routing tables asset parity contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:RoutingConfigAssetPath = Join-Path $script:RepoRoot 'skills\routing-tables\assets\routing-config.json'
-        $script:ScriptSafetyContract = Join-Path $script:RepoRoot '.github\scripts\Tests\script-safety-contract.Tests.ps1'
+        $script:RoutingConfigAssetPath = Join-Path $script:RepoRoot 'skills/routing-tables/assets/routing-config.json'
+        $script:ScriptSafetyContract = Join-Path $script:RepoRoot '.github/scripts/Tests/script-safety-contract.Tests.ps1'
     }
 
     It 'keeps routing-config category enums aligned with the script safety contract taxonomy' {

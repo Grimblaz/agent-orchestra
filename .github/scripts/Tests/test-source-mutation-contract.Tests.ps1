@@ -15,7 +15,7 @@ Describe 'test source mutation contract' -Tag 'no-gh' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:TestsRoot = Join-Path $script:RepoRoot '.github\scripts\Tests'
+        $script:TestsRoot = Join-Path $script:RepoRoot '.github/scripts/Tests'
         $script:ThisFile = (Resolve-Path $PSCommandPath).Path
         $script:AssetPathPattern = 'skills[/\\][^/\\]+[/\\]assets(?:[/\\]|$)'
 

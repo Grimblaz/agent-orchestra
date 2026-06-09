@@ -15,7 +15,7 @@ Describe 'Code-Conductor shared-body size contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ConductorBodyPath = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
+        $script:ConductorBodyPath = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
         $script:ConductorBody = (Get-Content -Path $script:ConductorBodyPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
         $script:ConductorLineCount = if ([string]::IsNullOrEmpty($script:ConductorBody)) {
             0

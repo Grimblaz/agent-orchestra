@@ -37,7 +37,7 @@ function Resolve-CopilotCostDefaultUserSettingsPath {
             throw 'APPDATA is not set; pass -UserSettingsPath for this VS Code installation.'
         }
 
-        return Join-Path -Path $env:APPDATA -ChildPath 'Code\User\settings.json'
+        return Join-Path -Path $env:APPDATA -ChildPath 'Code\User\settings.json' # host-path-ok
     }
 
     $profileHome = [Environment]::GetFolderPath('UserProfile')

@@ -15,11 +15,11 @@ Describe 'orchestra-review lite mode trigger contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CodeCriticBodyPath = Join-Path $script:RepoRoot 'agents\Code-Critic.agent.md'
-        $script:CodeReviewResponseBodyPath = Join-Path $script:RepoRoot 'agents\Code-Review-Response.agent.md'
-        $script:CodeReviewIntakeSkillPath = Join-Path $script:RepoRoot 'skills\code-review-intake\SKILL.md'
-        $script:RoutingTablesSkillPath = Join-Path $script:RepoRoot 'skills\routing-tables\SKILL.md'
-        $script:RoutingConfigPath = Join-Path $script:RepoRoot 'skills\routing-tables\assets\routing-config.json'
+        $script:CodeCriticBodyPath = Join-Path $script:RepoRoot 'agents/Code-Critic.agent.md'
+        $script:CodeReviewResponseBodyPath = Join-Path $script:RepoRoot 'agents/Code-Review-Response.agent.md'
+        $script:CodeReviewIntakeSkillPath = Join-Path $script:RepoRoot 'skills/code-review-intake/SKILL.md'
+        $script:RoutingTablesSkillPath = Join-Path $script:RepoRoot 'skills/routing-tables/SKILL.md'
+        $script:RoutingConfigPath = Join-Path $script:RepoRoot 'skills/routing-tables/assets/routing-config.json'
         $script:CodeCriticBody = Get-Content -Path $script:CodeCriticBodyPath -Raw
         $script:CodeReviewResponseBody = Get-Content -Path $script:CodeReviewResponseBodyPath -Raw
         $script:CodeReviewIntakeSkill = Get-Content -Path $script:CodeReviewIntakeSkillPath -Raw
@@ -33,7 +33,7 @@ Describe 'orchestra-review lite mode trigger contract' {
             '(?ms)^## Review Mode Routing\s*\r?\n(?<body>.*?)(?=^## |\z)'
         ).Groups['body'].Value
 
-        $script:LiteCommandPath = Join-Path $script:RepoRoot 'commands\orchestra-review-lite.md'
+        $script:LiteCommandPath = Join-Path $script:RepoRoot 'commands/orchestra-review-lite.md'
         $script:LiteCommand = Get-Content -Path $script:LiteCommandPath -Raw
     }
 

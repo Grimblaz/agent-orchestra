@@ -17,7 +17,7 @@ Describe 'Natural-language intent routing table contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:RoutingTablesCore = Join-Path $script:RepoRoot 'skills\routing-tables\scripts\routing-tables-core.ps1'
+        $script:RoutingTablesCore = Join-Path $script:RepoRoot 'skills/routing-tables/scripts/routing-tables-core.ps1'
 
         . $script:RoutingTablesCore
 

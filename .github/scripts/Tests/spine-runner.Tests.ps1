@@ -17,15 +17,15 @@ Describe 'Spine-Runner frame-walking contract' -Tag 'contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:SpineRunnerPath = Join-Path $script:RepoRoot 'agents\Spine-Runner.agent.md'
-        $script:ClaudeCommandPath = Join-Path $script:RepoRoot 'commands\spine-run.md'
-        $script:ClaudeShellPath = Join-Path $script:RepoRoot 'agents\spine-runner.md'
-        $script:FrameCreditEmissionPath = Join-Path $script:RepoRoot 'skills\frame-credit-emission\SKILL.md'
-        $script:PortsDirectory = Join-Path $script:RepoRoot 'frame\ports'
-        $script:CopilotPromptPath = Join-Path $script:RepoRoot '.github\prompts\spine-run.prompt.md'
-        $script:OrchestratePromptPath = Join-Path $script:RepoRoot '.github\prompts\orchestrate.prompt.md'
-        $script:FrameSpineParseTestsPath = Join-Path $script:RepoRoot '.github\scripts\Tests\frame-spine-parse.Tests.ps1'
-        $script:ConductorSpineDispatchTestsPath = Join-Path $script:RepoRoot '.github\scripts\Tests\code-conductor-spine-dispatch.Tests.ps1'
+        $script:SpineRunnerPath = Join-Path $script:RepoRoot 'agents/Spine-Runner.agent.md'
+        $script:ClaudeCommandPath = Join-Path $script:RepoRoot 'commands/spine-run.md'
+        $script:ClaudeShellPath = Join-Path $script:RepoRoot 'agents/spine-runner.md'
+        $script:FrameCreditEmissionPath = Join-Path $script:RepoRoot 'skills/frame-credit-emission/SKILL.md'
+        $script:PortsDirectory = Join-Path $script:RepoRoot 'frame/ports'
+        $script:CopilotPromptPath = Join-Path $script:RepoRoot '.github/prompts/spine-run.prompt.md'
+        $script:OrchestratePromptPath = Join-Path $script:RepoRoot '.github/prompts/orchestrate.prompt.md'
+        $script:FrameSpineParseTestsPath = Join-Path $script:RepoRoot '.github/scripts/Tests/frame-spine-parse.Tests.ps1'
+        $script:ConductorSpineDispatchTestsPath = Join-Path $script:RepoRoot '.github/scripts/Tests/code-conductor-spine-dispatch.Tests.ps1'
         $script:NoFrameRefusal = 'No frame found on plan-issue-{ID}. Run /plan first.'
 
         $script:Normalize = {

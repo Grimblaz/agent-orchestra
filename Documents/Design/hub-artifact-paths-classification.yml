@@ -145,6 +145,18 @@ families:
       Missing script produces visible-warning rather than hard-failure because the skill
       body can fall back to inline guidance."
 
+  "../skills/*/scripts/*.ps1":
+    claude_resolves: both
+    copilot_resolves: source-tree
+    requires_version_bump: true
+    experience: visible-warning
+    examples:
+      - ../skills/session-startup/scripts/session-cleanup-detector.ps1
+    notes: "../-prefixed form of 'skills/*/scripts/*.ps1' referenced from .github/scripts/
+      context (e.g., test-session-cleanup-detector.ps1). Resolves to the same physical
+      scripts as the skills/*/scripts/*.ps1 family; introduced by #664 forward-slash
+      path conversion which activated forward-slash path extraction."
+
   "skills/*/assets/*.json":
     claude_resolves: both
     copilot_resolves: source-tree

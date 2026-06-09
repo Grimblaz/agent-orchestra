@@ -14,8 +14,8 @@
 Describe 'Invoke-CreateImprovementIssue' -Tag 'no-gh' {
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:CorePath = Join-Path $script:RepoRoot 'skills\calibration-pipeline\scripts\create-improvement-issue-core.ps1'
-        $script:WrapperPath = Join-Path $script:RepoRoot 'skills\calibration-pipeline\scripts\create-improvement-issue.ps1'
+        $script:CorePath = Join-Path $script:RepoRoot 'skills/calibration-pipeline/scripts/create-improvement-issue-core.ps1'
+        $script:WrapperPath = Join-Path $script:RepoRoot 'skills/calibration-pipeline/scripts/create-improvement-issue.ps1'
         . $script:CorePath
 
         # ── temp root for all test data ──────────────────────────────

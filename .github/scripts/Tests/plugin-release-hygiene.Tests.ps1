@@ -5,8 +5,8 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:HookScript = Join-Path $script:RepoRoot 'skills\plugin-release-hygiene\scripts\plugin-release-hygiene-hook.ps1'
-        $script:SkillFile = Join-Path $script:RepoRoot 'skills\plugin-release-hygiene\SKILL.md'
+        $script:HookScript = Join-Path $script:RepoRoot 'skills/plugin-release-hygiene/scripts/plugin-release-hygiene-hook.ps1'
+        $script:SkillFile = Join-Path $script:RepoRoot 'skills/plugin-release-hygiene/SKILL.md'
         $script:ClaudeGuide = Join-Path $script:RepoRoot 'CLAUDE.md'
         $script:Readme = Join-Path $script:RepoRoot 'README.md'
         $script:FixtureRoots = [System.Collections.Generic.List[string]]::new()
@@ -29,7 +29,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
             $root = Join-Path ([System.IO.Path]::GetTempPath()) $Name
             $agentsDir = Join-Path $root 'agents'
-            $scriptsDir = Join-Path $root '.github\scripts'
+            $scriptsDir = Join-Path $root '.github/scripts'
 
             New-Item -ItemType Directory -Path $agentsDir -Force | Out-Null
             New-Item -ItemType Directory -Path $scriptsDir -Force | Out-Null
@@ -61,12 +61,12 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
             )
 
             New-Item -ItemType Directory -Path (Join-Path $Root '.claude-plugin') -Force | Out-Null
-            New-Item -ItemType Directory -Path (Join-Path $Root '.github\plugin') -Force | Out-Null
+            New-Item -ItemType Directory -Path (Join-Path $Root '.github/plugin') -Force | Out-Null
 
             Set-Content -Path (Join-Path $Root 'plugin.json') -Value "{`"version`":`"$Version`"}" -Encoding UTF8
-            Set-Content -Path (Join-Path $Root '.claude-plugin\plugin.json') -Value "{`"version`":`"$Version`"}" -Encoding UTF8
-            Set-Content -Path (Join-Path $Root '.claude-plugin\marketplace.json') -Value "{`"metadata`":{`"version`":`"$Version`"},`"plugins`": [{`"version`":`"$Version`"}]}" -Encoding UTF8
-            Set-Content -Path (Join-Path $Root '.github\plugin\marketplace.json') -Value "{`"metadata`":{`"version`":`"$Version`"},`"plugins`": [{`"version`":`"$Version`"}]}" -Encoding UTF8
+            Set-Content -Path (Join-Path $Root '.claude-plugin/plugin.json') -Value "{`"version`":`"$Version`"}" -Encoding UTF8
+            Set-Content -Path (Join-Path $Root '.claude-plugin/marketplace.json') -Value "{`"metadata`":{`"version`":`"$Version`"},`"plugins`": [{`"version`":`"$Version`"}]}" -Encoding UTF8
+            Set-Content -Path (Join-Path $Root '.github/plugin/marketplace.json') -Value "{`"metadata`":{`"version`":`"$Version`"},`"plugins`": [{`"version`":`"$Version`"}]}" -Encoding UTF8
             Set-Content -Path (Join-Path $Root 'README.md') -Value "[![Version](https://img.shields.io/badge/version-v$Version-blue.svg)](../../releases)" -Encoding UTF8
         }
 
@@ -119,7 +119,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
     It 'emits the hook JSON contract for the first entry-point edit' {
         $fixture = New-PluginReleaseHygieneFixture
-        $target = Join-Path $fixture 'agents\Example.agent.md'
+        $target = Join-Path $fixture 'agents/Example.agent.md'
         Set-Content -Path $target -Value '# Example' -Encoding UTF8
 
         $raw = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $target
@@ -132,7 +132,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
     It 'emits hook JSON through the production entrypoint using stdin payload' {
         $fixture = New-PluginReleaseHygieneFixture
-        $target = Join-Path $fixture 'agents\Entrypoint.agent.md'
+        $target = Join-Path $fixture 'agents/Entrypoint.agent.md'
         Set-Content -Path $target -Value '# Entrypoint' -Encoding UTF8
         $payload = [PSCustomObject]@{
             hook_event_name = 'PostToolUse'
@@ -175,15 +175,15 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
     It 'coalesces repeated entry-point edits into one state file' {
         $fixture = New-PluginReleaseHygieneFixture
-        $first = Join-Path $fixture 'agents\First.agent.md'
-        $second = Join-Path $fixture 'commands\design.md'
+        $first = Join-Path $fixture 'agents/First.agent.md'
+        $second = Join-Path $fixture 'commands/design.md'
         New-Item -ItemType Directory -Path (Split-Path $second) -Force | Out-Null
         Set-Content -Path $first -Value '# First' -Encoding UTF8
         Set-Content -Path $second -Value '# Design' -Encoding UTF8
 
         $firstResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $first
         $secondResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $second
-        $statePath = Join-Path $fixture '.claude\.state\release-hygiene-389.json'
+        $statePath = Join-Path $fixture '.claude/.state/release-hygiene-389.json'
         $state = Get-Content -Path $statePath -Raw | ConvertFrom-Json
 
         [string]::IsNullOrWhiteSpace($firstResult) | Should -BeFalse
@@ -196,8 +196,8 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
     It 'coalesces repeated entry-point edits by session_id and records the strategy' {
         $fixture = New-PluginReleaseHygieneFixture
-        $first = Join-Path $fixture 'agents\First.agent.md'
-        $second = Join-Path $fixture 'commands\design.md'
+        $first = Join-Path $fixture 'agents/First.agent.md'
+        $second = Join-Path $fixture 'commands/design.md'
         $sessionId = 'session-422'
         New-Item -ItemType Directory -Path (Split-Path $second) -Force | Out-Null
         Set-Content -Path $first -Value '# First' -Encoding UTF8
@@ -205,7 +205,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
         $firstResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $first -SessionId $sessionId
         $secondResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $second -SessionId $sessionId
-        $statePath = Join-Path $fixture '.claude\.state\release-hygiene-session-422.json'
+        $statePath = Join-Path $fixture '.claude/.state/release-hygiene-session-422.json'
         $state = Get-Content -Path $statePath -Raw | ConvertFrom-Json
 
         [string]::IsNullOrWhiteSpace($firstResult) | Should -BeFalse
@@ -217,8 +217,8 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
     It 'updates keying_strategy when a later invocation uses a session_id for the same slug' {
         $fixture = New-PluginReleaseHygieneFixture
-        $first = Join-Path $fixture 'agents\First.agent.md'
-        $second = Join-Path $fixture 'commands\design.md'
+        $first = Join-Path $fixture 'agents/First.agent.md'
+        $second = Join-Path $fixture 'commands/design.md'
         New-Item -ItemType Directory -Path (Split-Path $second) -Force | Out-Null
         Set-Content -Path $first -Value '# First' -Encoding UTF8
         Set-Content -Path $second -Value '# Design' -Encoding UTF8
@@ -233,7 +233,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
         $firstResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $first
         $secondResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $second -SessionId '422'
-        $statePath = Join-Path $fixture '.claude\.state\release-hygiene-422.json'
+        $statePath = Join-Path $fixture '.claude/.state/release-hygiene-422.json'
         $state = Get-Content -Path $statePath -Raw | ConvertFrom-Json
 
         [string]::IsNullOrWhiteSpace($firstResult) | Should -BeFalse
@@ -243,7 +243,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
     It 'stays silent (no output) when plugin.json is already ahead of main but writes symmetric-bump credit to state file (issue #441, Step 7a)' {
         $fixture = New-PluginReleaseHygieneFixture
-        $target = Join-Path $fixture 'agents\Example.agent.md'
+        $target = Join-Path $fixture 'agents/Example.agent.md'
         Set-Content -Path $target -Value '# Example' -Encoding UTF8
 
         Push-Location $fixture
@@ -265,7 +265,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
         [string]::IsNullOrWhiteSpace($raw) | Should -BeTrue
 
         # Step 7a: hook now writes symmetric-bump credit to state file when version is already bumped.
-        $statePath = Join-Path $fixture '.claude\.state\release-hygiene-session-422-bumped.json'
+        $statePath = Join-Path $fixture '.claude/.state/release-hygiene-session-422-bumped.json'
         Test-Path $statePath | Should -BeTrue -Because 'symmetric-bump credit must be persisted when version is already bumped'
         $state = Get-Content $statePath -Raw | ConvertFrom-Json
         $state.symmetric_bump_credit        | Should -Not -BeNullOrEmpty
@@ -275,7 +275,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
     It 'does not stay silent when only part of the version set is bumped' {
         $fixture = New-PluginReleaseHygieneFixture
-        $target = Join-Path $fixture 'agents\Example.agent.md'
+        $target = Join-Path $fixture 'agents/Example.agent.md'
         Set-Content -Path $target -Value '# Example' -Encoding UTF8
 
         Push-Location $fixture
@@ -332,23 +332,23 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
     It 'fails open when the state path cannot be created' {
         $fixture = New-PluginReleaseHygieneFixture
-        $target = Join-Path $fixture 'agents\Example.agent.md'
+        $target = Join-Path $fixture 'agents/Example.agent.md'
         Set-Content -Path $target -Value '# Example' -Encoding UTF8
         New-Item -ItemType Directory -Path (Join-Path $fixture '.claude') -Force | Out-Null
-        Set-Content -Path (Join-Path $fixture '.claude\.state') -Value 'blocked' -Encoding UTF8
+        Set-Content -Path (Join-Path $fixture '.claude/.state') -Value 'blocked' -Encoding UTF8
 
         $raw = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $target
         $result = $raw | ConvertFrom-Json
 
         $result.hookSpecificOutput.hookEventName | Should -Be 'PostToolUse'
-        Test-Path (Join-Path $fixture '.claude\.state\release-hygiene-389.json') | Should -BeFalse
+        Test-Path (Join-Path $fixture '.claude/.state/release-hygiene-389.json') | Should -BeFalse
     }
 
     It 'reuses the same state file across linked worktrees for the same session_id' {
         $fixture = New-PluginReleaseHygieneFixture
-        $first = Join-Path $fixture 'agents\First.agent.md'
+        $first = Join-Path $fixture 'agents/First.agent.md'
         $worktreeRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("prh-worktree-$([guid]::NewGuid().ToString('N'))")
-        $second = Join-Path $worktreeRoot 'commands\design.md'
+        $second = Join-Path $worktreeRoot 'commands/design.md'
         New-Item -ItemType Directory -Path (Split-Path $first) -Force | Out-Null
         Set-Content -Path $first -Value '# First' -Encoding UTF8
         $script:FixtureRoots.Add($worktreeRoot)
@@ -366,7 +366,7 @@ Describe 'plugin release hygiene hook contract' -Tag 'unit' {
 
         $firstResult = Invoke-HookInFixture -FixtureRoot $fixture -FilePath $first -SessionId 'shared-worktree-session'
         $secondResult = Invoke-HookInFixture -FixtureRoot $worktreeRoot -FilePath $second -SessionId 'shared-worktree-session'
-        $state = Get-Content -Path (Join-Path $fixture '.claude\.state\release-hygiene-shared-worktree-session.json') -Raw | ConvertFrom-Json
+        $state = Get-Content -Path (Join-Path $fixture '.claude/.state/release-hygiene-shared-worktree-session.json') -Raw | ConvertFrom-Json
 
         [string]::IsNullOrWhiteSpace($firstResult) | Should -BeFalse
         [string]::IsNullOrWhiteSpace($secondResult) | Should -BeTrue

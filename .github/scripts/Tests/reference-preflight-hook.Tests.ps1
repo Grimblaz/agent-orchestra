@@ -5,9 +5,9 @@ Describe 'reference-preflight-hook contract' -Tag 'unit' {
 
     BeforeAll {
         $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:HookScript = Join-Path $script:RepoRoot 'skills\project-references\scripts\reference-preflight-hook.ps1'
-        $script:LoaderScript = Join-Path $script:RepoRoot 'skills\project-references\scripts\invoke-reference-loader.ps1'
-        $script:FixtureBase = Join-Path $PSScriptRoot 'fixtures\project-references\valid-repo'
+        $script:HookScript = Join-Path $script:RepoRoot 'skills/project-references/scripts/reference-preflight-hook.ps1'
+        $script:LoaderScript = Join-Path $script:RepoRoot 'skills/project-references/scripts/invoke-reference-loader.ps1'
+        $script:FixtureBase = Join-Path $PSScriptRoot 'fixtures/project-references/valid-repo'
 
         # Dot-source the hook to get all functions in scope
         . $script:HookScript

@@ -3,7 +3,7 @@
 
 Describe 'Format-CostPatternMarkdown' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\cost-pattern-renderer.ps1'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-pattern-renderer.ps1'
         if (Test-Path $script:LibPath) {
             . $script:LibPath
         }
@@ -480,7 +480,7 @@ Describe 'Format-CostPatternMarkdown' {
 
 Describe 'Format-CostPatternYaml' {
     BeforeAll {
-        $script:LibPath = Join-Path $PSScriptRoot '..\lib\cost-pattern-renderer.ps1'
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-pattern-renderer.ps1'
         if (Test-Path $script:LibPath) {
             . $script:LibPath
         }
@@ -676,7 +676,7 @@ Describe 'Format-CostPatternYaml' {
 
 Describe 'cost-pattern-data schema documentation' {
     It 'documents the post-#488 additive YAML fields' {
-        $schemaPath = Join-Path $PSScriptRoot '..\lib\cost-pattern-data-schema.md'
+        $schemaPath = Join-Path $PSScriptRoot '../lib/cost-pattern-data-schema.md'
         $schemaPath | Should -Exist
         $schema = Get-Content -LiteralPath $schemaPath -Raw
 

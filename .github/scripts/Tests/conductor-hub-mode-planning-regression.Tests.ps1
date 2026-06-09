@@ -15,8 +15,8 @@ Describe 'Code-Conductor hub-mode planning regression contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:OrchestrateCommandPath = Join-Path $script:RepoRoot 'commands\orchestrate.md'
-        $script:ConductorBodyPath = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
+        $script:OrchestrateCommandPath = Join-Path $script:RepoRoot 'commands/orchestrate.md'
+        $script:ConductorBodyPath = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
 
         $script:OrchestrateCommand = (Get-Content -Path $script:OrchestrateCommandPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"
         $script:ConductorBody = (Get-Content -Path $script:ConductorBodyPath -Raw -ErrorAction Stop) -replace "`r`n?", "`n"

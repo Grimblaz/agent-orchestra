@@ -15,8 +15,8 @@ Describe 'Copilot CE Gate regression contract' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:ConductorBodyPath = Join-Path $script:RepoRoot 'agents\Code-Conductor.agent.md'
-        $script:OrchestratePromptPath = Join-Path $script:RepoRoot '.github\prompts\orchestrate.prompt.md'
+        $script:ConductorBodyPath = Join-Path $script:RepoRoot 'agents/Code-Conductor.agent.md'
+        $script:OrchestratePromptPath = Join-Path $script:RepoRoot '.github/prompts/orchestrate.prompt.md'
         $script:CanonicalReference = 'skills/customer-experience/references/orchestration-protocol.md'
         $script:CompositeSkillPath = 'skills/customer-experience/SKILL.md'
 
