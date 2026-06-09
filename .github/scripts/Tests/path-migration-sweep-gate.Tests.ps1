@@ -237,17 +237,30 @@ Describe 'Issue #664 backslash-Join-Path hygiene gate' -Tag 'issue-664', 'sweep-
     # Gate: no tracked .ps1 file may pass a single-quoted child path containing a
     # backslash to Join-Path (e.g. Join-Path $x 'a\b') unless exempted.
     #
-    # Detection regex (verbatim): Join-Path\s.*'[^']*\\[^']*'
+    # Detection regex (verbatim): Join-Path\s.*'[^'\\]+\\[^']*'
     #
     # Matches any source line where:
     #   1. The token "Join-Path" appears.
     #   2. Followed by at least one whitespace character (\s).
     #   3. Followed by any characters (.*).
-    #   4. Followed by a single-quoted string containing at least one backslash.
+    #   4. Followed by a single-quoted string whose FIRST backslash is preceded
+    #      by at least one non-backslash, non-quote character ([^'\\]+) — i.e. a
+    #      relative-path child argument like '..\assets\x.json' or 'lib\y.ps1'.
     #
-    # Documented miss: double-quoted child paths (Join-Path $x "a\b") are NOT
-    # caught because the regex requires a single-quoted string. No known in-tree
-    # double-quoted backslash Join-Path calls exist at the time of authoring.
+    # Why the leading-char guard ([^'\\]+ rather than [^']*): the original
+    # [^']* form let greedy .* on a Join-Path line reach forward to an unrelated
+    # single-quoted regex operand later on the same line — e.g. a
+    # `-replace '\s+', '-'` argument — and mis-flag it as a path violation
+    # (false positive on review-completion-gate.Tests.ps1:167, issue #664 review).
+    # Requiring a non-backslash char before the first backslash excludes
+    # leading-backslash regex/escape literals ('\s+', '\d', '\.') while still
+    # catching every relative-path literal (which never leads with a separator).
+    #
+    # Documented misses (outside regex scope, no known in-tree instances):
+    #   - Double-quoted child paths (Join-Path $x "a\b") — regex requires a
+    #     single-quoted string.
+    #   - Leading-backslash single-quoted literals (Join-Path $x '\abs\path') —
+    #     absolute-from-root paths; excluded by the [^'\\]+ guard above.
     #
     # Exemption mechanism (same convention as script-safety-contract.Tests.ps1):
     #   - Full-line comments (TrimStart starts with '#') are skipped.
@@ -266,7 +279,7 @@ Describe 'Issue #664 backslash-Join-Path hygiene gate' -Tag 'issue-664', 'sweep-
 
     BeforeAll {
         $script:RepoRoot664 = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-        $script:GatePattern = "Join-Path\s.*'[^']*\\[^']*'"
+        $script:GatePattern = "Join-Path\s.*'[^'\\]+\\[^']*'"
         # Self-exclusion: the gate file itself contains the pattern string and
         # self-test literals — exclude it from the production scan.
         $script:GateRelPath = '.github/scripts/Tests/path-migration-sweep-gate.Tests.ps1'
@@ -340,6 +353,19 @@ Describe 'Issue #664 backslash-Join-Path hygiene gate' -Tag 'issue-664', 'sweep-
             # Content assertion with backslash — no Join-Path prefix
             $contentAssert = "`$content | Should -Be 'path\to\file'"
             $contentAssert | Should -Not -Match $script:GatePattern
+        }
+
+        It 'No false positives: a regex operand on a Join-Path line is not flagged' {
+            # Regression guard (issue #664 review F1): a Join-Path with a
+            # double-quoted child path AND an unrelated -replace '\s+' regex
+            # operand later on the same line must NOT be flagged. The greedy
+            # .* in the original [^']* form mis-matched the '\s+' literal.
+            $regexOperandOnJoinPathLine = "`$path = Join-Path `$script:TempRoot (`"review-state-malformed-{0}.md`" -f (`$case.Name -replace '\s+', '-'))"
+            $regexOperandOnJoinPathLine | Should -Not -Match $script:GatePattern
+
+            # Leading-backslash literal (absolute-from-root) — documented miss
+            $leadingBackslash = "Join-Path `$x '\abs\path'"
+            $leadingBackslash | Should -Not -Match $script:GatePattern
         }
 
         It 'Documented miss: double-quoted child path is not caught by regex' {
