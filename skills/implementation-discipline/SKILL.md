@@ -94,7 +94,7 @@ Halt and return without completing the slice when either of these `implement-cod
 - **Scope violation** — the slice requires touching files unrelated to the dispatched requirement. Halt with reason `scope-violation`.
 - **Simplicity violation** — the implementation would require a new architectural seam, substantial refactor, or cross-layer dependency not called for by the plan. Halt with reason `simplicity-violation`.
 
-For the halt return shape and the full reason enum, see `agents/Senior-Engineer.agent.md` § `## Halt-Return Contract` — that section is the single authoritative source.
+For the Halt-Return shape and the full reason enum, see `agents/Senior-Engineer.agent.md` § `## Halt-Return Contract` — that section is the single authoritative source.
 
 ## Implementation Requirements Verification
 

@@ -29,7 +29,7 @@ Apply `skills/implementation-discipline/SKILL.md` to the dispatched slice. Use t
 
 Keep this adapter distinct from `implement-refactor`: do not perform behavior-preserving structural cleanup under this label. If the slice is refactoring-only, route to the `implement-refactor` port instead.
 
-For the halt return shape when a halt condition is reached, see `agents/Senior-Engineer.agent.md` § `## Halt-Return Contract`.
+For the Halt-Return shape when a halt condition is reached, see `agents/Senior-Engineer.agent.md` § `## Halt-Return Contract`.
 
 ## Terminal credit step
 
