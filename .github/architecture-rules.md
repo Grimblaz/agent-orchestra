@@ -106,3 +106,26 @@ pwsh -NoProfile -NonInteractive -File .github/scripts/quick-validate.ps1
 ```
 
 This consolidates all structural checks (deleted-agent references, skill frontmatter, guidance complexity, PSScriptAnalyzer, and more).
+
+### Join-Path child-path separator rule
+
+All `Join-Path` calls in tracked `.ps1` files must use forward slashes (`/`) as
+path separators in child-path arguments:
+
+```powershell
+# Correct (cross-platform)
+Join-Path $root 'skills/session-startup/scripts/session-cleanup-detector.ps1'
+
+# Wrong (Linux-breaking)
+Join-Path $root 'skills\session-startup\scripts\session-cleanup-detector.ps1'
+```
+
+PowerShell's `Join-Path` does not normalize embedded backslashes on Linux;
+`Get-Content -LiteralPath` and file-existence checks against such paths fail silently.
+Forward slashes are portable across Windows, Linux, and macOS.
+
+**Exceptions**: Windows-only paths inside an `if ($IsWindows)` block may retain
+backslashes. Mark these with `# host-path-ok` on the same line to suppress the gate.
+
+**Enforcement**: `path-migration-sweep-gate.Tests.ps1` `Describe 'Issue #664...'` block
+(added in issue #664) — run with `Invoke-Pester .github/scripts/Tests/path-migration-sweep-gate.Tests.ps1`.

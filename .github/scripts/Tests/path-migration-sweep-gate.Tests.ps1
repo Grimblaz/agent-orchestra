@@ -318,7 +318,8 @@ Describe 'Issue #664 backslash-Join-Path hygiene gate' -Tag 'issue-664', 'sweep-
             $script:Violations664 | Should -BeNullOrEmpty -Because (
                 "Join-Path child paths must not contain backslashes — use forward slashes or " +
                 "separate path segments as additional Join-Path arguments. " +
-                "To suppress a legitimate Windows-only reference add '# host-path-ok' on the same line. " +
+                "See .github/architecture-rules.md §Validation for the convention. " +
+                "To suppress a documented Windows-only exception add '# host-path-ok' on the same line. " +
                 "Violations:`n  " + ($script:Violations664 -join "`n  ")
             )
         }
