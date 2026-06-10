@@ -250,6 +250,8 @@ function ConvertFrom-FVPlanSliceBlock {
     $adapter = Get-FVPlanScalarField -Block $Block -Names @('adapter')
     $migrationScanRaw = Get-FVPlanScalarField -Block $Block -Names @('migration-scan')
     $migrationScan = ($migrationScanRaw -eq 'true')
+    $commitIndexRaw = Get-FVPlanScalarField -Block $Block -Names @('commit-index', 'commit_index')
+    $commitIndex = if ($null -ne $commitIndexRaw -and $commitIndexRaw -match '^\d+$') { [int]$commitIndexRaw } else { [int]::MaxValue }
 
     $provides = if ($null -eq $providesRaw) { [string[]]@() } else { ConvertFrom-FVInlineList -Value $providesRaw }
     if ($null -eq $provides) { $provides = [string[]]@() }
@@ -274,6 +276,7 @@ function ConvertFrom-FVPlanSliceBlock {
         IsExploratory     = [bool]$isExploratory
         ExploratoryReason = [string]$exploratoryReason
         MigrationScan     = [bool]$migrationScan
+        CommitIndex       = [int]$commitIndex
     }
 }
 
@@ -391,8 +394,10 @@ function Get-FVPlanCommentText {
 function Test-FVMigrationTypePlan {
     param([AllowNull()][string]$PlanBody)
     if ([string]::IsNullOrWhiteSpace($PlanBody)) { return $false }
-    # Detection uses signal phrases from plan-authoring/SKILL.md § Migration-type issues
-    return ($PlanBody -imatch 'migration-type|exhaustive repo scan|migration-scan:')
+    # Classifies via literal signals: 'migration-type' (self-declared) or 'exhaustive repo scan'
+    # (mandatory Step 1 prose per plan-authoring/SKILL.md § Migration-type issues).
+    # NOTE: do NOT add 'migration-scan:' here — that is the enforcement target, not a classifier.
+    return ($PlanBody -imatch 'migration-type|exhaustive repo scan')
 }
 
 function Invoke-FVPlanValidate {
@@ -430,6 +435,7 @@ function Invoke-FVPlanValidate {
             ConvertFrom-FVPlanSliceBlock -Block $block
         }
     )
+    $slices = @($slices | Sort-Object CommitIndex)
 
     $sliceByStepId = @{}
     foreach ($slice in $slices) {

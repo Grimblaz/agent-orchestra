@@ -238,6 +238,106 @@ Describe 'Migration-scan enforcement' -Tag 'unit' {
             $result.ExitCode | Should -Be 0
             ($result.Results | Where-Object { $_.Name -eq 'PlanStructuralCoverage' }).Passed | Should -BeTrue
         }
+
+        It 'does not classify a plan as migration-type when its prose only mentions the marker string' {
+            # A non-migration plan whose AC references "migration-scan: true" in prose must not
+            # be forced into migration-scan enforcement (F-A regression guard).
+            $plan = @(
+                '# Non-migration plan with migration-scan: true mentioned in AC prose'
+                ''
+                '## Acceptance Criteria'
+                '- **AC1** Tests must assert migration-scan: true is enforced on first slice.'
+                ''
+                '<!-- frame-spine'
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T15:00:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-test: [s1]'
+                'slices:'
+                '  s1:'
+                '    execution_mode: serial'
+                '    rc: GREEN'
+                '    ac_refs: [AC1]'
+                '    depends_on: []'
+                '    cycle: 1'
+                '-->'
+                ''
+                '<!-- frame-slice'
+                'id: s1'
+                'commit-index: 1'
+                'provides: [implement-test]'
+                'depends-on: []'
+                'ac-refs: [AC1]'
+                'slice: |'
+                '  Step 1 - Write tests'
+                '-->'
+            ) -join "`n"
+
+            $result = Invoke-FVPlanValidate -CommentText $plan
+
+            $result.ExitCode | Should -Be 0
+            ($result.Results | Where-Object { $_.Name -eq 'PlanStructuralCoverage' }).Passed | Should -BeTrue
+        }
+
+        It 'enforces migration-scan on the first slice by commit-index, not document position' {
+            # F-B regression guard: s2 block appears BEFORE s1 block in document,
+            # but commit-index declares s1 as first. migration-scan: true on s1 must pass.
+            $plan = @(
+                '# Migration-type plan with reversed document order'
+                ''
+                '## Acceptance Criteria'
+                '- **AC1** Exhaustive scan produces the authoritative file list.'
+                ''
+                '<!-- frame-spine'
+                'spine_schema_version: 1'
+                'generated_at: 2026-05-04T15:00:00Z'
+                'coverage: complete'
+                'ports:'
+                '  implement-docs: [s1]'
+                '  implement-code: [s2]'
+                'slices:'
+                '  s1:'
+                '    execution_mode: serial'
+                '    rc: GREEN'
+                '    ac_refs: [AC1]'
+                '    depends_on: []'
+                '    cycle: 1'
+                '  s2:'
+                '    execution_mode: serial'
+                '    rc: GREEN'
+                '    ac_refs: []'
+                '    depends_on: [s1]'
+                '    cycle: 1'
+                '-->'
+                ''
+                '<!-- frame-slice'
+                'id: s2'
+                'commit-index: 2'
+                'provides: [implement-code]'
+                'depends-on: [s1]'
+                'ac-refs: []'
+                'slice: |'
+                '  Step 2 - Apply changes (document-first but commit-index 2)'
+                '-->'
+                ''
+                '<!-- frame-slice'
+                'id: s1'
+                'commit-index: 1'
+                'migration-scan: true'
+                'provides: [implement-docs]'
+                'depends-on: []'
+                'ac-refs: [AC1]'
+                'slice: |'
+                '  Step 1 - Exhaustive repo scan (document-second but commit-index 1)'
+                '-->'
+            ) -join "`n"
+
+            $result = Invoke-FVPlanValidate -CommentText $plan
+
+            $result.ExitCode | Should -Be 0
+            ($result.Results | Where-Object { $_.Name -eq 'PlanStructuralCoverage' }).Passed | Should -BeTrue
+        }
     }
 
     Context 'Invoke-FVPlanValidate — legacy path (spine-omitted: plan-too-small)' {

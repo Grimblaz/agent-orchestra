@@ -320,7 +320,7 @@ When authoring a migration-type plan with three or more implementation steps (sp
 
    ```
    <!-- frame-slice
-   step_id: s1
+   id: s1
    provides: [implement-docs]
    adapter: {path}
    migration-scan: true
