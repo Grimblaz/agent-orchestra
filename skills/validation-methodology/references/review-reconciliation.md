@@ -184,6 +184,42 @@ Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFE
 
 **Completion** - After routing completes, or the post-fix judge accepts zero findings (no routing occurred), or the overall skip rule applies - proceed to the CE Gate (see Customer Experience Gate section).
 
+### Response Commit & Push (existing-PR review)
+
+**This subsection is the single source of truth (SSOT) for the Response Summary contract. It documents the contract only — it does not house sequencing or write-back logic.**
+
+After the post-fix prosecution pass completes (or is skipped because no findings were accepted), the CE Gate runs (see Customer Experience Gate in `agents/Code-Conductor.agent.md`). Once the CE Gate completes, the caller (the CE-Gate-owning orchestrator) fires `skills/persist-changes/SKILL.md` as the terminal step:
+
+- **When to fire**: at the orchestrator's last validated change-producing step — after the CE Gate when one runs. If the CE Gate routes fixes back through Code-Smith and those fixes are accepted, re-invoke `skills/persist-changes/SKILL.md` idempotently (if no new changes, the helper returns `nothing-to-push`).
+- **Who fires it**: the orchestrating executor (Code-Conductor or spine-runner), not Code-Critic or Code-Review-Response. The persist/push slice is **non-adversarial** — owned by the orchestrating executor per adversarial-independence (`#552 D11`).
+- **This reference does not sequence after the CE Gate itself** — the CE Gate lives in the orchestrator (`agents/Code-Conductor.agent.md:423`), downstream of this reference file. The binding firing step lives in `skills/code-review-intake/SKILL.md`.
+
+#### Two push sites (mutually exclusive by path)
+
+| Path | Push site | Location |
+|---|---|---|
+| Existing-PR review loop | `persist-changes` terminal step (this contract) | Fired by the orchestrator after CE Gate |
+| New-PR creation | `git push -u origin {branch}` + `gh pr create` | `agents/Code-Conductor.agent.md:343` Step 4 |
+
+These two paths are mutually exclusive: the existing-PR path fires `persist-changes`; the new-PR path uses the Conductor's Step-4 push. They do not overlap.
+
+#### Response Summary required shape
+
+After the persist attempt, the orchestrator assembles a Response Summary with all of the following:
+
+1. **Per-finding disposition summary** — which findings were accepted, rejected, or escalated.
+2. **Commit SHA(s) applied** — from `git rev-parse HEAD` after the commit step.
+3. **Push ref/result** — `{headRemote}/{branch}` if push succeeded, or the `not_pushed_reason` + `manual_instruction` if push was skipped, or `attempted-and-failed: {stderr} (exit {code})` if `git push` executed and returned non-zero.
+4. **Explicit not-pushed list** — when accepted findings were not pushed, list each one with its reason. This includes the distinct **"nothing to push (all deferred/rejected/escalated)"** state when zero findings were accepted.
+
+The `not_pushed_reason` enum is defined in `skills/persist-changes/SKILL.md`:
+
+```text
+'detached' | 'default-branch' | 'fork-no-write' | 'non-ff' | 'opt-out' | 'nothing-to-push'
+```
+
+For the full executor contract (guard precedence, Commit-Policy opt-out, format-before-commit), see `skills/persist-changes/SKILL.md`.
+
 ## Reusable Review Heuristics
 
 - Complete the full prosecution to defense to judgment cycle before fix routing.

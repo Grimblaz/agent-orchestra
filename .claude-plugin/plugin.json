@@ -1,6 +1,6 @@
 {
   "name": "agent-orchestra",
-  "version": "2.25.1",
+  "version": "2.26.0",
   "agents": [
     "./agents/code-conductor.md",
     "./agents/code-critic.md",
