@@ -251,7 +251,8 @@ function ConvertFrom-FVPlanSliceBlock {
     $migrationScanRaw = Get-FVPlanScalarField -Block $Block -Names @('migration-scan')
     $migrationScan = ($migrationScanRaw -eq 'true')
     $commitIndexRaw = Get-FVPlanScalarField -Block $Block -Names @('commit-index', 'commit_index')
-    $commitIndex = if ($null -ne $commitIndexRaw -and $commitIndexRaw -match '^\d+$') { [int]$commitIndexRaw } else { [int]::MaxValue }
+    $commitIndexParsed = 0
+    $commitIndex = if ($null -ne $commitIndexRaw -and [int]::TryParse($commitIndexRaw, [ref]$commitIndexParsed)) { $commitIndexParsed } else { [int]::MaxValue }
 
     $provides = if ($null -eq $providesRaw) { [string[]]@() } else { ConvertFrom-FVInlineList -Value $providesRaw }
     if ($null -eq $provides) { $provides = [string[]]@() }
@@ -397,6 +398,17 @@ function Test-FVMigrationTypePlan {
     # Classifies via literal signals: 'migration-type' (self-declared) or 'exhaustive repo scan'
     # (mandatory Step 1 prose per plan-authoring/SKILL.md § Migration-type issues).
     # NOTE: do NOT add 'migration-scan:' here — that is the enforcement target, not a classifier.
+    #
+    # This two-token anchor is the ENFORCED-CONTRACT classifier, deliberately narrower
+    # than the human-facing signal-phrase trigger list in plan-authoring/SKILL.md
+    # § Migration-type issues (which includes "migrate from A to B", "rename Z across
+    # the codebase", "replace X with Y", "remove all references to W"). Those loose
+    # signal phrases guide a human planner's classification; this validator matches only
+    # the self-declared 'migration-type' token or the canonical 'exhaustive repo scan'
+    # deliverable phrase, to avoid false-positive enforcement on plans that merely
+    # mention migration concepts in prose (see migration-scan-enforcement.Tests.ps1
+    # § "does not classify a plan as migration-type when its prose only mentions the
+    # marker string").
     return ($PlanBody -imatch 'migration-type|exhaustive repo scan')
 }
 

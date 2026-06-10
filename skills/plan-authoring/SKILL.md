@@ -318,7 +318,7 @@ When authoring a migration-type plan with three or more implementation steps (sp
 
 1. Add `migration-scan: true` to the `<!-- frame-slice -->` comment block for slice #1 (the exhaustive-scan step). Example:
 
-   ```
+   ```text
    <!-- frame-slice
    id: s1
    provides: [implement-docs]
