@@ -248,6 +248,8 @@ function ConvertFrom-FVPlanSliceBlock {
     $coverage = Get-FVPlanScalarField -Block $Block -Names @('coverage')
     $executor = Get-FVPlanScalarField -Block $Block -Names @('executor')
     $adapter = Get-FVPlanScalarField -Block $Block -Names @('adapter')
+    $migrationScanRaw = Get-FVPlanScalarField -Block $Block -Names @('migration-scan')
+    $migrationScan = ($migrationScanRaw -eq 'true')
 
     $provides = if ($null -eq $providesRaw) { [string[]]@() } else { ConvertFrom-FVInlineList -Value $providesRaw }
     if ($null -eq $provides) { $provides = [string[]]@() }
@@ -271,6 +273,7 @@ function ConvertFrom-FVPlanSliceBlock {
         Adapter           = if ($null -eq $adapter) { '' } else { $adapter }
         IsExploratory     = [bool]$isExploratory
         ExploratoryReason = [string]$exploratoryReason
+        MigrationScan     = [bool]$migrationScan
     }
 }
 
@@ -385,6 +388,13 @@ function Get-FVPlanCommentText {
     return ''
 }
 
+function Test-FVMigrationTypePlan {
+    param([AllowNull()][string]$PlanBody)
+    if ([string]::IsNullOrWhiteSpace($PlanBody)) { return $false }
+    # Detection uses signal phrases from plan-authoring/SKILL.md § Migration-type issues
+    return ($PlanBody -imatch 'migration-type|exhaustive repo scan|migration-scan:')
+}
+
 function Invoke-FVPlanValidate {
     [CmdletBinding()]
     param(
@@ -396,7 +406,15 @@ function Invoke-FVPlanValidate {
     $spineBlock = Get-FSCSpineBlock -CommentBody $commentBody
     if ($null -eq $spineBlock) {
         if (Test-FVPlanSpineOmittedPlanTooSmall -CommentBody $commentBody) {
-            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail 'spine-omitted: plan-too-small')))
+            $legacyResults = [System.Collections.Generic.List[PSCustomObject]]::new()
+            $legacyResults.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail 'spine-omitted: plan-too-small')) | Out-Null
+            if (Test-FVMigrationTypePlan -PlanBody $commentBody) {
+                $firstStepHasScan = ($commentBody -imatch '(?m)^\s*1\.\s+.*?(?:exhaustive\s+(?:repo\s+)?scan|authoritative\s+(?:file\s+)?list)')
+                if (-not $firstStepHasScan) {
+                    $legacyResults.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail 'coverage-gap: migration-type legacy plan — Step 1 should be an exhaustive repo scan producing the authoritative file list.')) | Out-Null
+                }
+            }
+            return (New-FVAggregateResult -Results $legacyResults.ToArray())
         }
 
         return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Missing frame-spine block.')))
@@ -456,6 +474,23 @@ function Invoke-FVPlanValidate {
             if ($slice.Provides -notcontains $portName) {
                 $slicePorts = @($slice.Provides) -join ', '
                 $structuralViolations.Add("step $stepId conflict: spine port $portName, slice port $slicePorts; update the spine or slice provides: anchor.") | Out-Null
+            }
+        }
+    }
+
+    # Migration-scan enforcement: for plans that declare themselves migration-type, assert
+    # the first implementation slice carries migration-scan: true and uses a real port.
+    if ($slices.Count -gt 0 -and (Test-FVMigrationTypePlan -PlanBody $commentBody)) {
+        $firstSlice = $slices[0]
+        if (-not $firstSlice.MigrationScan) {
+            $structuralViolations.Add("migration-type plan: slice $($firstSlice.StepId) (first implementation step) must carry migration-scan: true in its <!-- frame-slice --> comment block.") | Out-Null
+        }
+        elseif ($firstSlice.IsExploratory) {
+            $structuralViolations.Add("migration-type plan: slice $($firstSlice.StepId) has migration-scan: true but uses coverage: exploratory; the exhaustive scan is a deterministic deliverable — use a real provides: port instead.") | Out-Null
+        }
+        for ($i = 1; $i -lt $slices.Count; $i++) {
+            if ($slices[$i].MigrationScan) {
+                $structuralViolations.Add("migration-type plan: migration-scan: true is only valid on the first implementation slice (step $($slices[0].StepId)); found on step $($slices[$i].StepId).") | Out-Null
             }
         }
     }
