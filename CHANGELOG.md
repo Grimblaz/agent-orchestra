@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.25.2] — 2026-06-09
+
+### Changed
+
+- **Fat-skills consolidation for the `implement-code` port** (`skills/implementation-discipline/SKILL.md`, `skills/implementation-discipline/adapters/implement-code-adapter.md`): migrated three adapter-only behaviors (scope-discipline standard, `scope-violation` halt trigger, `simplicity-violation` halt trigger) from the adapter into the skill, then slimmed `implement-code-adapter.md` from 123 to 52 lines into a thin port-binding that names the skill as execution authority. The Halt-Return shape and reason enum stay single-sourced in `agents/Senior-Engineer.agent.md § Halt-Return Contract`. Code-Smith reads only the skill (design D0), so the port-specific triggers must live there. Code-Smith `## Core Principles` annotated as intentional persona voice pending shell retirement (#669, capstone #671, umbrella #662).
+
 ## [2.25.0] — 2026-06-07
 
 ### Added
