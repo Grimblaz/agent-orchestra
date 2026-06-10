@@ -78,7 +78,7 @@ The proxy prosecution pipeline is single-shot: prosecution → defense → judge
 
 ## Response Loop Completion (Terminal Step)
 
-After all judgment states reach terminal and the Batch Specialist Dispatch (R4) routes accepted fixes, the GitHub-intake response loop completes with these ordered steps:
+After all judgment states reach terminal, the GitHub-intake response loop completes with these ordered steps:
 
 1. **Disposition gate** — honor the `<!-- review-dispositions-{PR} -->` marker: skip findings with `disposition: escalate`; only `disposition: incorporate` entries proceed.
 2. **Batch Specialist Dispatch (R4)** — dispatch accepted findings to specialists (see `skills/validation-methodology/references/review-reconciliation.md § Batch Specialist Dispatch (R4)`).

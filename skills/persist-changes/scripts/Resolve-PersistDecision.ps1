@@ -16,7 +16,7 @@ function Resolve-PersistDecision {
     $nonFastForwardProbe  = [bool]$Inputs.nonFastForwardProbe
 
     # Edge case: null/empty headRemote defaults to 'origin'
-    $effectiveHeadRemote = if ([string]::IsNullOrEmpty($headRemote)) { 'origin' } else { $headRemote }
+    $effectiveHeadRemote = if ([string]::IsNullOrWhiteSpace($headRemote)) { 'origin' } else { $headRemote }
 
     $result = @{
         commit             = $false
@@ -33,8 +33,8 @@ function Resolve-PersistDecision {
         return $result
     }
 
-    # Guard 2: default branch
-    if ($branch -eq $defaultBranch) {
+    # Guard 2: default branch (null/empty branch skips — avoids $null -eq $null false positive)
+    if (-not [string]::IsNullOrEmpty($branch) -and $branch -eq $defaultBranch) {
         $result.refuse_reason = 'default-branch'
         return $result
     }

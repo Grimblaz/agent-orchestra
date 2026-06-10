@@ -42,7 +42,7 @@ The side-effect-free helper lives at `skills/persist-changes/scripts/Resolve-Per
 
 ### Inputs
 
-Pass as a hashtable or named parameters:
+Pass as a single hashtable (`$Inputs` key→value):
 
 ```text
 { branch, isDetached, defaultBranch, headRemote, headRemoteWritable,
@@ -104,7 +104,7 @@ The orchestrating executor is responsible for the following steps in order.
 
 Acquire the following before calling the helper (these involve git I/O and must not be inside the pure helper):
 
-- **`nonFastForwardProbe`**: run `git fetch {headRemote} {branch}` then `git merge-base --is-ancestor HEAD {headRemote}/{branch}`. Non-zero exit = `true` (non-ff).
+- **`nonFastForwardProbe`**: run `git fetch {headRemote} {branch}` then `git merge-base --is-ancestor HEAD {headRemote}/{branch}`. Non-zero exit = `true` (non-ff). **Exception**: if `git fetch` exits non-zero because the remote ref does not exist (unknown ref — branch not yet on the remote), set `nonFastForwardProbe=false`. A branch with no remote tracking ref is not non-fast-forward.
 - **`headRemoteWritable`**: attempt a dry-run push (`git push --dry-run {headRemote} HEAD:{branch}`) or use `gh repo view` to confirm write access.
 
 ### Step 2: Call `Resolve-PersistDecision.ps1`
@@ -121,7 +121,7 @@ Execute in order:
 
 1. `git add {fixFiles}` (file list only — never `git add -A`).
 2. Load `skills/pre-commit-formatting/SKILL.md` and execute format-before-commit.
-3. `git commit -m "fix(#679): apply review-accepted changes"` (or an equivalent commit message reflecting the actual issue and context).
+3. `git commit -m "fix({issue}): apply review-accepted changes"` (or an equivalent commit message reflecting the actual issue and context).
 
 ### Step 5: Consume `push_target_remote`
 

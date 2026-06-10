@@ -192,14 +192,14 @@ After the post-fix prosecution pass completes (or is skipped because no findings
 
 - **When to fire**: at the orchestrator's last validated change-producing step — after the CE Gate when one runs. If the CE Gate routes fixes back through Code-Smith and those fixes are accepted, re-invoke `skills/persist-changes/SKILL.md` idempotently (if no new changes, the helper returns `nothing-to-push`).
 - **Who fires it**: the orchestrating executor (Code-Conductor or spine-runner), not Code-Critic or Code-Review-Response. The persist/push slice is **non-adversarial** — owned by the orchestrating executor per adversarial-independence (`#552 D11`).
-- **This reference does not sequence after the CE Gate itself** — the CE Gate lives in the orchestrator (`agents/Code-Conductor.agent.md:423`), downstream of this reference file. The binding firing step lives in `skills/code-review-intake/SKILL.md`.
+- **This reference does not sequence after the CE Gate itself** — the CE Gate lives in the orchestrator (`agents/Code-Conductor.agent.md`), downstream of this reference file. The binding firing step lives in `skills/code-review-intake/SKILL.md`.
 
 #### Two push sites (mutually exclusive by path)
 
 | Path | Push site | Location |
 |---|---|---|
 | Existing-PR review loop | `persist-changes` terminal step (this contract) | Fired by the orchestrator after CE Gate |
-| New-PR creation | `git push -u origin {branch}` + `gh pr create` | `agents/Code-Conductor.agent.md:343` Step 4 |
+| New-PR creation | `git push -u origin {branch}` + `gh pr create` | `agents/Code-Conductor.agent.md` Step 4 |
 
 These two paths are mutually exclusive: the existing-PR path fires `persist-changes`; the new-PR path uses the Conductor's Step-4 push. They do not overlap.
 
