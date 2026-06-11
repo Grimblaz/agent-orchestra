@@ -248,6 +248,11 @@ function ConvertFrom-FVPlanSliceBlock {
     $coverage = Get-FVPlanScalarField -Block $Block -Names @('coverage')
     $executor = Get-FVPlanScalarField -Block $Block -Names @('executor')
     $adapter = Get-FVPlanScalarField -Block $Block -Names @('adapter')
+    $migrationScanRaw = Get-FVPlanScalarField -Block $Block -Names @('migration-scan')
+    $migrationScan = ($migrationScanRaw -eq 'true')
+    $commitIndexRaw = Get-FVPlanScalarField -Block $Block -Names @('commit-index', 'commit_index')
+    $commitIndexParsed = 0
+    $commitIndex = if ($null -ne $commitIndexRaw -and [int]::TryParse($commitIndexRaw, [ref]$commitIndexParsed)) { $commitIndexParsed } else { [int]::MaxValue }
 
     $provides = if ($null -eq $providesRaw) { [string[]]@() } else { ConvertFrom-FVInlineList -Value $providesRaw }
     if ($null -eq $provides) { $provides = [string[]]@() }
@@ -271,6 +276,8 @@ function ConvertFrom-FVPlanSliceBlock {
         Adapter           = if ($null -eq $adapter) { '' } else { $adapter }
         IsExploratory     = [bool]$isExploratory
         ExploratoryReason = [string]$exploratoryReason
+        MigrationScan     = [bool]$migrationScan
+        CommitIndex       = [int]$commitIndex
     }
 }
 
@@ -385,6 +392,26 @@ function Get-FVPlanCommentText {
     return ''
 }
 
+function Test-FVMigrationTypePlan {
+    param([AllowNull()][string]$PlanBody)
+    if ([string]::IsNullOrWhiteSpace($PlanBody)) { return $false }
+    # Classifies via literal signals: 'migration-type' (self-declared) or 'exhaustive repo scan'
+    # (mandatory Step 1 prose per plan-authoring/SKILL.md § Migration-type issues).
+    # NOTE: do NOT add 'migration-scan:' here — that is the enforcement target, not a classifier.
+    #
+    # This two-token anchor is the ENFORCED-CONTRACT classifier, deliberately narrower
+    # than the human-facing signal-phrase trigger list in plan-authoring/SKILL.md
+    # § Migration-type issues (which includes "migrate from A to B", "rename Z across
+    # the codebase", "replace X with Y", "remove all references to W"). Those loose
+    # signal phrases guide a human planner's classification; this validator matches only
+    # the self-declared 'migration-type' token or the canonical 'exhaustive repo scan'
+    # deliverable phrase, to avoid false-positive enforcement on plans that merely
+    # mention migration concepts in prose (see migration-scan-enforcement.Tests.ps1
+    # § "does not classify a plan as migration-type when its prose only mentions the
+    # marker string").
+    return ($PlanBody -imatch 'migration-type|exhaustive repo scan')
+}
+
 function Invoke-FVPlanValidate {
     [CmdletBinding()]
     param(
@@ -396,7 +423,15 @@ function Invoke-FVPlanValidate {
     $spineBlock = Get-FSCSpineBlock -CommentBody $commentBody
     if ($null -eq $spineBlock) {
         if (Test-FVPlanSpineOmittedPlanTooSmall -CommentBody $commentBody) {
-            return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail 'spine-omitted: plan-too-small')))
+            $legacyResults = [System.Collections.Generic.List[PSCustomObject]]::new()
+            $legacyResults.Add((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $true -Detail 'spine-omitted: plan-too-small')) | Out-Null
+            if (Test-FVMigrationTypePlan -PlanBody $commentBody) {
+                $firstStepHasScan = ($commentBody -imatch '(?m)^\s*1\.\s+.*?(?:exhaustive\s+(?:repo\s+)?scan|authoritative\s+(?:file\s+)?list)')
+                if (-not $firstStepHasScan) {
+                    $legacyResults.Add((New-FVCheckResult -Name 'PlanCoverageGap' -Passed $true -Detail 'coverage-gap: migration-type legacy plan — Step 1 should be an exhaustive repo scan producing the authoritative file list.')) | Out-Null
+                }
+            }
+            return (New-FVAggregateResult -Results $legacyResults.ToArray())
         }
 
         return (New-FVAggregateResult -Results @((New-FVCheckResult -Name 'PlanStructuralCoverage' -Passed $false -Detail 'Missing frame-spine block.')))
@@ -412,6 +447,7 @@ function Invoke-FVPlanValidate {
             ConvertFrom-FVPlanSliceBlock -Block $block
         }
     )
+    $slices = @($slices | Sort-Object CommitIndex)
 
     $sliceByStepId = @{}
     foreach ($slice in $slices) {
@@ -456,6 +492,23 @@ function Invoke-FVPlanValidate {
             if ($slice.Provides -notcontains $portName) {
                 $slicePorts = @($slice.Provides) -join ', '
                 $structuralViolations.Add("step $stepId conflict: spine port $portName, slice port $slicePorts; update the spine or slice provides: anchor.") | Out-Null
+            }
+        }
+    }
+
+    # Migration-scan enforcement: for plans that declare themselves migration-type, assert
+    # the first implementation slice carries migration-scan: true and uses a real port.
+    if ($slices.Count -gt 0 -and (Test-FVMigrationTypePlan -PlanBody $commentBody)) {
+        $firstSlice = $slices[0]
+        if (-not $firstSlice.MigrationScan) {
+            $structuralViolations.Add("migration-type plan: slice $($firstSlice.StepId) (first implementation step) must carry migration-scan: true in its <!-- frame-slice --> comment block.") | Out-Null
+        }
+        elseif ($firstSlice.IsExploratory) {
+            $structuralViolations.Add("migration-type plan: slice $($firstSlice.StepId) has migration-scan: true but uses coverage: exploratory; the exhaustive scan is a deterministic deliverable — use a real provides: port instead.") | Out-Null
+        }
+        for ($i = 1; $i -lt $slices.Count; $i++) {
+            if ($slices[$i].MigrationScan) {
+                $structuralViolations.Add("migration-type plan: migration-scan: true is only valid on the first implementation slice (step $($slices[0].StepId)); found on step $($slices[$i].StepId).") | Out-Null
             }
         }
     }

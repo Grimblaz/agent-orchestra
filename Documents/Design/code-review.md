@@ -21,7 +21,7 @@ Two complementary improvements to the code review workflow: (1) an exhaustive-sc
 
 ## Exhaustive-Scan Requirement
 
-For migration-type issues — pattern replacement, API migration, rename/move across files, or issues with signal phrases like "replace X with Y" or "migrate from A to B" — Step 1 of the plan **MUST** be an exhaustive repo scan producing the authoritative file list. The issue author's file list must not be trusted as complete.
+For migration-type issues (see [`skills/plan-authoring/SKILL.md` § Migration-type issues](../../skills/plan-authoring/SKILL.md) for the authoritative detection predicate and signal phrases) — Step 1 of the plan **MUST** be an exhaustive repo scan producing the authoritative file list. The issue author's file list must not be trusted as complete.
 
 **Root cause**: In issue #39, two instruction files with hardcoded relative paths were missed by the plan and only caught in Code-Critic Pass 3 as a blocker. A single scan before implementation would have caught them.
 
@@ -29,10 +29,10 @@ For migration-type issues — pattern replacement, API migration, rename/move ac
 
 Use `grep_search` with the old-pattern as `query` and `includePattern` matching the target files (e.g., `**/*.md`). Confirm result count is 0. Use `file_search` with the same glob to confirm at least 1 file was examined — a 0-match from 0 files indicates a misconfigured glob.
 
-**Two insertion points**:
+**Canonical enforcement locations** (absorbed by issue #591):
 
-1. **Issue-Planner** `<plan_style_guide>` — new conditional rule after "Keep scannable": migration issues require an exhaustive scan in Step 1.
-2. **Code-Conductor** Step 4 — new "Migration completeness check" bullet between "Scope check" and "Validation evidence": run a final scan for remaining old-form references and confirm count is 0; include scan output as validation evidence in the PR body.
+1. **plan-authoring**: [`skills/plan-authoring/SKILL.md` § Migration-type issues](../../skills/plan-authoring/SKILL.md) — authoring-time contract; `migration-scan: true` frame-slice marker + `frame-validate-core.ps1` structural enforcement.
+2. **Code-Conductor**: `agents/Code-Conductor.agent.md` Migration-type plan check — insert + flag (`planner-omitted-scan` dispatch-fallback-events row) if scan step absent at plan-load.
 
 ---
 

@@ -258,6 +258,7 @@ slices:
    id: s1
    provides: [{port}]
    adapter: {path}
+   migration-scan: {true — migration-type slice #1 only, omit otherwise}
    depends-on: []
    ac-refs: [AC#]
    -->
@@ -306,7 +307,36 @@ slices:
 ### Specialized rules
 
 - **Agent-file insertion strategies** — when a step modifies `.agent.md` files, categorize each file as exactly one of: (a) **clean insert** — no existing identity/personality text at the canonical insertion point (top of body, immediately before the main heading); (b) **fragment replacement** — existing identity/personality text is present at the canonical insertion point; (c) **stance-preserving insert** — a named stance section sits at the insertion point and must be preserved. Behavioral guidance found elsewhere in the body (not at the canonical insertion point) does not qualify as a fragment — classify those files as clean inserts.
-- **Migration-type issues** — issues involving pattern replacement, API migration, rename/move across files, or signal phrases like "replace X with Y", "migrate from A to B", "rename Z across the codebase", or "remove all references to W" — require that **Step 1 of the plan MUST be an exhaustive repo scan**. The scan produces the authoritative list of files to update; the issue author's file list must not be relied on as complete. Subsequent steps must be scoped to scan-discovered files only — additions require a documented reason.
+
+#### Migration-type issues
+
+Issues involving pattern replacement, API migration, rename/move across files, or signal phrases like "replace X with Y", "migrate from A to B", "rename Z across the codebase", or "remove all references to W" require that **Step 1 of the plan MUST be an exhaustive repo scan**. The scan produces the authoritative list of files to update; the issue author's file list must not be relied on as complete. Subsequent steps must be scoped to scan-discovered files only — additions require a documented reason.
+
+**Authoring-time contract for `migration-scan: true`**
+
+When authoring a migration-type plan with three or more implementation steps (spine-bearing plan), the plan author MUST:
+
+1. Add `migration-scan: true` to the `<!-- frame-slice -->` comment block for slice #1 (the exhaustive-scan step). Example:
+
+   ```text
+   <!-- frame-slice
+   id: s1
+   provides: [implement-docs]
+   adapter: {path}
+   migration-scan: true
+   depends-on: []
+   ac-refs: [AC#]
+   -->
+   ```
+
+2. **Placement constraint**: `migration-scan: true` belongs in the `<!-- frame-slice -->` HTML comment block only. Do NOT place it in the machine-readable spine `slices:` block — the spine key parser rejects hyphenated keys and would null the entire spine.
+
+3. **Port constraint**: slice #1 must use a real, deterministic `provides:` port (e.g., `implement-docs`). Using `coverage: exploratory` on a migration scan slice is disallowed — the scan is a deterministic deliverable, not exploratory work.
+
+For **legacy/spine-omitted plans** (fewer than three implementation steps and `spine-omitted: plan-too-small`), the `migration-scan: true` slice marker does not apply. Instead, the plan's Step 1 prose MUST be the exhaustive repo scan. The authoring-time validator checks the first-step text for a scan action when no spine is present.
+
+Non-migration plans have no `migration-scan` marker and no validation friction from this rule.
+
 - **Removal steps** — when a step removes a concept, feature, section, or phrase from a file, the Requirement Contract must include a completeness validation grep confirming zero remaining references in the target file and any other files that referenced it.
 - **Cross-file constants** — when a step (a) implements or modifies a script or module that consumes enumerated values produced by another file (stage names, category strings, enum labels), or (b) creates or modifies a file that authoritatively defines enumerated values consumed by scripts, the Requirement Contract must: (i) for case (a) name the authoritative source file; for case (b) identify all known consumer scripts via grep — and (ii) list the exact allowed values as a quoted string enum (example format: `Allowed values: 'main' | 'postfix' | 'ce'`).
 - **Multi-tier statistical output** — when a step involves a statistical output schema with multiple independent sub-sections (calibration scripts, metrics aggregators), the Requirement Contract must enumerate each output section that requires a `sufficient_data` gate rather than describing gating as a single aggregate requirement.

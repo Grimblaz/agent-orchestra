@@ -428,10 +428,10 @@ Planner absorption umbrella: [#588](https://github.com/Grimblaz/agent-orchestra/
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Determine Resume Point & Validate Plan"
   responsibility: "Ensure migration-type plans start with an exhaustive repo scan."
-  disposition: planner-should-absorb
-  action: "Track absorption in https://github.com/Grimblaz/agent-orchestra/issues/591; move migration scan-step requirements into skills/plan-authoring/SKILL.md plan-style enforcement."
-  verification_status: unverified
-  verified-against-sha: ""
+  disposition: planner-absorbed
+  action: "Absorbed by issue #591: migration-scan enforcement anchored in skills/plan-authoring/SKILL.md § Migration-type issues and code-enforced in .github/scripts/lib/frame-validate-core.ps1 (Invoke-FVPlanValidate)."
+  verification_status: verified
+  verified-against-sha: "cf465d98ee2883e673cb78997830eb8f748e035e"
   verified-via-pr-sha: ""
 - source: "Hub Execution Workflow / Determine Resume Point & Validate Plan / D10 Capacity check"
   responsibility: "Measure guidance complexity and block or override agent-prompt rule additions when targets exceed the soft ceiling."
