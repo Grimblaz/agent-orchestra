@@ -2,6 +2,19 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.26.0] — 2026-06-10
+
+### Added
+
+- **Git-portable `persist-changes` skill** (`skills/persist-changes/SKILL.md`, `skills/persist-changes/scripts/Resolve-PersistDecision.ps1`): caller-parameterized commit+push primitive with a side-effect-free decision helper (`Resolve-PersistDecision`) and Pester coverage. Stages only caller-supplied fix files (never `git add -A`), runs format-before-commit, commits, and conditionally pushes with guards for detached HEAD, dynamic default-branch resolution, commit-policy opt-out, fork/no-write, and non-fast-forward. Returns commit/push outcomes with explicit not-pushed reasons (#679).
+- **`/review-github` response-loop completion** (`skills/code-review-intake/SKILL.md`, `commands/review-github.md`): a bare `/review-github` now closes the full loop — after judgment and routing, accepted fixes are implemented, post-fix prosecution and CE Gate run, then `persist-changes` fires as the terminal step to commit and push to the existing PR branch (or surface a loud not-pushed reason). The Response Summary commit/push/reporting contract is single-sourced in `skills/validation-methodology/references/review-reconciliation.md § Response Commit & Push` (#679).
+
+## [2.25.2] — 2026-06-09
+
+### Changed
+
+- **Fat-skills consolidation for the `implement-code` port** (`skills/implementation-discipline/SKILL.md`, `skills/implementation-discipline/adapters/implement-code-adapter.md`): migrated three adapter-only behaviors (scope-discipline standard, `scope-violation` halt trigger, `simplicity-violation` halt trigger) from the adapter into the skill, then slimmed `implement-code-adapter.md` from 123 to 52 lines into a thin port-binding that names the skill as execution authority. The Halt-Return shape and reason enum stay single-sourced in `agents/Senior-Engineer.agent.md § Halt-Return Contract`. Code-Smith reads only the skill (design D0), so the port-specific triggers must live there. Code-Smith `## Core Principles` annotated as intentional persona voice pending shell retirement (#669, capstone #671, umbrella #662).
+
 ## [2.25.0] — 2026-06-07
 
 ### Added

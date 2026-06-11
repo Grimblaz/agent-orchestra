@@ -35,6 +35,7 @@ Implement only what the requirements demand, with clear delegation boundaries an
 - Prefer minimal changes over broad rewrites
 - Extract helpers when complexity limits or readability clearly require it
 - Follow repo architecture and file-size rules before adding new structure
+- Leave adjacent cleanup and follow-up ideas out of the implementation unless they are required for correctness
 
 ## Requirements Verification
 
@@ -85,6 +86,15 @@ Returning to orchestrator for redirection to Test-Writer.
 ````
 
 Why this matters: implementing against a broken test wastes time and pushes the code away from the real requirement.
+
+## Halt-Return Conditions
+
+Halt and return without completing the slice when either of these `implement-code`-specific conditions is met:
+
+- **Scope violation** — the slice requires touching files unrelated to the dispatched requirement. Halt with reason `scope-violation`.
+- **Simplicity violation** — the implementation would require a new architectural seam, substantial refactor, or cross-layer dependency not called for by the plan. Halt with reason `simplicity-violation`.
+
+For the Halt-Return shape and the full reason enum, see `agents/Senior-Engineer.agent.md` § `## Halt-Return Contract` — that section is the single authoritative source.
 
 ## Implementation Requirements Verification
 
