@@ -89,6 +89,8 @@ The judge result is designed for same-comment persistence: the Markdown score su
 
 **When to use which**: `/orchestra:review` and `/orchestra:review-lite` run adversarial prosecution → defense → judge on local code changes and return verdicts — no fix dispatch. `/review-github` ingests an existing GitHub PR review and runs proxy prosecution through Code-Conductor, which then dispatches fixes. Use `/orchestra:review*` for code quality verdict; use `/review-github` when you have a GitHub review to reconcile and want Conductor to handle the response.
 
+**Response loop**: `/review-github` completes the full response loop — it applies accepted fixes, commits them, and pushes to the existing PR branch (or surfaces a loud not-pushed reason). The terminal step fires `skills/persist-changes/SKILL.md`. See `skills/code-review-intake/SKILL.md § Response Loop Completion` for the step sequence and `skills/persist-changes/SKILL.md` for the executor contract.
+
 ## Cross-tool handoffs
 
 Handoffs between phases use durable GitHub issue comments rather than session-local state. Markers:
@@ -192,6 +194,7 @@ Run these three checks in Claude Code to audit the auto-mode boundary in your se
 - `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/code-conductor`, `/review-github`, `/setup-references`, `/polish`, `/raw`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
 - `skills/` — reusable methodology loaded by both platforms; each skill has `platforms/claude.md` for Claude-specific invocation details
 - `platforms/` (at skill root) — platform-specific routing notes
+- `skills/persist-changes/` — git-portable commit+push primitive: caller-parameterized, no Code-Conductor session flags, Pester-tested guard decision helper (`Resolve-PersistDecision.ps1`). Inherited by #678's spine-runner review loop after the #677 Code-Conductor body deletion.
 
 ## Per-agent model + reasoning routing
 

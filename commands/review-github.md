@@ -29,6 +29,8 @@ Resolve and read `agents/Code-Conductor.agent.md` before adopting the role. Use 
 
 Adopt the resolved Code-Conductor body inline. Process this invocation as `review github`: enter the GitHub intake path described in `agents/Code-Conductor.agent.md ## Review Reconciliation Loop (Mandatory)` and `skills/code-review-intake/SKILL.md`. Use the active-PR resolution result from pre-flight as `$PR_NUMBER`.
 
+This command completes the full response loop: accepted fixes are applied by specialists, committed, and pushed to the existing PR branch — or a loud not-pushed reason is surfaced when push is not possible (detached HEAD, default branch, fork without write access, non-fast-forward conflict, or Commit-Policy opt-out). See `skills/code-review-intake/SKILL.md § Response Loop Completion` and `skills/persist-changes/SKILL.md` for the terminal-step executor contract.
+
 ## Downstream Agent handshakes
 
 Before each downstream `Agent` dispatch, reconstruct a fresh `subagent-env-handshake` by capturing live HEAD, branch, CWD, and dirty fingerprint immediately before that dispatch. The working tree mutates during orchestration, so do not reuse or carry forward a command-entry-captured handshake, a single entry-time handshake, or any earlier per-dispatch block for later specialist calls.
