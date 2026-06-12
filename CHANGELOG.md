@@ -2,6 +2,18 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.28.0] — 2026-06-12
+
+### Added
+
+- **Plan-authoring Grounding Pass** (`skills/plan-authoring/SKILL.md`): a new `### 4. Grounding Pass` discipline in the Discovery Workflow that establishes the invariant "no plan step may name an ungrounded artifact." Before drafting, the planner verifies that every artifact a plan step names (file names, paths, exported symbols, shapes, counts) actually exists in the tree and corrects or updates the issue when it does not. Adds a `#591` migration-scan carve-out, a `#467` per-port observation note, a Research Subagent contradiction-reporting directive, a factual-correction exemption in the Alignment Workflow (factual corrections are not "material scope changes" that trigger loop-back), and a reciprocal cross-reference with the post-draft Tree-State Verification Discipline. Locked by the RED assertion-existence contract `.github/scripts/Tests/plan-authoring-grounding-pass.Tests.ps1` (#473).
+
+## [2.27.0] — 2026-06-11
+
+### Added
+
+- **`ai-first-documentation` skill** (`skills/ai-first-documentation/`): research-backed documentation standards skill for authoring docs optimized for AI-agent consumption (#686).
+
 ## [2.26.0] — 2026-06-10
 
 ### Added
