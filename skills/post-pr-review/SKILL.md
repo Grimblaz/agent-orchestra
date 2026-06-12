@@ -175,20 +175,22 @@ git push origin --delete feature/issue-{ID}-description
 
 ### 7. Update Project Tracking
 
-**Action**: Update external project management tools if used.
+**Action**: Close related issues. The portfolio tracker issue updates automatically.
 
-**Common Tools**:
+The derived portfolio tracker (`Documents/Planning/sequence.yaml` + `render-portfolio.yml` workflow) re-renders the control-tower issue after every merge to `main` — no manual board update is required.
 
-- GitHub Projects - Move cards to "Done"
-- Issue trackers - Close related issues
-- Sprint boards - Update sprint progress
-- Team dashboards - Reflect completion
+**Manual fallback** (if the workflow did not run or needs a forced refresh):
+
+```powershell
+pwsh .github/scripts/render-portfolio.ps1
+```
+
+> **Consumer repos**: if `Documents/Planning/sequence.yaml` or `.github/scripts/render-portfolio.ps1` is absent, this step is a no-op — skip silently.
 
 **Verification**:
 
 - [ ] Related issues closed or updated
-- [ ] Project board reflects current state
-- [ ] No orphaned or stale references
+- [ ] Control-tower issue reflects current state (auto-rendered or manual fallback run)
 
 ### 8. Notify Stakeholders (If Applicable)
 
@@ -262,7 +264,7 @@ Once all checklist items are verified:
 - Mark the original issue as closed
 - Remove any temporary resources
 - Archive any temporary documentation
-- Update team status boards
+- Verify control-tower issue updated (auto-rendered by workflow after merge)
 
 The work is now fully complete and properly documented.
 

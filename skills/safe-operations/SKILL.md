@@ -112,6 +112,27 @@ gh issue create --title "..." --body "..."
 
 **Default for automatically-created follow-up issues**: `priority: medium`
 
+### 2b-bis. Umbrella or Triage at Creation (Additive to §2b)
+
+Every new issue created by any agent **MUST** also receive one of the following at creation time — this rule is additive to the §2b priority mandate and does not replace it:
+
+- **Parent umbrella** — attach the new issue as a native sub-issue of an existing sequenced umbrella, if the work is scoped to a tracked initiative. Use `Add-FollowUpIssue` (canonical sub-issue attach) or `gh sub-issue add {umbrella} --issue {new}` immediately after `gh issue create`.
+- **`triage` label** — if no sequenced umbrella applies, add `--label triage` to the `gh issue create` command so the portfolio renderer places the issue in the Triage bucket and it does not go missing.
+
+```powershell
+# CORRECT — umbrella child:
+$url = gh issue create --title "..." --body "..." --label "priority: medium"
+gh sub-issue add 425 --issue ($url | Split-Path -Leaf)
+
+# CORRECT — triage fallback:
+gh issue create --title "..." --body "..." --label "priority: medium" --label "triage"
+
+# WRONG — neither umbrella nor triage:
+gh issue create --title "..." --body "..." --label "priority: medium"
+```
+
+> **Why**: the derived portfolio renderer surfaces only sequenced or triage-labeled issues. Issues created without either silently disappear from the tracker.
+
 ### 2c. Deduplication Check (Mandatory)
 
 > **Rule-addition proposals**: Apply §2d (Prevention-Analysis Advisory, below) before this search — if §2d redirects to an existing issue, this dedup search is unnecessary.

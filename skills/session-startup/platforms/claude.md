@@ -21,3 +21,5 @@ Silent skip remains for setup/environment failures such as `pwsh` missing; `clau
 If Claude is running headless and cannot ask a structured question, skip the prompt and emit the update result inline instead.
 
 > **D3b exemption**: `session-startup/SKILL.md` intentionally retains this methodology verbatim (see `path-migration-sweep-gate.Tests.ps1` D3b whitelist). The platform file documents the Claude Code-specific tool invocation without duplicating the full protocol.
+
+**Step 7c — Portfolio snapshot tool invocation**: Use the `Read` tool to check for `Documents/Planning/sequence.yaml`; if present, parse the `control_tower:` integer with a regex (`control_tower:\s*(\d+)`). Then use the `Bash` tool to run `gh issue view {control_tower} --json body --jq '.body'` with a 3-second timeout (`--timeout 3`). Extract up to 5 lines from the rendered portfolio section (between `<!-- portfolio-tracker:begin -->` and `<!-- portfolio-tracker:end -->`), always including the `as of … — rendered by render-portfolio.ps1` footer line. Any failure at any step → silent skip; do not surface errors to the user.
