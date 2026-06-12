@@ -326,8 +326,8 @@ $($script:EndMarker)
         $result = Get-SplicedBody -existingBody $existingBody -contentBlock $script:ContentBlock
 
         $result | Should -Not -BeNullOrEmpty
-        $result | Should -Match [regex]::Escape($script:BeginMarker)
-        $result | Should -Match [regex]::Escape($script:EndMarker)
+        $result.Contains($script:BeginMarker) | Should -Be $true -Because 'begin marker must be present'
+        $result.Contains($script:EndMarker)   | Should -Be $true -Because 'end marker must be present'
         $result | Should -Match 'Some content here\.'  -Because 'original body content must be preserved'
     }
 
@@ -343,8 +343,8 @@ $($script:EndMarker)
         $result | Should -Not -BeNullOrEmpty
         $result | Should -Match $beforeText  -Because 'content before markers must be preserved'
         $result | Should -Match $afterText   -Because 'content after markers must be preserved'
-        $result | Should -Match [regex]::Escape('## Now')  -Because 'new content block must replace old'
-        $result | Should -Not -Match 'old content'          -Because 'old content between markers must be replaced'
+        $result.Contains('## Now') | Should -Be $true -Because 'new content block must replace old'
+        $result | Should -Not -Match 'old content'    -Because 'old content between markers must be replaced'
     }
 
     It 'returns null when content is identical after stripping timestamp (idempotent no-write F18)' {
