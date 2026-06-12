@@ -191,7 +191,7 @@ Run these three checks in Claude Code to audit the auto-mode boundary in your se
 
 - `agents/*.agent.md` — shared, tool-agnostic agent bodies used by both Copilot and Claude Code (capitalized filename, `.agent.md` extension)
 - `agents/{name}.md` — Claude-native subagent shells that point at the shared bodies (lowercase filename, plain `.md`). Claude registers only the lowercase shells via the explicit `agents` array in `.claude-plugin/plugin.json`; bodies are loaded by paired shells via `Read` and are intentionally excluded from `subagent_type` registration.
-- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/code-conductor`, `/review-github`, `/setup-references`, `/polish`, `/raw`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`)
+- `commands/` — slash commands at plugin root (`/experience`, `/design`, `/plan`, `/orchestrate`, `/spine-run`, `/orchestra:spine`, `/code-conductor`, `/review-github`, `/setup-references`, `/polish`, `/raw`, `/orchestra:review`, `/orchestra:review-lite`, `/orchestra:review-prosecute`, `/orchestra:review-defend`, `/orchestra:review-judge`, `/audit-docs`)
 - `skills/` — reusable methodology loaded by both platforms; each skill has `platforms/claude.md` for Claude-specific invocation details
 - `platforms/` (at skill root) — platform-specific routing notes
 - `skills/persist-changes/` — git-portable commit+push primitive: caller-parameterized, no Code-Conductor session flags, Pester-tested guard decision helper (`Resolve-PersistDecision.ps1`). Inherited by #678's spine-runner review loop after the #677 Code-Conductor body deletion.
