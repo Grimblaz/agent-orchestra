@@ -279,7 +279,7 @@ Describe 'audit-docs-mechanical' {
     Context 'FailOn behavior' {
         It '-FailOn fail exits with code 1 when fail rows exist' {
             $root = Join-Path $script:FixtureRoot 'oversized-claude'
-            $output = & $script:ScriptPath -Root $root -FailOn fail
+            $null = & $script:ScriptPath -Root $root -FailOn fail
             $LASTEXITCODE | Should -Be 1
         }
 

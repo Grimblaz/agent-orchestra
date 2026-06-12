@@ -64,11 +64,11 @@ function Get-WaiverMap {
         $raw = $raw -replace '\r\n', "`n" -replace '\r', "`n"
         # Find all H3 headings of form "### {check-id}: {relative-path}"
         $pattern = '(?m)^### ([^\n]+)'
-        $matches = [regex]::Matches($raw, $pattern)
-        foreach ($m in $matches) {
+        $regexMatches = [regex]::Matches($raw, $pattern)
+        foreach ($m in $regexMatches) {
             $headingText = $m.Groups[1].Value.Trim()
             # heading format: "A2: CLAUDE.md" — split on first ": "
-            if ($headingText -match '^([A-Z][0-9]+):\s+(\S+)') {
+            if ($headingText -match '^([A-Z][0-9]+):\s+(.+)$') {
                 $checkId = $Matches[1]
                 $filePath = $Matches[2].Trim()
                 # Normalize separators for key matching
@@ -370,8 +370,10 @@ function Invoke-CheckB3 {
                 }
             }
 
-            # Check name: must be lowercase (no uppercase characters)
-            if ($null -ne $nameValue -and $nameValue -cmatch '[A-Z]') {
+            # Check name: must be non-empty and lowercase (no uppercase characters)
+            if ($null -eq $nameValue -or $nameValue -eq '') {
+                $violations.Add('name field is empty or missing')
+            } elseif ($nameValue -cmatch '[A-Z]') {
                 $violations.Add("name field contains uppercase characters ('$nameValue')")
             }
 
