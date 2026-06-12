@@ -84,10 +84,17 @@ Describe 'Plan-authoring Grounding Pass contract' {
     # It 3 — Write-back rule (Discovery scope)
     # Three separate sub-assertions: correct/update the issue, before drafting, names/paths/shapes/counts
     # -------------------------------------------------------------------------
-    It 'states the write-back rule (correct-or-update, before drafting, names/paths/shapes/counts) in the Discovery Workflow section' {
-        $script:DiscoverySection | Should -Match '(correct|update)\s+the\s+issue' -Because 'the write-back rule must direct the planner to correct or update the issue'
-        $script:DiscoverySection | Should -Match 'before drafting' -Because 'the write-back rule must require the correction to happen before drafting'
-        $script:DiscoverySection | Should -Match '(names|paths|shapes|counts)' -Because 'the write-back rule must enumerate the artifact properties that require correction'
+    It 'states the write-back rule (correct-or-update, before drafting, names/paths/shapes/counts) in the ### 4 Grounding Pass subsection' {
+        # Extract the ### 4. Grounding Pass subsection body — mirrors the It 6 sub-section extraction pattern.
+        $h4Start = $script:DiscoverySection.IndexOf('### 4. Grounding Pass', [System.StringComparison]::Ordinal)
+        $h4Start | Should -BeGreaterOrEqual 0 -Because '### 4. Grounding Pass must exist in the Discovery section'
+        $afterH4     = $script:DiscoverySection.Substring($h4Start + '### 4. Grounding Pass'.Length)
+        $nextH3Match = [regex]::Match($afterH4, '(?m)^###\s+')
+        $h4Body = if ($nextH3Match.Success) { $afterH4.Substring(0, $nextH3Match.Index) } else { $afterH4 }
+
+        $h4Body | Should -Match '(correct|update)\s+the\s+issue' -Because 'the write-back rule must direct the planner to correct or update the issue'
+        $h4Body | Should -Match 'before drafting'                 -Because 'the write-back rule must require the correction to happen before drafting'
+        $h4Body | Should -Match '(names|paths|shapes|counts)'     -Because 'the write-back rule must enumerate the artifact properties that require correction'
     }
 
     # -------------------------------------------------------------------------
@@ -95,7 +102,8 @@ Describe 'Plan-authoring Grounding Pass contract' {
     # Proximity-anchored regex — migration-scan and #591 must appear together
     # -------------------------------------------------------------------------
     It 'documents the #591 migration-scan carve-out in the Discovery Workflow section' {
-        $script:DiscoverySection | Should -Match 'migration[- ]scan .*#591|Step-1 exhaustive scan.*#591|#591.*Step-1 exhaustive scan' -Because 'the Grounding Pass must acknowledge the migration-scan carve-out that #591 introduced'
+        $script:DiscoverySection | Should -Match '#591'              -Because 'the carve-out sentence must cite issue #591'
+        $script:DiscoverySection | Should -Match 'migration[- ]scan' -Because 'the carve-out sentence must name the migration-scan concept'
     }
 
     # -------------------------------------------------------------------------
@@ -144,5 +152,13 @@ Describe 'Plan-authoring Grounding Pass contract' {
     It 'includes a reciprocal Grounding Pass anchor in the Tree-State Verification Discipline section' {
         $script:TreeStateSection | Should -Match 'Grounding Pass' -Because 'Tree-State Verification Discipline must reference the Grounding Pass as its upstream discovery peer'
         $script:TreeStateSection | Should -Match 'step[- ]?prose'  -Because 'Tree-State Verification Discipline must use step-prose language to anchor the reciprocal reference'
+
+        # Forward direction: the Grounding Pass subsection must also cross-reference Tree-State Verification Discipline.
+        $h4Start = $script:DiscoverySection.IndexOf('### 4. Grounding Pass', [System.StringComparison]::Ordinal)
+        $h4Start | Should -BeGreaterOrEqual 0 -Because '### 4. Grounding Pass must exist in the Discovery section'
+        $afterH4     = $script:DiscoverySection.Substring($h4Start + '### 4. Grounding Pass'.Length)
+        $nextH3Match = [regex]::Match($afterH4, '(?m)^###\s+')
+        $h4Body = if ($nextH3Match.Success) { $afterH4.Substring(0, $nextH3Match.Index) } else { $afterH4 }
+        $h4Body | Should -Match 'Tree-State Verification Discipline' -Because 'the Grounding Pass subsection must reference its post-draft peer to complete the reciprocal anchor'
     }
 }

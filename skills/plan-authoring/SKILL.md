@@ -79,13 +79,13 @@ Artifacts introduced while drafting a plan step must be grounded before the step
 
 When the research subagent surfaces a contradiction between a design-note artifact claim and the live tree — mismatched names, paths, shapes, or counts — **correct the issue** body **before drafting** the plan. The parent Issue-Planner context performs the correction (consistent with Issue-Planner's existing issue-body writes at `agents/Issue-Planner.agent.md:92` and `:100`, and distinct from the implementation-edit prohibition at `:34`/`:41`). The read-only research subagent reports contradictions as findings; it never edits.
 
-Ambiguous artifact claims that cannot be verified from the tree alone route through `## Alignment Workflow`. A factual correction is not a "material scope change" triggering the loop-back unless it invalidates an acceptance criterion.
+Ambiguous artifact claims that cannot be verified from the tree alone route through `## Alignment Workflow`. See `## Alignment Workflow` for the factual-correction exemption from its loop-back rule.
 
 Scope grounding to named artifacts only. Do not run tree-wide scans or re-verify artifacts already grounded in this session.
 
 When no design notes exist, there are no design-note claims to write back. Grounding still applies: verify any artifact the planner names when proposing steps.
 
-Worked example (from issue #429): the original issue Background table cited `lib/frame-predicate-core.ps1` as the path for frame-predicate exports. The live tree shows the real path is `.github/scripts/lib/frame-predicate-core.ps1` and the real exports are `*-FV*` (e.g., `ConvertTo-FVPredicate`, `ConvertFrom-FVPredicateToAst`). A grounding pass would have caught this before any plan step named the phantom path.
+Worked example (from issue #429): the original issue Background table cited `lib/frame-predicate-core.ps1` as the path for frame-predicate exports. The live tree shows the real path is `.github/scripts/lib/frame-predicate-core.ps1` and the real exports are `*-FV*` (e.g., `ConvertTo-FVPredicate`, `ConvertTo-FVExpression`). A grounding pass would have caught this before any plan step named the phantom path.
 
 Migration targets are a special case: the Step-1 exhaustive scan introduced by #591 owns migration file enumeration. Do not use the Grounding Pass to substitute for the #591 migration-scan step; use it only to verify that named artifacts (paths, interfaces) match what the live tree actually contains.
 
