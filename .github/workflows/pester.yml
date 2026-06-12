@@ -37,7 +37,9 @@ jobs:
             '.github/scripts/Tests/gate-reconciliation.Tests.ps1',
             '.github/scripts/Tests/gate-hook-contract.Tests.ps1',
             '.github/scripts/Tests/path-migration-sweep-gate.Tests.ps1',
-            '.github/scripts/Tests/Ensure-ScratchGitignore.Tests.ps1'
+            '.github/scripts/Tests/Ensure-ScratchGitignore.Tests.ps1',
+            # render-portfolio tests — registered per d-ci-gate-registration (#692 s3)
+            '.github/scripts/Tests/render-portfolio.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
