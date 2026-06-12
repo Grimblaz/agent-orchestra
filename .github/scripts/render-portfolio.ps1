@@ -126,9 +126,11 @@ function Get-PortfolioBuckets {
     foreach ($issue in $issueStateObjects) {
         if ($issue.state -eq 'CLOSED') {
             if ($issue.closedAt) {
-                $closedDate = [datetime]::Parse($issue.closedAt)
-                if ($closedDate -ge $cutoff) {
-                    $closedWithinWindow.Add($issue)
+                [datetime]$closedDate = [datetime]::MinValue
+                if ([datetime]::TryParse($issue.closedAt, [ref]$closedDate)) {
+                    if ($closedDate -ge $cutoff) {
+                        $closedWithinWindow.Add($issue)
+                    }
                 }
             }
             continue
@@ -465,7 +467,15 @@ query {
             $unresolvedNums += $num
             continue
         }
-        $response = $rawJson | ConvertFrom-Json
+        $response = $null
+        try {
+            $response = $rawJson | ConvertFrom-Json
+        }
+        catch {
+            Write-Warning "Failed to parse GraphQL response for issue #$num — skipping."
+            $unresolvedNums += $num
+            continue
+        }
         if ($response.errors) {
             Write-Warning "GraphQL errors for issue #$num — skipping."
             $unresolvedNums += $num
