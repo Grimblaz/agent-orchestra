@@ -462,6 +462,23 @@ families:
       Documents/Design/*.md — agents that cross-reference these for schema or classification
       data will proceed without that context if the file is absent (visible-warning)."
 
+  "Documents/Planning/*.yaml":
+    claude_resolves: source-tree
+    copilot_resolves: source-tree
+    requires_version_bump: false
+    experience: wasted-tool-call
+    examples:
+      - Documents/Planning/sequence.yaml
+    notes: "Hub-repo derived-portfolio-tracker sequence spec consumed by
+      .github/scripts/render-portfolio.ps1 (#692). Per-repo opt-in content: each repo that
+      wants a derived portfolio tracker authors its own sequence.yaml; it is not distributed
+      via the plugin cache and is read from the working-tree CWD. Referenced by
+      session-startup Step 7c and post-pr-review section 7 with explicit existence guards
+      that skip when absent. A consumer repo without a portfolio tracker that hits one of
+      those skill references performs a wasted tool call (the existence check returns nothing)
+      and proceeds without portfolio context. Editing the spec does not require a plugin
+      version bump — it is hub-repo planning content, not a plugin entry point."
+
   "frame/ports/*.yaml":
     claude_resolves: both
     copilot_resolves: source-tree

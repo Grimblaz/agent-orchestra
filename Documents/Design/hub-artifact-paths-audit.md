@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: 32f983d4f2c599322c3a08b21516b7b06c9fd6e4
-generated-at: 2026-06-09T05:41:59Z
+last-verified: c9591230b11b6ca11346945d2f90d8554805a474
+generated-at: 2026-06-12T21:04:15Z
 -->
 
 ## Purpose
@@ -389,6 +389,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `Documents/INDEX.md`
 - **notes**: Generated project-reference documentation index in consumer repos. Not a hub distribution artifact; refreshed by /setup-references from the active repo's reference sidecars. Attempting to resolve it from the plugin cache or another repo is a wasted tool call.
+
+### `Documents/Planning/*.yaml`
+
+- **claude_resolves**: source-tree
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `Documents/Planning/sequence.yaml`
+- **notes**: Hub-repo derived-portfolio-tracker sequence spec consumed by .github/scripts/render-portfolio.ps1 (#692). Per-repo opt-in content: each repo that wants a derived portfolio tracker authors its own sequence.yaml; it is not distributed via the plugin cache and is read from the working-tree CWD. Referenced by session-startup Step 7c and post-pr-review section 7 with explicit existence guards that skip when absent. A consumer repo without a portfolio tracker that hits one of those skill references performs a wasted tool call (the existence check returns nothing) and proceeds without portfolio context. Editing the spec does not require a plugin version bump — it is hub-repo planning content, not a plugin entry point.
 
 ### `examples/{stack}/*.md`
 
