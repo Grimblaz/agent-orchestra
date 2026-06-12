@@ -79,6 +79,7 @@ The mechanical-check script (`scripts/audit-docs-mechanical.ps1`) is designed to
   # After vendoring the script to your repo (e.g., scripts/audit-docs-mechanical.ps1):
   pwsh scripts/audit-docs-mechanical.ps1 -Root $env:GITHUB_WORKSPACE -FailOn fail
   ```
+  Always pass a non-empty `-Root` — an empty string produces a PowerShell parameter-binding error rather than JSON output, since the binding check runs before the script body. The command layer's root-resolution step (CWD fallback) prevents this in interactive use.
 
 ## Recording Documentation Decisions
 
@@ -100,7 +101,7 @@ When a check fires and the deviation is intentional (e.g., CLAUDE.md is temporar
 - date: 2026-06-12
 ```
 
-The match key is (check_id, normalized relative path from root). The `waiver_ref` in the JSON output is the heading text (`A2: CLAUDE.md`).
+The match key is (check_id, normalized relative path from root). The `waiver_ref` in the JSON output is the raw heading text (`A2: CLAUDE.md`). Keep the H3 heading to the two-token `{check-id}: {relative-path}` form — any trailing annotation (e.g., `### A2: CLAUDE.md — migration note`) will appear verbatim in `waiver_ref`. Matching is case-insensitive: `### a2: claude.md` matches the same entry as `### A2: CLAUDE.md`.
 
 **Relocation**: the default location is `.claude/documentation-decisions.md`. Override with `-DecisionRecordPath <absolute-or-repo-relative-path>` when your repo layout differs.
 
