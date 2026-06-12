@@ -99,16 +99,56 @@ Project-reference loading follows the same bounded-scope principle: load the sma
 - **Standards concerns**: findings from the standards check (see below). Omit if check raises no concerns.
 - **Constraints**: known technical constraints, architecture rules, or non-goals relevant to this phase. Omit if none.
 - **Project references**: If the `<!-- refs-injected-{issue} -->` sentinel is present, the hook loaded refs deterministically — surface their names. Otherwise, report loaded reference names, under-match notes, stale-reference markers, or the non-blocking adoption nudge. Omit if references are configured and no project-reference note affects onboarding.
+- **Changed since this issue was filed**: age-gated diff scan — see `### Changed since this issue was filed` below. Omit if the issue is below the age threshold (Empty-Section Omission Rule applies).
 
 ### Empty-Section Omission Rule
 
 Do not render empty section headers or `(none)` placeholders. If a conditional section has nothing to report, omit the heading entirely. A trivial change may produce a brief of two lines (What + Scope tier) with no conditional sections at all.
+
+### Changed since this issue was filed
+
+When the issue is **strictly older than 7 days** (configurable via `-ThresholdDays N`), run the drift scan and render this section in the brief. The scan detects which merged PRs have touched paths that appear as backtick-quoted tokens in the issue body, giving the pickup agent a fresh picture of what the codebase looks like compared to when the issue was filed.
+
+**Script invocation**:
+
+```powershell
+# Repo clone (contributor — relative path from repo root):
+pwsh -NoProfile -NonInteractive -File "skills/upstream-onboarding/scripts/get-issue-drift.ps1" -IssueNumber {ID}
+
+# Plugin-cache install (consumer — resolve from installed plugin path):
+pwsh -NoProfile -NonInteractive -File "<plugin-root>/skills/upstream-onboarding/scripts/get-issue-drift.ps1" -IssueNumber {ID}
+```
+
+Resolve `<plugin-root>` using the same D1 plugin-cache-priority lookup described in `skills/session-startup/SKILL.md` Step 3.
+
+**Entry format**: `#N — title (touches: path1, path2, ...)`. Entries are ranked by overlap count descending, then by merge date descending. Cap at 10 entries by default.
+
+**Example rendering**:
+
+```text
+**Changed since this issue was filed** (3 PRs touched tracked paths)
+- #686 — feat: add drift scan (touches: skills/upstream-onboarding/SKILL.md)
+- #685 — feat: persist-changes skill (touches: skills/persist-changes/SKILL.md)
++1 more PR touched tracked paths.
+```
+
+**When nothing matches** (scan ran but no PRs path-matched the issue body's tokens): render a single count-only line — `N PRs merged since filing — type "what changed" to review.` Never dump an unmatched PR list.
+
+**Truncation note**: when the script result carries `truncated: true` OR any rendered candidate carries `files_truncated: true`, append: `results may be incomplete — type "what changed" for a full scan.`
+
+**Age-threshold omission**: when the issue is below the 7-day threshold, omit this section entirely including the heading (Empty-Section Omission Rule applies).
+
+**Scaling Rule clarification**: this section is a conditional section. Trivial-tier briefs stay required-core-only and omit it even when the age threshold is met.
+
+**Ephemerality**: the drift output is rendered ephemerally — never written to any durable marker, engagement record, or issue/PR comment.
 
 ### Resume Variant
 
 When performing a **same-agent resume** (re-entering paused work on an issue the active agent already owns), a terse ~4-6 line inline orientation snapshot surfaces **instead of** the standards check. On cross-role issue pickup (e.g., Issue-Planner picking up a Solution-Designer's work), the full scaled brief and standards check fire (rule 4 in the Marker-Boundary Trigger table) — the brief already surfaces What / Scope tier / inherited decisions / next phase, satisfying the AC1 pickup-orientation goal. The resume snapshot is the **additive same-agent-resume case**.
 
 This snapshot is assembled ONLY from already-loaded context to avoid extra reads or expensive model summarization passes.
+
+**Drift exception (narrow, additive)**: The age-gated deterministic drift call (`get-issue-drift.ps1`) may append a "Changed since this issue was filed" section to the resume snapshot when the issue exceeds the age threshold. This is the only narrow exception to the assembled-from-already-loaded-context constraint above — the call is a cheap, stateless, age-gated script that does not load or summarize prior analysis context. Render it under the same `### Changed since this issue was filed` rules. All other snapshot fields remain assembled from already-loaded context only.
 
 The snapshot fields map directly to durable artifacts (D3):
 
@@ -126,12 +166,15 @@ When a real issue does not yet carry any durable `engagement-record` markers (e.
 
 If a richer context or the full issue details are needed, an on-demand summary is available via natural language (e.g., typing "expand" or "full picture"). This is handled in-turn as a context-local follow-up, is NOT registered in `nl_intent_routing`, and is never suppressed by `/raw`.
 
+**Drift follow-up phrases**: the phrases "what changed", "what's changed", and "what happened since" (and close variants) trigger the drift follow-up — run `get-issue-drift.ps1 -IssueNumber {ID} -Force` and narrate the results using the same entry-format and rendering rules as the "Changed since this issue was filed" section. If the script returns `{error: "..."}`, surface the error as: `couldn't check: {error}`. Never silence errors.
+
 #### Affordance-Hint Predicate (D5)
 
 A single-line affordance hint (e.g. "Type 'expand' for richer details") appears below the snapshot only when a cheap check resolves to true:
 
 1. At least one prior `engagement-record` decision exists on the issue, OR
 2. The issue body's rendered length exceeds the snapshot's rendered length by more than 1 000 characters.
+3. The issue age exceeds the drift threshold (i.e., the drift scan ran or would run) — show the hint: `Type "what changed" to see what's been merged since this issue was filed.` This predicate fires independently of the D5 hint above; both may appear on the same snapshot.
 
 #### Example snapshot (same-agent resume)
 
