@@ -262,6 +262,25 @@ Describe 'audit-docs-mechanical' {
     }
 
     # -------------------------------------------------------------------------
+    Context 'AC5 - template line count' {
+        It 'CLAUDE.md-starter.md is under 50 lines' {
+            $templatePath = Join-Path $script:RepoRoot 'skills/ai-first-documentation/templates/CLAUDE.md-starter.md'
+            Test-Path $templatePath | Should -BeTrue
+            @(Get-Content -Path $templatePath).Count | Should -BeLessThan 50
+        }
+    }
+
+    # -------------------------------------------------------------------------
+    Context 'AC10 - skill self-audit' {
+        It 'audit of skills/ai-first-documentation/ returns no fail rows' {
+            $skillRoot = Join-Path $script:RepoRoot 'skills/ai-first-documentation'
+            $result = & $script:ScriptPath -Root $skillRoot | ConvertFrom-Json
+            $failRows = $result.checks | Where-Object { $_.status -eq 'fail' }
+            $failRows | Should -BeNullOrEmpty -Because 'the skill itself must pass its own checks'
+        }
+    }
+
+    # -------------------------------------------------------------------------
     Context 'FailOn behavior' {
         It '-FailOn fail exits with code 1 when fail rows exist' {
             $root = Join-Path $script:FixtureRoot 'oversized-claude'
