@@ -10,6 +10,18 @@ description: "Research-backed standards for documentation in AI-first codebases:
 
 Standards for structuring a repository's documentation when coding agents are primary readers and operators. Every practice here is backed by two adversarially-verified research passes (June 2026) across Anthropic official guidance (Tier 1), major vendor guidance (Tier 2), and evidenced practitioner sources (Tier 3). The testable rubric lives in [rubric.md](./rubric.md); citations, verification dates, refuted claims, and open gaps live in [sources.md](./sources.md).
 
+- [When to Use](#when-to-use)
+- [Core Principle](#core-principle)
+- [The Placement Model](#the-placement-model)
+- [Audit Workflow](#audit-workflow)
+- [Consumer-Mode Audits](#consumer-mode-audits)
+- [Recording Documentation Decisions](#recording-documentation-decisions)
+- [Multi-Agent Repositories](#multi-agent-repositories)
+- [Known Industry Open Gaps](#known-industry-open-gaps)
+- [Quick Reference — Verified Numbers](#quick-reference--verified-numbers)
+- [See Also](#see-also)
+- [Gotchas](#gotchas)
+
 ## When to Use
 
 - Authoring or auditing a CLAUDE.md, AGENTS.md, or other always-loaded context file
@@ -64,8 +76,8 @@ The mechanical-check script (`scripts/audit-docs-mechanical.ps1`) is designed to
   Acquire the script via vendor-copy or pinned raw fetch; do not depend on a git submodule or npm package.
 - **CI snippet** (acquire + run):
   ```powershell
-  # Vendor-copy or pin via raw fetch, then:
-  pwsh audit-docs-mechanical.ps1 -Root $env:GITHUB_WORKSPACE -FailOn fail
+  # After vendoring the script to your repo (e.g., scripts/audit-docs-mechanical.ps1):
+  pwsh scripts/audit-docs-mechanical.ps1 -Root $env:GITHUB_WORKSPACE -FailOn fail
   ```
 
 ## Recording Documentation Decisions
@@ -90,7 +102,7 @@ When a check fires and the deviation is intentional (e.g., CLAUDE.md is temporar
 
 The match key is (check_id, normalized relative path from root). The `waiver_ref` in the JSON output is the heading text (`A2: CLAUDE.md`).
 
-**Relocation**: the default location is `.claude/documentation-decisions.md`. Override with `-DecisionRecordPath` when your repo layout differs. [CUSTOMIZE: update to your preferred path]
+**Relocation**: the default location is `.claude/documentation-decisions.md`. Override with `-DecisionRecordPath <absolute-or-repo-relative-path>` when your repo layout differs.
 
 ## Multi-Agent Repositories
 

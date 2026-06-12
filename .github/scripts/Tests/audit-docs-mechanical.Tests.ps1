@@ -216,24 +216,19 @@ Describe 'audit-docs-mechanical' {
 
     # -------------------------------------------------------------------------
     Context 'Error path — Get-Content failure returns error row' {
-        It 'emits a status: error check row when reading a file throws' {
-            # We need to invoke the script in a context where Get-Content throws for one file.
-            # We use a sub-invocation with a wrapper that mocks the behavior by passing
-            # a temporary fixture with a non-existent file injected via a custom test.
-            # Since the script is not dot-sourced in this test (it runs as an executable),
-            # we test the error path by pointing at an unreadable path via a temp fixture dir.
-
+        It 'no spurious error rows when all inventoried files are readable (positive path)' {
+            # Positive path: verifies no error rows are emitted when all files are readable.
+            # NOTE: true error-path coverage (status: error from catch blocks) requires
+            # dot-sourcing the script functions and using Pester Mock. The script runs as an
+            # external process in this suite, so Get-Content cannot be intercepted mid-run.
             $tempRoot = Join-Path $TestDrive 'error-fixture'
             New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
             $claudeMd = Join-Path $tempRoot 'CLAUDE.md'
             Set-Content -Path $claudeMd -Value 'minimal content'
 
-            # Run the audit — no error expected for a readable file
             $output = & $script:ScriptPath -Root $tempRoot
             $result = $output | ConvertFrom-Json
-            # Should have at most pass/skip rows, not error
             $errorRows = $result.checks | Where-Object { $_.status -eq 'error' }
-            # Positive path: no error rows for readable files
             $errorRows | Should -BeNullOrEmpty
         }
 

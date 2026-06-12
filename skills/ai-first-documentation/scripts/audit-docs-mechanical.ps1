@@ -39,7 +39,12 @@ if (-not (Test-Path -LiteralPath $resolvedRoot -PathType Container)) {
 # Resolve decision record path
 # ---------------------------------------------------------------------------
 if ($DecisionRecordPath) {
-    $resolvedDecisionPath = $DecisionRecordPath
+    # Resolve relative paths against the audited root, not the caller's CWD
+    if ([System.IO.Path]::IsPathRooted($DecisionRecordPath)) {
+        $resolvedDecisionPath = $DecisionRecordPath
+    } else {
+        $resolvedDecisionPath = Join-Path $resolvedRoot $DecisionRecordPath
+    }
 } else {
     $resolvedDecisionPath = Join-Path $resolvedRoot '.claude' 'documentation-decisions.md'
 }
@@ -63,7 +68,7 @@ function Get-WaiverMap {
         foreach ($m in $matches) {
             $headingText = $m.Groups[1].Value.Trim()
             # heading format: "A2: CLAUDE.md" — split on first ": "
-            if ($headingText -match '^([A-Z][0-9]+):\s+(.+)$') {
+            if ($headingText -match '^([A-Z][0-9]+):\s+(\S+)') {
                 $checkId = $Matches[1]
                 $filePath = $Matches[2].Trim()
                 # Normalize separators for key matching
@@ -221,7 +226,12 @@ function Invoke-CheckA2 {
     param([System.Collections.Generic.List[string]]$Inventoried, [string]$RootPath, [hashtable]$WaiverMap)
     $rows = [System.Collections.Generic.List[object]]::new()
     foreach ($rel in $Inventoried) {
-        if (-not $rel.EndsWith('.md')) { continue }
+        # A2 applies only to always-loaded context files (Section A: root context, .claude/rules/, nested CLAUDE.md)
+        if (-not ($rel -match '(^|/)CLAUDE\.md$' -or
+                  $rel -match '(^|/)AGENTS\.md$' -or
+                  $rel -match '(^|/)CLAUDE\.local\.md$' -or
+                  $rel -match '(^|/)\.claude/rules/')) { continue }
+        if (-not $rel.EndsWith('.md', [StringComparison]::OrdinalIgnoreCase)) { continue }
         $fullPath = Join-Path $RootPath $rel
         $row = [ordered]@{
             check_id = 'A2'
@@ -269,7 +279,7 @@ function Invoke-CheckB2 {
             check_id = 'B2'
             file     = ''
             status   = 'skip'
-            detail   = 'no local skills/ directory'
+            detail   = 'no SKILL.md files found in inventoried paths'
         })
         return $rows
     }
@@ -342,13 +352,21 @@ function Invoke-CheckB3 {
             foreach ($line in $fmLines) {
                 if ($line -match '^name:\s*(.*)$') {
                     $nameValue = $Matches[1].Trim()
-                    # Remove surrounding quotes if present
-                    $nameValue = $nameValue -replace '^"(.*)"$', '$1'
+                    if ($nameValue -match '^"') {
+                        $nameValue = $nameValue -replace '^"(.*)"$', '$1'
+                    } else {
+                        # Strip inline YAML comment (unquoted values only)
+                        $nameValue = ($nameValue -split '\s+#')[0].Trim()
+                    }
                 }
                 if ($line -match '^description:\s*(.*)$') {
                     $descValue = $Matches[1].Trim()
-                    # Remove surrounding quotes if present
-                    $descValue = $descValue -replace '^"(.*)"$', '$1'
+                    if ($descValue -match '^"') {
+                        $descValue = $descValue -replace '^"(.*)"$', '$1'
+                    } else {
+                        # Strip inline YAML comment (unquoted values only)
+                        $descValue = ($descValue -split '\s+#')[0].Trim()
+                    }
                 }
             }
 
@@ -386,7 +404,9 @@ function Invoke-CheckB5 {
     $rows = [System.Collections.Generic.List[object]]::new()
 
     foreach ($rel in $Inventoried) {
-        if (-not $rel.EndsWith('.md')) { continue }
+        # B5 applies only to skill reference files (Section B: files under skills/)
+        if (-not ($rel -match '(^|/)skills/')) { continue }
+        if (-not $rel.EndsWith('.md', [StringComparison]::OrdinalIgnoreCase)) { continue }
         $fullPath = Join-Path $RootPath $rel
         $row = [ordered]@{
             check_id = 'B5'
@@ -405,7 +425,7 @@ function Invoke-CheckB5 {
             }
             # Check for a ToC: a markdown link to a # anchor, e.g. [something](#anchor)
             $content = $lines -join "`n"
-            $hasToc = $content -match '\[.+\]\(#[^)]+\)'
+            $hasToc = ($content -match '\[.+\]\(#[^)]+\)') -or ($content -match 'href="#[^"]+')
             if (-not $hasToc) {
                 $waiverRef = Get-WaiverRef -WaiverMap $WaiverMap -CheckId 'B5' -RelativePath $rel
                 if ($waiverRef) {
@@ -460,7 +480,7 @@ function Invoke-CheckA9 {
         try {
             $content = Get-Content -LiteralPath $fullPath -Raw -ErrorAction Stop
             # Check for path-scoping indicators: globs: frontmatter field or applyWhen: directive
-            $hasScope = ($content -match '(?m)^globs:') -or ($content -match '(?m)^applyWhen:') -or ($content -match 'applyWhen:')
+            $hasScope = ($content -match '(?m)^globs:') -or ($content -match '(?m)^applyWhen:')
             if (-not $hasScope) {
                 $waiverRef = Get-WaiverRef -WaiverMap $WaiverMap -CheckId 'A9' -RelativePath $rel
                 if ($waiverRef) {
