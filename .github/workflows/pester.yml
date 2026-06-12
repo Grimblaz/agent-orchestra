@@ -37,7 +37,8 @@ jobs:
             '.github/scripts/Tests/gate-reconciliation.Tests.ps1',
             '.github/scripts/Tests/gate-hook-contract.Tests.ps1',
             '.github/scripts/Tests/path-migration-sweep-gate.Tests.ps1',
-            '.github/scripts/Tests/Ensure-ScratchGitignore.Tests.ps1'
+            '.github/scripts/Tests/Ensure-ScratchGitignore.Tests.ps1',
+            '.github/scripts/Tests/audit-docs-mechanical.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
