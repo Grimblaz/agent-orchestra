@@ -151,6 +151,17 @@ Describe 'Get-IssueDrift' {
             # PR 3: unrelated file — no token matches
             $candidateNumbers | Should -Not -Contain 3
         }
+
+        It 'matches tokens case-insensitively against file paths' {
+            # Token in issue body is uppercase; file path in PR is lowercase → should still match
+            $issueJson = '{"number":683,"title":"t","body":"some `README.MD` ref","createdAt":"2020-01-01T00:00:00Z"}'
+            $prJson = '[{"number":10,"title":"PR ci","mergedAt":"2020-01-02T00:00:00Z","changedFiles":1,"files":[{"path":"readme.md","additions":1,"deletions":0}]}]'
+            $result = Get-IssueDrift -IssueNumber 683 -ThresholdDays 7 `
+                -IssueJsonOverride $issueJson `
+                -PrListJsonOverride $prJson
+            $result.candidates | Should -Not -BeNullOrEmpty
+            $result.candidates[0].number | Should -Be 10
+        }
     }
 
     # ----------------------------------------------------------------
@@ -167,6 +178,17 @@ Describe 'Get-IssueDrift' {
                 -PrListJsonOverride $prJson `
                 -ExcludePaths @('.github/')
             # The only matched path is .github/workflows/ci.yml which is excluded → zero candidates
+            $result.intersection | Should -Be 'none'
+        }
+
+        It 'excludes paths case-insensitively when ExcludePaths entry has different casing than file path' {
+            # ExcludePaths uses uppercase prefix; file path is lowercase → should still be excluded
+            $issueJson = '{"number":683,"title":"t","body":"some `.claude-plugin/plugin.json` ref","createdAt":"2020-01-01T00:00:00Z"}'
+            $prJson = '[{"number":60,"title":"plugin update","mergedAt":"2020-01-02T00:00:00Z","changedFiles":1,"files":[{"path":".claude-plugin/plugin.json","additions":1,"deletions":0}]}]'
+            $result = Get-IssueDrift -IssueNumber 683 -ThresholdDays 7 `
+                -IssueJsonOverride $issueJson `
+                -PrListJsonOverride $prJson `
+                -ExcludePaths @('.CLAUDE-PLUGIN/')
             $result.intersection | Should -Be 'none'
         }
 
@@ -226,6 +248,15 @@ Describe 'Get-IssueDrift' {
                 -PrListJsonOverride '[]'
             $result.error | Should -Not -BeNullOrEmpty
             $result.PSObject.Properties.Name | Should -Not -Contain 'skipped'
+            $result.PSObject.Properties.Name | Should -Not -Contain 'candidates'
+        }
+
+        It 'returns error shape for issue JSON with non-numeric number field' {
+            # Guarded parsing: [int]::TryParse should fail and return a structured error
+            $result = Get-IssueDrift -IssueNumber 683 `
+                -IssueJsonOverride '{"number":"not-a-number","title":"t","body":"","createdAt":"2020-01-01T00:00:00Z"}' `
+                -PrListJsonOverride '[]'
+            $result.error | Should -Not -BeNullOrEmpty
             $result.PSObject.Properties.Name | Should -Not -Contain 'candidates'
         }
 

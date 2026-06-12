@@ -87,6 +87,11 @@ function Get-IssueDrift {
         return (New-DriftError "Issue JSON is missing required field 'createdAt'")
     }
 
+    $issueNumberInt = 0
+    if ($null -eq $issueData.number -or -not [int]::TryParse([string]$issueData.number, [ref]$issueNumberInt)) {
+        return (New-DriftError "Issue JSON is missing or has an invalid 'number' field")
+    }
+
     $issueCreatedAt = $issueData.createdAt
 
     # ----------------------------------------------------------------
@@ -111,7 +116,7 @@ function Get-IssueDrift {
     # STEP 4: Fetch merged PR list (DI-injectable)
     # ----------------------------------------------------------------
     # Date-granular string for GitHub's merged: qualifier (date only, not datetime)
-    $dateStr = $createdAtOffset.ToString('yyyy-MM-dd')
+    $dateStr = $createdAtOffset.UtcDateTime.ToString('yyyy-MM-dd')
 
     $prJson = $null
     if (-not [string]::IsNullOrWhiteSpace($PrListJsonOverride)) {
@@ -250,7 +255,7 @@ function Get-IssueDrift {
                 # Leading-/ tokens: strip the slash and do exact/suffix match directly
                 if ($token.StartsWith('/')) {
                     $tokenStripped = $token.TrimStart('/')
-                    if ($candidatePath -eq $tokenStripped -or $candidatePath.EndsWith("/$tokenStripped")) {
+                    if ($candidatePath -eq $tokenStripped -or $candidatePath -like "*/$tokenStripped") {
                         $matched = $true
                         break
                     }
@@ -259,7 +264,7 @@ function Get-IssueDrift {
 
                 # Directory prefix match: token ends with /
                 if ($token.EndsWith('/')) {
-                    if ($candidatePath.StartsWith($token)) {
+                    if ($candidatePath -like "$token*") {
                         $matched = $true
                         break
                     }
@@ -268,7 +273,7 @@ function Get-IssueDrift {
 
                 # Token has a slash — treat as repo-relative or partial path
                 if ($token.Contains('/')) {
-                    if ($candidatePath -eq $token -or $candidatePath.EndsWith("/$token")) {
+                    if ($candidatePath -eq $token -or $candidatePath -like "*/$token") {
                         $matched = $true
                         break
                     }
@@ -276,7 +281,7 @@ function Get-IssueDrift {
                 else {
                     # Basename-only token
                     $basename = [System.IO.Path]::GetFileName($candidatePath)
-                    if ($basename -eq $token -or $candidatePath -eq $token -or $candidatePath.EndsWith("/$token")) {
+                    if ($basename -eq $token -or $candidatePath -eq $token -or $candidatePath -like "*/$token") {
                         $matched = $true
                         break
                     }
@@ -300,14 +305,14 @@ function Get-IssueDrift {
             $isExcluded = $false
             foreach ($excl in $ExcludePaths) {
                 if ($excl.EndsWith('/')) {
-                    if ($mp -eq $excl.TrimEnd('/') -or $mp.StartsWith($excl)) {
+                    if ($mp -eq $excl.TrimEnd('/') -or $mp -like "$excl*") {
                         $isExcluded = $true
                         break
                     }
                 }
                 else {
                     $mpBasename = [System.IO.Path]::GetFileName($mp)
-                    if ($mp -eq $excl -or $mpBasename -eq $excl -or $mp.EndsWith("/$excl")) {
+                    if ($mp -eq $excl -or $mpBasename -eq $excl -or $mp -like "*/$excl") {
                         $isExcluded = $true
                         break
                     }
@@ -335,7 +340,7 @@ function Get-IssueDrift {
     # ----------------------------------------------------------------
     if ($candidates.Count -eq 0) {
         return [pscustomobject]@{
-            issue_number            = [int]$issueData.number
+            issue_number            = $issueNumberInt
             issue_created_at        = $issueCreatedAt
             total_merged_since      = $totalMergedSince
             truncated               = $truncated
@@ -359,7 +364,7 @@ function Get-IssueDrift {
     $moreCount = [Math]::Max(0, $totalMatching - $Cap)
 
     return [pscustomobject]@{
-        issue_number            = [int]$issueData.number
+        issue_number            = $issueNumberInt
         issue_created_at        = $issueCreatedAt
         total_merged_since      = $totalMergedSince
         truncated               = $truncated
