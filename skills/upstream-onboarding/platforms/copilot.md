@@ -39,3 +39,13 @@ Emit inline: `Standards check: none flagged` — no tool call required.
 ## Judgment principle reminder
 
 Raise concerns based on certainty × risk. There is no numeric cap. Multiple simultaneous concerns may be batched into a single `#tool:vscode/askQuestions` call with multiple questions, or raised sequentially if each requires the previous answer to proceed.
+
+## Drift scan — script path resolution
+
+When invoking `get-issue-drift.ps1` from a Copilot session, resolve the script path from the installed `agent-orchestra` plugin cache (the VS Code `agentPlugins/.../agent-orchestra` cache path under the active product profile), then:
+
+```powershell
+pwsh -NoProfile -NonInteractive -File "<plugin-root>/skills/upstream-onboarding/scripts/get-issue-drift.ps1" -IssueNumber {ID}
+```
+
+If the plugin cache path cannot be resolved, emit `couldn't check: script not found`.

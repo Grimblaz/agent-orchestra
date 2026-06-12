@@ -58,4 +58,8 @@ Describe 'upstream onboarding resume variant' {
         $script:ConductorContent | Should -Match '(?i)independently assemble and render the \*\*resume-variant orientation snapshot\*\* inline' -Because 'Code-Conductor must independently render the snapshot'
         $script:ConductorContent | Should -Match '(?i)last decision: not recorded' -Because 'Code-Conductor snapshot must specify the last decision fallback'
     }
+
+    It 'documents the narrow drift exception to the assembled-from-already-loaded-context rule' {
+        $script:SkillContent | Should -Match '(?i)Drift exception.*narrow.*additive' -Because 'issue #683 requires a documented narrow exception permitting the age-gated drift call on same-agent resume'
+    }
 }
