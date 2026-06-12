@@ -65,8 +65,33 @@ When delegating discovery to a subagent, keep the brief read-only and scope it t
 - Design and decision document review
 - CE Gate surface identification and exercise method selection
 - Missing information, technical unknowns, and feasibility risks
+- When the subagent discovers an artifact contradiction — a named path, function, or schema field in the design notes that does not match the live tree — report it as a finding. The parent Issue-Planner context applies the write-back correction; the subagent does not edit.
 
 Do not let the discovery pass draft the full plan.
+
+### 4. Grounding Pass
+
+Invariant: **no plan step may name an ungrounded artifact**. This discipline runs at Discovery (for artifacts named in the research inventory) and at first-naming (for any artifact the planner introduces while drafting a step).
+
+Ground: function signatures, schema file paths, agent body paths, command surfaces, and migration targets. For each named artifact, run one batched `Grep`/`Read` to verify its claimed shape (name, path, interface, count). Do not re-verify already-grounded artifacts.
+
+Artifacts introduced while drafting a plan step must be grounded before the step is finalized. The same invariant applies mid-draft.
+
+When the research subagent surfaces a contradiction between a design-note artifact claim and the live tree — mismatched names, paths, shapes, or counts — **correct the issue** body **before drafting** the plan. The parent Issue-Planner context performs the correction (consistent with Issue-Planner's existing issue-body writes at `agents/Issue-Planner.agent.md:92` and `:100`, and distinct from the implementation-edit prohibition at `:34`/`:41`). The read-only research subagent reports contradictions as findings; it never edits.
+
+Ambiguous artifact claims that cannot be verified from the tree alone route through `## Alignment Workflow`. See `## Alignment Workflow` for the factual-correction exemption from its loop-back rule.
+
+Scope grounding to named artifacts only. Do not run tree-wide scans or re-verify artifacts already grounded in this session.
+
+When no design notes exist, there are no design-note claims to write back. Grounding still applies: verify any artifact the planner names when proposing steps.
+
+Worked example (from issue #429): the original issue Background table cited `lib/frame-predicate-core.ps1` as the path for frame-predicate exports. The live tree shows the real path is `.github/scripts/lib/frame-predicate-core.ps1` and the real exports are `*-FV*` (e.g., `ConvertTo-FVPredicate`, `ConvertTo-FVExpression`). A grounding pass would have caught this before any plan step named the phantom path.
+
+Migration targets are a special case: the Step-1 exhaustive scan introduced by #591 owns migration file enumeration. Do not use the Grounding Pass to substitute for the #591 migration-scan step; use it only to verify that named artifacts (paths, interfaces) match what the live tree actually contains.
+
+See `## Tree-State Verification Discipline` for the post-draft companion: that discipline verifies load-bearing ACs against the live tree after the plan is drafted, while this Grounding Pass verifies step-prose artifact claims before drafting.
+
+Telemetry note: the `#467` per-port cost harness records token, dispatch, and cost data only — it cannot isolate grounding-blocker counts. Reduction in grounding-driven prosecution blockers is observable through the CE Gate fixture exercise rather than automated telemetry.
 
 ## Alignment Workflow
 
@@ -77,6 +102,8 @@ If research surfaces ambiguity, convert it into a small decision set:
 - Clarify the minimum missing information needed to proceed
 
 If the user's answer materially changes scope or mechanism, loop back through discovery before drafting the plan.
+
+A Grounding Pass factual correction — correcting a misnamed path, schema, or artifact count in the issue body — is not a "material scope change" for this loop-back unless it invalidates an acceptance criterion. Already-grounded artifacts are not re-questioned when drafting proceeds.
 
 ## Draft Workflow
 
@@ -112,7 +139,7 @@ Include the fixed adversarial review pipeline: three prosecution passes, merged 
 
 ## Tree-State Verification Discipline
 
-After drafting the plan and before stress-test preparation, verify every load-bearing acceptance criterion against the current repository tree. Populate the plan's `**Verification Evidence**` block before adversarial review so prosecutors evaluate the plan and its evidence together.
+After drafting the plan and before stress-test preparation, verify every load-bearing acceptance criterion against the current repository tree. Populate the plan's `**Verification Evidence**` block before adversarial review so prosecutors evaluate the plan and its evidence together. The Grounding Pass (`### 4. Grounding Pass` in `## Discovery Workflow`) is its pre-draft counterpart: it owns step-prose artifact claims and upstream write-back before drafting, while this discipline owns load-bearing AC evidence after drafting.
 
 **Why layered discipline**: this discipline uses methodology, a persisted plan-template block, and a standalone warn-only verifier because the rejected alternatives each miss part of the failure class: methodology-only leaves no durable audit trail, free-form or external evidence is hard to parse and easy to lose, and hard-blocking rollout or pre-PR hook style alternatives would break in-flight plans before the evidence pattern stabilizes. The verifier is not wired into quick-validate, CI, or normal `/plan` execution.
 
