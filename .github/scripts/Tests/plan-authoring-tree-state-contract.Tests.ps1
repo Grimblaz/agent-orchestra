@@ -113,10 +113,10 @@ Describe 'Plan-authoring tree-state verification contract' {
     }
 
     It 'directs Issue-Planner to run tree-state verification before adversarial stress testing' {
-        $stressTestAnchor = 'Before presenting the plan, run the three-pass adversarial stress test'
+        $stressTestAnchor = 'Before presenting the plan, preserve this ordering'
         $stressTestIndex = $script:IssuePlannerContent.IndexOf($stressTestAnchor, [System.StringComparison]::Ordinal)
 
-        $stressTestIndex | Should -BeGreaterOrEqual 0 -Because 'the existing adversarial stress-test directive is the placement anchor'
+        $stressTestIndex | Should -BeGreaterOrEqual 0 -Because 'the existing pre-presentation ordering directive is the placement anchor'
 
         $contentBeforeStressTest = $script:IssuePlannerContent.Substring(0, $stressTestIndex)
         $directiveLines = @(
