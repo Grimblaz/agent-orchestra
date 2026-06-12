@@ -159,6 +159,27 @@ Describe 'Get-PortfolioBuckets' {
         $buckets.Now | Should -BeNullOrEmpty -Because 'all round-1 issues are blocked; Now must be empty to signal an honest stuck state'
     }
 
+    It 'holds empty Now when lowest round is all-blocked and round 2 has unblocked items' {
+        # Two-round spec: round 1 all-blocked, round 2 unblocked
+        $twoRoundSpec = ConvertFrom-SequenceSpec (New-ValidSpecYaml -RoundsBlock @'
+rounds:
+  - lane: main
+    round: 1
+    issues: [100]
+  - lane: main
+    round: 2
+    issues: [200]
+'@)
+        $issues = @(
+            (New-IssueState -Number 100 -BlockedBy @(999)),   # round 1, blocked
+            (New-IssueState -Number 200)                       # round 2, unblocked
+        )
+        $result = Get-PortfolioBuckets -spec $twoRoundSpec -issueStateObjects $issues
+        $result.Now   | Should -BeNullOrEmpty -Because 'round 1 is all-blocked; Now must be empty (honest stuck signal)'
+        $result.Blocked | Select-Object -ExpandProperty number | Should -Contain 100
+        $result.Next  | Select-Object -ExpandProperty number | Should -Contain 200 -Because 'round 2 is the next round'
+    }
+
     It "puts out-of-plan blockers in annotation format 'blocked by #N (out of plan)'" {
         $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
         # Blocker 999 is not in sequence.yaml → out-of-plan
@@ -357,7 +378,7 @@ $($script:EndMarker)
         $result | Should -BeNullOrEmpty -Because 'identical content after timestamp-strip must return null to prevent a no-op write'
     }
 
-    It 'updates content when only timestamp differs' {
+    It 'returns null when only timestamp differs — idempotent' {
         # Body has old timestamp; content block has new timestamp — must NOT be null
         $oldTimestampBlock = @"
 $($script:BeginMarker)

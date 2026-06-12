@@ -43,18 +43,18 @@ function ConvertFrom-SequenceSpec {
         }
 
         # Require schema_version as integer
-        if ($yamlText -notmatch 'schema_version:\s*(\d+)') { return $null }
+        if ($yamlText -notmatch '(?m)^\s*schema_version:\s*(\d+)') { return $null }
         $schema_version = [int]$Matches[1]
 
         # Reject quoted control_tower
-        if ($yamlText -match 'control_tower:\s*"') { return $null }
+        if ($yamlText -match '(?m)^\s*control_tower:\s*"') { return $null }
 
         # Require control_tower as unquoted integer
-        if ($yamlText -notmatch 'control_tower:\s*(\d+)') { return $null }
+        if ($yamlText -notmatch '(?m)^\s*control_tower:\s*(\d+)') { return $null }
         $control_tower = [int]$Matches[1]
 
         # Require recently_closed_days as integer
-        if ($yamlText -notmatch 'recently_closed_days:\s*(\d+)') { return $null }
+        if ($yamlText -notmatch '(?m)^\s*recently_closed_days:\s*(\d+)') { return $null }
         $recently_closed_days = [int]$Matches[1]
 
         # Parse rounds — each round block: "- lane: X\n    round: N\n    issues: [...]"
@@ -77,6 +77,14 @@ function ConvertFrom-SequenceSpec {
                 round  = $round
                 issues = @($issueNums)
             }
+        }
+
+        # Validate: each "- lane:" block must produce exactly one parsed round
+        $expectedRoundCount = ([regex]::Matches($yamlText, '(?m)^\s*-\s+lane:')).Count
+        if ($expectedRoundCount -gt 0 -and $rounds.Count -ne $expectedRoundCount) {
+            Write-Error ("sequence.yaml: round parse mismatch — found {0} '- lane:' blocks but only {1} parsed correctly. " +
+                "Each round must have lane:, round:, and issues: on consecutive lines." -f $expectedRoundCount, $rounds.Count)
+            return $null
         }
 
         return [PSCustomObject]@{
@@ -161,10 +169,11 @@ function Get-PortfolioBuckets {
     # Determine Now and Next from sorted rounds
     $sortedRounds = @($spec.rounds | Sort-Object round)
     $nowRoundIdx  = -1
+    $allOpenIssues = @($openBlocked) + @($openUnblocked)
     for ($i = 0; $i -lt $sortedRounds.Count; $i++) {
         $roundIssueNums = $sortedRounds[$i].issues
-        $hasUnblocked   = $openUnblocked | Where-Object { $roundIssueNums -contains $_.number }
-        if ($hasUnblocked) {
+        $hasOpen        = $allOpenIssues | Where-Object { $roundIssueNums -contains $_.number }
+        if ($hasOpen) {
             $nowRoundIdx = $i
             break
         }
@@ -191,12 +200,10 @@ function Get-PortfolioBuckets {
         }
     }
 
-    # Helper: safe totalCount from first element (or 0)
+    # Helper: return actual bucket item count (no overflow unless bucket is explicitly capped)
     function Get-BucketTotal {
         param([array]$items)
-        if ($items -and $items.Count -gt 0 -and $null -ne $items[0].PSObject.Properties['totalCount']) {
-            return [int]$items[0].totalCount
-        }
+        if ($null -ne $items) { return $items.Count }
         return 0
     }
 
@@ -226,7 +233,7 @@ function Get-PortfolioBuckets {
 # Pagination: (+N more) when totalCount > rendered count.
 # ---------------------------------------------------------------------------
 function Format-PortfolioMarkdown {
-    param($bucketModel, [string]$timestamp)
+    param($bucketModel, [string]$timestamp, [int[]]$UnresolvedNums = @())
 
     $sb = [System.Text.StringBuilder]::new()
 
@@ -336,6 +343,12 @@ function Format-PortfolioMarkdown {
     # --- Footer ---
     $null = $sb.AppendLine("as of $timestamp — rendered by render-portfolio.ps1")
 
+    if ($UnresolvedNums -and $UnresolvedNums.Count -gt 0) {
+        foreach ($n in $UnresolvedNums) {
+            $null = $sb.AppendLine("⚠️ Warning: issue #$n not found in GitHub — remove from sequence.yaml")
+        }
+    }
+
     return $sb.ToString()
 }
 
@@ -419,7 +432,8 @@ function Invoke-PortfolioRender {
     )
 
     # 3. Query each issue via gh GraphQL (first: 50 per connection)
-    $issueStates = [System.Collections.Generic.List[object]]::new()
+    $issueStates    = [System.Collections.Generic.List[object]]::new()
+    $unresolvedNums = @()
 
     foreach ($num in $allIssueNums) {
         $query = @"
@@ -431,7 +445,7 @@ query {
       state
       closedAt
       labels(first: 50) { totalCount nodes { name } }
-      trackedInIssues(first: 50) {
+      blockedBy(first: 50) {
         totalCount
         nodes { number title state }
       }
@@ -439,11 +453,27 @@ query {
   }
 }
 "@
-        $response  = gh api graphql -f query=$query | ConvertFrom-Json
+        $rawJson = gh api graphql -f query=$query 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "GraphQL query failed for issue #$num (exit $LASTEXITCODE) — skipping."
+            $unresolvedNums += $num
+            continue
+        }
+        $response = $rawJson | ConvertFrom-Json
+        if ($response.errors) {
+            Write-Warning "GraphQL errors for issue #$num — skipping."
+            $unresolvedNums += $num
+            continue
+        }
         $issueData = $response.data.repository.issue
 
+        if ($null -eq $issueData) {
+            $unresolvedNums += $num
+            continue
+        }
+
         $labels       = @($issueData.labels.nodes | ForEach-Object { $_.name })
-        $allBlockers  = $issueData.trackedInIssues.nodes
+        $allBlockers  = $issueData.blockedBy.nodes
         $openBlockers = @(
             $allBlockers |
             Where-Object { $_.state -eq 'OPEN' } |
@@ -460,14 +490,14 @@ query {
         }
 
         $issueStates.Add([PSCustomObject]@{
-            number        = $issueData.number
-            title         = $issueData.title
-            state         = $issueData.state
-            closedAt      = $issueData.closedAt
-            labels        = $labels
-            blockedBy     = $openBlockers
-            blockerInPlan = $blockerInPlan
-            totalCount    = $issueData.trackedInIssues.totalCount
+            number             = $issueData.number
+            title              = $issueData.title
+            state              = $issueData.state
+            closedAt           = $issueData.closedAt
+            labels             = $labels
+            blockedBy          = $openBlockers
+            blockerInPlan      = $blockerInPlan
+            blockedByTotalCount = $issueData.blockedBy.totalCount
         })
     }
 
@@ -480,7 +510,7 @@ query {
 
     # 6. Format content block
     $timestamp    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    $innerContent = Format-PortfolioMarkdown -bucketModel $buckets -timestamp $timestamp
+    $innerContent = Format-PortfolioMarkdown -bucketModel $buckets -timestamp $timestamp -UnresolvedNums $unresolvedNums
     $fullContent  = "$MARKER_BEGIN`n$innerContent$MARKER_END"
 
     # 7. Splice into body
