@@ -26,6 +26,7 @@ function Get-IssueDrift {
 
         [switch]$Force,
 
+        [ValidateRange(1, [int]::MaxValue)]
         [int]$Cap = 10,
 
         [string[]]$ExcludePaths = @(
@@ -60,7 +61,7 @@ function Get-IssueDrift {
     }
     else {
         try {
-            $rawOutput = & gh issue view $IssueNumber --json 'number,title,body,createdAt' 2>&1
+            $rawOutput = & gh issue view $IssueNumber --json 'number,title,body,createdAt' 2>$null
             if ($LASTEXITCODE -ne 0) {
                 return (New-DriftError "gh issue view failed for issue ${IssueNumber}: $rawOutput")
             }
@@ -102,7 +103,7 @@ function Get-IssueDrift {
     $nowOffset = [DateTimeOffset]::UtcNow
     $ageHours = ($nowOffset - $createdAtOffset).TotalHours
 
-    if (-not $Force -and ($ageHours -lt ($ThresholdDays * 24))) {
+    if (-not $Force -and ($ageHours -le ($ThresholdDays * 24))) {
         return [pscustomobject]@{ skipped = 'below-threshold' }
     }
 
@@ -118,7 +119,7 @@ function Get-IssueDrift {
     }
     else {
         try {
-            $rawOutput = & gh pr list --state merged --search "merged:>=$dateStr" --limit 200 --json 'number,title,mergedAt,files,changedFiles' 2>&1
+            $rawOutput = & gh pr list --state merged --search "merged:>=$dateStr" --limit 200 --json 'number,title,mergedAt,files,changedFiles' 2>$null
             if ($LASTEXITCODE -ne 0) {
                 return (New-DriftError "gh pr list failed: $rawOutput")
             }
@@ -145,12 +146,7 @@ function Get-IssueDrift {
     }
 
     # Ensure array (ConvertFrom-Json may return a single object for a 1-element list)
-    if ($allPrs -isnot [System.Collections.IEnumerable] -or $allPrs -is [string]) {
-        $allPrs = @($allPrs)
-    }
-    else {
-        $allPrs = @($allPrs)
-    }
+    $allPrs = @($allPrs)
 
     # Detect truncation: raw list hit the 200-limit ceiling
     $truncated = ($allPrs.Count -ge 200)
@@ -172,6 +168,7 @@ function Get-IssueDrift {
     })
 
     $totalMergedSince = $filteredPrs.Count
+    $filesUnavailableCount = 0
 
     # ----------------------------------------------------------------
     # STEP 7: Token extraction from issue body
@@ -225,7 +222,7 @@ function Get-IssueDrift {
 
         # If files are unavailable, we cannot do path-matching for this PR
         if ($filesTruncated -and $null -eq $prFiles) {
-            # Skip path-matching entirely; can't determine overlap without file list
+            $filesUnavailableCount++
             continue
         }
 
@@ -250,14 +247,14 @@ function Get-IssueDrift {
         foreach ($candidatePath in $prPaths) {
             $matched = $false
             foreach ($token in $tokens) {
-                # Discard leading-/ tokens that match nothing
+                # Leading-/ tokens: strip the slash and do exact/suffix match directly
                 if ($token.StartsWith('/')) {
                     $tokenStripped = $token.TrimStart('/')
-                    $exactMatch = ($candidatePath -eq $tokenStripped)
-                    $suffixMatch = $candidatePath.EndsWith("/$tokenStripped")
-                    if (-not $exactMatch -and -not $suffixMatch) {
-                        continue
+                    if ($candidatePath -eq $tokenStripped -or $candidatePath.EndsWith("/$tokenStripped")) {
+                        $matched = $true
+                        break
                     }
+                    continue
                 }
 
                 # Directory prefix match: token ends with /
@@ -295,14 +292,25 @@ function Get-IssueDrift {
             continue
         }
 
-        # Apply ExcludePaths: exclude candidate only if ALL matched paths are in ExcludePaths
+        # Apply ExcludePaths: exclude candidate only if ALL matched paths are in ExcludePaths.
+        # Directory entries (trailing /) use prefix semantics; file entries use exact/basename
+        # semantics to mirror inclusion matching and avoid prefix-collision false-positives.
         $nonExcludedMatchedPaths = @($matchedPaths | Where-Object {
             $mp = $_
             $isExcluded = $false
             foreach ($excl in $ExcludePaths) {
-                if ($mp -eq $excl -or $mp.StartsWith($excl)) {
-                    $isExcluded = $true
-                    break
+                if ($excl.EndsWith('/')) {
+                    if ($mp -eq $excl.TrimEnd('/') -or $mp.StartsWith($excl)) {
+                        $isExcluded = $true
+                        break
+                    }
+                }
+                else {
+                    $mpBasename = [System.IO.Path]::GetFileName($mp)
+                    if ($mp -eq $excl -or $mpBasename -eq $excl -or $mp.EndsWith("/$excl")) {
+                        $isExcluded = $true
+                        break
+                    }
                 }
             }
             -not $isExcluded
@@ -327,12 +335,13 @@ function Get-IssueDrift {
     # ----------------------------------------------------------------
     if ($candidates.Count -eq 0) {
         return [pscustomobject]@{
-            issue_number       = [int]$issueData.number
-            issue_created_at   = $issueCreatedAt
-            total_merged_since = $totalMergedSince
-            truncated          = $truncated
-            cap                = $Cap
-            intersection       = 'none'
+            issue_number            = [int]$issueData.number
+            issue_created_at        = $issueCreatedAt
+            total_merged_since      = $totalMergedSince
+            truncated               = $truncated
+            cap                     = $Cap
+            intersection            = 'none'
+            files_unavailable_count = $filesUnavailableCount
         }
     }
 
@@ -350,12 +359,13 @@ function Get-IssueDrift {
     $moreCount = [Math]::Max(0, $totalMatching - $Cap)
 
     return [pscustomobject]@{
-        issue_number       = [int]$issueData.number
-        issue_created_at   = $issueCreatedAt
-        total_merged_since = $totalMergedSince
-        truncated          = $truncated
-        cap                = $Cap
-        more_count         = $moreCount
-        candidates         = $capped
+        issue_number            = [int]$issueData.number
+        issue_created_at        = $issueCreatedAt
+        total_merged_since      = $totalMergedSince
+        truncated               = $truncated
+        cap                     = $Cap
+        more_count              = $moreCount
+        files_unavailable_count = $filesUnavailableCount
+        candidates              = $capped
     }
 }

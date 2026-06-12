@@ -48,15 +48,13 @@ param(
 
     [switch]$Force,
 
+    [ValidateRange(1, [int]::MaxValue)]
     [int]$Cap = 10,
 
-    [string[]]$ExcludePaths = @(
-        '.claude-plugin/',
-        '.github/plugin/',
-        'plugin.json',
-        'marketplace.json',
-        'CHANGELOG.md'
-    ),
+    # Default ExcludePaths is intentionally omitted here — the core function owns
+    # the canonical default. Omitting it ensures @PSBoundParameters does not
+    # forward a stale copy that could diverge from the core's single-source default.
+    [string[]]$ExcludePaths,
 
     [AllowNull()]
     [string]$IssueJsonOverride = $null,

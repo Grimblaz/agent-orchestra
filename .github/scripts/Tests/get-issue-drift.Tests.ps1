@@ -25,17 +25,11 @@ Describe 'Get-IssueDrift' {
             $result.skipped | Should -Be 'below-threshold'
         }
 
-        It 'returns skipped for exactly-7-day-old issue without consuming PrListOverride' {
-            # NOTE: The code uses ageHours -lt (ThresholdDays * 24).
-            # AddDays(-7) produces ageHours slightly > 168 due to test execution time,
-            # so this case SCANS rather than skips per actual code behavior.
-            # This test is written to match what the code actually does:
-            # exactly 7 days old (plus a tiny epsilon from execution time) → scanned.
-            # CONTRACT DIVERGENCE: task spec says "exactly 7 days = skipped"; code scans it.
-            # We test actual code behavior here and document the divergence below.
-            # To reliably test the skip boundary, use a date slightly inside the threshold:
-            $recentDate = [DateTimeOffset]::UtcNow.AddDays(-7).AddHours(1).ToString('o')
-            # 7 days minus 1 hour = 167 hours old → still < 168 → skipped
+        It 'returns skipped for 167h-old issue (1h below the 7-day threshold)' {
+            # Gate: ageHours -le (ThresholdDays * 24). 167h is strictly below 168h → skipped.
+            # Testing 1h inside the boundary is more reliable than testing exactly 168h,
+            # since dynamic time comparison has sub-millisecond drift at the exact boundary.
+            $recentDate = [DateTimeOffset]::UtcNow.AddHours(-167).ToString('o')
             $issueJson = '{"number":683,"title":"t","body":"","createdAt":"' + $recentDate + '"}'
             $result = Get-IssueDrift -IssueNumber 683 -ThresholdDays 7 `
                 -IssueJsonOverride $issueJson `
@@ -68,17 +62,8 @@ Describe 'Get-IssueDrift' {
             $issueJson = '{"number":683,"title":"Test issue","body":"some body with `backtick-token`","createdAt":"2026-06-05T12:00:00Z"}'
             # PR merged at 08:00 — strictly before createdAt 12:00 → excluded by post-filter
             $prJson = '[{"number":100,"title":"feat: something","mergedAt":"2026-06-05T08:00:00Z","changedFiles":1,"files":[{"path":"backtick-token","additions":1,"deletions":0}]}]'
-            # Force scan by using an old-enough date — we must make issue old enough
-            $oldIssueJson = '{"number":683,"title":"Test issue","body":"some body with `backtick-token`","createdAt":"2020-01-01T12:00:00Z"}'
-            $result = Get-IssueDrift -IssueNumber 683 -ThresholdDays 7 `
-                -IssueJsonOverride $oldIssueJson `
-                -PrListJsonOverride $prJson
-            # PR is from 2026 but issue is from 2020 — PR is after createdAt, so it would be included
-            # We need to test correctly: use a fixed recent issue date and ensure PR is before it
-            # Use Force switch and a fixed-date issue so the age gate is bypassed
-            $fixedIssueJson = '{"number":683,"title":"Test issue","body":"some body with `backtick-token`","createdAt":"2026-06-05T12:00:00Z"}'
             $result = Get-IssueDrift -IssueNumber 683 -ThresholdDays 7 -Force `
-                -IssueJsonOverride $fixedIssueJson `
+                -IssueJsonOverride $issueJson `
                 -PrListJsonOverride $prJson
             # PR merged before createdAt → excluded by post-filter → zero candidates → intersection: none
             $result.intersection | Should -Be 'none'
@@ -136,31 +121,34 @@ Describe 'Get-IssueDrift' {
     # ----------------------------------------------------------------
     Context 'token matching' {
 
-        It 'strips suffixes, normalizes backslashes, and matches directory prefixes' {
+        It 'strips suffixes, normalizes backslashes, matches directory prefixes, and resolves leading-/ tokens' {
             $issueJson = '{"number":591,"title":"t","body":"some `skills/plan-authoring/SKILL.md:309` and `plan-authoring.md:309` and `/plan` and `skills/upstream-onboarding/` and `skills\\plan-authoring\\SKILL.md` refs","createdAt":"2020-01-01T00:00:00Z"}'
             # PRs:
-            # PR 1: touches skills/plan-authoring/SKILL.md  (matches token 1 and token 5 after normalization)
-            # PR 2: touches skills/plan-authoring/plan-authoring.md (matches basename-only token 2 after suffix strip)
-            # PR 3: touches /plan-only-path (leading-/ token should NOT match arbitrary paths)
-            # PR 4: touches skills/upstream-onboarding/SKILL.md (matches directory-prefix token 4)
+            # PR 1: touches skills/plan-authoring/SKILL.md  (path match + backslash normalization)
+            # PR 2: touches skills/plan-authoring/plan-authoring.md (basename-only token after suffix strip)
+            # PR 3: touches unrelated/file.txt (should NOT match any token)
+            # PR 4: touches skills/upstream-onboarding/SKILL.md (directory-prefix match)
+            # PR 5: touches other/plan (leading-/ token /plan → strips to 'plan' → suffix-matches 'other/plan')
             $prJson = '[
                 {"number":1,"title":"PR path match","mergedAt":"2020-01-02T00:00:00Z","changedFiles":1,"files":[{"path":"skills/plan-authoring/SKILL.md","additions":5,"deletions":1}]},
                 {"number":2,"title":"PR basename match","mergedAt":"2020-01-02T00:00:00Z","changedFiles":1,"files":[{"path":"skills/plan-authoring/plan-authoring.md","additions":1,"deletions":0}]},
-                {"number":3,"title":"PR no match","mergedAt":"2020-01-02T00:00:00Z","changedFiles":1,"files":[{"path":"other/plan","additions":1,"deletions":0}]},
-                {"number":4,"title":"PR dir prefix","mergedAt":"2020-01-02T00:00:00Z","changedFiles":1,"files":[{"path":"skills/upstream-onboarding/SKILL.md","additions":1,"deletions":0}]}
+                {"number":3,"title":"PR no match","mergedAt":"2020-01-02T00:00:00Z","changedFiles":1,"files":[{"path":"unrelated/file.txt","additions":1,"deletions":0}]},
+                {"number":4,"title":"PR dir prefix","mergedAt":"2020-01-02T00:00:00Z","changedFiles":1,"files":[{"path":"skills/upstream-onboarding/SKILL.md","additions":1,"deletions":0}]},
+                {"number":5,"title":"PR leading-slash match","mergedAt":"2020-01-02T00:00:00Z","changedFiles":1,"files":[{"path":"other/plan","additions":1,"deletions":0}]}
             ]'
             $result = Get-IssueDrift -IssueNumber 591 -ThresholdDays 7 `
                 -IssueJsonOverride $issueJson `
                 -PrListJsonOverride $prJson
-            # Should have candidates (not intersection: none)
             $result.intersection | Should -Not -Be 'none'
             $result.candidates | Should -Not -BeNullOrEmpty
-            # PR 1 should appear (path match + backslash normalization)
             $candidateNumbers = $result.candidates | ForEach-Object { $_.number }
+            # PR 1: path match + backslash normalization
             $candidateNumbers | Should -Contain 1
-            # PR 4 should appear (directory-prefix match)
+            # PR 4: directory-prefix match
             $candidateNumbers | Should -Contain 4
-            # PR 3 should NOT appear (leading-/ token /plan should not match 'other/plan')
+            # PR 5: leading-/ token /plan strips to 'plan' → matches other/plan via suffix
+            $candidateNumbers | Should -Contain 5
+            # PR 3: unrelated file — no token matches
             $candidateNumbers | Should -Not -Contain 3
         }
     }
@@ -278,5 +266,43 @@ Describe 'Get-IssueDrift' {
             $result.candidates | Should -Not -BeNullOrEmpty
             $result.candidates[0].files_truncated | Should -Be $true
         }
+    }
+
+    # ----------------------------------------------------------------
+    # (i) files_unavailable_count test — PR with null files
+    # ----------------------------------------------------------------
+    Context 'files unavailability' {
+
+        It 'counts PRs with null files in files_unavailable_count' {
+            $issueJson = '{"number":683,"title":"t","body":"some `README.md` ref","createdAt":"2020-01-01T00:00:00Z"}'
+            # PR 1: files:null — cannot determine path overlap, dropped and counted
+            # PR 2: normal files — matched and returned as candidate
+            $prJson = '[
+                {"number":1,"title":"PR null files","mergedAt":"2020-01-02T00:00:00Z","changedFiles":3,"files":null},
+                {"number":2,"title":"PR normal","mergedAt":"2020-01-02T00:00:00Z","changedFiles":1,"files":[{"path":"README.md","additions":1,"deletions":0}]}
+            ]'
+            $result = Get-IssueDrift -IssueNumber 683 -ThresholdDays 7 `
+                -IssueJsonOverride $issueJson `
+                -PrListJsonOverride $prJson
+            $result.candidates | Should -Not -BeNullOrEmpty
+            $result.candidates[0].number | Should -Be 2
+            $result.files_unavailable_count | Should -Be 1
+        }
+    }
+}
+
+Describe 'Get-IssueDrift wrapper (get-issue-drift.ps1)' {
+
+    It 'outputs valid JSON with expected shape when invoked as a child process' {
+        $wrapperPath = Join-Path $PSScriptRoot '..' '..' '..' 'skills' 'upstream-onboarding' 'scripts' 'get-issue-drift.ps1'
+        $issueJson = '{"number":683,"title":"t","body":"some `README.md` ref","createdAt":"2020-01-01T00:00:00Z"}'
+        $prJson = '[{"number":1,"title":"PR 1","mergedAt":"2020-01-02T00:00:00Z","changedFiles":1,"files":[{"path":"README.md","additions":1,"deletions":0}]}]'
+        $stdout = pwsh -NoProfile -File $wrapperPath -IssueNumber 683 -ThresholdDays 7 `
+            -IssueJsonOverride $issueJson -PrListJsonOverride $prJson
+        $result = $stdout | ConvertFrom-Json
+        $result | Should -Not -BeNullOrEmpty
+        $result.PSObject.Properties.Name | Should -Contain 'issue_number'
+        $result.candidates | Should -Not -BeNullOrEmpty
+        $result.candidates[0].number | Should -Be 1
     }
 }

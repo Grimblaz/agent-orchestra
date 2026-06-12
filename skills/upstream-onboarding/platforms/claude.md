@@ -46,7 +46,7 @@ Raise concerns based on certainty × risk. There is no numeric cap. Multiple sim
 
 ## Drift scan — script path resolution
 
-When invoking `get-issue-drift.ps1` from a Claude Code session, resolve the script path using the same D1 plugin-cache-first sequence as `skills/session-startup/SKILL.md` Step 3:
+When invoking `get-issue-drift.ps1` from a Claude Code session, resolve the script path using the same D1 plugin-cache-priority lookup as `skills/session-startup/SKILL.md` Step 3 (repo-clone first for contributors, plugin-cache installPath for consumers):
 
 1. **Repo clone** (contributor CWD is the repo root): `skills/upstream-onboarding/scripts/get-issue-drift.ps1`
 2. **Plugin-cache install** (consumer): read `~/.claude/plugins/installed_plugins.json`, find `agent-orchestra@agent-orchestra`'s `installPath`, and use `{installPath}/skills/upstream-onboarding/scripts/get-issue-drift.ps1`.

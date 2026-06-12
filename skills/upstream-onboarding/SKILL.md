@@ -134,9 +134,11 @@ Resolve `<plugin-root>` using the same D1 plugin-cache-priority lookup described
 
 **When nothing matches** (scan ran but no PRs path-matched the issue body's tokens): render a single count-only line — `N PRs merged since filing — type "what changed" to review.` Never dump an unmatched PR list.
 
-**Truncation note**: when the script result carries `truncated: true` OR any rendered candidate carries `files_truncated: true`, append: `results may be incomplete — type "what changed" for a full scan.`
+**Truncation note**: when the script result carries `truncated: true`, any rendered candidate carries `files_truncated: true`, OR `files_unavailable_count > 0`, append: `results may be incomplete — type "what changed" for a full scan.`
 
 **Age-threshold omission**: when the issue is below the 7-day threshold, omit this section entirely including the heading (Empty-Section Omission Rule applies).
+
+**Error-path omission**: when the script returns `{error: "..."}` during brief assembly, omit this section entirely including the heading — do not surface the raw error in the passive brief. If the user explicitly requests a drift scan via the On-Demand Expand trigger, surface the error then instead.
 
 **Scaling Rule clarification**: this section is a conditional section. Trivial-tier briefs stay required-core-only and omit it even when the age threshold is met.
 
