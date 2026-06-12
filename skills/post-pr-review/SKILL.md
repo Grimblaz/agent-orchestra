@@ -182,7 +182,10 @@ The derived portfolio tracker (`Documents/Planning/sequence.yaml` + `render-port
 **Manual fallback** (if the workflow did not run or needs a forced refresh):
 
 ```powershell
-pwsh .github/scripts/render-portfolio.ps1
+# Guard: skip silently in consumer repos that lack the renderer
+if ((Test-Path 'Documents/Planning/sequence.yaml') -and (Test-Path '.github/scripts/render-portfolio.ps1')) {
+    pwsh .github/scripts/render-portfolio.ps1
+}
 ```
 
 > **Consumer repos**: if `Documents/Planning/sequence.yaml` or `.github/scripts/render-portfolio.ps1` is absent, this step is a no-op — skip silently.

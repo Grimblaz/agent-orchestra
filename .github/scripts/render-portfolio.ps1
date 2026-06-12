@@ -127,7 +127,7 @@ function Get-PortfolioBuckets {
         if ($issue.state -eq 'CLOSED') {
             if ($issue.closedAt) {
                 $closedDate = [datetime]::Parse($issue.closedAt)
-                if ($closedDate -gt $cutoff) {
+                if ($closedDate -ge $cutoff) {
                     $closedWithinWindow.Add($issue)
                 }
             }
@@ -261,7 +261,13 @@ function Format-PortfolioMarkdown {
         }
     }
     else {
-        $null = $sb.AppendLine('*(no unblocked items — all current-round items are blocked)*')
+        $blockedCount = if ($bucketModel.Blocked) { @($bucketModel.Blocked).Count } else { 0 }
+        $emptyMsg     = if ($blockedCount -gt 0) {
+            '*(no unblocked items — all current-round items are blocked)*'
+        } else {
+            '*(no current-round work)*'
+        }
+        $null = $sb.AppendLine($emptyMsg)
     }
     $null = $sb.AppendLine('')
 
