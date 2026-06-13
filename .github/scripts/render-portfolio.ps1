@@ -379,7 +379,13 @@ function Get-SplicedBody {
     # on Windows (which can produce mojibake variants of the em dash character).
     $footerPattern = 'as of \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z[^\n]*rendered by render-portfolio\.ps1\r?\n?'
 
-    if ($existingBody -match [regex]::Escape($begin)) {
+    $hasBegin = $existingBody -match [regex]::Escape($begin)
+    $hasEnd   = $existingBody -match [regex]::Escape($end)
+    if ($hasBegin -xor $hasEnd) {
+        throw "Control tower body has only one portfolio marker — region is malformed (begin=$hasBegin, end=$hasEnd)."
+    }
+
+    if ($hasBegin) {
         # Extract the region between markers in both bodies
         $betweenPattern = [regex]::Escape($begin) + '([\s\S]*?)' + [regex]::Escape($end)
 
@@ -550,7 +556,11 @@ query {
     }
 
     # 8. Write back to GitHub
-    gh issue edit $tower --repo Grimblaz/agent-orchestra --body $newBody
+    gh issue edit $tower --repo Grimblaz/agent-orchestra --body $newBody 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to update control tower issue #$tower (exit $LASTEXITCODE)"
+        exit 1
+    }
     Write-Host "Rendered and wrote portfolio to issue #$tower"
 }
 
