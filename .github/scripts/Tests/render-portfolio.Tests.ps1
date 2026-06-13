@@ -194,6 +194,37 @@ rounds:
         $blockedEntry.blockerAnnotations | Should -Match 'blocked by #999 \(out of plan\)'
     }
 
+    It 'annotates each blocker independently when an issue mixes in-plan and out-of-plan blockers (CR7)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
+        # 425 is blocked by 571 (in sequence.yaml → in plan) AND 999 (not in
+        # sequence.yaml → out of plan). Each blocker must be labeled on its own
+        # merits, not collapsed to one issue-level verdict.
+        $issues = @(
+            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @(571, 999))
+        )
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues
+
+        $blockedEntry = $buckets.Blocked | Where-Object { $_.number -eq 425 }
+        $blockedEntry | Should -Not -BeNullOrEmpty
+        $blockedEntry.blockerAnnotations | Should -Match 'blocked by #571(?!\s*\(out of plan\))' -Because 'an in-plan blocker must not be tagged out of plan'
+        $blockedEntry.blockerAnnotations | Should -Match 'blocked by #999 \(out of plan\)' -Because 'an out-of-plan blocker must be tagged'
+    }
+
+    It 'throws on a multi-lane spec rather than silently merging lanes (CR8)' {
+        $multiLaneSpec = ConvertFrom-SequenceSpec (New-ValidSpecYaml -RoundsBlock @'
+rounds:
+  - lane: main
+    round: 1
+    issues: [100]
+  - lane: side
+    round: 1
+    issues: [200]
+'@)
+        { Get-PortfolioBuckets -spec $multiLaneSpec -issueStateObjects @() } |
+            Should -Throw -ExpectedMessage '*Multi-lane*' -Because 'per-lane derivation is unimplemented; merging lanes silently is the failure mode the tracker exists to kill'
+    }
+
     It 'puts closed issues in Recently Closed only, not in Now or Next' {
         $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
         $closedAt = (Get-Date).AddDays(-3).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')

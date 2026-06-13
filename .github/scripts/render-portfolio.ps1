@@ -111,6 +111,17 @@ function ConvertFrom-SequenceSpec {
 function Get-PortfolioBuckets {
     param($spec, $issueStateObjects)
 
+    # Multi-lane guard (CR8): the per-lane Now/Next/Blocked derivation required
+    # by the portfolio contract is not yet implemented — this function flattens
+    # all rounds and derives a single global flow. That is correct only for a
+    # single-lane spec. Rather than silently merge multiple lanes into one
+    # board (the silently-wrong-board failure this tracker exists to kill),
+    # fail loud until per-lane derivation lands.
+    $distinctLanes = @($spec.rounds | ForEach-Object { $_.lane } | Sort-Object -Unique)
+    if ($distinctLanes.Count -gt 1) {
+        throw "Multi-lane specs are not yet supported by bucket derivation (found lanes: $($distinctLanes -join ', ')). Per-lane Now/Next/Blocked derivation is tracked separately; refusing to render to avoid silently merging lanes into one board."
+    }
+
     # All issue numbers across all rounds (flat, unique, sorted)
     $allIssueNumbers = @(
         $spec.rounds | ForEach-Object { $_.issues } | Sort-Object -Unique
@@ -147,11 +158,14 @@ function Get-PortfolioBuckets {
 
         # Open, sequenced — check blockers
         if ($issue.blockedBy -and $issue.blockedBy.Count -gt 0) {
-            # Build per-blocker annotations
+            # Build per-blocker annotations (CR7): plan membership is evaluated
+            # per blocker against the sequenced issue set, not collapsed to one
+            # issue-level flag. An issue blocked by both an in-plan and an
+            # out-of-plan issue must label each blocker independently rather
+            # than tarring every blocker with a single issue-wide verdict.
             $annotations = $issue.blockedBy | ForEach-Object {
-                $blockerNum    = $_
-                $blockerInPlan = $issue.blockerInPlan
-                if ($blockerInPlan -eq $false) {
+                $blockerNum = $_
+                if ($allIssueNumbers -notcontains $blockerNum) {
                     "blocked by #$blockerNum (out of plan)"
                 }
                 else {
@@ -445,11 +459,37 @@ function Invoke-PortfolioRender {
         $spec.rounds | ForEach-Object { $_.issues } | Sort-Object -Unique
     )
 
+    # 2b. Fetch open triage-labeled issues repo-wide (CR9 / d-triage-visibility,
+    #     AC #5). The Triage bucket promises open `triage`-labeled issues that
+    #     are NOT in any sequence round; those are never named in sequence.yaml,
+    #     so without this independent query they would never be fetched and the
+    #     bucket would silently stay empty. The query is additive: a failure
+    #     warns and degrades (Triage may be incomplete) rather than aborting the
+    #     whole render, consistent with the per-issue skip pattern below.
+    $triageNums = @()
+    $triageRaw  = gh issue list --repo Grimblaz/agent-orchestra --label triage --state open --limit 200 --json number 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Failed to list open triage-labeled issues (exit $LASTEXITCODE) — Triage bucket may be incomplete."
+    }
+    else {
+        try {
+            $triageNums = @(($triageRaw | ConvertFrom-Json) | ForEach-Object { $_.number })
+        }
+        catch {
+            Write-Warning "Failed to parse triage issue list — Triage bucket may be incomplete."
+        }
+    }
+
+    # Query set = sequenced issues ∪ repo-wide triage issues (deduplicated).
+    # Plan membership ($allIssueNums) stays sequence-only — triage issues are by
+    # definition unsequenced and must NOT count as in-plan for blocker logic.
+    $queryNums = @($allIssueNums + $triageNums | Sort-Object -Unique)
+
     # 3. Query each issue via gh GraphQL (first: 50 per connection)
     $issueStates    = [System.Collections.Generic.List[object]]::new()
     $unresolvedNums = @()
 
-    foreach ($num in $allIssueNums) {
+    foreach ($num in $queryNums) {
         $query = @"
 query {
   repository(owner: "Grimblaz", name: "agent-orchestra") {
