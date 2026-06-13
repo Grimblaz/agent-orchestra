@@ -200,6 +200,24 @@ If the cleanup script (or a settings.local.json edit applying these recommendati
 
 Issue #548's `gh issue view` and `gh pr list --head` calls run as child processes of `pwsh` inside `post-merge-cleanup.ps1`, so the existing `Bash(pwsh*post-merge-cleanup.ps1*)` allowlist entry above covers them. No new `Bash(gh ...)` entries are needed. The L2 customer-self-verification responsibility documented above (issue #546 contextual-classifier override) applies symmetrically to these gh calls — if a same-turn denial is observed, apply the existing workaround.
 
+### Step 7c — Portfolio snapshot (Claude-only, fail-open)
+
+<!-- scope: claude-only -->
+
+This step runs **outside** the Step 4 run-once guard — it refreshes every session start, not just the first. Skip this step if the user chose `drift_stop` in Step 7b (session is ending; no point rendering a snapshot). Copilot: silent skip.
+
+**Behavior**: If `Documents/Planning/sequence.yaml` exists in the working directory and is parseable (has a `control_tower:` integer field), run:
+
+```powershell
+gh issue view {control_tower} --json body --jq '.body' | Select-String 'rendered by render-portfolio\.ps1' -Context 4,0
+```
+
+with a ~3-second timeout (set at the Bash-tool invocation level, not as a `gh` CLI flag). Surface at most **5 lines** of the rendered section by anchoring on the footer line (`rendered by render-portfolio.ps1`) and showing up to 4 preceding content lines — this guarantees the footer is always present regardless of section length. Truncate with `(…)` if more lines precede those 4.
+
+Any failure (file absent, parse error, `gh` timeout, network error, missing `control_tower` field, non-zero exit) → **silent skip**. Never block session startup on a portfolio snapshot.
+
+See `platforms/claude.md` for the Claude Code tool invocation note.
+
 ### Step 8 — Continue with the user's request
 
 After the automatic startup path is complete, continue with the user's original request only after completing any other applicable startup steps below, including Step 7b and Step 9 when they apply. In hook-driven runs, this means consuming any injected `additionalContext`, recording the run-once marker, and then proceeding. This automatic run-once guard applies only to the cleanup-detector plus Claude drift-check path; explicit or manual detector runs still remain allowed after the automatic guard fires.

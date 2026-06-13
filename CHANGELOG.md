@@ -2,6 +2,16 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.30.0] — 2026-06-12
+
+### Added
+
+- **Derived portfolio tracker** (`Documents/Planning/sequence.yaml`, `.github/scripts/render-portfolio.ps1`, `.github/scripts/Tests/render-portfolio.Tests.ps1`, `.github/workflows/render-portfolio.yml`): a merge-triggered control-tower renderer that derives a five-bucket portfolio (Now / Next / Blocked / Recently closed / Triage) from a truly-flat sequence spec and the live GitHub issue graph (`blockedBy` dependencies), then idempotently splices it into the control-tower issue body. Includes the `render-portfolio.yml` push/`workflow_dispatch` workflow (SHA-pinned checkout, `persist-credentials: false`, `gh`-only auth), a 20-test Pester suite registered in the CI gate, and three skill touchpoints — `safe-operations` §2b-bis umbrella/triage intake, `post-pr-review` §7 auto-render note, and `session-startup` Step 7c portfolio snapshot (#692).
+
+### Changed
+
+- Version bumped to 2.30.0 (2.29.0 was concurrently claimed by #708's ai-first-documentation consumer-mode release; this entry resolves the collision).
+
 ## [2.29.0] — 2026-06-12
 
 ### Added
