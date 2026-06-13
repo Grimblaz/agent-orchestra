@@ -43,3 +43,12 @@ Emit inline: `Standards check: none flagged` — no tool call required.
 ## Judgment principle reminder
 
 Raise concerns based on certainty × risk. There is no numeric cap. Multiple simultaneous concerns may be batched into a single `AskUserQuestion` call (no numeric cap — raise every concern that meets the certainty × risk threshold), or raised sequentially if each requires the previous answer to proceed.
+
+## Drift scan — script path resolution
+
+When invoking `get-issue-drift.ps1` from a Claude Code session, resolve the script path using the same D1 plugin-cache-priority lookup as `skills/session-startup/SKILL.md` Step 3 (repo-clone first for contributors, plugin-cache installPath for consumers):
+
+1. **Repo clone** (contributor CWD is the repo root): `skills/upstream-onboarding/scripts/get-issue-drift.ps1`
+2. **Plugin-cache install** (consumer): read `~/.claude/plugins/installed_plugins.json`, find `agent-orchestra@agent-orchestra`'s `installPath`, and use `{installPath}/skills/upstream-onboarding/scripts/get-issue-drift.ps1`.
+
+If both paths fail, emit `couldn't check: script not found` rather than silencing the failure.

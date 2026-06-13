@@ -2,11 +2,35 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.30.0] — 2026-06-12
+
+### Added
+
+- **Derived portfolio tracker** (`Documents/Planning/sequence.yaml`, `.github/scripts/render-portfolio.ps1`, `.github/scripts/Tests/render-portfolio.Tests.ps1`, `.github/workflows/render-portfolio.yml`): a merge-triggered control-tower renderer that derives a five-bucket portfolio (Now / Next / Blocked / Recently closed / Triage) from a truly-flat sequence spec and the live GitHub issue graph (`blockedBy` dependencies), then idempotently splices it into the control-tower issue body. Includes the `render-portfolio.yml` push/`workflow_dispatch` workflow (SHA-pinned checkout, `persist-credentials: false`, `gh`-only auth), a 20-test Pester suite registered in the CI gate, and three skill touchpoints — `safe-operations` §2b-bis umbrella/triage intake, `post-pr-review` §7 auto-render note, and `session-startup` Step 7c portfolio snapshot (#692).
+
+### Changed
+
+- Version bumped to 2.30.0 (2.29.0 was concurrently claimed by #708's ai-first-documentation consumer-mode release; this entry resolves the collision).
+
+## [2.29.0] — 2026-06-12
+
+### Added
+
+- **`/audit-docs` command and mechanical-check script** (`commands/audit-docs.md`, `skills/ai-first-documentation/scripts/audit-docs-mechanical.ps1`, `skills/ai-first-documentation/templates/CLAUDE.md-starter.md`): Consumer-mode enablement for the `ai-first-documentation` skill. The `/audit-docs` command runs deterministic mechanical checks (A2, B2, B3, B5, A9) against any consumer repository with explicit `-Root`, emits JSON results, and supports a waiver convention via `.claude/documentation-decisions.md`. An `init` action bootstraps a minimal CLAUDE.md starter template. Includes a routing row (`intent_key: audit-docs`, audit-anchored patterns) and collision fixtures. SKILL.md updated with `## Consumer-Mode Audits` and `## Recording Documentation Decisions` sections including the H3-per-record decision-record format and CI acquisition guidance (#699).
+
 ## [2.28.0] — 2026-06-12
 
 ### Added
 
 - **Plan-authoring Grounding Pass** (`skills/plan-authoring/SKILL.md`): a new `### 4. Grounding Pass` discipline in the Discovery Workflow that establishes the invariant "no plan step may name an ungrounded artifact." Before drafting, the planner verifies that every artifact a plan step names (file names, paths, exported symbols, shapes, counts) actually exists in the tree and corrects or updates the issue when it does not. Adds a `#591` migration-scan carve-out, a `#467` per-port observation note, a Research Subagent contradiction-reporting directive, a factual-correction exemption in the Alignment Workflow (factual corrections are not "material scope changes" that trigger loop-back), and a reciprocal cross-reference with the post-draft Tree-State Verification Discipline. Locked by the RED assertion-existence contract `.github/scripts/Tests/plan-authoring-grounding-pass.Tests.ps1` (#473).
+- **Issue drift scan on pickup** (`skills/upstream-onboarding/scripts/get-issue-drift-core.ps1`, `skills/upstream-onboarding/scripts/get-issue-drift.ps1`): deterministic PowerShell library + wrapper that scans merged PRs since an issue was created and returns path-matched candidates as JSON. Age-gated at 7 days (bypassed with `-Force`); DI-injectable via `-IssueJsonOverride`/`-PrListJsonOverride` for Pester testing without live `gh` calls. Three output shapes: `{skipped:"below-threshold"}`, `{error:"..."}`, and full result with ranked `candidates[]`. Handles `.files[].path` object arrays, per-PR `files_truncated`, 200-row truncation detection, `ExcludePaths` filtering, cap + `more_count`, and intersection-none fallback (#683).
+- **Pester coverage for drift scan** (`.github/scripts/Tests/get-issue-drift.Tests.ps1`): 20 tests covering age-gate boundary, date boundary, offset robustness, 200-row truncation, `#591`-shaped token extraction, `ExcludePaths` override and default, cap + `more_count`, all three output shapes, intersection:none, `files_truncated`, guarded numeric parsing, and case-insensitive path matching (#683).
+
+### Changed
+
+- **`upstream-onboarding` drift section** (`skills/upstream-onboarding/SKILL.md`): new `### Changed since this issue was filed` conditional section surfaces the drift script output as a ranked candidate list (format: `#N — title (touches: paths)`) with count-only fallback when intersection is none, truncation note, and ephemerality rule. On-Demand Expand extended with "what changed"/"what's changed"/"what happened since" trigger phrases and error surfacing. Resume Variant narrow exception documents that the drift section may appear on same-agent resume. Third affordance-hint predicate added for drift threshold (#683).
+- **Claude Code platform notes** (`skills/upstream-onboarding/platforms/claude.md`): `## Drift scan — script path resolution` section documents the D1 plugin-cache-priority path-resolution sequence (repo clone first, then plugin-cache `installPath` lookup, then emit `couldn't check: script not found`) (#683).
+- **Copilot platform notes** (`skills/upstream-onboarding/platforms/copilot.md`): equivalent drift scan path-resolution section for VS Code plugin-cache (#683).
 
 ## [2.27.0] — 2026-06-11
 

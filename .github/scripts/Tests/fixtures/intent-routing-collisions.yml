@@ -43,3 +43,13 @@
 - phrase: "Sketch a plan for learning PowerShell over the next month."
   no_route: true
   class: plan-overlap
+- phrase: "Can you audit our financial records?"
+  no_route: true
+  class: audit-docs-overlap
+- phrase: "Audit the test coverage numbers in this project."
+  no_route: true
+  class: audit-docs-overlap
+- phrase: "audit my docs"
+  no_route: true
+  route_fire: true
+  class: audit-docs-overlap

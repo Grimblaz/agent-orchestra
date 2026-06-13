@@ -132,6 +132,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `.claude/.state/release-hygiene-{slug}.json`
 - **notes**: Claude runtime state files written by the plugin-release-hygiene hook. Session-scoped; not distribution artifacts. Placeholders like {slug} are session-scoped runtime tokens; only the D2a eight ({ID}, {PR}, {NUMBER}, {name}, {port}, {ISSUE_NUMBER}, {N}, {Surface}) are normalized for path-family clustering. Attempting to resolve from plugin cache is a wasted tool call.
 
+### `.claude/documentation-decisions.md`
+
+- **claude_resolves**: none
+- **copilot_resolves**: none
+- **requires_version_bump**: false
+- **experience**: wasted-tool-call
+- **examples**:
+  - `.claude/documentation-decisions.md`
+- **notes**: Consumer-generated documentation-audit waiver record (named decision d-decision-record-format). The audit-docs-mechanical.ps1 script reads it from the consumer's own -Root (overridable via -DecisionRecordPath) to emit status: waived for intentional deviations. Not a hub distribution artifact — each consumer repo creates its own. Absent file = the script simply emits no waivers (graceful); attempting to resolve it from the plugin cache or hub tree is a wasted tool call.
+
 ### `.claude/settings.json`
 
 - **claude_resolves**: none
@@ -522,6 +532,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
   - `skills/parallel-execution/SKILL.md`
   - `skills/session-startup/SKILL.md`
 - **notes**: Core skill bodies. Paths like 'bdd-scenarios/SKILL.md', 'customer-experience/SKILL.md', 'plugin-release-hygiene/SKILL.md', 'post-pr-review/SKILL.md', and 'session-startup/SKILL.md' appearing without the skills/ prefix are relative references from within skill subdirectories and map to this same family. Both Claude (plugin-cache D1 or source-tree fallback) and Copilot (source-tree) must resolve these for agent methodology to function.
+
+### `skills/*/templates/*.md`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: visible-warning
+- **examples**:
+  - `skills/ai-first-documentation/templates/CLAUDE.md-starter.md`
+- **notes**: Markdown template/seed files nested within skill directories. Bare-relative paths such as 'templates/CLAUDE.md-starter.md' appearing in skill body text are relative references that map to this family. Distinct from the root-level templates/*.md family (BDD/test scaffolding). The /audit-docs init action copies the starter template into a consumer root; a missing template produces visible-warning because init can fall back to inline guidance rather than hard-failing the pipeline.
 
 ### `templates/*.md`
 

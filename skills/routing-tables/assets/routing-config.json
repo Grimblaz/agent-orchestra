@@ -357,6 +357,20 @@
         "claude_command": "/orchestra:spine",
         "copilot_command": null,
         "notes": "Render or inspect the frame spine through the Claude command surface."
+      },
+      {
+        "intent_key": "audit-docs",
+        "patterns": [
+          "audit my documentation",
+          "audit the docs",
+          "documentation audit",
+          "audit docs",
+          "run a documentation audit",
+          "audit my docs"
+        ],
+        "claude_command": "/audit-docs",
+        "copilot_command": null,
+        "notes": "Run the ai-first-documentation audit script against the current repository. Patterns are audit-anchored only — no review-verb phrases."
       }
     ]
   },
