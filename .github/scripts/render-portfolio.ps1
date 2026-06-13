@@ -518,7 +518,19 @@ query {
     }
 
     # 4. Fetch current control tower body
-    $ctData       = gh issue view $tower --repo Grimblaz/agent-orchestra --json body | ConvertFrom-Json
+    $ctRawJson = gh issue view $tower --repo Grimblaz/agent-orchestra --json body 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to fetch control tower issue #$tower (exit $LASTEXITCODE)"
+        exit 1
+    }
+    $ctData = $null
+    try {
+        $ctData = $ctRawJson | ConvertFrom-Json
+    }
+    catch {
+        Write-Error "Failed to parse control tower issue body JSON: $_"
+        exit 1
+    }
     $existingBody = $ctData.body
 
     # 5. Derive buckets

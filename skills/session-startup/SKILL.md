@@ -209,10 +209,10 @@ This step runs **outside** the Step 4 run-once guard — it refreshes every sess
 **Behavior**: If `Documents/Planning/sequence.yaml` exists in the working directory and is parseable (has a `control_tower:` integer field), run:
 
 ```powershell
-gh issue view {control_tower} --json body --jq '.body' | Select-String 'portfolio-tracker' -Context 0,5 | Select-Object -First 6
+gh issue view {control_tower} --json body --jq '.body' | Select-String 'rendered by render-portfolio\.ps1' -Context 4,0
 ```
 
-with a ~3-second timeout. Surface at most **5 lines** of the rendered section, always including the `as of … — rendered by render-portfolio.ps1` footer line so the owner can see render freshness at a glance. Truncate with `(…)` if more lines follow.
+with a ~3-second timeout (set at the Bash-tool invocation level, not as a `gh` CLI flag). Surface at most **5 lines** of the rendered section by anchoring on the footer line (`rendered by render-portfolio.ps1`) and showing up to 4 preceding content lines — this guarantees the footer is always present regardless of section length. Truncate with `(…)` if more lines precede those 4.
 
 Any failure (file absent, parse error, `gh` timeout, network error, missing `control_tower` field, non-zero exit) → **silent skip**. Never block session startup on a portfolio snapshot.
 
