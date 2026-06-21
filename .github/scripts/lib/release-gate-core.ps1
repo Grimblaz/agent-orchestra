@@ -32,7 +32,7 @@ function Get-PluginVersion {
     } else {
         return $null
     }
-    if ($versionString -notmatch '^\d+\.\d+\.\d+$') {
+    if ($versionString -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
         return $null
     }
     return $versionString
@@ -48,7 +48,7 @@ function Compare-PluginVersionIsGreater {
 
 function Test-ChangelogSectionPresent {
     param(
-        [Parameter(Mandatory)][string]$ChangelogContent,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ChangelogContent,
         [Parameter(Mandatory)][string]$Version
     )
     $escaped = [regex]::Escape($Version)
@@ -58,12 +58,8 @@ function Test-ChangelogSectionPresent {
 
 function Get-ReleaseGateWaiver {
     param([string]$CommitMessage)
-    if ($CommitMessage -match 'Skip-Release-Check: all') {
-        return 'all'
-    }
-    if ($CommitMessage -match 'Skip-Release-Check: changelog-only') {
-        return 'changelog-only'
-    }
+    if ($CommitMessage -match '(?m)^Skip-Release-Check:\s*all\b') { return 'all' }
+    if ($CommitMessage -match '(?m)^Skip-Release-Check:\s*changelog-only\b') { return 'changelog-only' }
     return $null
 }
 
@@ -72,7 +68,7 @@ function Invoke-ReleaseGateEvaluation {
         [Parameter(Mandatory)][string[]]$ChangedFiles,
         [Parameter(Mandatory)][string]$HeadVersion,
         [Parameter(Mandatory)][string]$BaseVersion,
-        [Parameter(Mandatory)][string]$ChangelogContent,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ChangelogContent,
         [string]$HeadCommitMessage = ''
     )
 

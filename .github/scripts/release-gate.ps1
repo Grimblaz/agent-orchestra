@@ -39,12 +39,13 @@ if (-not $entryPointTouched) {
     exit 0
 }
 
-$baseJsonContent = git show "origin/$BaseRef:.claude-plugin/plugin.json" 2>&1
+$baseJsonRaw = @(git show "origin/$BaseRef:.claude-plugin/plugin.json")
 $baseJsonExitCode = $LASTEXITCODE
 if ($baseJsonExitCode -ne 0) {
     Write-Error "Failed to read base-branch plugin.json (exit $baseJsonExitCode) — failing closed"
     exit 1
 }
+$baseJsonContent = $baseJsonRaw -join "`n"
 
 $baseVersion = $null
 if ($baseJsonContent -match '"version":\s*"([\d.]+)"') {
@@ -63,13 +64,21 @@ if ($null -eq $headVersion) {
 
 $headMsg = git log -1 --format=%B HEAD
 
-$changelog = Get-Content -Path 'CHANGELOG.md' -Raw -ErrorAction SilentlyContinue
+$changelog = ''
+if (Test-Path 'CHANGELOG.md') {
+    $changelog = Get-Content -Path 'CHANGELOG.md' -Raw -ErrorAction SilentlyContinue
+    if ($null -eq $changelog) {
+        Write-Error "CHANGELOG.md exists but could not be read — failing closed"
+        exit 1
+    }
+}
+# $changelog is '' if the file is absent (will fail the changelog leg cleanly)
 
 $result = Invoke-ReleaseGateEvaluation `
     -ChangedFiles $changedFiles `
     -HeadVersion $headVersion `
     -BaseVersion $baseVersion `
-    -ChangelogContent ($changelog ?? '') `
+    -ChangelogContent $changelog `
     -HeadCommitMessage ($headMsg ?? '')
 
 if ($result.Pass) {

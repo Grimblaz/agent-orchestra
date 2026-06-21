@@ -77,28 +77,23 @@ Describe 'Get-PluginVersion' {
         }
     }
 
-    It 'throws or returns $null for a 2-segment version (2.30) — must reject before [System.Version] cast' {
+    It 'returns $null for a 2-segment version (2.30)' {
         $tmpFile = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.json'
         try {
             '{"name":"agent-orchestra","version":"2.30"}' | Set-Content -Path $tmpFile -Encoding utf8
             $result = Get-PluginVersion -Path $tmpFile
             $result | Should -BeNullOrEmpty
-        } catch {
-            # Throwing is also acceptable
-            $true | Should -Be $true
         } finally {
             Remove-Item -Path $tmpFile -ErrorAction SilentlyContinue
         }
     }
 
-    It 'throws or returns $null for a leading-zero version (2.030.0) — must assert format before [System.Version] cast' {
+    It 'returns $null for a leading-zero version (2.030.0) — no-leading-zeros rule' {
         $tmpFile = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.json'
         try {
             '{"name":"agent-orchestra","version":"2.030.0"}' | Set-Content -Path $tmpFile -Encoding utf8
             $result = Get-PluginVersion -Path $tmpFile
             $result | Should -BeNullOrEmpty
-        } catch {
-            $true | Should -Be $true
         } finally {
             Remove-Item -Path $tmpFile -ErrorAction SilentlyContinue
         }
@@ -201,6 +196,12 @@ Describe 'Get-ReleaseGateWaiver' {
         # The function only looks at the passed-in message; this simulates
         # a caller passing a non-HEAD commit message that lacks the trailer.
         $msg = ''
+        $result = Get-ReleaseGateWaiver -CommitMessage $msg
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'returns $null when commit message MENTIONS the trailer in prose (not a real trailer line)' {
+        $msg = "feat: add gate documentation`n`nThis commit discusses Skip-Release-Check: all and Skip-Release-Check: changelog-only syntax in prose."
         $result = Get-ReleaseGateWaiver -CommitMessage $msg
         $result | Should -BeNullOrEmpty
     }
