@@ -38,7 +38,13 @@ jobs:
             '.github/scripts/Tests/gate-hook-contract.Tests.ps1',
             '.github/scripts/Tests/path-migration-sweep-gate.Tests.ps1',
             '.github/scripts/Tests/Ensure-ScratchGitignore.Tests.ps1',
-            '.github/scripts/Tests/audit-docs-mechanical.Tests.ps1'
+            '.github/scripts/Tests/audit-docs-mechanical.Tests.ps1',
+            # render-portfolio tests — registered per d-ci-gate-registration (#692 s3)
+            '.github/scripts/Tests/render-portfolio.Tests.ps1',
+            # release-gate tests — registered per d-ci-gate-registration (#703 s2)
+            '.github/scripts/Tests/release-gate.Tests.ps1',
+            # entry-point-scope-parity test — registered per s4 (#703)
+            '.github/scripts/Tests/entry-point-scope-parity.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'

@@ -2,6 +2,28 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.32.0] — 2026-06-21
+
+### Changed
+
+- **Five-pass two-layer prosecution panel for the `standard` adversarial-review adapter** (`skills/adversarial-review/platforms/claude.md`, `skills/adversarial-review/adapters/standard.md`, `skills/adversarial-review/SKILL.md`, `agents/Code-Critic.agent.md`): replaces the homogeneous 3× Opus prosecution with a diverse panel — `generalist-A` (Sonnet), `generalist-B` (Opus), and three Opus specialists (`spec-correctness`, `spec-security`, `spec-architecture`). Cross-layer dedup merges on failure-mode + code-location and prefers the deepest-tier finding (Opus over Sonnet); the panel survives iff ≥1 generalist **and** ≥1 specialist clear quorum after per-pass retries. PR-phase prosecution-pass enums widen `[1,2,3]` → `[1,2,3,4,5]` across the schema, validator, routing-config, metrics schemas, and supporting prose; the design-phase `design-disposition-audit` `[1,2,3]` invariant is unchanged. Adds an optional `model:` field to `dispatch-cost-samples[]`, wired end-to-end (parser positional contract, RC back-fill preservation, merge dedup key, round-trip tests). Also folds in the inline doc corrections that AC4's surface sweep promised (`Documents/Design/frame-architecture.md`, `skills/review-judgment/SKILL.md`, `skills/calibration-pipeline/references/metrics-schema.md`) and a quorum "well-formed ledger" definition clarification (#706, with inline fixes for #714/#716/#717/#718).
+
+## [2.31.0] — 2026-06-21
+
+### Added
+
+- **CI release gate** (`.github/scripts/lib/release-gate-core.ps1`, `.github/scripts/release-gate.ps1`, `.github/workflows/release-gate.yml`): A required PR check that fails any PR touching plugin entry points (`agents/**`, `commands/**`, `skills/**`, `hooks/**`, `.claude-plugin/**`, `plugin.json`, `README.md`, `.github/copilot-instructions.md`) without a monotonic version bump **and** a matching `## [version]` CHANGELOG section. Leg-scoped `Skip-Release-Check:` commit-trailer waiver: `changelog-only` waives only the CHANGELOG leg; `all <reason>` waives both. Fail-closed on any base-ref/diff error (AC5). Entry-point membership delegated to `Get-FVPluginEntryPointPatterns`; parity enforced by `.github/scripts/Tests/entry-point-scope-parity.Tests.ps1` (#703).
+
+## [2.30.0] — 2026-06-12
+
+### Added
+
+- **Derived portfolio tracker** (`Documents/Planning/sequence.yaml`, `.github/scripts/render-portfolio.ps1`, `.github/scripts/Tests/render-portfolio.Tests.ps1`, `.github/workflows/render-portfolio.yml`): a merge-triggered control-tower renderer that derives a five-bucket portfolio (Now / Next / Blocked / Recently closed / Triage) from a truly-flat sequence spec and the live GitHub issue graph (`blockedBy` dependencies), then idempotently splices it into the control-tower issue body. Includes the `render-portfolio.yml` push/`workflow_dispatch` workflow (SHA-pinned checkout, `persist-credentials: false`, `gh`-only auth), a 20-test Pester suite registered in the CI gate, and three skill touchpoints — `safe-operations` §2b-bis umbrella/triage intake, `post-pr-review` §7 auto-render note, and `session-startup` Step 7c portfolio snapshot (#692).
+
+### Changed
+
+- Version bumped to 2.30.0 (2.29.0 was concurrently claimed by #708's ai-first-documentation consumer-mode release; this entry resolves the collision).
+
 ## [2.29.0] — 2026-06-12
 
 ### Added

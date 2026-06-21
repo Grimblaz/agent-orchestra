@@ -1,0 +1,32 @@
+# Renders the derived portfolio tracker issue after every merge to main.
+# Triggered on push to main (merge events) and on-demand via workflow_dispatch.
+# Issue body edits (gh issue edit) do NOT trigger push: — no self-trigger loop.
+name: Render portfolio tracker
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+concurrency:
+  group: render-portfolio
+  cancel-in-progress: true
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+
+      - name: Render portfolio tracker
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          ./.github/scripts/render-portfolio.ps1

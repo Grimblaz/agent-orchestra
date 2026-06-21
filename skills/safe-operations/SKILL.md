@@ -69,7 +69,7 @@ These PowerShell commands silently corrupt files through encoding issues (e.g., 
 When any agent discovers an out-of-scope or non-blocking improvement during its work, classify it against the structural-criteria gate (canonical taxonomy in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`):
 
 - **Inline (fix-in-PR) eligibility**: the change is small, single-file or single-system, doesn't introduce a new abstraction, doesn't cross architecture layer boundaries, and doesn't require a separate design decision. Address within the current task (or current PR if one is open).
-- **Follow-up issue creation**: the change matches at least one structural criterion (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment`). Create a follow-up GitHub issue **immediately** using `gh issue create` (or the `Add-FollowUpIssue` helper in `scripts/Add-FollowUpIssue.ps1` for the canonical sentinel + GraphQL parenting), then continue with in-scope work. Do not block the current PR on the deferred improvement.
+- **Follow-up issue creation**: the change matches at least one structural criterion (`S-new-abstraction`, `S-cross-cutting`, `S-design-decision`, `S-schema-or-contract`, `S-different-surface`, `S-maintainer-judgment`). Create a follow-up GitHub issue **immediately** using `gh issue create` (or the `Add-FollowUpIssue` helper in `skills/safe-operations/scripts/Add-FollowUpIssue.ps1` for the canonical sentinel + GraphQL parenting), then continue with in-scope work. Do not block the current PR on the deferred improvement.
 
 > Supplementary rationale: as a quick sanity check, deferred (structural) issues typically represent more than a day of work, but structural-criteria match — not the effort estimate — is the load-bearing deferral criterion.
 
@@ -111,6 +111,29 @@ gh issue create --title "..." --body "..."
 | `priority: low`    | Nice-to-have — cosmetic or optional   | Cosmetic, optional, or speculative work                       |
 
 **Default for automatically-created follow-up issues**: `priority: medium`
+
+### 2b-bis. Umbrella or Triage at Creation (Additive to §2b)
+
+Every new issue created by any agent **MUST** also receive one of the following at creation time — this rule is additive to the §2b priority mandate and does not replace it:
+
+- **Parent umbrella** — attach the new issue as a native sub-issue of an existing sequenced umbrella, if the work is scoped to a tracked initiative. Use `Add-FollowUpIssue` (canonical sub-issue attach) immediately after `gh issue create`.
+- **`triage` label** — if no sequenced umbrella applies, add `--label triage` to the `gh issue create` command so the portfolio renderer places the issue in the Triage bucket and it does not go missing.
+
+```powershell
+# CORRECT — umbrella child (use the canonical Add-FollowUpIssue helper):
+$url = gh issue create --title "..." --body "..." --label "priority: medium"
+# Extract number and attach to umbrella using the canonical helper:
+$issueNum = $url -replace '.*/', ''
+pwsh skills/safe-operations/scripts/Add-FollowUpIssue.ps1 -ParentIssueNumber 425 -ChildIssueNumber $issueNum
+
+# CORRECT — triage fallback:
+gh issue create --title "..." --body "..." --label "priority: medium" --label "triage"
+
+# WRONG — neither umbrella nor triage:
+gh issue create --title "..." --body "..." --label "priority: medium"
+```
+
+> **Why**: the derived portfolio renderer surfaces only sequenced or triage-labeled issues. Issues created without either silently disappear from the tracker.
 
 ### 2c. Deduplication Check (Mandatory)
 
