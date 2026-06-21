@@ -3,7 +3,7 @@
 > ⚠️ **GitHub Copilot / VS Code support is frozen and retiring after 2026-08-31.**
 > Claude Code is the actively supported path. See [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md) for details and the reach-out channel if you depend on Copilot support.
 
-[![Version](https://img.shields.io/badge/version-v2.30.0-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v2.31.0-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system that orchestrates AI-assisted software development through specialized Claude Code agents. *(GitHub Copilot/VS Code: frozen and retiring after 2026-08-31 — see [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md))*
@@ -119,6 +119,8 @@ Claude Code includes the implementation specialists for Code-Conductor dispatch.
 Claude Code caches plugins by the `version` in `.claude-plugin/plugin.json`. If an entry-point file changes without a version bump, cached installs keep serving the previous snapshot even though the repo content changed.
 
 Agent-assisted maintainer flows now route entry-point edits through the shared `plugin-release-hygiene` skill. Claude uses a committed `PostToolUse` hook, Copilot uses an auto-attached instruction file, and both mechanisms converge on one conversation-scoped version-bump decision.
+
+PRs touching plugin entry points are also enforced by a required GitHub Actions check (`release-gate.yml`). The check fails if the PR lacks a monotonic version bump and a matching `## [version]` CHANGELOG section. To waive only the CHANGELOG leg, add `Skip-Release-Check: changelog-only` as a head-commit trailer. To waive the full gate, use `Skip-Release-Check: all <reason>`.
 
 Claude sessions also run an active-assist startup drift check. When the installed `agent-orchestra@agent-orchestra` version is behind the resolved marketplace version, startup runs `claude plugin update`, reports the old and new versions, and asks whether to restart now or continue under the old code until the next session.
 

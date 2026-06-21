@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.31.0] — 2026-06-21
+
+### Added
+
+- **CI release gate** (`.github/scripts/lib/release-gate-core.ps1`, `.github/scripts/release-gate.ps1`, `.github/workflows/release-gate.yml`): A required PR check that fails any PR touching plugin entry points (`agents/**`, `commands/**`, `skills/**`, `hooks/**`, `.claude-plugin/**`, `plugin.json`, `README.md`, `.github/copilot-instructions.md`) without a monotonic version bump **and** a matching `## [version]` CHANGELOG section. Leg-scoped `Skip-Release-Check:` commit-trailer waiver: `changelog-only` waives only the CHANGELOG leg; `all <reason>` waives both. Fail-closed on any base-ref/diff error (AC5). Entry-point membership delegated to `Get-FVPluginEntryPointPatterns`; parity enforced by `.github/scripts/Tests/entry-point-scope-parity.Tests.ps1` (#703).
+
 ## [2.30.0] — 2026-06-12
 
 ### Added
