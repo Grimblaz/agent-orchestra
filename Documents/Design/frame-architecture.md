@@ -431,8 +431,8 @@ credits:
     selector-reason: "changeset 1735/-785, full prosecution depth"
     judge-score: 5-accepted/1-rejected/0-deferred
     integrity-check:
-      expected-prosecution-passes: [1, 2, 3]
-      observed-prosecution-passes: [1, 2, 3]
+      expected-prosecution-passes: [1, 2, 3, 4, 5]
+      observed-prosecution-passes: [1, 2, 3, 4, 5]
       passed: true
     timestamp: 2026-04-24T14:25:00Z
 
@@ -499,7 +499,7 @@ Terminal-step adapters verify their inputs are complete before writing the credi
 
 This closes the only failure mode the terminal-step rule alone doesn't address: an adapter that internally short-circuits its sub-stages.
 
-**Audit confirmation**: PR #411's pipeline-metrics block contains an explicit warning that "*pass-level distribution was not durably persisted in-session*" with `pass_1/2/3_findings: n/a`. Today this ships unchallenged. The integrity-check rule would have flagged it (observed-prosecution-passes: empty; expected: [1,2,3] for standard) and the judge would have written `failed` instead of `passed`.
+**Audit confirmation**: PR #411's pipeline-metrics block contains an explicit warning that "*pass-level distribution was not durably persisted in-session*" with `pass_1/2/3_findings: n/a`. Today this ships unchallenged. The integrity-check rule would have flagged it (observed-prosecution-passes: empty; expected: [1,2,3,4,5] for standard) and the judge would have written `failed` instead of `passed`.
 
 **Express-lane carve-out**: PR #338 used `express_lane` to fast-path 5 of 12 findings past full defense. The integrity check must accept express-lane findings as valid — the rule is "every expected pass block has *some* terminating outcome (full ruling OR express-lane ruling)," not "every finding has full defense." The `express_lane: true` field on a finding entry counts as the terminator.
 
