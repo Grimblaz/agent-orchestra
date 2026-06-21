@@ -1,0 +1,32 @@
+# Fails PRs that touch plugin entry points without a version bump + CHANGELOG entry.
+# Triggered on pull request open, synchronize, and reopen events.
+name: Release gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: release-gate-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.event.pull_request.base.ref }}
+
+      - name: Run release gate
+        shell: pwsh
+        run: |
+          ./.github/scripts/release-gate.ps1 -BaseRef '${{ github.event.pull_request.base.ref }}'
