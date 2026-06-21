@@ -62,6 +62,7 @@
           "also_flagged_by": {
             "type": "array",
             "items": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
+            "uniqueItems": true,
             "description": "Optional. Secondary prosecution pass ids that also flagged this finding."
           }
         },

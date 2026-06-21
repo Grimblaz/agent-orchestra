@@ -56,7 +56,7 @@ Select prosecution shape from the adapter contract.
 
 **Role→tier map:**
 
-```
+```yaml
 role→tier map:
   generalist-A: sonnet
   generalist-B: opus
@@ -65,6 +65,7 @@ role→tier map:
 fallback order (when a tier is unavailable):
   fable → opus → sonnet → haiku
 ```
+
 - `lite`: dispatch one Code-Critic prosecution pass with `subagent_type: code-critic`. Prepend the fresh handshake block when constructed, then `Review mode selector: "Use lite code review perspectives"`, then the resolved review target context.
 - `design-challenge`: emit the three-pass design challenge in one parallel tool-use block with `subagent_type: code-critic`. Passes 1 and 2 use `Review mode selector: "Use design review perspectives"`; pass 3 uses `Review mode selector: "Use product-alignment perspectives"`.
 - `post-fix`: dispatch one Code-Critic prosecution pass with `subagent_type: code-critic`. Prepend the fresh handshake block when constructed, then `Review mode selector: "Use post-fix code review perspectives"`, then the fix diff, sustained finding context, and validation evidence.

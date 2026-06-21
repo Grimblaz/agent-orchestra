@@ -153,6 +153,9 @@ foreach ($body in $rawBodies) {
             if ($entry.pass -notin @(1, 2, 3, 4, 5)) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel pass must be 1-5"
             }
+            if ($null -ne $entry.pass_role -and $entry.pass_role -notin @('generalist-A', 'generalist-B', 'spec-correctness', 'spec-security', 'spec-architecture')) {
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel pass_role must be one of generalist-A|generalist-B|spec-correctness|spec-security|spec-architecture"
+            }
             if ($entry.disposition -notin @('incorporate', 'dismiss', 'escalate')) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel disposition must be incorporate|dismiss|escalate"
             }

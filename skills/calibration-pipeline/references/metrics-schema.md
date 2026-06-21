@@ -8,7 +8,7 @@ See [verdict-mapping.md](verdict-mapping.md) for judge-to-metric mapping details
 
 ## PR Body Pipeline Metrics
 
-Always include a `## Pipeline Metrics` section in the PR body with a hidden HTML comment block containing pipeline telemetry. Emit this at PR creation time after the full pipeline completes. Count values from the post-deduplication merged ledger (not raw per-pass totals). `sum(pass_findings.values) = prosecution_findings`. Fields `prosecution_findings` through `rework_cycles` cover the **main review cycle only**; `postfix_*` fields cover the post-fix targeted prosecution separately.
+Always include a `## Pipeline Metrics` section in the PR body with a hidden HTML comment block containing pipeline telemetry. Emit this at PR creation time after the full pipeline completes. Count values from the post-deduplication merged ledger (not raw per-pass totals). `sum(pass_findings.values) = prosecution_findings` (applies to standard/lite review mode only; in proxy mode `pass_findings` keys are `n/a` and this invariant does not apply). Fields `prosecution_findings` through `rework_cycles` cover the **main review cycle only**; `postfix_*` fields cover the post-fix targeted prosecution separately.
 
 ```markdown
 ## Pipeline Metrics

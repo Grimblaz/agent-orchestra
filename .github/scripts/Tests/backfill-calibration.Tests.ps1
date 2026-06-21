@@ -58,6 +58,8 @@ pass_findings:
   1: 1
   2: 1
   3: 1
+  4: 0
+  5: 0
 defense_disproved: 1
 judge_accepted: 2
 judge_rejected: 0

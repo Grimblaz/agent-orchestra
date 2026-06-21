@@ -64,7 +64,7 @@ Describe 'write-calibration-entry.ps1' {
             )
             summary    = [ordered]@{
                 prosecution_findings = 3
-                pass_findings        = [ordered]@{ '1' = 1; '2' = 1; '3' = 1 }
+                pass_findings        = [ordered]@{ '1' = 1; '2' = 1; '3' = 1; '4' = 0; '5' = 0 }
                 defense_disproved    = 1
                 judge_accepted       = 2
                 judge_rejected       = 1
@@ -372,6 +372,50 @@ Describe 'write-calibration-entry.ps1' {
 
             $result.ExitCode | Should -Not -Be 0 `
                 -Because 'summary missing prosecution_findings must cause a non-zero exit'
+        }
+
+        It 'exits non-zero and emits an error when summary is missing pass_findings' {
+            $workDir = & $script:NewWorkDir
+            $bad = [ordered]@{
+                pr_number  = 100
+                created_at = '2026-03-20T12:00:00Z'
+                findings   = @()
+                summary    = [ordered]@{
+                    prosecution_findings = 0
+                    # pass_findings omitted
+                    defense_disproved    = 0
+                    judge_accepted       = 0
+                    judge_rejected       = 0
+                    judge_deferred       = 0
+                }
+            }
+            $entryJson = $bad | ConvertTo-Json -Depth 10 -Compress
+            $result = & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
+
+            $result.ExitCode | Should -Not -Be 0 `
+                -Because 'summary missing pass_findings must cause a non-zero exit'
+        }
+
+        It 'exits non-zero and emits an error when summary has an empty pass_findings map' {
+            $workDir = & $script:NewWorkDir
+            $bad = [ordered]@{
+                pr_number  = 100
+                created_at = '2026-03-20T12:00:00Z'
+                findings   = @()
+                summary    = [ordered]@{
+                    prosecution_findings = 0
+                    pass_findings        = [ordered]@{}   # empty map — must be rejected
+                    defense_disproved    = 0
+                    judge_accepted       = 0
+                    judge_rejected       = 0
+                    judge_deferred       = 0
+                }
+            }
+            $entryJson = $bad | ConvertTo-Json -Depth 10 -Compress
+            $result = & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
+
+            $result.ExitCode | Should -Not -Be 0 `
+                -Because 'summary with empty pass_findings map must cause a non-zero exit'
         }
 
         It 'does not write to the file when validation fails' {

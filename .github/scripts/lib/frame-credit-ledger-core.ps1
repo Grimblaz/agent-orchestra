@@ -977,14 +977,21 @@ function Update-DispatchCostSampleEvaluationInPrBody {
     $samples = [System.Collections.Generic.List[object]]::new()
     $updated = $false
     $filterByProvider = $PSBoundParameters.ContainsKey('Provider') -and -not [string]::IsNullOrEmpty($Provider)
+    $filterByModel = $PSBoundParameters.ContainsKey('Model') -and -not [string]::IsNullOrEmpty($Model)
     foreach ($sample in @($metrics.DispatchCostSamples)) {
         $sampleProvider = if ($sample.PSObject.Properties['provider']) { [string]$sample.provider } else { $null }
+        $sampleModel = if ($sample.PSObject.Properties['model']) { [string]$sample.model } else { $null }
         # Without -Provider: match only legacy rows lacking a provider field (backward compat).
         # With -Provider: match only rows whose provider equals the specified value.
         # This prevents cross-provider contamination once multi-provider rows coexist (post-#545).
         $providerMatch = if ($filterByProvider) { $sampleProvider -eq $Provider } else { [string]::IsNullOrEmpty($sampleProvider) }
+        # Without -Model: match any row regardless of model (opt-in — back-fill callers that
+        # don't know the model tier should still be able to update all matching rows).
+        # With -Model: match only rows whose model equals the specified value.
+        # This prevents cross-model contamination when the caller knows which model row to target.
+        $modelMatch = if ($filterByModel) { $sampleModel -eq $Model } else { $true }
 
-        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode -and $providerMatch) {
+        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode -and $providerMatch -and $modelMatch) {
             $updatedRcConformance = [string]$sample.'rc-conformance'
             $updatedJudgeDisposition = [string]$sample.'judge-disposition'
             if ($PSBoundParameters.ContainsKey('RcConformance')) { $updatedRcConformance = $RcConformance }
