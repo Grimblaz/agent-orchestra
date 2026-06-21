@@ -35,7 +35,7 @@ The named adversarial review adapters are:
 
 | Adapter            | Adapter class                    | Port-filling           | Pipeline stages                   | Prosecution passes | Exempt | Notes                                                               |
 | ------------------ | -------------------------------- | ---------------------- | --------------------------------- | ------------------ | ------ | ------------------------------------------------------------------- |
-| `standard`         | multi-variant work adapter       | Yes, `review`          | `prosecution`, `defense`, `judge` | `1`, `2`, `3`      | No     | Full local adversarial review                                       |
+| `standard`         | multi-variant work adapter       | Yes, `review`          | `prosecution`, `defense`, `judge` | `1`, `2`, `3`, `4`, `5` | No | Full local adversarial review (five-pass two-layer panel)           |
 | `lite`             | multi-variant work adapter       | Yes, `review`          | `prosecution`                     | `1`                | No     | Compact local prosecution ledger                                    |
 | `judge-only`       | multi-variant work adapter       | Yes, `review`          | `judge`                           | none               | Yes    | Terminal ruling over already-collected evidence                     |
 | `proxy-github`     | multi-variant work adapter       | Yes, `review`          | `proxy-prosecution`               | none               | Yes    | GitHub review intake represented as proxy prosecution               |
@@ -367,7 +367,7 @@ Required keys:
 
 | Adapter            | Pipeline stages                   | Atomic | Prosecution passes | Exempt | Reason                                                                   |
 | ------------------ | --------------------------------- | ------ | ------------------ | ------ | ------------------------------------------------------------------------ |
-| `standard`         | `prosecution`, `defense`, `judge` | `true` | `[1, 2, 3]`        | No     | Runs full three-pass prosecution before defense and judge                |
+| `standard`         | `prosecution`, `defense`, `judge` | `true` | `[1, 2, 3, 4, 5]`  | No     | Runs five-pass two-layer prosecution (2 generalist + 3 specialist) before defense and judge |
 | `lite`             | `prosecution`                     | `n/a`  | `[1]`              | No     | Runs one compact prosecution pass                                        |
 | `judge-only`       | `judge`                           | `n/a`  | `[]`               | Yes    | Re-review scope; prior prosecution and defense evidence already exists   |
 | `proxy-github`     | `proxy-prosecution`               | `n/a`  | `[]`               | Yes    | External review intake; proxy prosecution replaces numbered local passes |

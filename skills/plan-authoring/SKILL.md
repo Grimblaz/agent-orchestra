@@ -135,7 +135,7 @@ If no customer-facing surface exists, state why `ce_gate: false` is justified.
 
 ### 4. Keep the Review Pipeline Explicit
 
-Include the fixed adversarial review pipeline: three prosecution passes, merged findings ledger, one defense pass, one judge pass, and local resolution of accepted findings before completion.
+Include the fixed adversarial review pipeline: five-pass two-layer prosecution panel (2 generalist + 3 specialist), merged findings ledger, one defense pass, one judge pass, and local resolution of accepted findings before completion.
 
 ## Tree-State Verification Discipline
 

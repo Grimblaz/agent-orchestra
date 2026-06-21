@@ -15,8 +15,8 @@
       - Validates required top-level fields: pr_number, created_at
       - Validates required finding fields: id, category, judge_ruling (express-lane findings exempt from judge_ruling check)
       - Validates required summary subfields:
-          prosecution_findings, pass_1_findings, pass_2_findings,
-          pass_3_findings, defense_disproved, judge_accepted,
+          prosecution_findings, pass_findings (keyed map with at least one pass key),
+          defense_disproved, judge_accepted,
           judge_rejected, judge_deferred
       - systemic_fix_type in findings: passthrough (not validated)
       - review_stage in findings: any non-empty string accepted
@@ -64,9 +64,7 @@ Describe 'write-calibration-entry.ps1' {
             )
             summary    = [ordered]@{
                 prosecution_findings = 3
-                pass_1_findings      = 1
-                pass_2_findings      = 1
-                pass_3_findings      = 1
+                pass_findings        = [ordered]@{ '1' = 1; '2' = 1; '3' = 1; '4' = 0; '5' = 0 }
                 defense_disproved    = 1
                 judge_accepted       = 2
                 judge_rejected       = 1
@@ -190,9 +188,7 @@ Describe 'write-calibration-entry.ps1' {
                 )
                 summary    = [ordered]@{
                     prosecution_findings = 1
-                    pass_1_findings      = 1
-                    pass_2_findings      = 0
-                    pass_3_findings      = 0
+                    pass_findings        = [ordered]@{ '1' = 1 }
                     defense_disproved    = 0
                     judge_accepted       = 0
                     judge_rejected       = 1
@@ -227,9 +223,7 @@ Describe 'write-calibration-entry.ps1' {
                 )
                 summary    = [ordered]@{
                     prosecution_findings = 1
-                    pass_1_findings      = 1
-                    pass_2_findings      = 0
-                    pass_3_findings      = 0
+                    pass_findings        = [ordered]@{ '1' = 1 }
                     defense_disproved    = 0
                     judge_accepted       = 1
                     judge_rejected       = 0
@@ -261,9 +255,7 @@ Describe 'write-calibration-entry.ps1' {
                 findings   = @()
                 summary    = [ordered]@{
                     prosecution_findings = 0
-                    pass_1_findings      = 0
-                    pass_2_findings      = 0
-                    pass_3_findings      = 0
+                    pass_findings        = [ordered]@{ '1' = 0 }
                     defense_disproved    = 0
                     judge_accepted       = 0
                     judge_rejected       = 0
@@ -284,9 +276,7 @@ Describe 'write-calibration-entry.ps1' {
                 findings  = @()
                 summary   = [ordered]@{
                     prosecution_findings = 0
-                    pass_1_findings      = 0
-                    pass_2_findings      = 0
-                    pass_3_findings      = 0
+                    pass_findings        = [ordered]@{ '1' = 0 }
                     defense_disproved    = 0
                     judge_accepted       = 0
                     judge_rejected       = 0
@@ -314,9 +304,7 @@ Describe 'write-calibration-entry.ps1' {
                 )
                 summary    = [ordered]@{
                     prosecution_findings = 1
-                    pass_1_findings      = 1
-                    pass_2_findings      = 0
-                    pass_3_findings      = 0
+                    pass_findings        = [ordered]@{ '1' = 1 }
                     defense_disproved    = 0
                     judge_accepted       = 1
                     judge_rejected       = 0
@@ -344,9 +332,7 @@ Describe 'write-calibration-entry.ps1' {
                 )
                 summary    = [ordered]@{
                     prosecution_findings = 1
-                    pass_1_findings      = 1
-                    pass_2_findings      = 0
-                    pass_3_findings      = 0
+                    pass_findings        = [ordered]@{ '1' = 1 }
                     defense_disproved    = 0
                     judge_accepted       = 1
                     judge_rejected       = 0
@@ -374,9 +360,7 @@ Describe 'write-calibration-entry.ps1' {
                 )
                 summary    = [ordered]@{
                     # prosecution_findings omitted
-                    pass_1_findings   = 1
-                    pass_2_findings   = 0
-                    pass_3_findings   = 0
+                    pass_findings     = [ordered]@{ '1' = 1 }
                     defense_disproved = 0
                     judge_accepted    = 1
                     judge_rejected    = 0
@@ -390,6 +374,50 @@ Describe 'write-calibration-entry.ps1' {
                 -Because 'summary missing prosecution_findings must cause a non-zero exit'
         }
 
+        It 'exits non-zero and emits an error when summary is missing pass_findings' {
+            $workDir = & $script:NewWorkDir
+            $bad = [ordered]@{
+                pr_number  = 100
+                created_at = '2026-03-20T12:00:00Z'
+                findings   = @()
+                summary    = [ordered]@{
+                    prosecution_findings = 0
+                    # pass_findings omitted
+                    defense_disproved    = 0
+                    judge_accepted       = 0
+                    judge_rejected       = 0
+                    judge_deferred       = 0
+                }
+            }
+            $entryJson = $bad | ConvertTo-Json -Depth 10 -Compress
+            $result = & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
+
+            $result.ExitCode | Should -Not -Be 0 `
+                -Because 'summary missing pass_findings must cause a non-zero exit'
+        }
+
+        It 'exits non-zero and emits an error when summary has an empty pass_findings map' {
+            $workDir = & $script:NewWorkDir
+            $bad = [ordered]@{
+                pr_number  = 100
+                created_at = '2026-03-20T12:00:00Z'
+                findings   = @()
+                summary    = [ordered]@{
+                    prosecution_findings = 0
+                    pass_findings        = [ordered]@{}   # empty map — must be rejected
+                    defense_disproved    = 0
+                    judge_accepted       = 0
+                    judge_rejected       = 0
+                    judge_deferred       = 0
+                }
+            }
+            $entryJson = $bad | ConvertTo-Json -Depth 10 -Compress
+            $result = & $script:Invoke -WorkDir $workDir -EntryJson $entryJson
+
+            $result.ExitCode | Should -Not -Be 0 `
+                -Because 'summary with empty pass_findings map must cause a non-zero exit'
+        }
+
         It 'does not write to the file when validation fails' {
             $workDir = & $script:NewWorkDir
             # Missing pr_number — guaranteed validation failure
@@ -398,9 +426,7 @@ Describe 'write-calibration-entry.ps1' {
                 findings   = @()
                 summary    = [ordered]@{
                     prosecution_findings = 0
-                    pass_1_findings      = 0
-                    pass_2_findings      = 0
-                    pass_3_findings      = 0
+                    pass_findings        = [ordered]@{ '1' = 0 }
                     defense_disproved    = 0
                     judge_accepted       = 0
                     judge_rejected       = 0
@@ -431,9 +457,7 @@ Describe 'write-calibration-entry.ps1' {
                 )
                 summary    = [ordered]@{
                     prosecution_findings = 1
-                    pass_1_findings      = 1
-                    pass_2_findings      = 0
-                    pass_3_findings      = 0
+                    pass_findings        = [ordered]@{ '1' = 1 }
                     defense_disproved    = 0
                     judge_accepted       = 1
                     judge_rejected       = 0
@@ -469,9 +493,7 @@ Describe 'write-calibration-entry.ps1' {
                 )
                 summary    = [ordered]@{
                     prosecution_findings = 1
-                    pass_1_findings      = 1
-                    pass_2_findings      = 0
-                    pass_3_findings      = 0
+                    pass_findings        = [ordered]@{ '1' = 1 }
                     defense_disproved    = 0
                     judge_accepted       = 1
                     judge_rejected       = 0
@@ -516,9 +538,7 @@ Describe 'write-calibration-entry.ps1' {
                 )
                 summary    = [ordered]@{
                     prosecution_findings = 1
-                    pass_1_findings      = 1
-                    pass_2_findings      = 0
-                    pass_3_findings      = 0
+                    pass_findings        = [ordered]@{ '1' = 1 }
                     defense_disproved    = 0
                     judge_accepted       = 1
                     judge_rejected       = 0

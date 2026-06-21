@@ -179,7 +179,7 @@ Describe 'Atomic adversarial pipeline structural contract' {
                 script:Test-YamlKey -Map $contract -Key $_ | Should -BeTrue
             }
             @(script:ConvertTo-ValueArray -Value (script:Get-YamlValue -Map $contract -Key 'pipeline-stages')) | Should -Be @('prosecution', 'defense', 'judge')
-            @(script:ConvertTo-ValueArray -Value (script:Get-YamlValue -Map $contract -Key 'prosecution-passes')) | Should -Be @(1, 2, 3)
+            @(script:ConvertTo-ValueArray -Value (script:Get-YamlValue -Map $contract -Key 'prosecution-passes')) | Should -Be @(1, 2, 3, 4, 5)
         }
 
         It 'keeps legacy pass-blocks fixtures from satisfying the new unified contract' {

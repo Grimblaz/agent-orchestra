@@ -110,14 +110,23 @@ function Invoke-WriteCalibrationEntry {
 
         if (Test-WCEHasProperty $entry 'summary') {
             $requiredSummaryFields = @(
-                'prosecution_findings', 'pass_1_findings', 'pass_2_findings',
-                'pass_3_findings', 'defense_disproved', 'judge_accepted',
+                'prosecution_findings', 'defense_disproved', 'judge_accepted',
                 'judge_rejected', 'judge_deferred'
             )
             foreach ($field in $requiredSummaryFields) {
                 if (-not (Test-WCEHasProperty $entry.summary $field)) {
                     return @{ ExitCode = 1; Output = ''; Error = "Validation failed: summary is missing required field '$field'." }
                 }
+            }
+            # Validate pass_findings map: must be present and have at least one key
+            if (-not (Test-WCEHasProperty $entry.summary 'pass_findings')) {
+                return @{ ExitCode = 1; Output = ''; Error = "Validation failed: summary is missing required field 'pass_findings'." }
+            }
+            $passFindingsValue = $entry.summary['pass_findings']
+            $isValidMap = ($passFindingsValue -is [System.Collections.IDictionary] -and $passFindingsValue.Count -gt 0) -or
+                          ($passFindingsValue -is [pscustomobject] -and @($passFindingsValue.PSObject.Properties).Count -gt 0)
+            if (-not $isValidMap) {
+                return @{ ExitCode = 1; Output = ''; Error = "Validation failed: summary 'pass_findings' must be a non-empty map (hashtable or object) with at least one pass key." }
             }
         }
 

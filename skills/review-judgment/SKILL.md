@@ -297,7 +297,7 @@ Write in this order (atomic marker first, engagement-record second):
 
    ```yaml
    schema_version: 1
-   passes_run: [1, 2, 3]
+   passes_run: [1, 2, 3, 4, 5]
    entries:
      - stable_finding_key: "..."
        ...

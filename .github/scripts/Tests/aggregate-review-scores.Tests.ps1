@@ -463,9 +463,7 @@ exit 0
                     )
                     summary    = [ordered]@{
                         prosecution_findings = 1
-                        pass_1_findings      = 1
-                        pass_2_findings      = 0
-                        pass_3_findings      = 0
+                        pass_findings        = [ordered]@{ '1' = 1 }
                         defense_disproved    = 0
                         judge_accepted       = 1
                         judge_rejected       = 0
@@ -488,9 +486,7 @@ exit 0
                     findings   = @()
                     summary    = [ordered]@{
                         prosecution_findings = 0
-                        pass_1_findings      = 0
-                        pass_2_findings      = 0
-                        pass_3_findings      = 0
+                        pass_findings        = [ordered]@{ '1' = 0 }
                         defense_disproved    = 0
                         judge_accepted       = 0
                         judge_rejected       = 0
@@ -522,9 +518,7 @@ exit 0
                     )
                     summary    = [ordered]@{
                         prosecution_findings = 1
-                        pass_1_findings      = 1
-                        pass_2_findings      = 0
-                        pass_3_findings      = 0
+                        pass_findings        = [ordered]@{ '1' = 1 }
                         defense_disproved    = 0
                         judge_accepted       = 1
                         judge_rejected       = 0
@@ -1009,9 +1003,7 @@ exit 0
                         findings   = $Findings
                         summary    = [ordered]@{
                             prosecution_findings = $Findings.Count
-                            pass_1_findings      = $Findings.Count
-                            pass_2_findings      = 0
-                            pass_3_findings      = 0
+                            pass_findings        = [ordered]@{ '1' = $Findings.Count }
                             defense_disproved    = 0
                             judge_accepted       = $Findings.Count
                             judge_rejected       = 0
@@ -1036,9 +1028,7 @@ exit 0
                         )
                         summary    = [ordered]@{
                             prosecution_findings = 1
-                            pass_1_findings      = 1
-                            pass_2_findings      = 0
-                            pass_3_findings      = 0
+                            pass_findings        = [ordered]@{ '1' = 1 }
                             defense_disproved    = 0
                             judge_accepted       = 1
                             judge_rejected       = 0
@@ -1623,9 +1613,7 @@ exit 0
                         findings   = $Findings
                         summary    = [ordered]@{
                             prosecution_findings = $Findings.Count
-                            pass_1_findings      = $Findings.Count
-                            pass_2_findings      = 0
-                            pass_3_findings      = 0
+                            pass_findings        = [ordered]@{ '1' = $Findings.Count }
                             defense_disproved    = 0
                             judge_accepted       = $Findings.Count
                             judge_rejected       = 0
@@ -1650,9 +1638,7 @@ exit 0
                         )
                         summary    = [ordered]@{
                             prosecution_findings = 1
-                            pass_1_findings      = 1
-                            pass_2_findings      = 0
-                            pass_3_findings      = 0
+                            pass_findings        = [ordered]@{ '1' = 1 }
                             defense_disproved    = 0
                             judge_accepted       = 1
                             judge_rejected       = 0

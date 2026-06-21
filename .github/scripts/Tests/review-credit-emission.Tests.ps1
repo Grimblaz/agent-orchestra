@@ -4,7 +4,7 @@
 # Tests for per-adapter integrity contract declarations (issue #441, Step 8a).
 #
 # Decision 6 (per-adapter integrity exemptions):
-#   standard adapter  — expects prosecution passes 1, 2, and 3 in the prosecution ledger
+#   standard adapter  — expects prosecution passes 1, 2, 3, 4, and 5 in the prosecution ledger (five-pass two-layer panel)
 #   lite adapter      — expects prosecution pass 1 only
 #   judge-only        — exempt (re-review scope; no new prosecution)
 #   proxy-github      — exempt (external review intake; single proxy pass)
@@ -27,7 +27,7 @@ BeforeAll {
     #   integrity-contract:
     #     pipeline-stages: [prosecution, defense, judge]
     #     atomic: true|n/a
-    #     prosecution-passes: [1, 2, 3]
+    #     prosecution-passes: [1, 2, 3, 4, 5]
     #     exempt: true|false
     # ---------------------------------------------------------------------------
 
@@ -101,7 +101,7 @@ BeforeAll {
 
 Describe 'Per-adapter integrity contract declarations (Step 8a — Decision 6)' {
 
-    It 'standard adapter declares integrity-contract with prosecution-passes [1, 2, 3]' {
+    It 'standard adapter declares integrity-contract with prosecution-passes [1, 2, 3, 4, 5]' {
         $contract = script:Get-AdapterIntegrityContract `
             (Join-Path $script:AdaptersPath 'standard.md')
 
@@ -109,7 +109,7 @@ Describe 'Per-adapter integrity contract declarations (Step 8a — Decision 6)' 
         $contract.PipelineStages    | Should -Be @('prosecution', 'defense', 'judge')
         $contract.Atomic            | Should -Be 'true'
         $contract.Exempt            | Should -Be $false -Because 'standard adapter is not exempt'
-        $contract.ProsecutionPasses | Should -Be @(1, 2, 3) -Because 'standard review runs all three prosecution passes'
+        $contract.ProsecutionPasses | Should -Be @(1, 2, 3, 4, 5) -Because 'standard review runs all five prosecution passes in the two-layer panel'
     }
 
     It 'lite adapter declares integrity-contract with prosecution-passes [1]' {
@@ -184,10 +184,10 @@ Describe 'adversarial-review SKILL.md integrity contract table (Step 8a)' {
         $script:Skill | Should -Match 'Integrity Contract' -Because 'SKILL.md must document the per-adapter integrity contract'
     }
 
-    It 'SKILL.md names the standard adapter as expecting three prosecution passes' {
+    It 'SKILL.md names the standard adapter as expecting five prosecution passes' {
         $script:Skill | Should -Match 'standard' -Because 'SKILL.md must name the standard adapter'
-        # The table should reference 1, 2, 3 prosecution passes for standard.
-        $script:Skill | Should -Match '1.*2.*3|prosecution.passes.*1.*2.*3|\[1, 2, 3\]' -Because 'standard must show 3 prosecution passes'
+        # The table should reference 1, 2, 3, 4, 5 prosecution passes for standard.
+        $script:Skill | Should -Match '1.*2.*3.*4.*5|prosecution.passes.*1.*2.*3.*4.*5|\[1, 2, 3, 4, 5\]' -Because 'standard must show five prosecution passes in the two-layer panel'
     }
 
     It 'SKILL.md names the lite adapter as expecting one prosecution pass' {
@@ -317,11 +317,11 @@ Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)'
         $f1.ruling | Should -Be 'defense-sustained'
     }
 
-    It 'integrity-check.prosecution-passes is [1,2,3] for standard adapter' {
+    It 'integrity-check.prosecution-passes is [1,2,3,4,5] for standard adapter' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
             -AdapterName 'standard' -AdaptersDir $script:AdaptersPath
 
-        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1, 2, 3)
+        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1, 2, 3, 4, 5)
         $legacyFieldName = 'pass' + '-blocks'
         $row.'integrity-check'.PSObject.Properties.Name | Should -Not -Contain $legacyFieldName
     }

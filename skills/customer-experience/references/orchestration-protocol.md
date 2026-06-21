@@ -89,7 +89,7 @@ Use this text for the standard path:
 ```markdown
 ## Review Mode
 
-Full review pipeline completed: 3 prosecution passes, 1 defense pass, 1 judge pass.
+Full review pipeline completed: 5 prosecution passes (2 generalist + 3 specialist), 1 defense pass, 1 judge pass.
 ```
 
 Use this text for the abbreviated path:

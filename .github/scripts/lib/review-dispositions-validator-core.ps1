@@ -9,7 +9,7 @@
     Finds <!-- review-dispositions-{PR} --> comments on a GitHub PR, parses their YAML
     payloads, and validates against the review-dispositions payload schema:
       - schema_version must be 1
-      - passes_run must be a non-empty subset of [1,2,3]
+      - passes_run must be a non-empty subset of [1,2,3,4,5]
       - entries[] must each carry stable_finding_key, pass, disposition, classification,
         disposition_rationale
     Warn-only: never throws, never returns non-zero exit code, never blocks PR creation.
@@ -126,15 +126,15 @@ foreach ($body in $rawBodies) {
 
     # passes_run
     if ($null -eq $payload.passes_run -or $payload.passes_run.Count -eq 0) {
-        Add-RdvFinding "review-dispositions-${PullRequestNumber}: passes_run must be a non-empty subset of [1,2,3]"
+        Add-RdvFinding "review-dispositions-${PullRequestNumber}: passes_run must be a non-empty subset of [1,2,3,4,5]"
     } else {
         $uniquePasses = $payload.passes_run | Select-Object -Unique
         if ($uniquePasses.Count -ne $payload.passes_run.Count) {
             Add-RdvFinding "review-dispositions-${PullRequestNumber}: passes_run contains duplicate values (must be unique per schema uniqueItems)"
         }
         foreach ($p in $payload.passes_run) {
-            if ($p -notin @(1, 2, 3)) {
-                Add-RdvFinding "review-dispositions-${PullRequestNumber}: passes_run contains invalid value: $p (must be 1, 2, or 3)"
+            if ($p -notin @(1, 2, 3, 4, 5)) {
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: passes_run contains invalid value: $p (must be 1-5)"
             }
         }
     }
@@ -150,8 +150,11 @@ foreach ($body in $rawBodies) {
             if ([string]::IsNullOrWhiteSpace($entry.stable_finding_key)) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel missing required stable_finding_key"
             }
-            if ($entry.pass -notin @(1, 2, 3)) {
-                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel pass must be 1, 2, or 3"
+            if ($entry.pass -notin @(1, 2, 3, 4, 5)) {
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel pass must be 1-5"
+            }
+            if ($null -ne $entry.pass_role -and $entry.pass_role -notin @('generalist-A', 'generalist-B', 'spec-correctness', 'spec-security', 'spec-architecture')) {
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel pass_role must be one of generalist-A|generalist-B|spec-correctness|spec-security|spec-architecture"
             }
             if ($entry.disposition -notin @('incorporate', 'dismiss', 'escalate')) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel disposition must be incorporate|dismiss|escalate"
@@ -166,6 +169,11 @@ foreach ($body in $rawBodies) {
                 $uniqueAlso = $entry.also_flagged_by | Select-Object -Unique
                 if ($uniqueAlso.Count -ne $entry.also_flagged_by.Count) {
                     Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel also_flagged_by contains duplicate pass IDs (must be unique)"
+                }
+                foreach ($af in $entry.also_flagged_by) {
+                    if ($af -notin @(1, 2, 3, 4, 5)) {
+                        Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel also_flagged_by contains invalid value: $af (must be 1-5)"
+                    }
                 }
             }
             $idx++

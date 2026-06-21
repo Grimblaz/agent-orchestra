@@ -77,11 +77,38 @@ function Invoke-BackfillCalibration {
         }
 
         # 4. Build summary from metrics block scalar fields
+        # Build pass_findings keyed map from the nested pass_findings block (keys 1-5);
+        # fall back to legacy pass_X_findings flat fields for older PR bodies.
+        $passFindingsMap = @{}
+
+        # Try to extract the nested pass_findings: block by capturing indented lines after the key.
+        $passFindingsBlockMatch = [regex]::Match($metricsBlock, '(?m)^pass_findings:\s*\n((?:[ \t]+\S.*\n?)*)')
+        if ($passFindingsBlockMatch.Success) {
+            $passFindingsBlock = $passFindingsBlockMatch.Groups[1].Value
+            foreach ($passKey in @('1', '2', '3', '4', '5')) {
+                $keyMatch = [regex]::Match($passFindingsBlock, "(?m)^\s+${passKey}:\s*(\S+)")
+                if ($keyMatch.Success) {
+                    $rawVal = $keyMatch.Groups[1].Value.Trim()
+                    if ($rawVal -notin @('n/a', 'N/A')) {
+                        $passFindingsMap[$passKey] = ConvertTo-IntSafe $rawVal
+                    }
+                }
+            }
+        }
+
+        # Legacy fallback: only when no pass_findings: block was present at all (not when block existed but all values were n/a).
+        if (-not $passFindingsBlockMatch.Success) {
+            foreach ($passKey in @('1', '2', '3')) {
+                $legacyValue = Get-YamlField -Block $metricsBlock -FieldName "pass_${passKey}_findings"
+                if (-not [string]::IsNullOrWhiteSpace($legacyValue) -and $legacyValue -notin @('n/a', 'N/A')) {
+                    $passFindingsMap[$passKey] = ConvertTo-IntSafe $legacyValue
+                }
+            }
+        }
+
         $summary = @{
             prosecution_findings = ConvertTo-IntSafe (Get-YamlField -Block $metricsBlock -FieldName 'prosecution_findings')
-            pass_1_findings      = ConvertTo-IntSafe (Get-YamlField -Block $metricsBlock -FieldName 'pass_1_findings')
-            pass_2_findings      = ConvertTo-IntSafe (Get-YamlField -Block $metricsBlock -FieldName 'pass_2_findings')
-            pass_3_findings      = ConvertTo-IntSafe (Get-YamlField -Block $metricsBlock -FieldName 'pass_3_findings')
+            pass_findings        = $passFindingsMap
             defense_disproved    = ConvertTo-IntSafe (Get-YamlField -Block $metricsBlock -FieldName 'defense_disproved')
             judge_accepted       = ConvertTo-IntSafe (Get-YamlField -Block $metricsBlock -FieldName 'judge_accepted')
             judge_rejected       = ConvertTo-IntSafe (Get-YamlField -Block $metricsBlock -FieldName 'judge_rejected')

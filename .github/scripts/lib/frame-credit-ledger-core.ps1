@@ -407,8 +407,8 @@ function script:ConvertFrom-FCLDispatchCostSampleChunk {
 
     $parsed = script:Get-FCLDispatchCostSampleKeysAndValues -Chunk $Chunk
     $keyOrder = @($parsed.KeyOrder)
-    if ($keyOrder.Count -notin @($requiredKeys.Count, ($requiredKeys.Count + 1))) {
-        throw 'row must contain exactly step-id, mode, bytes, rc-conformance, judge-disposition (optionally followed by provider)'
+    if ($keyOrder.Count -notin @($requiredKeys.Count, ($requiredKeys.Count + 1), ($requiredKeys.Count + 2))) {
+        throw 'row must contain exactly step-id, mode, bytes, rc-conformance, judge-disposition (optionally followed by provider and/or model)'
     }
 
     for ($keyIndex = 0; $keyIndex -lt $requiredKeys.Count; $keyIndex++) {
@@ -416,8 +416,11 @@ function script:ConvertFrom-FCLDispatchCostSampleChunk {
             throw 'row keys must be exactly step-id, mode, bytes, rc-conformance, judge-disposition in that order'
         }
     }
-    if ($keyOrder.Count -eq 6 -and $keyOrder[5] -ne 'provider') {
-        throw 'row keys must be exactly step-id, mode, bytes, rc-conformance, judge-disposition (with optional provider as 6th key)'
+    if ($keyOrder.Count -ge 6 -and $keyOrder[5] -notin @('provider', 'model')) {
+        throw 'row keys must be exactly step-id, mode, bytes, rc-conformance, judge-disposition (with optional provider or model as 6th key)'
+    }
+    if ($keyOrder.Count -eq 7 -and ($keyOrder[5] -ne 'provider' -or $keyOrder[6] -ne 'model')) {
+        throw 'row keys must be exactly step-id, mode, bytes, rc-conformance, judge-disposition, provider, model in that order when 7 keys are present'
     }
 
     $values = $parsed.Values
@@ -443,8 +446,12 @@ function script:ConvertFrom-FCLDispatchCostSampleChunk {
     }
 
     $providerParam = @{}
-    if ($keyOrder.Count -eq 6 -and $values.ContainsKey('provider') -and -not [string]::IsNullOrWhiteSpace([string]$values['provider'])) {
+    if ($keyOrder.Count -ge 6 -and $values.ContainsKey('provider') -and -not [string]::IsNullOrWhiteSpace([string]$values['provider'])) {
         $providerParam['Provider'] = [string]$values['provider']
+    }
+    $modelParam = @{}
+    if ($values.ContainsKey('model') -and -not [string]::IsNullOrWhiteSpace([string]$values['model'])) {
+        $modelParam['Model'] = [string]$values['model']
     }
     return New-DispatchCostSampleRow `
         -StepId ([string]$values['step-id']) `
@@ -452,7 +459,8 @@ function script:ConvertFrom-FCLDispatchCostSampleChunk {
         -Bytes $bytesValue `
         -RcConformance ([string]$values['rc-conformance']) `
         -JudgeDisposition ([string]$values['judge-disposition']) `
-        @providerParam
+        @providerParam `
+        @modelParam
 }
 
 function script:Set-FCLDispatchCostSamplesSection {
@@ -516,7 +524,10 @@ function script:Set-FCLDispatchCostSamplesSection {
             $existingProvider = if ($existing.PSObject.Properties['provider']) { [string]$existing.provider } else { $null }
             $incomingProvider = if ($incoming.PSObject.Properties['provider']) { [string]$incoming.provider } else { $null }
             $providerMatch = ($null -eq $existingProvider -and $null -eq $incomingProvider) -or ($existingProvider -eq $incomingProvider)
-            if ([string]$existing.'step-id' -eq [string]$incoming.'step-id' -and [string]$existing.mode -eq [string]$incoming.mode -and $providerMatch) {
+            $existingModel = if ($existing.PSObject.Properties['model']) { [string]$existing.model } else { $null }
+            $incomingModel = if ($incoming.PSObject.Properties['model']) { [string]$incoming.model } else { $null }
+            $modelMatch = ($null -eq $existingModel -and $null -eq $incomingModel) -or ($existingModel -eq $incomingModel)
+            if ([string]$existing.'step-id' -eq [string]$incoming.'step-id' -and [string]$existing.mode -eq [string]$incoming.mode -and $providerMatch -and $modelMatch) {
                 $override = $incoming
                 break
             }
@@ -539,6 +550,9 @@ function script:Set-FCLDispatchCostSamplesSection {
         [void]$sectionLines.Add("    judge-disposition: $($sample.'judge-disposition')")
         if ($sample.PSObject.Properties['provider'] -and -not [string]::IsNullOrEmpty([string]$sample.provider)) {
             [void]$sectionLines.Add("    provider: $($sample.provider)")
+        }
+        if ($sample.PSObject.Properties['model'] -and -not [string]::IsNullOrEmpty([string]$sample.model)) {
+            [void]$sectionLines.Add("    model: $($sample.model)")
         }
     }
 
@@ -860,7 +874,8 @@ function New-DispatchCostSampleRow {
         [Parameter(Mandatory)][int]$Bytes,
         [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance = 'not-evaluated',
         [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition = 'not-evaluated',
-        [string]$Provider = $null
+        [string]$Provider = $null,
+        [string]$Model = $null
     )
 
     $row = [ordered]@{
@@ -872,6 +887,9 @@ function New-DispatchCostSampleRow {
     }
     if (-not [string]::IsNullOrEmpty($Provider)) {
         $row['provider'] = $Provider
+    }
+    if (-not [string]::IsNullOrEmpty($Model)) {
+        $row['model'] = $Model
     }
     return [pscustomobject]$row
 }
@@ -885,7 +903,8 @@ function Add-DispatchCostSampleToPrBody {
         [Parameter(Mandatory)][int]$Bytes,
         [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance = 'not-evaluated',
         [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition = 'not-evaluated',
-        [string]$Provider = $null
+        [string]$Provider = $null,
+        [string]$Model = $null
     )
 
     $metrics = Read-PRMetricsBlock -PrBody $PrBody
@@ -899,7 +918,9 @@ function Add-DispatchCostSampleToPrBody {
         $sample = $samples[$sampleIndex]
         $sampleProvider = if ($sample.PSObject.Properties['provider']) { [string]$sample.provider } else { $null }
         $providerMatch = ($null -eq $sampleProvider -and [string]::IsNullOrEmpty($Provider)) -or ($sampleProvider -eq $Provider)
-        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode -and $providerMatch) {
+        $sampleModel = if ($sample.PSObject.Properties['model']) { [string]$sample.model } else { $null }
+        $modelMatch = ($null -eq $sampleModel -and [string]::IsNullOrEmpty($Model)) -or ($sampleModel -eq $Model)
+        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode -and $providerMatch -and $modelMatch) {
             $existingIndex = $sampleIndex
             break
         }
@@ -909,24 +930,30 @@ function Add-DispatchCostSampleToPrBody {
         $existingSample = $samples[$existingIndex]
         $existingProvider = if ($existingSample.PSObject.Properties['provider']) { [string]$existingSample.provider } else { $null }
         $effectiveProvider = if (-not [string]::IsNullOrEmpty($Provider)) { $Provider } elseif (-not [string]::IsNullOrEmpty($existingProvider)) { $existingProvider } else { $null }
+        $existingModel = if ($existingSample.PSObject.Properties['model']) { [string]$existingSample.model } else { $null }
+        $effectiveModel = if (-not [string]::IsNullOrEmpty($Model)) { $Model } elseif (-not [string]::IsNullOrEmpty($existingModel)) { $existingModel } else { $null }
         $providerParam = if (-not [string]::IsNullOrEmpty($effectiveProvider)) { @{ Provider = $effectiveProvider } } else { @{} }
+        $modelParam = if (-not [string]::IsNullOrEmpty($effectiveModel)) { @{ Model = $effectiveModel } } else { @{} }
         $samples[$existingIndex] = New-DispatchCostSampleRow `
             -StepId $StepId `
             -Mode $Mode `
             -Bytes $Bytes `
             -RcConformance ([string]$existingSample.'rc-conformance') `
             -JudgeDisposition ([string]$existingSample.'judge-disposition') `
-            @providerParam
+            @providerParam `
+            @modelParam
     }
     else {
         $providerParam = if (-not [string]::IsNullOrEmpty($Provider)) { @{ Provider = $Provider } } else { @{} }
+        $modelParam = if (-not [string]::IsNullOrEmpty($Model)) { @{ Model = $Model } } else { @{} }
         [void]$samples.Add((New-DispatchCostSampleRow `
                     -StepId $StepId `
                     -Mode $Mode `
                     -Bytes $Bytes `
                     -RcConformance $RcConformance `
                     -JudgeDisposition $JudgeDisposition `
-                    @providerParam))
+                    @providerParam `
+                    @modelParam))
     }
 
     return script:Set-FCLDispatchCostSamplesInPrBody -PrBody $PrBody -Samples $samples.ToArray()
@@ -940,7 +967,8 @@ function Update-DispatchCostSampleEvaluationInPrBody {
         [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
         [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance,
         [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition,
-        [string]$Provider = $null
+        [string]$Provider = $null,
+        [string]$Model = $null
     )
 
     $metrics = Read-PRMetricsBlock -PrBody $PrBody
@@ -949,23 +977,33 @@ function Update-DispatchCostSampleEvaluationInPrBody {
     $samples = [System.Collections.Generic.List[object]]::new()
     $updated = $false
     $filterByProvider = $PSBoundParameters.ContainsKey('Provider') -and -not [string]::IsNullOrEmpty($Provider)
+    $filterByModel = $PSBoundParameters.ContainsKey('Model') -and -not [string]::IsNullOrEmpty($Model)
     foreach ($sample in @($metrics.DispatchCostSamples)) {
         $sampleProvider = if ($sample.PSObject.Properties['provider']) { [string]$sample.provider } else { $null }
+        $sampleModel = if ($sample.PSObject.Properties['model']) { [string]$sample.model } else { $null }
         # Without -Provider: match only legacy rows lacking a provider field (backward compat).
         # With -Provider: match only rows whose provider equals the specified value.
         # This prevents cross-provider contamination once multi-provider rows coexist (post-#545).
         $providerMatch = if ($filterByProvider) { $sampleProvider -eq $Provider } else { [string]::IsNullOrEmpty($sampleProvider) }
+        # Without -Model: match any row regardless of model (opt-in — back-fill callers that
+        # don't know the model tier should still be able to update all matching rows).
+        # With -Model: match only rows whose model equals the specified value.
+        # This prevents cross-model contamination when the caller knows which model row to target.
+        $modelMatch = if ($filterByModel) { $sampleModel -eq $Model } else { $true }
 
-        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode -and $providerMatch) {
+        if ([string]$sample.'step-id' -eq $StepId -and [string]$sample.mode -eq $Mode -and $providerMatch -and $modelMatch) {
             $updatedRcConformance = [string]$sample.'rc-conformance'
             $updatedJudgeDisposition = [string]$sample.'judge-disposition'
             if ($PSBoundParameters.ContainsKey('RcConformance')) { $updatedRcConformance = $RcConformance }
             if ($PSBoundParameters.ContainsKey('JudgeDisposition')) { $updatedJudgeDisposition = $JudgeDisposition }
 
-            # Preserve the existing row's provider field — never drop it on back-fill (issue #514 F1)
+            # Preserve the existing row's provider and model fields — never drop on back-fill (issue #514 F1 for provider; mirrors for model)
             $preservedProvider = if ($sample.PSObject.Properties['provider']) { [string]$sample.provider } else { $null }
             $providerArgs = @{}
             if (-not [string]::IsNullOrEmpty($preservedProvider)) { $providerArgs['Provider'] = $preservedProvider }
+            $preservedModel = if ($sample.PSObject.Properties['model']) { [string]$sample.model } else { $null }
+            $modelArgs = @{}
+            if (-not [string]::IsNullOrEmpty($preservedModel)) { $modelArgs['Model'] = $preservedModel }
 
             [void]$samples.Add((New-DispatchCostSampleRow `
                         -StepId ([string]$sample.'step-id') `
@@ -973,7 +1011,8 @@ function Update-DispatchCostSampleEvaluationInPrBody {
                         -Bytes ([int]$sample.bytes) `
                         -RcConformance $updatedRcConformance `
                         -JudgeDisposition $updatedJudgeDisposition `
-                        @providerArgs))
+                        @providerArgs `
+                        @modelArgs))
             $updated = $true
         }
         else {
@@ -1135,7 +1174,7 @@ function script:Resolve-FCLReviewIntegrityContract {
         [AllowEmptyString()][string]$AdaptersDir = ''
     )
 
-    $prosecutionPasses = @(1, 2, 3)
+    $prosecutionPasses = @(1, 2, 3, 4, 5)
     $integrityStatus = 'passed'
 
     if ($AdapterName -in @('post-fix', 'lite')) {

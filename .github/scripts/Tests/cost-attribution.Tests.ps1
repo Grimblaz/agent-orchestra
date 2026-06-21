@@ -399,17 +399,19 @@ Describe 'Get-CostAttribution' {
     }
 
     Context 'review port parallel-pass aggregation (D13)' {
-        It 'counts all 3 parallel prosecution dispatches in dispatch_count' {
-            # Three Agent dispatches to Code-Critic in one parent turn (parallel pass)
+        It 'counts all 5 parallel prosecution dispatches in dispatch_count' {
+            # Five Agent dispatches to Code-Critic in one parent turn (five-pass two-layer panel)
             $ts = '2026-01-01T00:00:00Z'
             $dispatch1 = script:New-AgentDispatch -SubagentType 'agent-orchestra:Code-Critic' -Timestamp $ts
             $dispatch2 = script:New-AgentDispatch -SubagentType 'agent-orchestra:Code-Critic' -Timestamp $ts
             $dispatch3 = script:New-AgentDispatch -SubagentType 'agent-orchestra:Code-Critic' -Timestamp $ts
-            $parentEvent = script:New-AssistantEvent -Content @($dispatch1, $dispatch2, $dispatch3) -InputTokens 150 -OutputTokens 60
+            $dispatch4 = script:New-AgentDispatch -SubagentType 'agent-orchestra:Code-Critic' -Timestamp $ts
+            $dispatch5 = script:New-AgentDispatch -SubagentType 'agent-orchestra:Code-Critic' -Timestamp $ts
+            $parentEvent = script:New-AssistantEvent -Content @($dispatch1, $dispatch2, $dispatch3, $dispatch4, $dispatch5) -InputTokens 150 -OutputTokens 60
 
             $result = Get-CostAttribution -Events @($parentEvent) -RateTablePath $script:RateTablePath
 
-            $result.ports['review'].dispatch_count | Should -Be 3
+            $result.ports['review'].dispatch_count | Should -Be 5
         }
 
         It 'sets mixed_regime: true for review port' {
@@ -417,7 +419,9 @@ Describe 'Get-CostAttribution' {
             $dispatch1 = script:New-AgentDispatch -SubagentType 'agent-orchestra:Code-Critic' -Timestamp $ts
             $dispatch2 = script:New-AgentDispatch -SubagentType 'agent-orchestra:Code-Critic' -Timestamp $ts
             $dispatch3 = script:New-AgentDispatch -SubagentType 'agent-orchestra:Code-Critic' -Timestamp $ts
-            $parentEvent = script:New-AssistantEvent -Content @($dispatch1, $dispatch2, $dispatch3)
+            $dispatch4 = script:New-AgentDispatch -SubagentType 'agent-orchestra:Code-Critic' -Timestamp $ts
+            $dispatch5 = script:New-AgentDispatch -SubagentType 'agent-orchestra:Code-Critic' -Timestamp $ts
+            $parentEvent = script:New-AssistantEvent -Content @($dispatch1, $dispatch2, $dispatch3, $dispatch4, $dispatch5)
 
             $result = Get-CostAttribution -Events @($parentEvent) -RateTablePath $script:RateTablePath
 
