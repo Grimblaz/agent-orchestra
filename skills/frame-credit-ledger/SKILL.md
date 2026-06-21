@@ -59,7 +59,7 @@ The supported sibling keys are:
 - `prosecution-passes:` — ordered prosecution pass IDs expected in the prosecution output, or an empty list for exempt adapters.
 - `exempt:` — `true` when the adapter has no numbered prosecution pass output to verify.
 
-`Build-ReviewCreditRow` emits the review credit integrity field as `integrity-check.prosecution-passes`. The standard adapter emits `[1, 2, 3]`; lite and post-fix emit `[1]`; exempt adapters emit an empty list with `status: not-applicable`.
+`Build-ReviewCreditRow` emits the review credit integrity field as `integrity-check.prosecution-passes`. The standard adapter emits `[1, 2, 3, 4, 5]`; lite and post-fix emit `[1]`; exempt adapters emit an empty list with `status: not-applicable`.
 
 ## Atomic Marker Hook
 

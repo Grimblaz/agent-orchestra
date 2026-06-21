@@ -854,6 +854,7 @@ function Update-FCLPrBodyDispatchCostSamples {
         [Parameter(Mandatory)][string]$StepId,
         [Parameter(Mandatory)][ValidateSet('spine', 'legacy-fallback', 'budget-exceeded')][string]$Mode,
         [string]$Provider = $null,
+        [string]$Model = $null,
         [ValidateSet('pass', 'fail', 'not-evaluated')][string]$RcConformance,
         [ValidateSet('accepted', 'rejected', 'deferred', 'not-evaluated')][string]$JudgeDisposition
     )
@@ -866,6 +867,7 @@ function Update-FCLPrBodyDispatchCostSamples {
     if ($PSBoundParameters.ContainsKey('RcConformance')) { $updateParameters['RcConformance'] = $RcConformance }
     if ($PSBoundParameters.ContainsKey('JudgeDisposition')) { $updateParameters['JudgeDisposition'] = $JudgeDisposition }
     if ($PSBoundParameters.ContainsKey('Provider')) { $updateParameters['Provider'] = $Provider }
+    if ($PSBoundParameters.ContainsKey('Model')) { $updateParameters['Model'] = $Model }
 
     return Update-DispatchCostSampleEvaluationInPrBody @updateParameters
 }

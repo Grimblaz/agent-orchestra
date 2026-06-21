@@ -8,7 +8,7 @@ See [verdict-mapping.md](verdict-mapping.md) for judge-to-metric mapping details
 
 ## PR Body Pipeline Metrics
 
-Always include a `## Pipeline Metrics` section in the PR body with a hidden HTML comment block containing pipeline telemetry. Emit this at PR creation time after the full pipeline completes. Count values from the post-deduplication merged ledger (not raw per-pass totals). `pass_1_findings + pass_2_findings + pass_3_findings = prosecution_findings`. Fields `prosecution_findings` through `rework_cycles` cover the **main review cycle only**; `postfix_*` fields cover the post-fix targeted prosecution separately.
+Always include a `## Pipeline Metrics` section in the PR body with a hidden HTML comment block containing pipeline telemetry. Emit this at PR creation time after the full pipeline completes. Count values from the post-deduplication merged ledger (not raw per-pass totals). `sum(pass_findings.values) = prosecution_findings`. Fields `prosecution_findings` through `rework_cycles` cover the **main review cycle only**; `postfix_*` fields cover the post-fix targeted prosecution separately.
 
 ```markdown
 ## Pipeline Metrics
@@ -21,9 +21,12 @@ stages_run:
   defense: {true|false}
   judgment: {true|false}
 prosecution_findings: {N}
-pass_1_findings: {N}
-pass_2_findings: {N}
-pass_3_findings: {N}
+pass_findings:
+  1: {N}
+  2: {N}
+  3: {N}
+  4: {N}
+  5: {N}
 defense_disproved: {N}
 judge_accepted: {N}
 judge_rejected: {N}
@@ -83,7 +86,7 @@ findings:
 
 ## Top-Level Field Reference
 
-`0` for numeric fields when the stage ran but found nothing. `n/a` for categorical fields when the stage was skipped entirely (e.g., `ce_gate_result: not-applicable`, `ce_gate_intent: n/a` when `ce_gate: false`). `review_mode` defaults to `full` for older metrics blocks that predate `metrics_version: 3`. `stages_run` defaults to all `true` for pre-v3 metrics because older PR-body metrics only represented completed review pipelines. `ce_gate_defects_found: n/a` when the CE Gate did not run (`ce_gate: false` or `⏭️ CE Gate not applicable`). For proxy prosecution (GitHub review intake): `pass_1_findings`, `pass_2_findings`, `pass_3_findings` → `n/a` (3-pass structure replaced by proxy pass); route total findings count to `prosecution_findings` only. `postfix_*` numeric fields default to `0` when post-fix review was triggered but found nothing; `n/a` when not triggered (`postfix_triggered: false`). Set `postfix_triggered: true` when trigger conditions are met and post-fix prosecution executes (regardless of whether any findings were accepted). New optimization fields: `express_lane_count`, `batch_dispatch_calls`, `batch_dispatch_findings`, `rate_limit_retries` default to `0` when the stage ran; `n/a` when the relevant phase was not active for the current review mode (e.g., `express_lane_count: n/a` for proxy, CE, or design review; `batch_dispatch_calls`/`batch_dispatch_findings: n/a` only for review modes where specialist dispatch is not active — such as standalone design-review flows that stop after prosecution). `postfix_passes` defaults to `n/a` when post-fix review was not triggered; `1` or `2` to reflect actual passes run. `rate_limit_deferred` defaults to `false`. `prosecution_depth_light` and `prosecution_depth_skip` default to empty lists `[]` when no categories are at those depths. `prosecution_depth_override` defaults to `false`. `prosecution_depth_reactivations` defaults to `0` (no re-activation events written via `write-calibration-entry.ps1 -ReactivationEventJson` during this PR; incremented by the Post-Judgment and CE/Proxy re-activation detection steps).
+`0` for numeric fields when the stage ran but found nothing. `n/a` for categorical fields when the stage was skipped entirely (e.g., `ce_gate_result: not-applicable`, `ce_gate_intent: n/a` when `ce_gate: false`). `review_mode` defaults to `full` for older metrics blocks that predate `metrics_version: 3`. `stages_run` defaults to all `true` for pre-v3 metrics because older PR-body metrics only represented completed review pipelines. `ce_gate_defects_found: n/a` when the CE Gate did not run (`ce_gate: false` or `⏭️ CE Gate not applicable`). For proxy prosecution (GitHub review intake): `pass_findings` keys → `n/a` (variable-pass structure replaced by proxy pass); route total findings count to `prosecution_findings` only. `pass_findings` is a keyed map accommodating variable-length pass sets (keys `1` through `5` for the five-pass panel); each key records the count of findings for that pass. Older fixed fields `pass_1_findings`, `pass_2_findings`, `pass_3_findings` are superseded by `pass_findings` but remain supported for backward compatibility in consumers. `postfix_*` numeric fields default to `0` when post-fix review was triggered but found nothing; `n/a` when not triggered (`postfix_triggered: false`). Set `postfix_triggered: true` when trigger conditions are met and post-fix prosecution executes (regardless of whether any findings were accepted). New optimization fields: `express_lane_count`, `batch_dispatch_calls`, `batch_dispatch_findings`, `rate_limit_retries` default to `0` when the stage ran; `n/a` when the relevant phase was not active for the current review mode (e.g., `express_lane_count: n/a` for proxy, CE, or design review; `batch_dispatch_calls`/`batch_dispatch_findings: n/a` only for review modes where specialist dispatch is not active — such as standalone design-review flows that stop after prosecution). `postfix_passes` defaults to `n/a` when post-fix review was not triggered; `1` or `2` to reflect actual passes run. `rate_limit_deferred` defaults to `false`. `prosecution_depth_light` and `prosecution_depth_skip` default to empty lists `[]` when no categories are at those depths. `prosecution_depth_override` defaults to `false`. `prosecution_depth_reactivations` defaults to `0` (no re-activation events written via `write-calibration-entry.ps1 -ReactivationEventJson` during this PR; incremented by the Post-Judgment and CE/Proxy re-activation detection steps).
 
 ### Calibration Data Write (VS Code Copilot only)
 
@@ -110,9 +113,7 @@ if (Test-Path skills/calibration-pipeline/scripts/write-calibration-entry.ps1) {
         )
         summary = @{
             prosecution_findings = <N>
-            pass_1_findings      = <N>
-            pass_2_findings      = <N>
-            pass_3_findings      = <N>
+            pass_findings        = @{ '1' = <N>; '2' = <N>; '3' = <N>; '4' = <N>; '5' = <N> }
             defense_disproved    = <N>
             judge_accepted       = <N>
             judge_rejected       = <N>

@@ -17,7 +17,7 @@ Keep the shared review methodology in [../SKILL.md](../SKILL.md). This platform 
 
 | Adapter | pipeline-stages | atomic | Prosecution pass count | Mode selector strings | Handshake requirement | Defense and judge inclusion | Marker emission | Review-state persistence shape |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `standard` | `prosecution`, `defense`, `judge` | `true` | 3 | `Review mode selector: "Use code review perspectives"`; `Review mode selector: "Use defense review perspectives"` | Required for every Code-Critic prosecution, defense, and retry dispatch; single capture allowed for the three-pass parallel prosecution batch | Defense included; judge included | Emit `<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->` after terminal judge stage when the issue id is known | `/memories/session/review-state-{ISSUE_ID}.md`; `review_mode: full`; `prosecution_complete: true`; `defense_complete: true`; `judgment_complete: true`; `last_updated` UTC |
+| `standard` | `prosecution`, `defense`, `judge` | `true` | 5 (2 generalist + 3 specialist) | `Review mode selector: "Use code review perspectives"`; `Review mode selector: "Use defense review perspectives"` | Required for every Code-Critic prosecution, defense, and retry dispatch; single capture allowed for the five-pass two-layer prosecution panel | Defense included; judge included | Emit `<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->` after terminal judge stage when the issue id is known | `/memories/session/review-state-{ISSUE_ID}.md`; `review_mode: full`; `prosecution_complete: true`; `defense_complete: true`; `judgment_complete: true`; `last_updated` UTC |
 | `lite` | `prosecution` | `n/a` | 1 | `Review mode selector: "Use lite code review perspectives"` | Required for the singleton Code-Critic prosecution dispatch | Defense omitted by adapter contract; judge omitted by adapter contract | Skip; prosecution-only and non-atomic | `/memories/session/review-state-{ISSUE_ID}.md` only when a consumer runs extra terminal stages; otherwise no terminal-state persistence is required by this adapter |
 | `judge-only` | `judge` | `n/a` | 0 | No Code-Critic selector; judge receives existing prosecution and defense ledgers | No Step 0 Code-Critic handshake; freshly captured repo context may be passed to Code-Review-Response as metadata only | Defense omitted; judge included | Skip; non-atomic and exempt | Read existing state when present; force only `judgment_complete: true`; preserve readable prior stage booleans; default `review_mode: full`; update `last_updated` UTC |
 | `proxy-github` | `proxy-prosecution` | `n/a` | 0 | `Score and represent GitHub review` when dispatching proxy prosecution through the intake flow | Construct fresh downstream handshakes for tree-dependent specialist dispatches; skip the block on live-capture failure | Defense omitted; judge omitted | Skip; proxy-only and exempt | GitHub intake persists through the PR or issue review-response path, not the local review-state file unless the caller explicitly bridges it |
@@ -26,7 +26,7 @@ Keep the shared review methodology in [../SKILL.md](../SKILL.md). This platform 
 
 ## Parent-side Environment Handshake Construction
 
-Build handshakes from [../../subagent-env-handshake/SKILL.md](../../subagent-env-handshake/SKILL.md). Parent-side capture is per dispatch unless a three-pass prosecution batch is emitted as one parallel tool-use block.
+Build handshakes from [../../subagent-env-handshake/SKILL.md](../../subagent-env-handshake/SKILL.md). Parent-side capture is per dispatch unless a five-pass two-layer prosecution panel is emitted as one parallel tool-use block.
 
 1. Immediately before each Code-Critic dispatch or retry, capture live parent-side working-tree state with `Bash` in this order:
    - `git rev-parse HEAD`
@@ -47,7 +47,24 @@ Build handshakes from [../../subagent-env-handshake/SKILL.md](../../subagent-env
 
 Select prosecution shape from the adapter contract.
 
-- `standard`: emit `Dispatching prosecution x3 in parallel...`, then dispatch three Code-Critic prosecution passes in one parallel tool-use block with `subagent_type: code-critic`. Prepend the per-pass handshake block, then the authoritative selector `Review mode selector: "Use code review perspectives"`, then the resolved review target context. Keep selector text outside quoted or carried material.
+- `standard`: emit `Dispatching prosecution panel (5-pass, 2 generalist + 3 specialist)...`, then dispatch five Code-Critic prosecution passes in one parallel tool-use block with `subagent_type: code-critic`. Prepend the per-pass handshake block, then the authoritative selector `Review mode selector: "Use code review perspectives"`, then the resolved review target context. Keep selector text outside quoted or carried material. Apply the role→tier map at Agent-tool call time (not in the Code-Critic shell — the shell stays `model: opus`):
+  - Pass 1 — **generalist-A**: full 6-perspective sweep; set `model: sonnet` on the Agent tool call
+  - Pass 2 — **generalist-B**: full 6-perspective sweep; set `model: opus` on the Agent tool call
+  - Pass 3 — **spec-correctness specialist**: edge cases, boundary violations, logic errors; set `model: opus` on the Agent tool call
+  - Pass 4 — **spec-security specialist**: data integrity, injection vectors, permission/auth errors; set `model: opus` on the Agent tool call
+  - Pass 5 — **spec-architecture specialist**: cross-module contracts, abstraction boundaries, interface consistency; set `model: opus` on the Agent tool call
+
+**Role→tier map:**
+
+```
+role→tier map:
+  generalist-A: sonnet
+  generalist-B: opus
+  specialist: opus (now); fable (when permanent)
+
+fallback order (when a tier is unavailable):
+  fable → opus → sonnet → haiku
+```
 - `lite`: dispatch one Code-Critic prosecution pass with `subagent_type: code-critic`. Prepend the fresh handshake block when constructed, then `Review mode selector: "Use lite code review perspectives"`, then the resolved review target context.
 - `design-challenge`: emit the three-pass design challenge in one parallel tool-use block with `subagent_type: code-critic`. Passes 1 and 2 use `Review mode selector: "Use design review perspectives"`; pass 3 uses `Review mode selector: "Use product-alignment perspectives"`.
 - `post-fix`: dispatch one Code-Critic prosecution pass with `subagent_type: code-critic`. Prepend the fresh handshake block when constructed, then `Review mode selector: "Use post-fix code review perspectives"`, then the fix diff, sustained finding context, and validation evidence.
@@ -58,13 +75,14 @@ Select prosecution shape from the adapter contract.
 
 ## Merge And Progress Signal
 
-After all available prosecution passes return, merge and deduplicate findings by same perspective target plus same failure mode, preserving earliest-pass credit. Emit the visible progress signal exactly in this shape:
+After all available prosecution passes return, merge and deduplicate findings using cross-layer dedup: merge on same failure-mode plus same code-location (not perspective label). When two passes report the same defect, prefer the finding from the deepest-tier pass (Opus preferred over Sonnet). This resolves inter-layer duplicates more precisely than perspective-label matching. Emit the visible progress signal exactly in this shape:
 
 ```text
 Merged prosecution ledger: {count} finding(s).
+Panel: {role} ({tier}) x{N} [degraded: {list or 'none'}]
 ```
 
-For degraded three-pass prosecution, name the failed pass visibly and merge only the surviving valid passes. For singleton prosecution, there is no degraded merge path.
+For degraded prosecution, name the failed pass visibly (by role and tier) and merge only the surviving valid passes. For singleton prosecution, there is no degraded merge path.
 
 ## Defense Dispatch
 
@@ -92,13 +110,14 @@ Run judge only when the adapter includes `judge` in `integrity-contract.pipeline
 
 ## Partial-pass Recovery
 
-- The redundant retry policy applies only to three-pass prosecution sets in `standard` and `design-challenge`.
-- If one redundant Code-Critic prosecution pass has a body-load failure, cannot load the shared body, returns malformed output, or encounters an ND-2 environment-divergence, retry that pass once with the same substantive prompt and a newly recaptured handshake block when construction succeeds.
-- If the retry also fails, represent that pass as `pipeline-degraded`, name the failed pass visibly, and continue only when enough valid passes remain to form the adapter's allowed merged prosecution ledger.
+- The redundant retry policy applies only to the five-pass two-layer prosecution panel in `standard` and the three-pass panel in `design-challenge`.
+- If one Code-Critic prosecution pass has a body-load failure, cannot load the shared body, returns malformed output, or encounters an ND-2 environment-divergence, retry that pass once with the same substantive prompt and a newly recaptured handshake block when construction succeeds.
+- If the retry also fails, represent that pass as `pipeline-degraded`, name the failed pass visibly by role and tier, and evaluate quorum: the panel survives iff **at least 1 generalist AND at least 1 specialist survive** (quorum evaluated after all per-pass retries resolve). If quorum fails, halt. Record which passes are degraded (role, tier) in the verdict panel-composition line.
+- A pass "survives" when it returns a well-formed ledger after at most the inherited single retry.
 - Singleton prosecution paths are halt-strict: `lite`, `post-fix`, and proxy singleton prosecution must stop when the only prosecution body load fails, is missing, or is malformed.
 - Singleton defense paths are halt-strict: if Code-Critic defense body load fails, stop and do not continue to judge, marker emission, or review-state persistence.
 - Singleton judge paths are halt-strict: if Code-Review-Response body load fails, stop and do not emit a terminal success marker or write completion state.
-- Do not use two-of-three degraded recovery for defense or judge.
+- Do not use degraded-recovery for defense or judge.
 
 ## Post-terminal Marker Emission
 

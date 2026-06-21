@@ -79,7 +79,7 @@
       {
         "marker": null,
         "mode": "code_prosecution",
-        "passes": 3,
+        "passes": 5,
         "parallel": true
       },
       {
@@ -97,7 +97,7 @@
       {
         "marker": "Use code review perspectives",
         "mode": "code_prosecution",
-        "passes": 3,
+        "passes": 5,
         "parallel": true
       },
       {

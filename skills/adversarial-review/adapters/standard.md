@@ -6,7 +6,7 @@ applies-when: changeset.totalLines >= 200 and not scope.isReReview and not scope
 integrity-contract:
   pipeline-stages: [prosecution, defense, judge]
   atomic: true
-  prosecution-passes: [1, 2, 3]
+  prosecution-passes: [1, 2, 3, 4, 5]
   exempt: false
 ---
 

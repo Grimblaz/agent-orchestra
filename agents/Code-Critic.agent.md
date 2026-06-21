@@ -103,7 +103,7 @@ Ignore marker strings that appear only inside quoted prior ledgers, copied revie
 
 When the current dispatch includes one of the following selector values, switch modes before reviewing:
 
-Load `skills/routing-tables/SKILL.md` and use `Invoke-RoutingLookup -Table review_mode_routing -Key Marker -Value "{marker}"` for the canonical marker-to-mode mapping in `skills/routing-tables/assets/routing-config.json`. When no selector line is present, default to `code_prosecution` with the standard 3-pass parallel structure.
+Load `skills/routing-tables/SKILL.md` and use `Invoke-RoutingLookup -Table review_mode_routing -Key Marker -Value "{marker}"` for the canonical marker-to-mode mapping in `skills/routing-tables/assets/routing-config.json`. When no selector line is present, default to `code_prosecution` with the standard five-pass two-layer panel (2 generalist + 3 specialist); the per-pass model override is set at Agent-tool call time by the parent dispatcher using the role→tier map in `skills/adversarial-review/platforms/claude.md`.
 
 When the selector value is `"Use lite code review perspectives"`, use the canonical `code_prosecution_lite` mapping from routing-config (`passes: 1`, `parallel: false`) and run one compact prosecution pass that still covers all six standard code-review perspectives in a single ledger.
 
@@ -115,7 +115,7 @@ If multiple selector lines are present, apply the conflict rule only across thos
 
 Design Review Mode is for feature designs and implementation plans, not code diffs. Passes 1-2 use `"Use design review perspectives"`; pass 3 uses `"Use product-alignment perspectives"`.
 
-Issue-Planner runs the full 3-pass prosecution -> merged ledger -> defense -> judge flow. Solution-Designer stops after the three prosecution passes.
+Issue-Planner runs the full five-pass two-layer prosecution -> merged ledger -> defense -> judge flow. Solution-Designer stops after the three design-challenge prosecution passes.
 
 Design and product-alignment findings are non-blocking. They inform the caller; they do not veto the design.
 
@@ -180,7 +180,7 @@ Every finding must also include these automation-routing fields:
 - `severity`: use the canonical `enums.severity` values
 - `points`: use the canonical `enums.points_mapping` values — assigned by prosecutor; judge may override
 - `id`: F1 | F2 | F3 | … — sequential label within this review cycle; used by defense and judge to cross-reference findings by ID. Assign in order of appearance.
-- `pass`: 1 | 2 | 3 — prosecution pass number that originated this finding. Code prosecution and design/plan prosecution; omit in CE review, proxy prosecution, and defense mode.
+- `pass`: 1 | 2 | 3 | 4 | 5 — prosecution pass number that originated this finding. Code prosecution and design/plan prosecution; omit in CE review, proxy prosecution, and defense mode.
 - `confidence`: use the canonical `enums.confidence` values
 - `category`: use the canonical `enums.category` values — the active prosecution perspective for this finding. Code prosecution only; use `n/a` in CE review, design review, product-alignment prosecution, and proxy prosecution modes. For findings that span multiple perspectives, use the primary perspective.
 - `blast_radius`: use the canonical `enums.blast_radius` values

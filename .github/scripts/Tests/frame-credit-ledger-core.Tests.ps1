@@ -738,6 +738,132 @@ credits:
                 $normalized | Should -Match 'provider: claude'
             }
         }
+
+        Context 'Context: model field — round-trip (issue #706)' {
+
+            It 'model-without-provider: 6-key row (model at position 6) parses without error (A fix)' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s20
+        mode: spine
+        bytes: 8000
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+        model: opus
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+                $result.MetricsVersion | Should -Be 4
+                $sample = @($result.DispatchCostSamples)[0]
+                $sample.PSObject.Properties['model'] | Should -Not -BeNullOrEmpty
+                $sample.model | Should -Be 'opus'
+            }
+
+            It 'model-with-provider: 7-key row (provider at 6, model at 7) round-trips correctly' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s21
+        mode: spine
+        bytes: 9000
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+        provider: anthropic
+        model: sonnet
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $result = Read-PRMetricsBlock -PrBody $body
+                $sample = @($result.DispatchCostSamples)[0]
+                $sample.provider | Should -Be 'anthropic'
+                $sample.model | Should -Be 'sonnet'
+            }
+
+            It 'same step/mode/provider with different model produces two distinct rows — not collapsed (F fix)' {
+                $baseYaml = @'
+metrics_version: 4
+frame_version: 1
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $baseYaml
+                # Add opus row first
+                $body = Add-DispatchCostSampleToPrBody -PrBody $body -StepId 's22' -Mode 'spine' -Bytes 8000 -Provider 'anthropic' -Model 'opus'
+                # Add sonnet row for same step/mode/provider — must NOT collapse into one row
+                $body = Add-DispatchCostSampleToPrBody -PrBody $body -StepId 's22' -Mode 'spine' -Bytes 3000 -Provider 'anthropic' -Model 'sonnet'
+                $result = Read-PRMetricsBlock -PrBody $body
+                @($result.DispatchCostSamples).Count | Should -Be 2
+                $opusRow = @($result.DispatchCostSamples) | Where-Object { $_.model -eq 'opus' }
+                $sonnetRow = @($result.DispatchCostSamples) | Where-Object { $_.model -eq 'sonnet' }
+                $opusRow.bytes | Should -Be 8000
+                $sonnetRow.bytes | Should -Be 3000
+            }
+        }
+
+        Context 'Context: model field — back-fill preservation (issue #706, B fix)' {
+
+            It 'model is preserved when Update-DispatchCostSampleEvaluationInPrBody back-fills RC on a model-only 6-key row' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s23
+        mode: spine
+        bytes: 8000
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+        model: opus
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $updated = Update-DispatchCostSampleEvaluationInPrBody -PrBody $body -StepId 's23' -Mode 'spine' -RcConformance 'pass'
+                $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+                $normalized | Should -Match 'model: opus'
+                $normalized | Should -Match 'rc-conformance: pass'
+                $result = Read-PRMetricsBlock -PrBody $updated
+                @($result.DispatchCostSamples).Count | Should -Be 1
+            }
+
+            It 'model is preserved when Update-DispatchCostSampleEvaluationInPrBody back-fills RC on a 7-key provider+model row' {
+                $yaml = @'
+metrics_version: 4
+frame_version: 1
+dispatch-cost-samples:
+    - step-id: s24
+        mode: spine
+        bytes: 9000
+        rc-conformance: not-evaluated
+        judge-disposition: not-evaluated
+        provider: anthropic
+        model: opus
+credits:
+    - port: implement-test
+        status: passed
+        evidence: "tests passed"
+'@
+                $body = & $script:NewV4PrBody -Yaml $yaml
+                $updated = Update-DispatchCostSampleEvaluationInPrBody -PrBody $body -StepId 's24' -Mode 'spine' -Provider 'anthropic' -RcConformance 'pass'
+                $normalized = ($updated -replace "`r`n", "`n") -replace "`r", "`n"
+                $normalized | Should -Match 'provider: anthropic'
+                $normalized | Should -Match 'model: opus'
+                $normalized | Should -Match 'rc-conformance: pass'
+            }
+        }
 }
 
 Describe 'Get-PortFiles' {

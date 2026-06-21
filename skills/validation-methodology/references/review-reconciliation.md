@@ -6,7 +6,7 @@ See [post-judgment-routing.md](post-judgment-routing.md) for the paired post-jud
 
 ## Review Reconciliation Loop
 
-Use the `validation-methodology` skill (`skills/validation-methodology/SKILL.md`) for the reusable review-reconciliation method: pre-review gate, prosecution-depth setup, change-type classification, fixed 3-pass critic mechanics, defense and judgment sequencing, prosecution-depth exclusions, and merged-ledger deduplication rules.
+Use the `validation-methodology` skill (`skills/validation-methodology/SKILL.md`) for the reusable review-reconciliation method: pre-review gate, prosecution-depth setup, change-type classification, five-pass two-layer critic mechanics, defense and judgment sequencing, prosecution-depth exclusions, and merged-ledger deduplication rules.
 
 ### Pre-Review Gate
 
@@ -22,14 +22,14 @@ Before composing pass prompts:
 4. Record the depth map for later re-activation checks.
 5. Log a brief summary: `Prosecution depth: N full, N light, N skip`.
 6. Compose per-pass exclusions:
-   - Pass 1 excludes `skip` categories.
-   - Passes 2 and 3 exclude both `skip` and `light` categories.
+   - Pass 1 (generalist-A) excludes `skip` categories.
+   - Passes 2–5 (generalist-B and all specialist passes) exclude both `skip` and `light` categories.
 7. Safe fallback: if the aggregate script fails, YAML parsing fails, or the `prosecution_depth:` block is absent from parsed output, treat all categories as `full` and log `Prosecution depth: all full (fallback - {reason})`.
 
 Append this exclusion block to each prosecution pass prompt:
 
 ```text
-**Prosecution Depth Exclusions (pass {N} of 3)**:
+**Prosecution Depth Exclusions (pass {N} of 5)**:
 The following categories have been excluded from this pass based on calibration data.
 Do NOT generate findings in these categories - they will be discarded.
 Excluded: {comma-separated list of excluded categories, or "none"}
@@ -39,7 +39,7 @@ Excluded: {comma-separated list of excluded categories, or "none"}
 
 ### Critic Pass Protocol
 
-Run exactly 3 independent prosecution passes per review cycle. The pass count is fixed.
+Run exactly 5 independent prosecution passes per review cycle in a two-layer panel (2 generalist + 3 specialist). The pass count is fixed.
 
 - Each pass is an independent invocation, not a duplicate of prior output.
 - Coverage variance is expected; separate passes are intended to surface complementary findings.
@@ -64,14 +64,14 @@ For `documentation-only` reviews, include only the changed files in the reading 
 
 #### Pass Execution And Merge Rules
 
-- Launch all 3 passes in parallel as independent review calls.
-- Label each call as adversarial review pass `N of 3` and require `pass: N` tags in the automation-routing fields.
+- Launch all 5 passes in parallel as independent review calls.
+- Label each call as adversarial review pass `N of 5` and require `pass: N` tags in the automation-routing fields.
 - Merge the findings into one ledger after all passes complete.
 - Deduplicate only when two passes report identical evidence at the same file and line.
 - Treat different framings of the same evidence as one finding.
 - Treat complementary findings from different passes as additive.
 - Preserve all `pass: N` tags in the merged ledger.
-- When findings are deduplicated, credit the earliest pass.
+- When findings are deduplicated, prefer the finding from the deepest-tier pass (Opus preferred over Sonnet); record displaced passes in `also_flagged_by`.
 
 ### Defense And Judgment
 
@@ -102,7 +102,7 @@ For `github review` / `review github` / `cr review`, follow `skills/code-review-
 
 ### Non-GitHub Review Mode
 
-For local/internal reviews, run the same pipeline: 3 prosecution passes (parallel) -> merge ledger -> 1 defense pass -> 1 judge pass (Code-Review-Response).
+For local/internal reviews, run the same pipeline: 5 prosecution passes in parallel (two-layer panel: 2 generalist + 3 specialist) -> merge ledger -> 1 defense pass -> 1 judge pass (Code-Review-Response).
 
 #### Short-Trigger Routing
 

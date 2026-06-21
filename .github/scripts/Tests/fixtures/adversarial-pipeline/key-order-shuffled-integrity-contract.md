@@ -2,7 +2,7 @@
 name: shuffled-integrity-contract
 integrity-contract:
   exempt: false
-  prosecution-passes: [1, 2, 3]
+  prosecution-passes: [1, 2, 3, 4, 5]
   atomic: true
   pipeline-stages: [prosecution, defense, judge]
 ---
