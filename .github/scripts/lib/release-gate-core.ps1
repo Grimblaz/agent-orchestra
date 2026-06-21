@@ -20,14 +20,9 @@ function Test-ReleaseGateEntryPointTouched {
     return $false
 }
 
-function Get-PluginVersion {
-    param([Parameter(Mandatory)][string]$Path)
-    try {
-        $content = Get-Content -Path $Path -Raw -ErrorAction Stop
-    } catch {
-        return $null
-    }
-    if ($content -match '"version":\s*"([\d.]+)"') {
+function Get-PluginVersionFromString {
+    param([Parameter(Mandatory)][AllowEmptyString()][string]$Content)
+    if ($Content -match '"version":\s*"([\d.]+)"') {
         $versionString = $matches[1]
     } else {
         return $null
@@ -36,6 +31,16 @@ function Get-PluginVersion {
         return $null
     }
     return $versionString
+}
+
+function Get-PluginVersion {
+    param([Parameter(Mandatory)][string]$Path)
+    try {
+        $content = Get-Content -Path $Path -Raw -ErrorAction Stop
+    } catch {
+        return $null
+    }
+    return Get-PluginVersionFromString -Content $content
 }
 
 function Compare-PluginVersionIsGreater {
@@ -65,7 +70,6 @@ function Get-ReleaseGateWaiver {
 
 function Invoke-ReleaseGateEvaluation {
     param(
-        [Parameter(Mandatory)][string[]]$ChangedFiles,
         [Parameter(Mandatory)][string]$HeadVersion,
         [Parameter(Mandatory)][string]$BaseVersion,
         [Parameter(Mandatory)][AllowEmptyString()][string]$ChangelogContent,

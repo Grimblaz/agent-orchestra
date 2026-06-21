@@ -14,6 +14,10 @@
       - Invoke-ReleaseGateEvaluation      : pure orchestrator, waiver application
 
     Tests are RED until s2 creates release-gate-core.ps1.
+
+    Additional describe blocks added in the GitHub review pass (proxy prosecution G-1/G-2/G-9):
+      - Get-PluginVersionFromString (new shared extractor; folds G-3/G-6 base-version asymmetry)
+      - Get-ReleaseGateWaiver: regression for G-1 multi-line commit space-join bug
 #>
 
 BeforeAll {
@@ -99,14 +103,40 @@ Describe 'Get-PluginVersion' {
         }
     }
 
-    It 'returns $null or throws for a nonexistent file path' {
+    It 'returns $null for a nonexistent file path' {
         $nonExistentPath = Join-Path $PSScriptRoot 'does-not-exist-xyzzy-12345.json'
-        try {
-            $result = Get-PluginVersion -Path $nonExistentPath
-            $result | Should -BeNullOrEmpty
-        } catch {
-            $true | Should -Be $true
-        }
+        $result = Get-PluginVersion -Path $nonExistentPath
+        $result | Should -BeNullOrEmpty
+    }
+}
+
+# ===========================================================================
+Describe 'Get-PluginVersionFromString' {
+# ===========================================================================
+# Shared string extractor used by both Get-PluginVersion and the wrapper's base-branch
+# version parse. Ensures the same strict no-leading-zeros rule applies everywhere (G-3/G-6).
+
+    It 'returns the version string for a valid 3-segment version' {
+        $json = '{"name":"agent-orchestra","version":"2.31.0"}'
+        $result = Get-PluginVersionFromString -Content $json
+        $result | Should -Be '2.31.0'
+    }
+
+    It 'returns $null for a 2-segment version' {
+        $json = '{"name":"agent-orchestra","version":"2.31"}'
+        $result = Get-PluginVersionFromString -Content $json
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'returns $null for a leading-zero version (2.030.0) — strict rule applies to base JSON too' {
+        $json = '{"name":"agent-orchestra","version":"2.030.0"}'
+        $result = Get-PluginVersionFromString -Content $json
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'returns $null for empty content' {
+        $result = Get-PluginVersionFromString -Content ''
+        $result | Should -BeNullOrEmpty
     }
 }
 
@@ -205,6 +235,16 @@ Describe 'Get-ReleaseGateWaiver' {
         $result = Get-ReleaseGateWaiver -CommitMessage $msg
         $result | Should -BeNullOrEmpty
     }
+
+    It 'detects waiver in a realistic multi-line commit when lines are newline-separated (G-1 regression)' {
+        # Regression: git log -1 --format=%B returns Object[]; if space-joined instead of
+        # newline-joined, the line-anchored (?m)^Skip-Release-Check: regex fails silently.
+        # Fix: (@(git log ...) -join [Environment]::NewLine). This test documents the contract.
+        $nl = [Environment]::NewLine
+        $msg = "feat: add new feature${nl}${nl}This change ships CHANGELOG-only.${nl}Skip-Release-Check: changelog-only"
+        $result = Get-ReleaseGateWaiver -CommitMessage $msg
+        $result | Should -Be 'changelog-only'
+    }
 }
 
 # ===========================================================================
@@ -213,7 +253,6 @@ Describe 'Invoke-ReleaseGateEvaluation' {
 
     It 'returns Pass=$true and ExitCode=0 when both legs pass and no waiver is present' {
         $result = Invoke-ReleaseGateEvaluation `
-            -ChangedFiles      @('skills/foo/SKILL.md') `
             -HeadVersion       '2.31.0' `
             -BaseVersion       '2.30.0' `
             -ChangelogContent  "## [2.31.0] — 2026-06-21`nRelease notes." `
@@ -226,7 +265,6 @@ Describe 'Invoke-ReleaseGateEvaluation' {
 
     It 'returns Pass=$false and FailedLegs includes bump when base equals head (no version bump)' {
         $result = Invoke-ReleaseGateEvaluation `
-            -ChangedFiles      @('skills/foo/SKILL.md') `
             -HeadVersion       '2.30.0' `
             -BaseVersion       '2.30.0' `
             -ChangelogContent  "## [2.30.0] — 2026-06-12`nRelease notes." `
@@ -239,7 +277,6 @@ Describe 'Invoke-ReleaseGateEvaluation' {
 
     It 'returns Pass=$false and FailedLegs includes changelog when bump present but changelog section missing' {
         $result = Invoke-ReleaseGateEvaluation `
-            -ChangedFiles      @('skills/foo/SKILL.md') `
             -HeadVersion       '2.31.0' `
             -BaseVersion       '2.30.0' `
             -ChangelogContent  "## [2.30.0] — 2026-06-12`nPrevious release." `
@@ -252,7 +289,6 @@ Describe 'Invoke-ReleaseGateEvaluation' {
 
     It 'returns Pass=$true when bump present, CHANGELOG missing, but changelog-only waiver is applied' {
         $result = Invoke-ReleaseGateEvaluation `
-            -ChangedFiles      @('skills/foo/SKILL.md') `
             -HeadVersion       '2.31.0' `
             -BaseVersion       '2.30.0' `
             -ChangelogContent  "## [2.30.0] — 2026-06-12`nPrevious release." `
@@ -265,7 +301,6 @@ Describe 'Invoke-ReleaseGateEvaluation' {
 
     It 'returns Pass=$false when no bump but changelog present and changelog-only waiver — bump leg is NOT waived' {
         $result = Invoke-ReleaseGateEvaluation `
-            -ChangedFiles      @('skills/foo/SKILL.md') `
             -HeadVersion       '2.30.0' `
             -BaseVersion       '2.30.0' `
             -ChangelogContent  "## [2.30.0] — 2026-06-12`nRelease notes." `
@@ -278,7 +313,6 @@ Describe 'Invoke-ReleaseGateEvaluation' {
 
     It 'returns Pass=$true when both legs fail but all waiver is applied' {
         $result = Invoke-ReleaseGateEvaluation `
-            -ChangedFiles      @('skills/foo/SKILL.md') `
             -HeadVersion       '2.30.0' `
             -BaseVersion       '2.30.0' `
             -ChangelogContent  "## [2.29.0] — 2026-05-01`nOlder release." `

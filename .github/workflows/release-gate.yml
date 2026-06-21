@@ -24,9 +24,13 @@ jobs:
           persist-credentials: false
 
       - name: Fetch base branch
-        run: git fetch origin ${{ github.event.pull_request.base.ref }}
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: git fetch origin "$BASE_REF"
 
       - name: Run release gate
         shell: pwsh
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
-          ./.github/scripts/release-gate.ps1 -BaseRef '${{ github.event.pull_request.base.ref }}'
+          ./.github/scripts/release-gate.ps1 -BaseRef $env:BASE_REF
