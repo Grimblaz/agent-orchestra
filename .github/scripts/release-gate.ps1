@@ -39,7 +39,7 @@ if (-not $entryPointTouched) {
     exit 0
 }
 
-$baseJsonRaw = @(git show "origin/$BaseRef:.claude-plugin/plugin.json")
+$baseJsonRaw = @(git show "origin/${BaseRef}:.claude-plugin/plugin.json")
 $baseJsonExitCode = $LASTEXITCODE
 if ($baseJsonExitCode -ne 0) {
     Write-Error "Failed to read base-branch plugin.json (exit $baseJsonExitCode) — failing closed"
