@@ -29,10 +29,13 @@ Treat these paths as cache-keyed plugin entry points:
 - `agents/**`
 - `commands/**`
 - `skills/**`
+- `hooks/**`
 - `.claude-plugin/**`
 - `plugin.json`
 - `README.md`
 - `.github/copilot-instructions.md`
+
+> **Authoritative source**: The canonical entry-point set is defined by `Get-FVPluginEntryPointPatterns` in `.github/scripts/lib/frame-predicate-core.ps1`. The list above mirrors it; `.github/scripts/Tests/entry-point-scope-parity.Tests.ps1` permanently prevents drift between this prose and the function.
 
 Any edit touching one of those paths requires a release-hygiene check before the turn ends.
 
