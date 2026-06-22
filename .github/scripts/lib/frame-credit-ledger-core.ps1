@@ -1564,12 +1564,17 @@ function Get-PortFiles {
             $rawBOI = script:Get-FCLNestedScalar -Block $raw -ParentKey 'enforce' -ChildKey 'block-on-inconclusive'
             $blockOnInconclusive = if ($null -eq $rawBOI) { $true } else { $rawBOI -eq 'true' }
 
+            $triggerStatus = script:Get-FCLScalar -Block $raw -Name 'trigger-status'
+            $triggerDeferredTo = script:Get-FCLScalar -Block $raw -Name 'trigger-deferred-to'
+
             $results.Add([pscustomobject]@{
                     Name                = $name
                     Description         = $description
                     Applies             = $applies
                     Status              = $status
                     BlockOnInconclusive = [bool]$blockOnInconclusive
+                    TriggerStatus       = if ([string]::IsNullOrWhiteSpace($triggerStatus)) { $null } else { $triggerStatus }
+                    TriggerDeferredTo   = if ([string]::IsNullOrWhiteSpace($triggerDeferredTo)) { $null } else { $triggerDeferredTo }
                 }) | Out-Null
         }
         catch {
@@ -1579,6 +1584,54 @@ function Get-PortFiles {
     }
 
     return $results.ToArray()
+}
+
+function Resolve-FCLRecoveryCommand {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$PortName,
+        [Parameter(Mandatory)][string]$SubReason
+    )
+
+    # Port-specific registry (checked first)
+    $portRegistry = @{
+        'review'             = 'Run /orchestra:review to complete the adversarial review pipeline'
+        'post-fix-review'    = 'Run /orchestra:review (post-fix) after Code-Smith applies fixes'
+        'ce-gate-cli'        = 'Run /experience {N} CE Gate to capture CE Gate evidence for the CLI surface'
+        'ce-gate-browser'    = 'Run /experience {N} CE Gate to capture CE Gate evidence for the browser surface'
+        'ce-gate-canvas'     = 'Run /experience {N} CE Gate to capture CE Gate evidence for the canvas surface'
+        'ce-gate-api'        = 'Run /experience {N} CE Gate to capture CE Gate evidence for the API surface'
+        'plan'               = 'Run /plan {N} to produce an implementation plan'
+        'design'             = 'Run /design {N} to produce a technical design'
+        'experience'         = 'Run /experience {N} to produce customer framing'
+        'release-hygiene'    = 'Ensure a version bump and CHANGELOG entry are present in this PR'
+        'post-pr'            = 'Run post-PR archival steps via /orchestrate after the PR merges'
+        'implement-code'     = 'Ensure the implement-code credit row is present in the PR pipeline-metrics block'
+        'implement-test'     = 'Ensure the implement-test credit row is present in the PR pipeline-metrics block'
+        'implement-refactor' = 'Ensure the implement-refactor credit row is present in the PR pipeline-metrics block'
+        'implement-docs'     = 'Ensure the implement-docs credit row is present in the PR pipeline-metrics block'
+        'process-review'     = 'Run Process-Review agent to complete systemic analysis'
+    }
+
+    # Sub-reason fallback registry (when no port-specific entry or as supplement)
+    $subReasonRegistry = @{
+        'NoEvidence'             = "No adapters or credits found for port '$PortName'. Check that the frame spine declares this port and that credits were emitted."
+        'MissingNextStepField'   = "Adapter for port '$PortName' has no SuggestedNextStep field. Update the adapter YAML to include a suggested-next-step value."
+        'AdapterParseError'      = "Adapter YAML for port '$PortName' failed to parse. Fix the adapter file syntax and re-run the hook."
+        'AdapterDiscoveryFailed' = "All adapters for port '$PortName' returned unknown applicability. Check that the adapter's applies-when predicate is correctly wired."
+        'UnknownCreditStatus'    = "Credit for port '$PortName' has an unrecognized status. Valid statuses: passed, failed, skipped, not-applicable, inconclusive, not-persisted, overridden."
+    }
+
+    if ($portRegistry.ContainsKey($PortName)) {
+        return $portRegistry[$PortName]
+    }
+
+    if ($subReasonRegistry.ContainsKey($SubReason)) {
+        return $subReasonRegistry[$SubReason]
+    }
+
+    # Absolute fallback — always non-empty
+    return "Check port '$PortName' (sub-reason: $SubReason): verify that the frame spine declares this port and that the producing adapter emitted a valid credit."
 }
 
 function Resolve-PortStatus {
@@ -1797,6 +1850,7 @@ function Compose-Comment {
                     'InconclusiveCredit'  { 'inconclusive' }
                     'NotPersistedCredit'  { 'not-persisted' }
                     'MissingAdapter'      { 'missing' }
+                    'DeferredPort'        { 'deferred' }
                     default               { [string]$r.SubReason }
                 }
             }
@@ -1808,6 +1862,7 @@ function Compose-Comment {
                 'failed'        { '❌' }
                 'inconclusive'  { '⚠️' }
                 'not-persisted' { '🔇' }
+                'deferred'      { '⏸️' }
                 default         { '❓' }
             }
 

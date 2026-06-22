@@ -57,7 +57,7 @@ catch {
         # Warn-mode invariant: never block PR creation on a lib-load error.
         exit 0
     }
-    exit 1
+    exit 5
 }
 
 # Cost pattern lib dot-sources (warn-mode fail-open: cost composition failure never blocks PR creation)
@@ -1251,9 +1251,10 @@ function Invoke-FrameCreditLedger {
         }
 
         return @{
-            ExitCode      = 0
-            HasNotCovered = $false
-            Comment       = $comment
+            ExitCode        = 5
+            HasBlock        = $true
+            IsInternalError = $true
+            Comment         = $comment
         }
     }
 
@@ -1269,9 +1270,10 @@ function Invoke-FrameCreditLedger {
         }
 
         return @{
-            ExitCode      = 0
-            HasNotCovered = $false
-            Comment       = $comment
+            ExitCode        = 5
+            HasBlock        = $true
+            IsInternalError = $true
+            Comment         = $comment
         }
     }
 
@@ -1285,9 +1287,10 @@ function Invoke-FrameCreditLedger {
         }
 
         return @{
-            ExitCode      = 0
-            HasNotCovered = $false
-            Comment       = $comment
+            ExitCode        = 5
+            HasBlock        = $true
+            IsInternalError = $true
+            Comment         = $comment
         }
     }
 
@@ -1397,7 +1400,97 @@ function Invoke-FrameCreditLedger {
     }
 
     $reportsArray = $portReports.ToArray()
-    $hasNotCovered = @($reportsArray | Where-Object { [string]$_.Status -eq 'NotCovered' }).Count -gt 0
+
+    # Build a port-descriptor lookup for fast access to BlockOnInconclusive and TriggerStatus.
+    $portDescriptorMap = @{}
+    foreach ($pd in $ports) {
+        $portDescriptorMap[[string]$pd.Name] = $pd
+    }
+
+    # Determine which ports should block in enforce mode.
+    # A port blocks when:
+    #   1. Status = 'NotCovered' (port has a gap — always blocks)
+    #   2. Status = 'Inconclusive' AND it is a misconfiguration sub-reason (AdapterParseError,
+    #      AdapterDiscoveryFailed) — always blocks regardless of BlockOnInconclusive
+    #   3. Status = 'Inconclusive' AND the port's BlockOnInconclusive = true (per-port flag)
+    # Exception: ports with TriggerStatus = 'deferred' are NEVER included in the block set.
+    $blockingReports = @($reportsArray | Where-Object {
+        $r = $_
+        $portName = [string]$r.PortName
+        $status = [string]$r.Status
+        $subReason = [string]$r.SubReason
+
+        # Deferred ports: never block, render DEFERRED row separately.
+        $pd = $portDescriptorMap[$portName]
+        if ($null -ne $pd -and [string]$pd.TriggerStatus -eq 'deferred') {
+            return $false
+        }
+
+        if ($status -eq 'NotCovered') {
+            return $true
+        }
+
+        if ($status -eq 'Inconclusive') {
+            # Misconfiguration classes always block.
+            if ($subReason -in @('AdapterParseError', 'AdapterDiscoveryFailed')) {
+                return $true
+            }
+            # Per-port flag.
+            if ($null -ne $pd) {
+                $boi = $pd.PSObject.Properties['BlockOnInconclusive']
+                if ($null -ne $boi) { return [bool]$boi.Value }
+            }
+            return $true  # fail-safe default
+        }
+
+        return $false
+    })
+    $hasBlock = $blockingReports.Count -gt 0
+
+    # Fill recovery commands for blocking reports that have no SuggestedNextStep.
+    $reportsArray = @($reportsArray | ForEach-Object {
+        $r = $_
+        if ($null -eq $r.SuggestedNextStep -or [string]::IsNullOrWhiteSpace([string]$r.SuggestedNextStep)) {
+            $status = [string]$r.Status
+            $subReason = [string]$r.SubReason
+            # Only fill for statuses that are presented as actionable in the report
+            if ($status -in @('NotCovered', 'Inconclusive')) {
+                $recovery = Resolve-FCLRecoveryCommand -PortName ([string]$r.PortName) -SubReason $subReason
+                $r = [pscustomobject]@{
+                    PortName          = $r.PortName
+                    Status            = $r.Status
+                    SubReason         = $r.SubReason
+                    AdapterName       = $r.AdapterName
+                    SuggestedNextStep = $recovery
+                    Evidence          = $r.Evidence
+                }
+            }
+        }
+        $r
+    })
+
+    # Ensure deferred ports render a visible DEFERRED(#NNN): row.
+    # These ports are excluded from the block check (above) but must appear in the render table.
+    foreach ($pd in $ports) {
+        if ([string]$pd.TriggerStatus -ne 'deferred') { continue }
+        $portName = [string]$pd.Name
+        $deferredTo = if ($null -ne $pd.TriggerDeferredTo) { [string]$pd.TriggerDeferredTo } else { 'unknown' }
+
+        # Check if this port already has a report (it might have a credit with DEFERRED evidence)
+        $existing = @($reportsArray | Where-Object { [string]$_.PortName -eq $portName })
+        if ($existing.Count -eq 0) {
+            # Add a synthetic DEFERRED row — status Covered/DeferredPort, never auto-filtered
+            $deferredRow = [pscustomobject]@{
+                PortName          = $portName
+                Status            = 'Covered'
+                SubReason         = 'DeferredPort'
+                AdapterName       = ''
+                SuggestedNextStep = "Deferred to issue $deferredTo"
+                Evidence          = "DEFERRED($deferredTo): port excluded until producing issue lands"
+            }
+            $reportsArray = @($reportsArray) + $deferredRow
+        }
+    }
 
     # ---------------------------------------------------------------------------
     # Step 5b: 90-day deferred-port tripwire (issue #443, Step 11)
@@ -1587,8 +1680,8 @@ function Invoke-FrameCreditLedger {
     }
 
     return @{
-        ExitCode      = if ($Mode -eq 'enforce' -and $hasNotCovered) { 1 } else { 0 }
-        HasNotCovered = $hasNotCovered
+        ExitCode      = if ($Mode -eq 'enforce' -and $hasBlock) { 3 } else { 0 }
+        HasBlock      = $hasBlock
         Comment       = $comment
         adversarial_pipeline_atomic_marker_present = $atomicMarkerStatusValue
     }
@@ -1624,6 +1717,11 @@ if (-not $isDotSourced) {
         # PowerShell instance (which interrupts a hanging Start-Sleep
         # inside the gh mock) and emit a fail-open stderr note.
 
+        # Kill switch: FRAME_ENFORCE=0 coerces warn mode regardless of -Mode parameter.
+        if ($env:FRAME_ENFORCE -eq '0') {
+            $Mode = 'warn'
+        }
+
         $iss = script:New-FCLInitialSessionStateClone
 
         $rs = [System.Management.Automation.Runspaces.RunspaceFactory]::CreateRunspace($iss)
@@ -1656,7 +1754,7 @@ if (-not $isDotSourced) {
             }
             catch {
                 [Console]::Error.WriteLine("frame-credit-ledger: $($_.Exception.Message)")
-                if ($Mode -eq 'enforce') { $exitCode = 1 }
+                if ($Mode -eq 'enforce') { $exitCode = 5 }
             }
             # Mirror stderr from the worker.
             foreach ($errRecord in $worker.Streams.Error) {
@@ -1664,14 +1762,14 @@ if (-not $isDotSourced) {
             }
         }
         else {
-            # Budget exceeded — abort the worker and fail open.
+            # Budget exceeded: timeout-deferred conclusion in enforce mode.
             try { $worker.Stop() } catch { $null = $_ }
-            [Console]::Error.WriteLine("frame-credit-ledger: ${budgetSeconds}s budget exceeded; warn-mode fail-open (no comment posted)")
-            # Warn-mode invariant: never block PR creation on timeout. In
-            # enforce mode the test still expects exit 0 on timeout (warn
-            # invariant takes precedence over enforcement when no decision
-            # could be made).
-            $exitCode = 0
+            [Console]::Error.WriteLine("frame-credit-ledger: ${budgetSeconds}s budget exceeded; timeout-deferred (exit 4 in enforce mode, exit 0 in warn mode)")
+            if ($Mode -eq 'enforce') {
+                $exitCode = 4
+            } else {
+                $exitCode = 0
+            }
         }
 
         try { $worker.Dispose() } catch { $null = $_ }
@@ -1687,10 +1785,15 @@ if (-not $isDotSourced) {
             }
 
             if ($null -ne $resultHash) {
-                $hasNotCovered = $false
-                if ($null -ne $resultHash['HasNotCovered']) { $hasNotCovered = [bool]$resultHash['HasNotCovered'] }
-                if ($Mode -eq 'enforce' -and $hasNotCovered) {
-                    $exitCode = 1
+                $hasBlock = $false
+                $isInternalError = $false
+                if ($null -ne $resultHash['IsInternalError']) { $isInternalError = [bool]$resultHash['IsInternalError'] }
+                if ($null -ne $resultHash['HasBlock']) { $hasBlock = [bool]$resultHash['HasBlock'] }
+                # Also support legacy HasNotCovered key for backward compat
+                elseif ($null -ne $resultHash['HasNotCovered']) { $hasBlock = [bool]$resultHash['HasNotCovered'] }
+                if ($Mode -eq 'enforce') {
+                    if ($isInternalError) { $exitCode = 5 }
+                    elseif ($hasBlock) { $exitCode = 3 }
                 }
                 if ($null -ne $resultHash['Comment'] -and -not [string]::IsNullOrEmpty([string]$resultHash['Comment'])) {
                     Write-Output ([string]$resultHash['Comment'])
@@ -1700,9 +1803,8 @@ if (-not $isDotSourced) {
     }
     catch {
         [Console]::Error.WriteLine("frame-credit-ledger: $($_.Exception.Message)")
-        # Warn-mode invariant: never block PR creation; exit 0 even on caught exception.
         if ($Mode -eq 'enforce') {
-            $exitCode = 1
+            $exitCode = 5
         }
         else {
             $exitCode = 0

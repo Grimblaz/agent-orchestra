@@ -914,7 +914,7 @@ body
             (($result.Stdout, $result.Stderr) -join "`n") | Should -Match '(?i)pre-v4 metrics detected'
         }
 
-        It 'enforce mode exits 1 when at least one port is NotCovered' {
+        It 'enforce mode exits 3 when at least one port is NotCovered' {
             $bodyJson = (@{ body = $script:V4WithNotCoveredBody } | ConvertTo-Json -Compress)
             $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
@@ -923,7 +923,7 @@ body
                 -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
                 -MockBootstrap $bootstrap
 
-            $result.ExitCode | Should -Be 1
+            $result.ExitCode | Should -Be 3
         }
 
         It 'enforce mode exits 0 when no ports are NotCovered (only Covered or Inconclusive)' {
