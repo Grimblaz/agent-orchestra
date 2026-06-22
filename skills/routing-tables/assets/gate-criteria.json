@@ -141,7 +141,7 @@
         ]
       }
     ],
-    "skip_condition": "Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFERRED-SIGNIFICANT, no fixes applied).",
+    "skip_condition": "Skip if no findings were accepted and applied (post-judgment: all REJECT or DEFERRED-SIGNIFICANT (structural), no fixes applied).",
     "evaluation_ordering": [
       "Condition 1 (severity) is evaluable immediately from the main-review judge output.",
       "Condition 2 (control flow) requires the fix diff and is evaluated after Tier 1 re-validation and diff scoping.",

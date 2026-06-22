@@ -8,5 +8,5 @@ See [metrics-schema.md](metrics-schema.md) for the canonical block shape and [fi
 
 Map verdicts from the judge's score summary table to the corresponding metric fields:
 
-- **Main review**: `✅ Sustained` → `judge_accepted`; `❌ Defense sustained` → `judge_rejected`; `📋 DEFERRED-SIGNIFICANT` → `judge_deferred`
-- **Post-fix review**: `✅ Sustained` → `postfix_judge_accepted`; `❌ Defense sustained` → `postfix_judge_rejected`; `📋 DEFERRED-SIGNIFICANT` → `postfix_judge_deferred`
+- **Main review**: `✅ Sustained` → `judge_accepted`; `❌ Defense sustained` → `judge_rejected`; `📋 DEFERRED-SIGNIFICANT (structural)` → `judge_deferred`
+- **Post-fix review**: `✅ Sustained` → `postfix_judge_accepted`; `❌ Defense sustained` → `postfix_judge_rejected`; `📋 DEFERRED-SIGNIFICANT (structural)` → `postfix_judge_deferred`
