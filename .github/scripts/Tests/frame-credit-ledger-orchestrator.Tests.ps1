@@ -649,7 +649,7 @@ Describe 'frame-credit-ledger.ps1 orchestrator' {
 
             $result = & $script:InvokeOrchestrator `
                 -Pr 429 -Mode 'enforce' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'; FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' } `
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 0
@@ -920,7 +920,7 @@ body
 
             $result = & $script:InvokeOrchestrator `
                 -Pr 429 -Mode 'enforce' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'; FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' } `
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 3
@@ -932,7 +932,7 @@ body
 
             $result = & $script:InvokeOrchestrator `
                 -Pr 429 -Mode 'enforce' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
+                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'; FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' } `
                 -MockBootstrap $bootstrap
 
             $result.ExitCode | Should -Be 0

@@ -12,8 +12,9 @@
       5. Composes a markdown ledger comment and posts it via Find-OrUpsertComment.
 
     Honours two test-only env-var hooks (see TEST HOOK CONTRACT):
-      - FRAME_CREDIT_LEDGER_TEST_NO_SLEEP=1     skip Start-Sleep on retry
-      - FRAME_CREDIT_LEDGER_TEST_BUDGET_SECONDS override the 30s outer budget
+      - FRAME_CREDIT_LEDGER_TEST_NO_SLEEP=1                 skip Start-Sleep on retry
+      - FRAME_CREDIT_LEDGER_TEST_BUDGET_SECONDS             override the 30s outer budget
+      - FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER=1  bypass enforce-activation.yaml check
 
     `gh` is resolved via PATH/Get-Command so test mocks installed as
     `function global:gh { ... }` are reachable.
@@ -1744,6 +1745,62 @@ if (-not $isDotSourced) {
         # Kill switch: FRAME_ENFORCE=0 coerces warn mode regardless of -Mode parameter.
         if ($env:FRAME_ENFORCE -eq '0') {
             $Mode = 'warn'
+        }
+
+        # Activation cutover: only enforce for PRs created after the activation timestamp.
+        # Reads enforce-activation.yaml from the repo (which is the base-ref checkout in CI).
+        # If the file is absent, timestamp is unset, or PR_CREATED_AT is not passed,
+        # fall back to warn mode (advisory ship behavior).
+        # Test hook: FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER=1 bypasses this check.
+        if ($Mode -eq 'enforce' -and $env:FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER -ne '1') {
+            $activationFile = Join-Path (script:Resolve-FCLRepoRoot -ScriptPath $PSCommandPath) 'frame/enforce-activation.yaml'
+            $activationTimestamp = $null
+            if (Test-Path -LiteralPath $activationFile -PathType Leaf) {
+                try {
+                    $activationRaw = Get-Content -LiteralPath $activationFile -Raw -ErrorAction Stop
+                    $activationTsStr = script:Get-FCLScalar -Block $activationRaw -Name 'activation_timestamp'
+                    if (-not [string]::IsNullOrWhiteSpace($activationTsStr)) {
+                        $activationTimestamp = [datetime]::Parse($activationTsStr, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                    }
+                }
+                catch {
+                    [Console]::Error.WriteLine("frame-credit-ledger: failed to read activation timestamp — falling back to warn mode: $($_.Exception.Message)")
+                    $Mode = 'warn'
+                }
+            } else {
+                [Console]::Error.WriteLine("frame-credit-ledger: enforce-activation.yaml not found — falling back to warn mode (advisory ship)")
+                $Mode = 'warn'
+            }
+
+            # Check PR created-at against the activation timestamp.
+            if ($Mode -eq 'enforce' -and $null -ne $activationTimestamp) {
+                $prCreatedAtStr = $env:PR_CREATED_AT
+                if (-not [string]::IsNullOrWhiteSpace($prCreatedAtStr)) {
+                    try {
+                        $prCreatedAt = [datetime]::Parse($prCreatedAtStr, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                        if ($prCreatedAt -lt $activationTimestamp) {
+                            [Console]::Error.WriteLine("frame-credit-ledger: PR created at $prCreatedAtStr is before activation timestamp $activationTsStr — falling back to warn mode")
+                            $Mode = 'warn'
+                        }
+                    }
+                    catch {
+                        [Console]::Error.WriteLine("frame-credit-ledger: failed to parse PR_CREATED_AT '$prCreatedAtStr' — falling back to warn mode: $($_.Exception.Message)")
+                        $Mode = 'warn'
+                    }
+                } else {
+                    # PR_CREATED_AT not set (e.g., local invocation) — skip the cutover check; enforce as-is
+                    [Console]::Error.WriteLine("frame-credit-ledger: PR_CREATED_AT not set — skipping activation cutover check")
+                }
+            }
+
+            # Handle far-future activation timestamp (advisory ship default)
+            if ($Mode -eq 'enforce' -and $null -ne $activationTimestamp) {
+                $farFuture = [datetime]::new(9999, 12, 31, 0, 0, 0, [System.DateTimeKind]::Utc)
+                if ($activationTimestamp -ge $farFuture) {
+                    [Console]::Error.WriteLine("frame-credit-ledger: activation timestamp is far-future sentinel — falling back to warn mode (advisory ship)")
+                    $Mode = 'warn'
+                }
+            }
         }
 
         $iss = script:New-FCLInitialSessionStateClone
