@@ -294,6 +294,22 @@ ac_cross_check:
 
 This ensures the follow-up issue carries AC-provenance for the deferral decision, which is the AC4 contract.
 
+### Legitimate Partial-AC Defer — Loud Guard
+
+When the AC cross-check returns `routed: defer` (because `result: no-match` or `source: no-ac-section`), the agent has confirmed that this finding genuinely lacks plan AC coverage. **Silently recording a `defer` entry at this point is the exact anti-pattern this feature was built to prevent.**
+
+The agent MUST follow this sequence instead:
+
+1. **Emit a loud inline note** (not `AskUserQuestion` — this is a guard, not a user question): `⚠️ Finding {finding_id} deferred without AC coverage (ac_cross_check.result: {result}) — mandatory sub-issue required.`
+
+2. **Create a mandatory sub-issue** via `Add-FollowUpIssue` (with `-AcCrossCheck` per the M16 guard). The canonical title uses `ConvertTo-CanonicalFollowupTitle`. The body MUST include the finding title, the judge ruling, and the `ac_cross_check` YAML block. This is mandatory regardless of the finding's classification tier — routine findings that lack AC coverage still get a sub-issue.
+
+3. **Record in the accumulator** with `disposition: defer`, the `ac_cross_check` object, and `disposition_rationale` that cites the `no-match`/`no-ac-section` outcome and references the created sub-issue URL.
+
+The loud guard does not apply when `routed: force-accept` (high-confidence AC match) or `routed: disposition-gate` (ambiguous match fires `AskUserQuestion` normally). It applies only to the `routed: defer` arm.
+
+**Low-severity exemption applies here too**: findings with severity `low` are exempt from this guard (the low-severity exemption from the blocking pre-condition applies throughout this section).
+
 ### L0 Gate-Decision Tokens
 
 For each finding that was gate-classified (routine or load-bearing), emit an L0 gate-decision token per `skills/solution-authoring/schemas/gate-decision-token.schema.json`:
