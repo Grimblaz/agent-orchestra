@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
-Describe 'frame audit-only boundary' {
+Describe 'frame enforcement boundary' {
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
@@ -26,13 +26,20 @@ Describe 'frame audit-only boundary' {
         }
     }
 
-    It 'adds the frame audit wrappers without introducing an enforcement entry point' {
+    It 'frame-enforce workflow file exists and audit wrappers are present' {
+        # Audit wrappers are still present.
         foreach ($wrapper in $script:FrameWrappers) {
             $wrapper | Should -Exist
         }
+        # Enforcement workflow file ships in s2/s3.
+        $enforceWorkflow = Join-Path $script:WorkflowDir 'frame-enforce.yml'
+        $enforceWorkflow | Should -Exist
     }
 
-    It 'does not wire frame-specific behavior into hooks or workflows' {
+    It 'does not wire frame-specific audit wrappers into hooks or workflows' {
+        # frame-back-derive and frame-audit-report are internal audit wrappers and
+        # should NOT appear in hooks or workflows. frame-credit-ledger IS intentionally
+        # wired into frame-enforce.yml (that is the whole point of enforcement).
         foreach ($hookFile in $script:HookFiles) {
             $content = Get-Content -Raw -Path $hookFile
             $content | Should -Not -Match 'frame-(back-derive|audit-report)'
@@ -44,6 +51,13 @@ Describe 'frame audit-only boundary' {
             )
             $workflowHits.Count | Should -Be 0
         }
+    }
+
+    It 'enforce-activation.yaml has far-future sentinel (advisory ship constraint)' {
+        $activationFile = Join-Path $script:RepoRoot 'frame/enforce-activation.yaml'
+        $activationFile | Should -Exist
+        $content = Get-Content -LiteralPath $activationFile -Raw
+        $content | Should -Match 'activation_timestamp.*9999'
     }
 
     It 'keeps frame wrapper wording audit-only when the scripts arrive' {

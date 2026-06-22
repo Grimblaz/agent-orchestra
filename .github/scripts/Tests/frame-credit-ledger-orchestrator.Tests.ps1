@@ -1364,6 +1364,180 @@ dispatch-cost-samples:
         }
     }
 
+    Context 'Issue #439 enforce mode — block-on-inconclusive, kill switch, exit codes' {
+
+        # AC3: inconclusive review port (block-on-inconclusive: true) blocks in enforce mode.
+        It 'AC3: inconclusive review credit blocks in enforce mode (block-on-inconclusive: true → exit 3)' {
+            # Start from the fully-covered fixture and swap review from passed → inconclusive.
+            # All other ports remain covered so the only blocking candidate is review.
+            $prBody = $script:V4AllCoveredBody -replace '(?m)(port: review\s*\n\s*status:)\s*passed', '$1 inconclusive'
+            $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'enforce' `
+                -Env @{
+                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP              = '1'
+                FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1'
+            } `
+                -MockBootstrap $bootstrap
+
+            # review has block-on-inconclusive: true → inconclusive review is blocking → exit 3
+            $result.ExitCode | Should -Be 3
+        }
+
+        # AC4: inconclusive ce-gate-cli port (block-on-inconclusive: false) is non-blocking in enforce mode.
+        It 'AC4: inconclusive ce-gate-cli credit does not block in enforce mode (block-on-inconclusive: false → exit 0)' {
+            # Start from the fully-covered fixture and swap ce-gate-cli from not-applicable → inconclusive.
+            # All other ports remain covered so the only questionable port is ce-gate-cli.
+            $prBody = $script:V4AllCoveredBody -replace '(?m)(port: ce-gate-cli\s*\n\s*status:)\s*not-applicable', '$1 inconclusive'
+            $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'enforce' `
+                -Env @{
+                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP              = '1'
+                FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1'
+            } `
+                -MockBootstrap $bootstrap
+
+            # ce-gate-cli has block-on-inconclusive: false → inconclusive ce-gate-cli is non-blocking → exit 0
+            $result.ExitCode | Should -Be 0
+        }
+
+        # AC7: FRAME_ENFORCE=0 kill switch coerces enforce → warn → exit 0 even when credits are missing.
+        It 'AC7: FRAME_ENFORCE=0 kill switch coerces enforce to warn and exits 0 even when credits are missing' {
+            # V4WithNotCoveredBody has review: failed → would exit 3 in real enforce mode.
+            $bodyJson = (@{ body = $script:V4WithNotCoveredBody } | ConvertTo-Json -Compress)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'enforce' `
+                -Env @{
+                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'
+                FRAME_ENFORCE                     = '0'
+            } `
+                -MockBootstrap $bootstrap
+
+            # Kill switch coerces to warn → fail-open → exit 0
+            $result.ExitCode | Should -Be 0
+        }
+
+        # AC8: timeout in enforce mode → exit 4.
+        It 'AC8: timeout in enforce mode exits 4 (not 0 as in warn mode)' {
+            $bootstrap = & $script:NewGhMockBootstrap -HangOnBaseRef $true
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'enforce' `
+                -Env @{
+                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP              = '1'
+                FRAME_CREDIT_LEDGER_TEST_BUDGET_SECONDS        = '3'
+                FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1'
+            } `
+                -TimeoutSeconds 30 `
+                -MockBootstrap $bootstrap
+
+            # Enforce mode on timeout must exit 4 (not 0)
+            $result.TimedOut | Should -Be $false
+            $result.ExitCode | Should -Be 4
+        }
+
+        # AC9: internal exception in enforce mode → exit 5.
+        It 'AC9: internal exception in enforce mode exits 5 (not 0 as in warn mode)' {
+            # Same technique as the warn-mode exception test: patch the body-fetch branch to throw.
+            $extra = @'
+$global:ThrowOnBody = $true
+'@
+            $bootstrapBase = & $script:NewGhMockBootstrap -ExtraDeclarations $extra
+            $bootstrap = $bootstrapBase -replace [regex]::Escape("if (`$joined -match 'pr view \d+ --json body') {"), @"
+if (`$joined -match 'pr view \d+ --json body') {
+        throw 'simulated body-fetch failure'
+"@
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'enforce' `
+                -Env @{
+                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP              = '1'
+                FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1'
+            } `
+                -MockBootstrap $bootstrap
+
+            # Enforce mode on internal error must exit 5 (not 0)
+            $result.ExitCode | Should -Be 5
+        }
+
+        # s3 AC: frame-override marker removes a blocking port → exit 0 in enforce mode.
+        It 'frame-override-429 marker from OWNER overrides a blocking NotCovered port in enforce mode → exit 0' {
+            # Start from the fully-covered fixture and swap review from passed → failed (NotCovered → would block).
+            # Every other port remains covered so overriding review leaves no remaining blocking ports.
+            $prBodyWithFailedReview = $script:V4AllCoveredBody -replace '(?m)(port: review\s*\n\s*status:)\s*passed', '$1 failed'
+            $prComments = @(
+                [pscustomobject]@{
+                    body              = "<!-- frame-override-429`nports: review`nreason: emergency deploy`n-->"
+                    authorAssociation = "OWNER"
+                }
+            )
+            $bodyJson = (@{
+                    body     = $prBodyWithFailedReview
+                    comments = $prComments
+                } | ConvertTo-Json -Compress -Depth 10)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'enforce' `
+                -Env @{
+                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP              = '1'
+                FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1'
+            } `
+                -MockBootstrap $bootstrap
+
+            # Override applied → no blocking ports remain → exit 0
+            $result.ExitCode | Should -Be 0
+        }
+
+        # AC10(a): Far-future sentinel in enforce-activation.yaml → coerces to warn → exit 0.
+        It 'AC10a: far-future activation_timestamp sentinel coerces enforce to warn → exit 0 (advisory ship)' {
+            # Do NOT set SKIP_ACTIVATION_CUTOVER — this exercises the real cutover path.
+            # The repo's enforce-activation.yaml has activation_timestamp: 9999-12-31 which
+            # should trip the far-future guard and downgrade to warn mode.
+            $bodyJson = (@{ body = $script:V4WithNotCoveredBody } | ConvertTo-Json -Compress)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'enforce' `
+                -Env @{
+                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'
+            } `
+                -MockBootstrap $bootstrap
+
+            # Far-future sentinel → coerced to warn → fail-open → exit 0 even with NotCovered port
+            $result.ExitCode | Should -Be 0
+            # Stderr should mention the advisory/far-future downgrade
+            $result.Stderr | Should -Match '(?i)(far.future|advisory|sentinel|warn)'
+        }
+
+        # AC10(b): PR created before activation timestamp → coerces to warn → exit 0.
+        It 'AC10b: PR_CREATED_AT before activation_timestamp coerces enforce to warn → exit 0' {
+            # The repo has activation_timestamp: 9999-12-31T00:00:00Z.
+            # Any PR_CREATED_AT in 2026 is before that timestamp → coerce to warn.
+            $bodyJson = (@{ body = $script:V4WithNotCoveredBody } | ConvertTo-Json -Compress)
+            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
+
+            $result = & $script:InvokeOrchestrator `
+                -Pr 429 -Mode 'enforce' `
+                -Env @{
+                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'
+                PR_CREATED_AT                     = '2026-01-01T00:00:00Z'
+            } `
+                -MockBootstrap $bootstrap
+
+            # PR is before the 9999-12-31 activation timestamp (caught by far-future guard first)
+            # → coerced to warn → exit 0
+            $result.ExitCode | Should -Be 0
+        }
+    }
+
     Context 'C-Risk-1 fix: predicate evaluator is wired into per-adapter applicability' {
 
         It 'Resolve-FrameCreditLedgerApplicableMap evaluates `applies-when` against the changeset and returns true/false (not "unknown") for supported identifiers' {
