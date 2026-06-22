@@ -212,6 +212,8 @@ The `stable_finding_key` is what the resume-read mechanism uses to detect prior 
 
 For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 2` (current emission format); write `severity` and `stage` for all entries, and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ minor:
 
+> **Pre-condition**: for any `dismiss` entry with severity ≥ minor, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
+
 ```yaml
 - stable_finding_key: "src/foo.ts:42:null-check-missing-a1b2c3d4"
   finding_id: F2
@@ -241,7 +243,11 @@ Then fire `AskUserQuestion` with options:
 - `Escalate — this needs a design decision or a separate issue`
 - `Decline engagement — proceed without classification`
 
-Capture the engineer's choice verbatim. Record as (v2 format — include `severity`, `stage`, and `ac_cross_check` for dismiss/defer entries with severity ≥ minor):
+Capture the engineer's choice verbatim.
+
+> **Pre-condition**: if the engineer chooses `dismiss` with severity ≥ minor, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
+
+Record as (v2 format — include `severity`, `stage`, and `ac_cross_check` for dismiss/defer entries with severity ≥ minor):
 
 ```yaml
 - stable_finding_key: "src/auth/session.ts:88:token-expiry-not-checked-b7c1a2f3"
@@ -262,6 +268,31 @@ When an engineer selects `Escalate`:
 2. Emit a concise escalation note inline (not a structured question): `Finding {finding_id} escalated — recommend filing a follow-up issue for: {finding title}. Proceeding without implementing this finding.`
 3. Do NOT implement the finding in the current PR. The current work continues; the escalated finding is noted for tracking.
 4. Record the `escalate` outcome faithfully in `review-dispositions-{PR}` and in the L0 gate-decision token.
+
+### AC Cross-Check — Blocking Pre-Condition
+
+Before writing any entry with `disposition: dismiss` or `disposition: defer` **and** `severity` ≥ minor, the agent MUST complete an AC cross-check:
+
+1. Call `Get-AcTermsFromIssue -IssueNumber {parent_issue}` to extract behavioral AC terms.
+2. Call `Get-StructuralVerdict -Finding {finding} -PrFileSet {pr_files} -AcRefs {ac_refs} -RepoRoot {repo_root} -AcTerms {ac_terms}` to obtain the `ac_cross_check` object.
+3. Write the returned `ac_cross_check` object into the disposition entry.
+
+**This pre-condition is blocking.** The gate MUST NOT commit a `dismiss` or `defer` entry with severity ≥ minor that has a null or absent `ac_cross_check`. If `Get-AcTermsFromIssue` returns an empty array (no AC section found), the cross-check still runs — pass `@()` as `-AcTerms`; the verdict's `ac_cross_check.source` will be `no-ac-section` and `routed` will be `defer`.
+
+**Low-severity exemption.** Entries with severity `low` are exempt from this pre-condition (the validator also exempts them). Record them without `ac_cross_check`.
+
+**`Add-FollowUpIssue` guard.** When the cross-check routes to `defer` and the agent calls `Add-FollowUpIssue` to file a follow-up issue, it MUST pass the `ac_cross_check` outcome as part of the issue body. Include a fenced YAML block in the body:
+
+```yaml
+ac_cross_check:
+  file_arm: {bool}
+  term_arm: {bool}
+  result: {matched-high|matched-ambiguous|no-match}
+  source: {issue|pr-body|no-ac-section}
+  routed: defer
+```
+
+This ensures the follow-up issue carries AC-provenance for the deferral decision, which is the AC4 contract.
 
 ### L0 Gate-Decision Tokens
 
