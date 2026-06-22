@@ -1808,7 +1808,9 @@ function Compose-Comment {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MarkerToken,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$PortReports
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$PortReports,
+        [string]$Mode = 'warn',
+        [bool]$HasBlock = $false
     )
 
     $reports = @($PortReports | Where-Object { $_ -ne $null })
@@ -1853,6 +1855,7 @@ function Compose-Comment {
                     'NotPersistedCredit'  { 'not-persisted' }
                     'MissingAdapter'      { 'missing' }
                     'DeferredPort'        { 'deferred' }
+                    'OverriddenCredit'    { 'overridden' }
                     default               { [string]$r.SubReason }
                 }
             }
@@ -1865,6 +1868,7 @@ function Compose-Comment {
                 'inconclusive'  { '⚠️' }
                 'not-persisted' { '🔇' }
                 'deferred'      { '⏸️' }
+                'overridden'    { '🔓' }
                 default         { '❓' }
             }
 
@@ -1895,7 +1899,15 @@ function Compose-Comment {
         [void]$sb.AppendLine('')
     }
 
-    [void]$sb.AppendLine('(Hook ran in `warn` mode; PR creation was not blocked.)')
+    if ($Mode -eq 'enforce') {
+        if ($HasBlock) {
+            [void]$sb.AppendLine('(Hook ran in `enforce` mode; blocked ports above prevent merge.)')
+        } else {
+            [void]$sb.AppendLine('(Hook ran in `enforce` mode; all covered ports passed.)')
+        }
+    } else {
+        [void]$sb.AppendLine('(Hook ran in `warn` mode; PR creation was not blocked.)')
+    }
 
     return $sb.ToString()
 }
@@ -1906,10 +1918,12 @@ function Compose-CommentWithCostPattern {
     param(
         [Parameter(Mandatory)][string]$MarkerToken,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$PortReports,
-        [AllowEmptyString()][string]$CostSection = ''
+        [AllowEmptyString()][string]$CostSection = '',
+        [string]$Mode = 'warn',
+        [bool]$HasBlock = $false
     )
     # 1. Call Compose-Comment to get the port-coverage section
-    $portCoverageBody = Compose-Comment -MarkerToken $MarkerToken -PortReports $PortReports
+    $portCoverageBody = Compose-Comment -MarkerToken $MarkerToken -PortReports $PortReports -Mode $Mode -HasBlock $HasBlock
     # 2. Append cost section if non-empty
     if ([string]::IsNullOrWhiteSpace($CostSection)) {
         return $portCoverageBody

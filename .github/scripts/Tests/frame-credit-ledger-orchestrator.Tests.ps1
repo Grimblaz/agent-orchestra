@@ -1532,7 +1532,7 @@ if (`$joined -match 'pr view \d+ --json body') {
             } `
                 -MockBootstrap $bootstrap
 
-            # PR is before the 9999-12-31 activation timestamp (caught by far-future guard first)
+            # PR_CREATED_AT (2026) < activation_timestamp (9999-12-31) → caught by PR_CREATED_AT guard
             # → coerced to warn → exit 0
             $result.ExitCode | Should -Be 0
         }

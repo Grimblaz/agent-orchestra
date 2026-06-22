@@ -1696,7 +1696,7 @@ function Invoke-FrameCreditLedger {
         $costStopwatch.Stop()
     }
 
-    $comment = Compose-CommentWithCostPattern -MarkerToken $marker -PortReports $reportsArray -CostSection $costSection
+    $comment = Compose-CommentWithCostPattern -MarkerToken $marker -PortReports $reportsArray -CostSection $costSection -Mode $Mode -HasBlock $hasBlock
     try {
         $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $marker -Body $comment
     }
@@ -1760,7 +1760,7 @@ if (-not $isDotSourced) {
                     $activationRaw = Get-Content -LiteralPath $activationFile -Raw -ErrorAction Stop
                     $activationTsStr = script:Get-FCLScalar -Block $activationRaw -Name 'activation_timestamp'
                     if (-not [string]::IsNullOrWhiteSpace($activationTsStr)) {
-                        $activationTimestamp = [datetime]::Parse($activationTsStr, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                        $activationTimestamp = [DateTimeOffset]::Parse($activationTsStr, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
                     }
                 }
                 catch {
@@ -1777,7 +1777,7 @@ if (-not $isDotSourced) {
                 $prCreatedAtStr = $env:PR_CREATED_AT
                 if (-not [string]::IsNullOrWhiteSpace($prCreatedAtStr)) {
                     try {
-                        $prCreatedAt = [datetime]::Parse($prCreatedAtStr, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                        $prCreatedAt = [DateTimeOffset]::Parse($prCreatedAtStr, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
                         if ($prCreatedAt -lt $activationTimestamp) {
                             [Console]::Error.WriteLine("frame-credit-ledger: PR created at $prCreatedAtStr is before activation timestamp $activationTsStr — falling back to warn mode")
                             $Mode = 'warn'
@@ -1795,7 +1795,7 @@ if (-not $isDotSourced) {
 
             # Handle far-future activation timestamp (advisory ship default)
             if ($Mode -eq 'enforce' -and $null -ne $activationTimestamp) {
-                $farFuture = [datetime]::new(9999, 12, 31, 0, 0, 0, [System.DateTimeKind]::Utc)
+                $farFuture = [DateTimeOffset]::new(9999, 12, 31, 0, 0, 0, [TimeSpan]::Zero)
                 if ($activationTimestamp -ge $farFuture) {
                     [Console]::Error.WriteLine("frame-credit-ledger: activation timestamp is far-future sentinel — falling back to warn mode (advisory ship)")
                     $Mode = 'warn'

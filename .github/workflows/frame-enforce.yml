@@ -30,13 +30,20 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: git fetch origin "$BASE_REF"
 
-      - name: Checkout base-ref config files
+      - name: Checkout base-ref port config
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          # Read frame/ports/*.yaml and frame/enforce-activation.yaml from the base ref,
-          # not the merge commit. This ensures gate config cannot be changed by the PR.
-          git checkout "$BASE_SHA" -- frame/ports/ frame/enforce-activation.yaml || true
+          # Read frame/ports/*.yaml from the base ref so gate config cannot be changed by the PR.
+          git checkout "$BASE_SHA" -- frame/ports/
+
+      - name: Checkout base-ref activation config
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # enforce-activation.yaml is a new file and may be absent on the base ref.
+          # Fail-open (|| true) so the PS script's missing-file guard fires and coerces warn.
+          git checkout "$BASE_SHA" -- frame/enforce-activation.yaml || true
 
       - name: Run frame credit enforce
         shell: pwsh
