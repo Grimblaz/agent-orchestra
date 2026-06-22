@@ -8,7 +8,7 @@ Frame ledger data starts at `metrics_version: 4` because v3 was already claimed 
 
 This document owns only the frame-specific audit additions introduced with v4. The inherited pipeline-metrics fields, including the existing `findings:` array and all v1-v3 semantics, remain authoritative in `skills/calibration-pipeline/references/metrics-schema.md`.
 
-The v4 surface is audit-only. It records synthetic frame credits and integrity metadata for historical analysis without introducing adapter duplication, enforcement behavior, or a runtime trigger grammar.
+The v4 surface was designed as audit-only. It records synthetic frame credits and integrity metadata for historical analysis without introducing adapter duplication or a runtime trigger grammar. (Note: the no-enforcement constraint was superseded by #439, which adds advisory `enforce` mode via `frame-enforce.yml`. The schema remains audit-data — enforcement is in the required check that reads from it, not in the schema fields themselves.)
 
 ## v4 Additions
 
