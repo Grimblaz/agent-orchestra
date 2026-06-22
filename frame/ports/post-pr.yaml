@@ -2,3 +2,5 @@ name: post-pr
 description: "Was the post-merge cleanup and archival path completed for this change?"
 applies: always
 status: stable
+enforce:
+  block-on-inconclusive: true

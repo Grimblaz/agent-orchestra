@@ -38,6 +38,67 @@ function script:ConvertTo-FCLNormalizedLines {
     return $normalized -split "`n"
 }
 
+function script:Get-FCLNestedScalar {
+    # Reads a child key from a parent block in YAML text.
+    # Returns the value only when the child key appears at exactly one indent level deeper than the parent key.
+    # Returns $null when the parent block is absent, or the child key is absent inside it, or is at the wrong depth.
+    # DO NOT replace with Get-FCLScalar — the flat regex in that function matches at any depth, defeating nesting constraints.
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Block,
+        [Parameter(Mandatory)][string]$ParentKey,
+        [Parameter(Mandatory)][string]$ChildKey
+    )
+
+    if ([string]::IsNullOrEmpty($Block)) {
+        return $null
+    }
+
+    $lines = script:ConvertTo-FCLNormalizedLines -Text $Block
+
+    $parentIndent = -1
+    $insideParent = $false
+
+    foreach ($line in $lines) {
+        # Skip blank lines
+        if ($line -match '^\s*$') { continue }
+
+        # Determine current line indentation
+        $trimmed = $line.TrimStart()
+        $currentIndent = $line.Length - $trimmed.Length
+
+        if (-not $insideParent) {
+            # Look for the parent key at any column (top-level is column 0)
+            $parentPattern = '^(\s*)' + [regex]::Escape($ParentKey) + '\s*:\s*$'
+            if ($line -match $parentPattern) {
+                $parentIndent = $Matches[1].Length
+                $insideParent = $true
+            }
+            continue
+        }
+
+        # We are inside the parent block
+        # If we see a line at same or lesser indent as parent, the block has ended
+        if ($currentIndent -le $parentIndent) {
+            return $null
+        }
+
+        # The child must be at exactly parentIndent + some positive indent (any depth > parent qualifies,
+        # but we require the child key to appear before any sub-block ends).
+        # Look for the child key at this indent level (must be deeper than parent)
+        $childPattern = '^(\s+)' + [regex]::Escape($ChildKey) + '\s*:\s*(?<value>.+?)\s*$'
+        if ($line -match $childPattern) {
+            $childIndent = $Matches[1].Length
+            # Child must be strictly deeper than parent
+            if ($childIndent -gt $parentIndent) {
+                $value = $line -replace ('^(\s+)' + [regex]::Escape($ChildKey) + '\s*:\s*'), ''
+                return $value.Trim()
+            }
+        }
+    }
+
+    return $null
+}
+
 function script:Get-FCLScalar {
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Block,
@@ -1497,11 +1558,18 @@ function Get-PortFiles {
                 continue
             }
 
+            # Read block-on-inconclusive from the nested enforce: block.
+            # Default is $true (fail-safe) when the enforce: block or child key is absent.
+            # DO NOT use Get-FCLScalar here — the flat regex matches at any depth, defeating enforce: namespacing (M21/R2-8).
+            $rawBOI = script:Get-FCLNestedScalar -Block $raw -ParentKey 'enforce' -ChildKey 'block-on-inconclusive'
+            $blockOnInconclusive = if ($null -eq $rawBOI) { $true } else { $rawBOI -eq 'true' }
+
             $results.Add([pscustomobject]@{
-                    Name        = $name
-                    Description = $description
-                    Applies     = $applies
-                    Status      = $status
+                    Name                = $name
+                    Description         = $description
+                    Applies             = $applies
+                    Status              = $status
+                    BlockOnInconclusive = [bool]$blockOnInconclusive
                 }) | Out-Null
         }
         catch {

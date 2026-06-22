@@ -5,3 +5,5 @@ trigger:
   source-port: implement-code
   condition-description: "Entry-point or distributed plugin files changed in a way that would require release-hygiene review."
 status: stable
+enforce:
+  block-on-inconclusive: true

@@ -87,4 +87,63 @@ Describe 'frame port manifest' {
         $content = (Get-Content -Raw -Path $portFile) -replace '\r', ''
         $content | Should -Match '(?m)^status:\s*(stable|tbd-decision-pending|formalized-skeleton-deferred-to-\S+)$'
     }
+
+    It 'declares enforce.block-on-inconclusive in <PortName>.yaml' -ForEach $script:ExpectedPortCases {
+        param($PortName)
+
+        if (-not (& $script:RequirePortsDir)) {
+            return
+        }
+
+        $portFile = Join-Path $script:PortsDir ($PortName + '.yaml')
+        $portFile | Should -Exist
+
+        $content = (Get-Content -Raw -Path $portFile) -replace '\r', ''
+        # Must have a top-level enforce: block
+        $content | Should -Match '(?m)^enforce:\s*$'
+        # Must have block-on-inconclusive nested inside it (indented)
+        $content | Should -Match '(?m)^\s+block-on-inconclusive:\s*(true|false)\s*$'
+    }
+
+    It 'process-retrospective explicitly declares block-on-inconclusive: false' {
+        if (-not (& $script:RequirePortsDir)) {
+            return
+        }
+
+        $portFile = Join-Path $script:PortsDir 'process-retrospective.yaml'
+        $portFile | Should -Exist
+
+        $content = (Get-Content -Raw -Path $portFile) -replace '\r', ''
+        $content | Should -Match '(?m)^\s+block-on-inconclusive:\s*false\s*$'
+    }
+}
+
+Describe 'Get-PortFiles BlockOnInconclusive' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:PortsDir = Join-Path $script:RepoRoot 'frame/ports'
+        $script:CoreScript = Join-Path $script:RepoRoot '.github/scripts/lib/frame-credit-ledger-core.ps1'
+        . $script:CoreScript
+    }
+
+    It 'review port has BlockOnInconclusive = true' {
+        $ports = Get-PortFiles -PortsDir $script:PortsDir
+        ($ports | Where-Object Name -eq 'review').BlockOnInconclusive | Should -Be $true
+    }
+
+    It 'ce-gate-cli port has BlockOnInconclusive = false' {
+        $ports = Get-PortFiles -PortsDir $script:PortsDir
+        ($ports | Where-Object Name -eq 'ce-gate-cli').BlockOnInconclusive | Should -Be $false
+    }
+
+    It 'process-retrospective port has BlockOnInconclusive = false' {
+        $ports = Get-PortFiles -PortsDir $script:PortsDir
+        ($ports | Where-Object Name -eq 'process-retrospective').BlockOnInconclusive | Should -Be $false
+    }
+
+    It 'implement-code port has BlockOnInconclusive = true' {
+        $ports = Get-PortFiles -PortsDir $script:PortsDir
+        ($ports | Where-Object Name -eq 'implement-code').BlockOnInconclusive | Should -Be $true
+    }
 }

@@ -2,3 +2,5 @@ name: experience
 description: "Was the customer problem framed before implementation?"
 applies: always
 status: stable
+enforce:
+  block-on-inconclusive: true

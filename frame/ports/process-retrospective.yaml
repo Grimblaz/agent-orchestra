@@ -2,6 +2,8 @@ name: process-retrospective
 description: "Should this change contribute to a broader process retrospective signal?"
 applies: trigger-conditional
 status: formalized-skeleton-deferred-to-348
+enforce:
+  block-on-inconclusive: false
 trigger-status: deferred
 trigger-deferred-to: '#348'
 trigger-deferred-since: '2026-05-03'
