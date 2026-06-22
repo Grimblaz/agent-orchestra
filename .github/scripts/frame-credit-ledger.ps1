@@ -1401,6 +1401,30 @@ function Invoke-FrameCreditLedger {
 
     $reportsArray = $portReports.ToArray()
 
+    # Apply authorized self-override: find and validate the frame-override-{PR} marker.
+    # Override misconfiguration classes (AdapterParseError, AdapterDiscoveryFailed) are NOT
+    # eligible — these indicate system configuration problems, not missing credits.
+    $overriddenPorts = @(Resolve-FCLOverrideMarker -Pr $Pr -Comments $script:PrComments)
+    if ($overriddenPorts.Count -gt 0) {
+        $nonOverridableSubs = @('AdapterParseError', 'AdapterDiscoveryFailed')
+        $reportsArray = @($reportsArray | ForEach-Object {
+            $r = $_
+            $portName = [string]$r.PortName
+            if ($portName -in $overriddenPorts -and [string]$r.SubReason -notin $nonOverridableSubs) {
+                [pscustomobject]@{
+                    PortName          = $portName
+                    Status            = 'Covered'
+                    SubReason         = 'OverriddenCredit'
+                    AdapterName       = $r.AdapterName
+                    SuggestedNextStep = $null
+                    Evidence          = "override: authorized self-override posted in PR $Pr comment"
+                }
+            } else {
+                $r
+            }
+        })
+    }
+
     # Build a port-descriptor lookup for fast access to BlockOnInconclusive and TriggerStatus.
     $portDescriptorMap = @{}
     foreach ($pd in $ports) {

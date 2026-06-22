@@ -109,8 +109,9 @@ Field notes:
   - `stale-spine[]` records each user-approved stale-spine fallback to legacy-shape dispatch. Each event carries `step` (the implementation step identifier or index) and `reason` (`generated_at-mismatch` or `missing-step-id`). Additive updates append newly observed stale fallback events and preserve existing entries.
 - `spine-stale-fallback-count` is optional and absent when no stale-spine fallback event occurred. When present, it is a non-negative integer equal to the number of observed `dispatch-fallback-events.stale-spine[]` entries, except additive updates must never decrement an already-written higher value; use `max(existing count, observed stale-spine event count)`. The field gives report consumers a cheap count without requiring nested event parsing.
 - `credits[]` is the audit ledger. Each entry records a `port`, a frame credit `status`, and brief audit evidence.
-- `credits[].status` uses the explicit enum `passed | failed | skipped | not-applicable | inconclusive | not-persisted`.
+- `credits[].status` uses the explicit enum `passed | failed | skipped | not-applicable | inconclusive | not-persisted | overridden`.
   - `not-persisted` is synthesized by the warn-only hook when the sentinel `<!-- review-judge-produced-{PR} -->` is present but no credit row was written. It is never emitted directly as an inline credit.
+  - `overridden` is applied by `Resolve-FCLOverrideMarker` when an authorized actor (`OWNER`, `MEMBER`, or `COLLABORATOR`) posts a `<!-- frame-override-{PR} -->` marker comment on the PR granting explicit per-port clearance. The marker comment is the durable record. Enum-widening policy: adding `overridden` is a forward-compat enum-widening with no schema version bump. Unknown status values produce `inconclusive/❓` (never a parse error).
 - `credits[].adapter` (optional on non-review ports) names the specific adapter that produced this credit row.
 - `credits[].run_index` is a monotonically increasing integer per `(port, adapter)` pair. Multiple entries for the same port and adapter are appended; the latest by `run_index` is the authoritative summary value. There is no `timestamp` field on credit rows — `run_index` provides re-run ordering without violating the audit-only framing.
 - `credits[].terminal-step-id` (optional) records the positive terminal implementation step that emitted a spine-backed credit. Omitted or `0` preserves the legacy/spine-omitted identity for plans without a terminal slice.
@@ -144,6 +145,6 @@ Readers that understand v4 consume the inherited v3 metrics plus the frame addit
 ## Out Of Scope
 
 - Re-documenting inherited v1-v3 field semantics from `skills/calibration-pipeline/references/metrics-schema.md`
-- Any enforcement, warning, or blocking behavior
+- Any enforcement, warning, or blocking behavior (Note: this constraint was superseded by #439 which adds `enforce` mode. The schema remains audit-data — the enforcement is in the required check that reads from it.)
 - A runtime-evaluable trigger-condition DSL
 - Adapter declarations or frontmatter changes outside the audit artifacts

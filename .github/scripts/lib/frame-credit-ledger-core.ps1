@@ -1477,13 +1477,14 @@ function script:Get-FCLCreditStatusPrecedence {
 
     $status = if ($null -eq $LedgerRow) { '' } else { [string]$LedgerRow.Status }
     switch ($status) {
-        'failed' { return 60 }
-        'inconclusive' { return 50 }
-        'not-persisted' { return 40 }
-        'skipped' { return 30 }
+        'overridden'     { return 70 }   # override beats failed — must come first
+        'failed'         { return 60 }
+        'inconclusive'   { return 50 }
+        'not-persisted'  { return 40 }
+        'skipped'        { return 30 }
         'not-applicable' { return 20 }
-        'passed' { return 10 }
-        default { return 0 }
+        'passed'         { return 10 }
+        default          { return 0 }
     }
 }
 
@@ -1745,6 +1746,7 @@ function Resolve-PortStatus {
             'skipped'        = @{ Status = 'Covered'; SubReason = 'SkippedCredit'; IncludeNextStep = $false }
             'failed'         = @{ Status = 'NotCovered'; SubReason = 'AdapterFailed'; IncludeNextStep = $true }
             'inconclusive'   = @{ Status = 'Inconclusive'; SubReason = 'InconclusiveCredit'; IncludeNextStep = $true }
+            'overridden'     = @{ Status = 'Covered'; SubReason = 'OverriddenCredit'; IncludeNextStep = $false }
         }
 
         $entry = $creditMap[$creditStatus]
@@ -2689,4 +2691,90 @@ function Invoke-CreditInputHarvest {
     }
 
     return $results
+}
+
+function Resolve-FCLOverrideMarker {
+    <#
+    .SYNOPSIS
+        Finds an authorized <!-- frame-override-{PR} --> marker in PR comments.
+    .DESCRIPTION
+        Scans top-level PR comments (not PR body, not issue comments) for a
+        <!-- frame-override-{PR} --> block. Returns the list of port names to
+        override when a valid marker is found from an authorized author.
+        Fail-closed: empty/missing author lookup -> no override granted.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [AllowNull()][AllowEmptyCollection()][object[]]$Comments
+    )
+
+    if ($null -eq $Comments -or @($Comments).Count -eq 0) {
+        return @()
+    }
+
+    # Authorized author associations (case-insensitive match)
+    $authorizedAssociations = @('OWNER', 'MEMBER', 'COLLABORATOR')
+
+    foreach ($comment in @($Comments)) {
+        # Extract body
+        $body = ''
+        if ($comment.PSObject.Properties['body']) {
+            $body = [string]$comment.body
+        }
+        if ([string]::IsNullOrWhiteSpace($body)) { continue }
+
+        # Check for the frame-override-{PR} marker (anchored: must appear as an HTML
+        # comment at the start of a line, not inside a fenced block or blockquote).
+        # Grammar: <!-- frame-override-{PR}\nports: {csv}\nreason: {text}\n-->
+        $markerPattern = "(?ms)<!--\s*frame-override-$Pr\s*\n\s*ports:\s*(?<ports>[^\n]+)\n\s*reason:\s*(?<reason>[^\n]+?)\s*\n\s*-->"
+        $markerMatch = [regex]::Match($body, $markerPattern)
+        if (-not $markerMatch.Success) { continue }
+
+        # Reject if the marker appears inside a fenced code block (```...```)
+        # Simple heuristic: count ``` before the match position; odd count = inside a block
+        $beforeMarker = $body.Substring(0, $markerMatch.Index)
+        $fenceCount = ([regex]::Matches($beforeMarker, '```') | Measure-Object).Count
+        if ($fenceCount % 2 -ne 0) { continue }
+
+        # Reject if inside a blockquote (line starts with >)
+        $markerLine = ($body.Substring(0, $markerMatch.Index) -split '\n' | Select-Object -Last 1)
+        if ($markerLine -match '^\s*>') { continue }
+
+        # Validate reason is non-empty
+        $reason = $markerMatch.Groups['reason'].Value.Trim()
+        if ([string]::IsNullOrWhiteSpace($reason)) {
+            [Console]::Error.WriteLine("frame-credit-ledger: override marker found on PR $Pr but reason is empty — override rejected")
+            continue
+        }
+
+        # Validate author association (fail-closed: missing/empty -> reject)
+        $authorAssociation = ''
+        if ($comment.PSObject.Properties['authorAssociation']) {
+            $authorAssociation = [string]$comment.authorAssociation
+        }
+        if ([string]::IsNullOrWhiteSpace($authorAssociation)) {
+            [Console]::Error.WriteLine("frame-credit-ledger: override marker on PR $Pr from unknown author association — override rejected (fail-closed)")
+            continue
+        }
+        if ($authorAssociation.ToUpperInvariant() -notin $authorizedAssociations) {
+            $login = if ($comment.PSObject.Properties['author'] -and $comment.author.PSObject.Properties['login']) { [string]$comment.author.login } else { '(unknown)' }
+            [Console]::Error.WriteLine("frame-credit-ledger: override marker on PR $Pr from unauthorized author '$login' (association: $authorAssociation) — override rejected")
+            continue
+        }
+
+        # Parse port list (comma-separated)
+        $portsRaw = $markerMatch.Groups['ports'].Value
+        $overriddenPorts = @($portsRaw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($overriddenPorts.Count -eq 0) {
+            [Console]::Error.WriteLine("frame-credit-ledger: override marker on PR $Pr has empty ports list — override rejected")
+            continue
+        }
+
+        $login = if ($comment.PSObject.Properties['author'] -and $comment.author.PSObject.Properties['login']) { [string]$comment.author.login } else { '(authorized)' }
+        [Console]::Error.WriteLine("frame-credit-ledger: override applied on PR $Pr by '$login' (association: $authorAssociation) for ports: $($overriddenPorts -join ', '). Reason: $reason")
+        return $overriddenPorts
+    }
+
+    return @()
 }
