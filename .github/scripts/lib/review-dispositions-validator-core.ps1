@@ -153,8 +153,8 @@ foreach ($body in $rawBodies) {
             if ($entry.pass -notin @(1, 2, 3)) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel pass must be 1, 2, or 3"
             }
-            if ($entry.disposition -notin @('incorporate', 'dismiss', 'escalate')) {
-                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel disposition must be incorporate|dismiss|escalate"
+            if ($entry.disposition -notin @('incorporate', 'dismiss', 'escalate', 'defer')) {
+                Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel disposition must be incorporate|dismiss|escalate|defer"
             }
             if ($entry.classification -notin @('load-bearing', 'routine')) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel classification must be load-bearing|routine"
@@ -162,11 +162,11 @@ foreach ($body in $rawBodies) {
             if ([string]::IsNullOrWhiteSpace($entry.disposition_rationale)) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel missing required disposition_rationale"
             }
-            # v2: ac_cross_check required on >=minor dismiss/defer entries
+            # v2: ac_cross_check required on >=medium dismiss/defer entries
             if ($payload.schema_version -eq 2) {
-                $minorOrAbove = @('minor', 'medium', 'high', 'critical')
+                $mediumOrAbove = @('medium', 'high', 'critical')
                 $dismissOrDefer = @('dismiss', 'defer')
-                if ($entry.disposition -in $dismissOrDefer -and $entry.severity -in $minorOrAbove) {
+                if ($entry.disposition -in $dismissOrDefer -and $entry.severity -in $mediumOrAbove) {
                     if ($null -eq $entry.ac_cross_check) {
                         Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel (v2) dismiss/defer entry at severity '$($entry.severity)' is missing required ac_cross_check"
                     }

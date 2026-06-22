@@ -21,7 +21,7 @@ When a functional defect or intent deficiency is found:
 
 **When taking the follow-up-issue path for a CE defect**, apply the same AC cross-check pre-condition used for code-review deferred findings (see `skills/review-judgment/SKILL.md § AC Cross-Check — Blocking Pre-Condition`): call `Get-AcTermsFromIssue` then `Get-StructuralVerdict` with `-AcTerms` to produce an `ac_cross_check` object. Then:
 
-1. Record the deferred defect in the `review-dispositions-{PR}` accumulator with `stage: ce`, `disposition: defer`, and the `ac_cross_check` object (severity ≥ minor entries require `ac_cross_check` per the v2 schema).
+1. Record the deferred defect in the `review-dispositions-{PR}` accumulator with `stage: ce`, `disposition: defer`, and the `ac_cross_check` object (severity ≥ medium entries require `ac_cross_check` per the v2 schema).
 2. Pass `-AcCrossCheck` to `Add-FollowUpIssue` so the follow-up issue body carries AC-provenance for the deferral decision.
 
 When taking the follow-up issue path, still invoke Track 2 before PR creation and log the outcome in the PR body.

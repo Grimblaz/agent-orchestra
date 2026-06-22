@@ -263,7 +263,7 @@ entries:
         $result.marker_count | Should -Be 1
     }
 
-    It 'v2 dismiss entry missing ac_cross_check at severity minor emits warning' {
+    It 'v2 dismiss entry missing ac_cross_check at severity medium emits warning' {
         $body = @'
 <!-- review-dispositions-42 -->
 
@@ -275,7 +275,7 @@ entries:
     pass: 1
     disposition: dismiss
     classification: routine
-    severity: minor
+    severity: medium
     disposition_rationale: "Dismissed without running AC cross-check."
 ```
 '@

@@ -115,7 +115,14 @@ function Add-FollowUpIssue {
     $acBlock = ''
     if ($AcCrossCheck) {
         $yaml = ($AcCrossCheck.GetEnumerator() | Sort-Object Name | ForEach-Object {
-            $v = if ($_.Value -is [bool]) { $_.Value.ToString().ToLower() } else { $_.Value }
+            $v = if ($_.Value -is [bool]) {
+                $_.Value.ToString().ToLower()
+            } elseif ($null -eq $_.Value) {
+                'null'
+            } else {
+                $escaped = ([string]$_.Value).Replace('\', '\\').Replace('"', '\"')
+                "`"$escaped`""
+            }
             "  $($_.Name): $v"
         }) -join "`n"
         $acBlock = "`n`n**AC Cross-Check**`n``````yaml`n$yaml`n``````"

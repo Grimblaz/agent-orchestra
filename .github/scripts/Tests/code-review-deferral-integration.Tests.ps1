@@ -381,8 +381,8 @@ Describe 'Code-Review-Deferral-Integration' {
 
             $result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
             $script:CapturedCreateBody | Should -Match 'AC Cross-Check'
-            $script:CapturedCreateBody | Should -Match 'result:\s*no-match'
-            $script:CapturedCreateBody | Should -Match 'routed:\s*defer'
+            $script:CapturedCreateBody | Should -Match 'result:\s*"?no-match"?'
+            $script:CapturedCreateBody | Should -Match 'routed:\s*"?defer"?'
             $script:CapturedCreateBody | Should -Match 'file_arm:\s*false'
         }
 
@@ -395,6 +395,28 @@ Describe 'Code-Review-Deferral-Integration' {
 
             $result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
             $script:CapturedCreateBody | Should -Not -Match 'ac_cross_check'
+        }
+
+        It 'quotes ac_ref string values containing colons in the YAML block (F5 regression)' {
+            $result = Add-FollowUpIssue `
+                -ParentIssue 709 `
+                -Title '[Structural] colon-bearing ac_ref test' `
+                -Body 'Finding with a colon-bearing AC line.' `
+                -Labels @('priority: medium', 'filed-by: code-conductor') `
+                -AcCrossCheck @{
+                    file_arm = $false
+                    term_arm = $true
+                    result   = 'matched-high'
+                    ac_ref   = '- Gate: the renderer must fetch `triage`-labeled issues'
+                    source   = 'issue'
+                    routed   = 'force-accept'
+                }
+
+            $result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+            # ac_ref value must be quoted so the YAML is valid despite the colon
+            $script:CapturedCreateBody | Should -Match 'ac_ref:.*"'
+            # The full colon-bearing value must survive in the body
+            $script:CapturedCreateBody | Should -Match 'Gate:'
         }
     }
 
@@ -511,6 +533,54 @@ Describe 'Code-Review-Deferral-Integration' {
             $Result.ac_cross_check.term_arm  | Should -Be $true
             $Result.ac_cross_check.result    | Should -Be 'matched-high'
             $Result.ac_cross_check.routed    | Should -Be 'force-accept'
+        }
+
+        It 'integrated routed:defer path: Get-StructuralVerdict no-match + Add-FollowUpIssue with ac_cross_check guard (F7/AC7)' {
+            # Mock gh to return issue body WITH AC section but no terms that match the finding
+            Mock gh {
+                return @'
+## Acceptance Criteria
+
+- the `portfolio-tracker` label is applied unconditionally to all new portfolio issues
+'@
+            } -ParameterFilter { $args[0] -eq 'issue' }
+
+            # Step 1: extract AC terms — 'portfolio-tracker' is present
+            $acTerms = Get-AcTermsFromIssue -IssueNumber '709'
+            $acTerms | Should -Not -BeNullOrEmpty
+
+            # Step 2: Get-StructuralVerdict for a finding that does NOT mention portfolio-tracker
+            $Finding = @{
+                id    = "F_defer_path"
+                text  = "Consider adding logging to the renderer."
+                files = @("skills/portfolio-tracker/SKILL.md")
+            }
+
+            $Result = Get-StructuralVerdict `
+                -Finding   $Finding `
+                -PrFileSet @() `
+                -AcRefs    @() `
+                -RepoRoot  $script:RepoRoot `
+                -AcTerms   $acTerms
+
+            # Verify: no term matches → routed: defer
+            $Result.ac_cross_check.routed | Should -Be 'defer'
+            $Result.ac_cross_check.result | Should -Be 'no-match'
+
+            # Step 3: Guard path — Add-FollowUpIssue MUST be called with -AcCrossCheck
+            # This is the mandatory sub-issue requirement (SKILL.md: Legitimate Partial-AC Defer)
+            $subIssueResult = Add-FollowUpIssue `
+                -ParentIssue 709 `
+                -Title '[Structural] S-maintainer-judgment: logging gap without AC coverage' `
+                -Body 'Logging gap found with no AC coverage — mandatory follow-up per AC3.' `
+                -Labels @('priority: medium', 'filed-by: code-conductor') `
+                -AcCrossCheck $Result.ac_cross_check
+
+            $subIssueResult | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+            # The body must contain the ac_cross_check block (AC4 provenance)
+            $script:CapturedCreateBody | Should -Match 'AC Cross-Check'
+            $script:CapturedCreateBody | Should -Match 'routed:.*defer'
+            $script:CapturedCreateBody | Should -Match 'result:.*no-match'
         }
     }
 }

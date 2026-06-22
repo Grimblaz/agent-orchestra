@@ -38,8 +38,8 @@
           },
           "disposition": {
             "type": "string",
-            "enum": ["incorporate", "dismiss", "escalate"],
-            "description": "Engineer's disposition for this finding."
+            "enum": ["incorporate", "dismiss", "escalate", "defer"],
+            "description": "Engineer's disposition for this finding. 'defer' is used for partial-AC no-match findings that cannot be dismissed (loud-guard path)."
           },
           "classification": {
             "type": "string",
@@ -61,8 +61,8 @@
           },
           "severity": {
             "type": "string",
-            "enum": ["critical", "high", "medium", "minor", "low"],
-            "description": "v2: Prosecution/judge severity for this finding."
+            "enum": ["critical", "high", "medium", "low"],
+            "description": "v2: Prosecution/judge severity for this finding. Matches the canonical producer enum in routing-config.json."
           },
           "stage": {
             "type": "string",
@@ -90,7 +90,7 @@
             },
             "required": ["file_arm", "term_arm", "result", "source", "routed"],
             "additionalProperties": false,
-            "description": "v2: AC cross-check outcome. Required on >=minor dismiss/defer entries."
+            "description": "v2: AC cross-check outcome. Required on >=medium dismiss/defer entries."
           }
         },
         "additionalProperties": false
