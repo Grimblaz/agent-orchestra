@@ -115,6 +115,9 @@ function Get-AcTermsFromIssue {
         foreach ($m in $tokenMatches) {
             $token = $m.Groups[1].Value
 
+            # Skip whitespace-only tokens (e.g. a backtick pair containing only spaces).
+            if ([string]::IsNullOrWhiteSpace($token)) { continue }
+
             # Stop-list check (case-insensitive).
             if ($stopListLower -contains $token.ToLowerInvariant()) { continue }
 

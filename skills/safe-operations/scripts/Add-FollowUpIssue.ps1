@@ -114,7 +114,7 @@ function Add-FollowUpIssue {
     # AC4: append ac_cross_check YAML block when provided.
     $acBlock = ''
     if ($AcCrossCheck) {
-        $yaml = ($AcCrossCheck.GetEnumerator() | Sort-Object Name | ForEach-Object {
+        $yaml = ($AcCrossCheck.GetEnumerator() | Sort-Object Key | ForEach-Object {
             $v = if ($_.Value -is [bool]) {
                 $_.Value.ToString().ToLower()
             } elseif ($null -eq $_.Value) {
@@ -123,7 +123,7 @@ function Add-FollowUpIssue {
                 $escaped = ([string]$_.Value).Replace('\', '\\').Replace('"', '\"')
                 "`"$escaped`""
             }
-            "  $($_.Name): $v"
+            "  $($_.Key): $v"
         }) -join "`n"
         $acBlock = "`n`n**AC Cross-Check**`n``````yaml`n$yaml`n``````"
     }
