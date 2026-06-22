@@ -271,7 +271,7 @@ When an engineer selects `Escalate`:
 
 ### AC Cross-Check — Blocking Pre-Condition
 
-Before writing any entry with `disposition: dismiss` or `disposition: defer` **and** `severity` ≥ minor, the agent MUST complete an AC cross-check:
+Before writing any entry with `disposition: dismiss` or `disposition: defer` **and** `severity` ≥ minor — whether the entry originates from a code-review finding (`stage: code-review`) or a CE Gate defect deferral (`stage: ce`) — the agent MUST complete an AC cross-check:
 
 1. Call `Get-AcTermsFromIssue -IssueNumber {parent_issue}` to extract behavioral AC terms.
 2. Call `Get-StructuralVerdict -Finding {finding} -PrFileSet {pr_files} -AcRefs {ac_refs} -RepoRoot {repo_root} -AcTerms {ac_terms}` to obtain the `ac_cross_check` object.
@@ -352,6 +352,8 @@ Write in this order (atomic marker first, engagement-record second):
    ~~~
 
    > **v2 per-entry requirements**: For entries with `disposition: dismiss` or `disposition: defer` and `severity` ≥ minor, `ac_cross_check` is required. The `ac_cross_check` object records which arms ran (`file_arm`, `term_arm`), the result tier (`matched-high | matched-ambiguous | no-match`), the matched AC reference if any, the source, and the routing outcome. Legacy `schema_version: 1` entries are exempt from this check. `artifact_citation` covers non-AC inherited artifacts; `ac_cross_check.ac_ref` is the AC-specific channel.
+
+   > **`stage` field values**: The `stage` field records which pipeline stage produced this entry: `code-review` for the post-judge disposition gate, `ce` for CE Gate defect deferral. Both stages use the same `ac_cross_check` pre-condition at severity ≥ minor.
 
 2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired `AskUserQuestion` appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.
 

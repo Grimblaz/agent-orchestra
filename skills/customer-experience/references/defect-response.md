@@ -17,7 +17,14 @@ When a functional defect or intent deficiency is found:
 - Re-exercise the failing scenario after fix
 - Loop budget: **2 fix-revalidate cycles maximum**, then escalate via `#tool:vscode/askQuestions` with options: "Retry with different approach", "Skip CE Gate with documented risk", "Abort and investigate manually"
 
-**Intent deficiencies (partial or weak intent match)** also route through Track 1: route to Code-Smith with the specific rubric criterion violated and the design intent reference from the `[CE GATE]` step's `Design Intent` field (falling back to the latest durable `<!-- design-issue-{ID} -->` handoff comment, then to the issue body if no durable handoff exists). Platform-local design caches may be used as an optimization when available, but they are not required. When the deficiency requires a new design decision before a fix can be defined (e.g., the core interaction model contradicts the design intent rather than merely being under-polished), Code-Conductor may instead create a follow-up issue with rationale - this is a judgment call, not automatic; the default is to fix in-PR. When taking the follow-up issue path, still invoke Track 2 before PR creation and log the outcome in the PR body.
+**Intent deficiencies (partial or weak intent match)** also route through Track 1: route to Code-Smith with the specific rubric criterion violated and the design intent reference from the `[CE GATE]` step's `Design Intent` field (falling back to the latest durable `<!-- design-issue-{ID} -->` handoff comment, then to the issue body if no durable handoff exists). Platform-local design caches may be used as an optimization when available, but they are not required. When the deficiency requires a new design decision before a fix can be defined (e.g., the core interaction model contradicts the design intent rather than merely being under-polished), Code-Conductor may instead create a follow-up issue with rationale — this is a judgment call, not automatic; the default is to fix in-PR.
+
+**When taking the follow-up-issue path for a CE defect**, apply the same AC cross-check pre-condition used for code-review deferred findings (see `skills/review-judgment/SKILL.md § AC Cross-Check — Blocking Pre-Condition`): call `Get-AcTermsFromIssue` then `Get-StructuralVerdict` with `-AcTerms` to produce an `ac_cross_check` object. Then:
+
+1. Record the deferred defect in the `review-dispositions-{PR}` accumulator with `stage: ce`, `disposition: defer`, and the `ac_cross_check` object (severity ≥ minor entries require `ac_cross_check` per the v2 schema).
+2. Pass `-AcCrossCheck` to `Add-FollowUpIssue` so the follow-up issue body carries AC-provenance for the deferral decision.
+
+When taking the follow-up issue path, still invoke Track 2 before PR creation and log the outcome in the PR body.
 
 **Track 2 - Systemic analysis (always, after Track 1 fix is complete or when taking the follow-up-issue path):**
 
