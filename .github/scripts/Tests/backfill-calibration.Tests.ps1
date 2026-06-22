@@ -54,9 +54,12 @@ Some PR text here.
 <!-- pipeline-metrics
 metrics_version: 2
 prosecution_findings: 3
-pass_1_findings: 1
-pass_2_findings: 1
-pass_3_findings: 1
+pass_findings:
+  1: 1
+  2: 1
+  3: 1
+  4: 0
+  5: 0
 defense_disproved: 1
 judge_accepted: 2
 judge_rejected: 0

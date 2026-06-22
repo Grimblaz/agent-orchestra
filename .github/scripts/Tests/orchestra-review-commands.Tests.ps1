@@ -259,7 +259,7 @@ Describe 'orchestra-review command contract' {
         $content | Should -Match '(?is)\bretry\b.{0,80}\bonce\b|\bonce\b.{0,80}\bretry\b' -Because '/orchestra:review must retry a failed or malformed prosecution body-load pass once before degrading'
         $content | Should -Match '(?is)\bpipeline-degraded\b' -Because '/orchestra:review must make the degraded prosecution path visible'
         $content | Should -Match '(?is)(?:merged\s+)?prosecution ledger|adapter''s allowed merged prosecution ledger' -Because '/orchestra:review must continue only with an explicit merged prosecution ledger when enough prosecution passes remain'
-        $content | Should -Match '(?is)(?:continue|proceed).{0,220}(?:enough valid passes remain|enough passes remain|remaining passes)' -Because '/orchestra:review must say the pipeline continues only when enough redundant prosecution passes remain'
+        $content | Should -Match '(?is)(?:quorum|survive|at least.{0,60}generalist.{0,120}specialist)' -Because '/orchestra:review must say the pipeline continues only when the quorum requirement is met (at least 1 generalist and 1 specialist survive) — generic pass-count language without explicit generalist+specialist does not satisfy this requirement'
     }
 
     It 'documents halt-strict body-load behavior for composite defense and judge stages' {

@@ -12,10 +12,10 @@
     },
     "passes_run": {
       "type": "array",
-      "items": { "type": "integer", "enum": [1, 2, 3] },
+      "items": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
       "minItems": 1,
       "uniqueItems": true,
-      "description": "Which prosecution passes ran in this review cycle (subset of [1, 2, 3])."
+      "description": "Which prosecution passes ran in this review cycle (subset of [1, 2, 3, 4, 5])."
     },
     "entries": {
       "type": "array",
@@ -33,8 +33,13 @@
           },
           "pass": {
             "type": "integer",
-            "enum": [1, 2, 3],
+            "enum": [1, 2, 3, 4, 5],
             "description": "Prosecution pass number that originated this finding."
+          },
+          "pass_role": {
+            "type": "string",
+            "enum": ["generalist-A", "generalist-B", "spec-correctness", "spec-security", "spec-architecture"],
+            "description": "Optional. Role label for the prosecution pass that originated this finding."
           },
           "disposition": {
             "type": "string",
@@ -56,7 +61,8 @@
           },
           "also_flagged_by": {
             "type": "array",
-            "items": { "type": "integer", "enum": [1, 2, 3] },
+            "items": { "type": "integer", "enum": [1, 2, 3, 4, 5] },
+            "uniqueItems": true,
             "description": "Optional. Secondary prosecution pass ids that also flagged this finding."
           },
           "severity": {

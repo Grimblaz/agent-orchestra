@@ -116,13 +116,13 @@ entries:
         $allMessages | Should -Match 'passes_run'
     }
 
-    It 'invalid passes_run value (4) emits warning mentioning invalid value: 4' {
+    It 'invalid passes_run value (6) emits warning mentioning invalid value: 6' {
         $body = @'
 <!-- review-dispositions-42 -->
 
 ```yaml
 schema_version: 1
-passes_run: [1, 4]
+passes_run: [1, 6]
 entries:
   - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
     pass: 1
@@ -135,7 +135,7 @@ entries:
 
         $result.status | Should -Be 'findings'
         $allMessages = (@($result.findings) | ForEach-Object { $_.message }) -join "`n"
-        $allMessages | Should -Match 'invalid value: 4'
+        $allMessages | Should -Match 'invalid value: 6'
     }
 
     It 'AC5 negative — missing stable_finding_key emits warning mentioning stable_finding_key' {

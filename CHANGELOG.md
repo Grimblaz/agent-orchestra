@@ -2,7 +2,7 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
-## [2.32.0] — 2026-06-22
+## [2.33.0] — 2026-06-22
 
 ### Added
 
@@ -26,6 +26,12 @@ All notable changes to agent-orchestra will be documented in this file.
 - 27-test suite for `Get-AcTermsFromIssue` covering constants, extraction, behavioral detection, stop-list, H2 boundary, dedup, and failure paths.
 - 18-test suite for `Test-DeferralCriteria` covering ARM 1+2 routing, backward compat, and `ac_cross_check` population.
 - 25-test integration suite for the full deferral path including F5 YAML-quoting regression and F7 integrated `routed: defer` → mandatory sub-issue call (#709).
+
+## [2.32.0] — 2026-06-21
+
+### Changed
+
+- **Five-pass two-layer prosecution panel for the `standard` adversarial-review adapter** (`skills/adversarial-review/platforms/claude.md`, `skills/adversarial-review/adapters/standard.md`, `skills/adversarial-review/SKILL.md`, `agents/Code-Critic.agent.md`): replaces the homogeneous 3× Opus prosecution with a diverse panel — `generalist-A` (Sonnet), `generalist-B` (Opus), and three Opus specialists (`spec-correctness`, `spec-security`, `spec-architecture`). Cross-layer dedup merges on failure-mode + code-location and prefers the deepest-tier finding (Opus over Sonnet); the panel survives iff ≥1 generalist **and** ≥1 specialist clear quorum after per-pass retries. PR-phase prosecution-pass enums widen `[1,2,3]` → `[1,2,3,4,5]` across the schema, validator, routing-config, metrics schemas, and supporting prose; the design-phase `design-disposition-audit` `[1,2,3]` invariant is unchanged. Adds an optional `model:` field to `dispatch-cost-samples[]`, wired end-to-end (parser positional contract, RC back-fill preservation, merge dedup key, round-trip tests). Also folds in the inline doc corrections that AC4's surface sweep promised (`Documents/Design/frame-architecture.md`, `skills/review-judgment/SKILL.md`, `skills/calibration-pipeline/references/metrics-schema.md`) and a quorum "well-formed ledger" definition clarification (#706, with inline fixes for #714/#716/#717/#718).
 
 ## [2.31.0] — 2026-06-21
 
