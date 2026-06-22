@@ -231,6 +231,104 @@ entries:
         $allMessages = (@($result.findings) | ForEach-Object { $_.message }) -join "`n"
         $allMessages | Should -Match 'disposition_rationale'
     }
+
+    It 'v2 valid payload with ac_cross_check passes validator with status clean' {
+        $body = @'
+<!-- review-dispositions-42 -->
+
+```yaml
+schema_version: 2
+passes_run: [1, 2, 3]
+entries:
+  - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
+    finding_id: F1
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    disposition_rationale: "Incorporated — ac cross-check ran."
+    ac_cross_check:
+      file_arm: false
+      term_arm: true
+      result: matched-high
+      ac_ref: "- the renderer must fetch `triage`-labeled issues"
+      source: issue
+      routed: force-accept
+```
+'@
+        $result = script:Run-Validator -PR 42 -Bodies @($body)
+
+        $result.status       | Should -Be 'clean'
+        $result.marker_count | Should -Be 1
+    }
+
+    It 'v2 dismiss entry missing ac_cross_check at severity minor emits warning' {
+        $body = @'
+<!-- review-dispositions-42 -->
+
+```yaml
+schema_version: 2
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: minor
+    disposition_rationale: "Dismissed without running AC cross-check."
+```
+'@
+        $result = script:Run-Validator -PR 42 -Bodies @($body)
+
+        $result.status | Should -Be 'findings'
+        $allMessages = (@($result.findings) | ForEach-Object { $_.message }) -join "`n"
+        $allMessages | Should -Match 'ac_cross_check'
+    }
+
+    It 'v1 entry without ac_cross_check passes validator (legacy exemption)' {
+        # v1 marker should NOT warn about missing ac_cross_check even for dismiss entries
+        $body = @'
+<!-- review-dispositions-42 -->
+
+```yaml
+schema_version: 1
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    disposition_rationale: "v1 legacy dismiss without ac_cross_check."
+```
+'@
+        $result = script:Run-Validator -PR 42 -Bodies @($body)
+
+        # v1 exemption: this should be clean (no ac_cross_check warning for v1)
+        $result.status | Should -Be 'clean'
+    }
+
+    It 'schema_version 3 emits warning mentioning schema_version (out of range)' {
+        $body = @'
+<!-- review-dispositions-42 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    disposition_rationale: "Future version."
+```
+'@
+        $result = script:Run-Validator -PR 42 -Bodies @($body)
+
+        $result.status | Should -Be 'findings'
+        $allMessages = (@($result.findings) | ForEach-Object { $_.message }) -join "`n"
+        $allMessages | Should -Match 'schema_version'
+    }
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

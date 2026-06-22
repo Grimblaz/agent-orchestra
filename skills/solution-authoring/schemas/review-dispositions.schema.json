@@ -7,8 +7,8 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "enum": [1],
-      "description": "Schema version for this marker type. Must be 1."
+      "enum": [1, 2],
+      "description": "Schema version. 1 = legacy; 2 = includes severity, ac_cross_check, and stage per-entry fields."
     },
     "passes_run": {
       "type": "array",
@@ -58,6 +58,39 @@
             "type": "array",
             "items": { "type": "integer", "enum": [1, 2, 3] },
             "description": "Optional. Secondary prosecution pass ids that also flagged this finding."
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "minor", "low"],
+            "description": "v2: Prosecution/judge severity for this finding."
+          },
+          "stage": {
+            "type": "string",
+            "enum": ["code-review", "ce"],
+            "description": "v2: Which review stage produced this entry."
+          },
+          "ac_cross_check": {
+            "type": "object",
+            "properties": {
+              "file_arm": { "type": "boolean" },
+              "term_arm": { "type": "boolean" },
+              "result": {
+                "type": "string",
+                "enum": ["matched-high", "matched-ambiguous", "no-match"]
+              },
+              "ac_ref": {},
+              "source": {
+                "type": "string",
+                "enum": ["issue", "pr-body", "no-ac-section"]
+              },
+              "routed": {
+                "type": "string",
+                "enum": ["force-accept", "disposition-gate", "defer"]
+              }
+            },
+            "required": ["file_arm", "term_arm", "result", "source", "routed"],
+            "additionalProperties": false,
+            "description": "v2: AC cross-check outcome. Required on >=minor dismiss/defer entries."
           }
         },
         "additionalProperties": false

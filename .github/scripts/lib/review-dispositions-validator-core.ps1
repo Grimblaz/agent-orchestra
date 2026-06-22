@@ -8,7 +8,7 @@
 .DESCRIPTION
     Finds <!-- review-dispositions-{PR} --> comments on a GitHub PR, parses their YAML
     payloads, and validates against the review-dispositions payload schema:
-      - schema_version must be 1
+      - schema_version must be 1 or 2 (`{1,2}`). v1 entries are exempt from ac_cross_check checks.
       - passes_run must be a non-empty subset of [1,2,3]
       - entries[] must each carry stable_finding_key, pass, disposition, classification,
         disposition_rationale
@@ -120,8 +120,8 @@ foreach ($body in $rawBodies) {
     }
 
     # schema_version
-    if ($null -eq $payload.schema_version -or $payload.schema_version -ne 1) {
-        Add-RdvFinding "review-dispositions-${PullRequestNumber}: schema_version must be 1, got: $($payload.schema_version)"
+    if ($null -eq $payload.schema_version -or $payload.schema_version -notin @(1, 2)) {
+        Add-RdvFinding "review-dispositions-${PullRequestNumber}: schema_version must be 1 or 2, got: $($payload.schema_version)"
     }
 
     # passes_run
@@ -161,6 +161,16 @@ foreach ($body in $rawBodies) {
             }
             if ([string]::IsNullOrWhiteSpace($entry.disposition_rationale)) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel missing required disposition_rationale"
+            }
+            # v2: ac_cross_check required on >=minor dismiss/defer entries
+            if ($payload.schema_version -eq 2) {
+                $minorOrAbove = @('minor', 'medium', 'high', 'critical')
+                $dismissOrDefer = @('dismiss', 'defer')
+                if ($entry.disposition -in $dismissOrDefer -and $entry.severity -in $minorOrAbove) {
+                    if ($null -eq $entry.ac_cross_check) {
+                        Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel (v2) dismiss/defer entry at severity '$($entry.severity)' is missing required ac_cross_check"
+                    }
+                }
             }
             if ($null -ne $entry.also_flagged_by -and $entry.also_flagged_by.Count -gt 0) {
                 $uniqueAlso = $entry.also_flagged_by | Select-Object -Unique

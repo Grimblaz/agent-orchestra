@@ -210,7 +210,7 @@ The `stable_finding_key` is what the resume-read mechanism uses to detect prior 
 
 ### Routine Findings — Silent Recording
 
-For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`:
+For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 2` (current emission format); write `severity` and `stage` for all entries, and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ minor:
 
 ```yaml
 - stable_finding_key: "src/foo.ts:42:null-check-missing-a1b2c3d4"
@@ -218,6 +218,8 @@ For routine findings, the agent records the disposition silently in the `review-
   pass: 1
   disposition: incorporate   # or dismiss — agent's judgment based on judge ruling
   classification: routine
+  severity: medium           # v2: required field
+  stage: code-review         # v2: required field
   disposition_rationale: "Trivial null-guard already required by the existing type contract; no maintainer choice required."
   artifact_citation: "src/types/index.ts:18 (NonNullable<T> constraint)"
 ```
@@ -239,7 +241,7 @@ Then fire `AskUserQuestion` with options:
 - `Escalate — this needs a design decision or a separate issue`
 - `Decline engagement — proceed without classification`
 
-Capture the engineer's choice verbatim. Record as:
+Capture the engineer's choice verbatim. Record as (v2 format — include `severity`, `stage`, and `ac_cross_check` for dismiss/defer entries with severity ≥ minor):
 
 ```yaml
 - stable_finding_key: "src/auth/session.ts:88:token-expiry-not-checked-b7c1a2f3"
@@ -247,6 +249,8 @@ Capture the engineer's choice verbatim. Record as:
   pass: 2
   disposition: incorporate   # or dismiss or escalate per engineer choice
   classification: load-bearing
+  severity: high             # v2: required field
+  stage: code-review         # v2: required field
   disposition_rationale: "Engineer chose incorporate: the expiry check was confirmed missing and the fix is bounded to one function."
 ```
 
@@ -290,19 +294,33 @@ This enables re-review of a PR without re-asking for findings already dispositio
 
 Write in this order (atomic marker first, engagement-record second):
 
-1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 1`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). This is the atomic per-finding record.
+1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 2`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). v2 adds per-entry `severity`, `ac_cross_check`, and `stage` fields. This is the atomic per-finding record.
 
    ~~~
    <!-- review-dispositions-{PR} -->
 
    ```yaml
-   schema_version: 1
+   schema_version: 2
    passes_run: [1, 2, 3]
    entries:
      - stable_finding_key: "..."
-       ...
+       pass: 1
+       disposition: incorporate
+       classification: routine
+       severity: medium
+       stage: code-review
+       disposition_rationale: "..."
+       ac_cross_check:
+         file_arm: false
+         term_arm: true
+         result: matched-high
+         ac_ref: "- the AC line that matched"
+         source: issue
+         routed: force-accept
    ```
    ~~~
+
+   > **v2 per-entry requirements**: For entries with `disposition: dismiss` or `disposition: defer` and `severity` ≥ minor, `ac_cross_check` is required. The `ac_cross_check` object records which arms ran (`file_arm`, `term_arm`), the result tier (`matched-high | matched-ambiguous | no-match`), the matched AC reference if any, the source, and the routing outcome. Legacy `schema_version: 1` entries are exempt from this check. `artifact_citation` covers non-AC inherited artifacts; `ac_cross_check.ac_ref` is the AC-specific channel.
 
 2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired `AskUserQuestion` appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.
 
