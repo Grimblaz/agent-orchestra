@@ -2,6 +2,31 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.33.0] — 2026-06-22
+
+### Added
+
+- **Deferral discipline — ARM 2 behavioral-term AC cross-check** (`skills/review-judgment/scripts/Get-AcTermsFromIssue.ps1`, `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`): a second AC cross-check arm that extracts behavioral-term identifiers from the issue's `## Acceptance Criteria` section and matches them against finding text. Behavioral terms (containing must/shall/gate/guard/etc.) route to `force-accept`; non-behavioral terms route to `disposition-gate`; no-match routes to `defer`. Confidence-tiered routing populates an `ac_cross_check` OUT object on every verdict path. Backward-compatible: `-AcTerms = @()` default leaves all existing callers unchanged (#709).
+
+- **Blocking pre-condition and loud guard** (`skills/review-judgment/SKILL.md`): no `dismiss`/`defer` entry at severity ≥ medium may be committed without a populated `ac_cross_check`. When `routed: defer` is the result, the loud guard mandates an inline note + a sub-issue created via `Add-FollowUpIssue -AcCrossCheck` carrying AC provenance YAML (#709).
+
+- **`schema_version: 2` per-entry fields** (`skills/solution-authoring/schemas/review-dispositions.schema.json`): adds `severity`, `stage`, and `ac_cross_check` per entry. v1 legacy entries are exempt from the `ac_cross_check` presence check. CE Gate deferrals use `stage: ce` (#709).
+
+- **`Add-FollowUpIssue -AcCrossCheck` parameter** (`skills/safe-operations/scripts/Add-FollowUpIssue.ps1`): optional M16 guard that appends AC provenance as a YAML block to the sub-issue body. String scalars are double-quoted so colon-bearing `ac_ref` values produce valid YAML (#709).
+
+- **ARM 2 integration in agent bodies** (`agents/Code-Conductor.agent.md`, `agents/Code-Review-Response.agent.md`, `skills/code-review-intake/SKILL.md`): `Get-AcTermsFromIssue` is called alongside `Get-AcRefsFromIssue` at the AC pre-population step; `-AcTerms` is passed to `Get-StructuralVerdict` (#709).
+
+### Fixed
+
+- `disposition: defer` was absent from the `review-dispositions` schema enum and validator accept-list despite being written by SKILL.md's loud-guard path (#709/F1).
+- Phantom `minor` severity tier removed from schema and validator threshold; all prose updated from "≥ minor" to "≥ medium" to match the canonical producer enum in `routing-config.json` (#709/F2).
+
+### Tests
+
+- 27-test suite for `Get-AcTermsFromIssue` covering constants, extraction, behavioral detection, stop-list, H2 boundary, dedup, and failure paths.
+- 18-test suite for `Test-DeferralCriteria` covering ARM 1+2 routing, backward compat, and `ac_cross_check` population.
+- 25-test integration suite for the full deferral path including F5 YAML-quoting regression and F7 integrated `routed: defer` → mandatory sub-issue call (#709).
+
 ## [2.32.0] — 2026-06-21
 
 ### Changed

@@ -210,7 +210,9 @@ The `stable_finding_key` is what the resume-read mechanism uses to detect prior 
 
 ### Routine Findings — Silent Recording
 
-For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`:
+For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 2` (current emission format); write `severity` and `stage` for all entries, and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ medium:
+
+> **Pre-condition**: for any `dismiss` entry with severity ≥ medium, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
 
 ```yaml
 - stable_finding_key: "src/foo.ts:42:null-check-missing-a1b2c3d4"
@@ -218,6 +220,8 @@ For routine findings, the agent records the disposition silently in the `review-
   pass: 1
   disposition: incorporate   # or dismiss — agent's judgment based on judge ruling
   classification: routine
+  severity: medium           # v2: required field
+  stage: code-review         # v2: required field
   disposition_rationale: "Trivial null-guard already required by the existing type contract; no maintainer choice required."
   artifact_citation: "src/types/index.ts:18 (NonNullable<T> constraint)"
 ```
@@ -239,7 +243,11 @@ Then fire `AskUserQuestion` with options:
 - `Escalate — this needs a design decision or a separate issue`
 - `Decline engagement — proceed without classification`
 
-Capture the engineer's choice verbatim. Record as:
+Capture the engineer's choice verbatim.
+
+> **Pre-condition**: if the engineer chooses `dismiss` with severity ≥ medium, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
+
+Record as (v2 format — include `severity`, `stage`, and `ac_cross_check` for dismiss/defer entries with severity ≥ medium):
 
 ```yaml
 - stable_finding_key: "src/auth/session.ts:88:token-expiry-not-checked-b7c1a2f3"
@@ -247,6 +255,8 @@ Capture the engineer's choice verbatim. Record as:
   pass: 2
   disposition: incorporate   # or dismiss or escalate per engineer choice
   classification: load-bearing
+  severity: high             # v2: required field
+  stage: code-review         # v2: required field
   disposition_rationale: "Engineer chose incorporate: the expiry check was confirmed missing and the fix is bounded to one function."
 ```
 
@@ -258,6 +268,47 @@ When an engineer selects `Escalate`:
 2. Emit a concise escalation note inline (not a structured question): `Finding {finding_id} escalated — recommend filing a follow-up issue for: {finding title}. Proceeding without implementing this finding.`
 3. Do NOT implement the finding in the current PR. The current work continues; the escalated finding is noted for tracking.
 4. Record the `escalate` outcome faithfully in `review-dispositions-{PR}` and in the L0 gate-decision token.
+
+### AC Cross-Check — Blocking Pre-Condition
+
+Before writing any entry with `disposition: dismiss` or `disposition: defer` **and** `severity` ≥ medium — whether the entry originates from a code-review finding (`stage: code-review`) or a CE Gate defect deferral (`stage: ce`) — the agent MUST complete an AC cross-check:
+
+1. Call `Get-AcTermsFromIssue -IssueNumber {parent_issue}` to extract behavioral AC terms.
+2. Call `Get-StructuralVerdict -Finding {finding} -PrFileSet {pr_files} -AcRefs {ac_refs} -RepoRoot {repo_root} -AcTerms {ac_terms}` to obtain the `ac_cross_check` object.
+3. Write the returned `ac_cross_check` object into the disposition entry.
+
+**This pre-condition is blocking.** The gate MUST NOT commit a `dismiss` or `defer` entry with severity ≥ medium that has a null or absent `ac_cross_check`. If `Get-AcTermsFromIssue` returns an empty array (no AC section found), the cross-check still runs — pass `@()` as `-AcTerms`; the verdict's `ac_cross_check.source` will be `no-ac-section` and `routed` will be `defer`.
+
+**Low-severity exemption.** Entries with severity `low` are exempt from this pre-condition (the validator also exempts them). Record them without `ac_cross_check`.
+
+**`Add-FollowUpIssue` guard.** When the cross-check routes to `defer` and the agent calls `Add-FollowUpIssue` to file a follow-up issue, it MUST pass the `ac_cross_check` outcome as part of the issue body. Include a fenced YAML block in the body:
+
+```yaml
+ac_cross_check:
+  file_arm: {bool}
+  term_arm: {bool}
+  result: {matched-high|matched-ambiguous|no-match}
+  source: {issue|pr-body|no-ac-section}
+  routed: defer
+```
+
+This ensures the follow-up issue carries AC-provenance for the deferral decision, which is the AC4 contract.
+
+### Legitimate Partial-AC Defer — Loud Guard
+
+When the AC cross-check returns `routed: defer` (because `result: no-match` or `source: no-ac-section`), the agent has confirmed that this finding genuinely lacks plan AC coverage. **Silently recording a `defer` entry at this point is the exact anti-pattern this feature was built to prevent.**
+
+The agent MUST follow this sequence instead:
+
+1. **Emit a loud inline note** (not `AskUserQuestion` — this is a guard, not a user question): `⚠️ Finding {finding_id} deferred without AC coverage (ac_cross_check.result: {result}) — mandatory sub-issue required.`
+
+2. **Create a mandatory sub-issue** via `Add-FollowUpIssue` (with `-AcCrossCheck` per the M16 guard). The canonical title uses `ConvertTo-CanonicalFollowupTitle`. The body MUST include the finding title, the judge ruling, and the `ac_cross_check` YAML block. This is mandatory regardless of the finding's classification tier — routine findings that lack AC coverage still get a sub-issue.
+
+3. **Record in the accumulator** with `disposition: defer`, the `ac_cross_check` object, and `disposition_rationale` that cites the `no-match`/`no-ac-section` outcome and references the created sub-issue URL.
+
+The loud guard does not apply when `routed: force-accept` (high-confidence AC match) or `routed: disposition-gate` (ambiguous match fires `AskUserQuestion` normally). It applies only to the `routed: defer` arm.
+
+**Low-severity exemption applies here too**: findings with severity `low` are exempt from this guard (the low-severity exemption from the blocking pre-condition applies throughout this section).
 
 ### L0 Gate-Decision Tokens
 
@@ -290,19 +341,37 @@ This enables re-review of a PR without re-asking for findings already dispositio
 
 Write in this order (atomic marker first, engagement-record second):
 
-1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 1`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). This is the atomic per-finding record.
+1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 2`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). v2 adds per-entry `severity`, `ac_cross_check`, and `stage` fields. This is the atomic per-finding record.
 
    ~~~
    <!-- review-dispositions-{PR} -->
 
    ```yaml
-   schema_version: 1
+   schema_version: 2
    passes_run: [1, 2, 3, 4, 5]
    entries:
      - stable_finding_key: "..."
-       ...
+       pass: 1
+       disposition: incorporate
+       classification: routine
+       severity: medium
+       stage: code-review
+       disposition_rationale: "..."
+       ac_cross_check:
+         file_arm: false
+         term_arm: true
+         result: matched-high
+         ac_ref: "- the AC line that matched"
+         source: issue
+         routed: force-accept
    ```
    ~~~
+
+   > **v2 per-entry requirements**: For entries with `disposition: dismiss` or `disposition: defer` and `severity` ≥ medium, `ac_cross_check` is required. The `ac_cross_check` object records which arms ran (`file_arm`, `term_arm`), the result tier (`matched-high | matched-ambiguous | no-match`), the matched AC reference if any, the source, and the routing outcome. Legacy `schema_version: 1` entries are exempt from this check. `artifact_citation` covers non-AC inherited artifacts; `ac_cross_check.ac_ref` is the AC-specific channel.
+
+   > **`stage` field values**: The `stage` field records which pipeline stage produced this entry: `code-review` for the post-judge disposition gate, `ce` for CE Gate defect deferral. Both stages use the same `ac_cross_check` pre-condition at severity ≥ medium.
+
+   > **In-session schema audit (before posting)**: Before posting the `review-dispositions-{PR}` comment to the PR, run a warn-only schema check using `.github/scripts/lib/review-dispositions-validator-core.ps1 -PullRequestNumber {PR} -InMemoryMarkers @($rawMarkerText)`. Surface any `findings` as warnings. This catches v2 schema violations (e.g., missing `ac_cross_check` on dismiss/defer entries at severity ≥ medium) before the marker is committed to the PR timeline. The validator is warn-only and never blocks posting.
 
 2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired `AskUserQuestion` appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.
 

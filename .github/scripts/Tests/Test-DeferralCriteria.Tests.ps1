@@ -146,4 +146,152 @@ Describe 'Test-DeferralCriteria' {
             $Result.matched | Should -Be $true -Because 'M8 <root> + M9 <infra> + agents + commands = 4 modules'
         }
     }
+
+    Context 'AcTerms term-based arm (AC2/AC5)' {
+
+        It 'high-confidence behavioral term in finding text -> force-ACCEPT (routed: force-accept)' {
+            $AcTermEntries = @(
+                [PSCustomObject]@{ term = 'triage'; source_ac_line = '- must fetch `triage`-labeled issues'; is_behavioral = $true }
+            )
+            $Finding = @{
+                id   = 'F_term_high'
+                text = 'The renderer does not query triage-labeled issues repo-wide.'
+                files = @('agents/some-agent.agent.md')
+            }
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @() -AcRefs @() -AcTerms $AcTermEntries
+
+            $Result.verdict                    | Should -Be 'ACCEPT (fix inline)'
+            $Result.ac_cross_check.routed      | Should -Be 'force-accept'
+            $Result.ac_cross_check.term_arm    | Should -Be $true
+            $Result.ac_cross_check.file_arm    | Should -Be $false
+            $Result.ac_cross_check.result      | Should -Be 'matched-high'
+        }
+
+        It 'ambiguous non-behavioral term in finding text -> verdict unchanged, routed: disposition-gate' {
+            # Finding matches a cross-cutting S-criterion; term is ambiguous (is_behavioral=false)
+            # The verdict should remain DEFERRED-SIGNIFICANT, not overridden to ACCEPT.
+            $AcTermEntries = @(
+                [PSCustomObject]@{ term = 'portfolio-tracker'; source_ac_line = '- `portfolio-tracker` label is applied to issues'; is_behavioral = $false }
+            )
+            $Finding = @{
+                id   = 'F_term_ambiguous'
+                text = 'The portfolio-tracker label is not applied in agents, skills, commands, and hooks.'
+                files = @('agents/x.agent.md', 'skills/y/SKILL.md', 'commands/z.md', 'hooks/pre-commit.ps1')
+            }
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @('agents/x.agent.md') -AcRefs @() -AcTerms $AcTermEntries
+
+            # Verdict stays DEFERRED-SIGNIFICANT because S-cross-cutting fires and term is ambiguous
+            $Result.verdict                    | Should -Be 'DEFERRED-SIGNIFICANT (structural)'
+            $Result.ac_cross_check.routed      | Should -Be 'disposition-gate'
+            $Result.ac_cross_check.term_arm    | Should -Be $true
+            $Result.ac_cross_check.result      | Should -Be 'matched-ambiguous'
+        }
+
+        It 'no term match -> routed: defer, verdict follows S-criteria normally' {
+            $AcTermEntries = @(
+                [PSCustomObject]@{ term = 'UnrelatedTerm'; source_ac_line = '- `UnrelatedTerm` must exist'; is_behavioral = $true }
+            )
+            $Finding = @{
+                id   = 'F_term_nomatch'
+                text = 'This finding does not mention the relevant identifier at all.'
+                files = @('agents/Code-Conductor.agent.md')
+            }
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @() -AcRefs @() -AcTerms $AcTermEntries
+
+            $Result.ac_cross_check.routed      | Should -Be 'defer'
+            $Result.ac_cross_check.term_arm    | Should -Be $false
+            $Result.ac_cross_check.result      | Should -Be 'no-match'
+        }
+
+        It 'file-arm match takes precedence and produces routed: force-accept (backward compat)' {
+            $AcTermEntries = @(
+                [PSCustomObject]@{ term = 'SomeTerm'; source_ac_line = '- `SomeTerm` is required'; is_behavioral = $false }
+            )
+            $Finding = @{
+                id   = 'F_file_arm_compat'
+                text = 'The hooks/pre-commit.ps1 file has a bug with SomeTerm.'
+                files = @('hooks/pre-commit.ps1')
+            }
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @() -AcRefs @('hooks/pre-commit.ps1') -AcTerms $AcTermEntries
+
+            $Result.verdict                    | Should -Be 'ACCEPT (fix inline)'
+            $Result.ac_cross_check.file_arm    | Should -Be $true
+            $Result.ac_cross_check.routed      | Should -Be 'force-accept'
+            $Result.ac_cross_check.result      | Should -Be 'matched-high'
+        }
+
+        It 'default -AcTerms (@()) produces ac_cross_check with file_arm=false, term_arm=false, routed=defer (backward compat)' {
+            $Finding = @{
+                id   = 'F_default_terms'
+                text = 'No structural criterion; no AC refs.'
+                files = @()
+            }
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @() -AcRefs @()
+
+            $Result.verdict                    | Should -Be 'ACCEPT (fix inline)'
+            $Result.ac_cross_check             | Should -Not -BeNullOrEmpty
+            $Result.ac_cross_check.file_arm    | Should -Be $false
+            $Result.ac_cross_check.term_arm    | Should -Be $false
+            $Result.ac_cross_check.routed      | Should -Be 'defer'
+            $Result.ac_cross_check.result      | Should -Be 'no-match'
+        }
+
+        It 'ac_cross_check is present on DEFERRED-SIGNIFICANT path (no AC refs)' {
+            # S-cross-cutting fires; no AC refs -> DEFERRED-SIGNIFICANT with ac_cross_check
+            $Finding = @{
+                id   = 'F_deferred_with_cc'
+                text = 'Affects agents, skills, commands, and hooks.'
+                files = @('agents/x.agent.md', 'skills/y/SKILL.md', 'commands/z.md', 'hooks/pre-commit.ps1')
+            }
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @('agents/x.agent.md') -AcRefs @()
+
+            $Result.verdict                    | Should -Be 'DEFERRED-SIGNIFICANT (structural)'
+            $Result.ac_cross_check             | Should -Not -BeNullOrEmpty
+            $Result.ac_cross_check.routed      | Should -Be 'defer'
+        }
+
+        It 'CR8/CR9 precision: behavioral triage term force-ACCEPTs regardless of structural match' {
+            # Simulates the originating incident: a finding that references "triage" (a behavioral AC term)
+            # matched against an S-criterion; the AC cross-check should override to ACCEPT.
+            $AcTermEntries = @(
+                [PSCustomObject]@{
+                    term = 'triage'
+                    source_ac_line = '- the renderer is specified to fetch `triage`-labeled issues repo-wide; must query repo-wide'
+                    is_behavioral = $true
+                }
+            )
+            $Finding = @{
+                id   = 'CR9_precision'
+                text = 'The Triage bucket renderer only queries sequenced issues, missing the triage-labeled repo-wide query required by the AC.'
+                files = @('agents/Code-Conductor.agent.md', 'skills/routing-tables/SKILL.md', 'commands/plan.md', 'hooks/pre-commit.ps1')
+            }
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @('agents/Code-Conductor.agent.md') -AcRefs @() -AcTerms $AcTermEntries
+
+            # Despite matching S-cross-cutting (4 modules), the behavioral term match force-ACCEPTs
+            $Result.verdict                    | Should -Be 'ACCEPT (fix inline)'
+            $Result.ac_cross_check.routed      | Should -Be 'force-accept'
+            $Result.ac_cross_check.term_arm    | Should -Be $true
+            $Result.ac_cross_check.result      | Should -Be 'matched-high'
+        }
+
+        It 'CR8/CR9 recall: stop-list term does NOT match (precision guard)' {
+            # "dismiss", "defer", "set" are on the stop-list in Get-AcTermsFromIssue
+            # but we need to verify Get-StructuralVerdict handles them safely when
+            # somehow passed in (should not false-positive if the stop-list was bypassed).
+            # This test uses a term NOT in the stop-list but absent from the finding text.
+            $AcTermEntries = @(
+                [PSCustomObject]@{ term = 'PortfolioTracker'; source_ac_line = '- `PortfolioTracker` must exist'; is_behavioral = $true }
+            )
+            $Finding = @{
+                id   = 'CR8_recall'
+                text = 'The bucket renderer misses the required label logic for triage issues.'
+                files = @()
+            }
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @() -AcRefs @() -AcTerms $AcTermEntries
+
+            # PortfolioTracker not in finding text -> no term arm match
+            $Result.ac_cross_check.term_arm    | Should -Be $false
+            $Result.ac_cross_check.result      | Should -Be 'no-match'
+        }
+    }
 }

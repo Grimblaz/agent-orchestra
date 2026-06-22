@@ -262,4 +262,325 @@ Describe 'Code-Review-Deferral-Integration' {
             $Content | Should -Match 'D8' -Because 'Must cite the thin shells over canonical shared bodies'
         }
     }
+
+    Context 'ARM 2 behavioral-term cross-check (AC1/AC5)' {
+
+        It 'produces ac_cross_check.result=matched-high when a behavioral AC term appears in finding text' {
+            $Finding = @{
+                id    = "F_term_behavioral"
+                text  = "The triage-labeled issues fetch is missing from the renderer."
+                files = @("skills/review-judgment/SKILL.md")
+            }
+            $AcTerms = @(
+                [PSCustomObject]@{
+                    term           = 'triage'
+                    source_ac_line = '- the renderer must fetch `triage`-labeled issues'
+                    is_behavioral  = $true
+                }
+            )
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @() -AcRefs @() -AcTerms $AcTerms
+
+            $Result.ac_cross_check           | Should -Not -BeNullOrEmpty
+            $Result.ac_cross_check.term_arm  | Should -Be $true
+            $Result.ac_cross_check.result    | Should -Be 'matched-high'
+            $Result.ac_cross_check.routed    | Should -Be 'force-accept'
+        }
+
+        It 'produces ac_cross_check.result=matched-ambiguous when a non-behavioral AC term matches' {
+            $Finding = @{
+                id    = "F_term_ambiguous"
+                text  = "The PortfolioTracker component is not wired."
+                files = @("skills/review-judgment/SKILL.md")
+            }
+            $AcTerms = @(
+                [PSCustomObject]@{
+                    term           = 'PortfolioTracker'
+                    source_ac_line = '- The `PortfolioTracker` is the output component.'
+                    is_behavioral  = $false
+                }
+            )
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @() -AcRefs @() -AcTerms $AcTerms
+
+            $Result.ac_cross_check           | Should -Not -BeNullOrEmpty
+            $Result.ac_cross_check.term_arm  | Should -Be $true
+            $Result.ac_cross_check.result    | Should -Be 'matched-ambiguous'
+            $Result.ac_cross_check.routed    | Should -Be 'disposition-gate'
+        }
+
+        It 'produces ac_cross_check.result=no-match when no AC terms appear in finding text' {
+            $Finding = @{
+                id    = "F_term_nomatch"
+                text  = "Consider adding logging."
+                files = @("skills/review-judgment/SKILL.md")
+            }
+            $AcTerms = @(
+                [PSCustomObject]@{
+                    term           = 'triage'
+                    source_ac_line = '- the renderer must fetch `triage`-labeled issues'
+                    is_behavioral  = $true
+                }
+            )
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @() -AcRefs @() -AcTerms $AcTerms
+
+            $Result.ac_cross_check           | Should -Not -BeNullOrEmpty
+            $Result.ac_cross_check.term_arm  | Should -Be $false
+            $Result.ac_cross_check.result    | Should -Be 'no-match'
+            $Result.ac_cross_check.routed    | Should -Be 'defer'
+        }
+
+        It 'file ARM takes precedence: ac_cross_check.result=matched-high when file_arm is true even without term match' {
+            $Finding = @{
+                id    = "F_file_arm"
+                text  = "Logging gap with no AC term."
+                files = @("skills/review-judgment/SKILL.md")
+            }
+            $AcTerms = @()  # no AC terms
+            $AcRefs  = @("skills/review-judgment/SKILL.md")  # file ARM matches
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @("skills/review-judgment/SKILL.md") -AcRefs $AcRefs -AcTerms $AcTerms
+
+            $Result.verdict                  | Should -Be 'ACCEPT (fix inline)'
+            $Result.ac_cross_check           | Should -Not -BeNullOrEmpty
+            $Result.ac_cross_check.file_arm  | Should -Be $true
+            $Result.ac_cross_check.result    | Should -Be 'matched-high'
+            $Result.ac_cross_check.routed    | Should -Be 'force-accept'
+        }
+
+        It 'backward compat: ac_cross_check is populated even when -AcTerms is omitted (ARM 2 = not run)' {
+            $Finding = @{
+                id    = "F_compat"
+                text  = "Some finding."
+                files = @("skills/review-judgment/SKILL.md")
+            }
+            # Call without -AcTerms (default @())
+            $Result = Get-StructuralVerdict -Finding $Finding -PrFileSet @() -AcRefs @()
+
+            # ac_cross_check should still be present (all fields at their default values)
+            $Result.ac_cross_check           | Should -Not -BeNullOrEmpty
+            $Result.ac_cross_check.term_arm  | Should -Be $false
+            $Result.ac_cross_check.file_arm  | Should -Be $false
+        }
+    }
+
+    Context 'Add-FollowUpIssue -AcCrossCheck parameter (M16/AC4)' {
+
+        It 'appends ac_cross_check YAML block to body when -AcCrossCheck is provided' {
+            $result = Add-FollowUpIssue `
+                -ParentIssue 709 `
+                -Title '[Structural] no-match: triage fetch missing' `
+                -Body 'Finding: triage fetch not implemented.' `
+                -Labels @('priority: medium', 'filed-by: code-conductor') `
+                -CriterionIds @('S-cross-cutting') `
+                -OriginatingPr '750' `
+                -AcCrossCheck @{
+                    file_arm = $false
+                    term_arm = $false
+                    result   = 'no-match'
+                    source   = 'issue'
+                    routed   = 'defer'
+                }
+
+            $result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+            $script:CapturedCreateBody | Should -Match 'AC Cross-Check'
+            $script:CapturedCreateBody | Should -Match 'result:\s*"?no-match"?'
+            $script:CapturedCreateBody | Should -Match 'routed:\s*"?defer"?'
+            $script:CapturedCreateBody | Should -Match 'file_arm:\s*false'
+        }
+
+        It 'does NOT append ac_cross_check block when -AcCrossCheck is absent' {
+            $result = Add-FollowUpIssue `
+                -ParentIssue 709 `
+                -Title '[Structural] S-cross-cutting: some finding' `
+                -Body 'Caller body without ac cross check.' `
+                -Labels @('priority: medium', 'filed-by: code-conductor')
+
+            $result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+            $script:CapturedCreateBody | Should -Not -Match 'ac_cross_check'
+        }
+
+        It 'quotes ac_ref string values containing colons in the YAML block (F5 regression)' {
+            $result = Add-FollowUpIssue `
+                -ParentIssue 709 `
+                -Title '[Structural] colon-bearing ac_ref test' `
+                -Body 'Finding with a colon-bearing AC line.' `
+                -Labels @('priority: medium', 'filed-by: code-conductor') `
+                -AcCrossCheck @{
+                    file_arm = $false
+                    term_arm = $true
+                    result   = 'matched-high'
+                    ac_ref   = '- Gate: the renderer must fetch `triage`-labeled issues'
+                    source   = 'issue'
+                    routed   = 'force-accept'
+                }
+
+            $result | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+            # ac_ref value must be quoted so the YAML is valid despite the colon
+            $script:CapturedCreateBody | Should -Match 'ac_ref:.*"'
+            # The full colon-bearing value must survive in the body
+            $script:CapturedCreateBody | Should -Match 'Gate:'
+        }
+    }
+
+    Context 'Autonomous path — CR8/CR9 originating incident (AC1)' {
+
+        BeforeAll {
+            # Dot-source Get-AcTermsFromIssue if not already loaded
+            $script:AcTermsScript = Join-Path $script:RepoRoot 'skills/review-judgment/scripts/Get-AcTermsFromIssue.ps1'
+            if (Test-Path $script:AcTermsScript) {
+                . $script:AcTermsScript
+            }
+
+            # Save the current global gh function and override it so that
+            # 'gh issue view <num> --json body --jq .body' returns a markdown
+            # body containing a behavioral AC section. The outer global:gh mock
+            # returns 'I_node_id' for all issue view calls, which is not a valid
+            # issue body for Get-AcTermsFromIssue. We replace it here and restore
+            # in AfterAll so the other contexts are unaffected.
+            $script:OriginalGhFunction = (Get-Item Function:\gh -ErrorAction SilentlyContinue)
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$RemainingArgs)
+                $joined = $RemainingArgs -join ' '
+
+                if ($joined -match 'issue\s+view' -and $joined -match '--json\s+body') {
+                    $global:LASTEXITCODE = 0
+                    return @'
+## Acceptance Criteria
+
+- the renderer must fetch `triage`-labeled issues repo-wide
+- the `portfolio-tracker` label is applied unconditionally to all new portfolio issues
+'@
+                }
+                if ($joined -match 'issue\s+create') {
+                    $idx = [array]::IndexOf($RemainingArgs, '--body')
+                    if ($idx -ge 0 -and $idx + 1 -lt $RemainingArgs.Count) {
+                        $script:CapturedCreateBody = $RemainingArgs[$idx + 1]
+                    }
+                    $global:LASTEXITCODE = 0
+                    return 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+                }
+                if ($joined -match 'issue\s+edit') {
+                    $global:LASTEXITCODE = 0
+                    return ''
+                }
+                if ($joined -match 'issue\s+view') {
+                    $global:LASTEXITCODE = 0
+                    return 'I_node_id'
+                }
+                if ($joined -match 'api\s+graphql') {
+                    $global:LASTEXITCODE = 0
+                    return '{"data":{"addSubIssue":{"issue":{"title":"Child"}}}}'
+                }
+                return ''
+            }
+        }
+
+        AfterAll {
+            # Restore the outer global:gh function defined by the Describe BeforeAll.
+            # Re-define it with the original implementation rather than trying to
+            # copy the function object (which is not reliably cloneable in PS7).
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$RemainingArgs)
+                $joined = $RemainingArgs -join ' '
+
+                if ($joined -match 'issue\s+create') {
+                    $idx = [array]::IndexOf($RemainingArgs, '--body')
+                    if ($idx -ge 0 -and $idx + 1 -lt $RemainingArgs.Count) {
+                        $script:CapturedCreateBody = $RemainingArgs[$idx + 1]
+                    }
+                    $global:LASTEXITCODE = 0
+                    return 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+                }
+                if ($joined -match 'issue\s+edit') {
+                    $idx = [array]::IndexOf($RemainingArgs, '--body')
+                    if ($idx -ge 0 -and $idx + 1 -lt $RemainingArgs.Count) {
+                        $script:CapturedEditBody = $RemainingArgs[$idx + 1]
+                    }
+                    $global:LASTEXITCODE = 0
+                    return ''
+                }
+                if ($joined -match 'issue\s+view') {
+                    $global:LASTEXITCODE = 0
+                    return 'I_node_id'
+                }
+                if ($joined -match 'api\s+graphql') {
+                    $global:LASTEXITCODE = 0
+                    return '{"data":{"addSubIssue":{"issue":{"title":"Child"}}}}'
+                }
+                return ''
+            }
+        }
+
+        It 'full autonomous path: Get-AcTermsFromIssue feeds Get-StructuralVerdict and routes force-accept for behavioral AC term in finding' {
+            # Step 1: extract AC terms from the mock issue
+            $acTerms = Get-AcTermsFromIssue -IssueNumber '709'
+            $acTerms | Should -Not -BeNullOrEmpty
+            ($acTerms | Select-Object -ExpandProperty term) | Should -Contain 'triage'
+
+            # Step 2: feed AC terms into Get-StructuralVerdict for a finding that mentions 'triage'
+            $Finding = @{
+                id    = "F_cr8_cr9"
+                text  = "The triage-labeled issue fetch is not wired in the renderer."
+                files = @("skills/portfolio-tracker/SKILL.md")
+            }
+
+            $Result = Get-StructuralVerdict `
+                -Finding   $Finding `
+                -PrFileSet @() `
+                -AcRefs    @() `
+                -RepoRoot  $script:RepoRoot `
+                -AcTerms   $acTerms
+
+            $Result.ac_cross_check           | Should -Not -BeNullOrEmpty
+            $Result.ac_cross_check.term_arm  | Should -Be $true
+            $Result.ac_cross_check.result    | Should -Be 'matched-high'
+            $Result.ac_cross_check.routed    | Should -Be 'force-accept'
+        }
+
+        It 'integrated routed:defer path: Get-StructuralVerdict no-match + Add-FollowUpIssue with ac_cross_check guard (F7/AC7)' {
+            # Mock gh to return issue body WITH AC section but no terms that match the finding
+            Mock gh {
+                return @'
+## Acceptance Criteria
+
+- the `portfolio-tracker` label is applied unconditionally to all new portfolio issues
+'@
+            } -ParameterFilter { $args[0] -eq 'issue' }
+
+            # Step 1: extract AC terms — 'portfolio-tracker' is present
+            $acTerms = Get-AcTermsFromIssue -IssueNumber '709'
+            $acTerms | Should -Not -BeNullOrEmpty
+
+            # Step 2: Get-StructuralVerdict for a finding that does NOT mention portfolio-tracker
+            $Finding = @{
+                id    = "F_defer_path"
+                text  = "Consider adding logging to the renderer."
+                files = @("skills/portfolio-tracker/SKILL.md")
+            }
+
+            $Result = Get-StructuralVerdict `
+                -Finding   $Finding `
+                -PrFileSet @() `
+                -AcRefs    @() `
+                -RepoRoot  $script:RepoRoot `
+                -AcTerms   $acTerms
+
+            # Verify: no term matches → routed: defer
+            $Result.ac_cross_check.routed | Should -Be 'defer'
+            $Result.ac_cross_check.result | Should -Be 'no-match'
+
+            # Step 3: Guard path — Add-FollowUpIssue MUST be called with -AcCrossCheck
+            # This is the mandatory sub-issue requirement (SKILL.md: Legitimate Partial-AC Defer)
+            $subIssueResult = Add-FollowUpIssue `
+                -ParentIssue 709 `
+                -Title '[Structural] S-maintainer-judgment: logging gap without AC coverage' `
+                -Body 'Logging gap found with no AC coverage — mandatory follow-up per AC3.' `
+                -Labels @('priority: medium', 'filed-by: code-conductor') `
+                -AcCrossCheck $Result.ac_cross_check
+
+            $subIssueResult | Should -Be 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+            # The body must contain the ac_cross_check block (AC4 provenance)
+            $script:CapturedCreateBody | Should -Match 'AC Cross-Check'
+            $script:CapturedCreateBody | Should -Match 'routed:.*defer'
+            $script:CapturedCreateBody | Should -Match 'result:.*no-match'
+        }
+    }
 }

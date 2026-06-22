@@ -273,7 +273,8 @@ function Get-StructuralVerdict {
         [hashtable]$Finding,
         [string[]]$PrFileSet,
         [string[]]$AcRefs,
-        [string]$RepoRoot
+        [string]$RepoRoot,
+        [PSCustomObject[]]$AcTerms = @()
     )
 
     # M4: resolve repo root once if not supplied; predicates forward it.
@@ -310,40 +311,102 @@ function Get-StructuralVerdict {
     $resMaint = Test-SCriterionMaintainerJudgment -Finding $Finding -PrFileSet $PrFileSet -RepoRoot $RepoRoot
     if ($resMaint.matched) { $matchedCriteria += $resMaint.criterion_id; $reasons += $resMaint.evidence }
 
-    # M12: AC cross-check as override; matched_criteria preserved.
-    $acCrossCheckMatched = $false
+    # --- ARM 1: File-path intersection (M12, existing behavior preserved) ---
+    $fileArmMatched = $false
+    $fileArmAcRef = $null
     if ($AcRefs -and $Finding.files) {
         $findingFiles = @($Finding.files) | ForEach-Object { $_.Replace('\', '/').ToLower() }
         $normalizedAc = @($AcRefs) | ForEach-Object { $_.Replace('\', '/').ToLower() }
         $acIntersection = @($findingFiles | Where-Object { $normalizedAc -contains $_ })
         if ($acIntersection.Count -gt 0) {
-            $acCrossCheckMatched = $true
+            $fileArmMatched = $true
+            $fileArmAcRef = ($AcRefs | Where-Object {
+                $_.Replace('\', '/').ToLower() -in $findingFiles
+            } | Select-Object -First 1)
         }
     }
 
-    if ($acCrossCheckMatched) {
+    # --- ARM 2: Term-based matching (new, requires -AcTerms) ---
+    $termArmMatched = $false
+    $termArmHighConfidence = $false
+    $termArmAcRef = $null
+    $findingText = if ($Finding.text) { $Finding.text } else { '' }
+
+    if ($AcTerms -and $AcTerms.Count -gt 0 -and $findingText) {
+        foreach ($entry in $AcTerms) {
+            if (-not $entry.term) { continue }
+            # Case-insensitive word-boundary match of the term in the finding text
+            if ($findingText -match "(?i)\b$([regex]::Escape($entry.term))\b") {
+                $termArmMatched = $true
+                if (-not $termArmAcRef) { $termArmAcRef = $entry.source_ac_line }
+                if ($entry.is_behavioral) {
+                    $termArmHighConfidence = $true
+                    break  # High-confidence: stop at first behavioral hit
+                }
+                # Non-behavioral: keep scanning for a behavioral hit
+            }
+        }
+    }
+
+    # --- Determine result / routing ---
+    # High-confidence: file-path intersection OR behavioral term match -> force-accept
+    # Ambiguous: non-behavioral term match only -> disposition-gate (verdict unchanged)
+    # No match: -> defer (verdict follows S-criteria normally)
+    $acCheckResult = 'no-match'
+    $acRouted = 'defer'
+    if ($fileArmMatched -or $termArmHighConfidence) {
+        $acCheckResult = 'matched-high'
+        $acRouted = 'force-accept'
+    } elseif ($termArmMatched) {
+        $acCheckResult = 'matched-ambiguous'
+        $acRouted = 'disposition-gate'
+    }
+
+    # Determine ac_ref and source
+    $acRef = $null
+    if ($fileArmMatched -and $fileArmAcRef) { $acRef = $fileArmAcRef }
+    elseif ($termArmMatched -and $termArmAcRef) { $acRef = $termArmAcRef }
+
+    $acSource = 'issue'
+    if ((-not $AcRefs -or $AcRefs.Count -eq 0) -and (-not $AcTerms -or $AcTerms.Count -eq 0)) {
+        $acSource = 'no-ac-section'
+    }
+
+    $acCrossCheck = @{
+        file_arm = $fileArmMatched
+        term_arm = $termArmMatched
+        result   = $acCheckResult
+        ac_ref   = $acRef
+        source   = $acSource
+        routed   = $acRouted
+    }
+
+    if ($acRouted -eq 'force-accept') {
         return @{
-            verdict = 'ACCEPT (fix inline)'
+            verdict          = 'ACCEPT (fix inline)'
             matched_criteria = $matchedCriteria
-            ac_precedence = $true
-            rationale = "AC Cross-Check Precedence: Finding relates to an explicit acceptance criterion."
-            evidence = 'AC cross-check overrode structural verdict; matched_criteria preserved'
+            ac_precedence    = $true
+            rationale        = "AC Cross-Check Precedence: Finding relates to an explicit acceptance criterion."
+            evidence         = 'AC cross-check overrode structural verdict; matched_criteria preserved'
+            ac_cross_check   = $acCrossCheck
         }
     }
 
     if ($matchedCriteria.Count -gt 0) {
         return @{
-            verdict = 'DEFERRED-SIGNIFICANT (structural)'
+            verdict          = 'DEFERRED-SIGNIFICANT (structural)'
             matched_criteria = $matchedCriteria
-            ac_precedence = $false
-            rationale = $reasons -join "; "
+            ac_precedence    = $false
+            rationale        = $reasons -join "; "
+            ac_cross_check   = $acCrossCheck
         }
     } else {
         return @{
-            verdict = 'ACCEPT (fix inline)'
+            verdict          = 'ACCEPT (fix inline)'
             matched_criteria = @()
-            ac_precedence = $false
-            rationale = "No structural criteria matched."
+            ac_precedence    = $false
+            rationale        = "No structural criteria matched."
+            ac_cross_check   = $acCrossCheck
         }
     }
 }

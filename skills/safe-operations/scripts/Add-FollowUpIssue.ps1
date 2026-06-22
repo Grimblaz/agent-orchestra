@@ -21,6 +21,9 @@
     M15: Emits Write-Error (ErrorAction Continue) when GraphQL parent/child
          Node IDs cannot be resolved so the "GraphQL skipped" path is
          machine-detectable on stderr instead of invisible.
+
+    M16: When -AcCrossCheck is provided, appends a fenced YAML block before the
+         sentinel block carrying the ac_cross_check provenance (AC4 contract).
 #>
 
 function ConvertTo-CanonicalFollowupTitle {
@@ -93,7 +96,12 @@ function Add-FollowUpIssue {
         [string[]]$CriterionIds = @(),
 
         # M1: PR number/URL this follow-up was triggered from.
-        [string]$OriginatingPr
+        [string]$OriginatingPr,
+
+        # AC4: ac_cross_check object from Get-StructuralVerdict.
+        # When provided, appended as a fenced YAML block in the issue body
+        # before the sentinel block so the follow-up issue carries AC-provenance.
+        [hashtable]$AcCrossCheck
     )
 
     # M1: Compose the body with parent ref, caller body, and sentinel block.
@@ -102,7 +110,25 @@ function Add-FollowUpIssue {
     # If CriterionIds parameter is empty but the legacy -CriterionId alias is supplied, use that.
     $effectiveCriterionIds = if ($CriterionIds -and $CriterionIds.Count -gt 0) { $CriterionIds } elseif ($CriterionId) { $CriterionId } else { @() }
     $sentinel = New-FollowupSentinelBlock -CriterionIds $effectiveCriterionIds -OriginatingPr $OriginatingPr
-    $bodyWithParent = "$parentRef`n`n$Body`n`n$sentinel"
+
+    # AC4: append ac_cross_check YAML block when provided.
+    $acBlock = ''
+    if ($AcCrossCheck) {
+        $yaml = ($AcCrossCheck.GetEnumerator() | Sort-Object Key | ForEach-Object {
+            $v = if ($_.Value -is [bool]) {
+                $_.Value.ToString().ToLower()
+            } elseif ($null -eq $_.Value) {
+                'null'
+            } else {
+                $escaped = ([string]$_.Value).Replace('\', '\\').Replace('"', '\"')
+                "`"$escaped`""
+            }
+            "  $($_.Key): $v"
+        }) -join "`n"
+        $acBlock = "`n`n**AC Cross-Check**`n``````yaml`n$yaml`n``````"
+    }
+
+    $bodyWithParent = "$parentRef`n`n$Body$acBlock`n`n$sentinel"
 
     # M3: Warn on comma-bearing labels before constructing the CSV.
     foreach ($label in $Labels) {
