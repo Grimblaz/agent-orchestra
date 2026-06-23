@@ -2,6 +2,16 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.33.1] — 2026-06-23
+
+### Fixed
+
+- **Session-cleanup false-positive on live persistent tracking files** (`skills/session-startup/scripts/session-startup-git-helpers.ps1`, `skills/session-startup/scripts/session-cleanup-detector-core.ps1`, `skills/session-startup/scripts/post-merge-cleanup.ps1`): root-level `.copilot-tracking/` artifacts with no `issue_id` frontmatter — `gate-events.jsonl`, `references-state.yml`, `references-init.manifest` — were flagged as stale untagged tracking files and archived by the cleanup executor. A new dual-axis exclusion registry (`Get-SCDPersistentTrackingExclusions` returning `Subtrees` + `Filenames`) is the single source of truth consumed by both detector and executor. The detector excludes registered filenames matched root-anchored at depth 0 (a registry-named file at depth ≥ 1 is still flagged); both executor archival routes skip registered files with a warning. Both consumers fail loudly (HALT + exit 1) before any `Move-Item` when the accessor is undefined or returns `$null`/missing `Filenames` — never fail-open toward deletion (#656).
+
+### Tests
+
+- 11 new Pester `It` blocks across two harnesses covering AC1–AC7: per-seed-file exclusion, positive companion (non-registry untagged file still flagged), over-exclusion depth guard, undefined-accessor hard-halt for both detector and executor, writer-oracle parity, and both executor-route skips (#656).
+
 ## [2.33.0] — 2026-06-22
 
 ### Added
