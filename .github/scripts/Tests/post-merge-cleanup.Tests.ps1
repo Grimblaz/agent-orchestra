@@ -1359,8 +1359,21 @@ title: "Issue 42 back-compat test"
 
 Describe 'post-merge-cleanup.ps1 — persistent root-level file exclusion (#656)' {
 
-    # $script:InvokeScript and $script:ScriptFile are set in the outer BeforeAll
-    # (script-scoped) and available to this sibling Describe.
+    BeforeAll {
+        # Initialize the variables this Describe needs so it can run in isolation
+        # (e.g. if extracted to a separate file). In normal full-file runs these are
+        # also set by the first Describe's BeforeAll (Describe-scoped, not script-scoped).
+        # NOTE: $script:InvokeScript and its mock-factory dependencies ($script:NewMockGitDir,
+        # $script:AddMockGh, $script:SavedPath) are NOT reproduced here — the AC4 tests
+        # (AC4-UntaggedRoute, AC4-IssueNumberRoute) require the full mock infrastructure
+        # from the first Describe's BeforeAll to run. AC6-Executor is fully self-contained.
+        if (-not $script:RepoRoot) {
+            $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        }
+        if (-not $script:ScriptFile) {
+            $script:ScriptFile = Join-Path $script:RepoRoot 'skills/session-startup/scripts/post-merge-cleanup.ps1'
+        }
+    }
 
     It 'AC4-UntaggedRoute: registry-protected file in -UntaggedTrackingFiles is skipped, not archived' {
         $workDir = Join-Path $TestDrive 'persistent-untagged-skip'

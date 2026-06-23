@@ -428,6 +428,12 @@ if ($UntaggedTrackingFiles.Count -gt 0) {
             continue
         }
         $fileInfo = Get-Item $absPath
+        # CR-5 defensive guard: skip directories (caller should only pass files via -File,
+        # but guard against API misuse that could move an entire tracking subtree)
+        if ($fileInfo.PSIsContainer) {
+            Write-Warning "Untagged tracking path is not a file: '$relPath' — skipping"
+            continue
+        }
         $ext = $fileInfo.Extension
         $nameNoExt = $fileInfo.BaseName
         $mtime = $fileInfo.LastWriteTime.ToString('yyyyMMddHHmmss')
@@ -459,11 +465,13 @@ if ($null -ne $IssueNumber) {
     New-Item -ItemType Directory -Path $archivePath -Force | Out-Null
 
     $trackingRoot = '.copilot-tracking'
+    # S-C1: hoist loop-invariant path resolution out of the per-file Where-Object and foreach
+    $trackingRootResolved = (Resolve-Path $trackingRoot).Path
     $allTrackingFiles = Get-ChildItem -Path $trackingRoot -Recurse -File -ErrorAction SilentlyContinue
     # Exclude .gitkeep placeholder files, then filter to only files belonging to this issue
     $trackingFiles = @($allTrackingFiles | Where-Object { $_.Name -ne '.gitkeep' } | Where-Object {
             # Registry guard: skip persistent root-level files (AC4)
-            $relFromRoot = $_.FullName.Substring((Resolve-Path $trackingRoot).Path.Length).TrimStart('\', '/')
+            $relFromRoot = $_.FullName.Substring($trackingRootResolved.Length).TrimStart('\', '/')
             if ($script:PersistentTrackingFilenames.Count -gt 0 -and
                 -not $relFromRoot.Contains('\') -and
                 -not $relFromRoot.Contains('/') -and
@@ -483,7 +491,7 @@ if ($null -ne $IssueNumber) {
 
     $archivedCount = 0
     foreach ($file in $trackingFiles) {
-        $relativePath = $file.FullName.Substring((Resolve-Path $trackingRoot).Path.Length).TrimStart('\', '/')
+        $relativePath = $file.FullName.Substring($trackingRootResolved.Length).TrimStart('\', '/')
         $destDir = Join-Path $archivePath (Split-Path $relativePath -Parent)
         New-Item -Force -ItemType Directory -Path $destDir | Out-Null
         Move-Item -LiteralPath $file.FullName -Destination (Join-Path $destDir $file.Name)
