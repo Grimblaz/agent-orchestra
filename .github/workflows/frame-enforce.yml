@@ -10,7 +10,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
+  pull-requests: write  # needed: Find-OrUpsertComment posts/updates the frame-credit-ledger PR comment
 
 concurrency:
   group: frame-enforce-pr-${{ github.event.pull_request.number }}

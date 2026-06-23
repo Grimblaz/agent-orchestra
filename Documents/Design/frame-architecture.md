@@ -522,7 +522,7 @@ This closes the only failure mode the terminal-step rule alone doesn't address: 
 > **Resolved limitations from the warn-only slice** (tracked in #439):
 >
 > 1. **Budget-exceeded enforce policy**: when the 30s outer budget elapses in enforce mode, the orchestrator exits with code 4 (budget-exceeded enforce block). This is the explicit policy chosen in #439 — budget-exceeded is treated as a soft-block requiring operator acknowledgment, not a silent pass.
-> 2. **AdapterDiscoveryFailed → Inconclusive routing**: in enforce mode, `Inconclusive` ports exit with code 3 (inconclusive-block), separate from code 4 (missing/failed). The `enforce: block-on-inconclusive:` field in each port YAML controls whether an inconclusive credit blocks or passes. This allows per-port tuning without changing the orchestrator's main flow.
+> 2. **AdapterDiscoveryFailed → Inconclusive routing**: in enforce mode, blocking ports (missing/failed and configured-blocking inconclusive) exit with code 3. Code 4 is reserved for budget timeout. The `enforce: block-on-inconclusive:` field in each port YAML controls whether an inconclusive credit blocks or passes. This allows per-port tuning without changing the orchestrator's main flow.
 
 ```text
 on `gh pr create` (or push to PR branch with auto-PR):
@@ -573,9 +573,11 @@ All four conditions must hold before flipping to required:
 Once the gate is met:
 
 1. Set the activation timestamp in `frame/enforce-activation.yaml` on the `main` branch:
+
    ```yaml
    activation_timestamp: "<ISO-8601 UTC timestamp of now>"
    ```
+
    For example: `activation_timestamp: "2026-09-01T00:00:00Z"`
 
 2. In the GitHub repository settings → Branch protection → `main` branch rule, add **`Frame credit enforce`** as a required status check.
@@ -589,12 +591,14 @@ PRs created **before** the `activation_timestamp` are not subject to enforcement
 Two escape hatches are available:
 
 - **Per-PR override**: an `OWNER`, `MEMBER`, or `COLLABORATOR` posts a top-level PR comment containing:
-  ```
+
+  ```text
   <!-- frame-override-{PR_NUMBER}
   ports: port1, port2
   reason: <mandatory explanation>
   -->
   ```
+
   This marks the listed ports as `overridden` (precedence 70, beats `failed`). The comment is the durable record; no additional tracking is added.
 
 - **Kill switch**: set the `FRAME_ENFORCE=0` environment variable in the Actions workflow run. This coerces enforce → warn for that run. Use only in genuine emergencies.

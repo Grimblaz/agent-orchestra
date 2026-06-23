@@ -101,8 +101,8 @@ Describe 'frame port manifest' {
         $content = (Get-Content -Raw -Path $portFile) -replace '\r', ''
         # Must have a top-level enforce: block
         $content | Should -Match '(?m)^enforce:\s*$'
-        # Must have block-on-inconclusive nested inside it (indented)
-        $content | Should -Match '(?m)^\s+block-on-inconclusive:\s*(true|false)\s*$'
+        # Must have block-on-inconclusive nested under enforce: specifically
+        $content | Should -Match '(?ms)^enforce:\s*\r?\n(?:(?:[ \t]+[^\r\n]*\r?\n)*?)[ \t]+block-on-inconclusive:\s*(true|false)\s*$'
     }
 
     It 'process-retrospective explicitly declares block-on-inconclusive: false' {
@@ -114,7 +114,7 @@ Describe 'frame port manifest' {
         $portFile | Should -Exist
 
         $content = (Get-Content -Raw -Path $portFile) -replace '\r', ''
-        $content | Should -Match '(?m)^\s+block-on-inconclusive:\s*false\s*$'
+        $content | Should -Match '(?ms)^enforce:\s*\r?\n(?:(?:[ \t]+[^\r\n]*\r?\n)*?)[ \t]+block-on-inconclusive:\s*false\s*$'
     }
 }
 

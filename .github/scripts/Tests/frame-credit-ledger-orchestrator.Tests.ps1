@@ -1415,8 +1415,9 @@ dispatch-cost-samples:
             $result = & $script:InvokeOrchestrator `
                 -Pr 429 -Mode 'enforce' `
                 -Env @{
-                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'
-                FRAME_ENFORCE                     = '0'
+                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP              = '1'
+                FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1'
+                FRAME_ENFORCE                                  = '0'
             } `
                 -MockBootstrap $bootstrap
 

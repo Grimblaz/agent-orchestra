@@ -59,11 +59,12 @@ function script:Get-FCLNestedScalar {
     $insideParent = $false
 
     foreach ($line in $lines) {
-        # Skip blank lines
+        # Skip blank lines and comment lines
         if ($line -match '^\s*$') { continue }
+        $trimmed = $line.TrimStart()
+        if ($trimmed.StartsWith('#')) { continue }
 
         # Determine current line indentation
-        $trimmed = $line.TrimStart()
         $currentIndent = $line.Length - $trimmed.Length
 
         if (-not $insideParent) {
@@ -91,6 +92,15 @@ function script:Get-FCLNestedScalar {
             # Child must be strictly deeper than parent
             if ($childIndent -gt $parentIndent) {
                 $value = $line -replace ('^(\s+)' + [regex]::Escape($ChildKey) + '\s*:\s*'), ''
+                $value = ($value).Trim()
+                if ($value.Length -ge 2) {
+                    $first = $value[0]
+                    $last  = $value[$value.Length - 1]
+                    if (($first -eq '"'  -and $last -eq '"') -or
+                        ($first -eq "'" -and $last -eq "'")) {
+                        $value = $value.Substring(1, $value.Length - 2)
+                    }
+                }
                 return $value.Trim()
             }
         }
@@ -1563,7 +1573,16 @@ function Get-PortFiles {
             # Default is $true (fail-safe) when the enforce: block or child key is absent.
             # DO NOT use Get-FCLScalar here — the flat regex matches at any depth, defeating enforce: namespacing (M21/R2-8).
             $rawBOI = script:Get-FCLNestedScalar -Block $raw -ParentKey 'enforce' -ChildKey 'block-on-inconclusive'
-            $blockOnInconclusive = if ($null -eq $rawBOI) { $true } else { $rawBOI -eq 'true' }
+            $blockOnInconclusive = switch ($rawBOI) {
+                $null   { $true  }   # absent → fail-safe default
+                'true'  { $true  }
+                'false' { $false }
+                default {
+                    [Console]::Error.WriteLine(
+                        "frame-credit-ledger: invalid enforce.block-on-inconclusive value '$rawBOI' in '$($file.FullName)'; defaulting to true (fail-safe).")
+                    $true
+                }
+            }
 
             $triggerStatus = script:Get-FCLScalar -Block $raw -Name 'trigger-status'
             $triggerDeferredTo = script:Get-FCLScalar -Block $raw -Name 'trigger-deferred-to'
@@ -2741,7 +2760,7 @@ function Resolve-FCLOverrideMarker {
         # Check for the frame-override-{PR} marker (anchored: must appear as an HTML
         # comment at the start of a line, not inside a fenced block or blockquote).
         # Grammar: <!-- frame-override-{PR}\nports: {csv}\nreason: {text}\n-->
-        $markerPattern = "(?ms)<!--\s*frame-override-$Pr\s*\n\s*ports:\s*(?<ports>[^\n]+)\n\s*reason:\s*(?<reason>[^\n]+?)\s*\n\s*-->"
+        $markerPattern = "(?ms)^\s*<!--\s*frame-override-$Pr\s*\n\s*ports:\s*(?<ports>[^\n]+)\n\s*reason:\s*(?<reason>[^\n]+?)\s*\n\s*-->"
         $markerMatch = [regex]::Match($body, $markerPattern)
         if (-not $markerMatch.Success) { continue }
 
@@ -2772,7 +2791,7 @@ function Resolve-FCLOverrideMarker {
             continue
         }
         if ($authorAssociation.ToUpperInvariant() -notin $authorizedAssociations) {
-            $login = if ($comment.PSObject.Properties['author'] -and $comment.author.PSObject.Properties['login']) { [string]$comment.author.login } else { '(unknown)' }
+            $login = if ($comment.PSObject.Properties['author'] -and $null -ne $comment.author -and $comment.author.PSObject.Properties['login']) { [string]$comment.author.login } else { '(unknown)' }
             [Console]::Error.WriteLine("frame-credit-ledger: override marker on PR $Pr from unauthorized author '$login' (association: $authorAssociation) — override rejected")
             continue
         }
@@ -2785,7 +2804,7 @@ function Resolve-FCLOverrideMarker {
             continue
         }
 
-        $login = if ($comment.PSObject.Properties['author'] -and $comment.author.PSObject.Properties['login']) { [string]$comment.author.login } else { '(authorized)' }
+        $login = if ($comment.PSObject.Properties['author'] -and $null -ne $comment.author -and $comment.author.PSObject.Properties['login']) { [string]$comment.author.login } else { '(authorized)' }
         [Console]::Error.WriteLine("frame-credit-ledger: override applied on PR $Pr by '$login' (association: $authorAssociation) for ports: $($overriddenPorts -join ', '). Reason: $reason")
         return $overriddenPorts
     }
