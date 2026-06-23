@@ -60,8 +60,8 @@ BeforeAll {
                 return $script:AllowedStatusByPortPattern[$pattern]
             }
         }
-        # Default: all six values (for ports not in the table)
-        return @('passed', 'failed', 'skipped', 'not-applicable', 'inconclusive', 'not-persisted')
+        # Default: all seven values (for ports not in the table)
+        return @('passed', 'failed', 'skipped', 'not-applicable', 'inconclusive', 'not-persisted', 'overridden')
     }
 
     function script:Get-CreditBuilderFunctionAst {

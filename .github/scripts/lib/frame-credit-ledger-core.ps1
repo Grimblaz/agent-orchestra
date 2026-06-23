@@ -38,6 +38,77 @@ function script:ConvertTo-FCLNormalizedLines {
     return $normalized -split "`n"
 }
 
+function script:Get-FCLNestedScalar {
+    # Reads a child key from a parent block in YAML text.
+    # Returns the value only when the child key appears at exactly one indent level deeper than the parent key.
+    # Returns $null when the parent block is absent, or the child key is absent inside it, or is at the wrong depth.
+    # DO NOT replace with Get-FCLScalar — the flat regex in that function matches at any depth, defeating nesting constraints.
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Block,
+        [Parameter(Mandatory)][string]$ParentKey,
+        [Parameter(Mandatory)][string]$ChildKey
+    )
+
+    if ([string]::IsNullOrEmpty($Block)) {
+        return $null
+    }
+
+    $lines = script:ConvertTo-FCLNormalizedLines -Text $Block
+
+    $parentIndent = -1
+    $insideParent = $false
+
+    foreach ($line in $lines) {
+        # Skip blank lines and comment lines
+        if ($line -match '^\s*$') { continue }
+        $trimmed = $line.TrimStart()
+        if ($trimmed.StartsWith('#')) { continue }
+
+        # Determine current line indentation
+        $currentIndent = $line.Length - $trimmed.Length
+
+        if (-not $insideParent) {
+            # Look for the parent key at any column (top-level is column 0)
+            $parentPattern = '^(\s*)' + [regex]::Escape($ParentKey) + '\s*:\s*$'
+            if ($line -match $parentPattern) {
+                $parentIndent = $Matches[1].Length
+                $insideParent = $true
+            }
+            continue
+        }
+
+        # We are inside the parent block
+        # If we see a line at same or lesser indent as parent, the block has ended
+        if ($currentIndent -le $parentIndent) {
+            return $null
+        }
+
+        # The child must be at exactly parentIndent + some positive indent (any depth > parent qualifies,
+        # but we require the child key to appear before any sub-block ends).
+        # Look for the child key at this indent level (must be deeper than parent)
+        $childPattern = '^(\s+)' + [regex]::Escape($ChildKey) + '\s*:\s*(?<value>.+?)\s*$'
+        if ($line -match $childPattern) {
+            $childIndent = $Matches[1].Length
+            # Child must be strictly deeper than parent
+            if ($childIndent -gt $parentIndent) {
+                $value = $line -replace ('^(\s+)' + [regex]::Escape($ChildKey) + '\s*:\s*'), ''
+                $value = ($value).Trim()
+                if ($value.Length -ge 2) {
+                    $first = $value[0]
+                    $last  = $value[$value.Length - 1]
+                    if (($first -eq '"'  -and $last -eq '"') -or
+                        ($first -eq "'" -and $last -eq "'")) {
+                        $value = $value.Substring(1, $value.Length - 2)
+                    }
+                }
+                return $value.Trim()
+            }
+        }
+    }
+
+    return $null
+}
+
 function script:Get-FCLScalar {
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Block,
@@ -1416,13 +1487,14 @@ function script:Get-FCLCreditStatusPrecedence {
 
     $status = if ($null -eq $LedgerRow) { '' } else { [string]$LedgerRow.Status }
     switch ($status) {
-        'failed' { return 60 }
-        'inconclusive' { return 50 }
-        'not-persisted' { return 40 }
-        'skipped' { return 30 }
+        'overridden'     { return 70 }   # override beats failed — must come first
+        'failed'         { return 60 }
+        'inconclusive'   { return 50 }
+        'not-persisted'  { return 40 }
+        'skipped'        { return 30 }
         'not-applicable' { return 20 }
-        'passed' { return 10 }
-        default { return 0 }
+        'passed'         { return 10 }
+        default          { return 0 }
     }
 }
 
@@ -1497,11 +1569,32 @@ function Get-PortFiles {
                 continue
             }
 
+            # Read block-on-inconclusive from the nested enforce: block.
+            # Default is $true (fail-safe) when the enforce: block or child key is absent.
+            # DO NOT use Get-FCLScalar here — the flat regex matches at any depth, defeating enforce: namespacing (M21/R2-8).
+            $rawBOI = script:Get-FCLNestedScalar -Block $raw -ParentKey 'enforce' -ChildKey 'block-on-inconclusive'
+            $blockOnInconclusive = switch ($rawBOI) {
+                $null   { $true  }   # absent → fail-safe default
+                'true'  { $true  }
+                'false' { $false }
+                default {
+                    [Console]::Error.WriteLine(
+                        "frame-credit-ledger: invalid enforce.block-on-inconclusive value '$rawBOI' in '$($file.FullName)'; defaulting to true (fail-safe).")
+                    $true
+                }
+            }
+
+            $triggerStatus = script:Get-FCLScalar -Block $raw -Name 'trigger-status'
+            $triggerDeferredTo = script:Get-FCLScalar -Block $raw -Name 'trigger-deferred-to'
+
             $results.Add([pscustomobject]@{
-                    Name        = $name
-                    Description = $description
-                    Applies     = $applies
-                    Status      = $status
+                    Name                = $name
+                    Description         = $description
+                    Applies             = $applies
+                    Status              = $status
+                    BlockOnInconclusive = [bool]$blockOnInconclusive
+                    TriggerStatus       = if ([string]::IsNullOrWhiteSpace($triggerStatus)) { $null } else { $triggerStatus }
+                    TriggerDeferredTo   = if ([string]::IsNullOrWhiteSpace($triggerDeferredTo)) { $null } else { $triggerDeferredTo }
                 }) | Out-Null
         }
         catch {
@@ -1511,6 +1604,54 @@ function Get-PortFiles {
     }
 
     return $results.ToArray()
+}
+
+function Resolve-FCLRecoveryCommand {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string]$PortName,
+        [Parameter(Mandatory)][string]$SubReason
+    )
+
+    # Port-specific registry (checked first)
+    $portRegistry = @{
+        'review'             = 'Run /orchestra:review to complete the adversarial review pipeline'
+        'post-fix-review'    = 'Run /orchestra:review (post-fix) after Code-Smith applies fixes'
+        'ce-gate-cli'        = 'Run /experience {N} CE Gate to capture CE Gate evidence for the CLI surface'
+        'ce-gate-browser'    = 'Run /experience {N} CE Gate to capture CE Gate evidence for the browser surface'
+        'ce-gate-canvas'     = 'Run /experience {N} CE Gate to capture CE Gate evidence for the canvas surface'
+        'ce-gate-api'        = 'Run /experience {N} CE Gate to capture CE Gate evidence for the API surface'
+        'plan'               = 'Run /plan {N} to produce an implementation plan'
+        'design'             = 'Run /design {N} to produce a technical design'
+        'experience'         = 'Run /experience {N} to produce customer framing'
+        'release-hygiene'    = 'Ensure a version bump and CHANGELOG entry are present in this PR'
+        'post-pr'            = 'Run post-PR archival steps via /orchestrate after the PR merges'
+        'implement-code'     = 'Ensure the implement-code credit row is present in the PR pipeline-metrics block'
+        'implement-test'     = 'Ensure the implement-test credit row is present in the PR pipeline-metrics block'
+        'implement-refactor' = 'Ensure the implement-refactor credit row is present in the PR pipeline-metrics block'
+        'implement-docs'     = 'Ensure the implement-docs credit row is present in the PR pipeline-metrics block'
+        'process-review'     = 'Run Process-Review agent to complete systemic analysis'
+    }
+
+    # Sub-reason fallback registry (when no port-specific entry or as supplement)
+    $subReasonRegistry = @{
+        'NoEvidence'             = "No adapters or credits found for port '$PortName'. Check that the frame spine declares this port and that credits were emitted."
+        'MissingNextStepField'   = "Adapter for port '$PortName' has no SuggestedNextStep field. Update the adapter YAML to include a suggested-next-step value."
+        'AdapterParseError'      = "Adapter YAML for port '$PortName' failed to parse. Fix the adapter file syntax and re-run the hook."
+        'AdapterDiscoveryFailed' = "All adapters for port '$PortName' returned unknown applicability. Check that the adapter's applies-when predicate is correctly wired."
+        'UnknownCreditStatus'    = "Credit for port '$PortName' has an unrecognized status. Valid statuses: passed, failed, skipped, not-applicable, inconclusive, not-persisted, overridden."
+    }
+
+    if ($portRegistry.ContainsKey($PortName)) {
+        return $portRegistry[$PortName]
+    }
+
+    if ($subReasonRegistry.ContainsKey($SubReason)) {
+        return $subReasonRegistry[$SubReason]
+    }
+
+    # Absolute fallback — always non-empty
+    return "Check port '$PortName' (sub-reason: $SubReason): verify that the frame spine declares this port and that the producing adapter emitted a valid credit."
 }
 
 function Resolve-PortStatus {
@@ -1624,6 +1765,7 @@ function Resolve-PortStatus {
             'skipped'        = @{ Status = 'Covered'; SubReason = 'SkippedCredit'; IncludeNextStep = $false }
             'failed'         = @{ Status = 'NotCovered'; SubReason = 'AdapterFailed'; IncludeNextStep = $true }
             'inconclusive'   = @{ Status = 'Inconclusive'; SubReason = 'InconclusiveCredit'; IncludeNextStep = $true }
+            'overridden'     = @{ Status = 'Covered'; SubReason = 'OverriddenCredit'; IncludeNextStep = $false }
         }
 
         $entry = $creditMap[$creditStatus]
@@ -1685,7 +1827,9 @@ function Compose-Comment {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MarkerToken,
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$PortReports
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$PortReports,
+        [string]$Mode = 'warn',
+        [bool]$HasBlock = $false
     )
 
     $reports = @($PortReports | Where-Object { $_ -ne $null })
@@ -1729,6 +1873,8 @@ function Compose-Comment {
                     'InconclusiveCredit'  { 'inconclusive' }
                     'NotPersistedCredit'  { 'not-persisted' }
                     'MissingAdapter'      { 'missing' }
+                    'DeferredPort'        { 'deferred' }
+                    'OverriddenCredit'    { 'overridden' }
                     default               { [string]$r.SubReason }
                 }
             }
@@ -1740,6 +1886,8 @@ function Compose-Comment {
                 'failed'        { '❌' }
                 'inconclusive'  { '⚠️' }
                 'not-persisted' { '🔇' }
+                'deferred'      { '⏸️' }
+                'overridden'    { '🔓' }
                 default         { '❓' }
             }
 
@@ -1770,7 +1918,15 @@ function Compose-Comment {
         [void]$sb.AppendLine('')
     }
 
-    [void]$sb.AppendLine('(Hook ran in `warn` mode; PR creation was not blocked.)')
+    if ($Mode -eq 'enforce') {
+        if ($HasBlock) {
+            [void]$sb.AppendLine('(Hook ran in `enforce` mode; blocked ports above prevent merge.)')
+        } else {
+            [void]$sb.AppendLine('(Hook ran in `enforce` mode; all covered ports passed.)')
+        }
+    } else {
+        [void]$sb.AppendLine('(Hook ran in `warn` mode; PR creation was not blocked.)')
+    }
 
     return $sb.ToString()
 }
@@ -1781,10 +1937,12 @@ function Compose-CommentWithCostPattern {
     param(
         [Parameter(Mandatory)][string]$MarkerToken,
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$PortReports,
-        [AllowEmptyString()][string]$CostSection = ''
+        [AllowEmptyString()][string]$CostSection = '',
+        [string]$Mode = 'warn',
+        [bool]$HasBlock = $false
     )
     # 1. Call Compose-Comment to get the port-coverage section
-    $portCoverageBody = Compose-Comment -MarkerToken $MarkerToken -PortReports $PortReports
+    $portCoverageBody = Compose-Comment -MarkerToken $MarkerToken -PortReports $PortReports -Mode $Mode -HasBlock $HasBlock
     # 2. Append cost section if non-empty
     if ([string]::IsNullOrWhiteSpace($CostSection)) {
         return $portCoverageBody
@@ -2566,4 +2724,90 @@ function Invoke-CreditInputHarvest {
     }
 
     return $results
+}
+
+function Resolve-FCLOverrideMarker {
+    <#
+    .SYNOPSIS
+        Finds an authorized <!-- frame-override-{PR} --> marker in PR comments.
+    .DESCRIPTION
+        Scans top-level PR comments (not PR body, not issue comments) for a
+        <!-- frame-override-{PR} --> block. Returns the list of port names to
+        override when a valid marker is found from an authorized author.
+        Fail-closed: empty/missing author lookup -> no override granted.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [AllowNull()][AllowEmptyCollection()][object[]]$Comments
+    )
+
+    if ($null -eq $Comments -or @($Comments).Count -eq 0) {
+        return @()
+    }
+
+    # Authorized author associations (case-insensitive match)
+    $authorizedAssociations = @('OWNER', 'MEMBER', 'COLLABORATOR')
+
+    foreach ($comment in @($Comments)) {
+        # Extract body
+        $body = ''
+        if ($comment.PSObject.Properties['body']) {
+            $body = [string]$comment.body
+        }
+        if ([string]::IsNullOrWhiteSpace($body)) { continue }
+
+        # Check for the frame-override-{PR} marker (anchored: must appear as an HTML
+        # comment at the start of a line, not inside a fenced block or blockquote).
+        # Grammar: <!-- frame-override-{PR}\nports: {csv}\nreason: {text}\n-->
+        $markerPattern = "(?ms)^\s*<!--\s*frame-override-$Pr\s*\n\s*ports:\s*(?<ports>[^\n]+)\n\s*reason:\s*(?<reason>[^\n]+?)\s*\n\s*-->"
+        $markerMatch = [regex]::Match($body, $markerPattern)
+        if (-not $markerMatch.Success) { continue }
+
+        # Reject if the marker appears inside a fenced code block (```...```)
+        # Simple heuristic: count ``` before the match position; odd count = inside a block
+        $beforeMarker = $body.Substring(0, $markerMatch.Index)
+        $fenceCount = ([regex]::Matches($beforeMarker, '```') | Measure-Object).Count
+        if ($fenceCount % 2 -ne 0) { continue }
+
+        # Reject if inside a blockquote (line starts with >)
+        $markerLine = ($body.Substring(0, $markerMatch.Index) -split '\n' | Select-Object -Last 1)
+        if ($markerLine -match '^\s*>') { continue }
+
+        # Validate reason is non-empty
+        $reason = $markerMatch.Groups['reason'].Value.Trim()
+        if ([string]::IsNullOrWhiteSpace($reason)) {
+            [Console]::Error.WriteLine("frame-credit-ledger: override marker found on PR $Pr but reason is empty — override rejected")
+            continue
+        }
+
+        # Validate author association (fail-closed: missing/empty -> reject)
+        $authorAssociation = ''
+        if ($comment.PSObject.Properties['authorAssociation']) {
+            $authorAssociation = [string]$comment.authorAssociation
+        }
+        if ([string]::IsNullOrWhiteSpace($authorAssociation)) {
+            [Console]::Error.WriteLine("frame-credit-ledger: override marker on PR $Pr from unknown author association — override rejected (fail-closed)")
+            continue
+        }
+        if ($authorAssociation.ToUpperInvariant() -notin $authorizedAssociations) {
+            $login = if ($comment.PSObject.Properties['author'] -and $null -ne $comment.author -and $comment.author.PSObject.Properties['login']) { [string]$comment.author.login } else { '(unknown)' }
+            [Console]::Error.WriteLine("frame-credit-ledger: override marker on PR $Pr from unauthorized author '$login' (association: $authorAssociation) — override rejected")
+            continue
+        }
+
+        # Parse port list (comma-separated)
+        $portsRaw = $markerMatch.Groups['ports'].Value
+        $overriddenPorts = @($portsRaw -split ',' | ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($overriddenPorts.Count -eq 0) {
+            [Console]::Error.WriteLine("frame-credit-ledger: override marker on PR $Pr has empty ports list — override rejected")
+            continue
+        }
+
+        $login = if ($comment.PSObject.Properties['author'] -and $null -ne $comment.author -and $comment.author.PSObject.Properties['login']) { [string]$comment.author.login } else { '(authorized)' }
+        [Console]::Error.WriteLine("frame-credit-ledger: override applied on PR $Pr by '$login' (association: $authorAssociation) for ports: $($overriddenPorts -join ', '). Reason: $reason")
+        return $overriddenPorts
+    }
+
+    return @()
 }

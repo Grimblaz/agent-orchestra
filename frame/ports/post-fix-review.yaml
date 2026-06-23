@@ -5,3 +5,5 @@ trigger:
   source-port: review
   condition-description: "Main review accepted findings that required a follow-up fix and targeted re-review."
 status: stable
+enforce:
+  block-on-inconclusive: true

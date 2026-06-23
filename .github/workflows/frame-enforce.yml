@@ -1,0 +1,55 @@
+# Enforces frame credit coverage as a required check (gates merge).
+# Ships in advisory mode — not marked required until the Pre-Activation Gate is met.
+# Activation: set enforce-activation.yaml on the base branch, then mark this check required
+# in branch protection. See frame/enforce-activation.yaml and Documents/Design/frame-architecture.md.
+name: Frame credit enforce
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write  # needed: Find-OrUpsertComment posts/updates the frame-credit-ledger PR comment
+
+concurrency:
+  group: frame-enforce-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  frame-enforce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Fetch base branch
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: git fetch origin "$BASE_REF"
+
+      - name: Checkout base-ref port config
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Read frame/ports/*.yaml from the base ref so gate config cannot be changed by the PR.
+          git checkout "$BASE_SHA" -- frame/ports/
+
+      - name: Checkout base-ref activation config
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # enforce-activation.yaml is a new file and may be absent on the base ref.
+          # Fail-open (|| true) so the PS script's missing-file guard fires and coerces warn.
+          git checkout "$BASE_SHA" -- frame/enforce-activation.yaml || true
+
+      - name: Run frame credit enforce
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_CREATED_AT: ${{ github.event.pull_request.created_at }}
+        run: |
+          ./.github/scripts/frame-credit-ledger.ps1 -Pr $env:PR_NUMBER -Mode enforce

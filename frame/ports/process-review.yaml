@@ -5,3 +5,5 @@ trigger:
   source-port: review
   condition-description: "Review or CE evidence identified a systemic process gap that warranted retrospective analysis."
 status: stable
+enforce:
+  block-on-inconclusive: true

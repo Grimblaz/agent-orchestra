@@ -1346,6 +1346,82 @@ Describe 'Compose-Comment' {
         $out | Should -Not -Match '### ✅ Covered'
         $out | Should -Not -Match '### 🚫 Not covered'
     }
+
+    It 'renders OverriddenCredit as 🔓 overridden (not ❓ OverriddenCredit) — M3 fix' {
+        $reports = @(
+            [pscustomobject]@{
+                PortName          = 'review'
+                Status            = 'Covered'
+                SubReason         = 'OverriddenCredit'
+                AdapterName       = ''
+                SuggestedNextStep = $null
+                Evidence          = 'override: authorized self-override posted in PR 429 comment'
+            }
+        )
+
+        $out = Compose-Comment -MarkerToken $script:Marker -PortReports $reports
+
+        $out | Should -Match '🔓'
+        $out | Should -Match 'overridden'
+        $out | Should -Not -Match '❓'
+        $out | Should -Not -Match 'OverriddenCredit'
+    }
+
+    It 'renders warn-mode footer when Mode is warn (default) — M4' {
+        $reports = @(
+            [pscustomobject]@{
+                PortName          = 'review'
+                Status            = 'Covered'
+                SubReason         = 'PassedCredit'
+                AdapterName       = 'review-adapter'
+                SuggestedNextStep = $null
+                Evidence          = ''
+            }
+        )
+
+        $out = Compose-Comment -MarkerToken $script:Marker -PortReports $reports
+
+        $out | Should -Match 'warn'
+        $out | Should -Not -Match 'enforce mode'
+    }
+
+    It 'renders enforce-mode footer (not blocked) when Mode is enforce and HasBlock is false — M4' {
+        $reports = @(
+            [pscustomobject]@{
+                PortName          = 'review'
+                Status            = 'Covered'
+                SubReason         = 'PassedCredit'
+                AdapterName       = 'review-adapter'
+                SuggestedNextStep = $null
+                Evidence          = ''
+            }
+        )
+
+        $out = Compose-Comment -MarkerToken $script:Marker -PortReports $reports -Mode 'enforce' -HasBlock $false
+
+        $out | Should -Match 'enforce'
+        $out | Should -Match 'passed'
+        $out | Should -Not -Match 'PR creation was not blocked'
+    }
+
+    It 'renders enforce-mode footer (blocked) when Mode is enforce and HasBlock is true — M4' {
+        $reports = @(
+            [pscustomobject]@{
+                PortName          = 'review'
+                Status            = 'NotCovered'
+                SubReason         = 'MissingAdapter'
+                AdapterName       = ''
+                SuggestedNextStep = 'Run /review'
+                Evidence          = ''
+            }
+        )
+
+        $out = Compose-Comment -MarkerToken $script:Marker -PortReports $reports -Mode 'enforce' -HasBlock $true
+
+        $out | Should -Match 'enforce'
+        $out | Should -Match 'blocked'
+        $out | Should -Not -Match 'PR creation was not blocked'
+    }
 }
 
 Describe 'Compose-PreV4ShortCircuitComment' {

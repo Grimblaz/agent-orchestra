@@ -12,7 +12,7 @@ Agent Orchestra delivers customer-visible work through a pipeline of phases (exp
 
 This design introduces a **frame** — a hexagonal-architecture-style contract that declares the required phases as **ports**, allows multiple **adapters** (skills/sub-skills) to fill each port, captures completion as **credits** in a structured PR ledger, and **enforces** completion via a pre-PR hook that blocks PR creation if any port lacks a credit. The frame separates **what must happen** (deterministic, declared in port files) from **how it happens this time** (judgment, contextual selection of an adapter), removing the prose-trust spine while preserving agent flexibility.
 
-The first deliverable is **audit-only**: build the credit ledger format, back-derive credits from existing markers across recent PRs, and report the actual gap rate per port. Enforcement comes after the audit shapes priorities.
+The first deliverable was **audit-only**: build the credit ledger format, back-derive credits from existing markers across recent PRs, and report the actual gap rate per port. Enforcement comes after the audit shapes priorities. As of #439, the frame is in **advisory enforce mode**: the `frame-enforce.yml` GitHub Actions workflow runs on every PR and emits a blocking signal for ports missing credits, but is not yet a required branch-protection check. See [Activation runbook](#activation-runbook) for the gate that must be met before an administrator marks it as required.
 
 ---
 
@@ -507,23 +507,22 @@ This closes the only failure mode the terminal-step rule alone doesn't address: 
 
 ## Pre-PR Hook Contract
 
-> **Shipped status (sub-issue #429, branch `feature/issue-429-pre-pr-warn-hook`):** the warn-only slice has landed.
+> **Shipped status:** two enforcement slices have landed.
 >
 > - **Schema**: `metrics_version: 4` — frame credits sit on top of the inherited v3 base. See `frame/pipeline-metrics-v4-schema.md` for the additive fields.
-> - **Orchestrator**: `.github/scripts/frame-credit-ledger.ps1 -Pr <N> [-Mode warn|enforce]`. Default `-Mode warn`; `enforce` is reserved for sub-issue #13 and is not active in this slice.
+> - **Orchestrator**: `.github/scripts/frame-credit-ledger.ps1 -Pr <N> [-Mode warn|enforce]`. Default `-Mode warn`; `enforce` mode ships as part of #439 and is active in the `frame-enforce.yml` GitHub Actions workflow (advisory only — not yet a required branch-protection check).
 > - **Methodology skill**: `skills/frame-credit-ledger/SKILL.md`, referenced from `agents/Code-Conductor.agent.md` Step 4 as the post-`gh pr create` observation step.
-> - **Status**: warn-only. The hook posts an idempotent `<!-- frame-credit-ledger-{PR} -->` comment listing gaps; it does **not** block PR creation. Blocking-mode activation is deferred to sub-issue #13.
+> - **Advisory enforce mode** (#439): the `frame-enforce.yml` workflow runs on every PR and exits with a non-zero code when ports are missing credits. It is **not** a required check — making it required is gated on the Pre-Activation Gate. See [Activation runbook](#activation-runbook).
+> - **Override mechanism** (#439): authorized actors (`OWNER`, `MEMBER`, or `COLLABORATOR`) may post a `<!-- frame-override-{PR} -->` comment to grant per-port clearance. The `overridden` credit status records this. Kill switch: set `FRAME_ENFORCE=0` in the Actions workflow run to coerce enforce → warn for that run.
 > - **Three-state taxonomy** for port coverage in the rendered ledger: `Covered | Inconclusive | NotCovered` — bare-string canonical at the data layer, with emoji applied at format-time only.
 > - **Auto-N/A semantics**: D7 logical-AND. A port is N/A iff *every* declared work-adapter for that port has an `applies-when` predicate that evaluates `false` against the changeset. If any work-adapter applies, the port is live and absence of a credit becomes a gap.
 >
-> The pseudocode below remains the design target; some semantics (notably blocking on `missing` / `failed`) describe the eventual enforce-mode behavior tracked in sub-issue #13. The shipped warn-only orchestrator surfaces the same conditions as ledger entries rather than as PR-create blocks.
+> The pseudocode below remains the design target. **As of #439**, the advisory enforce workflow (`frame-enforce.yml`) runs enforce mode on every PR and surfaces blocking conditions as a non-zero exit code; it is not yet a required branch-protection check. See [Activation runbook](#activation-runbook) for the gate that governs making it required.
 >
-> **Known limitation (sub-issue #13 will need more than a default-flag flip):** the original AC-8 / D6 promise framed sub-issue #13 as "change one parameter, not refactor the script." That promise is no longer fully truthful for two reasons surfaced during the warn-only slice:
+> **Resolved limitations from the warn-only slice** (tracked in #439):
 >
-> 1. **Budget-exceeded enforce policy is undefined.** When the 30s outer budget elapses, the orchestrator currently returns exit 0 *unconditionally* (warn-mode invariant takes precedence over enforcement when no decision could be made). Sub-issue #13 will need to pick an explicit policy: (a) keep the current warn-invariant precedence, (b) treat budget-exceeded as a hard fail in enforce mode, or (c) emit a separate "enforce-deferred" exit code. None of these are a flag flip.
-> 2. **AdapterDiscoveryFailed → Inconclusive routing.** When all adapters for a port resolve to `'unknown'` and no credit is present, the orchestrator currently routes to `Inconclusive`, not `NotCovered`. Sub-issue #13 will need to decide whether enforce mode treats `Inconclusive` as a block (strictest), as a pass (most permissive), or as a third "operator-must-acknowledge" path.
->
-> Both decisions touch the orchestrator's main flow, not just its default `-Mode` value. The audit-update for sub-issue #13 should rescope from "flip the flag" to "flip the flag + adopt explicit enforce-mode policies for the two ambiguity cases above."
+> 1. **Budget-exceeded enforce policy**: when the 30s outer budget elapses in enforce mode, the orchestrator exits with code 4 (budget-exceeded enforce block). This is the explicit policy chosen in #439 — budget-exceeded is treated as a soft-block requiring operator acknowledgment, not a silent pass.
+> 2. **AdapterDiscoveryFailed → Inconclusive routing**: in enforce mode, blocking ports (missing/failed and configured-blocking inconclusive) exit with code 3. Code 4 is reserved for budget timeout. The `enforce: block-on-inconclusive:` field in each port YAML controls whether an inconclusive credit blocks or passes. This allows per-port tuning without changing the orchestrator's main flow.
 
 ```text
 on `gh pr create` (or push to PR branch with auto-PR):
@@ -553,6 +552,56 @@ Every BLOCK message names:
 - The recovery command (e.g., `/orchestra:review-judge`)
 
 Operators should never see a generic "frame check failed" — always actionable.
+
+---
+
+## Activation runbook
+
+The `frame-enforce.yml` GitHub Actions workflow ships as **advisory** — it runs on every PR but is not yet a required branch-protection check. The following gate must be met before an administrator marks the workflow as required.
+
+### Pre-Activation Gate
+
+All four conditions must hold before flipping to required:
+
+1. **Credit provenance resolved** — issue #724 (corroborate `credits[]` against a non-PR-mutable source) is closed. This ensures the enforcement signal cannot be trivially spoofed.
+2. **Audit completeness** — ≥ 95% credit coverage over the most recent 30-PR retrospective audit (run `/audit-docs` to generate the report).
+3. **Operator notice** — ≥ 1-week advance notice posted to the relevant channel or issue before enforcement becomes mandatory.
+4. **Kill switch tested** — set `FRAME_ENFORCE=0` on a test PR run and confirm the workflow exits 0 before activating enforcement.
+
+### Activation steps (administrator)
+
+Once the gate is met:
+
+1. Set the activation timestamp in `frame/enforce-activation.yaml` on the `main` branch:
+
+   ```yaml
+   activation_timestamp: "<ISO-8601 UTC timestamp of now>"
+   ```
+
+   For example: `activation_timestamp: "2026-09-01T00:00:00Z"`
+
+2. In the GitHub repository settings → Branch protection → `main` branch rule, add **`Frame credit enforce`** as a required status check.
+
+3. Announce activation in the relevant channel or issue.
+
+PRs created **before** the `activation_timestamp` are not subject to enforcement (they degrade to warn mode automatically). Only PRs created after the timestamp are enforced.
+
+### Emergency opt-out
+
+Two escape hatches are available:
+
+- **Per-PR override**: an `OWNER`, `MEMBER`, or `COLLABORATOR` posts a top-level PR comment containing:
+
+  ```text
+  <!-- frame-override-{PR_NUMBER}
+  ports: port1, port2
+  reason: <mandatory explanation>
+  -->
+  ```
+
+  This marks the listed ports as `overridden` (precedence 70, beats `failed`). The comment is the durable record; no additional tracking is added.
+
+- **Kill switch**: set the `FRAME_ENFORCE=0` environment variable in the Actions workflow run. This coerces enforce → warn for that run. Use only in genuine emergencies.
 
 ---
 
@@ -649,7 +698,7 @@ Order is intentional but flexible — actual priority will shift based on audit-
 | 10 | #435 (closed) | Reify `post-pr` and `post-fix-review` ports | Trigger-conditional logic for post-fix-review; explicit credit for post-pr cleanup. | row 5 |
 | 11 | #436 (closed) | Decision: `process-retrospective` port or retire | Audit usage feeds the ADR-0004 D14 deferred-skeleton pattern until the practice is formalized as a port, folded into `post-pr`, or retired. | row 1 |
 | 12 | #438 (closed) | Reify `process-review` port | Trigger-conditional on CE Gate defects. | row 7 |
-| 13 | #439 | Pre-PR hook switches to **blocking mode** | After all 17 ports have adapters and audit shows acceptable credit-rate, hook upgrades from warn → block. **The actual rails turn on.** Per D17 (#442), blocking-mode activation requires ≥30-PR recalibration data, all post-spine. | all preceding |
+| 13 | #439 | Pre-PR hook: **advisory enforce mode** (shipped); required-check activation gated on Pre-Activation Gate | `enforce: block-on-inconclusive:` field added to all 17 port files; block aggregator (`FRAME_ENFORCE=0` kill switch, exit codes {0,3,4,5}); `overridden` credit status and `Resolve-FCLOverrideMarker`; `frame-enforce.yml` advisory workflow and `frame/enforce-activation.yaml` sentinel; activation-cutover logic in orchestrator. The hook runs on every PR but is **not** a required branch-protection check. See [Activation runbook](#activation-runbook) for the Pre-Activation Gate. Per D17 (#442), requiring ≥30-PR recalibration data (all post-spine) and issue #724 closure are among the gate conditions. | all preceding |
 
 Active aggregation issues: #441 (sub-A, closed 2026-05) covers rows 5, 6, and 10; **#442** (sub-B, active) covers rows 7, 8, and 9.
 
@@ -740,9 +789,9 @@ Reserved. Same policy as D14.
 
 Reserved. Same policy as D14.
 
-### D17 — Blocking-mode activation precondition
+### D17 — Activation precondition (updated by #439)
 
-Blocking-mode activation for sub-issue #13 requires ≥30-PR recalibration data, all post-spine. The first PR with spine semantics merging restarts the counter for #439. The warn-only hook must accumulate that dataset before the gate switches from `warn` to `enforce` mode. Sub-issue #13 owns the enforcement switch; this decision prevents premature enforcement before the credit-rate baseline is established.
+Advisory enforce mode (`frame-enforce.yml` running on every PR with a non-zero exit code for missing/failed/inconclusive ports) shipped in #439. Making the workflow a **required** branch-protection check is the remaining activation step. Required-check activation requires all four Pre-Activation Gate conditions to hold (see [Activation runbook](#activation-runbook)): credit provenance resolved (issue #724 closed), ≥95% credit coverage over the most recent 30-PR retrospective audit (all post-spine), ≥1-week operator notice, and kill switch tested. The first PR with spine semantics merging restarts the 30-PR audit counter. This decision prevents premature enforcement before the credit-rate baseline is established and before the spoofing surface is closed.
 
 ### D18 — Skill-first methodology
 
