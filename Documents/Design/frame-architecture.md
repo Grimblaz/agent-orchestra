@@ -557,13 +557,15 @@ Operators should never see a generic "frame check failed" — always actionable.
 
 ## Activation runbook
 
-The `frame-enforce.yml` GitHub Actions workflow ships as **advisory** — it runs on every PR but is not yet a required branch-protection check. The following gate must be met before an administrator marks the workflow as required.
+> **Status (2026-06-23): activation descoped — frame stays advisory.** Required-check activation is not being pursued. Its precondition, credit provenance (#724), was closed **won't-do** after a value-vs-cost review (a solo + own-agents repo gains little from an un-bypassable merge gate against real build + maintenance + false-block cost), and the frame-enforcement umbrella (#425) closed **completed-advisory**. The runbook below is retained for reference; re-scoping activation requires re-opening #724 first.
+
+The `frame-enforce.yml` GitHub Actions workflow ships as **advisory** — it runs on every PR but is not a required branch-protection check. The gate below would need to be met before an administrator marked the workflow as required.
 
 ### Pre-Activation Gate
 
 All four conditions must hold before flipping to required:
 
-1. **Credit provenance resolved** — issue #724 (corroborate `credits[]` against a non-PR-mutable source) is closed. This ensures the enforcement signal cannot be trivially spoofed.
+1. **Credit provenance resolved** — issue #724 (corroborate `credits[]` against a non-PR-mutable source). **Closed won't-do (2026-06-23)** — this gate item is not satisfiable without re-opening #724, which is why activation is descoped.
 2. **Audit completeness** — ≥ 95% credit coverage over the most recent 30-PR retrospective audit (run `/audit-docs` to generate the report).
 3. **Operator notice** — ≥ 1-week advance notice posted to the relevant channel or issue before enforcement becomes mandatory.
 4. **Kill switch tested** — set `FRAME_ENFORCE=0` on a test PR run and confirm the workflow exits 0 before activating enforcement.
@@ -789,9 +791,11 @@ Reserved. Same policy as D14.
 
 Reserved. Same policy as D14.
 
-### D17 — Activation precondition (updated by #439)
+### D17 — Activation precondition (updated by #439; descoped 2026-06-23)
 
-Advisory enforce mode (`frame-enforce.yml` running on every PR with a non-zero exit code for missing/failed/inconclusive ports) shipped in #439. Making the workflow a **required** branch-protection check is the remaining activation step. Required-check activation requires all four Pre-Activation Gate conditions to hold (see [Activation runbook](#activation-runbook)): credit provenance resolved (issue #724 closed), ≥95% credit coverage over the most recent 30-PR retrospective audit (all post-spine), ≥1-week operator notice, and kill switch tested. The first PR with spine semantics merging restarts the 30-PR audit counter. This decision prevents premature enforcement before the credit-rate baseline is established and before the spoofing surface is closed.
+Advisory enforce mode (`frame-enforce.yml` running on every PR with a non-zero exit code for missing/failed/inconclusive ports) shipped in #439. Making the workflow a **required** branch-protection check would have required all four Pre-Activation Gate conditions to hold (see [Activation runbook](#activation-runbook)): credit provenance resolved (issue #724 closed), ≥95% credit coverage over the most recent 30-PR retrospective audit (all post-spine), ≥1-week operator notice, and kill switch tested. The first PR with spine semantics merging restarts the 30-PR audit counter. This decision prevented premature enforcement before the credit-rate baseline was established and before the spoofing surface was closed.
+
+**Update (2026-06-23): required-check activation is descoped.** Credit provenance (#724) closed **won't-do** and the umbrella (#425) closed **completed-advisory** — so the frame remains in **advisory mode indefinitely** by choice, not by incomplete work. See the [Activation runbook](#activation-runbook) status note. Re-scoping activation requires re-opening #724 first.
 
 ### D18 — Skill-first methodology
 
