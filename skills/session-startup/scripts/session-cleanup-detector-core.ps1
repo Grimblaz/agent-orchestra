@@ -25,11 +25,25 @@ function Test-SCDPersistentTrackingFile {
         [System.IO.FileInfo]$File,
 
         [Parameter(Mandatory)]
-        [string[]]$PersistentSubtrees
+        [AllowEmptyCollection()]
+        [string[]]$PersistentSubtrees,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$PersistentFilenames
     )
 
     $filePath = [System.IO.Path]::GetFullPath($File.FullName)
     $relativePath = [System.IO.Path]::GetRelativePath($TrackingRootPath, $filePath).Replace('\', '/')
+
+    # Root-anchored filename check: file must be at tracking root depth 0 (no path separator)
+    if ($PersistentFilenames.Count -gt 0 -and -not $relativePath.Contains('/')) {
+        foreach ($fname in $PersistentFilenames) {
+            if ($relativePath.Equals($fname, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $true
+            }
+        }
+    }
 
     foreach ($subtree in $PersistentSubtrees) {
         $normalizedSubtree = $subtree.Trim('/').Replace('\', '/')
@@ -803,9 +817,27 @@ function Invoke-SessionCleanupDetector {
         return @{ ExitCode = 1; Output = $output; Error = '' }
     }
 
-    $persistentTrackingSubtrees = @(
-        'calibration'
-    )
+    if (-not (Get-Command Get-SCDPersistentTrackingExclusions -ErrorAction SilentlyContinue)) {
+        $errorJson = [pscustomobject]@{
+            hookSpecificOutput = [pscustomobject]@{
+                hookEventName     = 'SessionStart'
+                additionalContext = 'HALT: Get-SCDPersistentTrackingExclusions is not defined — session-startup-git-helpers.ps1 failed to load. Aborting detector to prevent false-positive cleanup recommendations.'
+            }
+        } | ConvertTo-Json -Depth 3 -Compress
+        return @{ ExitCode = 1; Output = $errorJson; Error = 'Accessor undefined: Get-SCDPersistentTrackingExclusions' }
+    }
+    $exclusions = Get-SCDPersistentTrackingExclusions
+    if ($null -eq $exclusions -or $null -eq $exclusions.Filenames) {
+        $haltJson = [pscustomobject]@{
+            hookSpecificOutput = [pscustomobject]@{
+                hookEventName     = 'SessionStart'
+                additionalContext = 'HALT: Get-SCDPersistentTrackingExclusions returned $null or missing Filenames — registry integrity failure. Aborting detector to prevent false-positive cleanup recommendations.'
+            }
+        } | ConvertTo-Json -Depth 3 -Compress
+        return @{ ExitCode = 1; Output = $haltJson; Error = 'Accessor returned null or missing Filenames' }
+    }
+    $persistentTrackingSubtrees = if ($null -ne $exclusions.Subtrees) { [string[]]$exclusions.Subtrees } else { [string[]]@() }
+    $persistentTrackingFilenames = [string[]]$exclusions.Filenames
     $noUpstreamBranchPrefixes = @('claude/')
     $upstreamDeletedBranchPrefixes = @('feature/issue-')
     $fetchLookup = New-SCDStringLookup
@@ -894,7 +926,7 @@ function Invoke-SessionCleanupDetector {
             $issueIds = @()
             $unknownFiles = @()
             foreach ($file in $trackingFiles) {
-                if (Test-SCDPersistentTrackingFile -TrackingRootPath $trackingRootPath -File $file -PersistentSubtrees $persistentTrackingSubtrees) {
+                if (Test-SCDPersistentTrackingFile -TrackingRootPath $trackingRootPath -File $file -PersistentSubtrees $persistentTrackingSubtrees -PersistentFilenames $persistentTrackingFilenames) {
                     continue
                 }
 

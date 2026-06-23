@@ -1356,3 +1356,123 @@ title: "Issue 42 back-compat test"
         }
     }
 }
+
+Describe 'post-merge-cleanup.ps1 — persistent root-level file exclusion (#656)' {
+
+    BeforeAll {
+        # Initialize the variables this Describe needs so it can run in isolation
+        # (e.g. if extracted to a separate file). In normal full-file runs these are
+        # also set by the first Describe's BeforeAll (Describe-scoped, not script-scoped).
+        # NOTE: $script:InvokeScript and its mock-factory dependencies ($script:NewMockGitDir,
+        # $script:AddMockGh, $script:SavedPath) are NOT reproduced here — the AC4 tests
+        # (AC4-UntaggedRoute, AC4-IssueNumberRoute) require the full mock infrastructure
+        # from the first Describe's BeforeAll to run. AC6-Executor is fully self-contained.
+        if (-not $script:RepoRoot) {
+            $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        }
+        if (-not $script:ScriptFile) {
+            $script:ScriptFile = Join-Path $script:RepoRoot 'skills/session-startup/scripts/post-merge-cleanup.ps1'
+        }
+    }
+
+    It 'AC4-UntaggedRoute: registry-protected file in -UntaggedTrackingFiles is skipped, not archived' {
+        $workDir = Join-Path $TestDrive 'persistent-untagged-skip'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        # Create a registry-named file at tracking root
+        $trackingDir = Join-Path $workDir '.copilot-tracking'
+        New-Item -ItemType Directory -Path $trackingDir -Force | Out-Null
+        $registryFile = Join-Path $trackingDir 'gate-events.jsonl'
+        Set-Content -Path $registryFile -Value '{"window_position":"pre-ask"}' -Encoding UTF8
+
+        $relPath = '.copilot-tracking\gate-events.jsonl'
+
+        $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+            'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+            'show-ref-refs/remotes/origin/main' = 0
+        } -ScriptParams @{
+            UntaggedTrackingFiles = [string[]]@($relPath)
+            SkipGitUpdate         = $true
+            SkipRemoteDelete      = $true
+        }
+
+        $result.ExitCode | Should -Be 0 -Because 'script must succeed even when only registry files are passed'
+        $result.Output   | Should -Match 'registry-protected' -Because 'a warning about the skipped registry file must appear'
+        # File must still exist (not moved to archive)
+        Test-Path $registryFile | Should -Be $true -Because 'persistent tracking file must not be archived'
+        # No archive directory must have been created for it
+        $archiveDir = Join-Path $workDir '.copilot-tracking-archive'
+        $archivedCopies = @(Get-ChildItem -Path $archiveDir -Recurse -Filter 'gate-events*' -ErrorAction SilentlyContinue)
+        $archivedCopies.Count | Should -Be 0 -Because 'gate-events.jsonl must not be archived'
+    }
+
+    It 'AC4-IssueNumberRoute: registry-protected file with issue_id frontmatter is skipped on -IssueNumber route' {
+        $workDir = Join-Path $TestDrive 'persistent-issueroute-skip'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        $trackingDir = Join-Path $workDir '.copilot-tracking'
+        New-Item -ItemType Directory -Path $trackingDir -Force | Out-Null
+
+        # Registry-named file that also happens to carry issue_id frontmatter (hypothetical future scenario)
+        # The registry guard must fire BEFORE the issue_id filter
+        $registryFile = Join-Path $trackingDir 'gate-events.jsonl'
+        Set-Content -Path $registryFile -Value "issue_id: '999'`n{`"window_position`":`"pre-ask`"}" -Encoding UTF8
+
+        # Legitimate issue-scoped file that should still be archived normally
+        $issueFile = Join-Path $trackingDir 'issue-999-research.md'
+        Set-Content -Path $issueFile -Value "---`nissue_id: '999'`ntitle: test`n---`n# research" -Encoding UTF8
+
+        $result = & $script:InvokeScript -WorkDir $workDir -GitConfig @{
+            'symbolic-ref-origin-HEAD'          = 'refs/remotes/origin/main'
+            'show-ref-refs/remotes/origin/main' = 0
+        } -ScriptParams @{
+            IssueNumber      = 999
+            SkipGitUpdate    = $true
+            SkipRemoteDelete = $true
+            SkipLocalDelete  = $true
+        }
+
+        $result.ExitCode  | Should -Be 0 -Because 'script must succeed'
+        $result.Output    | Should -Match 'registry-protected' -Because 'skip warning must appear for gate-events.jsonl'
+        # Registry file must still exist at its original location
+        Test-Path $registryFile | Should -Be $true -Because 'gate-events.jsonl must not be archived even with matching issue_id'
+        # The legitimate issue file must have been archived
+        $archiveDir = Join-Path $workDir '.copilot-tracking-archive'
+        $archivedIssueFiles = @(Get-ChildItem -Path $archiveDir -Recurse -Filter 'issue-999-research*' -ErrorAction SilentlyContinue)
+        $archivedIssueFiles.Count | Should -BeGreaterThan 0 -Because 'the legitimate issue-scoped file must still be archived'
+    }
+
+    It 'AC6-Executor: undefined accessor causes executor to halt with exit 1 before any archival' {
+        $workDir = Join-Path $TestDrive 'persistent-executor-failsafe'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        # Create a registry file that would be archived if the guard did not fire
+        $trackingDir = Join-Path $workDir '.copilot-tracking'
+        New-Item -ItemType Directory -Path $trackingDir -Force | Out-Null
+        $registryFile = Join-Path $trackingDir 'gate-events.jsonl'
+        Set-Content -Path $registryFile -Value '{"window_position":"pre-ask"}' -Encoding UTF8
+
+        # Strategy: produce a helpers stub that loads cleanly but does NOT define
+        # Get-SCDPersistentTrackingExclusions. The script's failsafe guard fires because
+        # the function is absent even though the dot-source itself succeeded.
+        $helpersStubPath = Join-Path $TestDrive 'helpers-stub-no-accessor.ps1'
+        Set-Content -Path $helpersStubPath -Value '# stub — accessor intentionally omitted to trigger failsafe' -Encoding UTF8
+
+        $scriptContent = Get-Content -Path $script:ScriptFile -Raw -ErrorAction Stop
+        $stubScriptPath = $helpersStubPath -replace '\\', '/'
+        $patchedScript = $scriptContent -replace [regex]::Escape('. "$PSScriptRoot/session-startup-git-helpers.ps1"'), ('. "' + $stubScriptPath + '"')
+        $patchedScriptPath = Join-Path $TestDrive 'patched-post-merge-cleanup.ps1'
+        Set-Content -Path $patchedScriptPath -Value $patchedScript -Encoding UTF8
+
+        $output = & pwsh -NoProfile -NonInteractive -File $patchedScriptPath `
+            -UntaggedTrackingFiles @('.copilot-tracking\gate-events.jsonl') `
+            -SkipGitUpdate `
+            -SkipRemoteDelete 2>&1
+        $exitCode = $LASTEXITCODE
+
+        $exitCode  | Should -Be 1 -Because 'undefined accessor must cause exit 1'
+        ($output -join "`n") | Should -Match 'HALT' -Because 'a loud HALT message must appear in stderr/output'
+        # File must NOT be archived — no archival must occur when the accessor fails to load
+        Test-Path $registryFile | Should -Be $true -Because 'no archival must occur when the accessor fails to load'
+    }
+}

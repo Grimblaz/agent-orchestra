@@ -8,9 +8,28 @@
     used by session-cleanup-detector-core.ps1. Cleanup-only decision helpers
     feed deletion authorization in post-merge-cleanup.ps1; keep those
     conservative and fail-open when their evidence is unavailable.
+    Fail-safe static-persistence-registry: Get-SCDPersistentTrackingExclusions
+    returns the set of .copilot-tracking/ artifacts that must never be deleted.
+    Registry unavailability must halt loudly before any deletion; it must NOT
+    fail-open toward deletion.
 #>
 
 $script:OrphanIssueRegex = '^feature/issue-(\d+)-'
+
+function Get-SCDPersistentTrackingExclusions {
+    <#
+    .SYNOPSIS
+        Returns the dual-axis persistent-exclusion registry for .copilot-tracking/ artifacts.
+        Subtrees: directory prefixes whose entire subtree is persistent (e.g. 'calibration').
+        Filenames: root-level basenames that must never be deleted/archived.
+        Callers: session-cleanup-detector-core.ps1, post-merge-cleanup.ps1.
+        Registry unavailability must halt loudly before any Move-Item — do NOT fail-open.
+    #>
+    return @{
+        Subtrees  = @('calibration')
+        Filenames = @('gate-events.jsonl', 'references-state.yml', 'references-init.manifest')
+    }
+}
 
 function Invoke-SCDNativeCommand {
     [CmdletBinding()]

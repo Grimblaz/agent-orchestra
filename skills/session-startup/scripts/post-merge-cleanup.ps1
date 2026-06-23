@@ -57,6 +57,16 @@ param(
 $ErrorActionPreference = 'Stop'
 
 . "$PSScriptRoot/session-startup-git-helpers.ps1"
+if (-not (Get-Command Get-SCDPersistentTrackingExclusions -ErrorAction SilentlyContinue)) {
+    Write-Error "HALT: Get-SCDPersistentTrackingExclusions is not defined after loading session-startup-git-helpers.ps1. Aborting executor to prevent destruction of persistent tracking files. (mf6-executor-failsafe)"
+    exit 1
+}
+$persistentExclusions = Get-SCDPersistentTrackingExclusions
+if ($null -eq $persistentExclusions -or $null -eq $persistentExclusions.Filenames) {
+    Write-Error "HALT: Get-SCDPersistentTrackingExclusions returned null or missing Filenames — registry integrity failure. Aborting executor to prevent destruction of persistent tracking files. (mf6-executor-failsafe)"
+    exit 1
+}
+$script:PersistentTrackingFilenames = [string[]]$persistentExclusions.Filenames
 
 # Guard: require IssueNumber, FeatureBranch, OR at least one of the new category parameters
 # (C6/C1: -FeatureBranch alone is sufficient — used by detector for no-issue-id stale branches
@@ -408,7 +418,22 @@ if ($UntaggedTrackingFiles.Count -gt 0) {
             Write-Warning "Path traversal blocked: '$relPath' resolves outside .copilot-tracking/ — skipping"
             continue
         }
+        # Registry guard: skip persistent root-level files (mf6-executor-failsafe, AC4)
+        $relFromTrackingRoot = $resolvedAbs.Substring($trackingRootCanonical.Length).TrimStart([System.IO.Path]::DirectorySeparatorChar, '/')
+        if ($script:PersistentTrackingFilenames.Count -gt 0 -and
+            -not $relFromTrackingRoot.Contains([System.IO.Path]::DirectorySeparatorChar) -and
+            -not $relFromTrackingRoot.Contains('/') -and
+            $script:PersistentTrackingFilenames -icontains $relFromTrackingRoot) {
+            Write-Warning "Persistent tracking file skipped — registry-protected, will not be archived: '$relPath'"
+            continue
+        }
         $fileInfo = Get-Item $absPath
+        # CR-5 defensive guard: skip directories (caller should only pass files via -File,
+        # but guard against API misuse that could move an entire tracking subtree)
+        if ($fileInfo.PSIsContainer) {
+            Write-Warning "Untagged tracking path is not a file: '$relPath' — skipping"
+            continue
+        }
         $ext = $fileInfo.Extension
         $nameNoExt = $fileInfo.BaseName
         $mtime = $fileInfo.LastWriteTime.ToString('yyyyMMddHHmmss')
@@ -440,9 +465,20 @@ if ($null -ne $IssueNumber) {
     New-Item -ItemType Directory -Path $archivePath -Force | Out-Null
 
     $trackingRoot = '.copilot-tracking'
+    # S-C1: hoist loop-invariant path resolution out of the per-file Where-Object and foreach
+    $trackingRootResolved = (Resolve-Path $trackingRoot).Path
     $allTrackingFiles = Get-ChildItem -Path $trackingRoot -Recurse -File -ErrorAction SilentlyContinue
     # Exclude .gitkeep placeholder files, then filter to only files belonging to this issue
     $trackingFiles = @($allTrackingFiles | Where-Object { $_.Name -ne '.gitkeep' } | Where-Object {
+            # Registry guard: skip persistent root-level files (AC4)
+            $relFromRoot = $_.FullName.Substring($trackingRootResolved.Length).TrimStart('\', '/')
+            if ($script:PersistentTrackingFilenames.Count -gt 0 -and
+                -not $relFromRoot.Contains('\') -and
+                -not $relFromRoot.Contains('/') -and
+                $script:PersistentTrackingFilenames -icontains $relFromRoot) {
+                Write-Warning "Persistent tracking file skipped — registry-protected, will not be archived: '$($_.Name)'"
+                return $false
+            }
             $content = Get-Content -Path $_.FullName -Raw -ErrorAction SilentlyContinue
             if ($content -match '(?m)^issue_id:\s*["\x27]?(\d+)["\x27]?') {
                 [int]$Matches[1] -eq $IssueNumber
@@ -455,7 +491,7 @@ if ($null -ne $IssueNumber) {
 
     $archivedCount = 0
     foreach ($file in $trackingFiles) {
-        $relativePath = $file.FullName.Substring((Resolve-Path $trackingRoot).Path.Length).TrimStart('\', '/')
+        $relativePath = $file.FullName.Substring($trackingRootResolved.Length).TrimStart('\', '/')
         $destDir = Join-Path $archivePath (Split-Path $relativePath -Parent)
         New-Item -Force -ItemType Directory -Path $destDir | Out-Null
         Move-Item -LiteralPath $file.FullName -Destination (Join-Path $destDir $file.Name)
