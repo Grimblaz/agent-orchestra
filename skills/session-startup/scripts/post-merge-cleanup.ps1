@@ -62,7 +62,11 @@ if (-not (Get-Command Get-SCDPersistentTrackingExclusions -ErrorAction SilentlyC
     exit 1
 }
 $persistentExclusions = Get-SCDPersistentTrackingExclusions
-$script:PersistentTrackingFilenames = if ($null -ne $persistentExclusions.Filenames) { [string[]]$persistentExclusions.Filenames } else { [string[]]@() }
+if ($null -eq $persistentExclusions -or $null -eq $persistentExclusions.Filenames) {
+    Write-Error "HALT: Get-SCDPersistentTrackingExclusions returned null or missing Filenames — registry integrity failure. Aborting executor to prevent destruction of persistent tracking files. (mf6-executor-failsafe)"
+    exit 1
+}
+$script:PersistentTrackingFilenames = [string[]]$persistentExclusions.Filenames
 
 # Guard: require IssueNumber, FeatureBranch, OR at least one of the new category parameters
 # (C6/C1: -FeatureBranch alone is sufficient — used by detector for no-issue-id stale branches

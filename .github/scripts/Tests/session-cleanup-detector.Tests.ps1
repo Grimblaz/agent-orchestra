@@ -1667,11 +1667,11 @@ Write-Output "OUT:`$(`$r.Output)"
 
             # Pattern 2: Join-Path ... '.copilot-tracking' 'filename.ext'
             $matches2 = [regex]::Matches($content, "Join-Path\s+\S+\s+'?\.copilot-tracking'?\s+['\`"]([^/\\'\`"]+\.[a-zA-Z0-9]+)['\`"]")
-            foreach ($m in $matches2) { $null = $writtenBasenames.Add($m.Groups[2].Value) }
+            foreach ($m in $matches2) { $null = $writtenBasenames.Add($m.Groups[1].Value) }
         }
 
-        # Every oracle-found basename must be in the registry
-        $unregistered = @($writtenBasenames | Where-Object { $registeredFilenames -notcontains $_.ToLowerInvariant() })
+        # Every oracle-found basename must be in the registry (filter empties to prevent silent BeNullOrEmpty pass)
+        $unregistered = @($writtenBasenames | Where-Object { $_ } | Where-Object { $registeredFilenames -notcontains $_.ToLowerInvariant() })
         $unregistered | Should -BeNullOrEmpty `
             -Because "oracle-found root-level tracking writers must all be enrolled in Get-SCDPersistentTrackingExclusions: missing: $($unregistered -join ', ')"
     }

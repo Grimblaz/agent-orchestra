@@ -25,9 +25,12 @@ function Test-SCDPersistentTrackingFile {
         [System.IO.FileInfo]$File,
 
         [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
         [string[]]$PersistentSubtrees,
 
-        [string[]]$PersistentFilenames = @()
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [string[]]$PersistentFilenames
     )
 
     $filePath = [System.IO.Path]::GetFullPath($File.FullName)
@@ -824,8 +827,17 @@ function Invoke-SessionCleanupDetector {
         return @{ ExitCode = 1; Output = $errorJson; Error = 'Accessor undefined: Get-SCDPersistentTrackingExclusions' }
     }
     $exclusions = Get-SCDPersistentTrackingExclusions
+    if ($null -eq $exclusions -or $null -eq $exclusions.Filenames) {
+        $haltJson = [pscustomobject]@{
+            hookSpecificOutput = [pscustomobject]@{
+                hookEventName     = 'SessionStart'
+                additionalContext = 'HALT: Get-SCDPersistentTrackingExclusions returned $null or missing Filenames — registry integrity failure. Aborting detector to prevent false-positive cleanup recommendations.'
+            }
+        } | ConvertTo-Json -Depth 3 -Compress
+        return @{ ExitCode = 1; Output = $haltJson; Error = 'Accessor returned null or missing Filenames' }
+    }
     $persistentTrackingSubtrees = if ($null -ne $exclusions.Subtrees) { [string[]]$exclusions.Subtrees } else { [string[]]@() }
-    $persistentTrackingFilenames = if ($null -ne $exclusions.Filenames) { [string[]]$exclusions.Filenames } else { [string[]]@() }
+    $persistentTrackingFilenames = [string[]]$exclusions.Filenames
     $noUpstreamBranchPrefixes = @('claude/')
     $upstreamDeletedBranchPrefixes = @('feature/issue-')
     $fetchLookup = New-SCDStringLookup
