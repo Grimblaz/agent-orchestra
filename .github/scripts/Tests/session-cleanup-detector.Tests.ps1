@@ -1517,3 +1517,183 @@ Describe 'Get-OrphanBranchLines — per-line suffix and composite invocation' {
             -Because 'the composite invocation must include -OrphanBranches'
     }
 }
+
+Describe 'session-cleanup-detector.ps1 — persistent root-level tracking file exclusion (#656)' {
+
+    BeforeAll {
+        # Load the core library so Invoke-SessionCleanupDetector and
+        # Get-SCDPersistentTrackingExclusions are defined in this Describe scope.
+        # The $script: helpers (InvokeDetectorInWorkDir, WriteFixtureFile, etc.) were
+        # set during the calibration-exclusion Describe's BeforeAll and are reused here.
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        . (Join-Path $script:RepoRoot 'skills/session-startup/scripts/session-cleanup-detector-core.ps1')
+    }
+
+    It 'AC1: gate-events.jsonl at tracking root is excluded from cleanup detection' {
+        $workDir = Join-Path $TestDrive 'persistent-gate-events'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        & $script:WriteFixtureFile -WorkDir $workDir -RelativePath '.copilot-tracking\gate-events.jsonl' -Content '{"window_position":"pre-ask"}' | Out-Null
+
+        $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+            'branch--show-current'     = 'main'
+            'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+        }
+
+        $result.ExitCode | Should -Be 0
+        $result.Output   | Should -Match '^\{\s*\}$' -Because 'gate-events.jsonl is a live persistent file and must not trigger cleanup'
+    }
+
+    It 'AC1: references-state.yml at tracking root is excluded from cleanup detection' {
+        $workDir = Join-Path $TestDrive 'persistent-references-state'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        & $script:WriteFixtureFile -WorkDir $workDir -RelativePath '.copilot-tracking\references-state.yml' -Content 'version: 1' | Out-Null
+
+        $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+            'branch--show-current'     = 'main'
+            'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+        }
+
+        $result.ExitCode | Should -Be 0
+        $result.Output   | Should -Match '^\{\s*\}$' -Because 'references-state.yml is a live persistent file and must not trigger cleanup'
+    }
+
+    It 'AC1: references-init.manifest at tracking root is excluded from cleanup detection' {
+        $workDir = Join-Path $TestDrive 'persistent-references-init-manifest'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        & $script:WriteFixtureFile -WorkDir $workDir -RelativePath '.copilot-tracking\references-init.manifest' -Content '{}' | Out-Null
+
+        $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+            'branch--show-current'     = 'main'
+            'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+        }
+
+        $result.ExitCode | Should -Be 0
+        $result.Output   | Should -Match '^\{\s*\}$' -Because 'references-init.manifest is a live persistent file and must not trigger cleanup'
+    }
+
+    It 'AC3: non-registry untagged root file is still flagged (positive companion)' {
+        $workDir = Join-Path $TestDrive 'persistent-positive-companion'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        & $script:WriteFixtureFile -WorkDir $workDir -RelativePath '.copilot-tracking\stale-notes.md' -Content '# no issue_id here' | Out-Null
+
+        $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+            'branch--show-current'     = 'main'
+            'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+        }
+        $context = & $script:GetAdditionalContext -Output $result.Output
+        $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+        $result.ExitCode | Should -Be 0
+        $insideFence     | Should -Match 'stale-notes' -Because 'untagged non-registry root file must still appear in cleanup recommendations'
+    }
+
+    It 'AC5: registry-named file at depth >= 1 is NOT excluded (over-exclusion guard)' {
+        $workDir = Join-Path $TestDrive 'persistent-depth-check'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+        & $script:WriteFixtureFile -WorkDir $workDir -RelativePath '.copilot-tracking\sub\gate-events.jsonl' -Content '{}' | Out-Null
+
+        $result = & $script:InvokeDetectorInWorkDir -WorkDir $workDir -GitConfig @{
+            'branch--show-current'     = 'main'
+            'symbolic-ref-origin-HEAD' = 'refs/remotes/origin/main'
+        }
+        $context = & $script:GetAdditionalContext -Output $result.Output
+        $insideFence = (& $script:GetFencedPowerShellBlocks -Context $context) -join "`n"
+
+        $result.ExitCode | Should -Be 0
+        $insideFence     | Should -Match 'gate-events' -Because 'a registry-named file in a subdirectory must NOT be excluded'
+    }
+
+    It 'AC6: undefined accessor causes detector to halt loudly instead of silently proceeding' {
+        # Strategy: run the detector wrapper script in a fresh subprocess where the helpers file
+        # has been temporarily replaced with an empty stub so Get-SCDPersistentTrackingExclusions
+        # is never defined. Using a subprocess avoids mutating the in-process function provider.
+        $workDir = Join-Path $TestDrive 'persistent-accessor-missing'
+        New-Item -ItemType Directory -Path $workDir -Force | Out-Null
+
+        # Write an empty helpers stub so the dot-source succeeds but the accessor is absent
+        $helpersStubPath = Join-Path $TestDrive 'session-startup-git-helpers-stub.ps1'
+        Set-Content -Path $helpersStubPath -Value '# stub — accessor intentionally omitted' -Encoding UTF8
+
+        # Build a patched copy of the detector core that loads the stub instead of the real helpers
+        $coreContent = Get-Content -Path (Join-Path $script:RepoRoot 'skills/session-startup/scripts/session-cleanup-detector-core.ps1') -Raw
+        $patchedCore = $coreContent -replace [regex]::Escape('. "$PSScriptRoot/session-startup-git-helpers.ps1"'), ('. "' + ($helpersStubPath -replace '\\', '/') + '"')
+        $patchedCorePath = Join-Path $TestDrive 'patched-detector-core.ps1'
+        Set-Content -Path $patchedCorePath -Value $patchedCore -Encoding UTF8
+
+        # Run a subprocess that dot-sources the patched core and calls Invoke-SessionCleanupDetector
+        $escapedWorkDir = $workDir -replace "'", "''"
+        $escapedCorePath = $patchedCorePath -replace "'", "''"
+        $output = pwsh -NoProfile -NonInteractive -Command @"
+. '$escapedCorePath'
+`$r = Invoke-SessionCleanupDetector -RepoRoot '$escapedWorkDir'
+Write-Output "EXIT:`$(`$r.ExitCode)"
+Write-Output "OUT:`$(`$r.Output)"
+"@ 2>&1
+        $outputStr = ($output -join "`n")
+        $exitCodeLine = $output | Where-Object { $_ -match '^EXIT:' } | Select-Object -First 1
+        $detectorExitCode = if ($exitCodeLine -match '^EXIT:(\d+)') { [int]$Matches[1] } else { -1 }
+
+        $detectorExitCode | Should -Be 1 -Because 'undefined accessor must cause a hard halt'
+        $outputStr        | Should -Match 'HALT' -Because 'a loud HALT message must be emitted'
+    }
+
+    It 'AC7: writer-oracle — registry contains all known root-level persistent tracking writers' {
+        $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+
+        # Get the registered filenames from the accessor
+        $exclusions = Get-SCDPersistentTrackingExclusions
+        $registeredFilenames = @($exclusions.Filenames | ForEach-Object { $_.ToLowerInvariant() })
+
+        # Writer oracle: scan all .ps1 files for patterns that write root-level files under .copilot-tracking/
+        $psFiles = Get-ChildItem -Path $repoRoot -Filter '*.ps1' -Recurse |
+            Where-Object {
+                $_.FullName -notmatch '\.Tests\.' -and
+                $_.Name -ne 'session-cleanup-detector-core.ps1' -and
+                $_.Name -ne 'post-merge-cleanup.ps1' -and
+                $_.Name -ne 'session-cleanup-detector.ps1' -and
+                $_.Name -notmatch 'gate-reconciliation' -and
+                $_.Name -notmatch 'Resolve-PersistDecision'
+            }
+
+        $writtenBasenames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+        foreach ($file in $psFiles) {
+            $content = Get-Content -Path $file.FullName -Raw -ErrorAction SilentlyContinue
+            if (-not $content) { continue }
+
+            # Pattern 1: Join-Path $trackingDir 'filename.ext' (depth-0 file only — no slash in filename)
+            $matches1 = [regex]::Matches($content, "Join-Path\s+\`$\w*[Tt]racking\w*\s+['\`"]([^/\\'\`"]+\.[a-zA-Z0-9]+)['\`"]")
+            foreach ($m in $matches1) { $null = $writtenBasenames.Add($m.Groups[1].Value) }
+
+            # Pattern 2: Join-Path ... '.copilot-tracking' 'filename.ext'
+            $matches2 = [regex]::Matches($content, "Join-Path\s+\S+\s+'?\.copilot-tracking'?\s+['\`"]([^/\\'\`"]+\.[a-zA-Z0-9]+)['\`"]")
+            foreach ($m in $matches2) { $null = $writtenBasenames.Add($m.Groups[2].Value) }
+        }
+
+        # Every oracle-found basename must be in the registry
+        $unregistered = @($writtenBasenames | Where-Object { $registeredFilenames -notcontains $_.ToLowerInvariant() })
+        $unregistered | Should -BeNullOrEmpty `
+            -Because "oracle-found root-level tracking writers must all be enrolled in Get-SCDPersistentTrackingExclusions: missing: $($unregistered -join ', ')"
+    }
+
+    It 'AC7: no persistent-filename literal exists outside Get-SCDPersistentTrackingExclusions' {
+        $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+
+        $exclusions = Get-SCDPersistentTrackingExclusions
+
+        foreach ($fname in $exclusions.Filenames) {
+            $matches = @(
+                Get-ChildItem -Path (Join-Path $repoRoot 'skills/session-startup/scripts') -Filter '*.ps1' |
+                Where-Object { $_.Name -ne 'session-startup-git-helpers.ps1' } |
+                ForEach-Object {
+                    $content = Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue
+                    if ($content -match [regex]::Escape($fname)) {
+                        $_.Name
+                    }
+                }
+            )
+            $matches | Should -BeNullOrEmpty `
+                -Because "'$fname' must only appear in the accessor, not as a literal in other session-startup scripts"
+        }
+    }
+}
