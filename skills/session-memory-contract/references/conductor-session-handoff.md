@@ -24,7 +24,7 @@ For plans with many completed steps, summarize in 3–5 words per step or list s
 
 ## Handoff to User
 
-Code Conductor operates autonomously and continues toward merge-ready by default. It pauses only when judgment beyond its authority is required, and every such pause must immediately use `#tool:vscode/askQuestions` to get a decision and continue — never plain-text questions, and never just stop and describe the problem.
+Code-Conductor operates autonomously and continues toward merge-ready by default. It pauses only when judgment beyond its authority is required, and every such pause must immediately use `#tool:vscode/askQuestions` to get a decision and continue — never plain-text questions, and never just stop and describe the problem.
 
 PR creation is mandatory before user handoff. Do not return work to the user for PR creation when the agent has authority to create it.
 

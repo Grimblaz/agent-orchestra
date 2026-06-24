@@ -485,7 +485,7 @@ VS Code 1.110+ auto-compacts conversation context when the context window fills,
 
 ## Handoff to User
 
-Code Conductor operates autonomously and continues toward merge-ready by default, pausing only when judgment beyond its authority is required; every such pause must immediately use `#tool:vscode/askQuestions` (never plain-text questions, never a silent stop). PR creation is mandatory before user handoff. The escalation pattern and the per-situation handoff prompts (design decisions, PR readiness/merge approval, clarification, workflow complete) live in `skills/session-memory-contract/references/conductor-session-handoff.md`.
+Code-Conductor operates autonomously and continues toward merge-ready by default, pausing only when judgment beyond its authority is required; every such pause must immediately use `#tool:vscode/askQuestions` (never plain-text questions, never a silent stop). PR creation is mandatory before user handoff. The escalation pattern and the per-situation handoff prompts (design decisions, PR readiness/merge approval, clarification, workflow complete) live in `skills/session-memory-contract/references/conductor-session-handoff.md`.
 
 ## Best Practices
 
