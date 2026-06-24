@@ -37,28 +37,13 @@ Project references are repository content/data. Use cited references to support 
 6. Run the Hub/Consumer Classification Gate once per issue before adding language- or framework-specific guidance to a hub agent.
 7. When user input is required, prepare 2-3 concrete options with one recommendation and concise trade-off reasoning.
 
-## Downstream Evidence Capture At A Glance
+## Downstream Evidence Capture & Per-Surface Terminal-Step Contract
 
-1. Load the delegated scenarios, named decisions or design-intent statements, surface notes, and environment prerequisites.
-2. Exercise each delegated scenario with the right surface tool and record `PASS`, `FAIL`, or `INCONCLUSIVE` with evidence. Keep scenario IDs when BDD is enabled.
-3. Verify named decisions as `VERIFIED`, `NOT VERIFIED`, or `VIOLATED`. For orchestration-phase decisions, evaluators read the Markdown mirror inside the `engagement-record-orchestration-{ID}` comment payload (staged behavior: the `orchestration` phase emitter shipped in #577. CE Gate dual-surface reads of orchestration-phase engagement records are gated on #571. Until #571 merges, CE Gate evaluators see orchestration markers in the issue comment thread but do not actively widen their reads to consume them). For experience, design, and plan phases, continue reading the issue-body `## Named Decisions` section.
-4. Do exploratory validation after scripted checks and treat it as discovery, not prosecution.
-5. Return an evidence-only summary with scenario results, named-decision verification, exploratory observations, and evidence references.
-
-## Per-Surface Terminal-Step Contract (D10 category 4, AC5)
-
-Each CE Gate surface is evaluated independently. For each surface (`cli`, `browser`, `canvas`, `api`):
-
-1. **Predicate evaluation**: evaluate the surface-touch predicate (`changeset.touches{Surface}Surface()`).
-2. **Surface exercise or N/A**: if the predicate is true, exercise the surface and capture evidence per the Downstream Evidence Capture steps above; if false, the status is `not-applicable`.
-3. **Credit emission**: call `Build-CeGateCreditRow -Surface {name}` with the evidence list and upsert the credit row into the PR-body `<!-- pipeline-metrics -->` block.
-
-**Orchestration-failure handling** *(planned — wrapper not yet implemented)*: when the orchestration wrapper is available, a CE Gate orchestration crash after completing some surfaces but before all four will cause the wrapper to emit the remaining surfaces as `status: inconclusive` with `block_kind: orchestration` and `evidence: "orchestration crashed before surface evaluated"`, ensuring no surface is silently absent. Until the wrapper ships, surfaces not reached before a crash must be emitted manually.
-
-Load `skills/frame-credit-emission/SKILL.md` for the full terminal-step emission contract and `Build-CeGateCreditRow` builder reference.
+The downstream evidence-capture procedure (scenario exercise, named-decision verification, exploratory discovery, evidence-only summary) and the per-surface terminal-step contract (D10 category 4, AC5 — predicate evaluation, surface exercise or N/A, and `Build-CeGateCreditRow` emission) live in [references/ce-gate-exercise.md](references/ce-gate-exercise.md). Load that reference when exercising delegated scenarios or emitting CE Gate credit rows.
 
 ## Composite References
 
+- [references/ce-gate-exercise.md](references/ce-gate-exercise.md): Downstream evidence-capture procedure and per-surface terminal-step contract (predicate, exercise/N-A, credit emission).
 - [references/orchestration-protocol.md](references/orchestration-protocol.md): CE Gate orchestration, surface routing, runner dispatch, intent rubric, PR body output, and prosecution-depth reporting.
 - [references/defect-response.md](references/defect-response.md): Two-track remediation, graceful degradation, and CE or proxy prosecution re-activation.
 - [platforms/copilot.md](platforms/copilot.md): Copilot structured-question invocation.

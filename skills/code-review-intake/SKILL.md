@@ -31,11 +31,7 @@ In GitHub Review Mode, do not add net-new findings outside the ingested GitHub l
 
 ### Safety Exception
 
-A new item may be added only for a critical correctness/security blocker discovered during verification. It must:
-
-- Be tagged `NEW-CRITICAL`
-- Include concrete evidence
-- Be explicitly surfaced to the user
+A new item may be added only for a critical correctness/security blocker discovered during verification. It must be tagged `NEW-CRITICAL`, include concrete evidence, and be explicitly surfaced to the user.
 
 ## Judgment Guardrail
 
@@ -64,6 +60,7 @@ The proxy prosecution pipeline is single-shot: prosecution → defense → judge
 ## Composite References
 
 - [references/express-lane.md](references/express-lane.md): canonical R6 express-lane gate, its exclusion from proxy prosecution, and the Tier 1 re-validation requirement when R6 is used elsewhere
+- [references/response-loop-completion.md](references/response-loop-completion.md): ordered terminal-step sequence (disposition gate, R4 dispatch, post-fix prosecution, CE Gate, persist-changes, Response Summary) that completes the `/review-github` response loop
 - [../validation-methodology/references/review-reconciliation.md](../validation-methodology/references/review-reconciliation.md): shared non-GitHub review reconciliation, prosecution-depth setup, and post-fix R2 review mechanics that pair with intake after proxy judgment completes
 
 ## Gotchas
@@ -78,15 +75,4 @@ The proxy prosecution pipeline is single-shot: prosecution → defense → judge
 
 ## Response Loop Completion (Terminal Step)
 
-After all judgment states reach terminal, the GitHub-intake response loop completes with these ordered steps:
-
-1. **Disposition gate** — honor the `<!-- review-dispositions-{PR} -->` marker: skip findings with `disposition: escalate`; only `disposition: incorporate` entries proceed.
-2. **Batch Specialist Dispatch (R4)** — dispatch accepted findings to specialists (see `skills/validation-methodology/references/review-reconciliation.md § Batch Specialist Dispatch (R4)`).
-3. **Post-fix targeted prosecution pass** — when triggered per the R2 conditions (see `skills/validation-methodology/references/review-reconciliation.md § Post-Fix Targeted Prosecution Pass`).
-4. **CE Gate** — run the CE Gate when a customer surface is affected (see `agents/Code-Conductor.agent.md § Customer Experience Gate`).
-5. **Persist changes** — fire `skills/persist-changes/SKILL.md` as the terminal step (see `### Response Commit & Push` in `skills/validation-methodology/references/review-reconciliation.md` for the SSOT contract). The executor commits fix files and pushes to the PR's head remote, or surfaces a loud not-pushed reason.
-6. **Response Summary** — assemble and return the Response Summary per the shape in `skills/validation-methodology/references/review-reconciliation.md § Response Commit & Push`.
-
-This step sequence is what makes a bare `/review-github` complete the full response loop — accepted fixes are applied, committed, and pushed to the existing PR branch without requiring an additional user instruction.
-
-> **Invariant preserved**: the routing gate at line 74 of this file ("All items must reach terminal state… before any routing") applies to fix-dispatch routing only — this section documents the post-routing terminal completion steps.
+The ordered terminal-step sequence that makes a bare `/review-github` complete the full response loop (disposition gate, Batch Specialist Dispatch R4, post-fix targeted prosecution, CE Gate, persist-changes, and Response Summary) lives in [references/response-loop-completion.md](references/response-loop-completion.md). Load that reference once all judgment states reach terminal; accepted fixes are applied, committed, and pushed to the existing PR branch without requiring an additional user instruction.
