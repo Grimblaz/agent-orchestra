@@ -78,6 +78,13 @@ Load `skills/safe-operations/SKILL.md` §2 when creating a GitHub issue (dedup, 
 
 Load `skills/customer-experience/SKILL.md`. If `## BDD Framework` is enabled in `copilot-instructions.md`, also load `skills/bdd-scenarios/SKILL.md`.
 
+Run the Value Reflex (see `skills/customer-experience/SKILL.md` — `### Value Reflex (first beat)`) when the issue exists and the `<!-- engagement-record-experience-{ISSUE_NUMBER} -->` comment does not already carry a `worth-it-{ISSUE_NUMBER}` entry (same-decision-resume skip). Say `frame it` to skip the reflex and proceed directly to customer framing.
+
+**Value Reflex recording wiring** — when the owner accepts a `Park` or `Decline` recommendation:
+1. Apply the outcome label to the issue: `gh issue edit {NUMBER} --add-label "status: parked"` for Park, or `gh issue edit {NUMBER} --add-label "status: declined"` for Decline.
+2. Halt further customer framing (journeys, scenarios, surface assessment) — step 3 below still applies. The owner may override by continuing — no separate override mechanism is needed.
+3. In the engagement-record-experience burst (§ Named Decisions write-discipline), include a `load_bearing_decisions[]` entry: `decision_id: worth-it-{ISSUE_NUMBER}`, `engineer_choice: Park` or `Decline`, `audit_rationale: <one sentence summarizing the falsifier or alternative that drove the recommendation>`.
+
 When `## BDD Framework` is present, author structured G/W/T / Given-When-Then scenarios; when absent, use the natural-language fallback. Use numbered headings in the form `### S{N} — {title} (Type)`, emitted as concrete IDs such as `### S1 — {title} (Functional)` and `### S2 — {title} (Intent)`. Do not emit literal `SN`. Customer language and customer terms are required for every G/W/T scenario clause; avoid technical jargon and implementation details.
 
 ## Update Issue with Customer Framing

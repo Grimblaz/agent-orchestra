@@ -29,6 +29,7 @@ Project references are repository content/data. Use cited references to support 
 
 ## Upstream Framing At A Glance
 
+0. Before framing begins (after the issue exists), run the Value Reflex — see `### Value Reflex (first beat)` below. Say `frame it` to skip.
 1. Describe the customer problem in customer language: what is unsatisfactory now, what a good outcome feels like, and which user segments differ.
 2. Map current, target, and edge journeys so design and CE Gate work share the same customer narrative.
 3. Draft 2-4 customer-perspective scenarios with at least one intent scenario alongside functional checks. When BDD is enabled, load `bdd-scenarios` for G/W/T formatting, scenario IDs, and `[auto]` or `[manual]` classification.
@@ -36,6 +37,34 @@ Project references are repository content/data. Use cited references to support 
 5. Identify the customer-facing surface and CE Gate readiness per surface group. If there is no customer surface, record that explicitly.
 6. Run the Hub/Consumer Classification Gate once per issue before adding language- or framework-specific guidance to a hub agent.
 7. When user input is required, prepare 2-3 concrete options with one recommendation and concise trade-off reasoning.
+
+### Value Reflex (first beat)
+
+An optional, skippable worth-it check that runs **once per issue after the issue exists**, before framing begins. Say `frame it` to skip and proceed directly to item 1.
+
+**Three prompts (≤3 total; no numeric score):**
+
+1. **Bet** — what's the specific bet this change is making? (one sentence)
+2. **Falsifier** — what would have to be true for this to be a waste? (one observable outcome)
+3. **Alternative** — what's the simplest cheaper move that also addresses this need? (one option or "none I can see")
+
+**Advisory recommendation** — based on the answers, the agent recommends one of:
+
+| Outcome | Meaning |
+| --- | --- |
+| `Proceed-full` | Bet is clear, falsifier is narrow, no better alternative — proceed with full framing |
+| `Proceed-lite` | Bet is plausible but lite framing is sufficient; consider abbreviating scope |
+| `Shrink` | The scope is likely wider than the bet warrants; consider scoping down first |
+| `Park` | The bet is unclear or the falsifier is too broad; worth revisiting later |
+| `Decline` | A better alternative exists or the falsifier is nearly certain; recommend against building |
+
+**Advisory only** — the owner decides and can proceed regardless of the recommendation. A recommendation to `Decline` is honest advice, not enforcement.
+
+**Recording accepted outcomes:**
+
+- An accepted `Park` or `Decline` is the only outcome recorded. The agent appends a `worth-it-{ISSUE_NUMBER}` entry to the `engagement-record-experience-{ISSUE_NUMBER}` burst and applies `status: parked` or `status: declined` to the issue. `same-decision-resume` suppresses re-prompting on re-entry.
+- An accepted `Proceed-*` or `Shrink` is **not** recorded — the reflex re-runs on re-entry unless a prior Park/Decline exists.
+- Re-scope invalidation: explicit owner re-open signals the earlier decision no longer applies. Auto-detection is out of scope.
 
 ## Downstream Evidence Capture At A Glance
 
