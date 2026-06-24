@@ -43,7 +43,10 @@ function New-FARBucketMap {
 }
 
 function Get-FARBucketForCreditStatus {
-    param([string]$Status)
+    param(
+        [string]$Status,
+        [string]$Port
+    )
 
     switch ($Status) {
         'passed' { return 'passed' }
@@ -53,8 +56,21 @@ function Get-FARBucketForCreditStatus {
         'inconclusive' { return 'inconclusive' }
     }
 
+    # An audit over live PR data can encounter non-conformant credit statuses that
+    # no builder in this repo emits (the canonical set is passed|failed|skipped|
+    # not-applicable|inconclusive|not-persisted|overridden). Rather than crash the
+    # whole audit on a single bad row, warn-and-skip: bucket the unknown status as
+    # 'inconclusive' (a non-fatal "we counted it but could not classify it" bucket)
+    # so the audit completes and the gap stays visible in the report.
     $displayStatus = if ([string]::IsNullOrWhiteSpace($Status)) { '<blank>' } else { $Status }
-    throw "Unsupported credit status '$displayStatus'. Report bucket 'missing' is reserved for ports with no credit entry."
+    $portContext = if ($PSBoundParameters.ContainsKey('Port') -and -not [string]::IsNullOrWhiteSpace($Port)) {
+        " for port '$Port'"
+    }
+    else {
+        ''
+    }
+    Write-Warning "frame-audit-report: unrecognized credit status '$displayStatus'$portContext; bucketing as 'inconclusive' and continuing."
+    return 'inconclusive'
 }
 
 function Get-FARDefaultPortsDir {
@@ -208,7 +224,7 @@ function Add-FARCreditToEra {
         if ([string]::IsNullOrWhiteSpace($port) -or -not $EraState.ports.Contains($port)) {
             continue
         }
-        $bucket = Get-FARBucketForCreditStatus -Status ([string]$credit['status'])
+        $bucket = Get-FARBucketForCreditStatus -Status ([string]$credit['status']) -Port $port
         $portState = $EraState.ports[$port]
         $portState.total = [int]$portState.total + 1
         $portState.buckets[$bucket] = [int]$portState.buckets[$bucket] + 1

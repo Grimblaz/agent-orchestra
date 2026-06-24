@@ -1443,11 +1443,17 @@ exit 0
 
                 # ARRANGE: pre-seeded skip state for pattern, but findings now show high sustain_rate
                 # (8 sustained + 12 defense-sustained -> sustain_rate = 0.4 >= 0.15 -> full)
+                # NOTE (issue #723): the skip_first_observed_at seed must stay WITHIN the 90-day
+                # time-decay window (core:1224-1225) so the time-decay re-activation path does NOT
+                # fire and the sustain-rate band (core:1259) is the producer of `full`. An absolute
+                # past date would let `now - seed > 90` force skip->light on any run after the window
+                # elapsed, breaking this test by wall-clock — the root cause of the flakiness.
+                $recentWithinWindow = (Get-Date).AddDays(-30).ToString('o')  # well within the 90-day decay window (issue #723)
                 $workDir = & $script:NewWorkDir
                 $findings = & $script:MakeCategoryFindings 'pattern' 8 12
                 $depthState = [ordered]@{
                     pattern = [ordered]@{
-                        skip_first_observed_at = '2026-02-01T00:00:00Z'
+                        skip_first_observed_at = $recentWithinWindow
                     }
                 }
                 $calib = & $script:BuildDepthCalibration -Findings $findings `
@@ -1464,16 +1470,33 @@ exit 0
                 $result.Output | Should -Match '(?s)prosecution_depth:.*?pattern:\s+recommendation:\s*full' `
                     -Because 'sustain_rate >= 0.15 must produce recommendation: full (pattern exited skip)'
 
+                # ASSERT (issue #723, MF4): the `full` came from the sustain-rate band, NOT from the
+                # time-decay re-activation path. re_activated: false proves time-decay did not fire —
+                # if a future run-date drift re-introduced wall-clock coupling, this would flip to true.
+                $result.Output | Should -Match '(?s)pattern:.*?re_activated:\s*false' `
+                    -Because 'full must come from the sustain-rate path (core:1259), not time-decay re-activation (issue #723)'
+
                 # ASSERT: skip_first_observed_at cleared from calibration file
                 $readBack = Get-Content $calibPath -Raw | ConvertFrom-Json -AsHashtable
                 $readBack | Should -Not -BeNullOrEmpty `
                     -Because 'calibration file must still be readable after run'
+                # MF4 (issue #723): make the clearing assertion NON-VACUOUS. The prior `if (pattern key
+                # present)` wrapper passed silently when prosecution_depth_state had no pattern key at
+                # all — which is itself a valid "cleared" outcome, but also masked a regression where
+                # the whole state went missing for the wrong reason. Assert the clearing happened one
+                # of the two legitimate ways: either the pattern key is gone entirely, OR it remains
+                # but skip_first_observed_at is explicitly cleared. Skip-state-still-present FAILS.
                 $depthStateAfter = $readBack['prosecution_depth_state']
-                if ($null -ne $depthStateAfter -and $null -ne $depthStateAfter['pattern']) {
+                $patternKeyPresent = ($null -ne $depthStateAfter) -and ($null -ne $depthStateAfter['pattern'])
+                if ($patternKeyPresent) {
                     $depthStateAfter['pattern']['skip_first_observed_at'] | Should -BeNullOrEmpty `
                         -Because 'skip_first_observed_at must be cleared when category exits skip'
                 }
-                # If prosecution_depth_state has no pattern key at all, the contract is also satisfied
+                else {
+                    # Pattern key removed entirely is the other legitimate cleared outcome.
+                    $patternKeyPresent | Should -BeFalse `
+                        -Because 'absence of the pattern key is an acceptable cleared state (skip_first_observed_at no longer present)'
+                }
             }
 
             It 'write-back: expired re-activation events are pruned on write-back' -Tag 'requires-gh' {
@@ -4660,7 +4683,7 @@ findings:
                 calibration_version     = 1
                 entries                 = @()
                 prosecution_depth_state = @{
-                    architecture = @{ skip_first_observed_at = '2026-01-01T00:00:00Z' }
+                    architecture = @{ skip_first_observed_at = '2026-01-01T00:00:00Z' }  # absolute on purpose: band-irrelevant write-back vehicle (issue #723)
                 }
                 proposals_emitted       = $ProposalsEmitted
             } | ConvertTo-Json -Depth 5 | Set-Content -Path $FilePath -Encoding UTF8
@@ -5063,7 +5086,7 @@ findings:
                 calibration_version     = 1
                 entries                 = @()
                 prosecution_depth_state = @{
-                    architecture = @{ skip_first_observed_at = '2026-01-01T00:00:00Z' }
+                    architecture = @{ skip_first_observed_at = '2026-01-01T00:00:00Z' }  # absolute on purpose: band-irrelevant write-back vehicle (issue #723)
                 }
             } | ConvertTo-Json -Depth 5 | Set-Content -Path $FilePath -Encoding UTF8
         }
@@ -5588,7 +5611,7 @@ exit 0
                 calibration_version     = 1
                 entries                 = @()
                 prosecution_depth_state = @{
-                    architecture = @{ skip_first_observed_at = '2026-01-01T00:00:00Z' }
+                    architecture = @{ skip_first_observed_at = '2026-01-01T00:00:00Z' }  # absolute on purpose: band-irrelevant write-back vehicle (issue #723)
                 }
                 proposals_emitted       = $ProposalsEmitted
             } | ConvertTo-Json -Depth 5 | Set-Content -Path $FilePath -Encoding UTF8
