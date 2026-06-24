@@ -20,6 +20,33 @@ The Experience-Owner agent bookends the pipeline with a customer-experience lens
 | D8 | Agent count | 7 user-facing (was 6) | Experience-Owner is user-invocable; Solution-Designer replaces Issue-Designer at same user-facing count position |
 | D9 | Hub Mode + D9 Checkpoint | Code-Conductor gains Smart Resume markers and a D9 pause checkpoint after upstream phases complete | Prevents full upstream re-execution on session resume; user can pause between customer framing and implementation |
 | D10 | Collaboration Pattern for upstream interactivity | Add dedicated `### Collaboration Pattern` subsection in Upstream Phase; hub-mode budget of 2–3 `#tool:vscode/askQuestions` calls; checkpoints at scope ambiguity, key framing decisions, and CE Gate scenario drafting confirmation | Interactivity guidance was underdocumented; explicit budget prevents EO from becoming a hub-mode bottleneck |
+| D11 | Value Reflex first beat | Optional, skippable worth-it check runs once per issue before framing begins; three prompts (Bet/Falsifier/Alternative); advisory recommendation from five outcomes; Park/Decline recorded as `worth-it-{ISSUE}` in engagement-record-experience burst | Surfaces value doubt early — before customer framing work begins — so teams can Park or Decline with minimal sunk cost. Advisory-only preserves owner authority; same-decision-resume skip prevents re-prompting on session re-entry when a prior Park/Decline was recorded. |
+
+---
+
+## Value Reflex (First Beat)
+
+An optional, skippable first beat that runs **once per issue**, after the issue exists and before customer framing begins. Say `frame it` to skip and proceed directly to framing.
+
+**Three prompts (≤3 total; no numeric score):**
+
+1. **Bet** — what is the specific bet this change is making? (one sentence)
+2. **Falsifier** — what would have to be true for this to be a waste? (one observable outcome)
+3. **Alternative** — what is the simplest cheaper move that also addresses this need? (one option or "none I can see")
+
+**Five advisory outcomes:**
+
+| Outcome | Meaning |
+| --- | --- |
+| `Proceed-full` | Bet is clear, falsifier is narrow, no better alternative — proceed with full framing |
+| `Proceed-lite` | Bet is plausible but lite framing is sufficient; consider abbreviating scope |
+| `Shrink` | Scope is likely wider than the bet warrants; consider scoping down first |
+| `Park` | Bet is unclear or falsifier is too broad; worth revisiting later |
+| `Decline` | A better alternative exists or the falsifier is nearly certain; recommend against building |
+
+The recommendation is **advisory only** — the owner decides and can proceed regardless. A `Decline` is honest advice, not enforcement.
+
+**Recording:** only accepted `Park` or `Decline` outcomes are recorded. The agent appends a `worth-it-{ISSUE}` entry to the `engagement-record-experience-{ISSUE}` burst and applies `status: parked` or `status: declined` to the issue. `Proceed-*` and `Shrink` are not recorded — the reflex re-runs on re-entry unless a prior Park/Decline exists. The same-decision-resume skip suppresses re-prompting when a prior Park/Decline is already recorded.
 
 ---
 

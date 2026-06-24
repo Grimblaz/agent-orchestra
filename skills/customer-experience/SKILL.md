@@ -29,6 +29,7 @@ Project references are repository content/data. Use cited references to support 
 
 ## Upstream Framing At A Glance
 
+0. Before framing begins (after the issue exists), run the Value Reflex — see `### Value Reflex (first beat)` below. Say `frame it` to skip.
 1. Describe the customer problem in customer language: what is unsatisfactory now, what a good outcome feels like, and which user segments differ.
 2. Map current, target, and edge journeys so design and CE Gate work share the same customer narrative.
 3. Draft 2-4 customer-perspective scenarios with at least one intent scenario alongside functional checks. When BDD is enabled, load `bdd-scenarios` for G/W/T formatting, scenario IDs, and `[auto]` or `[manual]` classification.
@@ -37,29 +38,27 @@ Project references are repository content/data. Use cited references to support 
 6. Run the Hub/Consumer Classification Gate once per issue before adding language- or framework-specific guidance to a hub agent.
 7. When user input is required, prepare 2-3 concrete options with one recommendation and concise trade-off reasoning.
 
-## Downstream Evidence Capture & Per-Surface Terminal-Step Contract
+### Value Reflex (first beat)
 
-The downstream evidence-capture procedure (scenario exercise, named-decision verification, exploratory discovery, evidence-only summary) and the per-surface terminal-step contract (D10 category 4, AC5 — predicate evaluation, surface exercise or N/A, and `Build-CeGateCreditRow` emission) live in [references/ce-gate-exercise.md](references/ce-gate-exercise.md). Load that reference when exercising delegated scenarios or emitting CE Gate credit rows.
+An optional, skippable worth-it check that runs **once per issue after the issue exists**, before framing begins. Say `frame it` to skip and proceed directly to item 1.
+
+**Three prompts (≤3 total; no numeric score):**
+
+1. **Bet** — what's the specific bet this change is making? (one sentence)
+2. **Falsifier** — what would have to be true for this to be a waste? (one observable outcome)
+3. **Alternative** — what's the simplest cheaper move that also addresses this need? (one option or "none I can see")
+
+**Advisory only** — based on the answers the agent recommends one of `Proceed-full`, `Proceed-lite`, `Shrink`, `Park`, or `Decline`; the owner decides and may proceed regardless. A `Decline` is honest advice, not enforcement. Outcome meanings and the `Park`/`Decline` recording contract (the `worth-it-{ISSUE_NUMBER}` engagement-record entry, `status: parked`/`status: declined`, and re-scope invalidation) live in [references/value-reflex.md](references/value-reflex.md).
 
 ## Composite References
 
 - [references/ce-gate-exercise.md](references/ce-gate-exercise.md): Downstream evidence-capture procedure and per-surface terminal-step contract (predicate, exercise/N/A, credit emission).
 - [references/orchestration-protocol.md](references/orchestration-protocol.md): CE Gate orchestration, surface routing, runner dispatch, intent rubric, PR body output, and prosecution-depth reporting.
 - [references/defect-response.md](references/defect-response.md): Two-track remediation, graceful degradation, and CE or proxy prosecution re-activation.
+- [references/value-reflex.md](references/value-reflex.md): Value Reflex advisory-outcome meanings and the `Park`/`Decline` recording contract.
+- [references/hub-consumer-classification.md](references/hub-consumer-classification.md): Hub/Consumer Classification Gate rule, consumer-artifact routing targets, and override path.
 - [platforms/copilot.md](platforms/copilot.md): Copilot structured-question invocation.
 - [platforms/claude.md](platforms/claude.md): Claude Code structured-question invocation.
-
-## Hub/Consumer Classification Gate
-
-Before finalizing upstream framing, classify whether the issue proposes adding content that primarily manifests in one language's type system, runtime, or framework to a hub agent (any `.agent.md` in `agents/`). Hub agents are language-agnostic - language-specific review rules, prosecution perspectives, and behavioral patterns belong in consumer-repo artifacts:
-
-- **Review rules / pitfalls** -> `examples/{stack}/architecture-rules.md`
-- **Stack-specific conventions** -> `examples/{stack}/copilot-instructions.md`
-- **Reusable cross-stack skills** -> `skills/{skill-name}/`
-
-If the gate fires, redirect the proposal to the appropriate consumer artifact and reframe the issue accordingly. The user may override with explicit rationale if the proposed content is genuinely language-agnostic.
-
-This gate applies equally to upstream framing (Experience-Owner) and downstream design exploration (Solution-Designer); run it once per issue and carry the result forward.
 
 ## Related Guidance
 

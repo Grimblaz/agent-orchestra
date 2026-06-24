@@ -2,20 +2,35 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
-## [2.34.0] — 2026-06-24
+## [2.35.0] — 2026-06-24
 
 ### Fixed
 
 - **Full Pester suite restored to clean green** (#723; absorbs #566 local-Windows triage): 26 pre-existing failures across ~17 subsystems root-caused and fixed. Highlights: a real regression in `skills/session-startup/scripts/post-merge-cleanup.ps1` (#727 hoisted `Resolve-Path` out of a loop, crashing `-IssueNumber` runs from any tree lacking `.copilot-tracking/`) is guarded; `frame-audit-report-core.ps1` `Get-FARBucketForCreditStatus` now warn-skips unknown live credit statuses (→ `inconclusive`) instead of throwing on `harvested-from-issue`; the `aggregate-review-scores` skip→full test no longer depends on wall-clock time (relative within-window date + `re_activated: false` assertion proving the sustain-rate path + non-vacuous clear assertion). Stale contract/parity/wording tests reconciled to match intentionally-shipped features (#439/#500/#574/#591/#620/#625/#632/#663/#706/#627) — fixed test-side only, bodies never reverted.
 - **Restored S4 framing sentence lost in #632's DRY consolidation** (`skills/adversarial-review/platforms/claude.md`): the working-tree-mutation ND-2 recovery framing was dropped from the command sites without being carried into the consolidated checklist.
+- **PR #731 review findings** (proxy prosecution → defense → judge): fixed a vacuous `else`-branch assertion in the `aggregate-review-scores` leave-skip writeback test (production takes the key-removal path, so the old assertion re-asserted the branch condition — now a raw-JSON check on the written calibration file, AC4); hyphenated the `Code-Conductor` handoff prose in `agents/Code-Conductor.agent.md` + `skills/session-memory-contract/references/conductor-session-handoff.md` to kill source/extract drift (SCR2); and fixed an `exercise/N-A` → `exercise/N/A` typo (SCR1).
 
 ### Added
 
-- **Wall-clock fixture guard** (`.github/scripts/Tests/wall-clock-fixture-guard.Tests.ps1`, registered in `.github/workflows/pester.yml`): a static guard that fails when a band-asserting fixture assigns an absolute ISO-date literal to the now-coupled `skip_first_observed_at` field (line-level `# absolute on purpose` exemption), with a falsifiability self-test and a core-drift check. Makes wall-clock independence a checked CI invariant (#723).
+- **Wall-clock fixture guard** (`.github/scripts/Tests/wall-clock-fixture-guard.Tests.ps1`, registered in `.github/workflows/pester.yml`): a static guard that fails when a band-asserting fixture assigns an absolute ISO-date literal to the now-coupled `skip_first_observed_at` field (line-level `# absolute on purpose` exemption), with a falsifiability self-test and a core-drift check. Makes wall-clock independence a checked CI invariant (#723). The detection regex covers both single- and double-quoted ISO literals (PR #731 GCR3, AC3).
 
 ### Changed
 
-- **Size-lint splits via composite-skill extraction** (not threshold bumps): `agents/Code-Conductor.agent.md` 588→499 lines (verbose sub-content extracted under 21 preserved H2 headings into 5 reference files; all shell-parity + contract-asserted text preserved), `skills/customer-experience/SKILL.md` 94→79, `skills/code-review-intake/SKILL.md` 93→78 (#723).
+- **Size-lint splits via composite-skill extraction** (not threshold bumps): `agents/Code-Conductor.agent.md` 588→499 lines (verbose sub-content extracted under 21 preserved H2 headings into 5 reference files; all shell-parity + contract-asserted text preserved), `skills/customer-experience/SKILL.md` rebalanced to ≤80 lines after the #729 Value Reflex merge by extracting the Value Reflex outcome contract and the Hub/Consumer Classification Gate into new reference files, `skills/code-review-intake/SKILL.md` 93→78 (#723).
+
+## [2.34.0] — 2026-06-24
+
+### Added
+
+- **Advisory Value Reflex — worth-it check as the first beat of `/experience`** (`skills/customer-experience/SKILL.md`, `agents/Experience-Owner.agent.md`, `CLAUDE.md`): an optional, skippable check that runs once per issue before framing begins. Three prompts (Bet / Falsifier / Alternative) with no numeric score produce an advisory recommendation from five outcomes — `Proceed-full`, `Proceed-lite`, `Shrink`, `Park`, `Decline`. Advisory only: the owner decides and may proceed regardless. An accepted `Park` or `Decline` is recorded as a `worth-it-{ISSUE}` entry in the `engagement-record-experience-{ISSUE}` burst and applies a `status: parked` or `status: declined` label; `same-decision-resume` suppresses re-prompting on re-entry. `Proceed-*`/`Shrink` outcomes are not recorded. Say `frame it` to skip (#729).
+
+### Tests
+
+- 12 Pester structural and constant-validation `It` blocks (`.github/scripts/Tests/value-reflex.Tests.ps1`) locking the invariants: exactly three numbered prompts, the `frame it` skip affordance, the no-numeric-score guard, first-beat ordering (item 0 before item 1), the five-outcome enum, the `worth-it-{ISSUE}` recording reference, the `status: parked`/`status: declined` label-apply plus halt wiring, the `Test-EngagementRecordSlug` slug-regex contract, and the `experience` phase-enum membership (#729).
+
+### Fixed
+
+- **Version drift across version-bearing files** (`plugin.json`, `.claude-plugin/marketplace.json`, `.github/plugin/marketplace.json`, `README.md`): a prior release advanced only `.claude-plugin/plugin.json` to 2.33.1 while the other manifests and the README badge lagged at 2.33.0/2.32.0. This bump reconciles all seven occurrences across five files to 2.34.0 (#729).
 
 ## [2.33.1] — 2026-06-23
 

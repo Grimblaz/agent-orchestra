@@ -1,10 +1,17 @@
 # Frame enforce activation timestamp.
 # PRs created BEFORE this timestamp are not subject to enforcement (warn mode only).
-# Set this to a past timestamp only after the Pre-Activation Gate is met:
+#
+# STATUS (2026-06-23): required-check activation is DESCOPED — the frame ships
+# advisory and stays advisory. Credit provenance (#724), a Pre-Activation Gate
+# precondition, was closed won't-do, and the frame-enforcement umbrella (#425)
+# closed completed-advisory. The activation_timestamp is intentionally left at the
+# never-date below; re-scoping activation means re-opening #724 first.
+#
+# Pre-Activation Gate (retained for reference; not currently pursued):
 #   1. >= 95% credit completeness over 30-PR retrospective audit
 #   2. >= 1-week operator notice posted
 #   3. Opt-out mechanism (FRAME_ENFORCE=0) built, documented, and tested
-#   4. Credit provenance (#724) resolved
+#   4. Credit provenance (#724) resolved — CLOSED WON'T-DO (2026-06-23)
 # See Documents/Design/frame-architecture.md for the activation runbook.
 schema_version: 1
 activation_timestamp: "9999-12-31T00:00:00Z"
