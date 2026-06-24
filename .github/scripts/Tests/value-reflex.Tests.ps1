@@ -25,9 +25,9 @@ BeforeAll {
     $script:AgentContent = & $script:GetContent $script:ExperienceOwnerAgent
 }
 
-Describe 'Value Reflex — skills/customer-experience/SKILL.md' {
+Describe 'Value Reflex - skills/customer-experience/SKILL.md' {
 
-    It '(a) enumerates exactly 3 numbered prompts — Bet, Falsifier, Alternative — as bold numbered items' {
+    It '(a) enumerates exactly 3 numbered prompts (Bet, Falsifier, Alternative) as bold numbered items' {
         # Extract the Value Reflex section: text from the heading to the next ## or ### heading
         $sectionMatch = [regex]::Match(
             $script:SkillContent,
@@ -59,12 +59,12 @@ Describe 'Value Reflex — skills/customer-experience/SKILL.md' {
         $script:SkillContent | Should -Match '0\. Before framing begins' -Because 'item 0 must use the "Before framing begins" phrasing'
         $script:SkillContent | Should -Match '1\. Describe' -Because 'item 1 must use the "Describe" phrasing'
 
-        $pos0 = $script:SkillContent.IndexOf('0. ')
+        $pos0 = $script:SkillContent.IndexOf('0. Before framing begins')
         $pos1 = $script:SkillContent.IndexOf('1. Describe')
         $pos0 | Should -BeLessThan $pos1 -Because 'item 0 (Value Reflex trigger) must precede item 1 in the framing checklist'
     }
 
-    It '(e-extra) recommendation enum completeness — all five outcome values are present' {
+    It '(e-extra) recommendation enum completeness: all five outcome values are present' {
         $script:SkillContent | Should -Match 'Proceed-full' -Because 'the Proceed-full outcome must be documented in the skill'
         $script:SkillContent | Should -Match 'Proceed-lite' -Because 'the Proceed-lite outcome must be documented in the skill'
         $script:SkillContent | Should -Match 'Shrink' -Because 'the Shrink outcome must be documented in the skill'
@@ -73,7 +73,7 @@ Describe 'Value Reflex — skills/customer-experience/SKILL.md' {
     }
 }
 
-Describe 'Value Reflex — agents/Experience-Owner.agent.md recording wiring' {
+Describe 'Value Reflex - agents/Experience-Owner.agent.md recording wiring' {
 
     It '(e) references worth-it-{ISSUE} engagement-record recording via decision_id: worth-it- pattern' {
         $script:AgentContent | Should -Match 'decision_id: worth-it-' -Because 'the agent must document the worth-it-{ISSUE_NUMBER} decision_id slug for Park/Decline recording'
@@ -88,7 +88,7 @@ Describe 'Value Reflex — agents/Experience-Owner.agent.md recording wiring' {
         # Find the Value Reflex recording wiring section
         $wiringMatch = [regex]::Match(
             $script:AgentContent,
-            '(?ms)^\*\*Value Reflex recording wiring\*\*[^\n]*\n(.*?)(?=\n## |\n\*\*|\z)'
+            '(?ms)^\*\*Value Reflex recording wiring\*\*[^\n]*\n(.*?)(?=\n## |\z)'
         )
         $wiringMatch.Success | Should -BeTrue -Because 'the **Value Reflex recording wiring** section must exist in the agent'
 
@@ -97,7 +97,7 @@ Describe 'Value Reflex — agents/Experience-Owner.agent.md recording wiring' {
     }
 }
 
-Describe 'Value Reflex — constant validations' {
+Describe 'Value Reflex - constant validations' {
 
     BeforeAll {
         $script:SlugFunctionAvailable = $false
