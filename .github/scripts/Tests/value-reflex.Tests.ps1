@@ -79,12 +79,12 @@ Describe 'Value Reflex - agents/Experience-Owner.agent.md recording wiring' {
         $script:AgentContent | Should -Match 'decision_id: worth-it-' -Because 'the agent must document the worth-it-{ISSUE_NUMBER} decision_id slug for Park/Decline recording'
     }
 
-    It '(f) documents label-apply behavior for parked and declined outcomes' {
+    It '(f1) documents label-apply behavior for parked and declined outcomes' {
         $script:AgentContent | Should -Match 'status: parked' -Because 'the agent must document the parked label name for gh issue edit'
         $script:AgentContent | Should -Match 'status: declined' -Because 'the agent must document the declined label name for gh issue edit'
     }
 
-    It '(f) documents Halt behavior near label application instructions' {
+    It '(f2) documents Halt behavior near label application instructions' {
         # Find the Value Reflex recording wiring section
         $wiringMatch = [regex]::Match(
             $script:AgentContent,
@@ -139,6 +139,6 @@ Describe 'Value Reflex - constant validations' {
 
     It 'Read-EngagementRecords $Phase ValidateSet includes "experience"' {
         $coreContent = & $script:GetContent $script:EngagementRecordCore
-        $coreContent | Should -Match "\[ValidateSet\('experience'" -Because 'the Phase parameter must include "experience" as a valid value'
+        $coreContent | Should -Match "\[ValidateSet\([^)]*'experience'" -Because 'the Phase parameter must include "experience" as a valid value'
     }
 }
