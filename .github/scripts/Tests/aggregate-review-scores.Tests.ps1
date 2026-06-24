@@ -1494,8 +1494,12 @@ exit 0
                 }
                 else {
                     # Pattern key removed entirely is the other legitimate cleared outcome.
-                    $patternKeyPresent | Should -BeFalse `
-                        -Because 'absence of the pattern key is an acceptable cleared state (skip_first_observed_at no longer present)'
+                    # MF4 fix (issue #723 CR): raw JSON check is genuinely non-vacuous — it re-reads
+                    # the file from disk and fails if skip_first_observed_at appears under any key
+                    # shape, even if $depthStateAfter is null/empty (key-removal production path).
+                    $rawAfter = Get-Content $calibPath -Raw
+                    $rawAfter | Should -Not -Match '"skip_first_observed_at"\s*:' `
+                        -Because 'skip_first_observed_at must be absent from the written calibration file after category exits skip via key-removal path (issue #723 MF4)'
                 }
             }
 

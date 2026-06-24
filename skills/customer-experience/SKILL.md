@@ -43,7 +43,7 @@ The downstream evidence-capture procedure (scenario exercise, named-decision ver
 
 ## Composite References
 
-- [references/ce-gate-exercise.md](references/ce-gate-exercise.md): Downstream evidence-capture procedure and per-surface terminal-step contract (predicate, exercise/N-A, credit emission).
+- [references/ce-gate-exercise.md](references/ce-gate-exercise.md): Downstream evidence-capture procedure and per-surface terminal-step contract (predicate, exercise/N/A, credit emission).
 - [references/orchestration-protocol.md](references/orchestration-protocol.md): CE Gate orchestration, surface routing, runner dispatch, intent rubric, PR body output, and prosecution-depth reporting.
 - [references/defect-response.md](references/defect-response.md): Two-track remediation, graceful degradation, and CE or proxy prosecution re-activation.
 - [platforms/copilot.md](platforms/copilot.md): Copilot structured-question invocation.

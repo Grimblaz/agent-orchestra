@@ -55,9 +55,10 @@ Describe 'Issue #723 wall-clock fixture durability guard' -Tag 'issue-723', 'wal
         $script:ThisFile = (Resolve-Path $PSCommandPath).Path
 
         # Detection: an absolute ISO-date literal assigned to skip_first_observed_at.
-        #   skip_first_observed_at = '20NN-NN-NNT...'
-        # Single-quoted literal whose value begins with a 20NN-NN-NN ISO date.
-        $script:AbsoluteSeedPattern = "skip_first_observed_at\s*=\s*'20\d\d-\d\d-\d\d"
+        #   skip_first_observed_at = '20NN-NN-NNT...'   (single-quoted — PowerShell convention)
+        #   skip_first_observed_at = "20NN-NN-NNT..."   (double-quoted — also detected; AC3 coverage)
+        # Both quote styles whose value begins with a 20NN-NN-NN ISO date.
+        $script:AbsoluteSeedPattern = "skip_first_observed_at\s*=\s*['""]20\d\d-\d\d-\d\d"
         # Line-level exemption token.
         $script:ExemptionToken = '# absolute on purpose'
 
@@ -190,6 +191,16 @@ Describe 'Issue #723 wall-clock fixture durability guard' -Tag 'issue-723', 'wal
             )
             $hits = @(& $script:GetUnannotatedAbsoluteSeeds -Lines $planted)
             $hits | Should -HaveCount 0 -Because 'a now-relative seed carries no absolute literal and is the prescribed fix'
+        }
+
+        It 'Flags an un-annotated absolute seed in double-quoted form (GCR3 fix, issue #723 CR)' {
+            # Verifies that the extended regex ['"] catches double-quoted ISO literals in addition
+            # to the conventional single-quoted form — closing the AC3 coverage gap.
+            $planted = @(
+                '                    pattern = @{ skip_first_observed_at = "2020-01-01T00:00:00Z" }'
+            )
+            $hits = @(& $script:GetUnannotatedAbsoluteSeeds -Lines $planted)
+            $hits | Should -HaveCount 1 -Because 'an un-annotated double-quoted absolute ISO seed must also be detected (AC3 guard covers both quote styles)'
         }
     }
 
