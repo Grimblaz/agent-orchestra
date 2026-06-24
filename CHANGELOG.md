@@ -2,6 +2,21 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.34.0] — 2026-06-24
+
+### Fixed
+
+- **Full Pester suite restored to clean green** (#723; absorbs #566 local-Windows triage): 26 pre-existing failures across ~17 subsystems root-caused and fixed. Highlights: a real regression in `skills/session-startup/scripts/post-merge-cleanup.ps1` (#727 hoisted `Resolve-Path` out of a loop, crashing `-IssueNumber` runs from any tree lacking `.copilot-tracking/`) is guarded; `frame-audit-report-core.ps1` `Get-FARBucketForCreditStatus` now warn-skips unknown live credit statuses (→ `inconclusive`) instead of throwing on `harvested-from-issue`; the `aggregate-review-scores` skip→full test no longer depends on wall-clock time (relative within-window date + `re_activated: false` assertion proving the sustain-rate path + non-vacuous clear assertion). Stale contract/parity/wording tests reconciled to match intentionally-shipped features (#439/#500/#574/#591/#620/#625/#632/#663/#706/#627) — fixed test-side only, bodies never reverted.
+- **Restored S4 framing sentence lost in #632's DRY consolidation** (`skills/adversarial-review/platforms/claude.md`): the working-tree-mutation ND-2 recovery framing was dropped from the command sites without being carried into the consolidated checklist.
+
+### Added
+
+- **Wall-clock fixture guard** (`.github/scripts/Tests/wall-clock-fixture-guard.Tests.ps1`, registered in `.github/workflows/pester.yml`): a static guard that fails when a band-asserting fixture assigns an absolute ISO-date literal to the now-coupled `skip_first_observed_at` field (line-level `# absolute on purpose` exemption), with a falsifiability self-test and a core-drift check. Makes wall-clock independence a checked CI invariant (#723).
+
+### Changed
+
+- **Size-lint splits via composite-skill extraction** (not threshold bumps): `agents/Code-Conductor.agent.md` 588→499 lines (verbose sub-content extracted under 21 preserved H2 headings into 5 reference files; all shell-parity + contract-asserted text preserved), `skills/customer-experience/SKILL.md` 94→79, `skills/code-review-intake/SKILL.md` 93→78 (#723).
+
 ## [2.33.1] — 2026-06-23
 
 ### Fixed
