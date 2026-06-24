@@ -2,6 +2,20 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.34.0] — 2026-06-24
+
+### Added
+
+- **Advisory Value Reflex — worth-it check as the first beat of `/experience`** (`skills/customer-experience/SKILL.md`, `agents/Experience-Owner.agent.md`, `CLAUDE.md`): an optional, skippable check that runs once per issue before framing begins. Three prompts (Bet / Falsifier / Alternative) with no numeric score produce an advisory recommendation from five outcomes — `Proceed-full`, `Proceed-lite`, `Shrink`, `Park`, `Decline`. Advisory only: the owner decides and may proceed regardless. An accepted `Park` or `Decline` is recorded as a `worth-it-{ISSUE}` entry in the `engagement-record-experience-{ISSUE}` burst and applies a `status: parked` or `status: declined` label; `same-decision-resume` suppresses re-prompting on re-entry. `Proceed-*`/`Shrink` outcomes are not recorded. Say `frame it` to skip (#729).
+
+### Tests
+
+- 12 Pester structural and constant-validation `It` blocks (`.github/scripts/Tests/value-reflex.Tests.ps1`) locking the invariants: exactly three numbered prompts, the `frame it` skip affordance, the no-numeric-score guard, first-beat ordering (item 0 before item 1), the five-outcome enum, the `worth-it-{ISSUE}` recording reference, the `status: parked`/`status: declined` label-apply plus halt wiring, the `Test-EngagementRecordSlug` slug-regex contract, and the `experience` phase-enum membership (#729).
+
+### Fixed
+
+- **Version drift across version-bearing files** (`plugin.json`, `.claude-plugin/marketplace.json`, `.github/plugin/marketplace.json`, `README.md`): a prior release advanced only `.claude-plugin/plugin.json` to 2.33.1 while the other manifests and the README badge lagged at 2.33.0/2.32.0. This bump reconciles all seven occurrences across five files to 2.34.0 (#729).
+
 ## [2.33.1] — 2026-06-23
 
 ### Fixed
