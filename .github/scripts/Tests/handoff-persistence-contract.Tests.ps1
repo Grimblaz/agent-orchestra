@@ -177,7 +177,8 @@ Describe 'execution handoff persistence contract' {
 
             $processSection = $processSectionMatch.Groups['body'].Value
 
-            $processSection | Should -Match ([regex]::Escape('When this user-invocable agent receives a request referencing an existing GitHub issue, load `skills/upstream-onboarding/SKILL.md` and follow its protocol.')) -Because "$($agent.Name) must reference the upstream-onboarding skill from its Process section"
+            $processSection | Should -Match ([regex]::Escape('Load `skills/solution-authoring/SKILL.md` first')) -Because "$($agent.Name) must load the solution-authoring skill first in its Process section"
+            $processSection | Should -Match ([regex]::Escape('Then load `skills/upstream-onboarding/SKILL.md` and follow its protocol.')) -Because "$($agent.Name) must reference the upstream-onboarding skill from its Process section"
             $processSection | Should -Not -Match 'provenance-gate' -Because "$($agent.Name) must not reference the retired provenance-gate skill"
         }
     }

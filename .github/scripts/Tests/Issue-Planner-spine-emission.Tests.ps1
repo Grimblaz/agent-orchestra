@@ -362,9 +362,9 @@ Describe 'Issue-Planner frame spine emission contract' -Tag 'contract' {
         $script:PersistPlanSection | Should -Match $script:FrontmatterFormatPattern -Because 'plan YAML frontmatter format must remain status/priority/issue_id/created/ce_gate'
         $script:PersistPlanSection | Should -Match '<!--\s*credit-input-plan-\{ISSUE_NUMBER\}\s*-->' -Because 'SMC-17 credit-input-plan marker must remain present'
         $script:PersistPlanSection | Should -Match 'SMC-01' -Because 'plan persistence must remain tied to SMC-01'
-        $script:PersistPlanSection | Should -Match 'SMC-03' -Because 'design cache persistence must remain tied to SMC-03'
-        $script:PersistPlanSection | Should -Match '(?i)/memories/session/plan-issue-\{id\}\.md' -Because 'canonical plan session-memory cache reference must remain present'
-        $script:PersistPlanSection | Should -Match '(?i)/memories/session/design-issue-\{id\}\.md' -Because 'canonical design session-memory cache reference must remain present'
+        $script:Content | Should -Match 'SMC-03' -Because 'design cache persistence must remain tied to SMC-03 (now in the Phase-specific persistence notes section per #620)'
+        $script:Content | Should -Match '(?i)/memories/session/plan-issue-\{id\}\.md' -Because 'canonical plan session-memory cache reference must remain present (now in the Phase-specific persistence notes section per #620)'
+        $script:Content | Should -Match '(?i)/memories/session/design-issue-\{id\}\.md' -Because 'canonical design session-memory cache reference must remain present (now in the Phase-specific persistence notes section per #620)'
     }
 
     It 'preserves the agent identity and Core Principles stance while adding spine guidance' {

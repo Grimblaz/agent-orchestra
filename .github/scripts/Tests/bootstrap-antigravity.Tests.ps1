@@ -75,7 +75,7 @@ Describe 'Antigravity Compatibility Bootstrap Runner Contract' {
             $tempOutput = Join-Path $script:RepoRoot '.tmp/test-antigravity-subagents.json'
             if (Test-Path $tempOutput) { Remove-Item $tempOutput -Force }
 
-            $process = Start-Process -FilePath 'pwsh' -ArgumentList "-NoProfile", "-File", "$script:WrapperScriptPath", "-OutputPath", "$tempOutput" -NoNewWindow -PassThru -Wait
+            $process = Start-Process -FilePath 'pwsh' -ArgumentList "-NoProfile", "-File", "`"$script:WrapperScriptPath`"", "-OutputPath", "`"$tempOutput`"" -NoNewWindow -PassThru -Wait
             $process.ExitCode | Should -Be 0 -Because 'the bootstrap script should execute with exit code 0'
 
             Test-Path $tempOutput | Should -BeTrue -Because 'the script should have generated the output JSON file'
@@ -104,7 +104,7 @@ Describe 'Antigravity Compatibility Bootstrap Runner Contract' {
 
         It 'exits with non-zero code on OutputPath path traversal attempt' {
             $outsidePath = "../../../outside.json"
-            $process = Start-Process -FilePath 'pwsh' -ArgumentList "-NoProfile", "-File", "$script:WrapperScriptPath", "-OutputPath", "$outsidePath" -NoNewWindow -PassThru -Wait
+            $process = Start-Process -FilePath 'pwsh' -ArgumentList "-NoProfile", "-File", "`"$script:WrapperScriptPath`"", "-OutputPath", "`"$outsidePath`"" -NoNewWindow -PassThru -Wait
             $process.ExitCode | Should -Be 1 -Because 'path traversal in OutputPath must fail the execution'
         }
 
@@ -203,7 +203,7 @@ tools: [Read] # inline comment with tools
         }
 
         It 'exits with non-zero code when OutputPath equals repository root exactly (F3)' {
-            $process = Start-Process -FilePath 'pwsh' -ArgumentList "-NoProfile", "-File", "$script:WrapperScriptPath", "-OutputPath", "$script:RepoRoot" -NoNewWindow -PassThru -Wait
+            $process = Start-Process -FilePath 'pwsh' -ArgumentList "-NoProfile", "-File", "`"$script:WrapperScriptPath`"", "-OutputPath", "`"$script:RepoRoot`"" -NoNewWindow -PassThru -Wait
             $process.ExitCode | Should -Be 1 -Because 'OutputPath matching repository root exactly must trigger path traversal exception and exit code 1'
         }
 
@@ -217,7 +217,7 @@ tools: [Read] # inline comment with tools
             Copy-Item -Path $script:CoreLibPath -Destination (Join-Path $tempLibDir 'bootstrap-antigravity-core.ps1') -Force
 
             $tempWrapper = Join-Path $tempWorkspace '.github/scripts/bootstrap-antigravity.ps1'
-            $process = Start-Process -FilePath 'pwsh' -ArgumentList "-NoProfile", "-File", "$tempWrapper" -NoNewWindow -PassThru -Wait
+            $process = Start-Process -FilePath 'pwsh' -ArgumentList "-NoProfile", "-File", "`"$tempWrapper`"" -NoNewWindow -PassThru -Wait
             $process.ExitCode | Should -Be 1 -Because 'zero subagents must trigger a terminating error'
 
             if (Test-Path $tempWorkspace) { Remove-Item $tempWorkspace -Recurse -Force }
