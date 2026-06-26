@@ -17,8 +17,9 @@
       6. Read-back verify: VerifyPass=$true after a successful insert
       7. No-op when ChangelogEntry is whitespace-only (caller contract; core tests clean call)
       8. ChangelogSection override: custom section name appears in output
-      9. VerifyPass=$false sentinel: artificially verify fail path (inject mismatched content)
-     10. Header injection guard in bump-version.ps1: validate the -ChangelogEntry check fires
+      9. CRLF input: inserted section preserves CRLF line endings when source content is CRLF
+     10. multi-line ChangelogEntry is preserved verbatim in the output
+     11. Header injection guard in bump-version.ps1: validate the -ChangelogEntry check fires
          by dot-sourcing a thin extraction of that validation (no child process)
 #>
 
@@ -231,7 +232,32 @@ Describe 'Invoke-ChangelogInsertion (changelog-insert-core.ps1 — AC7)' {
         $afterCount | Should -Be ($prevCount + 1)
     }
 
-    It '9. multi-line ChangelogEntry is preserved verbatim in the output' {
+    It '9. CRLF input: inserted section preserves CRLF line endings (no bare LF introduced)' {
+        # Simulate a CRLF CHANGELOG.md — common when committed on Windows.
+        # The function must detect the source style and use it throughout the inserted section.
+        $crlfInput = "# Changelog`r`n`r`n## [9.8.7] — 2026-01-01`r`n`r`n### Changed`r`n`r`n- Prior release.`r`n"
+
+        $result = Invoke-ChangelogInsertion `
+            -ChangelogContent $crlfInput `
+            -Version          '9.8.8' `
+            -ChangelogEntry   '- New CRLF entry'
+
+        $result.Updated    | Should -Be $true
+        $result.VerifyPass | Should -Be $true
+
+        # Locate the inserted section (between the two version headings)
+        $newIdx = $result.Content.IndexOf('## [9.8.8]')
+        $oldIdx = $result.Content.IndexOf('## [9.8.7]')
+        $insertedSection = $result.Content.Substring($newIdx, $oldIdx - $newIdx)
+
+        # Inserted section must contain CRLF
+        $insertedSection | Should -Match "`r`n"
+
+        # After removing all CRLF pairs, no bare LF should remain
+        ($insertedSection -replace "`r`n", '') | Should -Not -Match "`n"
+    }
+
+    It '10. multi-line ChangelogEntry is preserved verbatim in the output' {
         $multiLine = @"
 - Fixed issue A
 - Fixed issue B
@@ -265,17 +291,17 @@ Describe 'bump-version.ps1 input validation — header injection guard (AC7)' {
         }
     }
 
-    It '10. header injection: entry containing ## [9.9.9] is detected as invalid' {
+    It '11. header injection: entry containing ## [9.9.9] is detected as invalid' {
         $badEntry = "## [9.9.9] — 2026-01-01`n`n- Injected header"
         script:Test-ChangelogEntryHasHeader -ChangelogEntry $badEntry | Should -Be $true
     }
 
-    It '11. clean entry body passes the guard (no false positive)' {
+    It '12. clean entry body passes the guard (no false positive)' {
         $goodEntry = "- Fixed the thing`n- Also this"
         script:Test-ChangelogEntryHasHeader -ChangelogEntry $goodEntry | Should -Be $false
     }
 
-    It '12. entry with ## in prose (not a release header) is not flagged' {
+    It '13. entry with ## in prose (not a release header) is not flagged' {
         # "## " followed by non-bracket text is not a version header
         $proseEntry = "- See ## Background section for context"
         script:Test-ChangelogEntryHasHeader -ChangelogEntry $proseEntry | Should -Be $false

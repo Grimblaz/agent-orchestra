@@ -14,6 +14,9 @@
 $_coreLib = Join-Path $PSScriptRoot 'release-gate-core.ps1'
 if (Test-Path $_coreLib) { . $_coreLib }
 
+$_nlCoreLib = Join-Path $PSScriptRoot 'normalize-whitespace-core.ps1'
+if (Test-Path $_nlCoreLib) { . $_nlCoreLib }
+
 function Invoke-ChangelogInsertion {
     <#
     .SYNOPSIS
@@ -70,7 +73,12 @@ function Invoke-ChangelogInsertion {
     }
 
     $today = Get-Date -Format 'yyyy-MM-dd'
-    $newSection = "## [$Version] — $today`n`n### $ChangelogSection`n`n$($ChangelogEntry.TrimEnd())`n"
+    $nl = if (Get-Command -Name 'Get-NWNewlineSequence' -ErrorAction SilentlyContinue) {
+        Get-NWNewlineSequence -Content $ChangelogContent
+    } else {
+        if ($ChangelogContent -match "`r`n") { "`r`n" } else { "`n" }
+    }
+    $newSection = "## [$Version] — $today$nl$nl### $ChangelogSection$nl$nl$($ChangelogEntry.TrimEnd())$nl"
 
     # Count existing ## [X.Y.Z] headings before insertion (for read-back verify)
     $anchorPattern = '(?m)^## \[\d+\.\d+\.\d+\]'
@@ -81,15 +89,15 @@ function Invoke-ChangelogInsertion {
     if ($anchorMatch.Success) {
         # Insert above the first existing version heading
         $insertIdx     = $anchorMatch.Index
-        $updatedContent = $ChangelogContent.Substring(0, $insertIdx) + $newSection + "`n" + $ChangelogContent.Substring($insertIdx)
+        $updatedContent = $ChangelogContent.Substring(0, $insertIdx) + $newSection + $nl + $ChangelogContent.Substring($insertIdx)
     } else {
         # No-prior-heading fallback: insert after first '# <title>' line (or at top)
         $preambleMatch = [regex]::Match($ChangelogContent, '(?m)^# .+\r?\n')
         if ($preambleMatch.Success) {
             $insertIdx      = $preambleMatch.Index + $preambleMatch.Length
-            $updatedContent = $ChangelogContent.Substring(0, $insertIdx) + "`n" + $newSection + $ChangelogContent.Substring($insertIdx)
+            $updatedContent = $ChangelogContent.Substring(0, $insertIdx) + $nl + $newSection + $ChangelogContent.Substring($insertIdx)
         } else {
-            $updatedContent = $newSection + "`n" + $ChangelogContent
+            $updatedContent = $newSection + $nl + $ChangelogContent
         }
     }
 
