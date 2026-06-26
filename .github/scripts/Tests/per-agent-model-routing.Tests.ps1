@@ -12,7 +12,7 @@
     - Enum membership:        declared values belong to the allowed sets (case-insensitive), including explicit D7 inherit.
     - Inherit-comment:        omitting shells carry an explanatory YAML comment.
     - Routing-values oracle:  declared-routing shells match hard-coded expected values (D2+D5+quality).
-    - Routing-table parity:   CLAUDE.md routing table matches shell frontmatter for oracle shells and D7 inherit rows.
+    - Documentation home:     Documents/Design/agent-body-architecture.md exists and contains the routing section.
     - Command enforcement D3: upstream commands (/experience /design /plan /polish) must NOT declare model/effort.
     - Command enforcement D1: commands/orchestrate.md MUST declare model: sonnet, effort: high.
     - Scope guard:            commands/orchestrate.md `# /orchestrate` H1 is permanently followed by <!-- scope: claude-only -->.
@@ -20,7 +20,7 @@
     Parser strategy: ALL frontmatter parsing uses raw-text regex against the frontmatter slice
     (content between the first pair of --- delimiters), NOT ConvertFrom-Yaml, because YAML
     comments are stripped during parse and the inherit-comment check requires them.
-    Routing-table parity uses Markdown-table parsing (raw-text regex), not YAML.
+    Documentation home check uses raw-text regex (heading + sentinel string), not YAML or table parsing.
 #>
 
 Describe 'Per-agent model + effort routing contract' {

@@ -303,6 +303,7 @@ Describe 'auto-mode boundary contract' {
             -Begin $script:RecipeBegin -End $script:RecipeEnd
         if ([string]::IsNullOrEmpty($recipeInner)) { return }
 
+        $recipeFileDir = Split-Path $script:SkillAllowlist -Parent
         $linkMatches = [regex]::Matches($recipeInner, '\[[^\]]+\]\(([^)]+)\)')
         foreach ($m in $linkMatches) {
             $href = $m.Groups[1].Value.Trim()
@@ -310,13 +311,14 @@ Describe 'auto-mode boundary contract' {
             if ($href -match '^https?://' -or $href -match '^#') { continue }
             # Strip query/anchor from local paths
             $localPath = ($href -split '[?#]')[0]
-            # Root-anchored paths start with /
+            # Root-anchored paths start with /; all other relative paths resolve against the recipe file's dir
             if ($localPath.StartsWith('/')) {
-                $localPath = $localPath.TrimStart('/')
+                $fullPath = Join-Path $script:RepoRoot $localPath.TrimStart('/')
+            } else {
+                $fullPath = Join-Path $recipeFileDir $localPath
             }
-            $fullPath = Join-Path $script:RepoRoot $localPath
             $fullPath | Should -Exist `
-                -Because "recipe link target '$href' must reference an existing repo path"
+                -Because "recipe link target '$href' must reference an existing path (resolved relative to recipe file dir)"
         }
     }
 

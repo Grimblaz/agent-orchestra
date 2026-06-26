@@ -199,7 +199,7 @@ Note: the user-session default (`/model` setting) never propagates to subagents 
 
 **Standard prosecution role→tier map**: the `standard` adversarial-review adapter dispatches a five-pass two-layer panel. The `agents/code-critic.md` shell declares `model: opus`, but the parent dispatcher overrides this at Agent-tool call time using the role→tier map defined in `skills/adversarial-review/platforms/claude.md`: generalist-A uses `model: sonnet`; generalist-B and all three specialist passes use `model: opus`. The shell frontmatter governs only when no per-dispatch model override is set. Fallback order when a tier is unavailable: fable → opus → sonnet → haiku.
 
-**Override-discipline rule**: every `agents/*.md` shell must declare both `model:` and `effort:`, or neither (both-or-neither). A shell with only one field is a test failure. The Pester test at `.github/scripts/Tests/per-agent-model-routing.Tests.ps1` enforces this, the enum membership set, the inherit-comment requirement, the D5 oracle, and routing-table parity.
+**Override-discipline rule**: every `agents/*.md` shell must declare both `model:` and `effort:`, or neither (both-or-neither). A shell with only one field is a test failure. The Pester test at `.github/scripts/Tests/per-agent-model-routing.Tests.ps1` enforces this, the enum membership set, the inherit-comment requirement, and the D5 oracle. Shell frontmatter is the authoritative source for model/effort values; the table above is a documentation-tier mirror verified only by an existence-only check (this file exists and contains the section heading).
 
 **How to override the declared routing**:
 
