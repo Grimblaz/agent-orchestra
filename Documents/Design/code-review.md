@@ -267,6 +267,8 @@ GitHub comments arrive → Code-Conductor routes →
         → Score summary → Code-Conductor routes fixes + posts responses to GitHub
 ```
 
+**Ingestion boundary (Ledger-vs-Validation Boundary)**: The "Code-Conductor routes" step before proxy prosecution is strictly mechanical — the conductor records each ingested GitHub finding verbatim and maps it to its comment/review ID. The conductor MUST NOT pre-assess the technical merit of an ingested finding before proxy prosecution runs; per-finding validation is Code-Critic's responsibility (proxy prosecution step). The sole pre-prosecution conductor-side correctness judgment permitted is a `NEW-CRITICAL` blocker discovered *during* ingestion — governed by `### Safety Exception` in `skills/code-review-intake/SKILL.md`. This boundary is normative in `skills/code-review-intake/SKILL.md § ### Ledger-vs-Validation Boundary`.
+
 ---
 
 ### Defense Mode Specification
