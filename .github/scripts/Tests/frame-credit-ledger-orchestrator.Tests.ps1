@@ -727,29 +727,34 @@ integrity_checks:
                     $global:LASTEXITCODE = 0; return '{"baseRefOid":"abc123"}'
                 }
 
-                if ($joined -match "pr view \d+ --json 'body,comments'") {
-                    if ($capturedThrowOnBodyFetch) {
-                        throw 'simulated body-fetch failure'
-                    }
-                    $global:LASTEXITCODE = 0
-                    # Parse the PrBodyJson to get the body string, then wrap with empty comments.
-                    try {
-                        $parsedBody = $resolvedPrBodyJson | ConvertFrom-Json
-                        if ($null -ne $parsedBody -and $null -ne $parsedBody.body) {
-                            # Already has body+comments shape.
-                            return $resolvedPrBodyJson
-                        }
-                    }
-                    catch { }
-                    # Treat as raw body string or simple {body:...} JSON.
-                    return (@{ body = ($resolvedPrBodyJson | ConvertFrom-Json -ErrorAction SilentlyContinue)?.body ?? $resolvedPrBodyJson; comments = @() } | ConvertTo-Json -Compress -Depth 8)
-                }
+                if ($joined -match 'pr view \d+ ') {
+                    $jsonIdx = [Array]::IndexOf($Args, '--json')
+                    $jsonFields = if ($jsonIdx -ge 0 -and $jsonIdx + 1 -lt $Args.Count) { [string]$Args[$jsonIdx + 1] } else { '' }
 
-                if ($joined -match 'pr view \d+ --json body') {
-                    if ($capturedThrowOnBodyFetch) {
-                        throw 'simulated body-fetch failure'
+                    if ($jsonFields -eq 'body,comments') {
+                        if ($capturedThrowOnBodyFetch) {
+                            throw 'simulated body-fetch failure'
+                        }
+                        $global:LASTEXITCODE = 0
+                        # Parse the PrBodyJson to get the body string, then wrap with empty comments.
+                        try {
+                            $parsedBody = $resolvedPrBodyJson | ConvertFrom-Json
+                            if ($null -ne $parsedBody -and $null -ne $parsedBody.body) {
+                                # Already has body+comments shape.
+                                return $resolvedPrBodyJson
+                            }
+                        }
+                        catch { }
+                        # Treat as raw body string or simple {body:...} JSON.
+                        return (@{ body = ($resolvedPrBodyJson | ConvertFrom-Json -ErrorAction SilentlyContinue)?.body ?? $resolvedPrBodyJson; comments = @() } | ConvertTo-Json -Compress -Depth 8)
                     }
-                    $global:LASTEXITCODE = 0; return $resolvedPrBodyJson
+
+                    if ($jsonFields -eq 'body') {
+                        if ($capturedThrowOnBodyFetch) {
+                            throw 'simulated body-fetch failure'
+                        }
+                        $global:LASTEXITCODE = 0; return $resolvedPrBodyJson
+                    }
                 }
 
                 if ($joined -match 'issue view \d+ --json comments') {

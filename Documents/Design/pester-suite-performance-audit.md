@@ -24,7 +24,7 @@ The core finding: the suite's cost is concentrated in `Start-Process -FilePath '
 
 | File | Measured Wall-Clock | Top It-Block Consumers | Verdict |
 |---|---|---|---|
-| `frame-credit-ledger-orchestrator.Tests.ps1` | **289s** (42 tests) | 29 spawn-based Its at ~12–13s each; 7 in-process Its at ~0.35–2s; 6 dot-source Its at <300ms | **CONVERTIBLE** (29 spawn Its) + irreducible (4 exit-code-contract Its listed below) |
+| `frame-credit-ledger-orchestrator.Tests.ps1` | **289s** (42 tests) | 29 spawn-based Its at ~12–13s each; 7 in-process Its at ~0.35–2s; 6 dot-source Its at <300ms | **CONVERTIBLE** (23 spawn Its) + irreducible (6 exit-code-contract Its listed below) |
 | `cost-integration.Tests.ps1` | **111s** (19 tests) | 10 spawn-based Its at ~12–27s; 5 in-process Its at ~0.4–1s; 4 unit Its at <100ms | **CONVERTIBLE** (10 spawn Its) |
 | `frame-credit-ledger-fail-open.Tests.ps1` | **78s** (9 tests) | 9 spawn-based Its at ~1–14s (all exit-code-contract or warn-mode invariant tests) | **IRREDUCIBLE** (all 9 test warn-mode fail-open via exit-code invariants) |
 
@@ -125,7 +125,7 @@ All `.github/scripts/Tests/*.Tests.ps1` files containing any spawn form (`Start-
 | `bootstrap-antigravity.Tests.ps1` | `Start-Process -FilePath 'pwsh'` | 78, 107, 206, 220 | IRREDUCIBLE | All 4 Its assert exit code (0 or 1). Tests path-traversal and zero-subagents error conditions. Exit-code-contract. |
 | `cost-integration.Tests.ps1` | `Start-Process -FilePath 'pwsh'` | 93 (in `$script:InvokeOrchestrator`) | CONVERTIBLE | 10 spawn-dependent Its assert content (not exit code exclusively). In-process pattern already demonstrated by `InvokeOrchestratorInProcessWithWalkerCapture`. |
 | `frame-credit-ledger-fail-open.Tests.ps1` | `Start-Process -FilePath 'pwsh'` | 128 (in `$script:InvokeOrchestrator`) | IRREDUCIBLE | 9 Its: all test warn-mode exit-code invariants (exit 0 under adversarial conditions). Must run in isolated child process to assert real exit code. |
-| `frame-credit-ledger-orchestrator.Tests.ps1` | `Start-Process -FilePath 'pwsh'` | 211 (in `$script:InvokeOrchestrator`) | CONVERTIBLE (25 Its) + IRREDUCIBLE (4 Its) | 29 spawn-based Its total. 25 are content tests convertible to in-process pattern. 4 are exit-code-contract tests (ValidateSet non-zero, gh-hang budget, enforce exit 3, enforce exit 4, enforce exit 5 — see note). |
+| `frame-credit-ledger-orchestrator.Tests.ps1` | `Start-Process -FilePath 'pwsh'` | 211 (in `$script:InvokeOrchestrator`) | CONVERTIBLE (23 Its) + IRREDUCIBLE (6 Its) | 29 spawn-based Its total. 23 are content tests convertible to in-process pattern. 6 are exit-code-contract tests (ValidateSet non-zero, gh-hang budget x2, enforce exit 3, enforce exit 4, enforce exit 5 — see note). |
 | `hub-artifact-paths-coverage.Tests.ps1` | `& pwsh -NoProfile -NonInteractive -File` | 39, 70, 241 | IRREDUCIBLE | CLI-surface tests (`-Diff`, `-Render` modes). Already in allowlist. |
 | `orchestra-spine-command.Tests.ps1` | `Start-Process -FilePath 'pwsh'` | 254 (in invoker helper) | IRREDUCIBLE | All Its assert exit code (0 or non-zero) on CLI command surface. Exit-code-contract. |
 | `plan-tree-state-verification-fail-open.Tests.ps1` | `Start-Process -FilePath 'pwsh'` | 64 (in `$script:InvokeOrchestrator`) | IRREDUCIBLE | All Its assert ExitCode == 0. Exit-code + timing contracts on CLI surface. |
@@ -133,7 +133,7 @@ All `.github/scripts/Tests/*.Tests.ps1` files containing any spawn form (`Start-
 | `script-safety-contract.Tests.ps1` | `& pwsh` (in scan pattern string only) | 91 | N/A — false-positive | Contains literal `'& pwsh'` as a regex pattern string inside the scan test itself; self-excluded from allowlist. No real spawn. |
 | `session-cleanup-detector.Tests.ps1` | `& pwsh -NoProfile -NonInteractive -File` | 60, 1626 | IRREDUCIBLE | Line 60: wrapper smoke test (exit-code + env-var resolution). Line 1626: inline pwsh command for env-var override test. Already in allowlist. |
 
-**Note on orchestrator IRREDUCIBLE count**: The 4 irreducible spawn-based Its are: (1) `rejects an invalid -Mode value via ValidateSet (non-zero exit)` — must observe real ValidateSet parameter-binding failure exit code; (2) `completes within the budget when gh hangs` + `does not block PR creation when the timeout fires` — timing-contract tests that verify the 3s budget via WaitForExit; (3) `AC8: timeout in enforce mode exits 4`; (4) `AC9: internal exception in enforce mode exits 5`. (5) `enforce mode exits 3` is a content+exit-code test but since s2 targets only the largest block of ~25 purely content tests, it is grouped here for clarity. The plan's s2 RC says "fix 2 #512 tests" — those are the two Issue #512 incomplete-cycle Its at the bottom of the file, which are currently RED.
+**Note on orchestrator IRREDUCIBLE count**: The 6 irreducible spawn-based Its are: (1) `rejects an invalid -Mode value via ValidateSet (non-zero exit)` — must observe real ValidateSet parameter-binding failure exit code; (2) `completes within the budget when gh hangs` + `does not block PR creation when the timeout fires` — timing-contract tests that verify the 3s budget via WaitForExit; (3) `enforce mode exits 3 when NotCovered` — exit-code-contract (exit 3), IRREDUCIBLE per the per-It table above; (4) `AC8: timeout in enforce mode exits 4`; (5) `AC9: internal exception in enforce mode exits 5`. The plan's s2 RC says "fix 2 #512 tests" — those are the two Issue #512 incomplete-cycle Its at the bottom of the file, which are currently RED.
 
 ---
 
@@ -143,17 +143,19 @@ The minimum suite time if all convertible tests convert:
 
 | Category | Count | Time/Test | Subtotal |
 |---|---|---|---|
-| frame-credit-ledger-orchestrator IRREDUCIBLE | 4 spawn Its | ~5s avg (mix of 0.43s, 3.8s, 3.8s, 0.86s) | ~14s |
+| frame-credit-ledger-orchestrator IRREDUCIBLE | 6 spawn Its | ~4.3s avg (mix of 0.43s, 3.83s, 3.83s, 12.89s, 3.81s, 0.86s) | ~26s |
 | frame-credit-ledger-orchestrator in-process | 7 + 6 | ~0.5s avg | ~7s |
 | frame-credit-ledger-fail-open IRREDUCIBLE | 9 spawn Its | ~10s avg | ~90s |
 | cost-integration in-process (post-conversion) | 19 | ~0.5s avg | ~10s |
 | Other suite files (non-spawning) | ~155 files | variable, assume 0.5s avg | ~78s |
 
-**Estimated irreducible floor: ~90s** (dominated by `frame-credit-ledger-fail-open.Tests.ps1`'s 9 exit-code-contract tests which spawn full orchestrator invocations averaging ~10s each).
+**Estimated irreducible floor (dominant spawn category: frame-credit-ledger-fail-open): ~90s** (dominated by `frame-credit-ledger-fail-open.Tests.ps1`'s 9 exit-code-contract tests which spawn full orchestrator invocations averaging ~10s each).
+
+**Full-suite irreducible total (all categories combined): ~211s** (sum of all rows in the table above: ~26s orchestrator irreducible + ~7s orchestrator in-process + ~90s fail-open + ~10s cost-integration in-process + ~78s other suite files).
 
 **Target achievability:**
 
-- ≤120s binding target: achievable with full conversion of the 35 convertible spawn-based Its (~25 in orchestrator + 10 in cost-integration). Converting these removes ~450s from the suite.
+- ≤120s binding target: achievable with full conversion of the 33 convertible spawn-based Its (~23 in orchestrator + 10 in cost-integration). Converting these removes ~450s from the suite.
 - <60s stretch goal: NOT achievable as-is. The 9 IRREDUCIBLE Its in `frame-credit-ledger-fail-open.Tests.ps1` alone contribute ~78s. Achieving <60s would require a separate approach (parallel shard execution) rather than in-process conversion alone.
 
 **Recommendation for the floor**: The `run-pester-sharded.ps1` runner (s4) should isolate `frame-credit-ledger-fail-open.Tests.ps1` as a dedicated slow shard, allowing CI to report it separately or parallelize it with the main suite.
@@ -163,7 +165,7 @@ The minimum suite time if all convertible tests convert:
 - Baseline (pre-s2): ~508s
 - Post-s2 (orchestrator conversion): ~246.5s (via sharded runner)
 - Post-s4 (sharded runner): 246.5s (runner baseline)
-- Post-s5 (cost-integration conversion): **216.2s** (sharded runner)
+- Post-s5 (cost-integration conversion): **216.2s** (sharded runner, pre-CE-Gate intermediate run; final: 237.7s at CE Gate — see §CE Gate Results)
 
 ---
 

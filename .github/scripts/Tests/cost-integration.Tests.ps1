@@ -186,6 +186,7 @@ some_legacy_field: value
 
         $previousInline = $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
         $previousNoSleep = $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP
+        try {
         $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = '1'
         $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'
 
@@ -276,17 +277,16 @@ some_legacy_field: value
             return $capturedCostYaml
         }
 
-        try {
-            $script:FrameCreditLedgerRepoRoot = $capturedRepoRoot
-            $result = Invoke-FrameCreditLedger -Pr 467 -Mode 'warn'
-            # Apply the same exit-code translation the top-level script applies in warn mode:
-            # warn mode never sets exitCode > 0 for IsInternalError or HasBlock — it stays 0.
-            # Only enforce mode escalates to exit 3 (HasBlock) or exit 5 (IsInternalError).
-            $processExitCode = 0
-            return @{
-                ExitCode = $processExitCode
-                Comment  = if ($null -ne $result.Comment) { [string]$result.Comment } else { '' }
-            }
+        $script:FrameCreditLedgerRepoRoot = $capturedRepoRoot
+        $result = Invoke-FrameCreditLedger -Pr 467 -Mode 'warn'
+        # Apply the same exit-code translation the top-level script applies in warn mode:
+        # warn mode never sets exitCode > 0 for IsInternalError or HasBlock — it stays 0.
+        # Only enforce mode escalates to exit 3 (HasBlock) or exit 5 (IsInternalError).
+        $processExitCode = 0
+        return @{
+            ExitCode = $processExitCode
+            Comment  = if ($null -ne $result.Comment) { [string]$result.Comment } else { '' }
+        }
         }
         finally {
             $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = $previousInline

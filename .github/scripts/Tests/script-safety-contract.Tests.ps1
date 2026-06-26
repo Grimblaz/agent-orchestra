@@ -103,7 +103,10 @@ Describe 'script safety contract' {
             # and Start-Process -FilePath 'pwsh' / 'powershell' (named or positional FilePath argument).
             # String literals that contain 'pwsh' (e.g. assertion strings) are not CommandAst nodes
             # and are not flagged — this prevents false positives on files like Resolve-PersistDecision.Tests.ps1.
-            $spawnTargets = [System.Collections.Generic.HashSet[string]]@('pwsh', 'powershell')
+            $spawnTargets = [System.Collections.Generic.HashSet[string]]::new(
+                [string[]]@('pwsh', 'powershell'),
+                [System.StringComparer]::OrdinalIgnoreCase
+            )
             $violations = Get-ChildItem -Path (Join-Path $script:ScriptsRoot 'Tests') -Filter '*.Tests.ps1' |
                 Where-Object { $_.Name -notin $allowlist } |
                 Where-Object {
@@ -216,6 +219,46 @@ Describe 'script safety contract' {
                     }
                 }
                 $fCaught | Should -Be $true -Because 'the AST guard must detect Start-Process -FilePath pwsh invocation'
+            } finally {
+                if (Test-Path $tempFile) { Remove-Item $tempFile -Force }
+            }
+        }
+
+        It 'spawn-guard falsifiability: positional Start-Process pwsh is detected by AST scan' {
+            $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) "spawn-guard-falsifiability-positional-$([System.Guid]::NewGuid().ToString('N')).ps1"
+            try {
+                Set-Content -Path $tempFile -Value "Start-Process 'pwsh' -ArgumentList '-NonInteractive', '-Command', 'exit 0' -NoNewWindow -Wait" -Encoding utf8
+                $pAst = [System.Management.Automation.Language.Parser]::ParseFile(
+                    $tempFile,
+                    [ref]$null,
+                    [ref]$null
+                )
+                $pCmds = $pAst.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.CommandAst]
+                }, $true)
+                $pTargets = [System.Collections.Generic.HashSet[string]]::new(
+                    [string[]]@('pwsh', 'powershell'),
+                    [System.StringComparer]::OrdinalIgnoreCase
+                )
+                $pCaught = $false
+                foreach ($cmd in $pCmds) {
+                    if ($cmd.GetCommandName() -eq 'Start-Process') {
+                        $pElems = $cmd.CommandElements
+                        for ($pi = 1; $pi -lt $pElems.Count; $pi++) {
+                            $pEl = $pElems[$pi]
+                            # Positional first argument: Start-Process 'pwsh'
+                            if ($pi -eq 1 -and
+                                $pEl -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+                                $pTargets.Contains($pEl.Value)) {
+                                $pCaught = $true
+                                break
+                            }
+                        }
+                        if ($pCaught) { break }
+                    }
+                }
+                $pCaught | Should -Be $true -Because 'the AST guard must detect positional Start-Process pwsh invocation'
             } finally {
                 if (Test-Path $tempFile) { Remove-Item $tempFile -Force }
             }
