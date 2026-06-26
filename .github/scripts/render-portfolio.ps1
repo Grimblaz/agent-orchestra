@@ -211,15 +211,34 @@ function Get-PortfolioBuckets {
     $openUnblocked      = [System.Collections.Generic.List[object]]::new()
     $triage             = [System.Collections.Generic.List[object]]::new()
 
+    # When ClosedLeafItems is provided (repo-wide closed scan), source RecentlyClosed
+    # from it directly — filtering out umbrella numbers (AC9 requires leaf closures only).
+    # This replaces the per-issueStateObjects CLOSED detection for RecentlyClosed.
+    if ($null -ne $ClosedLeafItems) {
+        foreach ($leaf in $ClosedLeafItems) {
+            if ($allIssueNumbers -contains [int]$leaf.number) { continue }
+            if ($leaf.closedAt) {
+                [datetime]$leafClosedDate = [datetime]::MinValue
+                if ([datetime]::TryParse($leaf.closedAt, [ref]$leafClosedDate)) {
+                    if ($leafClosedDate -ge $cutoff) {
+                        $closedWithinWindow.Add($leaf)
+                    }
+                }
+            }
+        }
+    }
+
     # Build per-child round affiliation from KnownChildSet.
     # Support two formats:
     #   1. Array of int/string → child number only; round affiliation unknown → "spine-next"
     #   2. Array of PSCustomObject with .number and .UmbrellaNumber/.RoundIndex → use parent info
     $childRoundIndex = @{}   # child number → round index (0 = active, 1+ = non-active)
+    $childToUmbrella = @{}   # child number → parent umbrella number (rich-object path only)
     if ($null -ne $KnownChildSet) {
         foreach ($item in $KnownChildSet) {
             $childNum = $null
             $roundIdx = -1   # -1 = unknown
+            $umbNum   = $null
 
             if ($item -is [int] -or $item -is [long]) {
                 $childNum = [int]$item
@@ -241,6 +260,9 @@ function Get-PortfolioBuckets {
                         $roundIdx = $umbrellaToRoundIdx[$umbNum]
                     }
                 }
+                if ($null -ne $props['UmbrellaNumber']) {
+                    $umbNum = [int]$item.UmbrellaNumber
+                }
             }
 
             if ($null -ne $childNum) {
@@ -248,13 +270,19 @@ function Get-PortfolioBuckets {
                 # This handles flat int array passing convention from tests.
                 if ($roundIdx -lt 0) { $roundIdx = 1 }
                 $childRoundIndex[[int]$childNum] = $roundIdx
+                if ($null -ne $umbNum) {
+                    $childToUmbrella[[int]$childNum] = [int]$umbNum
+                }
             }
         }
     }
 
     foreach ($issue in $issueStateObjects) {
         if ($issue.state -eq 'CLOSED') {
-            if ($issue.closedAt) {
+            # Only add to RecentlyClosed from issueStateObjects when ClosedLeafItems is not
+            # provided (legacy path). When ClosedLeafItems is provided, RecentlyClosed is
+            # sourced from the repo-wide scan above (excluding umbrella closures per AC9).
+            if ($null -eq $ClosedLeafItems -and $issue.closedAt) {
                 [datetime]$closedDate = [datetime]::MinValue
                 if ([datetime]::TryParse($issue.closedAt, [ref]$closedDate)) {
                     if ($closedDate -ge $cutoff) {
@@ -421,15 +449,29 @@ function Get-PortfolioBuckets {
         }
 
         foreach ($umbrellaNum in $activeUmbrellaSet) {
-            # CoverageGap rule: with flat-array KnownChildSet (no parent info), we check
-            # whether any KnownChildSet members are classified as active-round spine children.
-            # If none exist, all active-round umbrellas get a CoverageGap entry.
             $umbrellaHasChildren = $false
-            foreach ($childNum in $knownChildNumbers) {
-                $cRoundIdx = if ($childRoundIndex.ContainsKey([int]$childNum)) { $childRoundIndex[[int]$childNum] } else { -1 }
-                if ($cRoundIdx -le $nowRoundIdx -and $cRoundIdx -ge 0) {
-                    $umbrellaHasChildren = $true
-                    break
+            if ($childToUmbrella.Count -gt 0) {
+                # Rich-object path: check if any child is attributed to THIS specific umbrella
+                # and is active-round eligible. This is per-umbrella accurate.
+                foreach ($childNum in $childToUmbrella.Keys) {
+                    if ($childToUmbrella[$childNum] -eq [int]$umbrellaNum) {
+                        $cRoundIdx = if ($childRoundIndex.ContainsKey([int]$childNum)) { $childRoundIndex[[int]$childNum] } else { -1 }
+                        if ($cRoundIdx -le $nowRoundIdx -and $cRoundIdx -ge 0) {
+                            $umbrellaHasChildren = $true
+                            break
+                        }
+                    }
+                }
+            }
+            else {
+                # Flat-int fallback: no per-umbrella association available; check if any
+                # KnownChildSet member is active-round eligible (conservative approximation).
+                foreach ($childNum in $knownChildNumbers) {
+                    $cRoundIdx = if ($childRoundIndex.ContainsKey([int]$childNum)) { $childRoundIndex[[int]$childNum] } else { -1 }
+                    if ($cRoundIdx -le $nowRoundIdx -and $cRoundIdx -ge 0) {
+                        $umbrellaHasChildren = $true
+                        break
+                    }
                 }
             }
 
@@ -719,7 +761,7 @@ function Invoke-PortfolioRender {
     # uses -ErrorAction Stop so the terminating error propagates cleanly through
     # Pester's try/catch without polluting the non-terminating error stream.
     $openLeavesRaw = gh issue list --repo Grimblaz/agent-orchestra --state open `
-        --json number,title,labels,createdAt --limit 200 2>&1
+        --json number,title,labels,createdAt --limit 200
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to fetch open issue list (exit $LASTEXITCODE)" -ErrorAction Stop
     }
@@ -738,7 +780,7 @@ function Invoke-PortfolioRender {
     # Fail-loud: same hard-exit pattern as the open scan.
     $cutoffDate    = (Get-Date).AddDays(-$spec.recently_closed_days).ToString('yyyy-MM-dd')
     $closedRawJson = gh issue list --repo Grimblaz/agent-orchestra --state closed `
-        --search "closed:>=$cutoffDate" --json number,title,closedAt,labels --limit 200 2>&1
+        --search "closed:>=$cutoffDate" --json number,title,closedAt,labels --limit 200
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to fetch closed issue list (exit $LASTEXITCODE)" -ErrorAction Stop
     }
@@ -761,7 +803,7 @@ function Invoke-PortfolioRender {
     #     warns and degrades (Triage may be incomplete) rather than aborting the
     #     whole render, consistent with the per-issue skip pattern below.
     $triageNums = @()
-    $triageRaw  = gh issue list --repo Grimblaz/agent-orchestra --label triage --state open --limit 200 --json number 2>&1
+    $triageRaw  = gh issue list --repo Grimblaz/agent-orchestra --label triage --state open --limit 200 --json number
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to list open triage-labeled issues (exit $LASTEXITCODE) — Triage bucket may be incomplete."
     }
@@ -783,7 +825,23 @@ function Invoke-PortfolioRender {
     $issueStates    = [System.Collections.Generic.List[object]]::new()
     $unresolvedNums = @()
 
+    # Build round-index map for umbrella numbers: used to tag KnownChildSet entries
+    # with the correct RoundIndex so Get-PortfolioBuckets can route children correctly.
+    $sortedRoundsForSpec = @($spec.rounds | Sort-Object round)
+    $umbrellaRoundIdxMap = @{}
+    for ($ri = 0; $ri -lt $sortedRoundsForSpec.Count; $ri++) {
+        foreach ($rnum in $sortedRoundsForSpec[$ri].issues) {
+            $umbrellaRoundIdxMap[[int]$rnum] = $ri
+        }
+    }
+
+    # KnownChildSet: rich PSCustomObjects { number, UmbrellaNumber, RoundIndex } built
+    # from per-umbrella subIssues GraphQL responses. Passed to Get-PortfolioBuckets so
+    # float detection (AC4) and CoverageGaps (AC7) work correctly in the live pipeline.
+    $knownChildSet = [System.Collections.Generic.List[object]]::new()
+
     foreach ($num in $queryNums) {
+        $isUmbrella = $allIssueNums -contains $num
         $query = @"
 query {
   repository(owner: "Grimblaz", name: "agent-orchestra") {
@@ -792,16 +850,22 @@ query {
       title
       state
       closedAt
+      createdAt
       labels(first: 50) { totalCount nodes { name } }
       blockedBy(first: 50) {
         totalCount
         nodes { number title state }
-      }
+      }$(if ($isUmbrella) {
+"
+      subIssues(first: 50) {
+        nodes { number }
+      }"
+      })
     }
   }
 }
 "@
-        $rawJson = gh api graphql -f query=$query 2>&1
+        $rawJson = gh api graphql -f query=$query
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "GraphQL query failed for issue #$num (exit $LASTEXITCODE) — skipping."
             $unresolvedNums += $num
@@ -816,16 +880,18 @@ query {
             $unresolvedNums += $num
             continue
         }
-        if ($response.errors) {
-            Write-Warning "GraphQL errors for issue #$num — skipping."
-            $unresolvedNums += $num
-            continue
-        }
         $issueData = $response.data.repository.issue
 
         if ($null -eq $issueData) {
+            if ($response.errors) {
+                Write-Warning "GraphQL errors for issue #$num (issue may not exist) — skipping."
+            }
             $unresolvedNums += $num
             continue
+        }
+        # Partial-success: data present but with field-level errors (e.g. blockedBy requires Projects scope)
+        if ($response.errors) {
+            Write-Warning "GraphQL field errors for issue #$num (blockedBy may be incomplete) — continuing with available data."
         }
 
         $labels       = @($issueData.labels.nodes | ForEach-Object { $_.name })
@@ -850,6 +916,94 @@ query {
             title               = $issueData.title
             state               = $issueData.state
             closedAt            = $issueData.closedAt
+            createdAt           = $issueData.createdAt
+            labels              = $labels
+            blockedBy           = $openBlockers
+            blockerInPlan       = $blockerInPlan
+            blockedByTotalCount = $issueData.blockedBy.totalCount
+        })
+
+        # Collect sub-issue children for this umbrella into KnownChildSet (AC4/AC7).
+        if ($isUmbrella -and $null -ne $issueData.subIssues) {
+            $umbRoundIdx = if ($umbrellaRoundIdxMap.ContainsKey([int]$num)) { $umbrellaRoundIdxMap[[int]$num] } else { 0 }
+            foreach ($child in $issueData.subIssues.nodes) {
+                if ($child.number -gt 0) {
+                    $knownChildSet.Add([PSCustomObject]@{
+                        number        = [int]$child.number
+                        UmbrellaNumber = [int]$num
+                        RoundIndex     = $umbRoundIdx
+                    })
+                }
+            }
+        }
+    }
+
+    # 3b. Float candidate pass (AC4): now that KnownChildSet is built, identify open issues
+    # from the bulk scan that are NOT umbrellas and NOT in KnownChildSet — these are floats.
+    # Query each float for full data (blockedBy, labels, state) so AC6 blocked-float routing
+    # and AC2 in-progress tagging work correctly in the live pipeline.
+    # Fail-loud: a float-query failure warns and skips (same as per-issue skip pattern), since
+    # float-scan failure was already guarded in step 2b — if we get here, the scan succeeded.
+    $knownChildNums = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($child in $knownChildSet) { $null = $knownChildNums.Add([int]$child.number) }
+    $alreadyQueried = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($q in $queryNums) { $null = $alreadyQueried.Add([int]$q) }
+
+    $floatCandidateNums = @(
+        $openLeaves |
+        Where-Object {
+            $n = [int]$_.number
+            (-not ($umbrellaNumbers -contains $n)) -and (-not $knownChildNums.Contains($n)) -and (-not $alreadyQueried.Contains($n))
+        } |
+        ForEach-Object { [int]$_.number }
+    )
+
+    foreach ($num in $floatCandidateNums) {
+        $query = @"
+query {
+  repository(owner: "Grimblaz", name: "agent-orchestra") {
+    issue(number: $num) {
+      number
+      title
+      state
+      closedAt
+      createdAt
+      labels(first: 50) { totalCount nodes { name } }
+      blockedBy(first: 50) {
+        totalCount
+        nodes { number title state }
+      }
+    }
+  }
+}
+"@
+        $rawJson = gh api graphql -f query=$query
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "GraphQL query failed for float #$num (exit $LASTEXITCODE) — skipping."
+            continue
+        }
+        $response = $null
+        try { $response = $rawJson | ConvertFrom-Json }
+        catch { Write-Warning "Failed to parse GraphQL response for float #$num — skipping."; continue }
+        $issueData = $response.data.repository.issue
+        if ($null -eq $issueData) { continue }
+        if ($response.errors) {
+            Write-Warning "GraphQL field errors for float #$num (blockedBy may be incomplete) — continuing."
+        }
+
+        $labels       = @($issueData.labels.nodes | ForEach-Object { $_.name })
+        $allBlockers  = $issueData.blockedBy.nodes
+        $openBlockers = @($allBlockers | Where-Object { $_.state -eq 'OPEN' } | ForEach-Object { $_.number })
+        $blockerInPlan = $true
+        foreach ($b in $openBlockers) {
+            if ($allIssueNums -notcontains $b) { $blockerInPlan = $false; break }
+        }
+        $issueStates.Add([PSCustomObject]@{
+            number              = $issueData.number
+            title               = $issueData.title
+            state               = $issueData.state
+            closedAt            = $issueData.closedAt
+            createdAt           = $issueData.createdAt
             labels              = $labels
             blockedBy           = $openBlockers
             blockerInPlan       = $blockerInPlan
@@ -858,27 +1012,25 @@ query {
     }
 
     # 4. Fetch current control tower body
-    $ctRawJson = gh issue view $tower --repo Grimblaz/agent-orchestra --json body 2>&1
+    $ctRawJson = gh issue view $tower --repo Grimblaz/agent-orchestra --json body
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to fetch control tower issue #$tower (exit $LASTEXITCODE)"
-        exit 1
+        Write-Error "Failed to fetch control tower issue #$tower (exit $LASTEXITCODE)" -ErrorAction Stop
     }
     $ctData = $null
     try {
         $ctData = $ctRawJson | ConvertFrom-Json
     }
     catch {
-        Write-Error "Failed to parse control tower issue body JSON: $_"
-        exit 1
+        Write-Error "Failed to parse control tower issue body JSON: $_" -ErrorAction Stop
     }
     $existingBody = $ctData.body
 
     # 5. Derive buckets — pass fetched data as parameters so Get-PortfolioBuckets
-    #    remains pure (no I/O). s3 will expand the pure derivation logic.
+    #    remains pure (no I/O).
     $buckets = Get-PortfolioBuckets `
         -spec $spec `
         -issueStateObjects $issueStates.ToArray() `
-        -KnownChildSet $null `
+        -KnownChildSet $knownChildSet.ToArray() `
         -OpenLeafCandidates $openLeaves `
         -ClosedLeafItems $closedLeaves
 
@@ -896,10 +1048,9 @@ query {
     }
 
     # 8. Write back to GitHub
-    gh issue edit $tower --repo Grimblaz/agent-orchestra --body $newBody 2>&1 | Out-Null
+    gh issue edit $tower --repo Grimblaz/agent-orchestra --body $newBody 2>$null | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Failed to update control tower issue #$tower (exit $LASTEXITCODE)"
-        exit 1
+        Write-Error "Failed to update control tower issue #$tower (exit $LASTEXITCODE)" -ErrorAction Stop
     }
     Write-Host "Rendered and wrote portfolio to issue #$tower"
 }

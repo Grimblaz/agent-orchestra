@@ -1056,4 +1056,122 @@ rounds:
             if (Test-Path $tempSpec) { Remove-Item $tempSpec -Force -ErrorAction SilentlyContinue }
         }
     }
+
+    It 'full pipeline: float appears in Now, repo-wide closed leaf in RecentlyClosed, and gh issue edit is called once (F1/F2/F3 wiring)' {
+        # Success-path integration test (F7 / review finding).
+        # Stubs all gh calls to return realistic data; exercises the full
+        # Invoke-PortfolioRender pipeline:
+        #   open-scan  → #800 float + umbrellas #425/#571
+        #   closed-scan → #801 recently-closed leaf (within window)
+        #   GraphQL #425 → OPEN, subIssues: [#900]
+        #   GraphQL #571 → OPEN, subIssues: []
+        #   view #704   → body with no portfolio block yet
+        #   edit #704   → captured to $script:GhEditBody
+        #
+        # Expected board state after fix:
+        #   Now:            #425 (spine), #571 (spine), #800 (unsequenced float)
+        #   CoverageGaps:   (#571: no leaves modeled yet)   — #425 has child #900
+        #   RecentlyClosed: #801 (from ClosedLeafItems, not issueStateObjects)
+
+        $script:GhEditCallCount = 0
+        $script:GhEditBody      = ''
+        $script:SuccessGhCalls  = @()
+
+        $closedAt801 = (Get-Date).AddDays(-5).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+            $script:SuccessGhCalls += ,@($ghArgs)
+
+            if ($ghArgs -contains 'edit') {
+                $script:GhEditCallCount++
+                $bodyIdx = [Array]::IndexOf([string[]]$ghArgs, '--body')
+                if ($bodyIdx -ge 0 -and ($bodyIdx + 1) -lt $ghArgs.Count) {
+                    $script:GhEditBody = $ghArgs[$bodyIdx + 1]
+                }
+                $global:LASTEXITCODE = 0
+                return
+            }
+
+            if ($ghArgs -contains 'list') {
+                if ($ghArgs -contains 'closed') {
+                    $global:LASTEXITCODE = 0
+                    return "[{`"number`":801,`"title`":`"Recently closed leaf`",`"closedAt`":`"$closedAt801`",`"labels`":[]}]"
+                }
+                if ($ghArgs -contains 'triage') {
+                    $global:LASTEXITCODE = 0
+                    return '[]'
+                }
+                # open scan: float #800 + umbrellas #425 and #571
+                $global:LASTEXITCODE = 0
+                return '[{"number":800,"title":"Float issue 800","labels":[],"createdAt":"2026-01-01T00:00:00Z"},{"number":425,"title":"Umbrella 425","labels":[],"createdAt":"2025-06-01T00:00:00Z"},{"number":571,"title":"Umbrella 571","labels":[],"createdAt":"2025-05-01T00:00:00Z"}]'
+            }
+
+            if ($ghArgs -contains 'api') {
+                # Dispatch by issue number in the query string (last element of args)
+                $queryStr = $ghArgs | Where-Object { $_ -like 'query=*' } | Select-Object -Last 1
+                $issueNum = 0
+                if ($queryStr -match 'issue\(number:\s*(\d+)') { $issueNum = [int]$Matches[1] }
+
+                if ($issueNum -eq 425) {
+                    $global:LASTEXITCODE = 0
+                    return '{"data":{"repository":{"issue":{"number":425,"title":"Umbrella 425","state":"OPEN","closedAt":null,"createdAt":"2025-06-01T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"subIssues":{"nodes":[{"number":900}]}}}}}'
+                }
+                if ($issueNum -eq 571) {
+                    $global:LASTEXITCODE = 0
+                    return '{"data":{"repository":{"issue":{"number":571,"title":"Umbrella 571","state":"OPEN","closedAt":null,"createdAt":"2025-05-01T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"subIssues":{"nodes":[]}}}}}'
+                }
+                if ($issueNum -eq 800) {
+                    # Float candidate — queried in step 3b, no subIssues field
+                    $global:LASTEXITCODE = 0
+                    return '{"data":{"repository":{"issue":{"number":800,"title":"Float issue 800","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]}}}}}'
+                }
+                $global:LASTEXITCODE = 0
+                return '{"data":{"repository":{"issue":null}}}'
+            }
+
+            if ($ghArgs -contains 'view') {
+                $global:LASTEXITCODE = 0
+                return '{"body":"# Control Tower\n\nNo portfolio block yet."}'
+            }
+
+            $global:LASTEXITCODE = 0
+        }
+
+        $tempSpec2 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        @'
+schema_version: 1
+control_tower: 704
+recently_closed_days: 14
+rounds:
+  - lane: main
+    round: 1
+    issues: [425, 571]
+'@ | Set-Content -Path $tempSpec2 -Encoding UTF8
+
+        try {
+            Invoke-PortfolioRender -specPath $tempSpec2
+
+            $script:GhEditCallCount | Should -Be 1 `
+                -Because 'pipeline should write the board once when body changes'
+
+            $script:GhEditBody | Should -Match '#800' `
+                -Because 'float issue #800 must appear in the rendered board (AC4/AC1 wiring verified)'
+
+            $script:GhEditBody | Should -Match '#801' `
+                -Because 'repo-wide closed leaf #801 must appear in RecentlyClosed (AC9 wiring verified)'
+
+            $script:GhEditBody | Should -Not -Match '#900' `
+                -Because '#900 is a known child but was never queried — should not appear in rendered output'
+
+            $script:GhEditBody | Should -Match 'unsequenced' `
+                -Because '#800 is a float and must be tagged (unsequenced) in Now'
+
+            $script:GhEditBody | Should -Match '571.*no leaves modeled yet' `
+                -Because '#571 has no sub-issues in KnownChildSet so CoverageGaps must emit a note for it (AC7)'
+        }
+        finally {
+            if (Test-Path $tempSpec2) { Remove-Item $tempSpec2 -Force -ErrorAction SilentlyContinue }
+        }
+    }
 }
