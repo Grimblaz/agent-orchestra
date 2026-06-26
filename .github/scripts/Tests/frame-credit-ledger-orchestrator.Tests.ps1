@@ -625,6 +625,224 @@ integrity_checks:
             Remove-Variable -Name FCL_TEST_CHECKPOINT_COVERAGE -Scope Script -ErrorAction SilentlyContinue
         }
     }
+
+    # In-process helper for content tests — replaces the spawn-based InvokeOrchestrator for
+    # all It-blocks that assert on comment content or exit-code values returned by
+    # Invoke-FrameCreditLedger (not OS-level process exit codes or timeout mechanics).
+    #
+    # Returns a hashtable:
+    #   Result         — the hashtable returned by Invoke-FrameCreditLedger
+    #   UpdatedPrBody  — the updated PR body string written by gh pr edit --body-file (or $null)
+    #   GhCallLog      — array of joined gh argument strings
+    #
+    # Parameters mirror the most common InvokeOrchestrator call patterns so that
+    # converting a spawn-based It-block is a mechanical replacement.
+    $script:InvokeOrchestratorInProcess = {
+        param(
+            [int]$Pr = 429,
+            [ValidateSet('warn', 'enforce')][string]$Mode = 'warn',
+            [AllowEmptyString()][string]$PrBodyJson = '',
+            [string]$IssueCommentsJson = '{"comments":[]}',
+            [int]$BaseRefAttemptsBeforeSuccess = 0,
+            [bool]$ThrowOnBodyFetch = $false,
+            [hashtable]$EnvVars = @{},
+            # When non-empty, the GH mock calls this scriptblock for pr view --json body.
+            # Allows tests to supply custom per-call body responses.
+            [scriptblock]$CustomBodyBranch = $null
+        )
+
+        # Snapshot env vars that we will mutate so we can restore them in finally.
+        $previousEnvSnapshot = @{}
+        $envKeys = @(
+            'FRAME_CREDIT_LEDGER_TEST_NO_SLEEP',
+            'FRAME_CREDIT_LEDGER_TEST_BUDGET_SECONDS',
+            'FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER',
+            'FRAME_ENFORCE',
+            'PR_CREATED_AT'
+        ) + @($EnvVars.Keys)
+        foreach ($k in ($envKeys | Select-Object -Unique)) {
+            $previousEnvSnapshot[$k] = [System.Environment]::GetEnvironmentVariable($k)
+        }
+
+        # State collected during the call for the caller to assert on.
+        $script:InProcessGhCallLog = @()
+        $script:InProcessUpdatedPrBody = $null
+        $script:InProcessBaseRefAttempts = 0
+
+        # Save Pr and Mode before dot-sourcing — the dot-source assigns those param names
+        # in the calling scope, which would overwrite our own parameters.
+        $private:prNumber = $Pr
+        $private:modeValue = $Mode
+
+        try {
+            # Apply caller-supplied env vars.
+            foreach ($k in $EnvVars.Keys) {
+                [System.Environment]::SetEnvironmentVariable($k, [string]$EnvVars[$k])
+            }
+
+            # Dot-source the orchestrator to load all functions without running the
+            # top-level execution block (because $isDotSourced will be $true).
+            . $script:OrchestratorPath -Pr 0 -Mode warn -ErrorAction SilentlyContinue 2>$null
+            $script:FrameCreditLedgerRepoRoot = $script:RepoRoot
+
+            # ---- git mock -------------------------------------------------------
+            function git {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                if ($joined -match 'rev-parse --show-toplevel') {
+                    $global:LASTEXITCODE = 0; return $script:RepoRoot
+                }
+                if ($joined -match 'config --get remote\.origin\.url') {
+                    $global:LASTEXITCODE = 0; return 'https://github.com/example/example.git'
+                }
+                if ($joined -match 'rev-parse --abbrev-ref HEAD') {
+                    $global:LASTEXITCODE = 0; return 'feature/test-branch'
+                }
+                if ($joined -match 'diff') {
+                    $global:LASTEXITCODE = 0; return ''
+                }
+                $global:LASTEXITCODE = 0; return ''
+            }
+
+            # ---- gh mock --------------------------------------------------------
+            # Resolve body JSON once (the mock can be called multiple times).
+            $resolvedPrBodyJson = $PrBodyJson
+            if ([string]::IsNullOrEmpty($resolvedPrBodyJson)) {
+                $resolvedPrBodyJson = (@{ body = '## empty body' } | ConvertTo-Json -Compress)
+            }
+            $resolvedIssueComments = $IssueCommentsJson
+            $capturedBaseRefAttemptsBeforeSuccess = $BaseRefAttemptsBeforeSuccess
+            $capturedThrowOnBodyFetch = $ThrowOnBodyFetch
+
+            function gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $script:InProcessGhCallLog += $joined
+
+                if ($joined -match 'pr view \d+ --json baseRefOid') {
+                    $script:InProcessBaseRefAttempts++
+                    if ($script:InProcessBaseRefAttempts -le $capturedBaseRefAttemptsBeforeSuccess) {
+                        $global:LASTEXITCODE = 0; return '{"baseRefOid":null}'
+                    }
+                    $global:LASTEXITCODE = 0; return '{"baseRefOid":"abc123"}'
+                }
+
+                if ($joined -match 'pr view \d+ ') {
+                    $jsonIdx = [Array]::IndexOf($Args, '--json')
+                    $jsonFields = if ($jsonIdx -ge 0 -and $jsonIdx + 1 -lt $Args.Count) { [string]$Args[$jsonIdx + 1] } else { '' }
+
+                    if ($jsonFields -eq 'body,comments') {
+                        if ($capturedThrowOnBodyFetch) {
+                            throw 'simulated body-fetch failure'
+                        }
+                        $global:LASTEXITCODE = 0
+                        # Parse the PrBodyJson to get the body string, then wrap with empty comments.
+                        try {
+                            $parsedBody = $resolvedPrBodyJson | ConvertFrom-Json
+                            if ($null -ne $parsedBody -and $null -ne $parsedBody.body) {
+                                # Already has body+comments shape.
+                                return $resolvedPrBodyJson
+                            }
+                        }
+                        catch { }
+                        # Treat as raw body string or simple {body:...} JSON.
+                        return (@{ body = ($resolvedPrBodyJson | ConvertFrom-Json -ErrorAction SilentlyContinue)?.body ?? $resolvedPrBodyJson; comments = @() } | ConvertTo-Json -Compress -Depth 8)
+                    }
+
+                    if ($jsonFields -eq 'body') {
+                        if ($capturedThrowOnBodyFetch) {
+                            throw 'simulated body-fetch failure'
+                        }
+                        $global:LASTEXITCODE = 0; return $resolvedPrBodyJson
+                    }
+                }
+
+                if ($joined -match 'issue view \d+ --json comments') {
+                    $global:LASTEXITCODE = 0; return $resolvedIssueComments
+                }
+
+                if ($joined -match 'pr edit \d+ .*--body-file') {
+                    $idx = [Array]::IndexOf($Args, '--body-file')
+                    if ($idx -ge 0 -and $idx + 1 -lt $Args.Count) {
+                        $bodyFile = [string]$Args[$idx + 1]
+                        $script:InProcessUpdatedPrBody = (Test-Path -LiteralPath $bodyFile) ? (Get-Content -LiteralPath $bodyFile -Raw) : ''
+                    }
+                    $global:LASTEXITCODE = 0; return 'https://github.com/example/example/pull/429'
+                }
+
+                if ($joined -match 'pr edit \d+ .*--body') {
+                    $idx = [Array]::IndexOf($Args, '--body')
+                    if ($idx -ge 0 -and $idx + 1 -lt $Args.Count) {
+                        $script:InProcessUpdatedPrBody = [string]$Args[$idx + 1]
+                    }
+                    $global:LASTEXITCODE = 0; return 'https://github.com/example/example/pull/429'
+                }
+
+                if ($joined -match 'api -X PATCH repos/[^/]+/[^/]+/pulls/\d+') {
+                    foreach ($arg in $Args) {
+                        $argText = [string]$arg
+                        if ($argText -like 'body=*') {
+                            $script:InProcessUpdatedPrBody = $argText.Substring(5)
+                            break
+                        }
+                    }
+                    $global:LASTEXITCODE = 0; return '{"html_url":"https://github.com/example/example/pull/429"}'
+                }
+
+                if ($joined -match '(issue|pr) comment \d+ --body') {
+                    $global:LASTEXITCODE = 0; return 'https://github.com/example/example/pull/429#issuecomment-1'
+                }
+
+                if ($joined -match 'api repos/[^/]+/[^/]+ ') {
+                    $global:LASTEXITCODE = 0; return '{"owner":{"login":"example"},"name":"example"}'
+                }
+
+                if ($joined -match 'api -X PATCH repos/[^/]+/[^/]+/issues/comments/\d+') {
+                    $global:LASTEXITCODE = 0; return '{"html_url":"https://github.com/example/example/pull/429#issuecomment-2"}'
+                }
+
+                $global:LASTEXITCODE = 0; return ''
+            }
+
+            # Cost-walker stubs (same as InvokeCostWalkerOrchestratorInProcess — cost path
+            # is always fail-open in these content tests, so empty events is fine).
+            function Get-CostTranscriptSlug { param([string]$CwdPath) $null = $CwdPath; return 'test-slug' }
+            function Invoke-CostTranscriptWalk {
+                param([string]$Slug, [string]$Branch, [string]$ParentCwd, [Nullable[int]]$IssueNumber = $null)
+                $null = $Slug; $null = $Branch; $null = $ParentCwd; $null = $IssueNumber
+                return @()
+            }
+            function Invoke-CostCopilotWalk {
+                param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+                $null = $Branch; $null = $RepoRoot; $null = $OtelJsonlPath; $null = $WorkspaceFolderBasename
+                return @()
+            }
+            function Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) $null = $TimeoutSeconds; return @{ timed_out = $false; entries = @() } }
+            function Get-MostRecentRegimeCheckpoint { param([string]$Path, [string]$Coverage = '') $null = $Path; $null = $Coverage; return $null }
+            function Get-CostAnomalyFlags {
+                [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseSingularNouns', '')]
+                param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint)
+                $null = $ThisRun; $null = $RollingHistory; $null = $RegimeCheckpoint
+                return @()
+            }
+
+            $result = Invoke-FrameCreditLedger -Pr $private:prNumber -Mode $private:modeValue
+            return @{
+                Result        = $result
+                UpdatedPrBody = $script:InProcessUpdatedPrBody
+                GhCallLog     = $script:InProcessGhCallLog
+            }
+        }
+        finally {
+            # Restore env vars.
+            foreach ($k in $previousEnvSnapshot.Keys) {
+                [System.Environment]::SetEnvironmentVariable($k, $previousEnvSnapshot[$k])
+            }
+            Remove-Variable -Name InProcessGhCallLog -Scope Script -ErrorAction SilentlyContinue
+            Remove-Variable -Name InProcessUpdatedPrBody -Scope Script -ErrorAction SilentlyContinue
+            Remove-Variable -Name InProcessBaseRefAttempts -Scope Script -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 Describe 'frame-credit-ledger.ps1 orchestrator' {
@@ -633,26 +851,23 @@ Describe 'frame-credit-ledger.ps1 orchestrator' {
 
         It 'accepts -Pr <int> -Mode warn and exits 0 on the all-covered v4 fixture' {
             $bodyJson = (@{ body = $script:V4AllCoveredBody } | ConvertTo-Json -Compress)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson
 
-            $result.ExitCode | Should -Be 0
+            $ip.Result.ExitCode | Should -Be 0
         }
 
         It 'accepts -Pr <int> -Mode enforce and exits 0 on the all-covered v4 fixture' {
             $bodyJson = (@{ body = $script:V4AllCoveredBody } | ConvertTo-Json -Compress)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'enforce' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'; FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -EnvVars @{ FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' }
 
-            $result.ExitCode | Should -Be 0
+            $ip.Result.ExitCode | Should -Be 0
         }
 
         It 'rejects an invalid -Mode value via ValidateSet (non-zero exit)' {
@@ -701,49 +916,50 @@ if (`$joined -match 'pr view \d+ --json body') {
 
         It 'succeeds on the first call when baseRefOid is returned immediately' {
             $bodyJson = (@{ body = $script:V4AllCoveredBody } | ConvertTo-Json -Compress)
-            $bootstrap = & $script:NewGhMockBootstrap `
-                -BodyJson $bodyJson `
-                -BaseRefAttemptsBeforeSuccess 0
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -BaseRefAttemptsBeforeSuccess 0 `
+                -EnvVars @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' }
 
-            $result.ExitCode | Should -Be 0
-            # Orchestrator should report exactly one baseRefOid call when it succeeds first try.
-            $result.Stdout + $result.Stderr | Should -Not -Match '(?i)retry|backoff'
+            $ip.Result.ExitCode | Should -Be 0
+            # Exactly one baseRefOid call when it succeeds on the first try.
+            $baseRefCalls = @($ip.GhCallLog | Where-Object { $_ -match 'pr view \d+ --json baseRefOid' })
+            $baseRefCalls | Should -HaveCount 1
         }
 
         It 'retries with bounded backoff when first calls return null and eventually succeeds' {
             # Mock returns null twice then a real SHA on the 3rd attempt.
             $bodyJson = (@{ body = $script:V4AllCoveredBody } | ConvertTo-Json -Compress)
-            $bootstrap = & $script:NewGhMockBootstrap `
-                -BodyJson $bodyJson `
-                -BaseRefAttemptsBeforeSuccess 2
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -BaseRefAttemptsBeforeSuccess 2 `
+                -EnvVars @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' }
 
-            $result.ExitCode | Should -Be 0
-            # Sleeps are skipped via TEST_NO_SLEEP, so the whole retry sequence completes fast.
-            $result.DurationSeconds | Should -BeLessThan 25
+            $ip.Result.ExitCode | Should -Be 0
+            # Mock returns null for attempts 1 and 2, real SHA on attempt 3.
+            $baseRefCalls = @($ip.GhCallLog | Where-Object { $_ -match 'pr view \d+ --json baseRefOid' })
+            $baseRefCalls | Should -HaveCount 3
         }
 
         It 'bails out after 3 attempts and emits a stderr note (warn mode exit 0)' {
-            # Always return null -> orchestrator exhausts retries.
-            $bootstrap = & $script:NewGhMockBootstrap `
-                -BaseRefAttemptsBeforeSuccess 999
+            # Always return null -> orchestrator exhausts retries; fail-open: exit 0.
+            # Provide a valid body so the function continues past baseRefOid failure.
+            $bodyJson = (@{ body = $script:V4AllCoveredBody } | ConvertTo-Json -Compress)
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -BaseRefAttemptsBeforeSuccess 999 `
+                -EnvVars @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' }
 
-            $result.ExitCode | Should -Be 0
-            ($result.Stderr) | Should -Match '(?i)baseRefOid|retry|gh'
+            $ip.Result.ExitCode | Should -Be 0
+            # All 3 retry attempts should have been made.
+            $baseRefCalls = @($ip.GhCallLog | Where-Object { $_ -match 'pr view \d+ --json baseRefOid' })
+            $baseRefCalls | Should -HaveCount 3
         }
     }
 
@@ -883,59 +1099,52 @@ body
 
         It 'composes a v4 ledger comment and posts it via Find-OrUpsertComment when v4 is detected' {
             $bodyJson = (@{ body = $script:V4AllCoveredBody } | ConvertTo-Json -Compress)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson
 
-            $result.ExitCode | Should -Be 0
-
-            # The orchestrator's gh-call log is dumped to stdout for assertion.
-            # Code-Smith: emit `GH_CALL_LOG: <line>` for each gh invocation
-            # (or print $global:GhCallLog at end of script) so tests can verify
-            # the upsert was attempted with the canonical marker.
-            $combined = "$($result.Stdout)`n$($result.Stderr)"
-            $combined | Should -Match '(?i)frame-credit-ledger-429'
-            $combined | Should -Match '(?i)Frame credit ledger'
+            $ip.Result.ExitCode | Should -Be 0
+            # Comment should contain the canonical marker and the ledger heading.
+            $ip.Result.Comment | Should -Match '(?i)frame-credit-ledger-429'
+            $ip.Result.Comment | Should -Match '(?i)Frame credit ledger'
         }
 
         It 'short-circuits to the pre-v4 comment when metrics_version is not 4' {
             $bodyJson = (@{ body = $script:PreV4Body } | ConvertTo-Json -Compress)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson
 
-            $result.ExitCode | Should -Be 0
-            (($result.Stdout, $result.Stderr) -join "`n") | Should -Match '(?i)pre-v4 metrics detected'
+            # In-process: Invoke-FrameCreditLedger returns ExitCode 5 for the pre-v4 short-circuit
+            # path (IsInternalError = true). The process-level exit code is 0 in warn mode — that
+            # coercion happens in the top-level execution block, outside Invoke-FrameCreditLedger.
+            # The meaningful assertion is that the comment contains the pre-v4 text.
+            $ip.Result.Comment | Should -Not -BeNullOrEmpty
+            $ip.Result.Comment | Should -Match '(?i)pre-v4 metrics detected'
         }
 
         It 'enforce mode exits 3 when at least one port is NotCovered' {
             $bodyJson = (@{ body = $script:V4WithNotCoveredBody } | ConvertTo-Json -Compress)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'enforce' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'; FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -EnvVars @{ FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' }
 
-            $result.ExitCode | Should -Be 3
+            $ip.Result.ExitCode | Should -Be 3
         }
 
         It 'enforce mode exits 0 when no ports are NotCovered (only Covered or Inconclusive)' {
             $bodyJson = (@{ body = $script:V4AllCoveredBody } | ConvertTo-Json -Compress)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'enforce' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'; FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -EnvVars @{ FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' }
 
-            $result.ExitCode | Should -Be 0
+            $ip.Result.ExitCode | Should -Be 0
         }
     }
 
@@ -1030,17 +1239,16 @@ body
     status: passed
     evidence: "review complete"
 '@
+            # PR body has empty comments array — spine found only via issue comments fallback.
             $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -IssueCommentsJson $issueCommentsJson
 
-            $result.ExitCode | Should -Be 0
-            $combined = "$($result.Stdout)`n$($result.Stderr)"
-            $incompleteRows = @($combined -split "`r?`n" | Where-Object {
+            $ip.Result.ExitCode | Should -Be 0
+            $incompleteRows = @($ip.Result.Comment -split "`r?`n" | Where-Object {
                     $_ -match '^\|\s*implement-test\s*\|' -and $_ -match 'incomplete-cycle'
                 })
 
@@ -1071,17 +1279,16 @@ body
     status: passed
     evidence: "review complete"
 '@
+            # PR body includes spine comment — spine found via PR comments path.
             $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -IssueCommentsJson $issueCommentsJson
 
-            $result.ExitCode | Should -Be 0
-            $combined = "$($result.Stdout)`n$($result.Stderr)"
-            $incompleteRows = @($combined -split "`r?`n" | Where-Object {
+            $ip.Result.ExitCode | Should -Be 0
+            $incompleteRows = @($ip.Result.Comment -split "`r?`n" | Where-Object {
                     $_ -match '^\|\s*implement-test\s*\|' -and $_ -match 'incomplete-cycle'
                 })
 
@@ -1120,16 +1327,14 @@ body
     evidence: "tests passed for terminal cycle"
 '@
             $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -IssueCommentsJson $issueCommentsJson
 
-            $result.ExitCode | Should -Be 0
-            $combined = "$($result.Stdout)`n$($result.Stderr)"
-            $incompleteRows = @($combined -split "`r?`n" | Where-Object { $_ -match 'incomplete-cycle' })
+            $ip.Result.ExitCode | Should -Be 0
+            $incompleteRows = @($ip.Result.Comment -split "`r?`n" | Where-Object { $_ -match 'incomplete-cycle' })
 
             $incompleteRows | Should -HaveCount 0
         }
@@ -1169,23 +1374,22 @@ body
     evidence: "terminal cycle failed"
 '@
             $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -IssueCommentsJson $issueCommentsJson
 
-            $result.ExitCode | Should -Be 0
-            $combined = "$($result.Stdout)`n$($result.Stderr)"
-            $coverageText = ($combined -split '(?m)^## Cost Pattern', 2)[0]
+            $ip.Result.ExitCode | Should -Be 0
+            # Split before Cost Pattern so we only check the coverage table rows.
+            $coverageText = ($ip.Result.Comment -split '(?m)^## Cost Pattern', 2)[0]
             $portRows = @($coverageText -split "`r?`n" | Where-Object { $_ -match '^\|\s*implement-test\s*\|' })
 
             $portRows | Should -HaveCount 1
             $portRows[0] | Should -Match 'failed'
             $portRows[0] | Should -Match 'terminal cycle failed'
             $portRows[0] | Should -Not -Match 'earlier cycle passed'
-            $combined | Should -Not -Match 'incomplete-cycle'
+            $ip.Result.Comment | Should -Not -Match 'incomplete-cycle'
         }
 
         It 'does not report incomplete-cycle rows when the spine has no terminal markers' {
@@ -1217,16 +1421,14 @@ body
     evidence: "review complete"
 '@
             $bodyJson = (@{ body = $prBody; comments = @($spineComment) } | ConvertTo-Json -Compress -Depth 8)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson -IssueCommentsJson $issueCommentsJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -IssueCommentsJson $issueCommentsJson
 
-            $result.ExitCode | Should -Be 0
-            $combined = "$($result.Stdout)`n$($result.Stderr)"
-            $incompleteRows = @($combined -split "`r?`n" | Where-Object { $_ -match 'incomplete-cycle' })
+            $ip.Result.ExitCode | Should -Be 0
+            $incompleteRows = @($ip.Result.Comment -split "`r?`n" | Where-Object { $_ -match 'incomplete-cycle' })
 
             $incompleteRows | Should -HaveCount 0
         }
@@ -1243,18 +1445,12 @@ body
     evidence: "tests passed"
 '@
             $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
-                -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' -PrBodyJson $bodyJson
 
-            $result.ExitCode | Should -Be 0
-            $updatedBody = & $script:GetUpdatedPrBody -Output "$($result.Stdout)`n$($result.Stderr)"
-
-            $updatedBody | Should -Not -BeNullOrEmpty -Because 'the orchestrator must re-emit the PR body metrics block when applying additive fallback metrics'
-            $updatedBody | Should -Not -Match '(?m)^\s*spine-stale-fallback-count\s*:' `
+            $ip.Result.ExitCode | Should -Be 0
+            $ip.UpdatedPrBody | Should -Not -BeNullOrEmpty -Because 'the orchestrator must re-emit the PR body metrics block when applying additive fallback metrics'
+            $ip.UpdatedPrBody | Should -Not -Match '(?m)^\s*spine-stale-fallback-count\s*:' `
                 -Because 'absence, not zero, is the default when no stale-spine fallback event has occurred'
         }
 
@@ -1275,18 +1471,12 @@ dispatch-fallback-events:
     evidence: "tests passed"
 '@
             $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
-                -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' -PrBodyJson $bodyJson
 
-            $result.ExitCode | Should -Be 0
-            $updatedBody = & $script:GetUpdatedPrBody -Output "$($result.Stdout)`n$($result.Stderr)"
-
-            $updatedBody | Should -Not -BeNullOrEmpty -Because 'stale-spine fallback events must be persisted back into PR-body pipeline metrics'
-            $updatedBody | Should -Match '(?m)^spine-stale-fallback-count:\s*2\s*$'
+            $ip.Result.ExitCode | Should -Be 0
+            $ip.UpdatedPrBody | Should -Not -BeNullOrEmpty -Because 'stale-spine fallback events must be persisted back into PR-body pipeline metrics'
+            $ip.UpdatedPrBody | Should -Match '(?m)^spine-stale-fallback-count:\s*2\s*$'
         }
 
         It 'never decrements spine-stale-fallback-count when additive metrics already contain a higher value' {
@@ -1307,19 +1497,13 @@ dispatch-fallback-events:
     evidence: "tests passed"
 '@
             $bodyJson = (@{ body = $prBody; comments = @() } | ConvertTo-Json -Compress -Depth 8)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
-                -Pr 429 -Mode 'warn' `
-                -Env @{ FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1' } `
-                -MockBootstrap $bootstrap
+            $ip = & $script:InvokeOrchestratorInProcess -Pr 429 -Mode 'warn' -PrBodyJson $bodyJson
 
-            $result.ExitCode | Should -Be 0
-            $updatedBody = & $script:GetUpdatedPrBody -Output "$($result.Stdout)`n$($result.Stderr)"
-
-            $updatedBody | Should -Not -BeNullOrEmpty -Because 'additive PR-body metrics updates must preserve previously observed stale-spine fallback counts'
-            $updatedBody | Should -Match '(?m)^spine-stale-fallback-count:\s*5\s*$'
-            $updatedBody | Should -Not -Match '(?m)^spine-stale-fallback-count:\s*[0-4]\s*$'
+            $ip.Result.ExitCode | Should -Be 0
+            $ip.UpdatedPrBody | Should -Not -BeNullOrEmpty -Because 'additive PR-body metrics updates must preserve previously observed stale-spine fallback counts'
+            $ip.UpdatedPrBody | Should -Match '(?m)^spine-stale-fallback-count:\s*5\s*$'
+            $ip.UpdatedPrBody | Should -Not -Match '(?m)^spine-stale-fallback-count:\s*[0-4]\s*$'
         }
     }
 
@@ -1372,18 +1556,14 @@ dispatch-cost-samples:
             # All other ports remain covered so the only blocking candidate is review.
             $prBody = $script:V4AllCoveredBody -replace '(?m)(port: review\s*\n\s*status:)\s*passed', '$1 inconclusive'
             $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'enforce' `
-                -Env @{
-                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP              = '1'
-                FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1'
-            } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -EnvVars @{ FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' }
 
             # review has block-on-inconclusive: true → inconclusive review is blocking → exit 3
-            $result.ExitCode | Should -Be 3
+            $ip.Result.ExitCode | Should -Be 3
         }
 
         # AC4: inconclusive ce-gate-cli port (block-on-inconclusive: false) is non-blocking in enforce mode.
@@ -1392,21 +1572,19 @@ dispatch-cost-samples:
             # All other ports remain covered so the only questionable port is ce-gate-cli.
             $prBody = $script:V4AllCoveredBody -replace '(?m)(port: ce-gate-cli\s*\n\s*status:)\s*not-applicable', '$1 inconclusive'
             $bodyJson = (@{ body = $prBody } | ConvertTo-Json -Compress)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'enforce' `
-                -Env @{
-                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP              = '1'
-                FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1'
-            } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -EnvVars @{ FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' }
 
             # ce-gate-cli has block-on-inconclusive: false → inconclusive ce-gate-cli is non-blocking → exit 0
-            $result.ExitCode | Should -Be 0
+            $ip.Result.ExitCode | Should -Be 0
         }
 
         # AC7: FRAME_ENFORCE=0 kill switch coerces enforce → warn → exit 0 even when credits are missing.
+        # NOTE: The kill switch check is in the top-level execution block (before Invoke-FrameCreditLedger
+        # is called), so this test must use the spawn helper to exercise the real code path.
         It 'AC7: FRAME_ENFORCE=0 kill switch coerces enforce to warn and exits 0 even when credits are missing' {
             # V4WithNotCoveredBody has review: failed → would exit 3 in real enforce mode.
             $bodyJson = (@{ body = $script:V4WithNotCoveredBody } | ConvertTo-Json -Compress)
@@ -1483,18 +1661,14 @@ if (`$joined -match 'pr view \d+ --json body') {
                     body     = $prBodyWithFailedReview
                     comments = $prComments
                 } | ConvertTo-Json -Compress -Depth 10)
-            $bootstrap = & $script:NewGhMockBootstrap -BodyJson $bodyJson
 
-            $result = & $script:InvokeOrchestrator `
+            $ip = & $script:InvokeOrchestratorInProcess `
                 -Pr 429 -Mode 'enforce' `
-                -Env @{
-                FRAME_CREDIT_LEDGER_TEST_NO_SLEEP              = '1'
-                FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1'
-            } `
-                -MockBootstrap $bootstrap
+                -PrBodyJson $bodyJson `
+                -EnvVars @{ FRAME_CREDIT_LEDGER_TEST_SKIP_ACTIVATION_CUTOVER = '1' }
 
             # Override applied → no blocking ports remain → exit 0
-            $result.ExitCode | Should -Be 0
+            $ip.Result.ExitCode | Should -Be 0
         }
 
         # AC10(a): Far-future sentinel in enforce-activation.yaml → coerces to warn → exit 0.

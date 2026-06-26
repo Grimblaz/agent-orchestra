@@ -75,26 +75,195 @@ Describe 'script safety contract' {
         }
 
         It 'script safety: test files must not spawn child pwsh processes (use dot-source + in-process call pattern)' {
+            # Scope: detects statically-resolvable spawn forms only.
+            # Variable/indirect invocation (e.g., $exe = 'pwsh'; & $exe) is out of scope —
+            # AST cannot resolve runtime values. See Documents/Design/pester-suite-performance-audit.md.
             $allowlist = @(
-                'audit-hub-artifact-paths.Tests.ps1',      # CLI integration tests: exercises script argument-parsing entry point; dot-source pattern cannot cover CLI flag paths
+                'audit-hub-artifact-paths.Tests.ps1',               # CLI integration tests: exercises script argument-parsing entry point; dot-source pattern cannot cover CLI flag paths
+                'bootstrap-antigravity.Tests.ps1',                  # IRREDUCIBLE: exit-code-contract tests require real subprocess to capture exit code
                 'branch-authority-gate.Tests.ps1',
-                'hub-artifact-paths-coverage.Tests.ps1',   # CLI integration tests: exercises -Diff mode against live repo; requires sub-process invocation
-                'post-merge-cleanup.Tests.ps1',            # executor integration tests: post-merge-cleanup.ps1 is a top-level executable (no -core.ps1 library); the #656 AC6 failsafe test must spawn a subprocess to exercise the load-time exit 1, which dot-sourcing cannot test without terminating the Pester host
-                'script-safety-contract.Tests.ps1',        # self-excluded: this file contains the literal '& pwsh' in its own scan pattern, which would cause a false-positive match
-                'session-cleanup-detector.Tests.ps1'
+                # cost-integration.Tests.ps1 — CONVERTED in s5: all spawn-based Its now use InvokeOrchestratorInProcess (in-process pattern)
+                'frame-credit-ledger-fail-open.Tests.ps1',          # IRREDUCIBLE: 9 exit-code-contract Its that require subprocess to verify exit codes
+                'frame-credit-ledger-orchestrator.Tests.ps1',       # kept 9 real-spawn smoke layer per s2 decision
+                'frame-spine-core.Tests.ps1',                       # IRREDUCIBLE: 1 spawn tests -CommentBodyStdin CLI switch (stdin-pipe contract; cannot simulate in-process without production code changes)
+                'get-issue-drift.Tests.ps1',                        # IRREDUCIBLE: 1 spawn tests get-issue-drift.ps1 wrapper CLI surface (JSON output shape of the wrapper script)
+                'hub-artifact-paths-coverage.Tests.ps1',            # CLI integration tests: exercises -Diff mode against live repo; requires sub-process invocation
+                'orchestra-spine-command.Tests.ps1',                # IRREDUCIBLE: exit-code-contract tests require real subprocess
+                'plan-tree-state-verification-fail-open.Tests.ps1', # IRREDUCIBLE: exit-code-contract tests require real subprocess
+                'post-merge-cleanup.Tests.ps1',                     # executor integration tests: post-merge-cleanup.ps1 is a top-level executable (no -core.ps1 library); the #656 AC6 failsafe test must spawn a subprocess to exercise the load-time exit 1, which dot-sourcing cannot test without terminating the Pester host
+                'post-merge-cleanup-squash-merge.Tests.ps1',        # IRREDUCIBLE: exit-code + output contract tests for post-merge-cleanup.ps1 top-level executable; subprocess required (no -core.ps1 library)
+                'script-safety-contract.Tests.ps1',                 # self-excluded: this file contains spawn-detection logic; AST scan would flag its own CommandAst nodes
+                'session-cleanup-detector.Tests.ps1',
+                'test-orphan-branch-auto-resolve-eligible.Tests.ps1', # IRREDUCIBLE: tri-state exit-code encoding (0/1/2) across subprocess boundary; converting would require architecture change to test helper
+                'test-orphan-branch-commits-absorbed.Tests.ps1',    # IRREDUCIBLE: tri-state exit-code encoding (0/1/2) across subprocess boundary; converting would require architecture change to test helper
+                'test-orphan-branch-github-signals.Tests.ps1'       # IRREDUCIBLE: tri-state exit-code encoding (0/1/2) across subprocess boundary; converting would require architecture change to test helper
             )
 
+            # AST-based detection: catches both & pwsh / & powershell (CommandAst with command name)
+            # and Start-Process -FilePath 'pwsh' / 'powershell' (named or positional FilePath argument).
+            # String literals that contain 'pwsh' (e.g. assertion strings) are not CommandAst nodes
+            # and are not flagged — this prevents false positives on files like Resolve-PersistDecision.Tests.ps1.
+            $spawnTargets = [System.Collections.Generic.HashSet[string]]::new(
+                [string[]]@('pwsh', 'powershell'),
+                [System.StringComparer]::OrdinalIgnoreCase
+            )
             $violations = Get-ChildItem -Path (Join-Path $script:ScriptsRoot 'Tests') -Filter '*.Tests.ps1' |
                 Where-Object { $_.Name -notin $allowlist } |
                 Where-Object {
-                    $content = Get-Content -Path $_.FullName -Raw
-                    $content -match '& pwsh'
+                    $fileAst = [System.Management.Automation.Language.Parser]::ParseFile(
+                        $_.FullName,
+                        [ref]$null,
+                        [ref]$null
+                    )
+                    $allCmds = $fileAst.FindAll({
+                        param($node)
+                        $node -is [System.Management.Automation.Language.CommandAst]
+                    }, $true)
+                    $fileHasSpawn = $false
+                    foreach ($cmd in $allCmds) {
+                        $cmdName = $cmd.GetCommandName()
+                        # Direct invocation: & pwsh ... or & powershell ...
+                        if ($spawnTargets.Contains($cmdName)) {
+                            $fileHasSpawn = $true
+                            break
+                        }
+                        # Start-Process with -FilePath pwsh/powershell (named or positional)
+                        if ($cmdName -eq 'Start-Process') {
+                            $elems = $cmd.CommandElements
+                            $elemCount = $elems.Count
+                            for ($ei = 1; $ei -lt $elemCount; $ei++) {
+                                $el = $elems[$ei]
+                                # Named parameter: -FilePath followed by a string value
+                                if ($el -is [System.Management.Automation.Language.CommandParameterAst] -and
+                                    $el.ParameterName -eq 'FilePath' -and ($ei + 1) -lt $elemCount) {
+                                    $nextEl = $elems[$ei + 1]
+                                    if ($nextEl -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+                                        $spawnTargets.Contains($nextEl.Value)) {
+                                        $fileHasSpawn = $true
+                                        break
+                                    }
+                                }
+                                # Positional first argument: Start-Process 'pwsh'
+                                if ($ei -eq 1 -and $el -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+                                    $spawnTargets.Contains($el.Value)) {
+                                    $fileHasSpawn = $true
+                                    break
+                                }
+                            }
+                            if ($fileHasSpawn) { break }
+                        }
+                    }
+                    $fileHasSpawn
                 } |
                 Select-Object -ExpandProperty Name
 
-        $violations | Should -HaveCount 0 -Because 'test files must use the dot-source + in-process call pattern (dot-source lib/...core.ps1, call Invoke-... directly) instead of spawning a child pwsh process per test; spawning adds significant Pester suite overhead (see issue #257)'
+            $violations | Should -HaveCount 0 -Because 'test files must use the dot-source + in-process call pattern (dot-source lib/...core.ps1, call Invoke-... directly) instead of spawning a child pwsh process per test; spawning adds significant Pester suite overhead (see issue #257)'
+        }
+
+        It 'spawn-guard falsifiability: direct & pwsh invocation is detected by AST scan' {
+            $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) "spawn-guard-falsifiability-direct-$([System.Guid]::NewGuid().ToString('N')).ps1"
+            try {
+                Set-Content -Path $tempFile -Value "& pwsh -File 'something.ps1'" -Encoding utf8
+                $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+                    $tempFile,
+                    [ref]$null,
+                    [ref]$null
+                )
+                $commands = $ast.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.CommandAst]
+                }, $true)
+                $caught = $false
+                foreach ($cmd in $commands) {
+                    if ($cmd.GetCommandName() -in @('pwsh', 'powershell')) {
+                        $caught = $true
+                        break
+                    }
+                }
+                $caught | Should -Be $true -Because 'the AST guard must detect direct & pwsh invocation'
+            } finally {
+                if (Test-Path $tempFile) { Remove-Item $tempFile -Force }
+            }
+        }
+
+        It 'spawn-guard falsifiability: Start-Process -FilePath pwsh is detected by AST scan' {
+            $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) "spawn-guard-falsifiability-startprocess-$([System.Guid]::NewGuid().ToString('N')).ps1"
+            try {
+                Set-Content -Path $tempFile -Value "Start-Process -FilePath 'pwsh' -ArgumentList @('-File', 'something.ps1')" -Encoding utf8
+                $fAst = [System.Management.Automation.Language.Parser]::ParseFile(
+                    $tempFile,
+                    [ref]$null,
+                    [ref]$null
+                )
+                $fCmds = $fAst.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.CommandAst]
+                }, $true)
+                $fCaught = $false
+                foreach ($cmd in $fCmds) {
+                    if ($cmd.GetCommandName() -eq 'Start-Process') {
+                        $fElems = $cmd.CommandElements
+                        for ($fi = 1; $fi -lt $fElems.Count; $fi++) {
+                            $fEl = $fElems[$fi]
+                            if ($fEl -is [System.Management.Automation.Language.CommandParameterAst] -and
+                                $fEl.ParameterName -eq 'FilePath' -and ($fi + 1) -lt $fElems.Count) {
+                                $fNext = $fElems[$fi + 1]
+                                if ($fNext -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+                                    $fNext.Value -in @('pwsh', 'powershell')) {
+                                    $fCaught = $true
+                                    break
+                                }
+                            }
+                        }
+                        if ($fCaught) { break }
+                    }
+                }
+                $fCaught | Should -Be $true -Because 'the AST guard must detect Start-Process -FilePath pwsh invocation'
+            } finally {
+                if (Test-Path $tempFile) { Remove-Item $tempFile -Force }
+            }
+        }
+
+        It 'spawn-guard falsifiability: positional Start-Process pwsh is detected by AST scan' {
+            $tempFile = Join-Path ([System.IO.Path]::GetTempPath()) "spawn-guard-falsifiability-positional-$([System.Guid]::NewGuid().ToString('N')).ps1"
+            try {
+                Set-Content -Path $tempFile -Value "Start-Process 'pwsh' -ArgumentList '-NonInteractive', '-Command', 'exit 0' -NoNewWindow -Wait" -Encoding utf8
+                $pAst = [System.Management.Automation.Language.Parser]::ParseFile(
+                    $tempFile,
+                    [ref]$null,
+                    [ref]$null
+                )
+                $pCmds = $pAst.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.CommandAst]
+                }, $true)
+                $pTargets = [System.Collections.Generic.HashSet[string]]::new(
+                    [string[]]@('pwsh', 'powershell'),
+                    [System.StringComparer]::OrdinalIgnoreCase
+                )
+                $pCaught = $false
+                foreach ($cmd in $pCmds) {
+                    if ($cmd.GetCommandName() -eq 'Start-Process') {
+                        $pElems = $cmd.CommandElements
+                        for ($pi = 1; $pi -lt $pElems.Count; $pi++) {
+                            $pEl = $pElems[$pi]
+                            # Positional first argument: Start-Process 'pwsh'
+                            if ($pi -eq 1 -and
+                                $pEl -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+                                $pTargets.Contains($pEl.Value)) {
+                                $pCaught = $true
+                                break
+                            }
+                        }
+                        if ($pCaught) { break }
+                    }
+                }
+                $pCaught | Should -Be $true -Because 'the AST guard must detect positional Start-Process pwsh invocation'
+            } finally {
+                if (Test-Path $tempFile) { Remove-Item $tempFile -Force }
+            }
+        }
     }
-}
 
 Describe 'Script safety: no host-native absolute-path literals in shipped scripts' {
     It 'no .ps1 script under skills/ or .github/scripts/ constructs a Windows host-native absolute path' {

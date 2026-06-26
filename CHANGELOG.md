@@ -2,6 +2,22 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.3] — 2026-06-26
+
+### Added
+
+- **File-granular parallel sharded Pester runner** (#740): new `.github/scripts/run-pester-sharded.ps1` thin wrapper + `.github/scripts/lib/pester-sharded-core.ps1` logic library (per the #257 lib+thin-wrapper convention). Discovers all `.Tests.ps1` files, splits a parallel shard (`ForEach-Object -Parallel -ThrottleLimit 8`) from a sequential real-git shard (`plugin-release-hygiene`, `session-cleanup-detector` — keyed on actual `git init`/`git commit` fixture behavior, not string grep), and enforces a no-false-GREEN contract: a missing result file (crashed worker) **or** a file that discovers zero tests is a hard failure with non-zero exit. Includes a `-DeterminismCheck` mode that runs the suite twice and fails on any per-file pass/fail flip. The real-git shard pins a temp `GIT_CONFIG_GLOBAL` (user identity + `commit.gpgsign=false` + `init.defaultBranch=main`) without pre-setting `GIT_TERMINAL_PROMPT`/`GCM_INTERACTIVE`/`GIT_ASKPASS` (those stay owned by the scripts under test).
+- **Pester suite performance audit** (`Documents/Design/pester-suite-performance-audit.md`): per-It timing profile of the top-3 slowest files, full spawn-form inventory with CONVERTIBLE/IRREDUCIBLE verdicts, and the CE Gate result with theoretical-floor analysis.
+
+### Changed
+
+- **Per-test `pwsh` spawns converted to in-process dot-source** (#740): 20 content `It` blocks in `frame-credit-ledger-orchestrator.Tests.ps1` (321s → 70s) and 8 in `cost-integration.Tests.ps1` (98.6s → 7.7s) now dot-source the orchestrator and stub `git`/`gh` in-process instead of spawning a child process per test. Exit-code-contract and timing-contract Its are preserved as a real-spawn smoke layer. Full suite wall-clock: ~836s → 238s (3.5× speedup); the ≤120s target remains gated by an irreducible ~124s floor (see audit doc).
+- **Spawn guard upgraded to AST scan** (`script-safety-contract.Tests.ps1`): replaced the `& pwsh` string-grep with a `[Parser]::ParseFile()` + `CommandAst` scan that detects both `& pwsh`/`& powershell` and `Start-Process -FilePath 'pwsh'` forms without false-positives on string literals; added two falsifiability Its and expanded the IRREDUCIBLE allowlist (same-commit atomic with the scan change).
+
+### Fixed
+
+- **Pre-existing `composite-skill-structure` red** (#740): trimmed `skills/code-review-intake/SKILL.md` from 88 to 79 lines to satisfy the ≤80-line composite-skill contract, with no information loss (covered by retained body sections).
+
 ## [2.35.2] — 2026-06-26
 
 ### Changed

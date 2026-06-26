@@ -26,7 +26,7 @@ When iterating on a specific test during red-green-refactor within an implementa
 Invoke-Pester 'path/to/specific.Tests.ps1' -Output Minimal
 ```
 
-The full-suite command in `Build & Run > Commands` remains the standard validation gate at step boundaries. Do not run the full suite during inner-loop iteration.
+The full-suite runner is `.github/scripts/run-pester-sharded.ps1` (authored in issue #740 s4); invoke it at step boundaries as the standard validation gate. Do not run the full suite during inner-loop iteration. Note: CI's `pester.yml` runs an ~18-file Ubuntu allowlist; this divergence from the full local suite is intentional.
 
 ## `isBackground` Default
 
