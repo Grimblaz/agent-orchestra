@@ -235,7 +235,7 @@ Describe 'Per-agent model + effort routing contract' {
 
     It 'frontmatter-only inherit check: non-oracle, non-D7 shells must not declare model or effort' {
         foreach ($shellFile in $script:ShellFiles) {
-            $relPath = $shellFile.FullName.Replace($script:RepoRoot, '').TrimStart([IO.Path]::DirectorySeparatorChar, '/').Replace('\', '/')
+            $relPath = ($shellFile.FullName -replace [regex]::Escape($script:RepoRoot), '').TrimStart([IO.Path]::DirectorySeparatorChar, '/').Replace('\', '/')
 
             if ($script:ExpectedRouting.ContainsKey($relPath)) { continue }
             if ($script:D7InheritRouting.ContainsKey($relPath)) { continue }

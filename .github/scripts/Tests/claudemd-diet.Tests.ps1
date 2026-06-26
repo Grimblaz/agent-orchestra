@@ -42,7 +42,7 @@ Describe 'CLAUDE.md diet (#694)' {
         It 'CLAUDE.md is below the 200-line diet budget' {
             # plan target: <190 lines; test threshold: 200 (guard with margin)
             # Uses (Get-Content).Count which correctly counts LF-separated lines on all platforms.
-            $lines = (Get-Content $script:ClaudeMdPath).Count
+            $lines = @(Get-Content $script:ClaudeMdPath).Count
             $lines | Should -BeLessThan 200
         }
     }
