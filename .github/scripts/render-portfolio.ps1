@@ -770,6 +770,7 @@ function Invoke-PortfolioRender {
         Write-Error "Failed to parse open issue list JSON: $_" -ErrorAction Stop
     }
     # Two-tier truncation contract: open/closed fail-loud (abort render); triage warn-and-continue (additive bucket).
+    # count == limit is the only observable truncation signal; false-positive at exactly the ceiling is treated as truncation and accepted.
     if ($openLeaves.Count -ge $issueScanLimit) {
         Write-Error "Open issue list returned $($openLeaves.Count) results (limit $issueScanLimit) — refusing to render a potentially truncated board." -ErrorAction Stop
     }
@@ -777,8 +778,11 @@ function Invoke-PortfolioRender {
     # 2c. Repo-wide closed-leaf scan (AC9 data source).
     # Fail-loud: same hard-exit pattern as the open scan.
     $cutoffDate    = (Get-Date).AddDays(-$spec.recently_closed_days).ToString('yyyy-MM-dd')
+    # Closed scan uses --search, routing through the GitHub Search API (hard cap: 1000 results regardless of --limit).
+    # Guard at min(issueScanLimit, 1000) so it can actually fire even when issueScanLimit > 1000.
+    $closedCeiling = [Math]::Min($issueScanLimit, 1000)
     $closedRawJson = gh issue list --repo Grimblaz/agent-orchestra --state closed `
-        --search "closed:>=$cutoffDate" --json number,title,closedAt,labels --limit $issueScanLimit
+        --search "closed:>=$cutoffDate" --json number,title,closedAt,labels --limit $closedCeiling
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to fetch closed issue list (exit $LASTEXITCODE)" -ErrorAction Stop
     }
@@ -789,10 +793,9 @@ function Invoke-PortfolioRender {
     catch {
         Write-Error "Failed to parse closed issue list JSON: $_" -ErrorAction Stop
     }
-    # Closed scan uses --search, routing through the GitHub Search API (hard cap: 1000 results regardless of --limit).
-    # Guard at min(issueScanLimit, 1000) so it can actually fire even when issueScanLimit > 1000.
-    if ($closedLeaves.Count -ge ([Math]::Min($issueScanLimit, 1000))) {
-        Write-Error "Closed issue list returned $($closedLeaves.Count) results (limit $([Math]::Min($issueScanLimit, 1000))) — refusing to render a potentially truncated RecentlyClosed section." -ErrorAction Stop
+    # Fail-loud tier: abort render (same contract as open guard above).
+    if ($closedLeaves.Count -ge $closedCeiling) {
+        Write-Error "Closed issue list returned $($closedLeaves.Count) results (limit $closedCeiling — GitHub Search API hard cap) — refusing to render a potentially truncated RecentlyClosed section." -ErrorAction Stop
     }
 
     # 2d. Fetch open triage-labeled issues repo-wide (CR9 / d-triage-visibility,

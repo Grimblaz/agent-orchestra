@@ -1330,6 +1330,76 @@ rounds:
         }
     }
 
+    It 'closed-ceiling-throws-at-api-cap: closed guard fires at min(issueScanLimit,1000) when issueScanLimit exceeds Search API hard cap' {
+        # AC4 clamp-path coverage: with -issueScanLimit 1500 the effective closed ceiling is
+        # [Math]::Min(1500, 1000) = 1000. The closed stub returns exactly 1000 items so
+        # closedLeaves.Count (1000) >= closedCeiling (1000) -> guard fires. A regression
+        # replacing [Math]::Min($issueScanLimit,1000) with plain $issueScanLimit would make
+        # closedCeiling = 1500, the stub's 1000 results would no longer trigger the guard, and
+        # the test would fail — exactly the mutation that the existing closed-ceiling-throws
+        # test (with issueScanLimit 3) cannot catch.
+
+        $script:ScanReached    = $false
+        $script:GhEditCallCount = 0
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+            if ($ghArgs -contains 'edit') {
+                $script:GhEditCallCount++
+                $global:LASTEXITCODE = 0
+                return
+            }
+            if ($ghArgs -contains 'list') {
+                if ($ghArgs -contains 'closed') {
+                    $script:ScanReached = $true
+                    $global:LASTEXITCODE = 0
+                    # Return exactly 1000 items — hits [Math]::Min(1500, 1000) = 1000
+                    $rows = (1..1000 | ForEach-Object { "{`"number`":$_,`"title`":`"c$_`",`"closedAt`":`"2026-01-01T00:00:00Z`",`"labels`":[]}" }) -join ','
+                    return "[$rows]"
+                }
+                if ($ghArgs -contains 'triage') {
+                    $global:LASTEXITCODE = 0
+                    return '[]'
+                }
+                # open scan fallthrough — return 1 item, well below issueScanLimit 1500
+                $global:LASTEXITCODE = 0
+                return '[{"number":1,"title":"t1","labels":[],"createdAt":"2026-01-01T00:00:00Z"}]'
+            }
+            $global:LASTEXITCODE = 0
+        }
+
+        $tempSpecCeil4 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        @'
+schema_version: 1
+control_tower: 704
+recently_closed_days: 14
+rounds:
+  - lane: main
+    round: 1
+    issues: [425, 571]
+'@ | Set-Content -Path $tempSpecCeil4 -Encoding UTF8
+
+        try {
+            try {
+                Invoke-PortfolioRender -specPath $tempSpecCeil4 -issueScanLimit 1500
+            }
+            catch {
+                # Expected: closed ceiling guard throws at [Math]::Min(1500,1000)=1000; swallow.
+            }
+
+            $script:ScanReached | Should -BeTrue `
+                -Because 'closed scan stub must run before the guard — if false, the call never reached the closed scan'
+
+            $script:GhEditCallCount | Should -Be 0 `
+                -Because 'gh issue edit must not be reached when the closed ceiling fires at [Math]::Min(1500,1000)=1000'
+
+            { Invoke-PortfolioRender -specPath $tempSpecCeil4 -issueScanLimit 1500 } | Should -Throw
+        }
+        finally {
+            if (Test-Path $tempSpecCeil4) { Remove-Item $tempSpecCeil4 -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
     It 'triage-ceiling-warns: triage scan at limit emits Write-Warning and render completes (warn-and-continue)' {
         # RED driver for s2 fix: -issueScanLimit param does not exist yet, so
         # calling it throws ParameterBindingException (unhandled, no try/catch) —
@@ -1404,6 +1474,9 @@ rounds:
             $warnings = @($captured | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
             $warnings.Count | Should -BeGreaterThan 0 `
                 -Because 'triage ceiling must emit Write-Warning when triage scan returns count >= issueScanLimit'
+
+            $warnings[0].Message | Should -Match 'returned 3 results' `
+                -Because 'the captured warning must be the triage ceiling warning (count/limit included), not a parse or exit-code warning'
 
             $script:GhEditCallCount | Should -BeGreaterThan 0 `
                 -Because 'render must complete (warn-and-continue, not abort) and write the control tower body'
