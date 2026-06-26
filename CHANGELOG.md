@@ -2,12 +2,43 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
-## [2.35.2] — 2026-06-26
+## [2.35.4] — 2026-06-26
 
 ### Fixed
 
 - **Canonical pipeline-metrics v4 emission from Code-Conductor inline PR creation** (#739): fixes the integration seam where `Build-*CreditRow` outputs (`[pscustomobject]`) were rejected by `New-PipelineMetricsV4Block` (declared `[hashtable[]]`), breaking the entire v4 emission path and short-circuiting the frame credit ledger to the pre-v4 path. Additional fixes: `Escape-FCLScalar` now uses YAML `""` escaping (not `\"`), both `Get-FCLScalar` and `ConvertFrom-FCLListSection` unescape `""` → `"` on read-back (round-trip losslessness AC1), `Test-PipelineMetricsV4Block` stripped of repair-loop logic (pure warn-only per #429), v3-base `-->` injection escaping, guard regex anchored.
 - **Atomic CHANGELOG insertion in `bump-version.ps1`** (#739 s5): extracted `Invoke-ChangelogInsertion` into `changelog-insert-core.ps1` (idempotency check, separator-agnostic anchor, read-back verify, no file I/O); `bump-version.ps1` now wires `-ChangelogEntry`/`-ChangelogSection` parameters with verify-before-write guard.
+
+## [2.35.3] — 2026-06-26
+
+### Added
+
+- **File-granular parallel sharded Pester runner** (#740): new `.github/scripts/run-pester-sharded.ps1` thin wrapper + `.github/scripts/lib/pester-sharded-core.ps1` logic library (per the #257 lib+thin-wrapper convention). Discovers all `.Tests.ps1` files, splits a parallel shard (`ForEach-Object -Parallel -ThrottleLimit 8`) from a sequential real-git shard (`plugin-release-hygiene`, `session-cleanup-detector` — keyed on actual `git init`/`git commit` fixture behavior, not string grep), and enforces a no-false-GREEN contract: a missing result file (crashed worker) **or** a file that discovers zero tests is a hard failure with non-zero exit. Includes a `-DeterminismCheck` mode that runs the suite twice and fails on any per-file pass/fail flip. The real-git shard pins a temp `GIT_CONFIG_GLOBAL` (user identity + `commit.gpgsign=false` + `init.defaultBranch=main`) without pre-setting `GIT_TERMINAL_PROMPT`/`GCM_INTERACTIVE`/`GIT_ASKPASS` (those stay owned by the scripts under test).
+- **Pester suite performance audit** (`Documents/Design/pester-suite-performance-audit.md`): per-It timing profile of the top-3 slowest files, full spawn-form inventory with CONVERTIBLE/IRREDUCIBLE verdicts, and the CE Gate result with theoretical-floor analysis.
+
+### Changed
+
+- **Per-test `pwsh` spawns converted to in-process dot-source** (#740): 20 content `It` blocks in `frame-credit-ledger-orchestrator.Tests.ps1` (321s → 70s) and 8 in `cost-integration.Tests.ps1` (98.6s → 7.7s) now dot-source the orchestrator and stub `git`/`gh` in-process instead of spawning a child process per test. Exit-code-contract and timing-contract Its are preserved as a real-spawn smoke layer. Full suite wall-clock: ~836s → 238s (3.5× speedup); the ≤120s target remains gated by an irreducible ~124s floor (see audit doc).
+- **Spawn guard upgraded to AST scan** (`script-safety-contract.Tests.ps1`): replaced the `& pwsh` string-grep with a `[Parser]::ParseFile()` + `CommandAst` scan that detects both `& pwsh`/`& powershell` and `Start-Process -FilePath 'pwsh'` forms without false-positives on string literals; added two falsifiability Its and expanded the IRREDUCIBLE allowlist (same-commit atomic with the scan change).
+
+### Fixed
+
+- **Pre-existing `composite-skill-structure` red** (#740): trimmed `skills/code-review-intake/SKILL.md` from 88 to 79 lines to satisfy the ≤80-line composite-skill contract, with no information loss (covered by retained body sections).
+
+## [2.35.2] — 2026-06-26
+
+### Changed
+
+- **CLAUDE.md diet — extracted four blocks to their owning sources** (#694): trimmed `CLAUDE.md` from ~270 to 189 lines (below the <190 target and the <200 A2 audit budget) by moving four duplicated content blocks to their canonical homes without information loss — the cross-tool handoff marker catalog → new `skills/session-memory-contract/references/handoff-markers.md` (13 active + 1 retired families); the deferrable Intent Routing mechanics (rules 1,2,3,5,9,10) → `skills/routing-tables/SKILL.md § Intent Routing Mechanics`; the auto-mode boundary verification recipe → `skills/session-startup/SKILL.md` (sentinel-wrapped); and the full per-agent model + reasoning routing table → `Documents/Design/agent-body-architecture.md`. The four CLAUDE.md keep-set routing rules (4, 6, 7, 8) and all four section stubs with resolving pointers remain.
+
+### Fixed
+
+- **Per-agent routing parity claim and moved-recipe link drift** (#694 adversarial review CR1/CR2/CR4): struck the now-false "routing-table parity" enforcement claim from `agent-body-architecture.md` and added the authoritative-source-is-frontmatter note; repaired two dead relative links in the relocated auto-mode recipe (`skills/session-startup/SKILL.md`) and hardened `auto-mode-boundary.Tests.ps1` test 7 to resolve recipe links against the recipe file's own directory instead of the repo root; updated a stale `.DESCRIPTION` docstring in `per-agent-model-routing.Tests.ps1`.
+- **Gemini Code Assist review** (#694 PR #738): case-insensitive `-replace` for repo-root stripping in `per-agent-model-routing.Tests.ps1`, `@(Get-Content)` array-wrap for the diet line count, and a `#when-to-skip` anchor on the upstream-onboarding recipe link.
+
+### Tests
+
+- New `claudemd-diet.Tests.ps1` (5 tests): the <200-line diet guard plus pointer-resolution sentinels for all four extraction destinations. `per-agent-model-routing.Tests.ps1`, `auto-mode-boundary.Tests.ps1`, and `orchestra-spine-command.Tests.ps1` pivoted to read the relocated content from its new homes; `audit-docs-mechanical.Tests.ps1` AC9 flipped to assert the hub `CLAUDE.md` now passes the A2 budget check. Added a `.github/prompts/*.prompt.md` entry to `Documents/Design/hub-artifact-paths-classification.yml` — the Intent Routing extraction surfaced that Copilot-prompt path family into a scanned scope (`skills/*/SKILL.md`), which the hub-artifact-paths coverage gate requires classified.
 
 ## [2.35.1] — 2026-06-26
 

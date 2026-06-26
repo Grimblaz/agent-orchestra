@@ -3,7 +3,7 @@ name: doc-keeper
 description: Documentation finalization specialist shell for Claude Code. Use when Code-Conductor needs implementation-aligned documentation updates.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch
 user-invocable: false
-# model/effort intentionally omitted: inherits dispatcher per agent-orchestra routing convention (see CLAUDE.md "Per-agent model + reasoning routing").
+# model/effort intentionally omitted: inherits dispatcher per agent-orchestra routing convention (see Documents/Design/agent-body-architecture.md "Per-agent model + reasoning routing").
 ---
 
 # Doc-Keeper (Claude Code shell)

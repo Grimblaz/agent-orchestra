@@ -31,16 +31,11 @@ See also: [CUSTOMIZATION.md > Script portability for plugin users](CUSTOMIZATION
 
 ## Intent Routing
 
-1. Plugin processes are the default chat experience. Natural-language requests matching the `nl_intent_routing` table route to the corresponding slash command with a visible confirmation; `/raw` opts out.
-2. Recommended order: (1) VS Code dropdown for VS Code users; (2) slash commands for both platforms; (3) natural-language with auto-routing confirmation; (4) @-mention is NOT recommended (unreliable in every plugin surface tested).
-3. Slash commands diverge between Claude (commands/*.md) and Copilot (.github/prompts/*.prompt.md); the nl_intent_routing table carries both column names so the canonical command name is platform-portable.
-4. Source of truth: `skills/routing-tables/assets/routing-config.json` anchors natural-language routing in `nl_intent_routing`.
-5. First match per command-family per conversation uses structured `AskUserQuestion` with options `Run /X for this (Recommended)`, `Continue as raw chat`, and `Don't ask again for this command-family this conversation`; Claude confirmation phrasing should use `Run /X?`. Subsequent same-family matches use inline confirmation: `Routing to /X — say /raw to opt out, otherwise proceed.`
-6. Routing detection runs only on top-level user messages outside an active slash-command turn and outside subagent dispatches, and only after the session-startup run-once marker is recorded.
-7. `/raw`, `just answer normally`, `don't run the pipeline`, `raw mode`, and `skip routing` activate within-conversation raw mode only: no persistence file, no SMC row, and new conversations start routing-active. Any user-typed slash command clears raw mode. Acknowledge with: `Raw mode active for this conversation — natural-language requests will not be routed. Any explicit slash command you type clears raw mode.`
-8. For commands with explicit `model:` frontmatter (`/orchestrate`, `/code-conductor`, `/review-github`), emit `Please run /X to continue` and stop; do not inline-emulate.
-9. When proposed command frontmatter differs from the user-session model, append a one-line tier hint, e.g. `Will run on sonnet + high per command frontmatter.`
-10. No-match answers normally; first no-match per conversation appends `Tip: type /help for plugin slash commands, or /raw to suppress these hints.` Ambiguous-match uses a text-only disambiguation prompt, e.g. `Did you mean /orchestra:review (local code) or /review-github (GitHub PR)?`
+Source of truth: `skills/routing-tables/assets/routing-config.json` anchors natural-language routing in `nl_intent_routing`. Routing detection runs only on top-level user messages outside an active slash-command turn and outside subagent dispatches, and only after the session-startup run-once marker is recorded. Activation order, confirmation phrasing, disambiguation, and no-match handling: [skills/routing-tables/SKILL.md](skills/routing-tables/SKILL.md).
+
+`/raw`, `just answer normally`, `don't run the pipeline`, `raw mode`, and `skip routing` activate within-conversation raw mode only: no persistence file, no SMC row, and new conversations start routing-active. Any user-typed slash command clears raw mode. Acknowledge with: `Raw mode active for this conversation — natural-language requests will not be routed. Any explicit slash command you type clears raw mode.`
+
+For commands with explicit `model:` frontmatter (`/orchestrate`, `/code-conductor`, `/review-github`), emit `Please run /X to continue` and stop; do not inline-emulate.
 
 ## Upstream pipeline
 
@@ -93,25 +88,7 @@ The judge result is designed for same-comment persistence: the Markdown score su
 
 ## Cross-tool handoffs
 
-Handoffs between phases use durable GitHub issue comments rather than session-local state. Markers:
-
-- `<!-- experience-owner-complete-{ID} -->` — upstream framing complete
-- `<!-- design-phase-complete-{ID} -->` — technical design complete
-- `<!-- engagement-record-experience-{ID} -->` — durable engagement audit for /experience phase: load-bearing decisions, audit rationale, articulation text persisted alongside the experience-owner-complete marker for cross-session decision memory (SMC-20)
-- `<!-- engagement-record-design-{ID} -->` — durable engagement audit for /design phase: load-bearing decisions persisted alongside the design-phase-complete marker; consumed by solution-authoring's same-decision-resume rule on phase re-entry (SMC-20)
-- `<!-- engagement-record-plan-{ID} -->` — durable engagement audit for /plan phase: load-bearing decisions persisted alongside the plan-issue marker; consumed by solution-authoring's same-decision-resume rule on phase re-entry (SMC-20)
-- `<!-- engagement-record-orchestration-{ID} -->` — durable engagement audit for orchestration touchpoint (`scope-classification`): persisted as an issue comment when scope-classification resolves; payload Markdown mirror co-located in the comment; consumed by solution-authoring's same-decision-resume rule on Code-Conductor re-entry (SMC-20)
-- `<!-- engagement-record-review-{PR} -->` — durable engagement audit for /orchestra:review and /orchestra:review-judge phases: load-bearing review-finding dispositions persisted as a PR comment after the post-judge disposition gate completes; consumed by same-decision-resume on re-review of the same PR (SMC-20, SMC-23, schema_version 4)
-- `<!-- review-dispositions-{PR} -->` — per-finding disposition record for PR code-review verdicts; one entry per judge-sustained finding carrying stable_finding_key, pass, disposition (incorporate|dismiss|escalate), classification, and disposition_rationale (SMC-23)
-- `<!-- design-issue-{ID} -->` — durable design snapshot handoff used for D9 pause/resume and full-pipeline smart resume
-- `<!-- plan-issue-{ID} -->` — approved plan persisted
-- `<!-- frame-credit-ledger-{PR} -->` — warn-only frame credit-ledger comment posted by the pre-PR hook (sub-issue #429 of frame umbrella #425); idempotently upserted on every PR after `gh pr create`
-- `<!-- review-judge-produced-{PR} -->` — sentinel written by the judge (both Copilot and Claude) immediately after the ruling finalizes, before pipeline-metrics persistence; the warn-only hook detects this to synthesize a `not-persisted` review credit when the PR body carries no review credit yet (SMC-16)
-- `<!-- credit-input-{port}-{ID} -->` — deferred-emission marker written by pipeline-entry agents (Experience-Owner, Solution-Designer, Issue-Planner) immediately after their completion marker; payload is a `yaml` fenced block carrying `{ port, adapter, evidence }`; harvested by Code-Conductor at PR-creation time to emit the corresponding credit row (SMC-17)
-
-Because the markers live on the issue, you can resume work across sessions without losing context. *(Cross-tool Copilot↔Claude handoff was supported; Copilot is now frozen.)*
-
-The row-level survival and fallback semantics are governed by [skills/session-memory-contract/SKILL.md](skills/session-memory-contract/SKILL.md). [Documents/Design/session-memory-contract.md](Documents/Design/session-memory-contract.md) explains why Claude keeps durable GitHub markers instead of adding a Claude-only session-memory store.
+Handoffs between phases use durable GitHub issue comments rather than session-local state; markers live on the issue so work resumes across sessions without losing context. *(Cross-tool Copilot↔Claude handoff was supported; Copilot is now frozen.)* Full catalog: [skills/session-memory-contract/references/handoff-markers.md](skills/session-memory-contract/references/handoff-markers.md). Row-level survival semantics: [skills/session-memory-contract/SKILL.md](skills/session-memory-contract/SKILL.md). Persistence rationale: [Documents/Design/session-memory-contract.md](Documents/Design/session-memory-contract.md).
 
 ## Session startup
 
@@ -175,17 +152,6 @@ This section applies to Claude Code. Copilot uses a different permission model a
 
 **Known limitation (L2 — platform-side classifier behavior):** The live evidence in [issue #546](https://github.com/Grimblaz/agent-orchestra/issues/546) (comments [4414368049](https://github.com/Grimblaz/agent-orchestra/issues/546#issuecomment-4414368049) and [4414376114](https://github.com/Grimblaz/agent-orchestra/issues/546#issuecomment-4414376114)) shows that Claude Code's contextual risk classifier can silently deny a tool call even after explicit same-turn user authorization, bypassing D2. The workaround is the opt-in allowlist in [skills/session-startup/SKILL.md](skills/session-startup/SKILL.md) § Permission allowlist (recommended) — apply those entries before the deny fires by editing `.claude/settings.local.json` directly, not by asking the agent to make the edit in the same turn you authorize it. If the gap proves materially worse than this workaround, file an upstream Claude Code issue referencing this evidence.
 
-<!-- auto-mode-boundary-recipe:begin -->
-### Manual verification recipe
-
-Run these three checks in Claude Code to audit the auto-mode boundary in your session.
-
-**1. Positive case (D1):** Run `git status` under auto-mode. It should execute immediately without a permission prompt. If it prompts, D1 has regressed — check your `permissions.allow` list.
-
-**2. Risky case (D2):** Run `gh pr merge --admin` against a draft PR you own, then **abort at the Claude Code permission prompt** — do not complete the merge. Expected: a permission prompt appears before execution. If no prompt appears and the command is silently denied, you are observing the L2 contextual-classifier override pattern documented above. Fallback: (a) record the chat transcript verbatim, (b) confirm the [cleanup-script allowlist entry](skills/session-startup/SKILL.md) is applied (project-level for contributors, `~/.claude/settings.json` for plugin consumers — see that skill section for the correct path), (c) file an issue at the [agent-orchestra repo](https://github.com/Grimblaz/agent-orchestra/issues) with the transcript and settings excerpt.
-
-**3. Axis B case (D3):** Run `/experience N` against an **existing issue** you own (use an issue that already carries an upstream marker — e.g., a `<!-- experience-owner-complete-{ID} -->` comment from a prior `/experience` run — so the upstream-onboarding standards check actually fires; a fresh unframed issue will skip the standards check per [skills/upstream-onboarding/SKILL.md § When to Skip](skills/upstream-onboarding/SKILL.md)). Verify the upstream-onboarding standards check fires `AskUserQuestion`. If the agent skips the question and assumes an answer, D3 has regressed — report it on [issue #546](https://github.com/Grimblaz/agent-orchestra/issues/546).
-<!-- auto-mode-boundary-recipe:end -->
 
 ## Where things live
 
@@ -198,54 +164,7 @@ Run these three checks in Claude Code to audit the auto-mode boundary in your se
 
 ## Per-agent model + reasoning routing
 
-Each Claude subagent shell in `agents/*.md` may declare `model:` and `effort:` in its YAML frontmatter to request a specific model tier for that role's dispatch. The convention is governed by [D9 in `Documents/Design/agent-body-architecture.md`](Documents/Design/agent-body-architecture.md): shells that justify a non-default tier declare both fields (both-or-neither discipline); shells that inherit the dispatcher's model omit both fields and document the reason with a YAML comment. The goal is to concentrate quality-justified upgrades at the roles that genuinely need them (adversarial review, deep synthesis) while keeping routine specialist work at the dispatcher's tier.
-
-| Agent shell | `model` | `effort` | Effective model + effort | Why |
-|---|---|---|---|---|
-| `commands/orchestrate.md` | `sonnet` | `high` | sonnet + high | D1: command front-end sets the primary dispatch tier |
-| `commands/code-conductor.md` | `sonnet` | `high` | sonnet + high | D1: command front-end sets the primary dispatch tier |
-| `commands/review-github.md` | `sonnet` | `high` | sonnet + high | D1: command front-end sets the primary dispatch tier |
-| `commands/spine-run.md` | `inherit` | `inherit` | dispatcher | D7: minimal frame walker inherits dispatcher tier |
-| `commands/orchestra-spine.md` | `inherit` | `inherit` | dispatcher | D4: routine inspection |
-| `agents/code-conductor.md` | `sonnet` | `high` | sonnet + high | D2: redundant declaration; ensures orchestrator tier even without command override |
-| `agents/spine-runner.md` | `inherit` | `inherit` | dispatcher | D7: minimal frame walker inherits dispatcher tier |
-| `agents/senior-engineer.md` | `inherit` | `inherit` | dispatcher | D4: routine skill-as-adapter execution; inherits dispatcher |
-| `agents/code-critic.md` | `opus` | `high` | opus + high | D5: adversarial review requires maximum reasoning depth |
-| `agents/code-review-response.md` | `opus` | `xhigh` | opus + xhigh | D5: judge pass requires full synthesis depth |
-| `agents/refactor-specialist.md` | `sonnet` | `high` | sonnet + high | D5: code-quality analysis benefits from extended reasoning |
-| `agents/process-review.md` | `sonnet` | `high` | sonnet + high | D5: workflow meta-analysis requires extended reasoning |
-| `agents/code-smith.md` | `inherit` | `inherit` | dispatcher | D4: routine implementation; inherits dispatcher |
-| `agents/test-writer.md` | `inherit` | `inherit` | dispatcher | D4: routine test authoring; inherits dispatcher |
-| `agents/doc-keeper.md` | `inherit` | `inherit` | dispatcher | D4: routine documentation; inherits dispatcher |
-| `agents/research-agent.md` | `inherit` | `inherit` | dispatcher | D4: evidence gathering; inherits dispatcher |
-| `agents/specification.md` | `inherit` | `inherit` | dispatcher | D4: specification authoring; inherits dispatcher |
-| `agents/ui-iterator.md` | `inherit` | `inherit` | dispatcher | D4: UI polish; inherits dispatcher |
-| `agents/experience-owner.md` | `inherit` | `inherit` | user-session (inline) / dispatcher (subagent) | D6: inline `/experience` uses user session; subagent dispatch inherits dispatcher |
-| `agents/solution-designer.md` | `inherit` | `inherit` | user-session (inline) / dispatcher (subagent) | D6: inline `/design` uses user session; subagent dispatch inherits dispatcher |
-| `agents/issue-planner.md` | `inherit` | `inherit` | user-session (inline) / dispatcher (subagent) | D6: inline `/plan` uses user session; subagent dispatch inherits dispatcher |
-
-**Inheritance order** (highest priority first, per the [Claude Code sub-agents docs](https://code.claude.com/docs/en/sub-agents)):
-
-1. `CLAUDE_CODE_SUBAGENT_MODEL` environment variable (process-level override)
-2. Per-invocation `model:` parameter passed in the `Agent` tool call
-3. Shell frontmatter `model:` / `effort:` declaration (this table)
-4. Dispatcher's current model (user's active session model)
-
-Note: the user-session default (`/model` setting) never propagates to subagents — it applies only to inline commands without `model:` frontmatter (`/experience`, `/design`, `/plan`, `/polish`). Downstream specialist `Agent` dispatches from those commands inherit the dispatcher's model, not the user-session default.
-
-**Multi-turn `/orchestrate` boundary**: the `model: sonnet, effort: high` override declared in `commands/orchestrate.md` applies for the duration of the command's turn. `/code-conductor` and `/review-github` have their own `sonnet + high` command-front-end overrides that apply for their respective command turns. If a user interrupts a multi-turn `/orchestrate` session mid-flow, the override resets to the user's session model. Re-invoking `/orchestrate` re-applies the override for the new turn.
-
-**Sonnet-default trade-off**: `commands/orchestrate.md` and `agents/code-conductor.md` default to `sonnet + high` because orchestration work (plan parsing, dispatch, coordination, review reconciliation) benefits from extended reasoning while staying on the cost-efficient Sonnet tier. Spine-Runner inherits the dispatcher tier because it is a minimal frame walker. Quality-critical roles (adversarial review, judge synthesis) explicitly upgrade to `opus`. This is an intentional cost-vs-depth trade-off per D3.
-
-**Standard prosecution role→tier map**: the `standard` adversarial-review adapter dispatches a five-pass two-layer panel. The `agents/code-critic.md` shell declares `model: opus`, but the parent dispatcher overrides this at Agent-tool call time using the role→tier map defined in `skills/adversarial-review/platforms/claude.md`: generalist-A uses `model: sonnet`; generalist-B and all three specialist passes use `model: opus`. The shell frontmatter governs only when no per-dispatch model override is set. Fallback order when a tier is unavailable: fable → opus → sonnet → haiku.
-
-**Override-discipline rule**: every `agents/*.md` shell must declare both `model:` and `effort:`, or neither (both-or-neither). A shell with only one field is a test failure. The Pester test at `.github/scripts/Tests/per-agent-model-routing.Tests.ps1` enforces this, the enum membership set, the inherit-comment requirement, the D5 oracle, and CLAUDE.md routing-table parity.
-
-**How to override the declared routing**:
-
-- **Inline slash commands**: when a command file declares concrete `model:` frontmatter (currently `/orchestrate`, `/code-conductor`, and `/review-github`), that frontmatter governs the command's turn — running `/model <name>` first does *not* override it. `/spine-run` declares `inherit` routing for D7 parity and follows the dispatcher's active tier. The user-session `/model` setting only governs inline commands that omit `model:` frontmatter (`/experience`, `/design`, `/plan`, `/polish`).
-- **Subagent dispatches** from any command follow the inheritance order above. For a process-wide override of every subagent, set the `CLAUDE_CODE_SUBAGENT_MODEL` environment variable. For a one-off override, pass `model:` on a specific `Agent` tool call. Shell frontmatter still wins over the dispatcher model, so quality-justified shells (code-critic, code-review-response, etc.) keep their declared tier even when the dispatcher's model differs.
-- **Multi-turn `/orchestrate` interruption**: if you interrupt mid-flow and the next message is not `/orchestrate`, the model falls back to the user-session default until you re-invoke `/orchestrate`, which re-applies the command frontmatter.
+The canonical routing table, inheritance order, override-discipline rule, and per-shell declarations live in [Documents/Design/agent-body-architecture.md § Per-agent model + reasoning routing](Documents/Design/agent-body-architecture.md).
 
 ## Senior Engineer + skill-as-adapter pattern
 

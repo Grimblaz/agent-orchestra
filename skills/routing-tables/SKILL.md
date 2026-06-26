@@ -93,6 +93,20 @@ Future deterministic consumers should prefer the JSON assets first. If a later s
 
 Routing authority remains with the calling agent. This skill provides shared data and summaries; it does not own orchestration decisions.
 
+## Intent Routing Mechanics
+
+Plugin processes are the default chat experience. Natural-language requests matching the `nl_intent_routing` table route to the corresponding slash command with a visible confirmation; `/raw` opts out.
+
+**Activation order**: (1) VS Code dropdown for VS Code users; (2) slash commands for both platforms; (3) natural-language with auto-routing confirmation; (4) @-mention is NOT recommended (unreliable in every plugin surface tested).
+
+Slash commands diverge between Claude (`commands/*.md`) and Copilot (`.github/prompts/*.prompt.md`); the `nl_intent_routing` table carries both column names so the canonical command name is platform-portable.
+
+**First match per command-family** per conversation uses structured `AskUserQuestion` with options `Run /X for this (Recommended)`, `Continue as raw chat`, and `Don't ask again for this command-family this conversation`; Claude confirmation phrasing should use `Run /X?`. Subsequent same-family matches use inline confirmation: `Routing to /X — say /raw to opt out, otherwise proceed.`
+
+**Tier hint**: When a proposed command's `model:` frontmatter differs from the user-session model, append a one-line tier hint, e.g. `Will run on sonnet + high per command frontmatter.`
+
+**No-match and disambiguation**: No-match answers normally; first no-match per conversation appends `Tip: type /help for plugin slash commands, or /raw to suppress these hints.` Ambiguous-match uses a text-only disambiguation prompt, e.g. `Did you mean /orchestra:review (local code) or /review-github (GitHub PR)?`
+
 ## Gotchas
 
 | Trigger                                               | Gotcha                                                                                                                  | Fix                                                                                         |

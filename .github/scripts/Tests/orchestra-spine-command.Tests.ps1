@@ -23,6 +23,7 @@ Describe '/orchestra:spine deterministic inspection command' -Tag 'contract' {
         $script:ScriptPath = Join-Path $script:RepoRoot '.github/scripts/orchestra-spine.ps1'
         $script:CommandPath = Join-Path $script:RepoRoot 'commands/orchestra-spine.md'
         $script:ClaudeMdPath = Join-Path $script:RepoRoot 'CLAUDE.md'
+        $script:AgentBodyArchPath = Join-Path $script:RepoRoot 'Documents/Design/agent-body-architecture.md'
 
         $script:RepresentativeSpine = @(
             'spine_schema_version: 1'
@@ -410,7 +411,7 @@ exit `$exitCode
         $commandContent | Should -Not -Match '(?m)^(model|effort):\s*' -Because 'D4 routine inspection commands inherit the dispatcher rather than declaring a model tier'
         $commandContent | Should -Match 'positive integer issue number|Usage:\s*/orchestra:spine\s+<issue-number>' -Because 'the command body must guide invalid argument handling'
 
-        $claudeContent = Get-Content -Path $script:ClaudeMdPath -Raw -ErrorAction Stop
-        $claudeContent | Should -Match '(?m)^\|\s*`commands/orchestra-spine\.md`\s*\|\s*`inherit`\s*\|\s*`inherit`\s*\|[^\r\n]*D4:\s*routine inspection' -Because 'CLAUDE.md routing table must register the command as inherited D4 routine inspection'
+        $archContent = Get-Content -Path $script:AgentBodyArchPath -Raw -ErrorAction Stop
+        $archContent | Should -Match '(?m)^\|\s*`commands/orchestra-spine\.md`\s*\|\s*`inherit`\s*\|\s*`inherit`\s*\|[^\r\n]*D4:\s*routine inspection' -Because 'agent-body-architecture.md routing table must register the command as inherited D4 routine inspection'
     }
 }

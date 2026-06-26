@@ -245,14 +245,14 @@ Describe 'audit-docs-mechanical' {
 
     # -------------------------------------------------------------------------
     Context 'AC9 — Hub self-run integration' {
-        It 'AC9: hub self-run emits at least one A2 fail row' {
+        It 'AC9: hub self-run emits no A2 fail rows (CLAUDE.md diet #694 complete)' {
             # Run the script against the actual repo root (not a fixture).
-            # Asserts the mechanism (>=1 A2 fail row), not a specific line count.
-            # issue #693 will remediate the hub CLAUDE.md.
+            # After issue #694 reduces CLAUDE.md below the A2 threshold, A2 must pass.
+            # Fixture files under fixtures/audit-docs/ are intentionally oversized — exclude them.
             $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '../../..')
             $result = & $script:ScriptPath -Root $repoRoot | ConvertFrom-Json
-            $a2Fails = $result.checks | Where-Object { $_.check_id -eq 'A2' -and $_.status -eq 'fail' }
-            $a2Fails | Should -Not -BeNullOrEmpty
+            $a2Fails = $result.checks | Where-Object { $_.check_id -eq 'A2' -and $_.status -eq 'fail' -and $_.file -notmatch 'fixtures' }
+            $a2Fails | Should -BeNullOrEmpty
         }
     }
 

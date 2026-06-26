@@ -3,7 +3,7 @@ name: experience-owner
 description: Customer experience bookend — frames features as customer journeys upstream, captures CE Gate evidence downstream. Use for customer framing of a GitHub issue or for CE Gate evidence capture after implementation.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
 user-invocable: false
-# model/effort intentionally omitted: inline /experience|/design|/plan inherit user-session default; subagent dispatch inherits dispatcher (see CLAUDE.md "Per-agent model + reasoning routing").
+# model/effort intentionally omitted: inline /experience|/design|/plan inherit user-session default; subagent dispatch inherits dispatcher (see Documents/Design/agent-body-architecture.md "Per-agent model + reasoning routing").
 ---
 
 # Experience-Owner (Claude Code shell)

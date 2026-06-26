@@ -77,3 +77,8 @@ Use these cross-tool fungibility values in the table and in citations: `yes`, `n
 | Trigger                                           | Gotcha                                                                                                             | Fix                                                                                                                                                         |
 | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Adding a new state shape without a survival label | Later docs cannot tell whether the state survives dispatch, conversation end, worktree changes, or GitHub handoff. | Add a nearby `Survival: {label}; contract: SMC-XX` callout in the state-owning file, or add a new contract row in this skill if the shape is genuinely new. |
+
+## References
+
+- [references/handoff-markers.md](references/handoff-markers.md) — cross-tool handoff marker catalog; all active and retired GitHub comment marker families with SMC citations
+- [references/conductor-session-handoff.md](references/conductor-session-handoff.md) — Code-Conductor long-session context management and user-handoff escalation patterns
