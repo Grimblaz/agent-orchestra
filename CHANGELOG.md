@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.5] — 2026-06-26
+
+### Fixed
+
+- **BDD enablement detection now requires a `^## BDD Framework` line-start heading (column 0)** (#733): replaced substring/presence phrasing across 13 agent-and-skill detection sites in `agents/Experience-Owner.agent.md`, `agents/Issue-Planner.agent.md`, `agents/Test-Writer.agent.md`, `skills/bdd-scenarios/SKILL.md`, and `skills/customer-experience/references/orchestration-protocol.md`; anchored 12 detection references in `Documents/Design/bdd-framework.md`. Added **Discriminator** note with `grep -nE '^## BDD Framework'` oracle. The hub's own `copilot-instructions.md:33` backtick mention no longer produces a false positive under anchored detection.
+
 ## [2.35.4] — 2026-06-26
 
 ### Fixed

@@ -107,13 +107,17 @@ When reading scenario IDs from an issue body:
 
 ## BDD Detection Mechanism
 
-BDD structured scenarios are only active when the consumer repo's `copilot-instructions.md` contains a `## BDD Framework` section heading. Absence of this heading = natural-language fallback. Agents check for this heading before applying BDD-specific authoring, classification, or pre-flight behavior.
+BDD structured scenarios are only active when the consumer repo's `copilot-instructions.md` has a `## BDD Framework` **heading at line start** (column 0 — a real level-2 Markdown heading, not a backticked mention or mid-line reference). Absence of this heading = natural-language fallback. Agents check for this heading before applying BDD-specific authoring, classification, or pre-flight behavior.
+
+**Discriminator**: `grep -nE '^## BDD Framework' copilot-instructions.md` returns at least one line → BDD enabled. A backticked mention such as the description bullet in this hub's `copilot-instructions.md` appears mid-sentence and does NOT match `^## BDD Framework` (anchored to line-start). The naïve `grep -c "## BDD Framework"` returns a false positive on that hub file; the anchored grep is the truth.
+
+All BDD-specific behavior is conditional on a `## BDD Framework` **line-start heading** (column 0) being present. The heading must appear at column 0 with no leading whitespace — CommonMark allows 1–3 spaces before an ATX heading, but the detector requires zero; an indented `## BDD Framework` will not be detected and silently disables BDD.
 
 ## Gotchas
 
 - **S-IDs vs Specification's AC-NNN format**: This skill uses S-IDs (S1, S2, S3) for CE Gate scenarios. Specification agent uses `AC-NNN` for acceptance criteria. These are different namespaces — do not mix them or treat AC-NNN as a scenario ID.
 - **Customer language principle**: G/W/T keywords are structural framing only. The clause content must be in customer terms — no method names, no file paths, no agent names, no implementation details. "When the system calls ExperienceOwner.FrameScenarios()" is wrong; "When the team begins feature planning" is correct. See also: **Declarative-over-Imperative** above for specific anti-patterns, preferred alternatives, and a validation scan. This gotcha states the broad principle (no implementation details); the subsection above provides actionable examples covering imperative UI verbs and test-infrastructure leakage.
-- **BDD detection gating**: All BDD-specific behavior (G/W/T authoring, classification, pre-flight, per-scenario prosecution) is conditional on `## BDD Framework` presence. Repos without this section keep the existing natural-language workflow unchanged — do not apply rubric, IDs, or pre-flight to natural-language scenarios.
+- **BDD detection gating**: All BDD-specific behavior (G/W/T authoring, classification, pre-flight, per-scenario prosecution) is conditional on a `## BDD Framework` **line-start heading** (column 0) being present. Repos without this heading keep the existing natural-language workflow unchanged — do not apply rubric, IDs, or pre-flight to natural-language scenarios.
 - **Issue-body source of truth**: The `## Scenarios` section in the GitHub issue body is the authoritative store for scenario IDs. Any abbreviated or derived authoring path (e.g., generating scenarios only in the plan's `[CE GATE]` step) **must** also write the full scenarios back into the issue body using the GitHub issue update tool — Code-Conductor's CE Gate pre-flight reads from the issue body and will treat missing issue-body scenarios as coverage gaps.
 - **Phase 2 scope boundary**: Phase 2 (Gherkin conversion + framework runner integration) is documented in the `## Phase 2: Gherkin Conversion & Framework Runner` section below. Phase 1 content (authoring, traceability, coverage detection) is unchanged.
 
@@ -138,14 +142,14 @@ Keep the Test-Writer agent body thin by pointing here instead of restating the f
 
 Phase 2 is active when **both** conditions are met in the consumer repo's `copilot-instructions.md`:
 
-1. `## BDD Framework` section heading is present (Phase 1 condition)
+1. `## BDD Framework` **line-start heading** at column 0 is present (Phase 1 condition; a mid-line mention does not qualify)
 2. A `bdd: {framework}` config line is present with a recognized framework name
 
 **Known migration case — `bdd: true`**: If a consumer repo was set up under Phase 1 only and still has `bdd: true` in a comment, emit a warning: _"bdd: true detected — Phase 2 requires a recognized framework name. Set `bdd: {framework}` with one of: cucumber.js, behave, jest-cucumber, cucumber. Falling back to Phase 1 behavior."_ Then fall back to Phase 1.
 
 **Unrecognized framework name**: If a `bdd: {framework}` line is present but the value is not in the mapping table, emit a warning: _"Unrecognized framework '{value}'. Recognized values: cucumber.js, behave, jest-cucumber, cucumber. Falling back to Phase 1 behavior."_ Then fall back to Phase 1.
 
-**Phase-1-only repos** (heading present, no `bdd:` line): Phase 2 detection requires BOTH conditions. A repo with only the `## BDD Framework` heading is Phase 1 only — behavior is unchanged.
+**Phase-1-only repos** (**line-start heading** (column 0) present, no `bdd:` line): Phase 2 detection requires BOTH conditions. A repo with only the `## BDD Framework` line-start heading is Phase 1 only — behavior is unchanged.
 
 ### Framework Mapping Table
 
