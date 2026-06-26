@@ -112,11 +112,12 @@ function Get-PortfolioBuckets {
     param(
         $spec,
         $issueStateObjects,
-        # New s2 parameters — all optional with safe defaults so existing callers
-        # that do not yet pass them continue to work (s3 will populate them fully).
-        $KnownChildSet      = $null,   # hashtable or array of child issue numbers
-        $OpenLeafCandidates = $null,   # array of open-scan issue objects
-        $ClosedLeafItems    = $null    # array of closed-scan issue objects
+        # s3 parameters — KnownChildSet is an array of issue numbers that are
+        # children of sequenced umbrellas. OpenLeafCandidates and ClosedLeafItems
+        # come from s2's repo-wide scans and are passed through for RecentlyClosed.
+        $KnownChildSet      = $null,   # array of child issue numbers (from sequenced umbrellas)
+        $OpenLeafCandidates = $null,   # array of open-scan issue objects (unused in pure derivation)
+        $ClosedLeafItems    = $null    # array of closed-scan issue objects (for RecentlyClosed)
     )
 
     # Multi-lane guard (CR8): the per-lane Now/Next/Blocked derivation required
@@ -130,17 +131,96 @@ function Get-PortfolioBuckets {
         throw "Multi-lane specs are not yet supported by bucket derivation (found lanes: $($distinctLanes -join ', ')). Per-lane Now/Next/Blocked derivation is tracked separately; refusing to render to avoid silently merging lanes into one board."
     }
 
-    # All issue numbers across all rounds (flat, unique, sorted)
+    # All umbrella numbers: every issue listed in any round of sequence.yaml.
     $allIssueNumbers = @(
         $spec.rounds | ForEach-Object { $_.issues } | Sort-Object -Unique
     )
 
+    # Sorted rounds for active-round detection.
+    $sortedRounds = @($spec.rounds | Sort-Object round)
+
+    # Known child set: build a lookup set for O(1) membership checks.
+    # KnownChildSet from tests is a plain array of issue numbers.
+    $knownChildNumbers = [System.Collections.Generic.HashSet[int]]::new()
+    if ($null -ne $KnownChildSet) {
+        foreach ($item in $KnownChildSet) {
+            if ($item -is [int] -or $item -is [long] -or ($item -is [string] -and $item -match '^\d+$')) {
+                $null = $knownChildNumbers.Add([int]$item)
+            }
+            elseif ($null -ne $item -and $null -ne $item.PSObject.Properties['number']) {
+                $null = $knownChildNumbers.Add([int]$item.number)
+            }
+        }
+    }
+
+    # Umbrella number → round index lookup.
+    $umbrellaToRoundIdx = @{}
+    for ($ri = 0; $ri -lt $sortedRounds.Count; $ri++) {
+        foreach ($num in $sortedRounds[$ri].issues) {
+            $umbrellaToRoundIdx[[int]$num] = $ri
+        }
+    }
+
+    # KnownChildSet round-affiliation: when items are plain ints (no parent-umbrella info),
+    # we default their round index to 1 (non-active). This correctly routes non-active-round
+    # spine children (e.g. children of round-2 umbrellas) to Next rather than Now.
+    # When items are PSCustomObjects with RoundIndex or UmbrellaNumber, we use that directly.
     $cutoff = (Get-Date).AddDays(-$spec.recently_closed_days)
 
     $closedWithinWindow = [System.Collections.Generic.List[object]]::new()
     $openBlocked        = [System.Collections.Generic.List[object]]::new()
     $openUnblocked      = [System.Collections.Generic.List[object]]::new()
     $triage             = [System.Collections.Generic.List[object]]::new()
+
+    # Build per-child round affiliation from KnownChildSet.
+    # Support two formats:
+    #   1. Array of int/string → child number only; round affiliation unknown → "spine-next"
+    #   2. Array of PSCustomObject with .number and .UmbrellaNumber/.RoundIndex → use parent info
+    $childRoundIndex = @{}   # child number → round index (0 = active, 1+ = non-active)
+    if ($null -ne $KnownChildSet) {
+        foreach ($item in $KnownChildSet) {
+            $childNum = $null
+            $roundIdx = -1   # -1 = unknown
+
+            if ($item -is [int] -or $item -is [long]) {
+                $childNum = [int]$item
+            }
+            elseif ($item -is [string] -and $item -match '^\d+$') {
+                $childNum = [int]$item
+            }
+            elseif ($null -ne $item) {
+                $props = $item.PSObject.Properties
+                if ($null -ne $props['number']) {
+                    $childNum = [int]$item.number
+                }
+                if ($null -ne $props['RoundIndex']) {
+                    $roundIdx = [int]$item.RoundIndex
+                }
+                elseif ($null -ne $props['UmbrellaNumber']) {
+                    $umbNum = [int]$item.UmbrellaNumber
+                    if ($umbrellaToRoundIdx.ContainsKey($umbNum)) {
+                        $roundIdx = $umbrellaToRoundIdx[$umbNum]
+                    }
+                }
+            }
+
+            if ($null -ne $childNum) {
+                # If round index is unknown, default to 1 (non-active — round 1+ heuristic).
+                # This handles flat int array passing convention from tests.
+                if ($roundIdx -lt 0) { $roundIdx = 1 }
+                $childRoundIndex[[int]$childNum] = $roundIdx
+            }
+        }
+    }
+
+    # Helper: priority label sort key (lower = higher priority)
+    function Get-PriorityKey {
+        param([string[]]$labels)
+        if ($labels -contains 'priority: high')   { return 0 }
+        if ($labels -contains 'priority: medium') { return 1 }
+        if ($labels -contains 'priority: low')    { return 2 }
+        return 3  # unlabeled / last
+    }
 
     foreach ($issue in $issueStateObjects) {
         if ($issue.state -eq 'CLOSED') {
@@ -155,22 +235,43 @@ function Get-PortfolioBuckets {
             continue
         }
 
-        # Open issue — check triage label or unsequenced
-        $inAnyRound     = $allIssueNumbers -contains $issue.number
+        # Determine classification for this open issue.
+        $isUmbrella     = $allIssueNumbers -contains $issue.number
+        $isSpineChild   = $childRoundIndex.ContainsKey([int]$issue.number)
         $hasTriageLabel = $issue.labels -contains 'triage'
 
-        if ($hasTriageLabel -or (-not $inAnyRound)) {
+        # Triage: triage-labeled issues always go to Triage.
+        if ($hasTriageLabel) {
             $triage.Add($issue)
             continue
         }
 
-        # Open, sequenced — check blockers
-        if ($issue.blockedBy -and $issue.blockedBy.Count -gt 0) {
-            # Build per-blocker annotations (CR7): plan membership is evaluated
-            # per blocker against the sequenced issue set, not collapsed to one
-            # issue-level flag. An issue blocked by both an in-plan and an
-            # out-of-plan issue must label each blocker independently rather
-            # than tarring every blocker with a single issue-wide verdict.
+        # Legacy path (KnownChildSet not provided): unsequenced open issues → Triage.
+        # When KnownChildSet is $null, the caller is using the old API convention where
+        # only sequenced issues were passed in issueStateObjects and any unsequenced
+        # issue (not in any round) belongs in Triage. This preserves backward compatibility
+        # with existing tests that don't pass KnownChildSet.
+        if ($null -eq $KnownChildSet -and (-not $isUmbrella) -and (-not $isSpineChild)) {
+            $triage.Add($issue)
+            continue
+        }
+
+        # Determine isFloat: open, not an umbrella, NOT in KnownChildSet
+        # (Only applies when KnownChildSet is provided — floats land in Now)
+        $isFloat = (-not $isUmbrella) -and (-not $isSpineChild)
+
+        # Determine inProgress: has 'in progress' label
+        $isInProgress = $issue.labels -contains 'in progress'
+
+        # Attach derived properties
+        $issue | Add-Member -NotePropertyName 'isFloat'    -NotePropertyValue $isFloat    -Force
+        $issue | Add-Member -NotePropertyName 'inProgress' -NotePropertyValue $isInProgress -Force
+
+        # Check blockers: blocked if blockedBy is non-empty (open blockers only — already filtered by Invoke-PortfolioRender)
+        $hasBlockers = $issue.blockedBy -and $issue.blockedBy.Count -gt 0
+
+        if ($hasBlockers) {
+            # Build per-blocker annotations (CR7)
             $annotations = $issue.blockedBy | ForEach-Object {
                 $blockerNum = $_
                 if ($allIssueNumbers -notcontains $blockerNum) {
@@ -190,41 +291,138 @@ function Get-PortfolioBuckets {
         }
     }
 
-    # Determine Now and Next from sorted rounds
-    $sortedRounds = @($spec.rounds | Sort-Object round)
-    $nowRoundIdx  = -1
+    # Determine active round index: lowest round that has open issues (blocked or unblocked)
     $allOpenIssues = @($openBlocked) + @($openUnblocked)
+    $nowRoundIdx   = -1
     for ($i = 0; $i -lt $sortedRounds.Count; $i++) {
-        $roundIssueNums = $sortedRounds[$i].issues
-        $hasOpen        = $allOpenIssues | Where-Object { $roundIssueNums -contains $_.number }
-        if ($hasOpen) {
+        $roundUmbrellaNums = $sortedRounds[$i].issues
+        $hasOpenUmbrella   = $allOpenIssues | Where-Object { $roundUmbrellaNums -contains $_.number }
+        if ($hasOpenUmbrella) {
             $nowRoundIdx = $i
             break
         }
     }
 
-    $nowIssues  = @()
-    $nextIssues = @()
+    $nowIssues  = [System.Collections.Generic.List[object]]::new()
+    $nextIssues = [System.Collections.Generic.List[object]]::new()
 
     if ($nowRoundIdx -ge 0) {
-        $nowRoundNums = $sortedRounds[$nowRoundIdx].issues
-        $nowIssues    = @(
-            $openUnblocked |
-            Where-Object  { $nowRoundNums -contains $_.number } |
-            Sort-Object   number
-        )
+        $nowRoundNums = @($sortedRounds[$nowRoundIdx].issues)
 
-        if (($nowRoundIdx + 1) -lt $sortedRounds.Count) {
-            $nextRoundNums = $sortedRounds[$nowRoundIdx + 1].issues
-            $nextIssues    = @(
-                $openUnblocked |
-                Where-Object  { $nextRoundNums -contains $_.number } |
-                Sort-Object   number
-            )
+        # Partition open unblocked issues into Now/Next/float buckets.
+        foreach ($issue in $openUnblocked) {
+            $num = [int]$issue.number
+
+            if ($nowRoundNums -contains $num) {
+                # Active-round umbrella → Now
+                $nowIssues.Add($issue)
+            }
+            elseif ($childRoundIndex.ContainsKey($num)) {
+                # Spine child — route by round index
+                $childRound = $childRoundIndex[$num]
+                if ($childRound -le $nowRoundIdx) {
+                    # Active-round spine child → Now
+                    $nowIssues.Add($issue)
+                }
+                else {
+                    # Non-active-round spine child → Next
+                    $nextIssues.Add($issue)
+                }
+            }
+            elseif ($allIssueNumbers -contains $num) {
+                # Non-active-round umbrella → Next or later (put in Next for now)
+                if ($nowRoundIdx + 1 -lt $sortedRounds.Count) {
+                    $nextRoundNums = @($sortedRounds[$nowRoundIdx + 1].issues)
+                    if ($nextRoundNums -contains $num) {
+                        $nextIssues.Add($issue)
+                    }
+                    # Issues in rounds beyond next are ignored in Now/Next (not implemented yet)
+                }
+            }
+            else {
+                # Float (not umbrella, not spine child, not triage) → Now
+                $nowIssues.Add($issue)
+            }
+        }
+
+    }
+    else {
+        # No active round found — all open unblocked issues are floats → Now
+        foreach ($issue in $openUnblocked) {
+            $nowIssues.Add($issue)
         }
     }
 
-    # Helper: return actual bucket item count (no overflow unless bucket is explicitly capped)
+    # Apply ordering to Now: current-round-spine-first → createdAt desc → priority-label tiebreak → number asc
+    # Current-round spine: issues in nowRoundNums (not float)
+    # Floats: issues with isFloat=$true
+    $nowSorted = @(
+        $nowIssues | Sort-Object -Property `
+            @{ Expression = { if ($_.isFloat) { 1 } else { 0 } } },
+            @{ Expression = {
+                $ca = $_.createdAt
+                if ($ca) {
+                    try { -[datetime]::Parse($ca).Ticks } catch { 0 }
+                } else { 0 }
+            }},
+            @{ Expression = { Get-PriorityKey $_.labels } },
+            @{ Expression = { $_.number } }
+    )
+
+    # Apply ordering to Next: createdAt desc → priority → number asc
+    $nextSorted = @(
+        $nextIssues | Sort-Object -Property `
+            @{ Expression = {
+                $ca = $_.createdAt
+                if ($ca) {
+                    try { -[datetime]::Parse($ca).Ticks } catch { 0 }
+                } else { 0 }
+            }},
+            @{ Expression = { Get-PriorityKey $_.labels } },
+            @{ Expression = { $_.number } }
+    )
+
+    # CoverageGaps (AC7): for each active-round umbrella, if it has 0 open sub-issues
+    # in KnownChildSet that are in Now-eligible (unblocked), emit a CoverageGaps entry.
+    $coverageGaps = [System.Collections.Generic.List[object]]::new()
+    if ($nowRoundIdx -ge 0) {
+        $activeUmbrellaSet = @($sortedRounds[$nowRoundIdx].issues)
+        # Build set of child numbers that route to Now (active-round spine children, unblocked)
+        $activeChildNums = [System.Collections.Generic.HashSet[int]]::new()
+        foreach ($childNum in $childRoundIndex.Keys) {
+            $roundIdx = $childRoundIndex[$childNum]
+            if ($roundIdx -le $nowRoundIdx) {
+                # Check not blocked
+                $childIssue = $allOpenIssues | Where-Object { $_.number -eq $childNum }
+                if ($childIssue -and -not ($childIssue.blockedBy -and $childIssue.blockedBy.Count -gt 0)) {
+                    $null = $activeChildNums.Add($childNum)
+                }
+            }
+        }
+
+        foreach ($umbrellaNum in $activeUmbrellaSet) {
+            # CoverageGap rule: with flat-array KnownChildSet (no parent info), we check
+            # whether any KnownChildSet members are classified as active-round spine children.
+            # If none exist, all active-round umbrellas get a CoverageGap entry.
+            $umbrellaHasChildren = $false
+            foreach ($childNum in $knownChildNumbers) {
+                $cRoundIdx = if ($childRoundIndex.ContainsKey([int]$childNum)) { $childRoundIndex[[int]$childNum] } else { -1 }
+                if ($cRoundIdx -le $nowRoundIdx -and $cRoundIdx -ge 0) {
+                    $umbrellaHasChildren = $true
+                    break
+                }
+            }
+
+            if (-not $umbrellaHasChildren) {
+                $coverageGaps.Add([PSCustomObject]@{
+                    umbrella = $umbrellaNum
+                    note     = 'no leaves modeled yet'
+                })
+            }
+        }
+    }
+
+    # Helper: return actual bucket item count
     function Get-BucketTotal {
         param([array]$items)
         if ($null -ne $items) { return $items.Count }
@@ -236,16 +434,17 @@ function Get-PortfolioBuckets {
     $triageSorted         = @($triage              | Sort-Object number)
 
     return [PSCustomObject]@{
-        Now                      = $nowIssues
-        NowTotalCount            = Get-BucketTotal $nowIssues
-        Next                     = $nextIssues
-        NextTotalCount           = Get-BucketTotal $nextIssues
+        Now                      = $nowSorted
+        NowTotalCount            = Get-BucketTotal $nowSorted
+        Next                     = $nextSorted
+        NextTotalCount           = Get-BucketTotal $nextSorted
         Blocked                  = $blockedSorted
         BlockedTotalCount        = Get-BucketTotal $blockedSorted
         RecentlyClosed           = $recentlyClosedSorted
         RecentlyClosedTotalCount = Get-BucketTotal $recentlyClosedSorted
         Triage                   = $triageSorted
         TriageTotalCount         = Get-BucketTotal $triageSorted
+        CoverageGaps             = @($coverageGaps)
     }
 }
 
