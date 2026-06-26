@@ -157,7 +157,42 @@ The minimum suite time if all convertible tests convert:
 
 **Recommendation for the floor**: The `run-pester-sharded.ps1` runner (s4) should isolate `frame-credit-ledger-fail-open.Tests.ps1` as a dedicated slow shard, allowing CI to report it separately or parallelize it with the main suite.
 
+**Measured suite wall-clock by slice:**
+- Baseline (pre-s2): ~508s
+- Post-s2 (orchestrator conversion): ~246.5s (via sharded runner)
+- Post-s4 (sharded runner): 246.5s (runner baseline)
+- Post-s5 (cost-integration conversion): **216.2s** (sharded runner)
+
 ---
+
+## s5: AST-Newly-Detected File Verdicts
+
+Six files were flagged by the extended AST guard (s3) but not inventoried in s1. S5 classified and documented each:
+
+| File | Spawn Form | Verdict | Reason |
+|---|---|---|---|
+| `frame-spine-core.Tests.ps1` | `pwsh -NoProfile -NonInteractive -File $script:LibFile` (Case 1 only) | IRREDUCIBLE | Tests the `-CommentBodyStdin` switch — stdin-pipe CLI contract that cannot be exercised in-process without production code changes |
+| `get-issue-drift.Tests.ps1` | `pwsh -NoProfile -File $wrapperPath` (1 It in wrapper Describe) | IRREDUCIBLE | Tests the JSON output shape of the `get-issue-drift.ps1` wrapper script invoked as CLI |
+| `post-merge-cleanup-squash-merge.Tests.ps1` | `pwsh -NoProfile -NonInteractive -File $script:ScriptFile` (via `InvokeCleanup`/`InvokeCleanupWithGh`) | IRREDUCIBLE | All Its test exit-code + output contracts for `post-merge-cleanup.ps1` top-level executable (no -core.ps1 library) |
+| `test-orphan-branch-auto-resolve-eligible.Tests.ps1` | `pwsh -NoProfile -NonInteractive -Command $cmd` (via `InvokeOrchestrator`) | IRREDUCIBLE | Tri-state exit-code encoding (0/1/2 → `$true`/`$false`/`$null`); conversion would require test helper architecture change |
+| `test-orphan-branch-commits-absorbed.Tests.ps1` | `pwsh -NoProfile -NonInteractive -Command $cmd` (via `Invoke`) | IRREDUCIBLE | Tri-state exit-code encoding (0/1/2 → `$true`/`$false`/`$null`); conversion would require test helper architecture change |
+| `test-orphan-branch-github-signals.Tests.ps1` | `pwsh -NoProfile -NonInteractive -Command $command` (via `InvokeHelper`) | IRREDUCIBLE | Tri-state exit-code encoding (0/1/2 → `$true`/`$false`/`$null`); conversion would require test helper architecture change |
+
+All 6 files remain allowlisted as IRREDUCIBLE. The allowlist now stands at **17 entries** (down from 18; `cost-integration.Tests.ps1` removed in s5 after full conversion).
+
+## s5: cost-integration.Tests.ps1 Conversion
+
+The 10 spawn-based Its in `cost-integration.Tests.ps1` were converted to use a new in-process helper `$script:InvokeOrchestratorInProcess`. The helper:
+- Dot-sources `frame-credit-ledger.ps1` to define `Invoke-FrameCreditLedger`
+- Sets up local function mocks for `git`, `gh`, and all cost functions
+- Calls `Invoke-FrameCreditLedger` directly and returns `@{ ExitCode = 0; Comment = ... }`
+- Applies warn-mode exit-code translation (warn mode never escalates to exit 3/5)
+
+The two dead spawn-based helpers (`$script:InvokeOrchestrator` and `$script:NewCostMockBootstrap`) were removed from the file.
+
+**Wall-clock before conversion**: ~98.6s (19 tests, 10 spawn-based at ~12–27s each)
+**Wall-clock after conversion**: ~7.7s (19 tests, all in-process at ~400–500ms each)
+**Speedup**: 12.8x on this file
 
 ## Scan Coverage Note
 

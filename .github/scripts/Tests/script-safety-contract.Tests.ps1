@@ -82,21 +82,21 @@ Describe 'script safety contract' {
                 'audit-hub-artifact-paths.Tests.ps1',               # CLI integration tests: exercises script argument-parsing entry point; dot-source pattern cannot cover CLI flag paths
                 'bootstrap-antigravity.Tests.ps1',                  # IRREDUCIBLE: exit-code-contract tests require real subprocess to capture exit code
                 'branch-authority-gate.Tests.ps1',
-                'cost-integration.Tests.ps1',                       # CONVERTIBLE: temporarily allowlisted; s5 converts content tests and removes this entry
+                # cost-integration.Tests.ps1 — CONVERTED in s5: all spawn-based Its now use InvokeOrchestratorInProcess (in-process pattern)
                 'frame-credit-ledger-fail-open.Tests.ps1',          # IRREDUCIBLE: 9 exit-code-contract Its that require subprocess to verify exit codes
                 'frame-credit-ledger-orchestrator.Tests.ps1',       # kept 9 real-spawn smoke layer per s2 decision
-                'frame-spine-core.Tests.ps1',                       # AST-newly-detected: invokes script library in-process via real pwsh for CLI-flag path coverage
-                'get-issue-drift.Tests.ps1',                        # AST-newly-detected: integration test invokes wrapper script requiring subprocess
+                'frame-spine-core.Tests.ps1',                       # IRREDUCIBLE: 1 spawn tests -CommentBodyStdin CLI switch (stdin-pipe contract; cannot simulate in-process without production code changes)
+                'get-issue-drift.Tests.ps1',                        # IRREDUCIBLE: 1 spawn tests get-issue-drift.ps1 wrapper CLI surface (JSON output shape of the wrapper script)
                 'hub-artifact-paths-coverage.Tests.ps1',            # CLI integration tests: exercises -Diff mode against live repo; requires sub-process invocation
                 'orchestra-spine-command.Tests.ps1',                # IRREDUCIBLE: exit-code-contract tests require real subprocess
                 'plan-tree-state-verification-fail-open.Tests.ps1', # IRREDUCIBLE: exit-code-contract tests require real subprocess
                 'post-merge-cleanup.Tests.ps1',                     # executor integration tests: post-merge-cleanup.ps1 is a top-level executable (no -core.ps1 library); the #656 AC6 failsafe test must spawn a subprocess to exercise the load-time exit 1, which dot-sourcing cannot test without terminating the Pester host
-                'post-merge-cleanup-squash-merge.Tests.ps1',        # AST-newly-detected: integration tests for squash-merge cleanup path requiring subprocess invocation
+                'post-merge-cleanup-squash-merge.Tests.ps1',        # IRREDUCIBLE: exit-code + output contract tests for post-merge-cleanup.ps1 top-level executable; subprocess required (no -core.ps1 library)
                 'script-safety-contract.Tests.ps1',                 # self-excluded: this file contains spawn-detection logic; AST scan would flag its own CommandAst nodes
                 'session-cleanup-detector.Tests.ps1',
-                'test-orphan-branch-auto-resolve-eligible.Tests.ps1', # AST-newly-detected: orphan-branch integration tests requiring subprocess for CLI entry point
-                'test-orphan-branch-commits-absorbed.Tests.ps1',    # AST-newly-detected: orphan-branch integration tests requiring subprocess for CLI entry point
-                'test-orphan-branch-github-signals.Tests.ps1'       # AST-newly-detected: orphan-branch integration tests requiring subprocess for CLI entry point
+                'test-orphan-branch-auto-resolve-eligible.Tests.ps1', # IRREDUCIBLE: tri-state exit-code encoding (0/1/2) across subprocess boundary; converting would require architecture change to test helper
+                'test-orphan-branch-commits-absorbed.Tests.ps1',    # IRREDUCIBLE: tri-state exit-code encoding (0/1/2) across subprocess boundary; converting would require architecture change to test helper
+                'test-orphan-branch-github-signals.Tests.ps1'       # IRREDUCIBLE: tri-state exit-code encoding (0/1/2) across subprocess boundary; converting would require architecture change to test helper
             )
 
             # AST-based detection: catches both & pwsh / & powershell (CommandAst with command name)
