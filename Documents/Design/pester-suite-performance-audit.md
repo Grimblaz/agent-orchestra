@@ -128,7 +128,7 @@ All `.github/scripts/Tests/*.Tests.ps1` files containing any spawn form (`Start-
 | `frame-credit-ledger-orchestrator.Tests.ps1` | `Start-Process -FilePath 'pwsh'` | 211 (in `$script:InvokeOrchestrator`) | CONVERTIBLE (25 Its) + IRREDUCIBLE (4 Its) | 29 spawn-based Its total. 25 are content tests convertible to in-process pattern. 4 are exit-code-contract tests (ValidateSet non-zero, gh-hang budget, enforce exit 3, enforce exit 4, enforce exit 5 — see note). |
 | `hub-artifact-paths-coverage.Tests.ps1` | `& pwsh -NoProfile -NonInteractive -File` | 39, 70, 241 | IRREDUCIBLE | CLI-surface tests (`-Diff`, `-Render` modes). Already in allowlist. |
 | `orchestra-spine-command.Tests.ps1` | `Start-Process -FilePath 'pwsh'` | 254 (in invoker helper) | IRREDUCIBLE | All Its assert exit code (0 or non-zero) on CLI command surface. Exit-code-contract. |
-| `plan-tree-state-verification-fail-open.Tests.ps1` | `Start-Process -FilePath 'pwsh'` | 64 (in `$script:InvokeOrchestrator`) | IRREDUCIBLE | All Its assert `ExitCode | Should -Be 0`. Exit-code + timing contracts on CLI surface. |
+| `plan-tree-state-verification-fail-open.Tests.ps1` | `Start-Process -FilePath 'pwsh'` | 64 (in `$script:InvokeOrchestrator`) | IRREDUCIBLE | All Its assert ExitCode == 0. Exit-code + timing contracts on CLI surface. |
 | `post-merge-cleanup.Tests.ps1` | `& pwsh -NoProfile -NonInteractive -File` | 1467 | IRREDUCIBLE | Already in allowlist. AC6 failsafe test requires load-time exit 1 via spawn — dot-source would terminate Pester host. |
 | `script-safety-contract.Tests.ps1` | `& pwsh` (in scan pattern string only) | 91 | N/A — false-positive | Contains literal `'& pwsh'` as a regex pattern string inside the scan test itself; self-excluded from allowlist. No real spawn. |
 | `session-cleanup-detector.Tests.ps1` | `& pwsh -NoProfile -NonInteractive -File` | 60, 1626 | IRREDUCIBLE | Line 60: wrapper smoke test (exit-code + env-var resolution). Line 1626: inline pwsh command for env-var override test. Already in allowlist. |
@@ -152,12 +152,14 @@ The minimum suite time if all convertible tests convert:
 **Estimated irreducible floor: ~90s** (dominated by `frame-credit-ledger-fail-open.Tests.ps1`'s 9 exit-code-contract tests which spawn full orchestrator invocations averaging ~10s each).
 
 **Target achievability:**
+
 - ≤120s binding target: achievable with full conversion of the 35 convertible spawn-based Its (~25 in orchestrator + 10 in cost-integration). Converting these removes ~450s from the suite.
 - <60s stretch goal: NOT achievable as-is. The 9 IRREDUCIBLE Its in `frame-credit-ledger-fail-open.Tests.ps1` alone contribute ~78s. Achieving <60s would require a separate approach (parallel shard execution) rather than in-process conversion alone.
 
 **Recommendation for the floor**: The `run-pester-sharded.ps1` runner (s4) should isolate `frame-credit-ledger-fail-open.Tests.ps1` as a dedicated slow shard, allowing CI to report it separately or parallelize it with the main suite.
 
 **Measured suite wall-clock by slice:**
+
 - Baseline (pre-s2): ~508s
 - Post-s2 (orchestrator conversion): ~246.5s (via sharded runner)
 - Post-s4 (sharded runner): 246.5s (runner baseline)
@@ -183,6 +185,7 @@ All 6 files remain allowlisted as IRREDUCIBLE. The allowlist now stands at **17 
 ## s5: cost-integration.Tests.ps1 Conversion
 
 The 10 spawn-based Its in `cost-integration.Tests.ps1` were converted to use a new in-process helper `$script:InvokeOrchestratorInProcess`. The helper:
+
 - Dot-sources `frame-credit-ledger.ps1` to define `Invoke-FrameCreditLedger`
 - Sets up local function mocks for `git`, `gh`, and all cost functions
 - Calls `Invoke-FrameCreditLedger` directly and returns `@{ ExitCode = 0; Comment = ... }`
@@ -215,7 +218,7 @@ The current `script-safety-contract.Tests.ps1` allowlist guard at line 77–95 o
 
 With `ThrottleLimit 8`, the parallel shard wall-clock is constrained by the scheduling of long-running files. The theoretical minimum with **infinite threads** (no contention) is:
 
-```
+```text
 max(single parallel file) + sequential shard
 = 84.6s (post-merge-cleanup-squash-merge)
 + 39.3s (plugin-release-hygiene 13.8s + session-cleanup-detector 25.5s)
@@ -223,6 +226,7 @@ max(single parallel file) + sequential shard
 ```
 
 The **120s binding target is architecturally unreachable** without either:
+
 1. Converting `post-merge-cleanup-squash-merge.Tests.ps1` from real-spawn to in-process (requires a `-core.ps1` library split for post-merge-cleanup, out of scope for #740)
 2. Running the sequential shard in parallel with some of the parallel shard (not possible: sequential shard mutates `GIT_CONFIG_GLOBAL`)
 3. Moving the sequential shard to run before the parallel shard (saves ~0s; parallel still dominates)
