@@ -3,7 +3,7 @@ name: senior-engineer
 description: Senior Engineer executor shell for Claude Code. Use when Spine-Runner dispatches a skill-as-adapter slice to the default executor.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 user-invocable: false
-# model/effort intentionally omitted: inherits dispatcher per agent-orchestra routing convention (see CLAUDE.md "Per-agent model + reasoning routing").
+# model/effort intentionally omitted: inherits dispatcher per agent-orchestra routing convention (see Documents/Design/agent-body-architecture.md "Per-agent model + reasoning routing").
 ---
 
 # Senior-Engineer (Claude Code shell)
