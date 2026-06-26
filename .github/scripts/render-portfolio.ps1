@@ -29,6 +29,45 @@ $MARKER_BEGIN = '<!-- portfolio-tracker:begin -->'
 $MARKER_END   = '<!-- portfolio-tracker:end -->'
 
 # ---------------------------------------------------------------------------
+# Pure helper functions (no I/O)
+# ---------------------------------------------------------------------------
+
+# Returns a sort-key integer for priority labels: lower = higher priority.
+function Get-PriorityKey {
+    param([string[]]$labels)
+    if ($labels -contains 'priority: high')   { return 0 }
+    if ($labels -contains 'priority: medium') { return 1 }
+    if ($labels -contains 'priority: low')    { return 2 }
+    return 3  # unlabeled / last
+}
+
+# Returns -Ticks for descending createdAt sort, or 0 when createdAt is absent/unparseable.
+function Get-CreatedAtSortTicks {
+    param([string]$createdAt)
+    if ($createdAt) {
+        try { return -[datetime]::Parse($createdAt).Ticks } catch { }
+    }
+    return 0
+}
+
+# Returns the count of $items, or 0 when $items is $null.
+function Get-BucketTotal {
+    param([array]$items)
+    if ($null -ne $items) { return $items.Count }
+    return 0
+}
+
+# Returns the numeric model property $propName when present, otherwise $renderedCount.
+function Get-ModelTotal {
+    param([object]$model, [string]$propName, [int]$renderedCount)
+    $prop = $model.PSObject.Properties[$propName]
+    if ($null -ne $prop) {
+        return [int]$prop.Value
+    }
+    return $renderedCount
+}
+
+# ---------------------------------------------------------------------------
 # ConvertFrom-SequenceSpec
 # Parse a flat-YAML sequence spec string using regex only (no ConvertFrom-Yaml).
 # Returns a PSCustomObject or $null on validation failure.
@@ -213,15 +252,6 @@ function Get-PortfolioBuckets {
         }
     }
 
-    # Helper: priority label sort key (lower = higher priority)
-    function Get-PriorityKey {
-        param([string[]]$labels)
-        if ($labels -contains 'priority: high')   { return 0 }
-        if ($labels -contains 'priority: medium') { return 1 }
-        if ($labels -contains 'priority: low')    { return 2 }
-        return 3  # unlabeled / last
-    }
-
     foreach ($issue in $issueStateObjects) {
         if ($issue.state -eq 'CLOSED') {
             if ($issue.closedAt) {
@@ -359,12 +389,7 @@ function Get-PortfolioBuckets {
     $nowSorted = @(
         $nowIssues | Sort-Object -Property `
             @{ Expression = { if ($_.isFloat) { 1 } else { 0 } } },
-            @{ Expression = {
-                $ca = $_.createdAt
-                if ($ca) {
-                    try { -[datetime]::Parse($ca).Ticks } catch { 0 }
-                } else { 0 }
-            }},
+            @{ Expression = { Get-CreatedAtSortTicks $_.createdAt } },
             @{ Expression = { Get-PriorityKey $_.labels } },
             @{ Expression = { $_.number } }
     )
@@ -372,12 +397,7 @@ function Get-PortfolioBuckets {
     # Apply ordering to Next: createdAt desc → priority → number asc
     $nextSorted = @(
         $nextIssues | Sort-Object -Property `
-            @{ Expression = {
-                $ca = $_.createdAt
-                if ($ca) {
-                    try { -[datetime]::Parse($ca).Ticks } catch { 0 }
-                } else { 0 }
-            }},
+            @{ Expression = { Get-CreatedAtSortTicks $_.createdAt } },
             @{ Expression = { Get-PriorityKey $_.labels } },
             @{ Expression = { $_.number } }
     )
@@ -422,13 +442,6 @@ function Get-PortfolioBuckets {
         }
     }
 
-    # Helper: return actual bucket item count
-    function Get-BucketTotal {
-        param([array]$items)
-        if ($null -ne $items) { return $items.Count }
-        return 0
-    }
-
     $blockedSorted        = @($openBlocked        | Sort-Object number)
     $recentlyClosedSorted = @($closedWithinWindow  | Sort-Object number)
     $triageSorted         = @($triage              | Sort-Object number)
@@ -459,16 +472,6 @@ function Format-PortfolioMarkdown {
     param($bucketModel, [string]$timestamp, [int[]]$UnresolvedNums = @())
 
     $sb = [System.Text.StringBuilder]::new()
-
-    # Helper: safe total count from model property (may be absent in test fixtures)
-    function Get-ModelTotal {
-        param([object]$model, [string]$propName, [int]$renderedCount)
-        $prop = $model.PSObject.Properties[$propName]
-        if ($null -ne $prop) {
-            return [int]$prop.Value
-        }
-        return $renderedCount
-    }
 
     # --- Now ---
     # Cap-floor constant (AC10): max float items to render before (+M more).
