@@ -13,8 +13,6 @@ Slim entryway for GitHub review intake, proxy-prosecution guardrails, and the ex
 
 Activate this skill when the request includes `github review`, `review github`, or `cr review`. It is the entryway for deterministic intake and judgment of GitHub-originated review feedback before implementation begins, while shared mechanics stay indexed in extracted references.
 
-### Shared judgment surface with non-GitHub review
-
 The GitHub-intake path consumes the same `agents/Code-Review-Response.agent.md` judge body as the non-GitHub review path and therefore the same structural-criteria deferral gate. Findings ingested from GitHub are classified against the canonical criterion taxonomy in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1` (the predicates), and any `DEFERRED-SIGNIFICANT (structural)` outcome is filed via `skills/safe-operations/scripts/Add-FollowUpIssue.ps1` (the filing helper). To guarantee AC7 dedup correctness across both paths, the GitHub-intake filing call canonicalizes the title with `ConvertTo-CanonicalFollowupTitle` (from the same helper file) and runs §2c dedup-on-create against the canonicalized title before invoking `Add-FollowUpIssue` — identical to the Code-Conductor non-GitHub path. The GitHub-intake path MUST also call `Get-AcTermsFromIssue` (ARM 2) alongside `Get-AcRefsFromIssue` (ARM 1) before invoking `Get-StructuralVerdict`, so that behavioral-term AC cross-check fires for GitHub-ingested findings — identical to the Code-Conductor path. The `ac_cross_check` OUT object is required for any `dismiss`/`defer` disposition entry at severity ≥ medium per the v2 schema.
 
 ## GitHub Review Mode (Proxy Prosecution Pipeline)
@@ -32,8 +30,6 @@ In GitHub Review Mode, do not add net-new findings outside the ingested GitHub l
 ### Ledger-vs-Validation Boundary
 
 Ingestion and ledger-building (steps 1–2) are mechanical: the conductor records each ingested finding verbatim and maps it to its GitHub comment/review ID. The conductor MUST NOT independently assess the technical merit of an ingested finding — neither accepting it, rejecting it, nor forming any per-finding correctness verdict — before proxy prosecution runs. Per-finding validation is the proxy prosecution pass's responsibility (step 3).
-
-This boundary protects adversarial independence, not just effort: the conductor is the same context that later owns the ledger build (step 2), the accepted-fix dispatch to specialists (R4), and the judge dispatch (step 5), so a correctness opinion formed during ingestion can bias those downstream steps it also owns. Code-Critic is dispatched as a separate agent precisely so prosecution forms its view independently — pre-judging in the conductor collapses that separation (the same principle as the Senior-Engineer adversarial-independence guard).
 
 Reading an ingested finding closely enough to record it and map it to its GitHub comment/review ID is expected; forming a verdict on whether it is *correct* — or assigning your own severity/type classification ahead of proxy prosecution — is not. The `NEW-CRITICAL` safety exception below — which concerns a *newly discovered* critical blocker, not an ingested finding — is the only conductor-side correctness judgment permitted before proxy prosecution.
 
@@ -77,10 +73,6 @@ The proxy prosecution pipeline is single-shot: prosecution → defense → judge
 | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
 | Spotting a new bug while reading GitHub review comments                          | Adding it informally bypasses the prosecution → defense pipeline and breaks ledger integrity | Surface as `NEW-CRITICAL` with concrete evidence only; present to user explicitly for decision  |
 | Routing implementation work before all judgment states are explicit              | Fixes applied to some findings may contradict pending rulings on others                      | All items must reach terminal state (ACCEPT / REJECT / DEFERRED-SIGNIFICANT (structural)) before any routing |
-| Treating a reviewer preference comment as a defect                               | Evidence-free rejection inflates fix scope and wastes implementation cycles                  | Reject by default; require cited code, test output, or acceptance criteria evidence             |
-| Running rebuttal rounds after the judge rules                                    | Proxy prosecution is single-shot; post-judge rebuttals break convergence                     | Judge rules final; unresolved low-confidence items go async via GitHub comment                  |
-| Accepting a finding just because it's consistently raised across multiple passes | Repetition is not evidence of correctness                                                    | Each finding still requires concrete evidence regardless of how many passes surface it          |
-| Pre-verifying an ingested finding's technical merit while building the ledger | The conductor forms a correctness verdict before proxy prosecution, duplicating step 3 and biasing the fix-dispatch and judge steps it also owns (adversarial-independence contamination) | Steps 1–2 are mechanical — record verbatim + map comment ID only; defer per-finding validation to proxy prosecution (step 3). The sole pre-prosecution correctness call is `NEW-CRITICAL` |
 
 ## Response Loop Completion (Terminal Step)
 
