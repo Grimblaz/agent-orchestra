@@ -2,6 +2,21 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.2] — 2026-06-26
+
+### Changed
+
+- **CLAUDE.md diet — extracted four blocks to their owning sources** (#694): trimmed `CLAUDE.md` from ~270 to 189 lines (below the <190 target and the <200 A2 audit budget) by moving four duplicated content blocks to their canonical homes without information loss — the cross-tool handoff marker catalog → new `skills/session-memory-contract/references/handoff-markers.md` (13 active + 1 retired families); the deferrable Intent Routing mechanics (rules 1,2,3,5,9,10) → `skills/routing-tables/SKILL.md § Intent Routing Mechanics`; the auto-mode boundary verification recipe → `skills/session-startup/SKILL.md` (sentinel-wrapped); and the full per-agent model + reasoning routing table → `Documents/Design/agent-body-architecture.md`. The four CLAUDE.md keep-set routing rules (4, 6, 7, 8) and all four section stubs with resolving pointers remain.
+
+### Fixed
+
+- **Per-agent routing parity claim and moved-recipe link drift** (#694 adversarial review CR1/CR2/CR4): struck the now-false "routing-table parity" enforcement claim from `agent-body-architecture.md` and added the authoritative-source-is-frontmatter note; repaired two dead relative links in the relocated auto-mode recipe (`skills/session-startup/SKILL.md`) and hardened `auto-mode-boundary.Tests.ps1` test 7 to resolve recipe links against the recipe file's own directory instead of the repo root; updated a stale `.DESCRIPTION` docstring in `per-agent-model-routing.Tests.ps1`.
+- **Gemini Code Assist review** (#694 PR #738): case-insensitive `-replace` for repo-root stripping in `per-agent-model-routing.Tests.ps1`, `@(Get-Content)` array-wrap for the diet line count, and a `#when-to-skip` anchor on the upstream-onboarding recipe link.
+
+### Tests
+
+- New `claudemd-diet.Tests.ps1` (5 tests): the <200-line diet guard plus pointer-resolution sentinels for all four extraction destinations. `per-agent-model-routing.Tests.ps1`, `auto-mode-boundary.Tests.ps1`, and `orchestra-spine-command.Tests.ps1` pivoted to read the relocated content from its new homes; `audit-docs-mechanical.Tests.ps1` AC9 flipped to assert the hub `CLAUDE.md` now passes the A2 budget check. Added a `.github/prompts/*.prompt.md` entry to `Documents/Design/hub-artifact-paths-classification.yml` — the Intent Routing extraction surfaced that Copilot-prompt path family into a scanned scope (`skills/*/SKILL.md`), which the hub-artifact-paths coverage gate requires classified.
+
 ## [2.35.1] — 2026-06-26
 
 ### Added

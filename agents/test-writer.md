@@ -3,7 +3,7 @@ name: test-writer
 description: Test authoring and validation specialist shell for Claude Code. Use when Code-Conductor needs behavior-focused tests or validation evidence.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent
 user-invocable: false
-# model/effort intentionally omitted: inherits dispatcher per agent-orchestra routing convention (see CLAUDE.md "Per-agent model + reasoning routing").
+# model/effort intentionally omitted: inherits dispatcher per agent-orchestra routing convention (see Documents/Design/agent-body-architecture.md "Per-agent model + reasoning routing").
 ---
 
 # Test-Writer (Claude Code shell)

@@ -291,6 +291,22 @@ families:
       repos maintain their own. Missing = Copilot operates without hub-level instruction
       context (visible-warning, not hard-failure)."
 
+  ".github/prompts/*.prompt.md":
+    claude_resolves: not-applicable
+    copilot_resolves: source-tree
+    requires_version_bump: false
+    experience: hard-failure
+    examples:
+      - .github/prompts/orchestrate.prompt.md
+      - .github/prompts/plan.prompt.md
+      - .github/prompts/review-github.prompt.md
+    notes: "Copilot slash-command prompt entry points — the Copilot mirror of Claude's
+      commands/*.md surface. Claude never loads these (it uses commands/*.md), so
+      claude_resolves is not-applicable and no plugin version bump is required. Copilot
+      reads them from source-tree; a missing prompt file is a hard-failure for the
+      corresponding Copilot slash command. Copilot support is frozen — see
+      Documents/Design/copilot-deprecation.md."
+
   ".github/instructions/*.instructions.md":
     claude_resolves: none
     copilot_resolves: none

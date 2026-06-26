@@ -3,7 +3,7 @@ name: solution-designer
 description: Technical design exploration and issue documentation — explores architecture options, documents decisions, updates GitHub issues. Use when a GitHub issue needs technical design exploration before planning.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
 user-invocable: false
-# model/effort intentionally omitted: inline /experience|/design|/plan inherit user-session default; subagent dispatch inherits dispatcher (see CLAUDE.md "Per-agent model + reasoning routing").
+# model/effort intentionally omitted: inline /experience|/design|/plan inherit user-session default; subagent dispatch inherits dispatcher (see Documents/Design/agent-body-architecture.md "Per-agent model + reasoning routing").
 ---
 
 # Solution-Designer (Claude Code shell)

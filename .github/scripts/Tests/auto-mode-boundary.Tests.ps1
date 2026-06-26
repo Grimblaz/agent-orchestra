@@ -182,22 +182,25 @@ Describe 'auto-mode boundary contract' {
         }
         $scanFiles.Add($script:ClaudemdPath)
 
-        # Build allowlist regions from CLAUDE.md sentinel blocks (directive + recipe)
+        # Build allowlist regions: directive from CLAUDE.md, recipe from session-startup SKILL.md
         $directiveInner = & $script:ExtractBetween -Content $script:ClaudemdContent `
             -Begin $script:BeginSentinel -End $script:EndSentinel
-        $recipeInner    = & $script:ExtractBetween -Content $script:ClaudemdContent `
+        $recipeInner    = & $script:ExtractBetween -Content $script:SkillContent `
             -Begin $script:RecipeBegin -End $script:RecipeEnd
 
         foreach ($filePath in $scanFiles) {
             $raw = & $script:ReadFile -Path $filePath
             if ([string]::IsNullOrEmpty($raw)) { continue }
 
-            # For CLAUDE.md: strip sentinel blocks before scanning
+            # For CLAUDE.md: strip directive sentinel block before scanning
+            # For session-startup SKILL.md: strip recipe sentinel block before scanning
             $effective = $raw
             if ($filePath -eq $script:ClaudemdPath) {
                 if ($null -ne $directiveInner) {
                     $effective = $effective.Replace($script:BeginSentinel + $directiveInner + $script:EndSentinel, '')
                 }
+            }
+            if ($filePath -eq $script:SkillAllowlist) {
                 if ($null -ne $recipeInner) {
                     $effective = $effective.Replace($script:RecipeBegin + $recipeInner + $script:RecipeEnd, '')
                 }
@@ -275,10 +278,10 @@ Describe 'auto-mode boundary contract' {
     # 6. Recipe links use inline Markdown form only
     # ─────────────────────────────────────────────────────────────
     It 'all links inside the recipe sentinel block use inline Markdown form [text](path)' {
-        $recipeInner = & $script:ExtractBetween -Content $script:ClaudemdContent `
+        $recipeInner = & $script:ExtractBetween -Content $script:SkillContent `
             -Begin $script:RecipeBegin -End $script:RecipeEnd
         $recipeInner | Should -Not -BeNullOrEmpty `
-            -Because 'CLAUDE.md must contain a recipe sentinel block for this assertion to run'
+            -Because 'skills/session-startup/SKILL.md must contain a recipe sentinel block for this assertion to run'
 
         # Reference-style links look like [text][ref] — disallow them
         $recipeInner | Should -Not -Match '\[[^\]]+\]\[[^\]]*\]' `
@@ -296,10 +299,11 @@ Describe 'auto-mode boundary contract' {
     # 7. Path-drift: every recipe link target must exist
     # ─────────────────────────────────────────────────────────────
     It 'every recipe link target references an existing repo path' {
-        $recipeInner = & $script:ExtractBetween -Content $script:ClaudemdContent `
+        $recipeInner = & $script:ExtractBetween -Content $script:SkillContent `
             -Begin $script:RecipeBegin -End $script:RecipeEnd
         if ([string]::IsNullOrEmpty($recipeInner)) { return }
 
+        $recipeFileDir = Split-Path $script:SkillAllowlist -Parent
         $linkMatches = [regex]::Matches($recipeInner, '\[[^\]]+\]\(([^)]+)\)')
         foreach ($m in $linkMatches) {
             $href = $m.Groups[1].Value.Trim()
@@ -307,13 +311,14 @@ Describe 'auto-mode boundary contract' {
             if ($href -match '^https?://' -or $href -match '^#') { continue }
             # Strip query/anchor from local paths
             $localPath = ($href -split '[?#]')[0]
-            # Root-anchored paths start with /
+            # Root-anchored paths start with /; all other relative paths resolve against the recipe file's dir
             if ($localPath.StartsWith('/')) {
-                $localPath = $localPath.TrimStart('/')
+                $fullPath = Join-Path $script:RepoRoot $localPath.TrimStart('/')
+            } else {
+                $fullPath = Join-Path $recipeFileDir $localPath
             }
-            $fullPath = Join-Path $script:RepoRoot $localPath
             $fullPath | Should -Exist `
-                -Because "recipe link target '$href' must reference an existing repo path"
+                -Because "recipe link target '$href' must reference an existing path (resolved relative to recipe file dir)"
         }
     }
 
@@ -321,10 +326,10 @@ Describe 'auto-mode boundary contract' {
     # 8. Recipe risky-case command whitelist
     # ─────────────────────────────────────────────────────────────
     It 'the recipe risky case contains at least one whitelisted command' {
-        $recipeInner = & $script:ExtractBetween -Content $script:ClaudemdContent `
+        $recipeInner = & $script:ExtractBetween -Content $script:SkillContent `
             -Begin $script:RecipeBegin -End $script:RecipeEnd
         $recipeInner | Should -Not -BeNullOrEmpty `
-            -Because 'CLAUDE.md must contain a recipe sentinel block'
+            -Because 'skills/session-startup/SKILL.md must contain a recipe sentinel block'
 
         $found = $false
         foreach ($cmd in $script:RiskyCommandWhitelist) {
@@ -341,10 +346,10 @@ Describe 'auto-mode boundary contract' {
     # 9. Recipe Axis B existing-issue qualifier
     # ─────────────────────────────────────────────────────────────
     It 'the recipe Axis B section references an existing issue' {
-        $recipeInner = & $script:ExtractBetween -Content $script:ClaudemdContent `
+        $recipeInner = & $script:ExtractBetween -Content $script:SkillContent `
             -Begin $script:RecipeBegin -End $script:RecipeEnd
         $recipeInner | Should -Not -BeNullOrEmpty `
-            -Because 'CLAUDE.md must contain a recipe sentinel block'
+            -Because 'skills/session-startup/SKILL.md must contain a recipe sentinel block'
 
         $recipeInner | Should -Match '(?i)existing.?issue' `
             -Because 'the Axis B recipe section must anchor to an existing-issue invocation, not a greenfield prompt'
@@ -354,10 +359,10 @@ Describe 'auto-mode boundary contract' {
     # 10. Recipe fallback prose: all 3 steps present and in order
     # ─────────────────────────────────────────────────────────────
     It 'the recipe risky case contains the three-step fallback prose in order' {
-        $recipeInner = & $script:ExtractBetween -Content $script:ClaudemdContent `
+        $recipeInner = & $script:ExtractBetween -Content $script:SkillContent `
             -Begin $script:RecipeBegin -End $script:RecipeEnd
         $recipeInner | Should -Not -BeNullOrEmpty `
-            -Because 'CLAUDE.md must contain a recipe sentinel block'
+            -Because 'skills/session-startup/SKILL.md must contain a recipe sentinel block'
 
         # Steps (word-boundary match to avoid substring false-positives like "confirmation"):
         #   1. record transcript  2. confirm allowlist  3. file an issue

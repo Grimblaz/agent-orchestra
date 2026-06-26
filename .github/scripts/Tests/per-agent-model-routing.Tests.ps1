@@ -12,7 +12,7 @@
     - Enum membership:        declared values belong to the allowed sets (case-insensitive), including explicit D7 inherit.
     - Inherit-comment:        omitting shells carry an explanatory YAML comment.
     - Routing-values oracle:  declared-routing shells match hard-coded expected values (D2+D5+quality).
-    - Routing-table parity:   CLAUDE.md routing table matches shell frontmatter for oracle shells and D7 inherit rows.
+    - Documentation home:     Documents/Design/agent-body-architecture.md exists and contains the routing section.
     - Command enforcement D3: upstream commands (/experience /design /plan /polish) must NOT declare model/effort.
     - Command enforcement D1: commands/orchestrate.md MUST declare model: sonnet, effort: high.
     - Scope guard:            commands/orchestrate.md `# /orchestrate` H1 is permanently followed by <!-- scope: claude-only -->.
@@ -20,7 +20,7 @@
     Parser strategy: ALL frontmatter parsing uses raw-text regex against the frontmatter slice
     (content between the first pair of --- delimiters), NOT ConvertFrom-Yaml, because YAML
     comments are stripped during parse and the inherit-comment check requires them.
-    Routing-table parity uses Markdown-table parsing (raw-text regex), not YAML.
+    Documentation home check uses raw-text regex (heading + sentinel string), not YAML or table parsing.
 #>
 
 Describe 'Per-agent model + effort routing contract' {
@@ -29,7 +29,7 @@ Describe 'Per-agent model + effort routing contract' {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:AgentsDirectory = Join-Path $script:RepoRoot 'agents'
         $script:CommandsDirectory = Join-Path $script:RepoRoot 'commands'
-        $script:ClaudeMdPath = Join-Path $script:RepoRoot 'CLAUDE.md'
+        $script:AgentBodyArchPath = Join-Path $script:RepoRoot 'Documents/Design/agent-body-architecture.md'
 
         # Routing-values oracle: hard-coded expected routing for explicitly-declared shells.
         # code-conductor is D2 (redundant orchestrator guarantee); code-critic / code-review-response
@@ -112,22 +112,6 @@ Describe 'Per-agent model + effort routing contract' {
             }
         }
 
-        $script:AssertRoutingTableMatchesDeclaration = {
-            param(
-                [string]$RelPath,
-                [PSCustomObject]$Declaration,
-                [string]$ExpectationLabel
-            )
-
-            $row = $script:RoutingTable[$RelPath]
-            $row | Should -Not -BeNullOrEmpty -Because "CLAUDE.md routing table must contain a row for '$RelPath'"
-
-            $rowModel = if ($null -ne $row.model) { $row.model.ToLowerInvariant() } else { $null }
-            $rowEffort = if ($null -ne $row.effort) { $row.effort.ToLowerInvariant() } else { $null }
-            $rowModel  | Should -Be $Declaration.Model  -Because "CLAUDE.md table model for '$RelPath' must match $ExpectationLabel"
-            $rowEffort | Should -Be $Declaration.Effort -Because "CLAUDE.md table effort for '$RelPath' must match $ExpectationLabel"
-        }
-
         # Levenshtein distance for enum-mismatch hints
         $script:Levenshtein = {
             param([string]$A, [string]$B)
@@ -163,28 +147,6 @@ Describe 'Per-agent model + effort routing contract' {
 
             return $closest
         }
-
-        # Parse CLAUDE.md routing table: returns hashtable keyed by shell path
-        # Matches rows of the form: | `shell-path` | `model` | `effort` | ... |
-        $script:ParseRoutingTable = {
-            param([string]$Content)
-            $sectionMatch = [regex]::Match($Content, '(?ms)^## Per-agent model \+ reasoning routing\s*\r?\n(?<body>.*?)(?=^## |\z)')
-            if (-not $sectionMatch.Success) { return @{} }
-            $body = $sectionMatch.Groups['body'].Value
-            $rows = [regex]::Matches($body, '(?m)^\|\s*`(?<shell>[^`]+)`\s*\|\s*`(?<model>[^`]+)`\s*\|\s*`(?<effort>[^`]+)`\s*\|')
-            $table = @{}
-            foreach ($row in $rows) {
-                $table[$row.Groups['shell'].Value] = @{
-                    model  = $row.Groups['model'].Value
-                    effort = $row.Groups['effort'].Value
-                }
-            }
-            return $table
-        }
-
-        # Pre-load
-        $script:ClaudeMdContent = Get-Content -Path $script:ClaudeMdPath -Raw -ErrorAction Stop
-        $script:RoutingTable = & $script:ParseRoutingTable -Content $script:ClaudeMdContent
 
         # Recursive scan future-proofs against any subdirectory layout under agents/
         # (currently flat). The `-notlike '*.agent.md'` filter still excludes shared bodies.
@@ -262,68 +224,42 @@ Describe 'Per-agent model + effort routing contract' {
         }
     }
 
-    It 'routing-table parity: CLAUDE.md table matches shell frontmatter for oracle shells' {
-        $script:RoutingTable.Count | Should -BeGreaterThan 0 -Because (
-            'CLAUDE.md must contain a parseable "## Per-agent model + reasoning routing" table'
-        )
-
-        foreach ($relPath in $script:ExpectedRouting.Keys) {
-            $declaration = & $script:ReadRoutingDeclaration -RelPath $relPath
-            & $script:AssertRoutingTableMatchesDeclaration `
-                -RelPath $relPath `
-                -Declaration $declaration `
-                -ExpectationLabel 'shell frontmatter'
-        }
-
+    It 'D7 inherit-routing: spine-runner and spine-run declare model: inherit, effort: inherit and carry the D7 comment' {
         foreach ($relPath in $script:D7InheritRouting.Keys) {
             $declaration = & $script:ReadRoutingDeclaration -RelPath $relPath
             $declaration.Model  | Should -Be $script:D7InheritRouting[$relPath].model  -Because "$relPath model must match D7 inherit routing"
             $declaration.Effort | Should -Be $script:D7InheritRouting[$relPath].effort -Because "$relPath effort must match D7 inherit routing"
             (& $script:HasD7InheritComment -Frontmatter $declaration.Frontmatter) | Should -BeTrue -Because "$relPath must carry the D7 inherit YAML comment"
-            & $script:AssertRoutingTableMatchesDeclaration `
-                -RelPath $relPath `
-                -Declaration $declaration `
-                -ExpectationLabel 'D7 frontmatter'
-        }
-
-        # Also check orchestrate.md command row
-        foreach ($relPath in $script:RequiredCommandRouting.Keys) {
-            $row = $script:RoutingTable[$relPath]
-            $row | Should -Not -BeNullOrEmpty -Because "CLAUDE.md routing table must contain a row for '$relPath'"
-            $row.model.ToLowerInvariant()  | Should -Be $script:RequiredCommandRouting[$relPath].model  -Because "CLAUDE.md table model for '$relPath' must match required value"
-            $row.effort.ToLowerInvariant() | Should -Be $script:RequiredCommandRouting[$relPath].effort -Because "CLAUDE.md table effort for '$relPath' must match required value"
         }
     }
 
-    It 'routing-table parity: non-D7 inherit rows in CLAUDE.md must not have frontmatter model/effort' {
-        $script:RoutingTable.Count | Should -BeGreaterThan 0 -Because (
-            'CLAUDE.md must contain a parseable "## Per-agent model + reasoning routing" table'
-        )
+    It 'frontmatter-only inherit check: non-oracle, non-D7 shells must not declare model or effort' {
+        foreach ($shellFile in $script:ShellFiles) {
+            $relPath = ($shellFile.FullName -replace [regex]::Escape($script:RepoRoot), '').TrimStart([IO.Path]::DirectorySeparatorChar, '/').Replace('\', '/')
 
-        foreach ($relPath in $script:RoutingTable.Keys) {
-            $row = $script:RoutingTable[$relPath]
-            if ($row.model -ne 'inherit') { continue }
+            if ($script:ExpectedRouting.ContainsKey($relPath)) { continue }
             if ($script:D7InheritRouting.ContainsKey($relPath)) { continue }
 
-            $shellPath = Join-Path $script:RepoRoot $relPath
-            Test-Path $shellPath | Should -BeTrue -Because (
-                "$relPath is listed as 'inherit' in the CLAUDE.md routing table but the file does not exist — " +
-                "remove the table entry or create the shell file"
-            )
-
-            $fm = & $script:GetFrontmatter -Content (Get-Content -Path $shellPath -Raw)
-            $model = & $script:GetFrontmatterField -Frontmatter $fm -FieldName 'model'
+            $fm = & $script:GetFrontmatter -Content (Get-Content -Path $shellFile.FullName -Raw)
+            $model  = & $script:GetFrontmatterField -Frontmatter $fm -FieldName 'model'
             $effort = & $script:GetFrontmatterField -Frontmatter $fm -FieldName 'effort'
 
-            $model  | Should -BeNull -Because (
-                "$relPath is listed as 'inherit' in the CLAUDE.md routing table but declares model: " +
-                "in its frontmatter — remove the field or update the table"
-            )
-            $effort | Should -BeNull -Because (
-                "$relPath is listed as 'inherit' in the CLAUDE.md routing table but declares effort: " +
-                "in its frontmatter — remove the field or update the table"
-            )
+            $model  | Should -BeNull -Because "$relPath is an inherit shell and must not declare model: in frontmatter"
+            $effort | Should -BeNull -Because "$relPath is an inherit shell and must not declare effort: in frontmatter"
         }
+    }
+
+    It 'routing documentation home: Documents/Design/agent-body-architecture.md exists and contains the routing table' {
+        Test-Path $script:AgentBodyArchPath | Should -BeTrue -Because (
+            'the routing table, inheritance order, and override-discipline rule live in agent-body-architecture.md (issue #694 migration)'
+        )
+        $content = Get-Content -Path $script:AgentBodyArchPath -Raw
+        $content | Should -Match '## Per-agent model \+ reasoning routing' -Because (
+            'agent-body-architecture.md must contain the ## Per-agent model + reasoning routing section'
+        )
+        $content | Should -Match 'CLAUDE_CODE_SUBAGENT_MODEL' -Because (
+            'the inheritance-order table including CLAUDE_CODE_SUBAGENT_MODEL must be present in agent-body-architecture.md'
+        )
     }
 
     It 'command D3: upstream commands must not declare model or effort (inherit user-session)' {

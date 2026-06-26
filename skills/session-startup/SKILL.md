@@ -258,6 +258,18 @@ Skip the entire check silently in any of these cases:
 
 These are normal conditions in repos that have not installed the agent-orchestra plugin or in environments where PowerShell is unavailable.
 
+<!-- auto-mode-boundary-recipe:begin -->
+## Auto-mode Boundary Verification Recipe
+
+Run these three checks in Claude Code to audit the auto-mode boundary in your session.
+
+**1. Positive case (D1):** Run `git status` under auto-mode. It should execute immediately without a permission prompt. If it prompts, D1 has regressed — check your `permissions.allow` list.
+
+**2. Risky case (D2):** Run `gh pr merge --admin` against a draft PR you own, then **abort at the Claude Code permission prompt** — do not complete the merge. Expected: a permission prompt appears before execution. If no prompt appears and the command is silently denied, you are observing the L2 contextual-classifier override pattern documented above. Fallback: (a) record the chat transcript verbatim, (b) confirm the [cleanup-script allowlist entry](#permission-allowlist-recommended) is applied (project-level for contributors, `~/.claude/settings.json` for plugin consumers — see that skill section for the correct path), (c) file an issue at the [agent-orchestra repo](https://github.com/Grimblaz/agent-orchestra/issues) with the transcript and settings excerpt.
+
+**3. Axis B case (D3):** Run `/experience N` against an **existing issue** you own (use an issue that already carries an upstream marker — e.g., a `<!-- experience-owner-complete-{ID} -->` comment from a prior `/experience` run — so the upstream-onboarding standards check actually fires; a fresh unframed issue will skip the standards check per [skills/upstream-onboarding/SKILL.md § When to Skip](../upstream-onboarding/SKILL.md#when-to-skip)). Verify the upstream-onboarding standards check fires `AskUserQuestion`. If the agent skips the question and assumes an answer, D3 has regressed — report it on [issue #546](https://github.com/Grimblaz/agent-orchestra/issues/546).
+<!-- auto-mode-boundary-recipe:end -->
+
 ## Gotchas
 
 | Trigger                            | Gotcha                                                                                | Fix                                                                                         |

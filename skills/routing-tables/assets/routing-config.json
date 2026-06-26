@@ -258,7 +258,7 @@
     ]
   },
   "nl_intent_routing": {
-    "source": "skills/routing-tables/SKILL.md + CLAUDE.md/copilot-instructions.md directives",
+    "source": "skills/routing-tables/SKILL.md intent-routing-mechanics + CLAUDE.md/copilot-instructions.md entry-gating directives",
     "entries": [
       {
         "intent_key": "review-pr-github",
