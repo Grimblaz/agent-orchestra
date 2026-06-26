@@ -213,6 +213,22 @@ Describe 'Issue #723 wall-clock fixture durability guard' -Tag 'issue-723', 'wal
         }
 
         It 'Every now-coupled source field in core is in the guard known-list' {
+            # CR4 fix (issue #723 PR round 2): fail loud on any null SourceField FIRST, before
+            # the known-list lookup. A null SourceField means the backtrack-regex at line ~130
+            # desynced from core's assignment shape; silently filtering it out (Where-Object
+            # $null -ne $_.SourceField) would let the drift detector pass green on exactly the
+            # desync it exists to catch (issue #723 MF3 defense-in-depth).
+            $nullSites = @($script:CoreNowCoupledSites | Where-Object { $null -eq $_.SourceField })
+            $nullSiteSummary = @($nullSites | ForEach-Object { "core:$($_.Line) ($($_.CompareVar) <- <unresolved>)" })
+            $nullSites | Should -BeNullOrEmpty -Because (
+                "every now-coupled (`$now - var).TotalDays comparison in $script:CoreRelPath must " +
+                "resolve to a named source field via the Parse-assignment backtrack. Null SourceField " +
+                "means the backtrack regex desynced from the core script's assignment shape -- " +
+                "update the backtrack pattern in this guard's GetCoreNowCoupledFields script block " +
+                "(issue #723, MF3/CR4).`n" +
+                "Unresolved sites:`n  " + ($nullSiteSummary -join "`n  ")
+            )
+
             $unknown = @(
                 $script:CoreNowCoupledSites |
                     Where-Object { $null -ne $_.SourceField } |

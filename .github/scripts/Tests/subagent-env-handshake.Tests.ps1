@@ -387,9 +387,15 @@ Describe 'subagent-env-handshake v1 contract' {
             # Post-#632, ND-2, environment-divergence, and the S4 framing live
             # once in the shared adversarial-review Partial-pass Recovery section
             # rather than being copied into each command/skill recovery clause.
-            $adversarialContent | Should -Match 'ND-2'
-            $adversarialContent | Should -Match 'environment-divergence'
-            $adversarialContent | Should -Match ([regex]::Escape($s4Framing)) -Because 'the consolidated adversarial-review/platforms/claude.md recovery section must contain the S4 framing'
+            # CR2 fix (issue #723 PR round 2): scope assertions to the section body,
+            # not the whole file, so a future migration scattering the terms fails red.
+            $sectionMatch = [regex]::Match($adversarialContent, '(?ms)## Partial-pass Recovery\r?\n(?<body>.*?)(?=\r?\n## |\z)')
+            $sectionMatch.Success | Should -BeTrue -Because 'skills/adversarial-review/platforms/claude.md must contain the ## Partial-pass Recovery section'
+            $sectionBody = $sectionMatch.Groups['body'].Value
+
+            $sectionBody | Should -Match 'ND-2' -Because 'ND-2 must be in the Partial-pass Recovery section (post-#632 consolidation invariant)'
+            $sectionBody | Should -Match 'environment-divergence' -Because 'environment-divergence must be in the Partial-pass Recovery section (post-#632 consolidation invariant)'
+            $sectionBody | Should -Match ([regex]::Escape($s4Framing)) -Because 'the consolidated adversarial-review/platforms/claude.md recovery section must contain the S4 framing'
         }
     }
 }
