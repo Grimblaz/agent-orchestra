@@ -2,7 +2,7 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
-## [2.35.1] — 2026-06-26
+## [2.35.2] — 2026-06-26
 
 ### Changed
 
@@ -16,6 +16,12 @@ All notable changes to agent-orchestra will be documented in this file.
 ### Tests
 
 - New `claudemd-diet.Tests.ps1` (5 tests): the <200-line diet guard plus pointer-resolution sentinels for all four extraction destinations. `per-agent-model-routing.Tests.ps1`, `auto-mode-boundary.Tests.ps1`, and `orchestra-spine-command.Tests.ps1` pivoted to read the relocated content from its new homes; `audit-docs-mechanical.Tests.ps1` AC9 flipped to assert the hub `CLAUDE.md` now passes the A2 budget check. Added a `.github/prompts/*.prompt.md` entry to `Documents/Design/hub-artifact-paths-classification.yml` — the Intent Routing extraction surfaced that Copilot-prompt path family into a scanned scope (`skills/*/SKILL.md`), which the hub-artifact-paths coverage gate requires classified.
+
+## [2.35.1] — 2026-06-26
+
+### Added
+
+- **Ledger-vs-Validation Boundary guardrail** (`skills/code-review-intake/SKILL.md`, `Documents/Design/code-review.md`): a normative `### Ledger-vs-Validation Boundary` section plus a Gotchas row establishing that GitHub review ingestion and ledger-building (steps 1–2) are strictly mechanical — the conductor records each ingested finding verbatim and maps it to its comment/review ID, and MUST NOT accept, reject, or form any per-finding correctness verdict before proxy prosecution runs. Per-finding validation is the proxy prosecution pass's responsibility (step 3); the sole pre-prosecution conductor-side correctness call permitted is `NEW-CRITICAL` for a newly discovered blocker, not an ingested finding. Protects adversarial independence: the conductor also owns the ledger build, accepted-fix dispatch (R4), and judge dispatch, so a correctness opinion formed during ingestion would bias those downstream steps (#735).
 
 ## [2.35.0] — 2026-06-24
 
