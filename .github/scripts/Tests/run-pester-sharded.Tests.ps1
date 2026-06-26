@@ -144,6 +144,25 @@ throw 'deliberate crash to test no-false-GREEN contract'
             Remove-Item -LiteralPath $crashFile -Force -ErrorAction SilentlyContinue
         }
     }
+
+    It 'T3d: a test file that discovers zero tests is flagged as a failure (no-false-GREEN F1 fix)' {
+        $emptyContent = @'
+#Requires -Version 7.0
+Describe 'Empty describe' { }
+'@
+        $emptyFile = Join-Path $script:TempTestsDir 'zero-tests.Tests.ps1'
+        Set-Content -Path $emptyFile -Value $emptyContent -Encoding UTF8
+
+        try {
+            $result = Invoke-PesterSharded -TestsPath $script:TempTestsDir -MinTestCount 0
+            $result.FailedFiles | Should -Contain 'zero-tests.Tests.ps1' `
+                -Because 'a file with zero discovered tests must appear in FailedFiles'
+            $result.ExitCode | Should -Be 1 -Because 'zero discovered tests is a no-false-GREEN failure'
+        }
+        finally {
+            Remove-Item -LiteralPath $emptyFile -Force -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 Describe 'run-pester-sharded — determinism check' {

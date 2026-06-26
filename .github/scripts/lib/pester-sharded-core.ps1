@@ -52,6 +52,7 @@ try {
 
     `$passed = 0
     `$failed = 0
+    `$totalCount = 0
     if (`$null -ne `$r) {
         `$passed = [int]`$r.PassedCount
         `$failed = [int]`$r.FailedCount
@@ -62,9 +63,10 @@ try {
                 `$failed++
             }
         }
+        `$totalCount = `$passed + `$failed + [int]`$r.SkippedCount + [int]`$r.NotRunCount
     }
 
-    `$obj = [ordered]@{ File = '$($TestFilePath | Split-Path -Leaf)'; Passed = `$passed; Failed = `$failed }
+    `$obj = [ordered]@{ File = '$($TestFilePath | Split-Path -Leaf)'; Passed = `$passed; Failed = `$failed; TotalCount = `$totalCount }
     `$obj | ConvertTo-Json -Compress | Set-Content -LiteralPath '$($ResultFilePath -replace "'", "''")' -Encoding UTF8
 
     if (`$failed -gt 0) { exit 1 } else { exit 0 }
@@ -211,6 +213,7 @@ function script:Invoke-ShardedRun {
                             File        = $fileName
                             Passed      = [int]$data.Passed
                             Failed      = [int]$data.Failed
+                            TotalCount  = [int]$data.TotalCount
                             WallClockMs = $sw.ElapsedMilliseconds
                             ExitCode    = $exitCode
                             HasResult   = $true
@@ -245,6 +248,8 @@ function script:Invoke-ShardedRun {
         # ---- Sequential shard (real-git files) ----
         if ($sequentialFiles.Count -gt 0) {
             $gitConfigPath = Join-Path ([System.IO.Path]::GetTempPath()) "pester-git-config-$([System.Guid]::NewGuid().ToString('N')).ini"
+            $savedGitConfigGlobal = $env:GIT_CONFIG_GLOBAL
+            $savedGitConfigSystem = $env:GIT_CONFIG_SYSTEM
             try {
                 $gitConfigContent = @"
 [user]
@@ -257,8 +262,6 @@ function script:Invoke-ShardedRun {
 "@
                 [System.IO.File]::WriteAllText($gitConfigPath, $gitConfigContent, [System.Text.UTF8Encoding]::new($false))
 
-                $savedGitConfigGlobal = $env:GIT_CONFIG_GLOBAL
-                $savedGitConfigSystem = $env:GIT_CONFIG_SYSTEM
                 $env:GIT_CONFIG_GLOBAL = $gitConfigPath
                 $env:GIT_CONFIG_SYSTEM = [string]::Empty
 
@@ -290,6 +293,7 @@ function script:Invoke-ShardedRun {
                                 File        = $file.Name
                                 Passed      = [int]$data.Passed
                                 Failed      = [int]$data.Failed
+                                TotalCount  = [int]$data.TotalCount
                                 WallClockMs = $sw.ElapsedMilliseconds
                                 ExitCode    = $exitCode
                                 HasResult   = $true
@@ -359,10 +363,14 @@ function script:Invoke-ShardedRun {
         $totalPassed += $r.Passed
         $totalFailed += $r.Failed
         $wallSec = [math]::Round($r.WallClockMs / 1000.0, 1)
-        $status = if ($r.Failed -gt 0 -or -not $r.HasResult) { 'FAIL' } else { 'PASS' }
-        $noResult = if (-not $r.HasResult) { ' [NO RESULT - WORKER CRASHED]' } else { '' }
+        $zeroTests = $r.HasResult -and $r.TotalCount -eq 0
+        if ($zeroTests) { $totalFailed++ }
+        $status = if ($r.Failed -gt 0 -or -not $r.HasResult -or $zeroTests) { 'FAIL' } else { 'PASS' }
+        $noResult = if (-not $r.HasResult) { ' [NO RESULT - WORKER CRASHED]' }
+                    elseif ($zeroTests) { ' [ZERO TESTS DISCOVERED]' }
+                    else { '' }
         Write-Host ("  [{0,-4}] {1,-60} pass={2,4}  fail={3,4}  wall={4,6}s{5}" -f $status, $r.File, $r.Passed, $r.Failed, $wallSec, $noResult)
-        if ($r.Failed -gt 0 -or -not $r.HasResult) {
+        if ($r.Failed -gt 0 -or -not $r.HasResult -or $zeroTests) {
             $failedFiles += $r.File
         }
     }
@@ -420,8 +428,8 @@ function script:Compare-RunResults {
         $r1 = $run1Map[$r2.File]
         if ($null -eq $r1) { continue }
 
-        $outcome1 = if ($r1.Failed -gt 0 -or -not $r1.HasResult) { 'fail' } else { 'pass' }
-        $outcome2 = if ($r2.Failed -gt 0 -or -not $r2.HasResult) { 'fail' } else { 'pass' }
+        $outcome1 = if ($r1.Failed -gt 0 -or -not $r1.HasResult -or ($r1.HasResult -and $r1.TotalCount -eq 0)) { 'fail' } else { 'pass' }
+        $outcome2 = if ($r2.Failed -gt 0 -or -not $r2.HasResult -or ($r2.HasResult -and $r2.TotalCount -eq 0)) { 'fail' } else { 'pass' }
 
         if ($outcome1 -ne $outcome2) {
             $diffs.Add([pscustomobject]@{
