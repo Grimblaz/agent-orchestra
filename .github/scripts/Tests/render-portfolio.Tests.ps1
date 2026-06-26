@@ -1190,4 +1190,226 @@ rounds:
             if (Test-Path $tempSpec2) { Remove-Item $tempSpec2 -Force -ErrorAction SilentlyContinue }
         }
     }
+
+    It 'open-ceiling-throws: open scan at limit fires fail-loud guard before gh issue edit is reached' {
+        # RED driver for s2 fix: -issueScanLimit param does not exist yet, so
+        # calling it throws ParameterBindingException.  $script:ScanReached stays
+        # $false and the ScanReached assertion fails — correct RED failure.
+        #
+        # GREEN (after s2): open scan stub sets ScanReached=$true, ceiling guard
+        # fires Write-Error -ErrorAction Stop, edit never reached, both assertions pass.
+
+        $script:ScanReached    = $false
+        $script:GhEditCallCount = 0
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+
+            if ($ghArgs -contains 'edit') {
+                $script:GhEditCallCount++
+                $global:LASTEXITCODE = 0
+                return
+            }
+
+            if ($ghArgs -contains 'list') {
+                if ($ghArgs -contains 'closed') {
+                    # 1 item — below limit, closed guard won't fire
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":10,"title":"c1","closedAt":"2026-01-01T00:00:00Z","labels":[]}]'
+                }
+                if ($ghArgs -contains 'triage') {
+                    $global:LASTEXITCODE = 0
+                    return '[]'
+                }
+                # open scan fallthrough — return exactly 3 items (= limit) and mark reached
+                $script:ScanReached = $true
+                $global:LASTEXITCODE = 0
+                return '[{"number":1,"title":"t1","labels":[],"createdAt":"2026-01-01T00:00:00Z"},{"number":2,"title":"t2","labels":[],"createdAt":"2026-01-01T00:00:00Z"},{"number":3,"title":"t3","labels":[],"createdAt":"2026-01-01T00:00:00Z"}]'
+            }
+
+            $global:LASTEXITCODE = 0
+        }
+
+        $tempSpecCeil1 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        @'
+schema_version: 1
+control_tower: 704
+recently_closed_days: 14
+rounds:
+  - lane: main
+    round: 1
+    issues: [425, 571]
+'@ | Set-Content -Path $tempSpecCeil1 -Encoding UTF8
+
+        try {
+            try {
+                Invoke-PortfolioRender -specPath $tempSpecCeil1 -issueScanLimit 3
+            }
+            catch {
+                # Expected: ceiling guard throws; swallow so we can assert below.
+            }
+
+            $script:ScanReached | Should -BeTrue `
+                -Because 'gh stub must have been called before the ceiling guard fired — if false, function failed with ParameterBindingException instead'
+
+            $script:GhEditCallCount | Should -Be 0 `
+                -Because 'gh issue edit must never be reached when the open ceiling guard fires'
+        }
+        finally {
+            if (Test-Path $tempSpecCeil1) { Remove-Item $tempSpecCeil1 -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'closed-ceiling-throws: closed scan at limit fires fail-loud guard before gh issue edit is reached' {
+        # RED driver for s2 fix: -issueScanLimit param does not exist yet, so
+        # calling it throws ParameterBindingException.  $script:ScanReached stays
+        # $false and the ScanReached assertion fails — correct RED failure.
+        #
+        # GREEN (after s2): open scan (2 items) passes, closed scan stub sets
+        # ScanReached=$true, closed ceiling guard fires Write-Error -ErrorAction Stop,
+        # edit never reached, both assertions pass.
+
+        $script:ScanReached    = $false
+        $script:GhEditCallCount = 0
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+
+            if ($ghArgs -contains 'edit') {
+                $script:GhEditCallCount++
+                $global:LASTEXITCODE = 0
+                return
+            }
+
+            if ($ghArgs -contains 'list') {
+                if ($ghArgs -contains 'closed') {
+                    # 3 items — exactly at limit, closed ceiling guard fires; mark reached
+                    $script:ScanReached = $true
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":10,"title":"c1","closedAt":"2026-01-01T00:00:00Z","labels":[]},{"number":11,"title":"c2","closedAt":"2026-01-01T00:00:00Z","labels":[]},{"number":12,"title":"c3","closedAt":"2026-01-01T00:00:00Z","labels":[]}]'
+                }
+                if ($ghArgs -contains 'triage') {
+                    $global:LASTEXITCODE = 0
+                    return '[]'
+                }
+                # open scan fallthrough — 2 items, below limit, open guard won't fire
+                $global:LASTEXITCODE = 0
+                return '[{"number":1,"title":"t1","labels":[],"createdAt":"2026-01-01T00:00:00Z"},{"number":2,"title":"t2","labels":[],"createdAt":"2026-01-01T00:00:00Z"}]'
+            }
+
+            $global:LASTEXITCODE = 0
+        }
+
+        $tempSpecCeil2 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        @'
+schema_version: 1
+control_tower: 704
+recently_closed_days: 14
+rounds:
+  - lane: main
+    round: 1
+    issues: [425, 571]
+'@ | Set-Content -Path $tempSpecCeil2 -Encoding UTF8
+
+        try {
+            try {
+                Invoke-PortfolioRender -specPath $tempSpecCeil2 -issueScanLimit 3
+            }
+            catch {
+                # Expected: ceiling guard throws; swallow so we can assert below.
+            }
+
+            $script:ScanReached | Should -BeTrue `
+                -Because 'gh stub must have been called before the ceiling guard fired — if false, function failed with ParameterBindingException instead'
+
+            $script:GhEditCallCount | Should -Be 0 `
+                -Because 'gh issue edit must never be reached when the closed ceiling guard fires'
+        }
+        finally {
+            if (Test-Path $tempSpecCeil2) { Remove-Item $tempSpecCeil2 -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    It 'triage-ceiling-warns: triage scan at limit emits Write-Warning and render completes (warn-and-continue)' {
+        # RED driver for s2 fix: -issueScanLimit param does not exist yet, so
+        # calling it throws ParameterBindingException (unhandled, no try/catch) —
+        # Pester marks the test FAILED with ParameterBindingException.  Correct RED.
+        #
+        # GREEN (after s2): open/closed scans below limit, triage scan at limit fires
+        # Write-Warning (warn-and-continue, never throw), render completes, gh issue edit
+        # is called exactly once, and the captured warning stream contains at least one
+        # WarningRecord for the triage ceiling.
+
+        $script:GhEditCallCount = 0
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+
+            if ($ghArgs -contains 'edit') {
+                $script:GhEditCallCount++
+                $global:LASTEXITCODE = 0
+                return
+            }
+
+            if ($ghArgs -contains 'view') {
+                $global:LASTEXITCODE = 0
+                return '{"body":"# Control Tower\n\nNo portfolio block yet."}'
+            }
+
+            if ($ghArgs -contains 'list') {
+                if ($ghArgs -contains 'closed') {
+                    # 1 item — below limit, closed guard won't fire
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":10,"title":"c1","closedAt":"2026-01-01T00:00:00Z","labels":[]}]'
+                }
+                if ($ghArgs -contains 'triage') {
+                    # 3 items — exactly at limit, triage ceiling fires Write-Warning
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":1},{"number":2},{"number":3}]'
+                }
+                # open scan fallthrough — 1 item, below limit, open guard won't fire
+                $global:LASTEXITCODE = 0
+                return '[{"number":425,"title":"Umbrella 425","labels":[],"createdAt":"2025-06-01T00:00:00Z"}]'
+            }
+
+            if ($ghArgs -contains 'api') {
+                $queryStr = $ghArgs | Where-Object { $_ -like 'query=*' } | Select-Object -Last 1
+                $issueNum = 0
+                if ($queryStr -match 'issue\(number:\s*(\d+)') { $issueNum = [int]$Matches[1] }
+                $global:LASTEXITCODE = 0
+                return "{`"data`":{`"repository`":{`"issue`":{`"number`":$issueNum,`"title`":`"t$issueNum`",`"state`":`"OPEN`",`"closedAt`":null,`"createdAt`":`"2026-01-01T00:00:00Z`",`"labels`":{`"totalCount`":0,`"nodes`":[]},`"blockedBy`":{`"totalCount`":0,`"nodes`":[]},`"subIssues`":{`"nodes`":[]}}}}}"
+            }
+
+            $global:LASTEXITCODE = 0
+        }
+
+        $tempSpecCeil3 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        @'
+schema_version: 1
+control_tower: 704
+recently_closed_days: 14
+rounds:
+  - lane: main
+    round: 1
+    issues: [425, 571]
+'@ | Set-Content -Path $tempSpecCeil3 -Encoding UTF8
+
+        try {
+            # NO try/catch: in RED state ParameterBindingException is unhandled
+            # and Pester marks the test FAILED — correct RED failure mode.
+            # In GREEN state the function completes (warn-and-continue) and
+            # warnings are captured via the 3>&1 stream redirect.
+            $captured = Invoke-PortfolioRender -specPath $tempSpecCeil3 -issueScanLimit 3 3>&1
+
+            $warnings = @($captured | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+            $warnings.Count | Should -BeGreaterThan 0 `
+                -Because 'triage ceiling must emit Write-Warning when triage scan returns count >= issueScanLimit'
+
+            $script:GhEditCallCount | Should -BeGreaterThan 0 `
+                -Because 'render must complete (warn-and-continue, not abort) and write the control tower body'
+        }
+        finally {
+            if (Test-Path $tempSpecCeil3) { Remove-Item $tempSpecCeil3 -Force -ErrorAction SilentlyContinue }
+        }
+    }
 }
