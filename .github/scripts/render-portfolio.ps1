@@ -109,7 +109,15 @@ function ConvertFrom-SequenceSpec {
 #   .totalCount (int)
 # ---------------------------------------------------------------------------
 function Get-PortfolioBuckets {
-    param($spec, $issueStateObjects)
+    param(
+        $spec,
+        $issueStateObjects,
+        # New s2 parameters — all optional with safe defaults so existing callers
+        # that do not yet pass them continue to work (s3 will populate them fully).
+        $KnownChildSet      = $null,   # hashtable or array of child issue numbers
+        $OpenLeafCandidates = $null,   # array of open-scan issue objects
+        $ClosedLeafItems    = $null    # array of closed-scan issue objects
+    )
 
     # Multi-lane guard (CR8): the per-lane Now/Next/Blocked derivation required
     # by the portfolio contract is not yet implemented — this function flattens
@@ -454,12 +462,58 @@ function Invoke-PortfolioRender {
 
     $tower = if ($controlTower -gt 0) { $controlTower } else { $spec.control_tower }
 
-    # 2. Collect all issue numbers from all rounds
+    # 2. Collect all umbrella numbers from all rounds (used for leaf detection and
+    #    known-child-set building in steps 2c/2d).
     $allIssueNums = @(
         $spec.rounds | ForEach-Object { $_.issues } | Sort-Object -Unique
     )
 
-    # 2b. Fetch open triage-labeled issues repo-wide (CR9 / d-triage-visibility,
+    # Build the full set of umbrella numbers (sequenced umbrellas + control tower).
+    # An issue is a "leaf" if its number does NOT appear in this set.
+    $umbrellaNumbers = @(@($allIssueNums) + @($tower) | Sort-Object -Unique)
+
+    # 2b. Bulk open-leaf scan (AC8 / AC4 data source).
+    # Fail-loud: if this scan fails, the board must not be written in a partial
+    # state. Hard-exit BEFORE any write step (gh issue edit) per AC8.
+    # Use exit 1 (not throw) per the script's hard-exit contract; Write-Error
+    # uses -ErrorAction Stop so the terminating error propagates cleanly through
+    # Pester's try/catch without polluting the non-terminating error stream.
+    $openLeavesRaw = gh issue list --repo Grimblaz/agent-orchestra --state open `
+        --json number,title,labels,createdAt --limit 200 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to fetch open issue list (exit $LASTEXITCODE)" -ErrorAction Stop
+    }
+    $openLeaves = @()
+    try {
+        $openLeaves = @($openLeavesRaw | ConvertFrom-Json)
+    }
+    catch {
+        Write-Error "Failed to parse open issue list JSON: $_" -ErrorAction Stop
+    }
+    if ($openLeaves.Count -ge 200) {
+        Write-Warning "Open issue list returned 200 results — results may be truncated."
+    }
+
+    # 2c. Repo-wide closed-leaf scan (AC9 data source).
+    # Fail-loud: same hard-exit pattern as the open scan.
+    $cutoffDate    = (Get-Date).AddDays(-$spec.recently_closed_days).ToString('yyyy-MM-dd')
+    $closedRawJson = gh issue list --repo Grimblaz/agent-orchestra --state closed `
+        --search "closed:>=$cutoffDate" --json number,title,closedAt,labels --limit 200 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to fetch closed issue list (exit $LASTEXITCODE)" -ErrorAction Stop
+    }
+    $closedLeaves = @()
+    try {
+        $closedLeaves = @($closedRawJson | ConvertFrom-Json)
+    }
+    catch {
+        Write-Error "Failed to parse closed issue list JSON: $_" -ErrorAction Stop
+    }
+    if ($closedLeaves.Count -ge 200) {
+        Write-Warning "Closed issue list returned 200 results — results may be truncated."
+    }
+
+    # 2d. Fetch open triage-labeled issues repo-wide (CR9 / d-triage-visibility,
     #     AC #5). The Triage bucket promises open `triage`-labeled issues that
     #     are NOT in any sequence round; those are never named in sequence.yaml,
     #     so without this independent query they would never be fetched and the
@@ -552,13 +606,13 @@ query {
         }
 
         $issueStates.Add([PSCustomObject]@{
-            number             = $issueData.number
-            title              = $issueData.title
-            state              = $issueData.state
-            closedAt           = $issueData.closedAt
-            labels             = $labels
-            blockedBy          = $openBlockers
-            blockerInPlan      = $blockerInPlan
+            number              = $issueData.number
+            title               = $issueData.title
+            state               = $issueData.state
+            closedAt            = $issueData.closedAt
+            labels              = $labels
+            blockedBy           = $openBlockers
+            blockerInPlan       = $blockerInPlan
             blockedByTotalCount = $issueData.blockedBy.totalCount
         })
     }
@@ -579,8 +633,14 @@ query {
     }
     $existingBody = $ctData.body
 
-    # 5. Derive buckets
-    $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issueStates.ToArray()
+    # 5. Derive buckets — pass fetched data as parameters so Get-PortfolioBuckets
+    #    remains pure (no I/O). s3 will expand the pure derivation logic.
+    $buckets = Get-PortfolioBuckets `
+        -spec $spec `
+        -issueStateObjects $issueStates.ToArray() `
+        -KnownChildSet $null `
+        -OpenLeafCandidates $openLeaves `
+        -ClosedLeafItems $closedLeaves
 
     # 6. Format content block
     $timestamp    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
