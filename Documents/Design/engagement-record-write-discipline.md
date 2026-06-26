@@ -166,7 +166,7 @@ The v2 rollout (experience/design/plan phases) completed with #576. The v3 orche
 ## Related Sources
 
 - [skills/engagement-record-emission/SKILL.md](../../skills/engagement-record-emission/SKILL.md) - Canonical operational contract
-- [CLAUDE.md](../../CLAUDE.md) - Cross-tool handoff marker registry
+- [skills/session-memory-contract/references/handoff-markers.md](../../skills/session-memory-contract/references/handoff-markers.md) - Cross-tool handoff marker registry
 - [.github/scripts/lib/frame-engagement-record-core.ps1](../../.github/scripts/lib/frame-engagement-record-core.ps1) - Core library implementation
 - [.github/scripts/Tests/named-decisions-write-discipline.Tests.ps1](../../.github/scripts/Tests/named-decisions-write-discipline.Tests.ps1) - Unit and integration tests
 
