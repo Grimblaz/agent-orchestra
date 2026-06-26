@@ -471,16 +471,54 @@ function Format-PortfolioMarkdown {
     }
 
     # --- Now ---
+    # Cap-floor constant (AC10): max float items to render before (+M more).
+    $floatCap = 15
+
     $null = $sb.AppendLine('## Now')
-    $nowItems = if ($bucketModel.Now) { @($bucketModel.Now | Sort-Object number) } else { @() }
+    # Consume producer ordering verbatim — do NOT Sort-Object number (AC3).
+    $nowItems = if ($bucketModel.Now) { @($bucketModel.Now) } else { @() }
     if ($nowItems.Count -gt 0) {
-        foreach ($issue in $nowItems) {
-            $null = $sb.AppendLine("- #$($issue.number) $($issue.title)")
+        # Separate spine items (isFloat=$false) from float items (isFloat=$true).
+        $spineItems = @($nowItems | Where-Object { -not ($_.PSObject.Properties['isFloat'] -and $_.isFloat -eq $true) })
+        $floatItems = @($nowItems | Where-Object {       $_.PSObject.Properties['isFloat'] -and $_.isFloat -eq $true  })
+
+        # Render ALL spine items with tags.
+        foreach ($issue in $spineItems) {
+            $tags = ''
+            if ($issue.PSObject.Properties['inProgress'] -and $issue.inProgress -eq $true) {
+                $tags += ' (in progress)'
+            }
+            $null = $sb.AppendLine("- #$($issue.number) $($issue.title)$tags")
         }
-        $nowTotal = Get-ModelTotal $bucketModel 'NowTotalCount' $nowItems.Count
-        if ($nowTotal -gt $nowItems.Count) {
-            $overflow = $nowTotal - $nowItems.Count
-            $null = $sb.AppendLine("(+$overflow more)")
+
+        # Render top N=15 float items with tags; compute total overflow.
+        $floatCount    = $floatItems.Count
+        $floatToRender = if ($floatCount -gt $floatCap) { $floatCap } else { $floatCount }
+        for ($fi = 0; $fi -lt $floatToRender; $fi++) {
+            $issue = $floatItems[$fi]
+            $tags = ' (unsequenced)'
+            if ($issue.PSObject.Properties['inProgress'] -and $issue.inProgress -eq $true) {
+                $tags += ' (in progress)'
+            }
+            $null = $sb.AppendLine("- #$($issue.number) $($issue.title)$tags")
+        }
+
+        # Overflow: combine cap-floor float overflow with NowTotalCount overflow.
+        # NowTotalCount may exceed Now.Count when the caller has more items than
+        # were passed in the Now array (pagination from the model).
+        $totalRendered   = $spineItems.Count + $floatToRender
+        $nowTotal        = Get-ModelTotal $bucketModel 'NowTotalCount' $nowItems.Count
+        $totalToAccount  = [math]::Max($nowTotal, $nowItems.Count)
+        $totalOverflow   = $totalToAccount - $totalRendered
+        if ($totalOverflow -gt 0) {
+            $null = $sb.AppendLine("(+$totalOverflow more)")
+        }
+
+        # CoverageGaps (AC7): render after Now items.
+        if ($bucketModel.PSObject.Properties['CoverageGaps'] -and $bucketModel.CoverageGaps) {
+            foreach ($gap in $bucketModel.CoverageGaps) {
+                $null = $sb.AppendLine("- (#$($gap.umbrella): $($gap.note))")
+            }
         }
     }
     else {
@@ -570,7 +608,7 @@ function Format-PortfolioMarkdown {
     $null = $sb.AppendLine('')
 
     # --- Footer ---
-    $null = $sb.AppendLine("as of $timestamp — rendered by render-portfolio.ps1")
+    $null = $sb.AppendLine("portfolio content unchanged since $timestamp — rendered by render-portfolio.ps1")
 
     if ($UnresolvedNums -and $UnresolvedNums.Count -gt 0) {
         foreach ($n in $UnresolvedNums) {
@@ -598,7 +636,7 @@ function Get-SplicedBody {
     # Use [^\n]* between the timestamp and "rendered" to tolerate encoding
     # differences when the em dash (U+2014) is round-tripped through the gh CLI
     # on Windows (which can produce mojibake variants of the em dash character).
-    $footerPattern = 'as of \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z[^\n]*rendered by render-portfolio\.ps1\r?\n?'
+    $footerPattern = 'portfolio content unchanged since \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z[^\n]*rendered by render-portfolio\.ps1\r?\n?'
 
     $hasBegin = $existingBody -match [regex]::Escape($begin)
     $hasEnd   = $existingBody -match [regex]::Escape($end)
@@ -892,7 +930,8 @@ function New-IssueState {
         [int[]]   $BlockedBy    = @(),
         [bool]    $BlockerInPlan = $true,
         [string]  $Title        = "Issue $Number",
-        [string]  $ClosedAt     = $null
+        [string]  $ClosedAt     = $null,
+        [string]  $CreatedAt    = '2025-01-01T00:00:00Z'
     )
     return [PSCustomObject]@{
         number        = $Number
@@ -902,6 +941,7 @@ function New-IssueState {
         blockedBy     = $BlockedBy
         blockerInPlan = $BlockerInPlan
         closedAt      = $ClosedAt
+        createdAt     = $CreatedAt
         totalCount    = 1  # default rendered count = totalCount (no overflow)
     }
 }
