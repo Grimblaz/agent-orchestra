@@ -1242,12 +1242,9 @@ rounds:
 '@ | Set-Content -Path $tempSpecCeil1 -Encoding UTF8
 
         try {
-            try {
-                Invoke-PortfolioRender -specPath $tempSpecCeil1 -issueScanLimit 3
-            }
-            catch {
-                # Expected: ceiling guard throws; swallow so we can assert below.
-            }
+            { Invoke-PortfolioRender -specPath $tempSpecCeil1 -issueScanLimit 3 } |
+                Should -Throw -ExpectedMessage '*refusing to render*' `
+                -Because 'ceiling guard must throw with the truncated-board message before gh issue edit is reached'
 
             $script:ScanReached | Should -BeTrue `
                 -Because 'gh stub must have been called before the ceiling guard fired — if false, function failed with ParameterBindingException instead'
@@ -1312,12 +1309,9 @@ rounds:
 '@ | Set-Content -Path $tempSpecCeil2 -Encoding UTF8
 
         try {
-            try {
-                Invoke-PortfolioRender -specPath $tempSpecCeil2 -issueScanLimit 3
-            }
-            catch {
-                # Expected: ceiling guard throws; swallow so we can assert below.
-            }
+            { Invoke-PortfolioRender -specPath $tempSpecCeil2 -issueScanLimit 3 } |
+                Should -Throw -ExpectedMessage '*truncated RecentlyClosed*' `
+                -Because 'ceiling guard must throw with the truncated-RecentlyClosed message before gh issue edit is reached'
 
             $script:ScanReached | Should -BeTrue `
                 -Because 'gh stub must have been called before the ceiling guard fired — if false, function failed with ParameterBindingException instead'
@@ -1393,7 +1387,9 @@ rounds:
             $script:GhEditCallCount | Should -Be 0 `
                 -Because 'gh issue edit must not be reached when the closed ceiling fires at [Math]::Min(1500,1000)=1000'
 
-            { Invoke-PortfolioRender -specPath $tempSpecCeil4 -issueScanLimit 1500 } | Should -Throw
+            { Invoke-PortfolioRender -specPath $tempSpecCeil4 -issueScanLimit 1500 } |
+                Should -Throw -ExpectedMessage '*GitHub Search API hard cap*' `
+                -Because 'api-cap path must throw the GitHub Search API hard cap message specifically'
         }
         finally {
             if (Test-Path $tempSpecCeil4) { Remove-Item $tempSpecCeil4 -Force -ErrorAction SilentlyContinue }
@@ -1478,8 +1474,8 @@ rounds:
             $warnings[0].Message | Should -Match 'returned 3 results' `
                 -Because 'the captured warning must be the triage ceiling warning (count/limit included), not a parse or exit-code warning'
 
-            $script:GhEditCallCount | Should -BeGreaterThan 0 `
-                -Because 'render must complete (warn-and-continue, not abort) and write the control tower body'
+            $script:GhEditCallCount | Should -Be 1 `
+                -Because 'render must complete with exactly one control-tower write (warn-and-continue, not abort)'
         }
         finally {
             if (Test-Path $tempSpecCeil3) { Remove-Item $tempSpecCeil3 -Force -ErrorAction SilentlyContinue }
