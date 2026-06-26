@@ -200,6 +200,45 @@ The current `script-safety-contract.Tests.ps1` allowlist guard at line 77–95 o
 
 ---
 
+---
+
+## CE Gate Result (s7)
+
+**Measured wall-clock**: 237.7s (inner) / 238.2s (outer timer including wrapper startup)
+**Test result**: 2747 pass, 0 fail across 166/166 files
+**Baseline**: ~836s (pre-#740)
+**Speedup**: 3.5× (72% reduction)
+
+**AC1 (≤120s binding)**: NOT MET — 238s measured.
+
+### Theoretical floor analysis
+
+With `ThrottleLimit 8`, the parallel shard wall-clock is constrained by the scheduling of long-running files. The theoretical minimum with **infinite threads** (no contention) is:
+
+```
+max(single parallel file) + sequential shard
+= 84.6s (post-merge-cleanup-squash-merge)
++ 39.3s (plugin-release-hygiene 13.8s + session-cleanup-detector 25.5s)
+≈ 123.9s
+```
+
+The **120s binding target is architecturally unreachable** without either:
+1. Converting `post-merge-cleanup-squash-merge.Tests.ps1` from real-spawn to in-process (requires a `-core.ps1` library split for post-merge-cleanup, out of scope for #740)
+2. Running the sequential shard in parallel with some of the parallel shard (not possible: sequential shard mutates `GIT_CONFIG_GLOBAL`)
+3. Moving the sequential shard to run before the parallel shard (saves ~0s; parallel still dominates)
+
+The `ThrottleLimit 8` floor (as measured) is 238s; pushing to ThrottleLimit 16 or 32 narrows the gap but cannot cross the 124s theoretical floor.
+
+**Stretch goal (<60s)**: Not met; unreachable with current suite composition.
+
+### Outcome
+
+The #740 implementation delivers its primary value: 3.5× wall-clock reduction (836s → 238s) through in-process conversion of 28 spawn-based tests and a file-granular parallel sharded runner with no-false-GREEN contract. The 120s binding target was set optimistically; the irreducible floor (~124s) was not accounted for in the original AC definition.
+
+A follow-up issue should track further wall-clock reduction (e.g., post-merge-cleanup `-core.ps1` split, ThrottleLimit tuning).
+
+---
+
 ## Source of Truth
 
-This document records the audit performed for issue #740 s1. Implementation source of truth after s2–s5 completion will be the converted test files themselves and the sharded runner at `.github/scripts/run-pester-sharded.ps1`.
+This document records the audit performed for issue #740 s1. Implementation source of truth is the converted test files and the sharded runner at `.github/scripts/run-pester-sharded.ps1`. CE Gate evidence recorded above (s7).
