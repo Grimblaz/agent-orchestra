@@ -728,6 +728,7 @@ function Invoke-PortfolioRender {
         # 2000 is ~9x the current open-issue count (226 as of 2026-06).
         # Crossing it means revisit the paginate decision (see #746-class pagination),
         # not just bump the number.
+        [ValidateRange(1, [int]::MaxValue)]
         [int]   $issueScanLimit = 2000
     )
 
