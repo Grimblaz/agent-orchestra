@@ -358,7 +358,7 @@ Describe 'inline dispatch contract' {
 
         $content | Should -Match '(?is)\bretry\b.{0,80}\bonce\b|\bonce\b.{0,80}\bretry\b' -Because '/plan must retry a failed or malformed redundant prosecution body-load pass once before degrading'
         $content | Should -Match '(?is)\bpipeline-degraded\b' -Because '/plan must preserve the visible degraded-pipeline note for redundant prosecution partial failure'
-        $content | Should -Match '(?is)continue only when enough valid passes remain to form the adapter''s allowed merged prosecution ledger' -Because '/plan must tie pipeline-degraded continuation to the allowed merged prosecution ledger'
+        $content | Should -Match '(?is)at least 1 generalist AND at least 1 specialist survive' -Because '/plan must tie pipeline-degraded continuation to the five-pass two-layer quorum'
 
         foreach ($singletonStage in @(
                 [pscustomobject]@{ Name = 'defense'; Body = 'Code-Critic'; StagePattern = 'defense' },

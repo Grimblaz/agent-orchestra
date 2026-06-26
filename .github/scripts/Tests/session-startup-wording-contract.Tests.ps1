@@ -267,7 +267,7 @@ Describe 'session startup wording contract' {
         ($copilotIndex -ge 0) | Should -BeTrue -Because 'The exact Copilot skip clause must appear inside Step 7b'
 
         # Ensure Step 7b region contains the resolve step marker reference after freshness content within the same section
-        $resolveText = '1. Resolve the installed plugin state'
+        $resolveText = 'Resolve installed state'
         $resolveIndex = $step7b.IndexOf($resolveText, [System.StringComparison]::Ordinal)
         ($resolveIndex -gt $copilotIndex) | Should -BeTrue -Because 'Step 7b freshness must appear before the Resolve step inside Step 7b'
 

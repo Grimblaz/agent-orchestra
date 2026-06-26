@@ -604,6 +604,29 @@ exit 99
         $design.buckets.missing | Should -Be 0
     }
 
+    It 'warns and skips unrecognized live credit statuses instead of crashing the audit' {
+        # Live PR data can carry non-conformant statuses (e.g. 'harvested-from-issue'
+        # on PR #627) that no builder in this repo emits. The audit must never crash
+        # on such a row; it warns and buckets the status as 'inconclusive'.
+        { Get-FARBucketForCreditStatus -Status 'harvested-from-issue' -WarningAction SilentlyContinue } |
+            Should -Not -Throw
+        { Get-FARBucketForCreditStatus -Status 'made-up-status' -WarningAction SilentlyContinue } |
+            Should -Not -Throw
+        { Get-FARBucketForCreditStatus -Status '' -WarningAction SilentlyContinue } |
+            Should -Not -Throw
+
+        (Get-FARBucketForCreditStatus -Status 'harvested-from-issue' -WarningAction SilentlyContinue) |
+            Should -Be 'inconclusive'
+        (Get-FARBucketForCreditStatus -Status 'made-up-status' -Port 'design' -WarningAction SilentlyContinue) |
+            Should -Be 'inconclusive'
+
+        # Known statuses keep their existing buckets.
+        Get-FARBucketForCreditStatus -Status 'passed' | Should -Be 'passed'
+        Get-FARBucketForCreditStatus -Status 'not-applicable' | Should -Be 'N/A'
+        Get-FARBucketForCreditStatus -Status 'skipped' | Should -Be 'skipped'
+        Get-FARBucketForCreditStatus -Status 'inconclusive' | Should -Be 'inconclusive'
+    }
+
     It 'supports a live audit window shape for later CE evidence capture' -Tag 'requires-gh' {
         if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
             Set-ItResult -Skipped -Because 'gh CLI not found'

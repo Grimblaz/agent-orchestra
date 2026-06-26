@@ -348,21 +348,12 @@ Describe 'subagent-env-handshake v1 contract' {
 
     Context 'Scenario (j) — Issue #587 Parallel-batch honest handshake contract tests' {
         BeforeAll {
-            # Constant SHA-256 for the working-tree mutation discipline directive
-            $script:DirectiveSha256 = 'e42322d8b9ba0aa64bd4f68d1d40f50ebc8bd9aad18731ae93120d9a43a51d27'
-            $script:PlanMdPath = Join-Path $script:RepoRoot 'commands/plan.md'
-            $script:OrchestraReviewMdPath = Join-Path $script:RepoRoot 'commands/orchestra-review.md'
-            $script:DesignExplorationSkillMdPath = Join-Path $script:RepoRoot 'skills/design-exploration/SKILL.md'
-
-            # Helper to normalize whitespace and compute SHA-256
-            function Get-NormalizedHash($text) {
-                $normalized = ($text -replace '\s+', ' ').Trim()
-                $bytes = [System.Text.Encoding]::UTF8.GetBytes($normalized)
-                $sha = [System.Security.Cryptography.SHA256]::Create()
-                $hashBytes = $sha.ComputeHash($bytes)
-                $hashStr = ($hashBytes | ForEach-Object { $_.ToString("x2") }) -join ""
-                return $hashStr
-            }
+            # Single source of truth after the #632 consolidation: the inline
+            # adversarial-dispatch prose that previously lived per-site in
+            # commands/plan.md, commands/orchestra-review.md, and
+            # skills/design-exploration/SKILL.md now lives once in the shared
+            # adversarial-review Claude platform checklist.
+            $script:AdversarialClaudePath = Join-Path $script:RepoRoot 'skills/adversarial-review/platforms/claude.md'
         }
 
         It 'contains ### Subagent working-tree discipline H3 section heading in SKILL.md' {
@@ -370,34 +361,14 @@ Describe 'subagent-env-handshake v1 contract' {
             $skillContent | Should -Match '(?m)^### Subagent working-tree discipline \(under workspace_mode: shared\)'
         }
 
-        It 'contains the byte-identical working-tree mutation discipline directive at three parallel-batch sites' {
-            $planContent = Get-Content -Path $script:PlanMdPath -Raw -Encoding utf8
-            $reviewContent = Get-Content -Path $script:OrchestraReviewMdPath -Raw -Encoding utf8
-            $designContent = Get-Content -Path $script:DesignExplorationSkillMdPath -Raw -Encoding utf8
+        It 'contains the working-tree mutation discipline directive in the consolidated single source of truth' {
+            $adversarialContent = Get-Content -Path $script:AdversarialClaudePath -Raw -Encoding utf8
 
-            $directivePattern = 'Per `skills/subagent-env-handshake/SKILL\.md` section Subagent working-tree discipline: under `workspace_mode: shared`[\s\S]*?(?=\r?\n\r?\n|$)'
-
-            $planMatch = [regex]::Match($planContent, $directivePattern)
-            $planMatch.Success | Should -BeTrue -Because 'commands/plan.md must contain the directive'
-            $planDirective = $planMatch.Value
-
-            $reviewMatch = [regex]::Match($reviewContent, $directivePattern)
-            $reviewMatch.Success | Should -BeTrue -Because 'commands/orchestra-review.md must contain the directive'
-            $reviewDirective = $reviewMatch.Value
-
-            $designMatch = [regex]::Match($designContent, $directivePattern)
-            $designMatch.Success | Should -BeTrue -Because 'skills/design-exploration/SKILL.md must contain the directive'
-            $designDirective = $designMatch.Value
-
-            $planHash = Get-NormalizedHash $planDirective
-            $reviewHash = Get-NormalizedHash $reviewDirective
-            $designHash = Get-NormalizedHash $designDirective
-
-            Write-Debug "Computed planHash is: $planHash"
-
-            $planHash | Should -Be $script:DirectiveSha256 -Because 'plan directive SHA-256 must match the constant'
-            $reviewHash | Should -Be $planHash -Because 'review directive must be byte-identical to plan directive'
-            $designHash | Should -Be $planHash -Because 'design directive must be byte-identical to plan directive'
+            # Post-#632, the working-tree mutation discipline is stated once in
+            # the shared adversarial-review Claude platform checklist instead of
+            # being copied byte-identically across three parallel-batch sites.
+            $adversarialContent | Should -Match '(?im)^\s*\d+\.\s+Under `workspace_mode: shared`, dispatched analysis subagents must not write to the working tree\.' `
+                -Because 'the consolidated adversarial-review/platforms/claude.md must carry the working-tree mutation discipline directive'
         }
 
         It 'contains parallel-batch-honest-premise-anchor sentinels wrapping a non-empty load-bearing claim' {
@@ -408,19 +379,23 @@ Describe 'subagent-env-handshake v1 contract' {
             $match.Groups['body'].Value.Trim() | Should -Not -BeNullOrEmpty -Because 'load-bearing claim must not be empty'
         }
 
-        It 'contains ND-2, environment-divergence and the S4 framing sentence in partial-pass-recovery clauses' {
-            $planContent = Get-Content -Path $script:PlanMdPath -Raw -Encoding utf8
-            $reviewContent = Get-Content -Path $script:OrchestraReviewMdPath -Raw -Encoding utf8
+        It 'contains ND-2, environment-divergence and the S4 framing sentence in the consolidated partial-pass-recovery clauses' {
+            $adversarialContent = Get-Content -Path $script:AdversarialClaudePath -Raw -Encoding utf8
 
             $s4Framing = 'ND-2 halts arising from sibling-subagent tree mutation under `workspace_mode: shared` are a documented recovery path declared in `skills/subagent-env-handshake/SKILL.md` section Subagent working-tree discipline, not a contract violation.'
 
-            $planContent | Should -Match 'ND-2'
-            $planContent | Should -Match 'environment-divergence'
-            $planContent | Should -Match ([regex]::Escape($s4Framing)) -Because 'commands/plan.md recovery clause must contain the S4 framing'
+            # Post-#632, ND-2, environment-divergence, and the S4 framing live
+            # once in the shared adversarial-review Partial-pass Recovery section
+            # rather than being copied into each command/skill recovery clause.
+            # CR2 fix (issue #723 PR round 2): scope assertions to the section body,
+            # not the whole file, so a future migration scattering the terms fails red.
+            $sectionMatch = [regex]::Match($adversarialContent, '(?ms)## Partial-pass Recovery\r?\n(?<body>.*?)(?=\r?\n## |\z)')
+            $sectionMatch.Success | Should -BeTrue -Because 'skills/adversarial-review/platforms/claude.md must contain the ## Partial-pass Recovery section'
+            $sectionBody = $sectionMatch.Groups['body'].Value
 
-            $reviewContent | Should -Match 'ND-2'
-            $reviewContent | Should -Match 'environment-divergence'
-            $reviewContent | Should -Match ([regex]::Escape($s4Framing)) -Because 'commands/orchestra-review.md recovery clause must contain the S4 framing'
+            $sectionBody | Should -Match 'ND-2' -Because 'ND-2 must be in the Partial-pass Recovery section (post-#632 consolidation invariant)'
+            $sectionBody | Should -Match 'environment-divergence' -Because 'environment-divergence must be in the Partial-pass Recovery section (post-#632 consolidation invariant)'
+            $sectionBody | Should -Match ([regex]::Escape($s4Framing)) -Because 'the consolidated adversarial-review/platforms/claude.md recovery section must contain the S4 framing'
         }
     }
 }

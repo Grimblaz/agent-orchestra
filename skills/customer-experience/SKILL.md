@@ -48,62 +48,17 @@ An optional, skippable worth-it check that runs **once per issue after the issue
 2. **Falsifier** — what would have to be true for this to be a waste? (one observable outcome)
 3. **Alternative** — what's the simplest cheaper move that also addresses this need? (one option or "none I can see")
 
-**Advisory recommendation** — based on the answers, the agent recommends one of:
-
-| Outcome | Meaning |
-| --- | --- |
-| `Proceed-full` | Bet is clear, falsifier is narrow, no better alternative — proceed with full framing |
-| `Proceed-lite` | Bet is plausible but lite framing is sufficient; consider abbreviating scope |
-| `Shrink` | The scope is likely wider than the bet warrants; consider scoping down first |
-| `Park` | The bet is unclear or the falsifier is too broad; worth revisiting later |
-| `Decline` | A better alternative exists or the falsifier is nearly certain; recommend against building |
-
-**Advisory only** — the owner decides and can proceed regardless of the recommendation. A recommendation to `Decline` is honest advice, not enforcement.
-
-**Recording accepted outcomes:**
-
-- An accepted `Park` or `Decline` is the only outcome recorded. The agent appends a `worth-it-{ISSUE_NUMBER}` entry to the `engagement-record-experience-{ISSUE_NUMBER}` burst and applies `status: parked` or `status: declined` to the issue. `same-decision-resume` suppresses re-prompting on re-entry.
-- An accepted `Proceed-*` or `Shrink` is **not** recorded — the reflex re-runs on re-entry unless a prior Park/Decline exists.
-- Re-scope invalidation: explicit owner re-open signals the earlier decision no longer applies. Auto-detection is out of scope.
-
-## Downstream Evidence Capture At A Glance
-
-1. Load the delegated scenarios, named decisions or design-intent statements, surface notes, and environment prerequisites.
-2. Exercise each delegated scenario with the right surface tool and record `PASS`, `FAIL`, or `INCONCLUSIVE` with evidence. Keep scenario IDs when BDD is enabled.
-3. Verify named decisions as `VERIFIED`, `NOT VERIFIED`, or `VIOLATED`. For orchestration-phase decisions, evaluators read the Markdown mirror inside the `engagement-record-orchestration-{ID}` comment payload (staged behavior: the `orchestration` phase emitter shipped in #577. CE Gate dual-surface reads of orchestration-phase engagement records are gated on #571. Until #571 merges, CE Gate evaluators see orchestration markers in the issue comment thread but do not actively widen their reads to consume them). For experience, design, and plan phases, continue reading the issue-body `## Named Decisions` section.
-4. Do exploratory validation after scripted checks and treat it as discovery, not prosecution.
-5. Return an evidence-only summary with scenario results, named-decision verification, exploratory observations, and evidence references.
-
-## Per-Surface Terminal-Step Contract (D10 category 4, AC5)
-
-Each CE Gate surface is evaluated independently. For each surface (`cli`, `browser`, `canvas`, `api`):
-
-1. **Predicate evaluation**: evaluate the surface-touch predicate (`changeset.touches{Surface}Surface()`).
-2. **Surface exercise or N/A**: if the predicate is true, exercise the surface and capture evidence per the Downstream Evidence Capture steps above; if false, the status is `not-applicable`.
-3. **Credit emission**: call `Build-CeGateCreditRow -Surface {name}` with the evidence list and upsert the credit row into the PR-body `<!-- pipeline-metrics -->` block.
-
-**Orchestration-failure handling** *(planned — wrapper not yet implemented)*: when the orchestration wrapper is available, a CE Gate orchestration crash after completing some surfaces but before all four will cause the wrapper to emit the remaining surfaces as `status: inconclusive` with `block_kind: orchestration` and `evidence: "orchestration crashed before surface evaluated"`, ensuring no surface is silently absent. Until the wrapper ships, surfaces not reached before a crash must be emitted manually.
-
-Load `skills/frame-credit-emission/SKILL.md` for the full terminal-step emission contract and `Build-CeGateCreditRow` builder reference.
+**Advisory only** — based on the answers the agent recommends one of `Proceed-full`, `Proceed-lite`, `Shrink`, `Park`, or `Decline`; the owner decides and may proceed regardless. A `Decline` is honest advice, not enforcement. Outcome meanings and the `Park`/`Decline` recording contract (the `worth-it-{ISSUE_NUMBER}` engagement-record entry, `status: parked`/`status: declined`, and re-scope invalidation) live in [references/value-reflex.md](references/value-reflex.md).
 
 ## Composite References
 
+- [references/ce-gate-exercise.md](references/ce-gate-exercise.md): Downstream evidence-capture procedure and per-surface terminal-step contract (predicate, exercise/N/A, credit emission).
 - [references/orchestration-protocol.md](references/orchestration-protocol.md): CE Gate orchestration, surface routing, runner dispatch, intent rubric, PR body output, and prosecution-depth reporting.
 - [references/defect-response.md](references/defect-response.md): Two-track remediation, graceful degradation, and CE or proxy prosecution re-activation.
+- [references/value-reflex.md](references/value-reflex.md): Value Reflex advisory-outcome meanings and the `Park`/`Decline` recording contract.
+- [references/hub-consumer-classification.md](references/hub-consumer-classification.md): Hub/Consumer Classification Gate rule, consumer-artifact routing targets, and override path.
 - [platforms/copilot.md](platforms/copilot.md): Copilot structured-question invocation.
 - [platforms/claude.md](platforms/claude.md): Claude Code structured-question invocation.
-
-## Hub/Consumer Classification Gate
-
-Before finalizing upstream framing, classify whether the issue proposes adding content that primarily manifests in one language's type system, runtime, or framework to a hub agent (any `.agent.md` in `agents/`). Hub agents are language-agnostic - language-specific review rules, prosecution perspectives, and behavioral patterns belong in consumer-repo artifacts:
-
-- **Review rules / pitfalls** -> `examples/{stack}/architecture-rules.md`
-- **Stack-specific conventions** -> `examples/{stack}/copilot-instructions.md`
-- **Reusable cross-stack skills** -> `skills/{skill-name}/`
-
-If the gate fires, redirect the proposal to the appropriate consumer artifact and reframe the issue accordingly. The user may override with explicit rationale if the proposed content is genuinely language-agnostic.
-
-This gate applies equally to upstream framing (Experience-Owner) and downstream design exploration (Solution-Designer); run it once per issue and carry the result forward.
 
 ## Related Guidance
 

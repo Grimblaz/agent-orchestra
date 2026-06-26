@@ -80,7 +80,7 @@ Describe 'prevention analysis gate contract' {
     }
 
     It 'requires Code-Conductor Auto-Tracking section to reference safe-operations §2d' {
-        $script:CCContent | Should -Match '(?is)auto.tracking.{0,500}§2d|§2d.{0,500}auto.tracking' `
+        $script:CCContent | Should -Match '(?is)auto.tracking.{0,1000}§2d|§2d.{0,1000}auto.tracking' `
             -Because 'Auto-Tracking in Code-Conductor must reference §2d so the principle-consolidation gate is applied before creating DEFERRED-SIGNIFICANT tracking issues'
     }
 

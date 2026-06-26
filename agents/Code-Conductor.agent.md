@@ -118,33 +118,11 @@ Content-authoring touchpoints where the solution-authoring classification gate a
 
 ### Orchestration engagement-record contract
 
-Code-Conductor writes its own decisions to the issue comments under the `orchestration` phase.
-- **Read trigger**: Extends Step 0's smart-resume comment scan; it calls `Read-EngagementRecords -IssueNumber {ID} -Phase orchestration` to look for existing orchestration records.
-- **Emit trigger**: Immediately after the `scope-classification` gate resolves. Emits the full-state marker to overwrite prior states (latest-comment-wins).
-- **Skip behavior**: Direct `/implement {ID}` paths (Copilot-only — Claude does not ship `/implement`) bypass scope-classification and are read-only with respect to the orchestration record (do not emit; may still read for resume-note display). `/code-conductor [text]` prose-routed paths that bypass scope-classification via specialist-dispatch also do not emit. Only flows that actually fire the scope-classification gate emit the burst.
-- **Override semantics**: Standard `same-decision-resume` override rules apply. When the engineer shifts choice, Code-Conductor re-fires the gate for the shift-requested decision, carries reused decisions forward, and emits a full revised marker with `recommendation_shift_trigger: engineer-pushback | new-evidence`. Partial re-emit is forbidden.
-- **Two-comment burst sequence**: When scope-classification resolves, Code-Conductor posts the comment containing the `<!-- engagement-record-orchestration-{ID} -->` marker and the Markdown mirror first. Immediately after, it posts `<!-- credit-input-orchestration-{ID} -->` carrying:
-
-  ```yaml
-  port: orchestration
-  adapter: scope-classification
-  evidence: "issue #{ID}; scope-classification engagement-record emitted"
-  ```
-
-  On engagement-record post-failure, the burst halts immediately and the credit-input marker is NOT posted.
-- **Resume-note format**: When `same-decision-resume` reuses a prior orchestration decision, Code-Conductor emits the canonical resume-note format: `Reusing prior {decision_id}: {engineer_choice}` (comma-separated when multiple decisions resume in a session). This applies uniformly with upstream phases per `skills/solution-authoring/SKILL.md` § `resume-note-format` rule.
+Code-Conductor writes its own decisions to the issue comments under the `orchestration` phase. The full read/emit/skip/override semantics, the two-comment burst sequence (`<!-- engagement-record-orchestration-{ID} -->` then `<!-- credit-input-orchestration-{ID} -->`, halt-on-failure), and the canonical resume-note format live in `skills/engagement-record-emission/references/conductor-orchestration-record.md`. Read trigger extends Step 0's smart-resume scan; emit trigger fires immediately after the `scope-classification` gate resolves (latest-comment-wins).
 
 ### Named Decisions write-discipline
 
-Code-Conductor does not author the issue body. The human-readable Named Decisions Markdown mirror is co-located directly inside the comment containing the `<!-- engagement-record-orchestration-{ID} -->` marker payload.
-
-Because the CE Gate evaluation occurs later (under #578), the YAML payload and Markdown mirror are allowed to diverge on the `articulation_text` field:
-- The YAML payload MUST carry `articulation_text: ""` (empty string) to prevent premature self-judgment.
-- The Markdown mirror MUST carry the literal HTML comment `<!-- CE Gate articulation pending per #578 -->` within its `**Articulation text**` bullet list block to clarify pending status.
-
-> The `#578` issue reference appears in three locations (this bullet, `skills/engagement-record-emission/SKILL.md` D10 guidance, and the canonical Markdown-mirror placeholder used by all engagement-record-emitting agents). If `#578` is renumbered or absorbed, update all three locations as a coordinated sweep.
-
-All other fields (classification, engineer_choice, audit_rationale, etc.) must match field-for-field.
+Code-Conductor does not author the issue body; the human-readable Named Decisions Markdown mirror is co-located inside the `<!-- engagement-record-orchestration-{ID} -->` marker comment. The YAML payload carries `articulation_text: ""` while the Markdown mirror carries `<!-- CE Gate articulation pending per #578 -->` (CE Gate evaluation occurs later under #578); all other fields match field-for-field. Full divergence rules and the three-location `#578` sweep note are in `skills/engagement-record-emission/references/conductor-orchestration-record.md`.
 
 For terminal and validation execution guardrails, load `skills/terminal-hygiene/SKILL.md` — especially the **Multiline Continuation-Prompt Hazard** and **Non-Fatal Diagnostic Wrapper Pattern** sections when dispatching subagent diagnostics.
 
@@ -471,41 +449,7 @@ For v4 review credit row construction (parsing judge-rulings block, determining 
 
 Dispatch-cost samples are additive v4 instrumentation owned by Code-Conductor. During implementation, placeholders and pre-PR RC/judge updates live in the same session-memory or PR-body draft accumulator used to build the initial PR body. PR creation flushes that accumulator into the emitted `<!-- pipeline-metrics -->` block. After PR creation, RC conformance and judge disposition back-fills update the live PR body only for the targeted `(step-id, mode)` sample.
 
-### Pipeline-Entry Credit Harvest (SMC-17)
-
-Before emitting the `credits[]` block at PR creation, harvest deferred pipeline-entry credits from the linked issue:
-
-1. Load `.github/scripts/lib/frame-credit-ledger-core.ps1`.
-2. Call `Invoke-CreditInputHarvest -IssueNumber {ID} -Repo {owner/name}` with:
-   - `-InMemoryMarkers` set to any `<!-- credit-input-{port}-{ID} -->` comment text returned by same-conversation post calls (bypasses gh replication delay for those ports).
-   - `-GhCliPath` set to the available `gh` executable.
-3. The harvester scans `<!-- credit-input-experience-{ID} -->`, `<!-- credit-input-design-{ID} -->`, and `<!-- credit-input-plan-{ID} -->` comments, parses their YAML payloads, and calls `Build-ExperienceCreditRow`, `Build-DesignCreditRow`, or `Build-PlanCreditRow` with the evidence from the payload.
-4. Read-after-write retry: when a completion marker (e.g., `<!-- experience-owner-complete-{ID} -->`) is present but the matching credit-input comment is not yet visible, the harvester retries up to 3 times with exponential backoff. Do not block PR creation if all retries are exhausted — the back-deriver and warn-only hook flag absences.
-5. Merge the returned credit rows into the `credits[]` array alongside the review, release-hygiene, and other credits. Deduplicate by port: if a credit row for a port is already present in the array, skip the harvested row for that port (additive-merge rule, D9).
-
-### Deferred Port Credit Rows
-
-For any port whose `frame/ports/{port}.yaml` carries `trigger-status: deferred`, emit a deferred credit row at PR-creation time alongside the other credits:
-
-1. Identify all ports with `trigger-status: deferred` by scanning `frame/ports/*.yaml`.
-2. For each deferred port, call `Build-DeferredPortCreditRow -Port {name} -DeferredToIssue {N} -DeferredSince {date}` (parameters from the port YAML fields `trigger-deferred-to` and `trigger-deferred-since`).
-3. Upsert the returned credit row into the `credits[]` array. Apply the additive-merge rule (D9): if a credit row for the port already exists, skip the upsert.
-
-**`process-review` trigger-absent emission**: When `ceGate.defectsFound == 0` (CE Gate found no defects), emit the `process-review` trigger-absent credit at PR-creation time:
-
-1. Read the `defects_found` field from the CE Gate surface credits in the pipeline-metrics block (sum across all `ce-gate-*` rows).
-2. If the sum is 0, call `Build-ProcessReviewCreditRow -DefectsFound 0` and upsert the result (status: `not-applicable`) into `credits[]`.
-3. If the sum is > 0, the Process-Review agent emits its own credit after Track-2 analysis completes — do not pre-emit.
-4. If CE Gate data is unavailable, call `Build-ProcessReviewCreditRow -DefectsFound $null` (status: `skipped`) and upsert.
-
-### Post-PR Credit Row (D10 category 3)
-
-After the post-merge cleanup path completes (post-PR steps driven by `skills/post-pr-review/SKILL.md`), emit the `post-pr` credit row:
-
-1. Collect the structured outcome hashtable from the post-pr-review skill per its "Structured Outcome Contract" section: `@{ archive = '...'; docs = '...'; version = '...'; releaseTag = '...' }`.
-2. Call `Build-PostPrCreditRow -ChecklistOutcomes @{...}` with the outcome hashtable.
-3. Upsert the returned credit row into the PR-body `<!-- pipeline-metrics -->` block's `credits[]` array.
-4. Apply the additive-merge rule (D9): if a credit row for `post-pr` already exists in the block, skip the upsert.
+For the Code-Conductor-owned credit-row emission procedures — Pipeline-Entry Credit Harvest (SMC-17), Deferred Port Credit Rows, the `process-review` trigger-absent emission, and the Post-PR Credit Row (D10 category 3) — load and follow `skills/calibration-pipeline/references/conductor-credit-emission.md`. Harvest pipeline-entry credits before emitting the `credits[]` block at PR creation; emit deferred-port and post-PR rows per the reference; apply the additive-merge rule (D9) on every upsert.
 
 ---
 
@@ -519,18 +463,9 @@ Load `skills/refactoring-methodology/SKILL.md` and follow its `## Conductor Inte
 
 You are expected to follow the plan, but not blindly. A good engineering manager adapts to reality while staying aligned with the goal.
 
-**When to adapt without asking**:
+**Adapt without asking** when: a referenced file was renamed/moved (find the new location and proceed); a step is redundant (skip it, note why in the progress summary); the step ordering creates unnecessary churn (reorder for efficiency); or a step needs a minor sub-task the plan didn't anticipate, such as a missing import or type update (include it).
 
-- A file the plan references has been renamed or moved → find the new location and proceed
-- A step is redundant (already done, or made unnecessary by a previous step) → skip it, note why in the progress summary
-- The plan's step ordering creates unnecessary churn (e.g., test step before its dependency exists) → reorder for efficiency
-- A step needs a minor sub-task the plan didn't anticipate (e.g., adding a missing import, updating a type) → include it
-
-**When to escalate** (use `#tool:vscode/askQuestions` with options and a recommended choice):
-
-- A step's entire premise is invalid (the feature it builds on doesn't exist or works differently than assumed)
-- The plan's scope seems wrong (too much or too little for the issue)
-- You discover a significant design question the plan didn't address
+**Escalate** (use `#tool:vscode/askQuestions` with options and a recommended choice) when: a step's entire premise is invalid (the feature it builds on doesn't exist or works differently than assumed); the plan's scope seems wrong (too much or too little for the issue); or you discover a significant design question the plan didn't address.
 
 ## Subagent Call Resilience (R5)
 
@@ -546,34 +481,11 @@ Keep this section scoped to non-rate-limit workflow failures after diagnosis.
 
 ## Context Management for Long Sessions
 
-VS Code 1.110+ auto-compacts conversation context automatically when the context window fills. This can happen silently mid-orchestration — do not wait for the user to notice.
-
-**Context window indicator**: When approaching capacity (the context window indicator in the chat UI shows this to you or the user), proactively compact at a phase boundary rather than letting auto-compaction interrupt mid-step.
-
-**What survives compaction**: Session memory (`/memories/session/`) notes survive compaction automatically. If the plan was persisted as a GitHub issue comment, it is also accessible after compaction.
-
-**Custom `/compact` instructions**: When recommending compaction, generate the command with actual values from the current context — do not use a generic reminder. Fill in this template with real values:
-
-```text
-/compact focus on: issue #[ID], step [N] of [M] complete ([brief outcome per step]), branch [branch-name], design intent: [key design intent], open items: [unresolved decisions or blockers]
-```
-
-For plans with many completed steps, summarize in 3–5 words per step or list step numbers only (e.g., `steps 1-4: done, step 5: in progress`).
-
-**When to compact**: After completing a major phase (e.g., after all implementation steps complete and before starting the review cycle).
+VS Code 1.110+ auto-compacts conversation context when the context window fills, silently mid-orchestration — proactively compact at a phase boundary instead of waiting for the user to notice. Session memory (`/memories/session/`) and any persisted GitHub plan comment survive compaction. The full guidance — context-window indicator, what survives, the filled-in custom `/compact` template, and when to compact — lives in `skills/session-memory-contract/references/conductor-session-handoff.md`.
 
 ## Handoff to User
 
-Code Conductor operates autonomously and continues toward merge-ready by default. It pauses only when judgment beyond its authority is required, and every such pause must immediately use `#tool:vscode/askQuestions` to get a decision and continue — never plain-text questions, and never just stop and describe the problem.
-
-PR creation is mandatory before user handoff. Do not return work to the user for PR creation when the agent has authority to create it.
-
-**Escalation pattern**: Present analysis in conversation text → call `#tool:vscode/askQuestions` with concrete options (mark one `recommended`) → incorporate the answer and resume work.
-
-- **Design decisions**: Explain the trade-off in text, then `#tool:vscode/askQuestions` with the options. Mark your recommendation.
-- **PR readiness/merge approval**: After PR creation, summarize what was built and tested, then `#tool:vscode/askQuestions`: "Merge-ready", "Needs changes [describe]", "Run additional validation"
-- **Clarification needed**: Explain the discrepancy in text, then `#tool:vscode/askQuestions` with your interpretations as options. Mark the one you think is correct.
-- **Workflow complete**: Final status with open items. If there are follow-up decisions, `#tool:vscode/askQuestions` with next actions.
+Code-Conductor operates autonomously and continues toward merge-ready by default, pausing only when judgment beyond its authority is required; every such pause must immediately use `#tool:vscode/askQuestions` (never plain-text questions, never a silent stop). PR creation is mandatory before user handoff. The escalation pattern and the per-situation handoff prompts (design decisions, PR readiness/merge approval, clarification, workflow complete) live in `skills/session-memory-contract/references/conductor-session-handoff.md`.
 
 ## Best Practices
 

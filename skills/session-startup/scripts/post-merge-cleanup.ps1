@@ -465,8 +465,18 @@ if ($null -ne $IssueNumber) {
     New-Item -ItemType Directory -Path $archivePath -Force | Out-Null
 
     $trackingRoot = '.copilot-tracking'
-    # S-C1: hoist loop-invariant path resolution out of the per-file Where-Object and foreach
-    $trackingRootResolved = (Resolve-Path $trackingRoot).Path
+    # S-C1: hoist loop-invariant path resolution out of the per-file Where-Object and foreach.
+    # Guard against a missing .copilot-tracking/ dir: Resolve-Path throws (terminating) on a
+    # non-existent path, which would crash an -IssueNumber cleanup run from any tree lacking
+    # that dir (fresh worktree, consumer repo, or post-prune). Get-ChildItem below already
+    # fails open (-ErrorAction SilentlyContinue) to an empty set, so a non-resolvable root is
+    # harmless — only the string prefix for the registry guard is needed.
+    $trackingRootResolved = if (Test-Path -LiteralPath $trackingRoot) {
+        (Resolve-Path -LiteralPath $trackingRoot).Path
+    }
+    else {
+        Join-Path (Get-Location).Path $trackingRoot
+    }
     $allTrackingFiles = Get-ChildItem -Path $trackingRoot -Recurse -File -ErrorAction SilentlyContinue
     # Exclude .gitkeep placeholder files, then filter to only files belonging to this issue
     $trackingFiles = @($allTrackingFiles | Where-Object { $_.Name -ne '.gitkeep' } | Where-Object {

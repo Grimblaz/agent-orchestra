@@ -37,8 +37,9 @@ Describe 'frame-architecture.md anchor presence' {
         $script:DocContent | Should -Match 'touchesBehaviorOrInterfaceDocsExtended'
     }
 
-    It 'records D17 precondition for sub-#439 blocking mode' {
-        $script:DocContent | Should -Match 'D17.*#442.*blocking'
+    It 'records D17 precondition for sub-#439 advisory enforce mode' {
+        $script:DocContent | Should -Match 'D17.*#442'
+        $script:DocContent | Should -Match 'Activation precondition'
         $script:DocContent | Should -Match '30-PR recalibration'
     }
 }
