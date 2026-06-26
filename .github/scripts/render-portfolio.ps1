@@ -45,7 +45,7 @@ function Get-PriorityKey {
 function Get-CreatedAtSortTicks {
     param([string]$createdAt)
     if ($createdAt) {
-        try { return -[datetime]::Parse($createdAt).Ticks } catch { }
+        try { return -[datetimeoffset]::Parse($createdAt).UtcTicks } catch { }
     }
     return 0
 }
@@ -204,7 +204,7 @@ function Get-PortfolioBuckets {
     # we default their round index to 1 (non-active). This correctly routes non-active-round
     # spine children (e.g. children of round-2 umbrellas) to Next rather than Now.
     # When items are PSCustomObjects with RoundIndex or UmbrellaNumber, we use that directly.
-    $cutoff = (Get-Date).AddDays(-$spec.recently_closed_days)
+    $cutoff = [datetimeoffset](Get-Date -AsUTC).AddDays(-$spec.recently_closed_days)
 
     $closedWithinWindow = [System.Collections.Generic.List[object]]::new()
     $openBlocked        = [System.Collections.Generic.List[object]]::new()
@@ -218,8 +218,8 @@ function Get-PortfolioBuckets {
         foreach ($leaf in $ClosedLeafItems) {
             if ($allIssueNumbers -contains [int]$leaf.number) { continue }
             if ($leaf.closedAt) {
-                [datetime]$leafClosedDate = [datetime]::MinValue
-                if ([datetime]::TryParse($leaf.closedAt, [ref]$leafClosedDate)) {
+                [datetimeoffset]$leafClosedDate = [datetimeoffset]::MinValue
+                if ([datetimeoffset]::TryParse($leaf.closedAt, [ref]$leafClosedDate)) {
                     if ($leafClosedDate -ge $cutoff) {
                         $closedWithinWindow.Add($leaf)
                     }
@@ -283,8 +283,8 @@ function Get-PortfolioBuckets {
             # provided (legacy path). When ClosedLeafItems is provided, RecentlyClosed is
             # sourced from the repo-wide scan above (excluding umbrella closures per AC9).
             if ($null -eq $ClosedLeafItems -and $issue.closedAt) {
-                [datetime]$closedDate = [datetime]::MinValue
-                if ([datetime]::TryParse($issue.closedAt, [ref]$closedDate)) {
+                [datetimeoffset]$closedDate = [datetimeoffset]::MinValue
+                if ([datetimeoffset]::TryParse($issue.closedAt, [ref]$closedDate)) {
                     if ($closedDate -ge $cutoff) {
                         $closedWithinWindow.Add($issue)
                     }
@@ -372,8 +372,8 @@ function Get-PortfolioBuckets {
             $num = [int]$issue.number
 
             if ($nowRoundNums -contains $num) {
-                # Active-round umbrella → Now
-                $nowIssues.Add($issue)
+                # Active-round umbrella: container only — do not render as a work item
+                continue
             }
             elseif ($childRoundIndex.ContainsKey($num)) {
                 # Spine child — route by round index
@@ -388,14 +388,8 @@ function Get-PortfolioBuckets {
                 }
             }
             elseif ($allIssueNumbers -contains $num) {
-                # Non-active-round umbrella → Next or later (put in Next for now)
-                if ($nowRoundIdx + 1 -lt $sortedRounds.Count) {
-                    $nextRoundNums = @($sortedRounds[$nowRoundIdx + 1].issues)
-                    if ($nextRoundNums -contains $num) {
-                        $nextIssues.Add($issue)
-                    }
-                    # Issues in rounds beyond next are ignored in Now/Next (not implemented yet)
-                }
+                # Non-active-round umbrella: container only — do not render as a work item
+                continue
             }
             else {
                 # Float (not umbrella, not spine child, not triage) → Now
@@ -558,13 +552,6 @@ function Format-PortfolioMarkdown {
         if ($totalOverflow -gt 0) {
             $null = $sb.AppendLine("(+$totalOverflow more)")
         }
-
-        # CoverageGaps (AC7): render after Now items.
-        if ($bucketModel.PSObject.Properties['CoverageGaps'] -and $bucketModel.CoverageGaps) {
-            foreach ($gap in $bucketModel.CoverageGaps) {
-                $null = $sb.AppendLine("- (#$($gap.umbrella): $($gap.note))")
-            }
-        }
     }
     else {
         $blockedCount = if ($bucketModel.Blocked) { @($bucketModel.Blocked).Count } else { 0 }
@@ -574,6 +561,12 @@ function Format-PortfolioMarkdown {
             '*(no current-round work)*'
         }
         $null = $sb.AppendLine($emptyMsg)
+    }
+    # CoverageGaps (AC7): render after Now content, even when Now is empty.
+    if ($bucketModel.CoverageGaps) {
+        foreach ($gap in $bucketModel.CoverageGaps) {
+            $null = $sb.AppendLine("- (#$($gap.umbrella): $($gap.note))")
+        }
     }
     $null = $sb.AppendLine('')
 
@@ -773,7 +766,7 @@ function Invoke-PortfolioRender {
         Write-Error "Failed to parse open issue list JSON: $_" -ErrorAction Stop
     }
     if ($openLeaves.Count -ge 200) {
-        Write-Warning "Open issue list returned 200 results — results may be truncated."
+        Write-Error "Open issue list returned 200 results — refusing to render a potentially truncated board." -ErrorAction Stop
     }
 
     # 2c. Repo-wide closed-leaf scan (AC9 data source).
@@ -792,7 +785,7 @@ function Invoke-PortfolioRender {
         Write-Error "Failed to parse closed issue list JSON: $_" -ErrorAction Stop
     }
     if ($closedLeaves.Count -ge 200) {
-        Write-Warning "Closed issue list returned 200 results — results may be truncated."
+        Write-Error "Closed issue list returned 200 results — refusing to render a potentially truncated RecentlyClosed section." -ErrorAction Stop
     }
 
     # 2d. Fetch open triage-labeled issues repo-wide (CR9 / d-triage-visibility,
@@ -889,9 +882,12 @@ query {
             $unresolvedNums += $num
             continue
         }
-        # Partial-success: data present but with field-level errors (e.g. blockedBy requires Projects scope)
+        # Partial-success: data present but with field-level errors (e.g. blockedBy requires Projects scope).
+        # Treat as unresolved to avoid silently classifying an issue as startable with incomplete blocker data (AC2).
         if ($response.errors) {
-            Write-Warning "GraphQL field errors for issue #$num (blockedBy may be incomplete) — continuing with available data."
+            Write-Warning "GraphQL field errors for issue #$num (blockedBy may be incomplete) — treating as unresolved."
+            $unresolvedNums += $num
+            continue
         }
 
         $labels       = @($issueData.labels.nodes | ForEach-Object { $_.name })
@@ -938,27 +934,28 @@ query {
         }
     }
 
-    # 3b. Float candidate pass (AC4): now that KnownChildSet is built, identify open issues
-    # from the bulk scan that are NOT umbrellas and NOT in KnownChildSet — these are floats.
-    # Query each float for full data (blockedBy, labels, state) so AC6 blocked-float routing
-    # and AC2 in-progress tagging work correctly in the live pipeline.
-    # Fail-loud: a float-query failure warns and skips (same as per-issue skip pattern), since
-    # float-scan failure was already guarded in step 2b — if we get here, the scan succeeded.
+    # 3b. Open-leaf detail pass (AC4): query full data for all non-umbrella open issues —
+    # both spine children (KnownChildSet members) and floats. Get-PortfolioBuckets classifies
+    # them: known children route to Now/Next/Blocked as spine; unknowns are floats (isFloat=$true).
+    # Previously KnownChildSet members were excluded here, causing spine leaves to never enter
+    # issueStates and never appear on the board. The exclusion was incorrect: we need full data
+    # for BOTH categories so blockedBy, labels, and createdAt are populated for all leaf issues.
+    # Fail-loud: a leaf-query failure warns and skips (same as per-issue skip pattern).
     $knownChildNums = [System.Collections.Generic.HashSet[int]]::new()
     foreach ($child in $knownChildSet) { $null = $knownChildNums.Add([int]$child.number) }
     $alreadyQueried = [System.Collections.Generic.HashSet[int]]::new()
     foreach ($q in $queryNums) { $null = $alreadyQueried.Add([int]$q) }
 
-    $floatCandidateNums = @(
+    $openLeafCandidateNums = @(
         $openLeaves |
         Where-Object {
             $n = [int]$_.number
-            (-not ($umbrellaNumbers -contains $n)) -and (-not $knownChildNums.Contains($n)) -and (-not $alreadyQueried.Contains($n))
+            (-not ($umbrellaNumbers -contains $n)) -and (-not $alreadyQueried.Contains($n))
         } |
         ForEach-Object { [int]$_.number }
     )
 
-    foreach ($num in $floatCandidateNums) {
+    foreach ($num in $openLeafCandidateNums) {
         $query = @"
 query {
   repository(owner: "Grimblaz", name: "agent-orchestra") {
@@ -988,7 +985,9 @@ query {
         $issueData = $response.data.repository.issue
         if ($null -eq $issueData) { continue }
         if ($response.errors) {
-            Write-Warning "GraphQL field errors for float #$num (blockedBy may be incomplete) — continuing."
+            Write-Warning "GraphQL field errors for leaf #$num (blockedBy may be incomplete) — treating as unresolved."
+            $unresolvedNums += $num
+            continue
         }
 
         $labels       = @($issueData.labels.nodes | ForEach-Object { $_.name })

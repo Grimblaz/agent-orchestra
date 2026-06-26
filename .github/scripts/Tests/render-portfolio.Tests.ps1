@@ -142,18 +142,21 @@ rounds:
 Describe 'Get-PortfolioBuckets' {
 # ===========================================================================
 
-    It 'puts open unblocked issues in Now for the lowest round' {
+    It 'puts spine leaf children of active-round umbrellas in Now; umbrellas are excluded (AC1/CR-2)' {
         $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
         $issues = @(
-            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 571 -State 'OPEN' -BlockedBy @())
+            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @())   # active-round umbrella
+            (New-IssueState -Number 571 -State 'OPEN' -BlockedBy @())   # active-round umbrella
+            (New-IssueState -Number 900 -State 'OPEN' -BlockedBy @())   # spine leaf (child of #425)
         )
+        $knownChildSet = @([PSCustomObject]@{ number = 900; RoundIndex = 0; UmbrellaNumber = 425 })
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet $knownChildSet
 
         $buckets.Now | Should -Not -BeNullOrEmpty
-        $buckets.Now.number | Should -Contain 425
-        $buckets.Now.number | Should -Contain 571
+        $buckets.Now.number | Should -Contain 900 -Because 'spine leaf child of active-round umbrella must appear in Now'
+        $buckets.Now.number | Should -Not -Contain 425 -Because 'umbrellas must not appear as work items in Now (AC1)'
+        $buckets.Now.number | Should -Not -Contain 571 -Because 'umbrellas must not appear as work items in Now (AC1)'
     }
 
     It 'returns empty Now when all issues in lowest round are blocked' {
@@ -169,8 +172,12 @@ Describe 'Get-PortfolioBuckets' {
         $buckets.Now | Should -BeNullOrEmpty -Because 'all round-1 issues are blocked; Now must be empty to signal an honest stuck state'
     }
 
-    It 'holds empty Now when lowest round is all-blocked and round 2 has unblocked items' {
-        # Two-round spec: round 1 all-blocked, round 2 unblocked
+    It 'holds empty Now when lowest round is all-blocked; round-2 umbrella excluded from Next (AC1/CR-2)' {
+        # Two-round spec: round 1 all-blocked, round 2 unblocked.
+        # CR-2: umbrellas are containers only — they do not appear as work items in Now or Next.
+        # #100 is a round-1 umbrella (blocked) → Now is empty; #100 lands in Blocked.
+        # #200 is a round-2 umbrella (unblocked) → excluded from Next because umbrellas are not work items.
+        # Spine leaf children of #200 would appear in Next, but none are provided here.
         $twoRoundSpec = ConvertFrom-SequenceSpec (New-ValidSpecYaml -RoundsBlock @'
 rounds:
   - lane: main
@@ -181,13 +188,13 @@ rounds:
     issues: [200]
 '@)
         $issues = @(
-            (New-IssueState -Number 100 -BlockedBy @(999)),   # round 1, blocked
-            (New-IssueState -Number 200)                       # round 2, unblocked
+            (New-IssueState -Number 100 -BlockedBy @(999)),   # round 1 umbrella, blocked
+            (New-IssueState -Number 200)                       # round 2 umbrella, unblocked — but excluded from Next (AC1)
         )
         $result = Get-PortfolioBuckets -spec $twoRoundSpec -issueStateObjects $issues
         $result.Now   | Should -BeNullOrEmpty -Because 'round 1 is all-blocked; Now must be empty (honest stuck signal)'
         $result.Blocked | Select-Object -ExpandProperty number | Should -Contain 100
-        $result.Next  | Select-Object -ExpandProperty number | Should -Contain 200 -Because 'round 2 is the next round'
+        $result.Next  | Should -BeNullOrEmpty -Because 'round-2 umbrella is a container only — not a work item in Next (AC1/CR-2)'
     }
 
     It "puts out-of-plan blockers in annotation format 'blocked by #N (out of plan)'" {
@@ -557,24 +564,27 @@ Describe 'Format-PortfolioMarkdown' {
         $output | Should -Match '\(\+50 more\)' -Because 'totalCount(51) - rendered(1) = 50 overflow items must be shown'
     }
 
-    It 'sorts issues by number ascending within each bucket (F18)' {
+    It 'Now ordering tiebreaker: lower-numbered float precedes higher-numbered float (AC3/F18)' {
+        # Two floats with no createdAt and no priority labels — the number-asc tiebreaker
+        # (last key in the Sort-Object in Get-PortfolioBuckets) must put #800 before #801.
+        # Uses floats rather than umbrellas: AC1 forbids umbrellas from appearing in Now.
         $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        # Provide issues in descending order to verify sort applies
         $issues = @(
-            (New-IssueState -Number 571 -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @())
+            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @())  # active-round umbrella (excluded by AC1)
+            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @())  # active-round umbrella (excluded by AC1)
+            (New-IssueState -Number 801  -State 'OPEN' -BlockedBy @())  # float (no KnownChildSet entry)
+            (New-IssueState -Number 800  -State 'OPEN' -BlockedBy @())  # float (lower number — must sort first)
         )
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet @()
         $timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
         $output = Format-PortfolioMarkdown -bucketModel $buckets -timestamp $timestamp
 
-        # 425 must appear before 571 in the output
-        $pos425 = $output.IndexOf('#425')
-        $pos571 = $output.IndexOf('#571')
-        $pos425 | Should -BeGreaterThan -1  -Because '#425 must appear in output'
-        $pos571 | Should -BeGreaterThan -1  -Because '#571 must appear in output'
-        $pos425 | Should -BeLessThan $pos571 -Because 'issues must be sorted ascending by number; #425 must precede #571'
+        $pos800 = $output.IndexOf('#800')
+        $pos801 = $output.IndexOf('#801')
+        $pos800 | Should -BeGreaterThan -1  -Because '#800 float must appear in output'
+        $pos801 | Should -BeGreaterThan -1  -Because '#801 float must appear in output'
+        $pos800 | Should -BeLessThan $pos801 -Because 'lower-numbered float (#800) must precede higher-numbered float (#801) as number-asc tiebreaker (AC3)'
     }
 
     # -----------------------------------------------------------------------
@@ -612,9 +622,10 @@ Describe 'Format-PortfolioMarkdown' {
         $pos571 | Should -BeGreaterThan -1  -Because '#571 must appear in output'
         $pos425 | Should -BeGreaterThan -1  -Because '#425 must appear in output'
         $pos571 | Should -BeLessThan $pos425 -Because 'formatter must NOT re-sort by number; bucket model order is authoritative (AC3)'
-        # No umbrella sub-headers: the output must not contain "### " or "#### " headers inside Now section
-        $nowSection = $output -replace '(?s)(## Now).*?(## Next)', '$1 $2'
-        $nowSection | Should -Not -Match '###\s' -Because 'single ranked Now list must not contain umbrella sub-headers (AC3)'
+        # No umbrella sub-headers: the Now section body must not contain "### " headers.
+        $nowMatch = [regex]::Match($output, '(?s)## Now(?<body>.*?)## Next')
+        $nowMatch.Success | Should -Be $true -Because 'Now section must appear before Next in the output'
+        $nowMatch.Groups['body'].Value | Should -Not -Match '(?m)^###\s' -Because 'single ranked Now list must not contain umbrella sub-headers (AC3)'
     }
 
     It 'float items in Now list are tagged with (unsequenced) (AC3/AC4)' {
@@ -1102,9 +1113,9 @@ rounds:
                     $global:LASTEXITCODE = 0
                     return '[]'
                 }
-                # open scan: float #800 + umbrellas #425 and #571
+                # open scan: spine leaf #900, float #800, umbrellas #425 and #571
                 $global:LASTEXITCODE = 0
-                return '[{"number":800,"title":"Float issue 800","labels":[],"createdAt":"2026-01-01T00:00:00Z"},{"number":425,"title":"Umbrella 425","labels":[],"createdAt":"2025-06-01T00:00:00Z"},{"number":571,"title":"Umbrella 571","labels":[],"createdAt":"2025-05-01T00:00:00Z"}]'
+                return '[{"number":900,"title":"Spine leaf 900","labels":[],"createdAt":"2026-01-02T00:00:00Z"},{"number":800,"title":"Float issue 800","labels":[],"createdAt":"2026-01-01T00:00:00Z"},{"number":425,"title":"Umbrella 425","labels":[],"createdAt":"2025-06-01T00:00:00Z"},{"number":571,"title":"Umbrella 571","labels":[],"createdAt":"2025-05-01T00:00:00Z"}]'
             }
 
             if ($ghArgs -contains 'api') {
@@ -1120,6 +1131,11 @@ rounds:
                 if ($issueNum -eq 571) {
                     $global:LASTEXITCODE = 0
                     return '{"data":{"repository":{"issue":{"number":571,"title":"Umbrella 571","state":"OPEN","closedAt":null,"createdAt":"2025-05-01T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"subIssues":{"nodes":[]}}}}}'
+                }
+                if ($issueNum -eq 900) {
+                    # Spine leaf — known child of umbrella #425; queried in step 3b after CR-5 fix
+                    $global:LASTEXITCODE = 0
+                    return '{"data":{"repository":{"issue":{"number":900,"title":"Spine leaf 900","state":"OPEN","closedAt":null,"createdAt":"2026-01-02T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]}}}}}'
                 }
                 if ($issueNum -eq 800) {
                     # Float candidate — queried in step 3b, no subIssues field
@@ -1161,8 +1177,8 @@ rounds:
             $script:GhEditBody | Should -Match '#801' `
                 -Because 'repo-wide closed leaf #801 must appear in RecentlyClosed (AC9 wiring verified)'
 
-            $script:GhEditBody | Should -Not -Match '#900' `
-                -Because '#900 is a known child but was never queried — should not appear in rendered output'
+            $script:GhEditBody | Should -Match '#900' `
+                -Because '#900 is a spine leaf (known child of umbrella #425) and must appear in the rendered board (CR-5 fix verified)'
 
             $script:GhEditBody | Should -Match 'unsequenced' `
                 -Because '#800 is a float and must be tagged (unsequenced) in Now'
