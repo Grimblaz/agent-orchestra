@@ -53,8 +53,8 @@ During inner-loop iteration on a specific test, use targeted invocation:
 Invoke-Pester 'path/to/specific.Tests.ps1' -Output Minimal
 ```
 
-The full-suite command (`Invoke-Pester .github/scripts/Tests/ -Output Minimal`) remains the
-standard Tier 1 validation gate at **step boundaries** — not during inner-loop iteration.
+The full-suite runner `.github/scripts/run-pester-sharded.ps1` (authored in issue #740 s4) is the
+standard Tier 1 validation gate at **step boundaries** — not during inner-loop iteration. Note: CI's `pester.yml` runs an ~18-file Ubuntu allowlist; this divergence from the full local suite is intentional.
 
 A Pester concurrency cap was considered but rejected: the targeted-only rule handles the 95% case
 with lower complexity (see R3).
@@ -87,7 +87,7 @@ allowed; the restriction applies to terminal commands alongside subagents only.
 
 ### D7 — Final-gate full-suite Pester must use `isBackground: true` (live-refresh only)
 
-The full Pester suite (`Invoke-Pester .github/scripts/Tests/ -Output Minimal`) includes tests tagged `requires-gh`
+The full Pester suite (run via `.github/scripts/run-pester-sharded.ps1`, authored in issue #740 s4) includes tests tagged `requires-gh`
 that previously made live GitHub API calls and could take 10–20 minutes, violating D3's "under 60
 seconds" assumption.
 
