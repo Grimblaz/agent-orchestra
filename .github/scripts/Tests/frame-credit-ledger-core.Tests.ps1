@@ -2072,12 +2072,17 @@ Describe 'New-PipelineMetricsV4Block (issue #739 s2 — AC1)' {
         } | Should -Throw -ExpectedMessage '*already contains a <!-- pipeline-metrics*'
     }
 
-    # Test 5b: double-wrap guard — V3BaseYaml already containing metrics_version: 4 throws
-    It 'double-wrap guard: V3BaseYaml already containing metrics_version: 4 throws' {
+    # Test 5b: metrics_version: 4 in V3BaseYaml is stripped (not thrown); block resolves as v4
+    It 'double-wrap guard: V3BaseYaml containing metrics_version: 4 is stripped; block resolves as v4' {
         $yamlWithV4 = "pr_number: 5`nmetrics_version: 4"
-        {
-            New-PipelineMetricsV4Block -V3BaseYaml $yamlWithV4
-        } | Should -Throw -ExpectedMessage "*already contains 'metrics_version: 4'*"
+        $block = New-PipelineMetricsV4Block -V3BaseYaml $yamlWithV4
+
+        $mvMatches = [regex]::Matches($block, '(?m)^\s*metrics_version\s*:')
+        $mvMatches.Count | Should -Be 1
+
+        $prBody = "## PR`n`n$block"
+        $parsed = Read-PRMetricsBlock -PrBody $prBody
+        $parsed.MetricsVersion | Should -Be '4'
     }
 
     # Test 6: round-trip text-anchor — every scalar field emitted by the builder
@@ -2208,6 +2213,27 @@ Describe 'New-PipelineMetricsV4Block (issue #739 s2 — AC1)' {
 
         $parsed = Read-PRMetricsBlock -PrBody "## PR`n`n$block`n`nEnd."
         $parsed.MetricsVersion | Should -Be 4
+    }
+
+    # Test 13 (CR4 regression): v3 base containing metrics_version: 3 — builder strips it; block round-trips as v4
+    It 'CR4 regression: v3 base containing metrics_version: 3 — builder strips it; block round-trips as v4' {
+        $v3Base = "pr_number: 99`nmetrics_version: 3`nframe_version: 1`n"
+        $credit = @{ port = 'implement-code'; status = 'passed'; evidence = 'Pester suite passed' }
+        $block = New-PipelineMetricsV4Block -V3BaseYaml $v3Base -Credits @($credit) -DispatchCostSamples @()
+        $prBody = "## Pipeline Metrics`n`n$block"
+
+        # Only ONE metrics_version line in the output
+        $mvMatches = [regex]::Matches($block, '(?m)^\s*metrics_version\s*:')
+        $mvMatches.Count | Should -Be 1
+
+        # Reader resolves 4, not 3
+        $parsed = Read-PRMetricsBlock -PrBody $prBody
+        $parsed | Should -Not -BeNullOrEmpty
+        $parsed.MetricsVersion | Should -Be '4'
+
+        # Full validation passes
+        $validation = Test-PipelineMetricsV4Block -PRBody $prBody
+        $validation.Valid | Should -Be $true
     }
 }
 

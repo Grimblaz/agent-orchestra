@@ -81,7 +81,7 @@ function Invoke-ChangelogInsertion {
     $newSection = "## [$Version] — $today$nl$nl### $ChangelogSection$nl$nl$($ChangelogEntry.TrimEnd())$nl"
 
     # Count existing ## [X.Y.Z] headings before insertion (for read-back verify)
-    $anchorPattern = '(?m)^## \[\d+\.\d+\.\d+\]'
+    $anchorPattern = '(?m)^##\s+\[\d+\.\d+\.\d+\]'
     $previousCount = ([regex]::Matches($ChangelogContent, $anchorPattern)).Count
 
     # Find insertion point: first existing ## [X.Y.Z] heading (separator-agnostic)

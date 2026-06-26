@@ -306,4 +306,24 @@ Describe 'bump-version.ps1 input validation — header injection guard (AC7)' {
         $proseEntry = "- See ## Background section for context"
         script:Test-ChangelogEntryHasHeader -ChangelogEntry $proseEntry | Should -Be $false
     }
+
+    It '14. non-single-space heading: new section inserts ABOVE an existing heading written with two spaces' {
+        # The gate (Test-ChangelogSectionPresent) tolerates ##  [X.Y.Z]; the inserter must too.
+        $changelogInput = "# Changelog`n`n##  [9.8.7] — 2026-01-01`n`n### Changed`n`n- Prior release.`n"
+
+        $result = Invoke-ChangelogInsertion `
+            -ChangelogContent $changelogInput `
+            -Version          '9.8.8' `
+            -ChangelogEntry   '- Non-single-space fixture'
+
+        $result.Updated    | Should -Be $true
+        $result.VerifyPass | Should -Be $true
+
+        # New entry must appear ABOVE the existing ##  [9.8.7] heading
+        $newIdx = $result.Content.IndexOf('## [9.8.8]')
+        $oldIdx = $result.Content.IndexOf('##  [9.8.7]')
+        $newIdx | Should -BeGreaterOrEqual 0
+        $oldIdx | Should -BeGreaterOrEqual 0
+        $newIdx | Should -BeLessThan $oldIdx
+    }
 }

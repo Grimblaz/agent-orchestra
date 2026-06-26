@@ -2834,9 +2834,11 @@ function New-PipelineMetricsV4Block {
         throw "New-PipelineMetricsV4Block: -V3BaseYaml already contains a <!-- pipeline-metrics opener. This builder is not an updater — pass the raw YAML payload without the HTML-comment wrapper."
     }
 
-    if ($V3BaseYaml -match '(?m)^\s*metrics_version\s*:\s*4\s*$') {
-        throw "New-PipelineMetricsV4Block: -V3BaseYaml already contains 'metrics_version: 4'. Pass a v3 base payload; the builder adds the v4 fields."
-    }
+    # Strip any pre-existing metrics_version: line from the v3 base.
+    # The canonical v3 base schema includes 'metrics_version: 3'; stripping it before
+    # composing ensures the output carries exactly one 'metrics_version: 4' line and
+    # Get-FCLScalar (first-match reader) resolves the correct version. (#742 CR4)
+    $V3BaseYaml = ($V3BaseYaml -split "`r?`n" | Where-Object { $_ -notmatch '^\s*metrics_version\s*:' }) -join "`n"
 
     # -----------------------------------------------------------------------
     # Normalize [pscustomobject] items to [hashtable] so the render helpers
@@ -2914,7 +2916,7 @@ function New-PipelineMetricsV4Block {
     # Nested list fields (judge-score.findings[], prosecution-passes,
     # files-checked) are out of scope for this builder.
     # -----------------------------------------------------------------------
-    function script:Render-CreditEntry {
+    function script:Render-FCLCreditEntry {
         param([hashtable]$Credit)
 
         # Emit the known scalar fields in a canonical order.
@@ -2956,7 +2958,7 @@ function New-PipelineMetricsV4Block {
     # Required fields (position-strict): step-id, mode, bytes, rc-conformance,
     # judge-disposition.  Optional: provider, model.
     # -----------------------------------------------------------------------
-    function script:Render-DispatchCostSampleEntry {
+    function script:Render-FCLDispatchCostSampleEntry {
         param([hashtable]$Sample)
 
         $sb = [System.Text.StringBuilder]::new()
@@ -2994,7 +2996,7 @@ function New-PipelineMetricsV4Block {
         [void]$sb.AppendLine('credits:')
         foreach ($credit in $Credits) {
             if ($null -ne $credit) {
-                [void]$sb.Append((script:Render-CreditEntry -Credit $credit))
+                [void]$sb.Append((script:Render-FCLCreditEntry -Credit $credit))
             }
         }
     }
@@ -3003,7 +3005,7 @@ function New-PipelineMetricsV4Block {
         [void]$sb.AppendLine('dispatch-cost-samples:')
         foreach ($sample in $DispatchCostSamples) {
             if ($null -ne $sample) {
-                [void]$sb.Append((script:Render-DispatchCostSampleEntry -Sample $sample))
+                [void]$sb.Append((script:Render-FCLDispatchCostSampleEntry -Sample $sample))
             }
         }
     }

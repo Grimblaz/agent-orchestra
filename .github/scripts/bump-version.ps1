@@ -85,7 +85,7 @@ if ($Version -notmatch '^\d+\.\d+\.\d+$') {
 }
 
 # --- Validate ChangelogEntry does not contain its own release header ---
-if ($ChangelogEntry -match '(?m)^## \[\d+\.\d+\.\d+\]') {
+if ($ChangelogEntry -match '(?m)^##\s+\[\d+\.\d+\.\d+\]') {
     Fail "-ChangelogEntry must not contain a '## [X.Y.Z]' release header — the script synthesizes the header. Pass only the entry body."
 }
 
