@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: c9591230b11b6ca11346945d2f90d8554805a474
-generated-at: 2026-06-12T21:04:15Z
+last-verified: d1850abaa181dfef143875b920430fb0c6a11ab9
+generated-at: 2026-06-26T08:01:26Z
 -->
 
 ## Purpose
@@ -234,6 +234,18 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `.github/plugin/marketplace.json`
 - **notes**: Marketplace descriptor residing under .github/plugin/. Distinct from .claude-plugin/marketplace.json; this copy is consumed by the GitHub-hosted plugin marketplace integration. Missing = marketplace cannot resolve the plugin.
+
+### `.github/prompts/*.prompt.md`
+
+- **claude_resolves**: not-applicable
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: false
+- **experience**: hard-failure
+- **examples**:
+  - `.github/prompts/orchestrate.prompt.md`
+  - `.github/prompts/plan.prompt.md`
+  - `.github/prompts/review-github.prompt.md`
+- **notes**: Copilot slash-command prompt entry points — the Copilot mirror of Claude's commands/*.md surface. Claude never loads these (it uses commands/*.md), so claude_resolves is not-applicable and no plugin version bump is required. Copilot reads them from source-tree; a missing prompt file is a hard-failure for the corresponding Copilot slash command. Copilot support is frozen — see Documents/Design/copilot-deprecation.md.
 
 ### `.github/scripts/*.ps1`
 
