@@ -76,7 +76,7 @@ Draft a comprehensive plan per the **Plan Style Guide** in `skills/plan-authorin
 
 ### BDD Scenario Classification (opt-in)
 
-When `## BDD Framework` is present in the consumer's `copilot-instructions.md`, BDD is enabled/active and each scenario is classified using the `bdd-scenarios` skill:
+When a `## BDD Framework` **line-start heading** (column 0) exists in the consumer's `copilot-instructions.md`, BDD is enabled/active and each scenario is classified using the `bdd-scenarios` skill:
 
 | Condition                                           | Classification        |
 | --------------------------------------------------- | --------------------- |
@@ -89,7 +89,7 @@ Override rule: when in doubt, classify as `[manual]`. Test-Writer may reclassify
 
 _(Rubric duplicated from `bdd-scenarios/SKILL.md` for quick reference. If you update one, update the other.)_
 
-When BDD is enabled, write the full `## Scenarios` section back into the GitHub issue body with numbered `### S{N} — {title} (Type)` headings before plan approval, emitted as concrete IDs such as `### S1` and `### S2`. List each scenario in the `[CE GATE]` step by scenario ID (`S{N}`/`S1`) with classification tags: `S{N}: {description} [auto]` or `S{N}: {description} [manual]`.
+When BDD is enabled (a `## BDD Framework` **line-start heading** at column 0), write the full `## Scenarios` section back into the GitHub issue body with numbered `### S{N} — {title} (Type)` headings before plan approval, emitted as concrete IDs such as `### S1` and `### S2`. List each scenario in the `[CE GATE]` step by scenario ID (`S{N}`/`S1`) with classification tags: `S{N}: {description} [auto]` or `S{N}: {description} [manual]`.
 
 - Before stress-test invocation, run the Tree-State Verification Discipline from `skills/plan-authoring/SKILL.md` and populate the plan's `**Verification Evidence**` block.
 

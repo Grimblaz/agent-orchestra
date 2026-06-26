@@ -14,7 +14,7 @@
       - skills/bdd-scenarios/SKILL.md
 
         Phase 1 contracts (issue #223):
-            - Conditional G/W/T authoring when ## BDD Framework section is present
+            - Conditional G/W/T authoring when ## BDD Framework line-start heading (column 0) is present — not a mid-line mention (issue #733)
             - Scenario ID convention (S1, S2...) with ### SN heading pattern
             - Natural-language fallback when BDD not enabled
             - [auto]/[manual] classification (Issue-Planner)
@@ -262,5 +262,39 @@ Describe 'Code-Critic BDD Phase 2 runner evidence evaluation contract' {
 
     It 'Code-Critic runner evidence evaluation is keyed on presence of source field in unified evidence record' {
         $script:CriticContent | Should -Match '(?is)(`source`.{0,100}field.{0,100}(present|contains|unified evidence|source field)|(unified evidence.{0,50}source|source field.{0,50}unified))' -Because 'issue #227 requires Code-Critic to key runner evidence evaluation on the presence of a source field in the unified evidence record'
+    }
+}
+
+Describe 'BDD detection anchor guard — hub stays disabled, skill uses anchored form' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:CopilotInstructions = Join-Path $script:RepoRoot '.github/copilot-instructions.md'
+        $script:SkillFile = Join-Path $script:RepoRoot 'skills/bdd-scenarios/SKILL.md'
+        $script:SkillContent = Get-Content -Path $script:SkillFile -Raw
+    }
+
+    It 'hub copilot-instructions.md has zero line-start ## BDD Framework headings (hub stays BDD-disabled)' {
+        $lineStartMatches = Select-String -Pattern '^## BDD Framework' -Path $script:CopilotInstructions
+        $lineStartMatches | Should -HaveCount 0 -Because 'the hub repo must not have a line-start ## BDD Framework heading; the line-33 prose mention is mid-line (inside a bullet starting with "- **"), so the line-start ^ anchor does not reach it (issue #733)'
+    }
+
+    It 'bdd-scenarios SKILL.md detection discriminator documents the anchored ^## BDD Framework grep form' {
+        $script:SkillContent | Should -Match '\^## BDD Framework' -Because 'issue #733 requires the detection discriminator to call out the anchored grep form (^ at line-start) so future editors understand why naive substring grep produces a false positive on the hub file'
+    }
+
+    It 'Experience-Owner uses line-start heading phrasing for BDD detection (issue #733 regression guard)' {
+        $eoContent = Get-Content -Path (Join-Path $script:RepoRoot 'agents/Experience-Owner.agent.md') -Raw
+        $eoContent | Should -Match '(?is)(## BDD Framework).{0,100}(line.start|column 0)' -Because 'issue #733 requires Experience-Owner to use line-start heading phrasing for BDD detection, not the old "is enabled"/"is present" substring language'
+    }
+
+    It 'Issue-Planner uses line-start heading phrasing for BDD detection (issue #733 regression guard)' {
+        $ipContent = Get-Content -Path (Join-Path $script:RepoRoot 'agents/Issue-Planner.agent.md') -Raw
+        $ipContent | Should -Match '(?is)(## BDD Framework).{0,100}(line.start|column 0)' -Because 'issue #733 requires Issue-Planner to use line-start heading phrasing for BDD detection, not the old "is present" substring language'
+    }
+
+    It 'Test-Writer uses line-start heading phrasing for BDD detection (issue #733 regression guard)' {
+        $twContent = Get-Content -Path (Join-Path $script:RepoRoot 'agents/Test-Writer.agent.md') -Raw
+        $twContent | Should -Match '(?is)(## BDD Framework).{0,100}(line.start|column 0)' -Because 'issue #733 requires Test-Writer to use line-start heading phrasing for BDD detection, not the old bare "heading" language'
     }
 }
