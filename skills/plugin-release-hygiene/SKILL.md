@@ -99,9 +99,24 @@ Allowed `keying_strategy` values are `session_id`, `branch_slug`, and `session_f
 
 ### 5. Apply The Bump
 
-Resolve the repo root with `git rev-parse --show-toplevel`, then locate `.github/scripts/bump-version.ps1`. Compute the next semver from the current `.claude-plugin/plugin.json` version and the chosen level, then invoke the bump script once.
+Resolve the repo root with `git rev-parse --show-toplevel`, then locate `.github/scripts/bump-version.ps1`. Compute the next semver from the current `.claude-plugin/plugin.json` version and the chosen level.
 
-Do not hand-edit version strings after the repo is back in lockstep. `bump-version.ps1` is the authority for writing all 7 occurrences.
+Before invoking the script, construct a categorized CHANGELOG entry body. Group changes into the appropriate subsection(s) — `Fixed`, `Added`, or `Changed` — as a markdown bullet list. Pass the body as `-ChangelogEntry` and the primary category as `-ChangelogSection`. The script uses today's date internally (`Get-Date -Format 'yyyy-MM-dd'`); the caller only supplies the body.
+
+Example invocation:
+
+```powershell
+$body = @"
+- Brief description of what changed (#issue).
+"@
+pwsh .github/scripts/bump-version.ps1 -Version <nextVersion> -ChangelogEntry $body -ChangelogSection 'Fixed'
+```
+
+Use `'Added'` when the primary change introduces a new user-visible surface, `'Fixed'` for bug fixes, and `'Changed'` for other modifications. When a release spans multiple categories, pass the dominant category as `-ChangelogSection` and include all bullets in `-ChangelogEntry` — the entry body may contain multiple `### SubSection` headings if needed, but must not contain a `## [X.Y.Z]` release header (the script synthesizes that).
+
+The script inserts the CHANGELOG section above the most-recent existing `## [X.Y.Z]` heading (em-dash, en-dash, or hyphen separator are all recognized). If the section for the new version already exists, the script skips insertion silently (idempotent).
+
+Do not hand-edit version strings after the repo is back in lockstep. `bump-version.ps1` is the authority for writing all 7 occurrences and the CHANGELOG entry.
 
 ## Claude Plugin CLI Surface
 

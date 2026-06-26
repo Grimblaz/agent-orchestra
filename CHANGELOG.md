@@ -2,6 +2,13 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.4] — 2026-06-26
+
+### Fixed
+
+- **Canonical pipeline-metrics v4 emission from Code-Conductor inline PR creation** (#739): fixes the integration seam where `Build-*CreditRow` outputs (`[pscustomobject]`) were rejected by `New-PipelineMetricsV4Block` (declared `[hashtable[]]`), breaking the entire v4 emission path and short-circuiting the frame credit ledger to the pre-v4 path. Additional fixes: `Escape-FCLScalar` now uses YAML `""` escaping (not `\"`), both `Get-FCLScalar` and `ConvertFrom-FCLListSection` unescape `""` → `"` on read-back (round-trip losslessness AC1), `Test-PipelineMetricsV4Block` stripped of repair-loop logic (pure warn-only per #429), v3-base `-->` injection escaping, guard regex anchored.
+- **Atomic CHANGELOG insertion in `bump-version.ps1`** (#739 s5): extracted `Invoke-ChangelogInsertion` into `changelog-insert-core.ps1` (idempotency check, separator-agnostic anchor, read-back verify, no file I/O); `bump-version.ps1` now wires `-ChangelogEntry`/`-ChangelogSection` parameters with verify-before-write guard.
+
 ## [2.35.3] — 2026-06-26
 
 ### Added

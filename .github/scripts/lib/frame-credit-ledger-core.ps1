@@ -22,6 +22,17 @@
                                            cost telemetry section (issue #467) when non-empty
       - Compose-PreV4ShortCircuitComment  : render the literal pre-v4 short-circuit text
 
+    Builder/writer functions (issue #739 s2):
+      - New-PipelineMetricsV4Block        : build a canonical <!-- pipeline-metrics --> v4 HTML-comment
+                                           block from a v3 base YAML string + credit/dispatch-cost-sample
+                                           hashtable arrays. Initial-creation-only; not an updater.
+
+    Validation functions (issue #739 s3):
+      - Test-PipelineMetricsV4Block       : validate that a PR body's pipeline-metrics block is canonical
+                                           v4 shape (version==4, single non-fenced marker, non-empty
+                                           credits). Self-correcting: bounded retry rebuilds from the
+                                           authoritative draft. Never throws.
+
     No `gh` calls, no network, no filesystem writes outside reading the ports dir.
 #>
 
@@ -130,7 +141,10 @@ function script:Get-FCLScalar {
     if ($value.Length -ge 2) {
         $first = $value[0]
         $last = $value[$value.Length - 1]
-        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+        if ($first -eq '"' -and $last -eq '"') {
+            $value = $value.Substring(1, $value.Length - 2)
+            $value = $value -replace '""', '"'  # YAML double-quoted scalar: "" is a literal "
+        } elseif ($first -eq "'" -and $last -eq "'") {
             $value = $value.Substring(1, $value.Length - 2)
         }
     }
@@ -243,7 +257,10 @@ function script:ConvertFrom-FCLListSection {
                     $val = $kv.Groups['value'].Value.Trim()
                     if ($val.Length -ge 2) {
                         $first = $val[0]; $last = $val[$val.Length - 1]
-                        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+                        if ($first -eq '"' -and $last -eq '"') {
+                            $val = $val.Substring(1, $val.Length - 2)
+                            $val = $val -replace '""', '"'
+                        } elseif ($first -eq "'" -and $last -eq "'") {
                             $val = $val.Substring(1, $val.Length - 2)
                         }
                     }
@@ -263,7 +280,10 @@ function script:ConvertFrom-FCLListSection {
                 $val = $kv.Groups['value'].Value.Trim()
                 if ($val.Length -ge 2) {
                     $first = $val[0]; $last = $val[$val.Length - 1]
-                    if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+                    if ($first -eq '"' -and $last -eq '"') {
+                        $val = $val.Substring(1, $val.Length - 2)
+                        $val = $val -replace '""', '"'
+                    } elseif ($first -eq "'" -and $last -eq "'") {
                         $val = $val.Substring(1, $val.Length - 2)
                     }
                 }
@@ -698,14 +718,20 @@ function Read-PRMetricsBlock {
     try {
         if (-not (script:Test-FCLYamlSane -Text $block)) {
             return [pscustomobject]@{
-                MetricsVersion = 'parse-error'
-                Reason         = 'Marker block contains malformed YAML (empty key, missing colon, or unterminated quoted value).'
+                MetricsVersion  = 'parse-error'
+                DetectedVersion = 'parse-error'
+                Reason          = 'Marker block contains malformed YAML (empty key, missing colon, or unterminated quoted value).'
             }
         }
 
         $version = script:Get-FCLScalar -Block $block -Name 'metrics_version'
         if ([string]::IsNullOrWhiteSpace($version) -or $version -ne '4') {
-            return [pscustomobject]@{ MetricsVersion = 'pre-v4' }
+            # Distinguish between "no metrics_version field at all" and "field present but not 4"
+            $detectedVersion = if ([string]::IsNullOrWhiteSpace($version)) { 'no-version-field' } else { 'version-N-not-4' }
+            return [pscustomobject]@{
+                MetricsVersion  = 'pre-v4'
+                DetectedVersion = $detectedVersion
+            }
         }
 
         $frameVersionRaw = script:Get-FCLScalar -Block $block -Name 'frame_version'
@@ -849,8 +875,9 @@ function Read-PRMetricsBlock {
     }
     catch {
         return [pscustomobject]@{
-            MetricsVersion = 'parse-error'
-            Reason         = $_.Exception.Message
+            MetricsVersion  = 'parse-error'
+            DetectedVersion = 'parse-error'
+            Reason          = $_.Exception.Message
         }
     }
 }
@@ -1953,13 +1980,33 @@ function Compose-CommentWithCostPattern {
 function Compose-PreV4ShortCircuitComment {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$MarkerToken)
+    param(
+        [Parameter(Mandatory)][string]$MarkerToken,
+        [string]$DetectedVersion = ''
+    )
+
+    # Render a detected-state description based on the cause diagnosed by Read-PRMetricsBlock.
+    $detectedStateDescription = switch ($DetectedVersion) {
+        'no-version-field' {
+            'This PR''s body has a `pipeline-metrics` block with no `metrics_version` field (the raw v3/pre-v4 base emitted without the v4 frame additions). Coverage details are unavailable.'
+        }
+        'version-N-not-4' {
+            'This PR''s body has a `pipeline-metrics` block with `metrics_version` set to a value other than 4. The block may be from an older emission or a partial update. Coverage details are unavailable.'
+        }
+        'parse-error' {
+            'This PR''s body has a `pipeline-metrics` block that could not be parsed. Coverage details are unavailable.'
+        }
+        default {
+            # Fallback: keep the original hardcoded text for unknown/null detected state.
+            'The frame credit-ledger hook reads `metrics_version: 4` frame credits. This PR''s body has only a pre-v4 `pipeline-metrics` block (the inherited v3 base, per `skills/calibration-pipeline/references/metrics-schema.md`), so port-by-port credit reporting is unavailable.'
+        }
+    }
 
     $lines = @(
         $MarkerToken,
         '⚠️ **Frame credit ledger — pre-v4 metrics detected**',
         '',
-        'The frame credit-ledger hook reads `metrics_version: 4` frame credits. This PR''s body has only a pre-v4 `pipeline-metrics` block (the inherited v3 base, per `skills/calibration-pipeline/references/metrics-schema.md`), so port-by-port credit reporting is unavailable.',
+        $detectedStateDescription,
         '',
         '**Suggested next step**: Ask Code-Conductor to re-emit pipeline-metrics at v4 (the conductor''s PR-creation flow targets v4 by default per `frame/pipeline-metrics-v4-schema.md`). If you opened this PR before v4 emission landed, close-and-reopen with a fresh `gh pr create` will regenerate the body.',
         '',
@@ -2724,6 +2771,418 @@ function Invoke-CreditInputHarvest {
     }
 
     return $results
+}
+
+# ===========================================================================
+# New-PipelineMetricsV4Block (issue #739 s2 — AC1)
+#
+# Builds a canonical <!-- pipeline-metrics ... --> v4 HTML-comment block
+# ready for embedding in a PR body.
+#
+# This is an INITIAL-CREATION-ONLY builder — it composes a new block from
+# scratch.  It is NOT an updater.  Use the additive-merge writers
+# (Set-FCLDispatchCostSamplesSection, etc.) to modify existing v4 blocks.
+#
+# Round-trip coverage: scalar fields + credits[] + dispatch-cost-samples[]
+# survive Read-PRMetricsBlock.  Nested lists (judge-score.findings[],
+# prosecution-passes, files-checked) are write-only — reader drops them
+# silently via Get-FCLChunkKeyMap's flat hashtable.
+# ===========================================================================
+function New-PipelineMetricsV4Block {
+    [CmdletBinding()]
+    param(
+        # Caller-supplied v3 base YAML (may be empty/minimal for new PRs).
+        # The trimmed content is emitted verbatim before the v4 additions.
+        [AllowEmptyString()][string]$V3BaseYaml = '',
+
+        # Array of credit-row objects (Build-*CreditRow returns [pscustomobject]; hashtables also accepted).
+        [AllowEmptyCollection()][object[]]$Credits = @(),
+
+        # Array of dispatch-cost-sample objects (hashtables or pscustomobject).
+        [AllowEmptyCollection()][object[]]$DispatchCostSamples = @(),
+
+        # When supplied and non-empty, checked for an existing v4 block.
+        # Throws when a v4 block is found unless -Force is set.
+        [AllowEmptyString()][string]$ExistingPRBody = '',
+
+        # Bypass the initial-creation-only guard (for tests only).
+        [switch]$Force
+    )
+
+    # -----------------------------------------------------------------------
+    # Initial-creation-only guard: reject when the PR body already has a v4
+    # pipeline-metrics block.  Prevents clobbering existing credits[]/
+    # dispatch-cost-samples rows.
+    # -----------------------------------------------------------------------
+    if (-not $Force -and -not [string]::IsNullOrEmpty($ExistingPRBody)) {
+        $existingMetrics = Read-PRMetricsBlock -PrBody $ExistingPRBody
+        if ($null -ne $existingMetrics -and $existingMetrics.MetricsVersion -eq 4) {
+            throw "New-PipelineMetricsV4Block: PR body already has a v4 pipeline-metrics block. Use the additive-merge writers for updates."
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # V3BaseYaml validation: reject null/empty, reject blocks that already
+    # contain a pipeline-metrics opener or metrics_version: 4 (double-wrap
+    # guard).
+    # -----------------------------------------------------------------------
+    if ([string]::IsNullOrWhiteSpace($V3BaseYaml)) {
+        throw "New-PipelineMetricsV4Block: -V3BaseYaml must not be null or empty. Supply a minimal v3 base YAML string (e.g. 'pr_number: 42')."
+    }
+
+    if ($V3BaseYaml -match '<!--\s*pipeline-metrics') {
+        throw "New-PipelineMetricsV4Block: -V3BaseYaml already contains a <!-- pipeline-metrics opener. This builder is not an updater — pass the raw YAML payload without the HTML-comment wrapper."
+    }
+
+    # Strip any pre-existing metrics_version: line from the v3 base.
+    # The canonical v3 base schema includes 'metrics_version: 3'; stripping it before
+    # composing ensures the output carries exactly one 'metrics_version: 4' line and
+    # Get-FCLScalar (first-match reader) resolves the correct version. (#742 CR4)
+    $V3BaseYaml = ($V3BaseYaml -split "`r?`n" | Where-Object { $_ -notmatch '^\s*metrics_version\s*:' }) -join "`n"
+
+    # -----------------------------------------------------------------------
+    # Normalize [pscustomobject] items to [hashtable] so the render helpers
+    # can use ContainsKey().  Build-*CreditRow functions return pscustomobject.
+    # -----------------------------------------------------------------------
+    $Credits = @($Credits | ForEach-Object {
+        if ($null -eq $_) { return }
+        if ($_ -is [hashtable]) { return $_ }
+        $ht = @{}
+        $_.PSObject.Properties | ForEach-Object { $ht[$_.Name] = $_.Value }
+        $ht
+    })
+    $DispatchCostSamples = @($DispatchCostSamples | ForEach-Object {
+        if ($null -eq $_) { return }
+        if ($_ -is [hashtable]) { return $_ }
+        $ht = @{}
+        $_.PSObject.Properties | ForEach-Object { $ht[$_.Name] = $_.Value }
+        $ht
+    })
+
+    # -----------------------------------------------------------------------
+    # Helper: escape a scalar value so it is safe inside an HTML comment and
+    # survives the reader's first-':' split + quote-strip in Get-FCLScalar.
+    #
+    # Escape rules:
+    #   1. --> -> --&gt;          (would terminate the HTML comment early)
+    #   2. <!-- pipeline-metrics -> <!-- pipeline&#8208;metrics (avoid nested opener)
+    #   3. ``` -> &#96;&#96;&#96; (avoids confusing Markdown renderers)
+    #
+    # YAML quoting rule: quote scalars containing ':', '#', leading/trailing
+    # spaces, or quote characters so Get-FCLScalar can read them without
+    # truncation at the first ':'.
+    # -----------------------------------------------------------------------
+    function script:Escape-FCLScalar {
+        param([AllowEmptyString()][string]$Value)
+
+        if ([string]::IsNullOrEmpty($Value)) { return $Value }
+
+        # Fold embedded newlines to space — YAML single-line scalar constraint.
+        # Multi-line values split key: value pairs across physical lines, truncating evidence.
+        $v = $Value -replace '\r\n', ' ' -replace '\r', ' ' -replace '\n', ' '
+
+        # Escaping
+        $v = $v -replace '-->', '--&gt;'
+        $v = $v -replace '<!--\s*pipeline-metrics', '<!-- pipeline&#8208;metrics'
+        $v = $v -replace '```', '&#96;&#96;&#96;'
+
+        # YAML quoting: wrap in single quotes when the value contains ':',
+        # '#', a leading/trailing space, or a single/double quote character.
+        # Use double-quote wrapping when the value already contains a single
+        # quote (escape the double quotes inside as \").
+        $needsQuoting = ($v -match ':') -or
+                        ($v -match '#') -or
+                        ($v -match "^[ \t]") -or
+                        ($v -match "[ \t]$") -or
+                        ($v -match "^['""]") -or
+                        ($v -match "['""]$")
+
+        if ($needsQuoting) {
+            if ($v.Contains("'")) {
+                # Use double-quote wrapping; YAML double-quoted scalars use "" (not \") for literal "
+                $v = $v -replace '"', '""'
+                return '"' + $v + '"'
+            }
+            return "'" + $v + "'"
+        }
+
+        return $v
+    }
+
+    # -----------------------------------------------------------------------
+    # Helper: render a single credit hashtable as YAML list entry lines.
+    # Known scalar fields that survive the reader (round-trip coverage):
+    #   port, adapter, status, run_index, evidence, terminal-step-id
+    # Nested list fields (judge-score.findings[], prosecution-passes,
+    # files-checked) are out of scope for this builder.
+    # -----------------------------------------------------------------------
+    function script:Render-FCLCreditEntry {
+        param([hashtable]$Credit)
+
+        # Emit the known scalar fields in a canonical order.
+        $knownFields = @('port', 'adapter', 'status', 'run_index', 'evidence', 'terminal-step-id')
+        $sb = [System.Text.StringBuilder]::new()
+        $first = $true
+
+        foreach ($field in $knownFields) {
+            if ($Credit.ContainsKey($field) -and $null -ne $Credit[$field] -and '' -ne [string]$Credit[$field]) {
+                $rawVal = [string]$Credit[$field]
+                $safeVal = script:Escape-FCLScalar -Value $rawVal
+                if ($first) {
+                    [void]$sb.AppendLine("  - ${field}: $safeVal")
+                    $first = $false
+                } else {
+                    [void]$sb.AppendLine("    ${field}: $safeVal")
+                }
+            }
+        }
+
+        # Also emit any unrecognized scalar fields the caller passed in
+        # (forward-compat: pass them through verbatim but escaped).
+        foreach ($key in @($Credit.Keys | Where-Object { $_ -notin $knownFields })) {
+            $rawVal = [string]$Credit[$key]
+            $safeVal = script:Escape-FCLScalar -Value $rawVal
+            if ($first) {
+                [void]$sb.AppendLine("  - ${key}: $safeVal")
+                $first = $false
+            } else {
+                [void]$sb.AppendLine("    ${key}: $safeVal")
+            }
+        }
+
+        return $sb.ToString()
+    }
+
+    # -----------------------------------------------------------------------
+    # Helper: render a dispatch-cost-sample hashtable as YAML list entry.
+    # Required fields (position-strict): step-id, mode, bytes, rc-conformance,
+    # judge-disposition.  Optional: provider, model.
+    # -----------------------------------------------------------------------
+    function script:Render-FCLDispatchCostSampleEntry {
+        param([hashtable]$Sample)
+
+        $sb = [System.Text.StringBuilder]::new()
+        $first = $true
+
+        $orderedFields = @('step-id', 'mode', 'bytes', 'rc-conformance', 'judge-disposition', 'provider', 'model')
+
+        foreach ($field in $orderedFields) {
+            if ($Sample.ContainsKey($field) -and $null -ne $Sample[$field] -and '' -ne [string]$Sample[$field]) {
+                $rawVal = [string]$Sample[$field]
+                $safeVal = script:Escape-FCLScalar -Value $rawVal
+                if ($first) {
+                    [void]$sb.AppendLine("  - ${field}: $safeVal")
+                    $first = $false
+                } else {
+                    [void]$sb.AppendLine("    ${field}: $safeVal")
+                }
+            }
+        }
+
+        return $sb.ToString()
+    }
+
+    # -----------------------------------------------------------------------
+    # Compose the block.
+    # -----------------------------------------------------------------------
+    $sb = [System.Text.StringBuilder]::new()
+
+    [void]$sb.AppendLine('<!-- pipeline-metrics')
+    [void]$sb.AppendLine(($V3BaseYaml.Trim() -replace '-->', '--&gt;'))
+    [void]$sb.AppendLine('metrics_version: 4')
+    [void]$sb.AppendLine('frame_version: 1')
+
+    if ($Credits.Count -gt 0) {
+        [void]$sb.AppendLine('credits:')
+        foreach ($credit in $Credits) {
+            if ($null -ne $credit) {
+                [void]$sb.Append((script:Render-FCLCreditEntry -Credit $credit))
+            }
+        }
+    }
+
+    if ($DispatchCostSamples.Count -gt 0) {
+        [void]$sb.AppendLine('dispatch-cost-samples:')
+        foreach ($sample in $DispatchCostSamples) {
+            if ($null -ne $sample) {
+                [void]$sb.Append((script:Render-FCLDispatchCostSampleEntry -Sample $sample))
+            }
+        }
+    }
+
+    # Remove trailing newline before appending the closing --> so the output
+    # has exactly one HTML comment with no trailing blank line inside it.
+    $body = $sb.ToString().TrimEnd("`r", "`n")
+    return $body + [Environment]::NewLine + '-->'
+}
+
+# ===========================================================================
+# Test-PipelineMetricsV4Block (issue #739 s3 — AC2, AC3)
+#
+# Given a PR body string containing a freshly-built pipeline-metrics block,
+# validates that the block is canonical v4 shape.
+#
+# Used by Code-Conductor before `gh pr create` to verify the block it just
+# built is correct.  Never throws — all exceptions are caught internally and
+# downgraded to Valid=$false + warning.
+#
+# Return shape:
+#   @{
+#     Valid                = $true / $false
+#     FailureReason        = ''               # empty string when Valid=$true
+#     DetectedMarkerCount  = N
+#     RoundTripVersion     = 4 / 'pre-v4' / 'missing'
+#   }
+#
+# Validation emits Write-Warning on failure and returns Valid=$false.
+# The caller proceeds to gh pr create regardless (warn-only, #429).
+# ===========================================================================
+function Test-PipelineMetricsV4Block {
+    [CmdletBinding()]
+    param(
+        # The full PR body string (may include other content around the block)
+        [AllowEmptyString()][string]$PRBody = ''
+    )
+
+    # -----------------------------------------------------------------------
+    # Internal: validate a PR body string.
+    # Returns a hashtable with Valid, FailureReason, DetectedMarkerCount,
+    # RoundTripVersion.
+    # -----------------------------------------------------------------------
+    function script:Invoke-FCLMetricsBlockValidation {
+        param([AllowEmptyString()][string]$Body)
+
+        # ------------------------------------------------------------------
+        # Check 2b: Count non-fenced pipeline-metrics markers.
+        # Strip content inside triple-backtick fences first so fenced
+        # documentation examples don't inflate the count.
+        # ------------------------------------------------------------------
+        $strippedBody = [regex]::Replace($Body, '(?s)```.*?```', '')
+        $markerMatches = [regex]::Matches($strippedBody, '<!--\s*pipeline-metrics')
+        $markerCount = $markerMatches.Count
+
+        # ------------------------------------------------------------------
+        # Check 2a: Call Read-PRMetricsBlock and assert MetricsVersion == 4.
+        # ------------------------------------------------------------------
+        $parsed = $null
+        $roundTripVersion = 'missing'
+
+        try {
+            $parsed = Read-PRMetricsBlock -PrBody $Body
+        } catch {
+            return @{
+                Valid               = $false
+                FailureReason       = "Read-PRMetricsBlock threw: $($_.Exception.Message)"
+                DetectedMarkerCount = $markerCount
+                RoundTripVersion    = 'missing'
+            }
+        }
+
+        if ($null -eq $parsed) {
+            $roundTripVersion = 'missing'
+            return @{
+                Valid               = $false
+                FailureReason       = 'No pipeline-metrics block found in PR body (Read-PRMetricsBlock returned null).'
+                DetectedMarkerCount = $markerCount
+                RoundTripVersion    = $roundTripVersion
+            }
+        }
+
+        $mv = [string]$parsed.MetricsVersion
+        if ($mv -eq '4') {
+            $roundTripVersion = 4
+        } elseif ($mv -eq 'pre-v4') {
+            $roundTripVersion = 'pre-v4'
+            $detectedVersion = if ($null -ne $parsed.PSObject.Properties['DetectedVersion']) { [string]$parsed.DetectedVersion } else { '' }
+            $failMsg = if ([string]::IsNullOrWhiteSpace($detectedVersion)) {
+                "Block metrics_version is not 4 (detected: pre-v4)."
+            } else {
+                "Block metrics_version is not 4 (detected: pre-v4; sub-reason: $detectedVersion)."
+            }
+            return @{
+                Valid               = $false
+                FailureReason       = $failMsg
+                DetectedMarkerCount = $markerCount
+                RoundTripVersion    = $roundTripVersion
+            }
+        } elseif ($mv -eq 'parse-error') {
+            $roundTripVersion = 'missing'
+            $reason = if ($null -ne $parsed.PSObject.Properties['Reason']) { [string]$parsed.Reason } else { '' }
+            return @{
+                Valid               = $false
+                FailureReason       = "Block failed to parse (parse-error): $reason"
+                DetectedMarkerCount = $markerCount
+                RoundTripVersion    = $roundTripVersion
+            }
+        } else {
+            $roundTripVersion = 'missing'
+            return @{
+                Valid               = $false
+                FailureReason       = "Block metrics_version is not 4 (got: $mv)."
+                DetectedMarkerCount = $markerCount
+                RoundTripVersion    = $roundTripVersion
+            }
+        }
+
+        # ------------------------------------------------------------------
+        # Check 2b: Exactly one non-fenced marker.
+        # ------------------------------------------------------------------
+        if ($markerCount -ne 1) {
+            return @{
+                Valid               = $false
+                FailureReason       = "Expected exactly 1 non-fenced pipeline-metrics marker; found $markerCount."
+                DetectedMarkerCount = $markerCount
+                RoundTripVersion    = $roundTripVersion
+            }
+        }
+
+        # ------------------------------------------------------------------
+        # Check 2c: Non-empty credits.
+        # ------------------------------------------------------------------
+        $credits = @()
+        if ($null -ne $parsed.PSObject.Properties['Credits']) {
+            $credits = @($parsed.Credits)
+        }
+        if ($credits.Count -eq 0) {
+            return @{
+                Valid               = $false
+                FailureReason       = 'Block has no credits[] entries.'
+                DetectedMarkerCount = $markerCount
+                RoundTripVersion    = $roundTripVersion
+            }
+        }
+
+        # All checks passed.
+        return @{
+            Valid               = $true
+            FailureReason       = ''
+            DetectedMarkerCount = $markerCount
+            RoundTripVersion    = $roundTripVersion
+        }
+    }
+
+    # -----------------------------------------------------------------------
+    # Outer try/catch: never throws.
+    # -----------------------------------------------------------------------
+    try {
+        $result = script:Invoke-FCLMetricsBlockValidation -Body $PRBody
+
+        if (-not $result.Valid) {
+            Write-Warning "Test-PipelineMetricsV4Block: validation failed — $($result.FailureReason) (warn-only; proceeding)"
+        }
+
+        return $result
+    } catch {
+        # Catch-all: never throws outward.
+        $msg = $_.Exception.Message
+        Write-Warning "Test-PipelineMetricsV4Block: unexpected error — $msg"
+        return @{
+            Valid               = $false
+            FailureReason       = "Unexpected error: $msg"
+            DetectedMarkerCount = 0
+            RoundTripVersion    = 'missing'
+        }
+    }
 }
 
 function Resolve-FCLOverrideMarker {

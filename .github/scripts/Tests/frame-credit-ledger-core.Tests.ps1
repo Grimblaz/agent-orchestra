@@ -121,6 +121,124 @@ Describe 'Read-PRMetricsBlock' {
     }
 }
 
+# ---------------------------------------------------------------------------
+# AC5 — Detected-state diagnostic (issue #739 s1)
+# Tests for DetectedVersion field on Read-PRMetricsBlock and the
+# Compose-PreV4ShortCircuitComment rendering per detected state.
+# ---------------------------------------------------------------------------
+Describe 'Read-PRMetricsBlock — DetectedVersion field (issue #739 AC5)' {
+
+    It '#737-shape fixture: self-closing marker captures empty block -> DetectedVersion=no-version-field' {
+        # Replicates the exact emission from PR #737 as documented in the issue Evidence section:
+        # the conductor emitted <!-- pipeline-metrics --> (self-closing) which the regex matches
+        # with an empty captured block, producing no metrics_version field.
+        # Source: issue #739 Evidence section — built from the issue body, NOT from gh pr view 737.
+        $prBody = @"
+## Summary
+
+A PR opened through the inline orchestration flow.
+
+<!-- pipeline-metrics -->
+``````yaml
+schema_version: 2
+issue: 735
+review_mode: full
+stages_run: [experience, design, plan, implement, review]
+``````
+<!-- /pipeline-metrics -->
+
+More text after.
+"@
+
+        $result = Read-PRMetricsBlock -PrBody $prBody
+
+        $result | Should -Not -BeNullOrEmpty
+        $result.MetricsVersion | Should -Be 'pre-v4'
+        $result.DetectedVersion | Should -Be 'no-version-field'
+    }
+
+    It 'literal-version fixture: block with metrics_version: 3 -> DetectedVersion=version-N-not-4' {
+        $body = "## Summary`n`n<!-- pipeline-metrics`nmetrics_version: 3`n-->`n"
+
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        $result | Should -Not -BeNullOrEmpty
+        $result.MetricsVersion | Should -Be 'pre-v4'
+        $result.DetectedVersion | Should -Be 'version-N-not-4'
+    }
+
+    It 'existing MetricsVersion=pre-v4 test still passes (backwards-compatibility guard)' {
+        $body = & $script:NewV4PrBody -Yaml $script:PreV4Yaml
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        $result | Should -Not -BeNullOrEmpty
+        $result.MetricsVersion | Should -Be 'pre-v4'
+    }
+
+    It 'v4 block returns null or absent DetectedVersion (only meaningful on pre-v4 path)' {
+        $body = & $script:NewV4PrBody -Yaml $script:V4FullYaml
+        $result = Read-PRMetricsBlock -PrBody $body
+
+        $result.MetricsVersion | Should -Be 4
+        # DetectedVersion may be absent or null on the v4 path — both are acceptable
+        if ($null -ne $result.PSObject.Properties['DetectedVersion']) {
+            $result.DetectedVersion | Should -BeNullOrEmpty
+        }
+    }
+}
+
+Describe 'Compose-PreV4ShortCircuitComment — DetectedVersion rendering (issue #739 AC5)' {
+
+    It 'no-version-field renders the correct phrase about missing metrics_version field' {
+        $comment = Compose-PreV4ShortCircuitComment -MarkerToken '<!-- frame-credit-ledger-warn -->' -DetectedVersion 'no-version-field'
+
+        $comment | Should -Match 'no `metrics_version` field'
+        $comment | Should -Match 'Coverage details are unavailable'
+    }
+
+    It 'version-N-not-4 renders the correct phrase about metrics_version set to a value other than 4' {
+        $comment = Compose-PreV4ShortCircuitComment -MarkerToken '<!-- frame-credit-ledger-warn -->' -DetectedVersion 'version-N-not-4'
+
+        $comment | Should -Match 'metrics_version.*other than 4|other than 4.*metrics_version'
+        $comment | Should -Match 'Coverage details are unavailable'
+    }
+
+    It 'parse-error renders the correct phrase about block that could not be parsed' {
+        $comment = Compose-PreV4ShortCircuitComment -MarkerToken '<!-- frame-credit-ledger-warn -->' -DetectedVersion 'parse-error'
+
+        $comment | Should -Match 'could not be parsed'
+        $comment | Should -Match 'Coverage details are unavailable'
+    }
+
+    It 'null/empty DetectedVersion falls back to the original hardcoded text' {
+        $comment = Compose-PreV4ShortCircuitComment -MarkerToken '<!-- frame-credit-ledger-warn -->'
+
+        $comment | Should -Match 'pre-v4 `pipeline-metrics` block'
+    }
+
+    It '#737-shape: no-version-field comment contains the correct description (end-to-end)' {
+        # Verify that the no-version-field state detected by Read-PRMetricsBlock
+        # produces the correct Compose-PreV4ShortCircuitComment output.
+        $prBody = @"
+## Summary
+
+<!-- pipeline-metrics -->
+``````yaml
+schema_version: 2
+``````
+<!-- /pipeline-metrics -->
+"@
+        $metrics = Read-PRMetricsBlock -PrBody $prBody
+        $metrics.DetectedVersion | Should -Be 'no-version-field'
+
+        $comment = Compose-PreV4ShortCircuitComment -MarkerToken '<!-- frame-credit-ledger-warn -->' -DetectedVersion $metrics.DetectedVersion
+
+        $comment | Should -Match 'no `metrics_version` field'
+        $comment | Should -Match 'v3/pre-v4 base'
+        $comment | Should -Match 'Coverage details are unavailable'
+    }
+}
+
 Describe 'dispatch-cost-samples v4 metrics contract (issue #512 Step 12)' {
 
         BeforeAll {
@@ -1845,4 +1963,379 @@ integrity_checks:
                 $credit.TerminalStepId | Should -Be 5
                 $credit.Evidence | Should -Be 'terminal cycle failed'
         }
+}
+
+# ---------------------------------------------------------------------------
+# issue #739 s2 — New-PipelineMetricsV4Block builder tests
+# ---------------------------------------------------------------------------
+Describe 'New-PipelineMetricsV4Block (issue #739 s2 — AC1)' {
+
+    # Test 1: basic happy path
+    It 'happy path: produces a single pipeline-metrics block with metrics_version: 4, frame_version: 1, and credit row' {
+        $credit = @{ port = 'experience'; adapter = 'work-adapter'; evidence = 'test-evidence' }
+
+        $block = New-PipelineMetricsV4Block `
+            -V3BaseYaml "pr_number: 42`nschema_version: 2" `
+            -Credits @($credit)
+
+        $block | Should -Not -BeNullOrEmpty
+        # Exactly one HTML-comment block opener and closer
+        $openerPattern = [regex]::Escape('<!-- pipeline-metrics')
+        ($block | Select-String $openerPattern -AllMatches).Matches.Count | Should -Be 1
+        ($block | Select-String '(?m)^-->' -AllMatches).Matches.Count | Should -Be 1
+        # Required v4 fields present
+        $block | Should -Match '(?m)^metrics_version:\s*4\s*$'
+        $block | Should -Match '(?m)^frame_version:\s*1\s*$'
+        # Base YAML preserved
+        $block | Should -Match 'pr_number: 42'
+        # Credit row present
+        $block | Should -Match 'port: experience'
+        $block | Should -Match 'adapter: work-adapter'
+        $block | Should -Match 'evidence: test-evidence'
+    }
+
+    # Test 2: escaping — evidence containing -->
+    It 'escaping: evidence containing --> does not appear as raw --> outside the closing tag' {
+        $credit = @{ port = 'review'; adapter = 'standard'; evidence = 'see comment --> important' }
+
+        $block = New-PipelineMetricsV4Block `
+            -V3BaseYaml 'pr_number: 100' `
+            -Credits @($credit)
+
+        # The closing --> must be the LAST occurrence; the body must not contain a raw --> before it
+        $normalized = $block -replace "`r`n", "`n" -replace "`r", "`n"
+        $lines = $normalized -split "`n"
+
+        # Find the line that is the closing -->
+        $closingIdx = -1
+        for ($i = $lines.Count - 1; $i -ge 0; $i--) {
+            if ($lines[$i].Trim() -eq '-->') {
+                $closingIdx = $i
+                break
+            }
+        }
+        $closingIdx | Should -BeGreaterThan 0 -Because 'closing --> must be present'
+
+        # No --> in any line before the closing tag
+        for ($i = 0; $i -lt $closingIdx; $i++) {
+            $lines[$i] | Should -Not -Match '-->'
+        }
+    }
+
+    # Test 3: YAML quoting — credit evidence value containing ':'
+    It 'quoting: credit evidence containing colon survives Read-PRMetricsBlock Get-FCLScalar without truncation' {
+        $evidenceWithColon = 'judge ruling: keep — no changes required'
+        $credit = @{ port = 'review'; adapter = 'standard'; evidence = $evidenceWithColon }
+
+        $block = New-PipelineMetricsV4Block `
+            -V3BaseYaml 'pr_number: 99' `
+            -Credits @($credit)
+
+        # Wrap in a PR body and round-trip through Read-PRMetricsBlock
+        $prBody = "## PR`n`n$block`n`nMore text."
+        $parsed = Read-PRMetricsBlock -PrBody $prBody
+
+        $parsed.MetricsVersion | Should -Be 4
+        $reviewCredit = @($parsed.Credits) | Where-Object { $_.Port -eq 'review' }
+        $reviewCredit | Should -Not -BeNullOrEmpty
+        $reviewCredit.Evidence | Should -Be $evidenceWithColon -Because 'colon-containing evidence must round-trip without truncation'
+    }
+
+    # Test 4: initial-creation-only guard — ExistingPRBody with v4 block throws
+    It 'initial-creation-only guard: calling with ExistingPRBody containing a v4 block throws the expected error' {
+        $existingV4Body = "## PR`n`n<!-- pipeline-metrics`npr_number: 1`nmetrics_version: 4`nframe_version: 1`n-->`n"
+
+        {
+            New-PipelineMetricsV4Block `
+                -V3BaseYaml 'pr_number: 1' `
+                -ExistingPRBody $existingV4Body
+        } | Should -Throw -ExpectedMessage '*already has a v4 pipeline-metrics block*'
+    }
+
+    # Test 4b: initial-creation-only guard bypass with -Force
+    It 'initial-creation-only guard: -Force bypasses the existing-v4-block check' {
+        $existingV4Body = "## PR`n`n<!-- pipeline-metrics`npr_number: 1`nmetrics_version: 4`nframe_version: 1`n-->`n"
+
+        {
+            New-PipelineMetricsV4Block `
+                -V3BaseYaml 'pr_number: 1' `
+                -ExistingPRBody $existingV4Body `
+                -Force
+        } | Should -Not -Throw
+    }
+
+    # Test 5: double-wrap guard — V3BaseYaml containing <!-- pipeline-metrics throws
+    It 'double-wrap guard: V3BaseYaml already containing <!-- pipeline-metrics throws' {
+        $yamlWithOpener = '<!-- pipeline-metrics-->pr_number: 5'
+        {
+            New-PipelineMetricsV4Block -V3BaseYaml $yamlWithOpener
+        } | Should -Throw -ExpectedMessage '*already contains a <!-- pipeline-metrics*'
+    }
+
+    # Test 5b: metrics_version: 4 in V3BaseYaml is stripped (not thrown); block resolves as v4
+    It 'double-wrap guard: V3BaseYaml containing metrics_version: 4 is stripped; block resolves as v4' {
+        $yamlWithV4 = "pr_number: 5`nmetrics_version: 4"
+        $block = New-PipelineMetricsV4Block -V3BaseYaml $yamlWithV4
+
+        $mvMatches = [regex]::Matches($block, '(?m)^\s*metrics_version\s*:')
+        $mvMatches.Count | Should -Be 1
+
+        $prBody = "## PR`n`n$block"
+        $parsed = Read-PRMetricsBlock -PrBody $prBody
+        $parsed.MetricsVersion | Should -Be '4'
+    }
+
+    # Test 6: round-trip text-anchor — every scalar field emitted by the builder
+    # is recoverable by Read-PRMetricsBlock
+    It 'round-trip text-anchor: scalar credit fields and dispatch-cost-sample fields survive Read-PRMetricsBlock' {
+        $credit = @{
+            port     = 'implement-code'
+            adapter  = 'skills/implementation-discipline/adapters/implement-code-adapter.md'
+            status   = 'passed'
+            run_index = '1'
+            evidence = 'Pester suite passed: 94/94'
+        }
+        $sample = @{
+            'step-id'           = 's2'
+            mode                = 'spine'
+            bytes               = '8192'
+            'rc-conformance'    = 'pass'
+            'judge-disposition' = 'accepted'
+        }
+
+        $block = New-PipelineMetricsV4Block `
+            -V3BaseYaml "pr_number: 739`nschema_version: 2" `
+            -Credits @($credit) `
+            -DispatchCostSamples @($sample)
+
+        $prBody = "## PR body`n`n$block`n`nMore text."
+        $parsed = Read-PRMetricsBlock -PrBody $prBody
+
+        # Scalar v4 fields
+        $parsed.MetricsVersion | Should -Be 4
+        $parsed.FrameVersion   | Should -Be 1
+
+        # Credit round-trip
+        $parsedCredit = @($parsed.Credits) | Where-Object { $_.Port -eq 'implement-code' }
+        $parsedCredit | Should -Not -BeNullOrEmpty
+        $parsedCredit.Adapter  | Should -Be $credit['adapter']
+        $parsedCredit.Status   | Should -Be $credit['status']
+        $parsedCredit.RunIndex | Should -Be 1
+        $parsedCredit.Evidence | Should -Be $credit['evidence']
+
+        # Dispatch-cost-sample round-trip
+        $parsedSample = @($parsed.DispatchCostSamples) | Where-Object { $_.'step-id' -eq 's2' }
+        $parsedSample | Should -Not -BeNullOrEmpty
+        $parsedSample.mode               | Should -Be 'spine'
+        $parsedSample.bytes              | Should -Be 8192
+        $parsedSample.'rc-conformance'   | Should -Be 'pass'
+        $parsedSample.'judge-disposition' | Should -Be 'accepted'
+    }
+
+    # Test 7: empty Credits and DispatchCostSamples — no credits: or dispatch-cost-samples: section emitted
+    It 'omits credits: and dispatch-cost-samples: sections when both arrays are empty' {
+        $block = New-PipelineMetricsV4Block -V3BaseYaml 'pr_number: 1'
+
+        $block | Should -Not -Match '(?m)^credits:\s*$'
+        $block | Should -Not -Match '(?m)^dispatch-cost-samples:\s*$'
+    }
+
+    # Test 8: dispatch-cost-samples round-trip with optional provider field
+    It 'dispatch-cost-sample with provider field round-trips through Read-PRMetricsBlock' {
+        $sample = @{
+            'step-id'           = 's3'
+            mode                = 'spine'
+            bytes               = '4096'
+            'rc-conformance'    = 'not-evaluated'
+            'judge-disposition' = 'not-evaluated'
+            provider            = 'claude'
+        }
+
+        $block = New-PipelineMetricsV4Block `
+            -V3BaseYaml 'pr_number: 1' `
+            -DispatchCostSamples @($sample)
+
+        $prBody = "## PR`n`n$block`n`nMore."
+        $parsed = Read-PRMetricsBlock -PrBody $prBody
+        $parsedSample = @($parsed.DispatchCostSamples) | Where-Object { $_.'step-id' -eq 's3' }
+        $parsedSample.provider | Should -Be 'claude'
+    }
+
+    # Test 9: pscustomobject credits (Build-*CreditRow returns pscustomobject, not hashtable)
+    It 'accepts pscustomobject credits as returned by Build-*CreditRow functions' {
+        $psoCredit = [pscustomobject]@{
+            port     = 'implement-code'
+            adapter  = 'skills/implementation-discipline/adapters/implement-code-adapter.md'
+            status   = 'passed'
+            evidence = 'Integration round-trip test'
+        }
+
+        # Should not throw — pscustomobject is normalized to hashtable internally
+        $block = New-PipelineMetricsV4Block -V3BaseYaml 'pr_number: 1' -Credits @($psoCredit)
+
+        $block | Should -Not -BeNullOrEmpty
+        $parsed = Read-PRMetricsBlock -PrBody "## PR`n`n$block`n`nEnd."
+        $parsed.MetricsVersion | Should -Be 4
+        $parsedCredit = @($parsed.Credits) | Where-Object { $_.Port -eq 'implement-code' }
+        $parsedCredit | Should -Not -BeNullOrEmpty
+        $parsedCredit.Evidence | Should -Be 'Integration round-trip test'
+    }
+
+    # Test 10: both-quote round-trip — value with ' and " survives Read-PRMetricsBlock losslessly
+    It 'round-trip: evidence containing both single-quote and double-quote round-trips losslessly' {
+        $evidence = "it's a ""quoted"" value: confirmed"
+        $credit = @{ port = 'implement-code'; status = 'passed'; evidence = $evidence }
+
+        $block  = New-PipelineMetricsV4Block -V3BaseYaml 'pr_number: 1' -Credits @($credit)
+        $parsed = Read-PRMetricsBlock -PrBody "## PR`n`n$block`n`nEnd."
+        $parsedCredit = @($parsed.Credits) | Where-Object { $_.Port -eq 'implement-code' }
+        $parsedCredit.Evidence | Should -Be $evidence
+    }
+
+    # Test 11: newline in evidence — folded to space; block still reads as v4
+    It 'round-trip: evidence with embedded newline is folded to space and block remains v4' {
+        $credit = @{ port = 'implement-code'; status = 'passed'; evidence = "first line`nsecond line" }
+
+        $block  = New-PipelineMetricsV4Block -V3BaseYaml 'pr_number: 1' -Credits @($credit)
+        $parsed = Read-PRMetricsBlock -PrBody "## PR`n`n$block`n`nEnd."
+        $parsed.MetricsVersion | Should -Be 4
+        $parsedCredit = @($parsed.Credits) | Where-Object { $_.Port -eq 'implement-code' }
+        $parsedCredit | Should -Not -BeNullOrEmpty
+        $parsedCredit.Evidence | Should -Be 'first line second line'
+    }
+
+    # Test 12: v3 base containing --> is escaped so the HTML comment does not close early
+    It 'v3-base with --> is escaped; block still reads as v4' {
+        $credit = @{ port = 'review'; status = 'passed'; evidence = 'ok' }
+        $block  = New-PipelineMetricsV4Block `
+            -V3BaseYaml "pr_number: 1`nnote: see --> here in base" `
+            -Credits @($credit)
+
+        $parsed = Read-PRMetricsBlock -PrBody "## PR`n`n$block`n`nEnd."
+        $parsed.MetricsVersion | Should -Be 4
+    }
+
+    # Test 13 (CR4 regression): v3 base containing metrics_version: 3 — builder strips it; block round-trips as v4
+    It 'CR4 regression: v3 base containing metrics_version: 3 — builder strips it; block round-trips as v4' {
+        $v3Base = "pr_number: 99`nmetrics_version: 3`nframe_version: 1`n"
+        $credit = @{ port = 'implement-code'; status = 'passed'; evidence = 'Pester suite passed' }
+        $block = New-PipelineMetricsV4Block -V3BaseYaml $v3Base -Credits @($credit) -DispatchCostSamples @()
+        $prBody = "## Pipeline Metrics`n`n$block"
+
+        # Only ONE metrics_version line in the output
+        $mvMatches = [regex]::Matches($block, '(?m)^\s*metrics_version\s*:')
+        $mvMatches.Count | Should -Be 1
+
+        # Reader resolves 4, not 3
+        $parsed = Read-PRMetricsBlock -PrBody $prBody
+        $parsed | Should -Not -BeNullOrEmpty
+        $parsed.MetricsVersion | Should -Be '4'
+
+        # Full validation passes
+        $validation = Test-PipelineMetricsV4Block -PRBody $prBody
+        $validation.Valid | Should -Be $true
+    }
+}
+
+# ===========================================================================
+# Test-PipelineMetricsV4Block (issue #739 s3 — AC2, AC3)
+# ===========================================================================
+Describe 'Test-PipelineMetricsV4Block' {
+
+    BeforeAll {
+        # Scriptblock helper: build a minimal valid v4 PR body with one credit entry.
+        # Stored as a script-scoped scriptblock so It-blocks can call it via & $script:BuildV4Body.
+        $script:BuildV4Body = {
+            param(
+                [string]$CreditsYaml = "  - port: implement-code`n    status: passed`n    evidence: Pester suite passed"
+            )
+            $yaml = "pr_number: 739`nmetrics_version: 4`nframe_version: 1`ncredits:`n$CreditsYaml"
+            return "## Summary`n`n<!-- pipeline-metrics`n$yaml`n-->`n`nMore text."
+        }
+    }
+
+    # Test 1: Happy path — valid v4 body with 1 credit → Valid=$true, DetectedMarkerCount=1
+    It 'happy path: valid v4 block with 1 credit returns Valid=$true and DetectedMarkerCount=1' {
+        $body = & $script:BuildV4Body
+        $result = Test-PipelineMetricsV4Block -PRBody $body
+
+        $result.Valid               | Should -Be $true
+        $result.DetectedMarkerCount | Should -Be 1
+        $result.FailureReason       | Should -BeNullOrEmpty
+    }
+
+    # Test 2: Wrong version fails — metrics_version: 3 → Valid=$false, FailureReason mentions version
+    It 'wrong version: metrics_version: 3 returns Valid=$false with FailureReason mentioning version' {
+        $yaml = "pr_number: 739`nmetrics_version: 3`ncredits:`n  - port: implement-code`n    status: passed`n    evidence: test"
+        $body = "## Summary`n`n<!-- pipeline-metrics`n$yaml`n-->`n"
+
+        $result = Test-PipelineMetricsV4Block -PRBody $body
+
+        $result.Valid         | Should -Be $false
+        $result.FailureReason | Should -Not -BeNullOrEmpty
+        # FailureReason should mention something about version not being 4
+        $result.FailureReason | Should -Match 'pre-v4|version|not 4'
+    }
+
+    # Test 3: Multi-marker fails — two non-fenced pipeline-metrics blocks → Valid=$false, DetectedMarkerCount=2
+    It 'multi-marker: two non-fenced pipeline-metrics blocks returns Valid=$false and DetectedMarkerCount=2' {
+        $yaml = "pr_number: 739`nmetrics_version: 4`nframe_version: 1`ncredits:`n  - port: implement-code`n    status: passed`n    evidence: test"
+        $block = "<!-- pipeline-metrics`n$yaml`n-->"
+        # Two separate blocks in the body (both non-fenced)
+        $body = "## Summary`n`n$block`n`nSome text.`n`n$block`n`nEnd."
+
+        $result = Test-PipelineMetricsV4Block -PRBody $body
+
+        $result.Valid               | Should -Be $false
+        $result.DetectedMarkerCount | Should -Be 2
+    }
+
+    # Test 4: Fenced marker excluded — one real block + one inside triple-backtick fence
+    #   → still DetectedMarkerCount=1 (the fenced one doesn't count)
+    It 'fenced marker excluded: pipeline-metrics inside a code fence is not counted' {
+        $yaml = "pr_number: 739`nmetrics_version: 4`nframe_version: 1`ncredits:`n  - port: implement-code`n    status: passed`n    evidence: test"
+        $realBlock = "<!-- pipeline-metrics`n$yaml`n-->"
+        # Fenced documentation example — should NOT be counted as a real marker
+        $fencedExample = '```' + "`n<!-- pipeline-metrics`nsome: yaml`n-->`n" + '```'
+        $body = "## Summary`n`n$realBlock`n`n$fencedExample`n`nEnd."
+
+        $result = Test-PipelineMetricsV4Block -PRBody $body
+
+        $result.Valid               | Should -Be $true
+        $result.DetectedMarkerCount | Should -Be 1
+    }
+
+    # Test 5: Empty credits fails — v4 block with no credits section → Valid=$false
+    It 'empty credits: v4 block with no credit entries returns Valid=$false' {
+        # Build a body with a v4 block but no credits: section at all (parser returns empty array)
+        $yaml = "pr_number: 739`nmetrics_version: 4`nframe_version: 1"
+        $body = "## Summary`n`n<!-- pipeline-metrics`n$yaml`n-->`n"
+
+        $result = Test-PipelineMetricsV4Block -PRBody $body
+
+        $result.Valid         | Should -Be $false
+        $result.FailureReason | Should -Not -BeNullOrEmpty
+    }
+
+    # Test 6: Never-throws — garbage input does NOT throw; returns Valid=$false
+    It 'never-throws: garbage PRBody does not throw and returns Valid=$false' {
+        # Invoke directly (not inside a scriptblock) to avoid scoping issues with $result
+        $result = Test-PipelineMetricsV4Block -PRBody 'garbage not a block at all'
+
+        $result       | Should -Not -BeNullOrEmpty
+        $result.Valid | Should -Be $false
+    }
+
+    # Test 7: invalid input terminates quickly and returns Valid=$false (no infinite loop)
+    It 'invalid input: returns Valid=$false quickly without hanging' {
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = Test-PipelineMetricsV4Block -PRBody 'not a block'
+        $sw.Stop()
+
+        # Function should return quickly (well under 5 seconds)
+        $sw.Elapsed.TotalSeconds | Should -BeLessThan 5
+
+        $result       | Should -Not -BeNullOrEmpty
+        $result.Valid | Should -Be $false
+    }
 }

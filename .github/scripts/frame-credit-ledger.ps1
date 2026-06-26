@@ -1279,7 +1279,9 @@ function Invoke-FrameCreditLedger {
     }
 
     if ($metrics.MetricsVersion -ne 4) {
-        $comment = Compose-PreV4ShortCircuitComment -MarkerToken $marker
+        $detectedVersion = $null
+        if ($null -ne $metrics.PSObject.Properties['DetectedVersion']) { $detectedVersion = [string]$metrics.DetectedVersion }
+        $comment = Compose-PreV4ShortCircuitComment -MarkerToken $marker -DetectedVersion $detectedVersion
         try {
             $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $marker -Body $comment
         }

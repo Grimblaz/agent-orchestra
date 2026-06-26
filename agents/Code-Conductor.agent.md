@@ -435,11 +435,11 @@ PR bodies must still include a `## Pipeline Metrics` section containing the `<!-
 
 Load and follow these references:
 
-- `skills/calibration-pipeline/references/metrics-schema.md`
+- `skills/calibration-pipeline/references/metrics-schema.md` — authoritative for the inherited v3 base fields
 - `skills/calibration-pipeline/references/verdict-mapping.md`
 - `skills/calibration-pipeline/references/findings-construction.md`
 
-Code-Conductor keeps only the emission timing and ownership boundary: emit the `## Pipeline Metrics` section at PR creation time using the canonical schema, mappings, and findings-construction rules from those references.
+Code-Conductor keeps only the emission timing and ownership boundary: emit the `## Pipeline Metrics` section at PR creation time by calling `New-PipelineMetricsV4Block` (from `.github/scripts/lib/frame-credit-ledger-core.ps1`) with `-V3BaseYaml` (plain YAML string of v3 base fields — do not wrap in the HTML comment, do not include `metrics_version: 4`; the builder adds those) and the accumulated `-Credits` / `-DispatchCostSamples` from the session-memory accumulator. `Build-*CreditRow` outputs are `[pscustomobject]` rows — pass them directly, the builder normalizes them. Then call `Test-PipelineMetricsV4Block` on the resulting PR body; if validation fails, log the warning and proceed to `gh pr create` regardless (warn-only, #429). On re-emit the initial-creation guard prevents double-wrapping; use additive-merge writers for updates after the initial PR exists.
 
 For v4 release-hygiene credit row construction (state-file reading, YAML examples) and the CE Gate S2 synthetic-PR test protocol, follow `skills/calibration-pipeline/references/release-hygiene-credit-emission.md`.
 
