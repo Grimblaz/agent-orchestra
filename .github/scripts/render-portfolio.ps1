@@ -513,7 +513,7 @@ function Format-PortfolioMarkdown {
     # --- UnresolvedNums ---
     if ($UnresolvedNums -and $UnresolvedNums.Count -gt 0) {
         foreach ($n in $UnresolvedNums) {
-            $null = $sb.AppendLine("⚠️ Warning: issue #$n not found in GitHub — remove from sequence.yaml")
+            $null = $sb.AppendLine("⚠️ Warning: issue #$n could not be fully resolved (not found or incomplete blocker data) — verify it exists in GitHub and is still in sequence.yaml")
         }
     }
 
@@ -632,8 +632,14 @@ query {
         Write-Error "Step 0 probe: GraphQL parent/subIssues fields unavailable (exit $LASTEXITCODE) — cannot render v2 board without parent-edge data." -ErrorAction Stop
     }
     $probeResponse = $null
-    try { $probeResponse = $probeRaw | ConvertFrom-Json } catch {}
-    if ($probeResponse -and $probeResponse.errors) {
+    try { $probeResponse = $probeRaw | ConvertFrom-Json }
+    catch {
+        Write-Error "Step 0 probe: GraphQL returned non-JSON output despite exit 0 — cannot trust parent-edge data." -ErrorAction Stop
+    }
+    if ($null -eq $probeResponse) {
+        Write-Error "Step 0 probe: GraphQL returned null/empty response — cannot trust parent-edge data." -ErrorAction Stop
+    }
+    if ($probeResponse.errors) {
         $errMsg = ($probeResponse.errors | ForEach-Object { $_.message }) -join '; '
         Write-Error "Step 0 probe: GraphQL parent/subIssues fields unavailable — $errMsg. Cannot render v2 board without parent-edge data." -ErrorAction Stop
     }
@@ -641,9 +647,8 @@ query {
     # 2b. Bulk open scan (all open issues — data source for triage/drift classification).
     # Fail-loud: if this scan fails, the board must not be written in a partial
     # state. Hard-exit BEFORE any write step (gh issue edit) per AC8.
-    # Use exit 1 (not throw) per the script's hard-exit contract; Write-Error
-    # uses -ErrorAction Stop so the terminating error propagates cleanly through
-    # Pester's try/catch without polluting the non-terminating error stream.
+    # Write-Error -ErrorAction Stop raises a terminating error that propagates cleanly
+    # through Pester's try/catch and terminates the script under direct invocation.
     $openIssuesRaw = gh issue list --repo Grimblaz/agent-orchestra --state open `
         --json number,title,labels,createdAt --limit $issueScanLimit
     if ($LASTEXITCODE -ne 0) {
