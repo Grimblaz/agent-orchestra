@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.7] — 2026-06-27
+
+### Added
+
+Add skills/naming-register-policy/ — two-register naming policy skill, 48-entry vocab-seed register, Pester test suite with CI wiring (issue #732)
+
 ## [2.35.6] — 2026-06-26
 
 ### Added
