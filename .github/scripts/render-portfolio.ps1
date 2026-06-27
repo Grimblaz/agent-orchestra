@@ -723,8 +723,13 @@ function Get-SplicedBody {
 # ---------------------------------------------------------------------------
 function Invoke-PortfolioRender {
     param(
-        [string]$specPath     = 'Documents/Planning/sequence.yaml',
-        [int]   $controlTower = 0   # 0 = read from spec
+        [string]$specPath       = 'Documents/Planning/sequence.yaml',
+        [int]   $controlTower   = 0,     # 0 = read from spec
+        # 2000 is ~9x the current open-issue count (226 as of 2026-06).
+        # Crossing it means revisit the paginate decision (see #746-class pagination),
+        # not just bump the number.
+        [ValidateRange(1, [int]::MaxValue)]
+        [int]   $issueScanLimit = 2000
     )
 
     # 1. Parse spec
@@ -754,7 +759,7 @@ function Invoke-PortfolioRender {
     # uses -ErrorAction Stop so the terminating error propagates cleanly through
     # Pester's try/catch without polluting the non-terminating error stream.
     $openLeavesRaw = gh issue list --repo Grimblaz/agent-orchestra --state open `
-        --json number,title,labels,createdAt --limit 200
+        --json number,title,labels,createdAt --limit $issueScanLimit
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to fetch open issue list (exit $LASTEXITCODE)" -ErrorAction Stop
     }
@@ -765,15 +770,20 @@ function Invoke-PortfolioRender {
     catch {
         Write-Error "Failed to parse open issue list JSON: $_" -ErrorAction Stop
     }
-    if ($openLeaves.Count -ge 200) {
-        Write-Error "Open issue list returned 200 results — refusing to render a potentially truncated board." -ErrorAction Stop
+    # Two-tier truncation contract: open/closed fail-loud (abort render); triage warn-and-continue (additive bucket).
+    # count == limit is the only observable truncation signal; false-positive at exactly the ceiling is treated as truncation and accepted.
+    if ($openLeaves.Count -ge $issueScanLimit) {
+        Write-Error "Open issue list returned $($openLeaves.Count) results (limit $issueScanLimit) — refusing to render a potentially truncated board." -ErrorAction Stop
     }
 
     # 2c. Repo-wide closed-leaf scan (AC9 data source).
     # Fail-loud: same hard-exit pattern as the open scan.
     $cutoffDate    = (Get-Date).AddDays(-$spec.recently_closed_days).ToString('yyyy-MM-dd')
+    # Closed scan uses --search, routing through the GitHub Search API (hard cap: 1000 results regardless of --limit).
+    # Guard at min(issueScanLimit, 1000) so it can actually fire even when issueScanLimit > 1000.
+    $closedCeiling = [Math]::Min($issueScanLimit, 1000)
     $closedRawJson = gh issue list --repo Grimblaz/agent-orchestra --state closed `
-        --search "closed:>=$cutoffDate" --json number,title,closedAt,labels --limit 200
+        --search "closed:>=$cutoffDate" --json number,title,closedAt,labels --limit $closedCeiling
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to fetch closed issue list (exit $LASTEXITCODE)" -ErrorAction Stop
     }
@@ -784,8 +794,9 @@ function Invoke-PortfolioRender {
     catch {
         Write-Error "Failed to parse closed issue list JSON: $_" -ErrorAction Stop
     }
-    if ($closedLeaves.Count -ge 200) {
-        Write-Error "Closed issue list returned 200 results — refusing to render a potentially truncated RecentlyClosed section." -ErrorAction Stop
+    # Fail-loud tier: abort render (same contract as open guard above).
+    if ($closedLeaves.Count -ge $closedCeiling) {
+        Write-Error "Closed issue list returned $($closedLeaves.Count) results (limit $closedCeiling — GitHub Search API hard cap) — refusing to render a potentially truncated RecentlyClosed section." -ErrorAction Stop
     }
 
     # 2d. Fetch open triage-labeled issues repo-wide (CR9 / d-triage-visibility,
@@ -796,7 +807,7 @@ function Invoke-PortfolioRender {
     #     warns and degrades (Triage may be incomplete) rather than aborting the
     #     whole render, consistent with the per-issue skip pattern below.
     $triageNums = @()
-    $triageRaw  = gh issue list --repo Grimblaz/agent-orchestra --label triage --state open --limit 200 --json number
+    $triageRaw  = gh issue list --repo Grimblaz/agent-orchestra --label triage --state open --limit $issueScanLimit --json number
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Failed to list open triage-labeled issues (exit $LASTEXITCODE) — Triage bucket may be incomplete."
     }
@@ -807,6 +818,12 @@ function Invoke-PortfolioRender {
         catch {
             Write-Warning "Failed to parse triage issue list — Triage bucket may be incomplete."
         }
+    }
+    # Triage truncation is an accepted advisory degradation: a best-effort additive bucket
+    # must not abort the whole render. count == limit is the only observable signal; a
+    # false-positive at exactly the ceiling is documented here as accepted.
+    if ($triageNums.Count -ge $issueScanLimit) {
+        Write-Warning "Triage issue list returned $($triageNums.Count) results (limit $issueScanLimit) — Triage bucket may be incomplete."
     }
 
     # Query set = sequenced issues ∪ repo-wide triage issues (deduplicated).
