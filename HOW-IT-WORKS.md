@@ -1,4 +1,161 @@
-# HOW-IT-WORKS
+# How Agent Orchestra works
+
+> **Last verified against v2.35.5 (2026-06-26).** If the README version badge shows a higher version, [`CLAUDE.md`](CLAUDE.md) is authoritative for the current pipeline.
+
+Agent Orchestra is a multi-agent workflow system that guides software ideas through a structured pipeline — from customer framing to a merged pull request — using a coordinated set of AI agents, each with a defined role. It runs inside Claude Code as a plugin.[^copilot]
+
+[^copilot]: GitHub Copilot / VS Code support was available but is frozen (no fixes) and retires after 2026-08-31. See [copilot-deprecation.md](Documents/Design/copilot-deprecation.md).
+
+## 1. What Agent Orchestra is
+
+Agent Orchestra is a multi-agent workflow system built for Claude Code that takes a software idea — captured as a GitHub issue — and carries it through customer framing, technical design, implementation planning, orchestrated coding, and adversarial review, ending with a merged pull request. Each stage is handled by a specialized AI agent with a defined role; no single agent tries to do everything. You can run the full journey or drop in at any stage, and every decision made along the way is recorded as a durable comment on the GitHub issue so work can resume across separate conversations without losing context.
+
+## 2. The path a piece of work takes
+
+Work moves through up to eight beats. Steps 2 and 3 (customer framing and technical design) are optional — the pipeline can start directly at planning for routine or clear-scope work. Step 6 (adversarial review) has two variants: full (three-pass panel) and lite (one compact prosecution pass).
+
+1. **Idea becomes a GitHub issue.** Work starts as a software idea that is filed as a GitHub issue (an entry in the project's issue tracker). The issue number is the durable reference every later beat reads and writes.
+
+   [Source: CLAUDE.md § Upstream pipeline — "frames the work" phrasing implies issue as the entry point]
+
+2. **Customer framing (optional) — Experience-Owner.** Experience-Owner (the customer-journey framing agent) reads the issue and frames the feature as customer journeys (step-by-step descriptions of what a user is trying to accomplish), writes Given/When/Then scenarios (structured intent tests), and optionally runs the Value Reflex (a brief worth-it check: bet, falsifier, alternative) to recommend whether the feature should proceed, shrink, or be parked. The output is written back to the issue body.
+
+   [Source: CLAUDE.md § Upstream pipeline, step 1]
+
+3. **Technical design (optional) — Solution-Designer.** Solution-Designer (the architecture exploration agent) explores design options, runs a 3-pass design challenge (a stress-test by simulated critics) against the leading proposal, and documents the technical decisions made and the alternatives that were rejected — along with the reasoning for each choice. This output is also written to the issue body.
+
+   [Source: CLAUDE.md § Upstream pipeline, step 2]
+
+4. **Implementation plan — Issue-Planner.** Issue-Planner (the planning agent) produces a step-by-step implementation plan with CE Gate (Customer Experience Gate) coverage — mapping each plan step to the acceptance criteria and scenarios from earlier phases. The plan is stress-tested by an adversarial review pipeline (prosecution finds defects, defense rebuts or concedes, judge scores the verdict) and then persisted as a durable GitHub issue comment so it survives across sessions.
+
+   [Source: CLAUDE.md § Upstream pipeline, step 3]
+
+5. **Orchestrated build — Code-Conductor.** Code-Conductor (the orchestration agent) walks the approved plan slice by slice. For each slice it dispatches Senior Engineer (the default implementation executor) or a specialist agent (such as Code-Smith for minimal code changes, Test-Writer for behavior-focused tests, or Doc-Keeper for documentation). Once each slice is validated and committed, Code-Conductor advances to the next.
+
+   [Source: CLAUDE.md § Orchestration]
+
+6. **Adversarial review — prosecution, defense, judge.** A dedicated review pipeline runs over the changed code. Prosecution (the finding pass) identifies defects with evidence. Defense (the rebuttal pass) either concedes or rebuts each finding. Judge (the scoring pass) evaluates the ledger and emits a verdict. Two variants are available: `/orchestra:review` runs three prosecution passes then defense then judge; `/orchestra:review-lite` runs one compact prosecution pass before defense and judge.
+
+   [Source: CLAUDE.md § Review pipeline]
+
+7. **CE Gate — Customer Experience Gate.** Experience-Owner exercises the customer scenarios and acceptance criteria from step 2 against the shipped feature to verify that what was built matches the original customer intent. A passing CE Gate is recorded as a credit row in the PR body.
+
+   [Source: CLAUDE.md § Orchestration — "CE Gate" mentioned as a pipeline phase]
+
+8. **Merged PR.** The validated, reviewed, CE-Gate-passed implementation lands on the main branch as a merged pull request.
+
+## 3. How to read an issue or PR
+
+GitHub renders certain structured elements that Agent Orchestra writes during each pipeline phase. This section explains what those elements mean in plain language.
+
+### `## Scenarios` heading
+
+When this heading appears in a GitHub issue body, it marks a list of Given/When/Then scenarios — structured intent tests that describe what a user should be able to do and what the system should do in response. Experience-Owner authors these scenarios during customer framing. Later, CE Gate uses this same list to verify that the shipped feature actually satisfies each scenario.
+
+### `## Named Decisions` heading
+
+When this heading appears in a GitHub issue body, it marks the formal record of design decisions made during framing or technical design. Each entry shows the choice made, the classification (whether it is load-bearing, meaning it materially changes the architecture or customer experience, or routine), the reasoning, and the alternatives that were considered and rejected. These entries help the team understand not just what was decided but why.
+
+### Completion comments
+
+When a pipeline phase finishes, the responsible agent posts a plain-text comment on the issue or PR. These comments follow a consistent pattern — for example: "Customer framing complete — ready for design" or "Implementation plan approved — ready for orchestration." Reading these comments tells you which phase was last completed and what the recommended next step is.
+
+### Verdict language in PRs
+
+PR comments from the review pipeline use a small set of terms that have specific meanings:
+
+- `SUSTAIN` — the judge confirmed a prosecution finding; the defect was real and the defense did not successfully rebut it.
+- `REJECT` — the judge did not uphold a finding; the defense rebuttal was accepted.
+- `CE Gate passed` — the Customer Experience Gate check confirmed that the shipped feature satisfies the customer scenarios.
+- Adversarial review score lines — numeric summaries from the judge that indicate the overall verdict quality and whether the PR is ready to merge.
+
+## 4. Want more detail?
+
+The spine in sections 1–3 covers most of what you need to orient yourself. If you want to go deeper into a specific subsystem, expand one of the sections below.
+
+<details>
+<summary>Customer framing — Experience-Owner</summary>
+
+Experience-Owner is the first agent in the upstream pipeline and the only agent with a customer lens. It reads a GitHub issue and frames the feature from the customer's perspective before any technical work begins.
+
+**Value Reflex (optional opening check).** Before framing, Experience-Owner can run a brief worth-it check called the Value Reflex. It evaluates three things: the bet (what outcome do we expect?), the falsifier (what would prove this wrong?), and the alternative (what else could we do?). The result is one of five recommendations: Proceed-full, Proceed-lite, Shrink, Park, or Decline. The Value Reflex is advisory — it can be skipped with `frame it`.
+
+**Customer journeys.** The main framing output is a set of customer journeys: step-by-step narratives that describe what a specific type of user is trying to accomplish and how the system supports them. Journeys anchor the feature in real user need rather than technical requirement.
+
+**Scenarios.** Each journey is distilled into one or more Given/When/Then scenarios — structured intent tests that can later be used for CE Gate coverage. Scenarios appear under the `## Scenarios` heading in the issue body.
+
+**Named decisions.** During framing, any significant choices the agent makes are recorded as named decisions under the `## Named Decisions` heading, with classification (load-bearing or routine), reasoning, and rejected alternatives.
+
+**CE Gate (bookend role).** Experience-Owner also runs at the end of the pipeline as the CE Gate executor: it re-reads the scenarios it authored and exercises them against the shipped implementation to verify the feature was built correctly.
+
+</details>
+
+<details>
+<summary>Technical design — Solution-Designer</summary>
+
+Solution-Designer is the second upstream agent. It runs after customer framing (or directly from the issue if framing was skipped) and produces a technical design record before implementation planning begins.
+
+**Design exploration.** The agent explores multiple design options, evaluates each against the requirements and constraints, and identifies a leading proposal. Exploration outputs are written to the issue body so the team can see what was considered.
+
+**3-pass design challenge.** The leading proposal is stress-tested by a simulated adversarial panel across three passes. Each pass plays the role of a critical reviewer asking: what is wrong with this design? What edge cases does it miss? What would make this fail? The agent then resolves each challenge and refines the design.
+
+**Technical decisions and acceptance criteria.** After the challenge, the agent writes the key technical decisions into the issue body (under `## Named Decisions`) and expands or refines the acceptance criteria so that Issue-Planner has a precise target to plan against.
+
+**Rejected alternatives.** Every option that was explored but not chosen is documented with the reason it was rejected. This prevents the team from re-litigating the same options later and creates an audit trail of the design process.
+
+</details>
+
+<details>
+<summary>Implementation planning — Issue-Planner</summary>
+
+Issue-Planner reads the framed and designed issue and produces an implementation plan that Spine-Runner or Code-Conductor can execute slice by slice.
+
+**Plan structure.** The plan is a YAML document (frame-spine format, `spine_schema_version: 2`) with an ordered list of slices. Each slice has a step ID, a commit index, an adapter path (the methodology file that governs that slice), a set of AC-refs (acceptance-criteria references), and a requirement contract (the precise deliverable for that slice).
+
+**CE Gate coverage.** Every slice in the plan is mapped to one or more acceptance criteria from the issue. This mapping ensures that when all slices are complete, every acceptance criterion has been addressed by at least one committed change.
+
+**Adversarial stress-test.** Before the plan is approved, Issue-Planner runs it through a 5-pass adversarial review: multiple prosecution rounds find planning defects, defense rebuts or concedes, and a judge scores the verdict. Only plans that survive this challenge are persisted.
+
+**Durable persistence.** The approved plan is written as a GitHub issue comment with a `<!-- plan-issue-{ID} -->` marker. This marker is what Code-Conductor reads on resume — it is the contract that survives across sessions and tools.
+
+</details>
+
+<details>
+<summary>Orchestration — Code-Conductor</summary>
+
+Code-Conductor is the hub-mode orchestration agent that reads the persisted plan and walks it from first slice to merged PR.
+
+**Smart resume.** When invoked, Code-Conductor first looks for the `<!-- plan-issue-{ID} -->` marker on the GitHub issue to find the approved plan. It then scans for engagement-record markers to determine which slices have already been completed, so it can resume in the right place without repeating work.
+
+**Scope classification.** Before implementation begins, Code-Conductor runs a scope-classification gate to determine the engagement type (routine, exploratory, or structural). This gate cannot be suppressed by user pacing directives — it always fires.
+
+**Slice dispatch.** For each slice in the plan, Code-Conductor resolves the adapter path, selects the appropriate executor (Senior Engineer by default, or a specialist agent when the plan specifies one), and dispatches the work. The executor runs, validates, and returns evidence; Code-Conductor then advances to the next slice.
+
+**D9 model-switch checkpoint.** When a slice requires a capability beyond the current model's strengths, Code-Conductor may pause at the D9 checkpoint to confirm a model switch before proceeding.
+
+**PR creation.** After all slices are complete and CE Gate passes, Code-Conductor creates or updates the pull request with the pipeline-metrics block (a machine-parseable summary of which frame ports were covered and by whom).
+
+</details>
+
+<details>
+<summary>Adversarial review pipeline</summary>
+
+The adversarial review pipeline runs after implementation to find defects before merge. It uses three roles — prosecution, defense, and judge — each played by a separate agent invocation to maintain independence.
+
+**Prosecution.** The prosecution pass reads the changed code and writes a finding ledger: a list of defects, each with evidence, severity, and the specific code location. Prosecution does not propose fixes — it only documents what it found and why it matters.
+
+**Defense.** The defense pass reads the prosecution ledger and responds to each finding. For each item, defense either concedes (the finding is valid) or rebuts (with a counter-argument and evidence). Defense may also raise mitigating context the prosecution missed.
+
+**Judge.** The judge reads both the prosecution ledger and the defense responses, then scores each finding as SUSTAIN (prosecution wins) or REJECT (defense wins). The judge also emits an overall verdict score and writes a `<!-- judge-rulings ... -->` YAML block into the PR comment so Code-Conductor can read the result as a machine-parseable credit row.
+
+**Full vs. lite variants.**
+
+- `/orchestra:review` — full variant: three prosecution passes (different critics with different focus areas), then defense, then judge. Used for significant or high-risk changes.
+- `/orchestra:review-lite` — lite variant: one compact prosecution pass, then defense, then judge. Used for small changes or when speed matters more than exhaustive coverage.
+
+**GitHub review intake.** `/review-github` is a separate entry point that ingests an existing GitHub PR review and runs proxy prosecution — treating the human reviewer's comments as the prosecution ledger and running them through Code-Conductor's response loop for fix dispatch.
+
+</details>
 
 ## 5. Plain-language vocabulary
 
