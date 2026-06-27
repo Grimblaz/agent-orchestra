@@ -91,7 +91,7 @@ Terms not in the v1 register that appear in human-facing prose are in #751's dom
 
 ## #693 Coordination
 
-#693 is a sibling umbrella that optimizes agent-facing docs *for agents* (machine-citable codes, SMC-NN/D-numbers praised for precision). #732 optimizes *for humans* and owns reconciling the two registers.
+Issue #693 is a sibling umbrella that optimizes agent-facing docs *for agents* (machine-citable codes, SMC-NN/D-numbers praised for precision). Issue #732 optimizes *for humans* and owns reconciling the two registers.
 
 One settled rule: **`stable-code` terms stay as stable codes in machine-citation contexts; the human layer (vocab-seed + first-use expansions) translates them.** #750's rename sweep operates **only** on `rename-candidate` rows and **sequences after** #693's naming-related pieces (#695/#696) on any shared file.
 
@@ -133,6 +133,6 @@ This skill is **supporting methodology** — it is loaded by authoring agents (#
 
 Consumers load this skill with:
 
-```
+```text
 Use `skills/naming-register-policy/SKILL.md` to apply the two-register rules and resolve term classifications from `register.json`.
 ```
