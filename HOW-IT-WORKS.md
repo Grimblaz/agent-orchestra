@@ -38,7 +38,7 @@ Work moves through up to eight beats. Steps 2 and 3 (customer framing and techni
 
    [Source: CLAUDE.md § Review pipeline]
 
-7. **CE Gate — Customer Experience Gate.** Experience-Owner exercises the customer scenarios and acceptance criteria from step 2 against the shipped feature to verify that what was built matches the original customer intent. A passing CE Gate is recorded as a credit row in the PR body.
+7. **CE Gate — Customer Experience Gate.** Experience-Owner exercises the plan's acceptance criteria — and the customer scenarios from step 2, when framing ran — against the shipped feature to verify that what was built matches the original customer intent. A passing CE Gate is recorded as a credit row in the PR body.
 
    [Source: CLAUDE.md § Orchestration — "CE Gate" mentioned as a pipeline phase]
 
@@ -64,8 +64,8 @@ When a pipeline phase finishes, the responsible agent posts a plain-text comment
 
 PR comments from the review pipeline use a small set of terms that have specific meanings:
 
-- `SUSTAIN` — the judge confirmed a prosecution finding; the defect was real and the defense did not successfully rebut it.
-- `REJECT` — the judge did not uphold a finding; the defense rebuttal was accepted.
+- `✅ Sustained` — the judge confirmed a prosecution finding; the defect was real and the defense did not successfully rebut it.
+- `❌ Defense sustained` — the judge did not uphold a finding; the defense rebuttal was accepted.
 - `CE Gate passed` — the Customer Experience Gate check confirmed that the shipped feature satisfies the customer scenarios.
 - Adversarial review score lines — numeric summaries from the judge that indicate the overall verdict quality and whether the PR is ready to merge.
 
@@ -146,7 +146,7 @@ The adversarial review pipeline runs after implementation to find defects before
 
 **Defense.** The defense pass reads the prosecution ledger and responds to each finding. For each item, defense either concedes (the finding is valid) or rebuts (with a counter-argument and evidence). Defense may also raise mitigating context the prosecution missed.
 
-**Judge.** The judge reads both the prosecution ledger and the defense responses, then scores each finding as SUSTAIN (prosecution wins) or REJECT (defense wins). The judge also emits an overall verdict score and writes a `<!-- judge-rulings ... -->` YAML block into the PR comment so Code-Conductor can read the result as a machine-parseable credit row.
+**Judge.** The judge reads both the prosecution ledger and the defense responses, then scores each finding as `✅ Sustained` (prosecution wins) or `❌ Defense sustained` (defense wins). The judge also emits an overall verdict score and writes a `<!-- judge-rulings ... -->` YAML block into the PR comment so Code-Conductor can read the result as a machine-parseable credit row.
 
 **Full vs. lite variants.**
 
@@ -194,7 +194,7 @@ The adversarial review pipeline runs after implementation to find defects before
 | **intent routing / nl\_intent\_routing** | Natural-language phrase matching that maps user messages to slash commands without the user typing a command. Anchored in the routing config. | `skills/routing-tables/assets/routing-config.json` |
 | **routing-config.json** | The canonical JSON file that declares all intent-routing patterns, specialist dispatch tables, CE surface mappings, and gate criteria. | `skills/routing-tables/assets/routing-config.json` |
 | **raw mode** | A within-conversation toggle (`/raw`, `just answer normally`) that disables intent routing so natural-language requests are answered directly without pipeline dispatch. | `CLAUDE.md § Intent Routing` |
-| **credits\[\] / pipeline-metrics block** | The array of frame-credit rows written into the PR body, used by Code-Conductor to determine which pipeline ports have been covered. Machine-parsed by `frame-credit-ledger.ps1`. | `skills/frame-credit-ledger/SKILL.md` |
+| **credits\[\] / pipeline-metrics block** | The array of frame-credit rows written into the PR body, used by Code-Conductor to determine which pipeline ports have been covered. Machine-parsed by `frame-credit-ledger.ps1`. | `.github/scripts/frame-credit-ledger.ps1`; methodology: `skills/frame-credit-ledger/SKILL.md` |
 | **credit provenance / witness type** | Each frame port declares a witness type (sentinel, issue-marker, diff, self-report) in its base-ref YAML; the verdict-time resolver checks that a `passed` credit has a corroborating independent signal. | `frame/ports/*.yaml` (base ref) |
 | **enforce verdict / enforce check** | The GitHub check run that evaluates frame port coverage; marked advisory by default and requires credit provenance before it can be made a required merge gate. | `skills/frame-credit-ledger/SKILL.md` |
 | **judge-rulings YAML block** | A machine-readable YAML block embedded in a PR comment by the review judge, containing scores and rulings that Code-Conductor reads via `credits[]`. | `skills/review-judgment/SKILL.md` |
