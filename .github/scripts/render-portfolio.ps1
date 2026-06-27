@@ -668,17 +668,36 @@ function Invoke-PortfolioRender {
 
     $tower = if ($controlTower -gt 0) { $controlTower } else { $spec.control_tower }
 
-    # 2. Collect all umbrella numbers from all rounds (used for leaf detection and
-    #    known-child-set building in steps 2c/2d).
-    $allIssueNums = @(
-        $spec.rounds | ForEach-Object { $_.issues } | Sort-Object -Unique
-    )
+    # 2. All umbrella numbers from the spec (v2: ordered list).
+    $allIssueNums = @($spec.umbrellas)
 
-    # Build the full set of umbrella numbers (sequenced umbrellas + control tower).
-    # An issue is a "leaf" if its number does NOT appear in this set.
+    # Umbrella numbers + control tower (for leaf detection).
     $umbrellaNumbers = @(@($allIssueNums) + @($tower) | Sort-Object -Unique)
 
-    # 2b. Bulk open-leaf scan (AC8 / AC4 data source).
+    # Step 0: Probe that parent + subIssues GraphQL fields are available.
+    # v2 triage/drift model depends on parent-edge data; fail loud if unavailable.
+    $probeQuery = @"
+query {
+  repository(owner: "Grimblaz", name: "agent-orchestra") {
+    issue(number: $tower) {
+      parent { number }
+      subIssues(first: 1) { totalCount }
+    }
+  }
+}
+"@
+    $probeRaw = gh api graphql -f query=$probeQuery
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Step 0 probe: GraphQL parent/subIssues fields unavailable (exit $LASTEXITCODE) — cannot render v2 board without parent-edge data." -ErrorAction Stop
+    }
+    $probeResponse = $null
+    try { $probeResponse = $probeRaw | ConvertFrom-Json } catch {}
+    if ($probeResponse -and $probeResponse.errors) {
+        $errMsg = ($probeResponse.errors | ForEach-Object { $_.message }) -join '; '
+        Write-Error "Step 0 probe: GraphQL parent/subIssues fields unavailable — $errMsg. Cannot render v2 board without parent-edge data." -ErrorAction Stop
+    }
+
+    # 2b. Bulk open scan (data source for leaf candidates).
     # Fail-loud: if this scan fails, the board must not be written in a partial
     # state. Hard-exit BEFORE any write step (gh issue edit) per AC8.
     # Use exit 1 (not throw) per the script's hard-exit contract; Write-Error
@@ -696,13 +715,13 @@ function Invoke-PortfolioRender {
     catch {
         Write-Error "Failed to parse open issue list JSON: $_" -ErrorAction Stop
     }
-    # Two-tier truncation contract: open/closed fail-loud (abort render); triage warn-and-continue (additive bucket).
+    # Two-tier truncation contract: open/closed fail-loud (abort render).
     # count == limit is the only observable truncation signal; false-positive at exactly the ceiling is treated as truncation and accepted.
     if ($openLeaves.Count -ge $issueScanLimit) {
         Write-Error "Open issue list returned $($openLeaves.Count) results (limit $issueScanLimit) — refusing to render a potentially truncated board." -ErrorAction Stop
     }
 
-    # 2c. Repo-wide closed-leaf scan (AC9 data source).
+    # 2c. Repo-wide closed scan (RecentlyClosed data source).
     # Fail-loud: same hard-exit pattern as the open scan.
     $cutoffDate    = (Get-Date).AddDays(-$spec.recently_closed_days).ToString('yyyy-MM-dd')
     # Closed scan uses --search, routing through the GitHub Search API (hard cap: 1000 results regardless of --limit).
@@ -725,59 +744,17 @@ function Invoke-PortfolioRender {
         Write-Error "Closed issue list returned $($closedLeaves.Count) results (limit $closedCeiling — GitHub Search API hard cap) — refusing to render a potentially truncated RecentlyClosed section." -ErrorAction Stop
     }
 
-    # 2d. Fetch open triage-labeled issues repo-wide (CR9 / d-triage-visibility,
-    #     AC #5). The Triage bucket promises open `triage`-labeled issues that
-    #     are NOT in any sequence round; those are never named in sequence.yaml,
-    #     so without this independent query they would never be fetched and the
-    #     bucket would silently stay empty. The query is additive: a failure
-    #     warns and degrades (Triage may be incomplete) rather than aborting the
-    #     whole render, consistent with the per-issue skip pattern below.
-    $triageNums = @()
-    $triageRaw  = gh issue list --repo Grimblaz/agent-orchestra --label triage --state open --limit $issueScanLimit --json number
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Failed to list open triage-labeled issues (exit $LASTEXITCODE) — Triage bucket may be incomplete."
-    }
-    else {
-        try {
-            $triageNums = @(($triageRaw | ConvertFrom-Json) | ForEach-Object { $_.number })
-        }
-        catch {
-            Write-Warning "Failed to parse triage issue list — Triage bucket may be incomplete."
-        }
-    }
-    # Triage truncation is an accepted advisory degradation: a best-effort additive bucket
-    # must not abort the whole render. count == limit is the only observable signal; a
-    # false-positive at exactly the ceiling is documented here as accepted.
-    if ($triageNums.Count -ge $issueScanLimit) {
-        Write-Warning "Triage issue list returned $($triageNums.Count) results (limit $issueScanLimit) — Triage bucket may be incomplete."
-    }
+    # Step 2d (v1 triage-label scan) is REMOVED in v2.
+    # Triage is now derived from parent-edge data in Get-PortfolioBuckets, not by label query.
 
-    # Query set = sequenced issues ∪ repo-wide triage issues (deduplicated).
-    # Plan membership ($allIssueNums) stays sequence-only — triage issues are by
-    # definition unsequenced and must NOT count as in-plan for blocker logic.
-    $queryNums = @($allIssueNums + $triageNums | Sort-Object -Unique)
-
-    # 3. Query each issue via gh GraphQL (first: 50 per connection)
+    # 3. Query each umbrella via gh GraphQL.
+    # v2: iterate $allIssueNums (spec.umbrellas) only; no $queryNums, no $triageNums.
+    # Each umbrella query includes parent { number } and subIssues(first:50) so
+    # Get-PortfolioBuckets v2 can detect ActiveChildren, drift, and triage.
     $issueStates    = [System.Collections.Generic.List[object]]::new()
     $unresolvedNums = @()
 
-    # Build round-index map for umbrella numbers: used to tag KnownChildSet entries
-    # with the correct RoundIndex so Get-PortfolioBuckets can route children correctly.
-    $sortedRoundsForSpec = @($spec.rounds | Sort-Object round)
-    $umbrellaRoundIdxMap = @{}
-    for ($ri = 0; $ri -lt $sortedRoundsForSpec.Count; $ri++) {
-        foreach ($rnum in $sortedRoundsForSpec[$ri].issues) {
-            $umbrellaRoundIdxMap[[int]$rnum] = $ri
-        }
-    }
-
-    # KnownChildSet: rich PSCustomObjects { number, UmbrellaNumber, RoundIndex } built
-    # from per-umbrella subIssues GraphQL responses. Passed to Get-PortfolioBuckets so
-    # float detection (AC4) and CoverageGaps (AC7) work correctly in the live pipeline.
-    $knownChildSet = [System.Collections.Generic.List[object]]::new()
-
-    foreach ($num in $queryNums) {
-        $isUmbrella = $allIssueNums -contains $num
+    foreach ($num in $allIssueNums) {
         $query = @"
 query {
   repository(owner: "Grimblaz", name: "agent-orchestra") {
@@ -791,12 +768,12 @@ query {
       blockedBy(first: 50) {
         totalCount
         nodes { number title state }
-      }$(if ($isUmbrella) {
-"
+      }
+      parent { number }
       subIssues(first: 50) {
-        nodes { number }
-      }"
-      })
+        totalCount
+        nodes { number state }
+      }
     }
   }
 }
@@ -850,6 +827,11 @@ query {
             }
         }
 
+        # Build parent and subIssues fields for v2 Get-PortfolioBuckets
+        $parentData    = if ($null -ne $issueData.parent) { @{ number = [int]$issueData.parent.number } } else { $null }
+        $subIssueNodes = @($issueData.subIssues.nodes | ForEach-Object { @{ number = [int]$_.number; state = $_.state } })
+        $subIssueData  = @{ totalCount = [int]$issueData.subIssues.totalCount; nodes = $subIssueNodes }
+
         $issueStates.Add([PSCustomObject]@{
             number              = $issueData.number
             title               = $issueData.title
@@ -860,40 +842,24 @@ query {
             blockedBy           = $openBlockers
             blockerInPlan       = $blockerInPlan
             blockedByTotalCount = $issueData.blockedBy.totalCount
+            parent              = $parentData
+            subIssues           = $subIssueData
         })
-
-        # Collect sub-issue children for this umbrella into KnownChildSet (AC4/AC7).
-        if ($isUmbrella -and $null -ne $issueData.subIssues) {
-            $umbRoundIdx = if ($umbrellaRoundIdxMap.ContainsKey([int]$num)) { $umbrellaRoundIdxMap[[int]$num] } else { 0 }
-            foreach ($child in $issueData.subIssues.nodes) {
-                if ($child.number -gt 0) {
-                    $knownChildSet.Add([PSCustomObject]@{
-                        number        = [int]$child.number
-                        UmbrellaNumber = [int]$num
-                        RoundIndex     = $umbRoundIdx
-                    })
-                }
-            }
-        }
     }
 
-    # 3b. Open-leaf detail pass (AC4): query full data for all non-umbrella open issues —
-    # both spine children (KnownChildSet members) and floats. Get-PortfolioBuckets classifies
-    # them: known children route to Now/Next/Blocked as spine; unknowns are floats (isFloat=$true).
-    # Previously KnownChildSet members were excluded here, causing spine leaves to never enter
-    # issueStates and never appear on the board. The exclusion was incorrect: we need full data
-    # for BOTH categories so blockedBy, labels, and createdAt are populated for all leaf issues.
-    # Fail-loud: a leaf-query failure warns and skips (same as per-issue skip pattern).
-    $knownChildNums = [System.Collections.Generic.HashSet[int]]::new()
-    foreach ($child in $knownChildSet) { $null = $knownChildNums.Add([int]$child.number) }
+    # 3b. Open-leaf detail pass: query ALL non-umbrella open issues from the open scan
+    # with parent { number } and subIssues(first:1) { totalCount } so Get-PortfolioBuckets
+    # can classify them as Triage (parent=null, totalCount=0) or DriftWarnings
+    # (totalCount>0, not in umbrella list). Fail-loud: a leaf-query failure warns and skips.
     $alreadyQueried = [System.Collections.Generic.HashSet[int]]::new()
-    foreach ($q in $queryNums) { $null = $alreadyQueried.Add([int]$q) }
+    foreach ($q in $allIssueNums) { $null = $alreadyQueried.Add([int]$q) }
+    $null = $alreadyQueried.Add([int]$tower)
 
     $openLeafCandidateNums = @(
         $openLeaves |
         Where-Object {
             $n = [int]$_.number
-            (-not ($umbrellaNumbers -contains $n)) -and (-not $alreadyQueried.Contains($n))
+            -not $alreadyQueried.Contains($n)
         } |
         ForEach-Object { [int]$_.number }
     )
@@ -913,18 +879,20 @@ query {
         totalCount
         nodes { number title state }
       }
+      parent { number }
+      subIssues(first: 1) { totalCount }
     }
   }
 }
 "@
         $rawJson = gh api graphql -f query=$query
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "GraphQL query failed for float #$num (exit $LASTEXITCODE) — skipping."
+            Write-Warning "GraphQL query failed for leaf #$num (exit $LASTEXITCODE) — skipping."
             continue
         }
         $response = $null
         try { $response = $rawJson | ConvertFrom-Json }
-        catch { Write-Warning "Failed to parse GraphQL response for float #$num — skipping."; continue }
+        catch { Write-Warning "Failed to parse GraphQL response for leaf #$num — skipping."; continue }
         $issueData = $response.data.repository.issue
         if ($null -eq $issueData) { continue }
         if ($response.errors) {
@@ -940,6 +908,12 @@ query {
         foreach ($b in $openBlockers) {
             if ($allIssueNums -notcontains $b) { $blockerInPlan = $false; break }
         }
+
+        # Build parent and subIssues for v2 triage/drift detection.
+        # Only first:1 was requested so nodes = @() (totalCount is sufficient for drift detection).
+        $parentData   = if ($null -ne $issueData.parent) { @{ number = [int]$issueData.parent.number } } else { $null }
+        $subIssueData = @{ totalCount = [int]$issueData.subIssues.totalCount; nodes = @() }
+
         $issueStates.Add([PSCustomObject]@{
             number              = $issueData.number
             title               = $issueData.title
@@ -950,6 +924,37 @@ query {
             blockedBy           = $openBlockers
             blockerInPlan       = $blockerInPlan
             blockedByTotalCount = $issueData.blockedBy.totalCount
+            parent              = $parentData
+            subIssues           = $subIssueData
+        })
+    }
+
+    # 3c. Add closed-scan results to issueStates for RecentlyClosed bucket.
+    # Get-PortfolioBuckets v2 derives RecentlyClosed from issueStateObjects where
+    # state == CLOSED and closedAt is within the window. The closed scan provides this data.
+    $closedAlreadyQueried = [System.Collections.Generic.HashSet[int]]::new()
+    foreach ($s in $issueStates) { $null = $closedAlreadyQueried.Add([int]$s.number) }
+    foreach ($cl in $closedLeaves) {
+        $clNum = [int]$cl.number
+        if ($closedAlreadyQueried.Contains($clNum)) { continue }
+        $clLabels = @()
+        if ($cl.PSObject.Properties['labels'] -and $null -ne $cl.labels) {
+            $clLabels = @($cl.labels | ForEach-Object {
+                if ($_ -is [string]) { $_ } elseif ($null -ne $_.name) { $_.name }
+            })
+        }
+        $issueStates.Add([PSCustomObject]@{
+            number              = $clNum
+            title               = if ($cl.PSObject.Properties['title']) { $cl.title } else { "Issue $clNum" }
+            state               = 'CLOSED'
+            closedAt            = if ($cl.PSObject.Properties['closedAt']) { $cl.closedAt } else { $null }
+            createdAt           = if ($cl.PSObject.Properties['createdAt']) { $cl.createdAt } else { $null }
+            labels              = $clLabels
+            blockedBy           = @()
+            blockerInPlan       = $true
+            blockedByTotalCount = 0
+            parent              = $null
+            subIssues           = $null
         })
     }
 
