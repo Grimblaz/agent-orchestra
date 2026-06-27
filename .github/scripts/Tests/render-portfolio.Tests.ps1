@@ -591,43 +591,40 @@ Describe 'Format-PortfolioMarkdown' {
         $output | Should -Match 'portfolio content unchanged since \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z — rendered by render-portfolio\.ps1'
     }
 
-    It 'renders Now/Next/Blocked/Recently closed/Triage sections in that order' {
+    It 'v2-renders-Active/Umbrellas/Triage/RecentlyClosed sections in that order' {
+        # v2 layout: Active → Umbrellas (ranked) → Triage → Recently closed
         $timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         $output = Format-PortfolioMarkdown -bucketModel $script:SimpleBuckets -timestamp $timestamp
 
-        $nowPos           = $output.IndexOf('Now')
-        $nextPos          = $output.IndexOf('Next')
-        $blockedPos       = $output.IndexOf('Blocked')
+        $activePos         = $output.IndexOf('Active')
+        $umbrellasPos      = $output.IndexOf('Umbrellas')
+        $triagePos         = $output.IndexOf('Triage')
         $recentlyClosedPos = $output.IndexOf('Recently closed')
-        $triagePos        = $output.IndexOf('Triage')
 
-        $nowPos            | Should -BeGreaterThan -1  -Because 'Now section must be present'
-        $nextPos           | Should -BeGreaterThan $nowPos           -Because 'Next must come after Now'
-        $blockedPos        | Should -BeGreaterThan $nextPos          -Because 'Blocked must come after Next'
-        $recentlyClosedPos | Should -BeGreaterThan $blockedPos       -Because 'Recently closed must come after Blocked'
-        $triagePos         | Should -BeGreaterThan $recentlyClosedPos -Because 'Triage must come after Recently closed'
+        $activePos         | Should -BeGreaterThan -1            -Because 'Active section must be present (v2)'
+        $umbrellasPos      | Should -BeGreaterThan $activePos    -Because 'Umbrellas (ranked) must come after Active (v2)'
+        $triagePos         | Should -BeGreaterThan $umbrellasPos -Because 'Triage must come after Umbrellas (v2)'
+        $recentlyClosedPos | Should -BeGreaterThan $triagePos    -Because 'Recently closed must come after Triage (v2)'
     }
 
-    It 'appends (+N more) when totalCount exceeds rendered count (pagination overflow F14)' {
-        # Fixture: 50 issues rendered, totalCount = 51 → should show (+1 more)
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        $issues = @(
-            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @())
-        )
-        # Override totalCount to simulate overflow: 51 total, 1 rendered
+    It 'v2-triage-residual-overflow: (+N more) appears in Triage when TriageResidualCount > 0 (F14)' {
+        # v2: overflow in Triage section is controlled by TriageResidualCount from Get-PortfolioBuckets.
+        # When TriageResidualCount=50 and 1 item is rendered, (+50 more) must appear.
         $overflowBucketModel = [PSCustomObject]@{
-            Now            = @($issues[0])
-            NowTotalCount  = 51
-            Next           = @()
-            Blocked        = @()
-            RecentlyClosed = @()
-            Triage         = @()
+            ActiveUmbrella      = $null
+            ActiveChildren      = @()
+            RankedUmbrellas     = @()
+            Triage              = @( [PSCustomObject]@{ number = 425; title = 'Issue 425' } )
+            TriageResidualCount = 50
+            DriftWarnings       = @()
+            IntegrityWarnings   = @()
+            RecentlyClosed      = @()
         }
         $timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
         $output = Format-PortfolioMarkdown -bucketModel $overflowBucketModel -timestamp $timestamp
 
-        $output | Should -Match '\(\+50 more\)' -Because 'totalCount(51) - rendered(1) = 50 overflow items must be shown'
+        $output | Should -Match '\(\+50 more\)' -Because 'TriageResidualCount=50 must appear as (+50 more) in Triage section (v2 pagination)'
     }
 
     It 'Now ordering tiebreaker: lower-numbered float precedes higher-numbered float (AC3/F18)' {
@@ -658,154 +655,111 @@ Describe 'Format-PortfolioMarkdown' {
     # All RED until s2/s3 implement single ranked list, tags, and cap-floor.
     # -----------------------------------------------------------------------
 
-    It 'Now list is a single ranked list — no umbrella section headers (AC3)' {
-        # The new Now list must NOT re-sort by number or add umbrella sub-headers.
-        # Formatter must preserve the producer ordering from the bucket model.
-        # RED until Format-PortfolioMarkdown is updated.
-        $bucketModel = [PSCustomObject]@{
-            Now            = @(
-                [PSCustomObject]@{ number = 571; title = 'Issue 571'; isFloat = $false; inProgress = $false }
-                [PSCustomObject]@{ number = 425; title = 'Issue 425'; isFloat = $false; inProgress = $false }
-            )
-            NowTotalCount  = 2
-            Next           = @()
-            NextTotalCount = 0
-            Blocked        = @()
-            BlockedTotalCount = 0
-            RecentlyClosed = @()
-            RecentlyClosedTotalCount = 0
-            Triage         = @()
-            TriageTotalCount = 0
-            CoverageGaps   = @()
-        }
-        $timestamp = '2026-06-25T00:00:00Z'
+    It 'v2-umbrellas-spec-order-preserved: Umbrellas section preserves spec list order — no re-sort by number (AC5)' {
+        # v2: Umbrellas (ranked) section must preserve spec list order verbatim.
+        # Formatter must NOT re-sort by number.
+        # Spec has umbrellas [571, 425] → 571 must appear before 425 in output.
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(571, 425))
+        $umbrella571 = New-IssueState -Number 571 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella425 = New-IssueState -Number 425 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
 
-        $output = Format-PortfolioMarkdown -bucketModel $bucketModel -timestamp $timestamp
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella571, $umbrella425)
+        $output  = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-06-25T00:00:00Z'
 
-        # 571 must appear BEFORE 425 (bucket model order preserved, no re-sort by number)
-        $pos571 = $output.IndexOf('#571')
-        $pos425 = $output.IndexOf('#425')
-        $pos571 | Should -BeGreaterThan -1  -Because '#571 must appear in output'
-        $pos425 | Should -BeGreaterThan -1  -Because '#425 must appear in output'
-        $pos571 | Should -BeLessThan $pos425 -Because 'formatter must NOT re-sort by number; bucket model order is authoritative (AC3)'
-        # No umbrella sub-headers: the Now section body must not contain "### " headers.
-        $nowMatch = [regex]::Match($output, '(?s)## Now(?<body>.*?)## Next')
-        $nowMatch.Success | Should -Be $true -Because 'Now section must appear before Next in the output'
-        $nowMatch.Groups['body'].Value | Should -Not -Match '(?m)^###\s' -Because 'single ranked Now list must not contain umbrella sub-headers (AC3)'
+        # Find positions in the Umbrellas section: 571 before 425
+        $umbrellasSectionMatch = [regex]::Match($output, '(?s)## Umbrellas \(ranked\)(?<body>.*?)## 🔥 Triage')
+        $umbrellasSectionMatch.Success | Should -Be $true -Because 'Umbrellas (ranked) section must appear before Triage'
+        $body = $umbrellasSectionMatch.Groups['body'].Value
+        $pos571 = $body.IndexOf('#571')
+        $pos425 = $body.IndexOf('#425')
+        $pos571 | Should -BeGreaterThan -1 -Because '#571 must appear in Umbrellas section'
+        $pos425 | Should -BeGreaterThan -1 -Because '#425 must appear in Umbrellas section'
+        $pos571 | Should -BeLessThan $pos425 -Because 'formatter must preserve spec order; #571 (listed first) must precede #425 (listed second) (AC5)'
     }
 
-    It 'float items in Now list are tagged with (unsequenced) (AC3/AC4)' {
-        # Float issues in Now must be rendered with "(unsequenced)" tag in the list item.
-        # RED until Format-PortfolioMarkdown adds (unsequenced) tag for isFloat items.
-        $bucketModel = [PSCustomObject]@{
-            Now            = @(
-                [PSCustomObject]@{ number = 800; title = 'Float Issue'; isFloat = $true; inProgress = $false }
-                [PSCustomObject]@{ number = 425; title = 'Issue 425';   isFloat = $false; inProgress = $false }
-            )
-            NowTotalCount  = 2
-            Next           = @()
-            NextTotalCount = 0
-            Blocked        = @()
-            BlockedTotalCount = 0
-            RecentlyClosed = @()
-            RecentlyClosedTotalCount = 0
-            Triage         = @()
-            TriageTotalCount = 0
-            CoverageGaps   = @()
-        }
-        $timestamp = '2026-06-25T00:00:00Z'
-
-        $output = Format-PortfolioMarkdown -bucketModel $bucketModel -timestamp $timestamp
-
-        $output | Should -Match '#800.*\(unsequenced\)' -Because 'float items in Now list must be tagged with (unsequenced) (AC3/AC4)'
-        $output | Should -Not -Match '#425.*\(unsequenced\)' -Because 'non-float items must NOT be tagged with (unsequenced)'
-    }
-
-    It 'in-progress items in Now list are tagged with (in progress) (AC3)' {
-        # Items with inProgress=$true (derived from "in progress" label) must be
-        # tagged with "(in progress)" in the list rendering.
-        # RED until Format-PortfolioMarkdown adds (in progress) tag.
-        $bucketModel = [PSCustomObject]@{
-            Now            = @(
-                [PSCustomObject]@{ number = 425; title = 'Issue 425'; isFloat = $false; inProgress = $true }
-                [PSCustomObject]@{ number = 571; title = 'Issue 571'; isFloat = $false; inProgress = $false }
-            )
-            NowTotalCount  = 2
-            Next           = @()
-            NextTotalCount = 0
-            Blocked        = @()
-            BlockedTotalCount = 0
-            RecentlyClosed = @()
-            RecentlyClosedTotalCount = 0
-            Triage         = @()
-            TriageTotalCount = 0
-            CoverageGaps   = @()
-        }
-        $timestamp = '2026-06-25T00:00:00Z'
-
-        $output = Format-PortfolioMarkdown -bucketModel $bucketModel -timestamp $timestamp
-
-        $output | Should -Match '#425.*\(in progress\)' -Because 'issues with inProgress=$true must be tagged (in progress) (AC3)'
-        $output | Should -Not -Match '#571.*\(in progress\)' -Because 'issues without inProgress flag must not be tagged'
-    }
-
-    It 'cap-floor N=15: top 15 float items rendered, (+M more) for the rest (AC10)' {
-        # When more than 15 floats exist, the formatter renders top 15 and shows "(+M more)".
-        # RED until Format-PortfolioMarkdown implements cap-floor.
-        $floats = 1..20 | ForEach-Object {
-            [PSCustomObject]@{
-                number     = 900 + $_
-                title      = "Float $_"
-                isFloat    = $true
-                inProgress = $false
+    It 'v2-active-children-blocked-annotation: blocked children show ⛔ annotation, non-blocked children do not (AC4)' {
+        # v2: in the Active section, blocked children must have ⛔ annotation; non-blocked must not.
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(100))
+        $blockedChild = New-IssueState -Number 800 -Title 'Blocked child' -State 'OPEN' -BlockedBy @(999) `
+            -Parent @{ number = 100 } -SubIssues @{ totalCount = 0; nodes = @() }
+        $normalChild  = New-IssueState -Number 425 -Title 'Normal child' -State 'OPEN' -BlockedBy @() `
+            -Parent @{ number = 100 } -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella100  = New-IssueState -Number 100 -State 'OPEN' `
+            -SubIssues @{
+                totalCount = 2
+                nodes = @( @{ number = 800; state = 'OPEN' }, @{ number = 425; state = 'OPEN' } )
             }
-        }
-        $bucketModel = [PSCustomObject]@{
-            Now               = $floats    # 20 floats; only 15 should render
-            NowTotalCount     = 20
-            NowFloatCount     = 20
-            Next              = @()
-            NextTotalCount    = 0
-            Blocked           = @()
-            BlockedTotalCount = 0
-            RecentlyClosed    = @()
-            RecentlyClosedTotalCount = 0
-            Triage            = @()
-            TriageTotalCount  = 0
-            CoverageGaps      = @()
-        }
-        $timestamp = '2026-06-25T00:00:00Z'
 
-        $output = Format-PortfolioMarkdown -bucketModel $bucketModel -timestamp $timestamp
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella100, $blockedChild, $normalChild)
+        $output  = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-06-25T00:00:00Z'
 
-        # Should show (+5 more) because 20 total - 15 cap = 5 overflow
-        $output | Should -Match '\(\+5 more\)' -Because 'cap-floor: 20 floats - N=15 cap = 5 overflow, must show (+5 more) (AC10)'
-        # Must NOT render items beyond the cap
-        $output | Should -Not -Match '#920' -Because 'items beyond cap floor must not be rendered individually'
+        $output | Should -Match '#800.*⛔' -Because 'blocked child must have ⛔ blocked annotation (AC4)'
+        $output | Should -Not -Match '#425.*⛔' -Because 'non-blocked child must NOT have ⛔ annotation (AC4)'
     }
 
-    It 'empty Now bucket shows appropriate empty label' {
-        # When Now bucket is empty (no current-round work), formatter shows a label.
-        # This is consistent with the existing blocked/no-work distinction.
+    It 'v2-active-children-priority-ordering: children sorted priority-then-recency, not by number (AC4)' {
+        # v2: Active section children must be sorted by priority-label then createdAt desc.
+        # This verifies the formatter preserves Get-PortfolioBuckets output order.
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(100))
+        # #571 has lower number but no priority; #425 has priority:high → must appear first
+        $child571 = New-IssueState -Number 571 -State 'OPEN' -CreatedAt '2025-01-01T00:00:00Z' -Labels @() `
+            -Parent @{ number = 100 } -SubIssues @{ totalCount = 0; nodes = @() }
+        $child425 = New-IssueState -Number 425 -State 'OPEN' -CreatedAt '2025-01-01T00:00:00Z' -Labels @('priority: high') `
+            -Parent @{ number = 100 } -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella100 = New-IssueState -Number 100 -State 'OPEN' `
+            -SubIssues @{
+                totalCount = 2
+                nodes = @( @{ number = 571; state = 'OPEN' }, @{ number = 425; state = 'OPEN' } )
+            }
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella100, $child571, $child425)
+        $output  = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-06-25T00:00:00Z'
+
+        # #425 has priority:high → key=0 → appears before #571 (unlabeled, key=3) despite larger number
+        $pos425 = $output.IndexOf('#425')
+        $pos571 = $output.IndexOf('#571')
+        $pos425 | Should -BeGreaterThan -1 -Because '#425 must appear in Active section'
+        $pos571 | Should -BeGreaterThan -1 -Because '#571 must appear in Active section'
+        $pos425 | Should -BeLessThan $pos571 `
+            -Because '#425 (priority:high) must appear before #571 (unlabeled) in Active section — formatter must not re-sort by number (AC4)'
+    }
+
+    It 'v2-triage-cap-floor: Get-PortfolioBuckets caps Triage at 5; TriageResidualCount carries overflow (AC6)' {
+        # v2: Triage is capped at 5 items by Get-PortfolioBuckets. The formatter renders all items
+        # it receives in Triage (no formatter-level cap), and appends (+N more) from TriageResidualCount.
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
+        # 8 triage candidates (none are umbrellas [476,571]) → cap at 5, residual = 3
+        $triageIssues = 1..8 | ForEach-Object {
+            New-IssueState -Number (900 + $_) -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        }
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $triageIssues
+        $output  = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-06-25T00:00:00Z'
+
+        # Residual = 3 → (+3 more) must appear
+        $output | Should -Match '\(\+3 more\)' -Because 'TriageResidualCount=3 must appear as (+3 more) after capped triage list (AC6)'
+        # Items beyond cap (#909) must not be rendered
+        $output | Should -Not -Match '#909' -Because 'item #909 (beyond triage cap of 5) must not be rendered individually (AC6)'
+    }
+
+    It 'v2-no-active-umbrella: empty state shown when ActiveUmbrella is null' {
+        # v2: when ActiveUmbrella is null (all closed or none in list), Active section
+        # shows an empty-state label matching '*(no' pattern (e.g. '*(none)*' or '*(no active umbrella)*').
         $bucketModel = [PSCustomObject]@{
-            Now               = @()
-            NowTotalCount     = 0
-            Next              = @()
-            NextTotalCount    = 0
-            Blocked           = @()
-            BlockedTotalCount = 0
-            RecentlyClosed    = @()
-            RecentlyClosedTotalCount = 0
-            Triage            = @()
-            TriageTotalCount  = 0
-            CoverageGaps      = @()
+            ActiveUmbrella      = $null
+            ActiveChildren      = @()
+            RankedUmbrellas     = @()
+            Triage              = @()
+            TriageResidualCount = 0
+            DriftWarnings       = @()
+            IntegrityWarnings   = @()
+            RecentlyClosed      = @()
         }
         $timestamp = '2026-06-25T00:00:00Z'
 
         $output = Format-PortfolioMarkdown -bucketModel $bucketModel -timestamp $timestamp
 
-        # Existing behavior: shows "*(no current-round work)*" or similar
-        $output | Should -Match '\*\(no' -Because 'empty Now bucket must show a labeled empty state message'
+        # Active section shows an empty-state label
+        $output | Should -Match '\*\(no' -Because 'null ActiveUmbrella must show a labeled empty state in Active section'
     }
 
     It 'repo-wide recently-closed section shows all leaf closures in window (AC9)' {
@@ -983,53 +937,237 @@ Describe 'Order independence' {
         $outputA | Should -Be $outputB -Because 'output must be byte-identical regardless of input issue ordering (sort by number ascending is deterministic)'
     }
 
-    It 'createdAt-desc ordering: creation order != number order → ranked by createdAt desc with priority tiebreak (AC3)' {
-        # Fixture where createdAt order DIFFERS from issue number order.
-        # AC3 full order key: current-round-spine-first → createdAt desc → priority-label → number.
-        # Floats mixed with labeled and unlabeled items.
-        # RED until Get-PortfolioBuckets implements createdAt-desc ordering for floats.
+    It 'v2-triage-ordering: priority then recency then number in Triage section (AC6)' {
+        # v2: #425, #800, #801, #802 are triage candidates (open, parent=null, totalCount=0, not in umbrella list).
+        # #571 IS an umbrella (in default spec umbrellas:[476,571]) → excluded from triage.
+        # Triage sort: priority-label key (asc) → Get-CreatedAtSortTicks (asc = newest first) → number asc.
+        # #800 (key=0/priority:high, 2025-02-01) → first
+        # #802 (key=3, 2025-06-01, newest among unlabeled) → second
+        # #801 (key=3, 2025-02-01, number 801) → third
+        # #425 (key=3, 2024-01-01, oldest) → fourth
         $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
 
-        # Round 1 spine issues (425, 571) — should appear first regardless of createdAt
-        # Float #802 (newer, unlabeled), float #800 (older, priority:high), float #801 (middle, unlabeled)
-        # Expected order after spine: 802 (newest) → 800 (older, priority:high beats #801 at same createdAt)
-        # Wait: all have different createdAt so priority-label tiebreak doesn't apply across them.
-        # Let's use 800/801 same date, 800 has priority:high.
-        # Order: 802 (newest) → 800 (same date as 801, priority:high wins) → 801 (same date, unlabeled)
+        $si0 = @{ totalCount = 0; nodes = @() }
         $issuesAscending = @(
-            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z')
-            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z')
-            (New-IssueState -Number 800  -State 'OPEN' -BlockedBy @() -CreatedAt '2025-02-01T00:00:00Z' -Labels @('priority: high'))
-            (New-IssueState -Number 801  -State 'OPEN' -BlockedBy @() -CreatedAt '2025-02-01T00:00:00Z' -Labels @())
-            (New-IssueState -Number 802  -State 'OPEN' -BlockedBy @() -CreatedAt '2025-06-01T00:00:00Z' -Labels @())
+            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z' -SubIssues $si0)
+            (New-IssueState -Number 571 -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z' -SubIssues $si0)
+            (New-IssueState -Number 800 -State 'OPEN' -BlockedBy @() -CreatedAt '2025-02-01T00:00:00Z' -Labels @('priority: high') -SubIssues $si0)
+            (New-IssueState -Number 801 -State 'OPEN' -BlockedBy @() -CreatedAt '2025-02-01T00:00:00Z' -Labels @() -SubIssues $si0)
+            (New-IssueState -Number 802 -State 'OPEN' -BlockedBy @() -CreatedAt '2025-06-01T00:00:00Z' -Labels @() -SubIssues $si0)
         )
         $issuesShuffled = @(
-            (New-IssueState -Number 802  -State 'OPEN' -BlockedBy @() -CreatedAt '2025-06-01T00:00:00Z' -Labels @())
-            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z')
-            (New-IssueState -Number 801  -State 'OPEN' -BlockedBy @() -CreatedAt '2025-02-01T00:00:00Z' -Labels @())
-            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z')
-            (New-IssueState -Number 800  -State 'OPEN' -BlockedBy @() -CreatedAt '2025-02-01T00:00:00Z' -Labels @('priority: high'))
+            (New-IssueState -Number 802 -State 'OPEN' -BlockedBy @() -CreatedAt '2025-06-01T00:00:00Z' -Labels @() -SubIssues $si0)
+            (New-IssueState -Number 571 -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z' -SubIssues $si0)
+            (New-IssueState -Number 801 -State 'OPEN' -BlockedBy @() -CreatedAt '2025-02-01T00:00:00Z' -Labels @() -SubIssues $si0)
+            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z' -SubIssues $si0)
+            (New-IssueState -Number 800 -State 'OPEN' -BlockedBy @() -CreatedAt '2025-02-01T00:00:00Z' -Labels @('priority: high') -SubIssues $si0)
         )
-        $knownChildSet = @()
 
-        $bucketsA = Get-PortfolioBuckets -spec $spec -issueStateObjects $issuesAscending -KnownChildSet $knownChildSet
-        $bucketsB = Get-PortfolioBuckets -spec $spec -issueStateObjects $issuesShuffled  -KnownChildSet $knownChildSet
+        $bucketsA = Get-PortfolioBuckets -spec $spec -issueStateObjects $issuesAscending
+        $bucketsB = Get-PortfolioBuckets -spec $spec -issueStateObjects $issuesShuffled
 
         $fixedTimestamp = '2026-06-12T12:00:00Z'
         $outputA = Format-PortfolioMarkdown -bucketModel $bucketsA -timestamp $fixedTimestamp
         $outputB = Format-PortfolioMarkdown -bucketModel $bucketsB -timestamp $fixedTimestamp
 
         # Output must be byte-identical regardless of input order (deterministic sort)
-        $outputA | Should -Be $outputB -Because 'createdAt-desc ordering must be deterministic regardless of input order (AC3)'
+        $outputA | Should -Be $outputB -Because 'v2 triage ordering must be deterministic regardless of input order (AC6)'
 
-        # Verify ordering: in Now section, #802 (newest float) must appear before #800 and #801
-        $pos802 = $outputA.IndexOf('#802')
+        # Verify ordering in the combined output:
+        # #800 (priority:high) must come before #802 (createdAt-desc secondary)
         $pos800 = $outputA.IndexOf('#800')
         $pos801 = $outputA.IndexOf('#801')
-        $pos802 | Should -BeLessThan $pos800 -Because '#802 (created 2025-06-01) must appear before #800 (created 2025-02-01) — createdAt desc'
-        $pos802 | Should -BeLessThan $pos801 -Because '#802 (created 2025-06-01) must appear before #801 (created 2025-02-01) — createdAt desc'
-        # Priority tiebreak: #800 (priority:high) before #801 (unlabeled) at same createdAt
-        $pos800 | Should -BeLessThan $pos801 -Because '#800 (priority:high) must rank before #801 (unlabeled) at same createdAt — priority-label tiebreak (AC3)'
+        $pos802 = $outputA.IndexOf('#802')
+        $pos425 = $outputA.IndexOf('#425')
+
+        $pos800 | Should -BeLessThan $pos802 `
+            -Because '#800 (priority:high) must appear before #802 (createdAt-desc secondary) — priority-label tiebreak (AC6)'
+        $pos802 | Should -BeLessThan $pos801 `
+            -Because '#802 (2025-06-01) must appear before #801 (2025-02-01) — createdAt desc within same priority group (AC6)'
+        $pos801 | Should -BeLessThan $pos425 `
+            -Because '#801 (2025-02-01) must appear before #425 (2024-01-01) — createdAt desc (AC6)'
+    }
+}
+
+# ===========================================================================
+Describe 'Format-PortfolioMarkdown v2' {
+# ===========================================================================
+
+    It 'v2-three-zone-layout: output contains Active, Umbrellas ranked, and Triage headers' {
+        # Minimal v2 bucket model with an active umbrella, one ranked umbrella, one triage issue
+        $buckets = [PSCustomObject]@{
+            ActiveUmbrella      = [PSCustomObject]@{ number = 100; title = 'Test Umbrella' }
+            ActiveChildren      = @()
+            RankedUmbrellas     = @(
+                [PSCustomObject]@{ Number = 100; Title = 'Test Umbrella'; State = 'OPEN'; Done = 0; Total = 0; DoneTotalLabel = '0/0 (no children linked)'; IsActive = $true }
+            )
+            Triage              = @(
+                [PSCustomObject]@{ number = 200; title = 'Triage Issue' }
+            )
+            TriageResidualCount = 0
+            DriftWarnings       = @()
+            IntegrityWarnings   = @()
+            RecentlyClosed      = @()
+        }
+
+        $output = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-01-01T00:00:00Z'
+
+        $output | Should -Match '## 🎯 Active' -Because 'v2 Active section header must appear (AC3)'
+        $output | Should -Match '## Umbrellas \(ranked\)' -Because 'v2 Umbrellas (ranked) section header must appear (AC5)'
+        $output | Should -Match '## 🔥 Triage' -Because 'v2 Triage section header must appear (AC6)'
+        $output | Should -Match '## Recently closed' -Because 'v2 Recently closed section must appear (AC9)'
+    }
+
+    It 'v2-active-section: active umbrella children listed with done/total footer' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(100))
+        $child200 = New-IssueState -Number 200 -State 'OPEN' `
+            -Parent @{ number = 100 } -SubIssues @{ totalCount = 0; nodes = @() }
+        $child201 = New-IssueState -Number 201 -State 'CLOSED' `
+            -Parent @{ number = 100 } -SubIssues @{ totalCount = 0; nodes = @() } -ClosedAt '2026-01-01T00:00:00Z'
+        $umbrella100 = New-IssueState -Number 100 -State 'OPEN' `
+            -SubIssues @{
+                totalCount = 2
+                nodes = @(
+                    @{ number = 200; state = 'OPEN' },
+                    @{ number = 201; state = 'CLOSED' }
+                )
+            }
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella100, $child200, $child201)
+        $output  = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-01-01T00:00:00Z'
+
+        $output | Should -Match '#200' -Because 'open active child #200 must appear in Active section'
+        $output | Should -Match '1/2'  -Because 'done/total (1 closed of 2 children) must appear in active section footer'
+    }
+
+    It 'v2-active-blocked-child: blocked child shows ⛔ in active section' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(100))
+        $child200 = New-IssueState -Number 200 -State 'OPEN' -BlockedBy @(999) `
+            -Parent @{ number = 100 } -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella100 = New-IssueState -Number 100 -State 'OPEN' `
+            -SubIssues @{
+                totalCount = 1
+                nodes = @( @{ number = 200; state = 'OPEN' } )
+            }
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella100, $child200)
+        $output  = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-01-01T00:00:00Z'
+
+        $output | Should -Match '⛔' -Because 'blocked child must show ⛔ annotation in Active section (AC4)'
+    }
+
+    It 'v2-umbrellas-ranked-with-active-marker: active umbrella gets ◀ active marker' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(100, 200))
+        $umbrella100 = New-IssueState -Number 100 -State 'OPEN' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella200 = New-IssueState -Number 200 -State 'OPEN' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella100, $umbrella200)
+        $output  = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-01-01T00:00:00Z'
+
+        $output | Should -Match '◀ active' -Because 'active umbrella must have ◀ active marker in Umbrellas section (AC5)'
+        # spec order preserved: #100 before #200 in Umbrellas section
+        $pos100 = $output.IndexOf('#100')
+        $pos200 = $output.IndexOf('#200')
+        $pos100 | Should -BeLessThan $pos200 -Because 'spec order must be preserved in Umbrellas (ranked) section (AC5)'
+    }
+
+    It 'v2-triage-residual-count: (+N more) appears when TriageResidualCount > 0' {
+        $buckets = [PSCustomObject]@{
+            ActiveUmbrella      = $null
+            ActiveChildren      = @()
+            RankedUmbrellas     = @()
+            Triage              = @(
+                [PSCustomObject]@{ number = 1; title = 'T1' }
+            )
+            TriageResidualCount = 3
+            DriftWarnings       = @()
+            IntegrityWarnings   = @()
+            RecentlyClosed      = @()
+        }
+
+        $output = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-01-01T00:00:00Z'
+
+        $output | Should -Match '\(\+3 more\)' -Because 'TriageResidualCount=3 must appear as (+3 more) after triage list (AC6)'
+    }
+
+    It 'v2-drift-integrity-warnings: ⚠️ DriftWarnings and IntegrityWarnings appear after zones' {
+        $buckets = [PSCustomObject]@{
+            ActiveUmbrella      = $null
+            ActiveChildren      = @()
+            RankedUmbrellas     = @()
+            Triage              = @()
+            TriageResidualCount = 0
+            DriftWarnings       = @('⚠️ open umbrella #999 not in ranked list')
+            IntegrityWarnings   = @('⚠️ umbrella #100: subIssues.totalCount=5 but only 3 nodes returned')
+            RecentlyClosed      = @()
+        }
+
+        $output = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-01-01T00:00:00Z'
+
+        $output | Should -Match 'open umbrella #999' -Because 'DriftWarnings must appear in output (AC7)'
+        $output | Should -Match 'subIssues\.totalCount=5' -Because 'IntegrityWarnings must appear in output (AC8)'
+
+        # Warnings must appear after zone content (before footer)
+        $footerPos   = $output.IndexOf('portfolio content unchanged since')
+        $driftPos    = $output.IndexOf('open umbrella #999')
+        $driftPos | Should -BeLessThan $footerPos -Because 'warnings must appear before footer'
+    }
+
+    It 'v2-idempotency: Format-PortfolioMarkdown + Get-SplicedBody returns $null on second call with same data' {
+        $MARKER_BEGIN = '<!-- portfolio-tracker:begin -->'
+        $MARKER_END   = '<!-- portfolio-tracker:end -->'
+
+        $buckets = [PSCustomObject]@{
+            ActiveUmbrella      = $null
+            ActiveChildren      = @()
+            RankedUmbrellas     = @()
+            Triage              = @( [PSCustomObject]@{ number = 99; title = 'T99' } )
+            TriageResidualCount = 0
+            DriftWarnings       = @()
+            IntegrityWarnings   = @()
+            RecentlyClosed      = @()
+        }
+
+        $fixedTimestamp = '2026-01-01T00:00:00Z'
+        $inner1  = Format-PortfolioMarkdown -bucketModel $buckets -timestamp $fixedTimestamp
+        $block1  = "$MARKER_BEGIN`n$inner1$MARKER_END"
+
+        # Splice into empty body
+        $body1 = Get-SplicedBody -existingBody '' -contentBlock $block1
+
+        # Format again with different timestamp (same data)
+        $inner2 = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-06-01T00:00:00Z'
+        $block2 = "$MARKER_BEGIN`n$inner2$MARKER_END"
+
+        # Splice into already-spliced body
+        $result = Get-SplicedBody -existingBody $body1 -contentBlock $block2
+
+        $result | Should -BeNullOrEmpty -Because 'identical content with only timestamp change must return null (idempotency — no write needed)'
+    }
+
+    It 'v2-outside-marker-prose-preserved: text before portfolio marker is kept in spliced body' {
+        $MARKER_BEGIN = '<!-- portfolio-tracker:begin -->'
+        $MARKER_END   = '<!-- portfolio-tracker:end -->'
+
+        $existingBody = "Some prose before marker`n$MARKER_BEGIN`nold content`nportfolio content unchanged since 2026-01-01T00:00:00Z — rendered by render-portfolio.ps1`n$MARKER_END"
+
+        $buckets = [PSCustomObject]@{
+            ActiveUmbrella      = $null
+            ActiveChildren      = @()
+            RankedUmbrellas     = @()
+            Triage              = @()
+            TriageResidualCount = 0
+            DriftWarnings       = @()
+            IntegrityWarnings   = @()
+            RecentlyClosed      = @()
+        }
+        $inner   = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-06-01T00:00:00Z'
+        $block   = "$MARKER_BEGIN`n$inner$MARKER_END"
+        $result  = Get-SplicedBody -existingBody $existingBody -contentBlock $block
+
+        $result | Should -Match 'Some prose before marker' -Because 'text before portfolio marker must be preserved after splice'
     }
 }
 

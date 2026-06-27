@@ -1,12 +1,12 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Renders the derived portfolio tracker for issue #692 (control tower issue).
+    Renders the derived portfolio tracker for issue #704 (control tower issue).
 
 .DESCRIPTION
     Implements the Renderer Contract:
       - ConvertFrom-SequenceSpec  : parse flat YAML sequence spec (no ConvertFrom-Yaml)
-      - Get-PortfolioBuckets      : classify issues into Now/Next/Blocked/RecentlyClosed/Triage
+      - Get-PortfolioBuckets      : classify issues into ActiveUmbrella/ActiveChildren/RankedUmbrellas/Triage/RecentlyClosed/DriftWarnings/IntegrityWarnings
       - Format-PortfolioMarkdown  : render bucket model to Markdown
       - Get-SplicedBody           : idempotent splice into issue body
       - Invoke-PortfolioRender    : full pipeline end-to-end
@@ -57,15 +57,6 @@ function Get-BucketTotal {
     return 0
 }
 
-# Returns the numeric model property $propName when present, otherwise $renderedCount.
-function Get-ModelTotal {
-    param([object]$model, [string]$propName, [int]$renderedCount)
-    $prop = $model.PSObject.Properties[$propName]
-    if ($null -ne $prop) {
-        return [int]$prop.Value
-    }
-    return $renderedCount
-}
 
 # ---------------------------------------------------------------------------
 # ConvertFrom-SequenceSpec
@@ -424,110 +415,69 @@ function Get-PortfolioBuckets {
 }
 
 # ---------------------------------------------------------------------------
-# Format-PortfolioMarkdown
-# Renders bucket model to Markdown string.
-# Bucket order: Now / Next / Blocked / Recently closed / Triage
-# Footer: "as of {timestamp} — rendered by render-portfolio.ps1"
-# Pagination: (+N more) when totalCount > rendered count.
+# Format-PortfolioMarkdown v2
+# Renders v2 bucket model to Markdown string.
+# Three-zone layout: Active / Umbrellas (ranked) / Triage / Recently closed
+# Warnings (DriftWarnings + IntegrityWarnings) appear after zones, before footer.
+# Footer: "portfolio content unchanged since {timestamp} — rendered by render-portfolio.ps1"
+# Get-SplicedBody strips the footer line for idempotency comparison — do not move it.
 # ---------------------------------------------------------------------------
 function Format-PortfolioMarkdown {
     param($bucketModel, [string]$timestamp, [int[]]$UnresolvedNums = @())
 
     $sb = [System.Text.StringBuilder]::new()
 
-    # --- Now ---
-    # Cap-floor constant (AC10): max float items to render before (+M more).
-    $floatCap = 15
-
-    $null = $sb.AppendLine('## Now')
-    # Consume producer ordering verbatim — do NOT Sort-Object number (AC3).
-    $nowItems = if ($bucketModel.Now) { @($bucketModel.Now) } else { @() }
-    if ($nowItems.Count -gt 0) {
-        # Separate spine items (isFloat=$false) from float items (isFloat=$true).
-        $spineItems = @($nowItems | Where-Object { -not ($_.PSObject.Properties['isFloat'] -and $_.isFloat -eq $true) })
-        $floatItems = @($nowItems | Where-Object {       $_.PSObject.Properties['isFloat'] -and $_.isFloat -eq $true  })
-
-        # Render ALL spine items with tags.
-        foreach ($issue in $spineItems) {
-            $tags = ''
-            if ($issue.PSObject.Properties['inProgress'] -and $issue.inProgress -eq $true) {
-                $tags += ' (in progress)'
+    # --- Active ---
+    if ($null -ne $bucketModel.ActiveUmbrella) {
+        $null = $sb.AppendLine("## 🎯 Active — #$($bucketModel.ActiveUmbrella.number) $($bucketModel.ActiveUmbrella.title)")
+        # Children: consume verbatim, do NOT re-sort
+        $children = if ($bucketModel.ActiveChildren) { @($bucketModel.ActiveChildren) } else { @() }
+        foreach ($child in $children) {
+            if ($child.BlockedAnnotation) {
+                $null = $sb.AppendLine("- #$($child.number) $($child.title) $($child.BlockedAnnotation)")
             }
-            $null = $sb.AppendLine("- #$($issue.number) $($issue.title)$tags")
-        }
-
-        # Render top N=15 float items with tags; compute total overflow.
-        $floatCount    = $floatItems.Count
-        $floatToRender = if ($floatCount -gt $floatCap) { $floatCap } else { $floatCount }
-        for ($fi = 0; $fi -lt $floatToRender; $fi++) {
-            $issue = $floatItems[$fi]
-            $tags = ' (unsequenced)'
-            if ($issue.PSObject.Properties['inProgress'] -and $issue.inProgress -eq $true) {
-                $tags += ' (in progress)'
+            else {
+                $null = $sb.AppendLine("- #$($child.number) $($child.title)")
             }
-            $null = $sb.AppendLine("- #$($issue.number) $($issue.title)$tags")
         }
-
-        # Overflow: combine cap-floor float overflow with NowTotalCount overflow.
-        # NowTotalCount may exceed Now.Count when the caller has more items than
-        # were passed in the Now array (pagination from the model).
-        $totalRendered   = $spineItems.Count + $floatToRender
-        $nowTotal        = Get-ModelTotal $bucketModel 'NowTotalCount' $nowItems.Count
-        $totalToAccount  = [math]::Max($nowTotal, $nowItems.Count)
-        $totalOverflow   = $totalToAccount - $totalRendered
-        if ($totalOverflow -gt 0) {
-            $null = $sb.AppendLine("(+$totalOverflow more)")
+        $null = $sb.AppendLine('')
+        # Done/total footer line
+        $activeEntry = @($bucketModel.RankedUmbrellas | Where-Object { $_.IsActive })[0]
+        if ($null -ne $activeEntry -and $activeEntry.Total -gt 0) {
+            $null = $sb.AppendLine("── $($activeEntry.Done)/$($activeEntry.Total) done ──")
+        }
+        else {
+            $null = $sb.AppendLine('── no children linked ──')
         }
     }
     else {
-        $blockedCount = if ($bucketModel.Blocked) { @($bucketModel.Blocked).Count } else { 0 }
-        $emptyMsg     = if ($blockedCount -gt 0) {
-            '*(no unblocked items — all current-round items are blocked)*'
-        } else {
-            '*(no current-round work)*'
-        }
-        $null = $sb.AppendLine($emptyMsg)
-    }
-    # CoverageGaps (AC7): render after Now content, even when Now is empty.
-    if ($bucketModel.CoverageGaps) {
-        foreach ($gap in $bucketModel.CoverageGaps) {
-            $null = $sb.AppendLine("- (#$($gap.umbrella): $($gap.note))")
-        }
+        $null = $sb.AppendLine('## 🎯 Active')
+        $null = $sb.AppendLine('*(no active umbrella)*')
     }
     $null = $sb.AppendLine('')
 
-    # --- Next ---
-    $null = $sb.AppendLine('## Next')
-    $nextItems = if ($bucketModel.Next) { @($bucketModel.Next | Sort-Object number) } else { @() }
-    if ($nextItems.Count -gt 0) {
-        foreach ($issue in $nextItems) {
-            $null = $sb.AppendLine("- #$($issue.number) $($issue.title)")
-        }
-        $nextTotal = Get-ModelTotal $bucketModel 'NextTotalCount' $nextItems.Count
-        if ($nextTotal -gt $nextItems.Count) {
-            $overflow = $nextTotal - $nextItems.Count
-            $null = $sb.AppendLine("(+$overflow more)")
-        }
+    # --- Umbrellas (ranked) ---
+    $null = $sb.AppendLine('## Umbrellas (ranked)')
+    $rankedUmbrellas = if ($bucketModel.RankedUmbrellas) { @($bucketModel.RankedUmbrellas) } else { @() }
+    foreach ($umb in $rankedUmbrellas) {
+        $activeMarker = if ($umb.IsActive) { ' ◀ active' } else { '' }
+        $null = $sb.AppendLine("- #$($umb.Number) $($umb.Title) $($umb.DoneTotalLabel)$activeMarker")
     }
-    else {
+    if ($rankedUmbrellas.Count -eq 0) {
         $null = $sb.AppendLine('*(none)*')
     }
     $null = $sb.AppendLine('')
 
-    # --- Blocked ---
-    $null = $sb.AppendLine('## Blocked')
-    $blockedItems = if ($bucketModel.Blocked) { @($bucketModel.Blocked | Sort-Object number) } else { @() }
-    if ($blockedItems.Count -gt 0) {
-        foreach ($issue in $blockedItems) {
-            $annotation = if ($issue.PSObject.Properties['blockerAnnotations']) {
-                " ($($issue.blockerAnnotations))"
-            } else { '' }
-            $null = $sb.AppendLine("- #$($issue.number) $($issue.title)$annotation")
+    # --- Triage ---
+    $null = $sb.AppendLine('## 🔥 Triage')
+    $triageItems = if ($bucketModel.Triage) { @($bucketModel.Triage) } else { @() }
+    if ($triageItems.Count -gt 0) {
+        foreach ($issue in $triageItems) {
+            $null = $sb.AppendLine("- #$($issue.number) $($issue.title)")
         }
-        $blockedTotal = Get-ModelTotal $bucketModel 'BlockedTotalCount' $blockedItems.Count
-        if ($blockedTotal -gt $blockedItems.Count) {
-            $overflow = $blockedTotal - $blockedItems.Count
-            $null = $sb.AppendLine("(+$overflow more)")
+        $residualCount = if ($null -ne $bucketModel.TriageResidualCount) { [int]$bucketModel.TriageResidualCount } else { 0 }
+        if ($residualCount -gt 0) {
+            $null = $sb.AppendLine("(+$residualCount more)")
         }
     }
     else {
@@ -537,48 +487,39 @@ function Format-PortfolioMarkdown {
 
     # --- Recently closed ---
     $null = $sb.AppendLine('## Recently closed')
-    $rcItems = if ($bucketModel.RecentlyClosed) { @($bucketModel.RecentlyClosed | Sort-Object number) } else { @() }
+    $rcItems = if ($bucketModel.RecentlyClosed) { @($bucketModel.RecentlyClosed) } else { @() }
     if ($rcItems.Count -gt 0) {
         foreach ($issue in $rcItems) {
             $null = $sb.AppendLine("- #$($issue.number) $($issue.title)")
         }
-        $rcTotal = Get-ModelTotal $bucketModel 'RecentlyClosedTotalCount' $rcItems.Count
-        if ($rcTotal -gt $rcItems.Count) {
-            $overflow = $rcTotal - $rcItems.Count
-            $null = $sb.AppendLine("(+$overflow more)")
-        }
     }
     else {
         $null = $sb.AppendLine('*(none)*')
     }
     $null = $sb.AppendLine('')
 
-    # --- Triage ---
-    $null = $sb.AppendLine('## Triage')
-    $triageItems = if ($bucketModel.Triage) { @($bucketModel.Triage | Sort-Object number) } else { @() }
-    if ($triageItems.Count -gt 0) {
-        foreach ($issue in $triageItems) {
-            $null = $sb.AppendLine("- #$($issue.number) $($issue.title)")
-        }
-        $triageTotal = Get-ModelTotal $bucketModel 'TriageTotalCount' $triageItems.Count
-        if ($triageTotal -gt $triageItems.Count) {
-            $overflow = $triageTotal - $triageItems.Count
-            $null = $sb.AppendLine("(+$overflow more)")
+    # --- Warnings (after zones, before footer) ---
+    if ($bucketModel.DriftWarnings) {
+        foreach ($warn in $bucketModel.DriftWarnings) {
+            $null = $sb.AppendLine($warn)
         }
     }
-    else {
-        $null = $sb.AppendLine('*(none)*')
+    if ($bucketModel.IntegrityWarnings) {
+        foreach ($warn in $bucketModel.IntegrityWarnings) {
+            $null = $sb.AppendLine($warn)
+        }
     }
-    $null = $sb.AppendLine('')
 
-    # --- Footer ---
-    $null = $sb.AppendLine("portfolio content unchanged since $timestamp — rendered by render-portfolio.ps1")
-
+    # --- UnresolvedNums ---
     if ($UnresolvedNums -and $UnresolvedNums.Count -gt 0) {
         foreach ($n in $UnresolvedNums) {
             $null = $sb.AppendLine("⚠️ Warning: issue #$n not found in GitHub — remove from sequence.yaml")
         }
     }
+
+    # --- Footer ---
+    # IMPORTANT: Get-SplicedBody strips this line for idempotency; do not move it.
+    $null = $sb.AppendLine("portfolio content unchanged since $timestamp — rendered by render-portfolio.ps1")
 
     return $sb.ToString()
 }
