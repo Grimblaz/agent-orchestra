@@ -1,6 +1,6 @@
 # How Agent Orchestra works
 
-> **Last verified against v2.35.5 (2026-06-26).** If the README version badge shows a higher version, [`CLAUDE.md`](CLAUDE.md) is authoritative for the current pipeline.
+> **Last verified against v2.35.6 (2026-06-27).** If the README version badge shows a higher version, [`CLAUDE.md`](CLAUDE.md) is authoritative for the current pipeline.
 
 Agent Orchestra is a multi-agent workflow system that guides software ideas through a structured pipeline — from customer framing to a merged pull request — using a coordinated set of AI agents, each with a defined role. It runs inside Claude Code as a plugin.[^copilot]
 

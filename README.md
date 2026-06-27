@@ -3,7 +3,7 @@
 > ⚠️ **GitHub Copilot / VS Code support is frozen and retiring after 2026-08-31.**
 > Claude Code is the actively supported path. See [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md) for details and the reach-out channel if you depend on Copilot support.
 
-[![Version](https://img.shields.io/badge/version-v2.35.5-blue.svg)](../../releases)
+[![Version](https://img.shields.io/badge/version-v2.35.6-blue.svg)](../../releases)
 [![Ready for Production](https://img.shields.io/badge/status-production%20ready-green.svg)](../../releases)
 
 A multi-agent workflow system that orchestrates AI-assisted software development through specialized Claude Code agents. *(GitHub Copilot/VS Code: frozen and retiring after 2026-08-31 — see [COPILOT-DEPRECATION.md](Documents/Design/copilot-deprecation.md))*
@@ -35,6 +35,8 @@ A multi-agent workflow system that orchestrates AI-assisted software development
 **What requires clone/fork**: Instruction files (`.github/instructions/`) and project templates are not distributed via the plugin — they are auto-discovered by VS Code when you clone or fork the repo. Plugin-distributed hooks are also not active when you only point VS Code at a clone via `chat.agentFilesLocations`; deterministic `SessionStart` cleanup and Claude `PostToolUse` release-hygiene prompts require an actual plugin install.
 
 ---
+
+**New here? → [How Agent Orchestra works](HOW-IT-WORKS.md)**
 
 ## Install as Plugin (Claude Code)
 
