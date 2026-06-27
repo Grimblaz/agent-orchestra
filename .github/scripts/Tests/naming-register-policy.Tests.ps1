@@ -36,6 +36,9 @@ Describe "Schema: structural" {
         $enumValues | Should -Contain 'self-describing'
         $enumValues | Should -Contain 'rename-candidate'
     }
+    It "register.json validates against the JSON schema" {
+        Test-Json -Json $registerRaw -Schema $schemaRaw | Should -BeTrue
+    }
 }
 
 Describe "Register: structural" {
@@ -47,6 +50,10 @@ Describe "Register: structural" {
         $register | ForEach-Object {
             $_.term | Should -Not -BeNullOrEmpty
         }
+    }
+    It "every term in register.json is unique" {
+        $dupes = $register | Group-Object term | Where-Object { $_.Count -gt 1 } | Select-Object -ExpandProperty Name
+        $dupes | Should -BeNullOrEmpty -Because "register terms must be unique; duplicates: $($dupes -join ', ')"
     }
     It "every entry has a 'register' field with a valid enum value" {
         $validValues = @('stable-code', 'self-describing', 'rename-candidate')
