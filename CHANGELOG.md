@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.6] — 2026-06-26
+
+### Added
+
+- **HOW-IT-WORKS.md orientation doc** (#749): new plain-language orientation document at the repo root. Five sections: what Agent Orchestra is, the work pipeline (board to merged PR), how to read an issue/PR, optional depth (`<details>` blocks), and a 48-row vocabulary table (seeds the #732 naming/register policy via the `<!-- vocab-seed:begin/end -->` anchor). README pointer added after deprecation banner. `.markdownlint.json` now allows `<details>` and `<summary>` HTML elements (MD033).
+
 ## [2.35.5] — 2026-06-26
 
 ### Fixed
