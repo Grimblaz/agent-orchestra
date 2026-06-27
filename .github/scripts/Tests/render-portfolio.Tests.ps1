@@ -260,352 +260,311 @@ rounds:
 }
 
 # ===========================================================================
-Describe 'Get-PortfolioBuckets' {
+# Get-PortfolioBuckets v1 tests RETIRED (s2 of #753)
+# These tests referenced v1 model properties (.Now, .Next, .Blocked,
+# .CoverageGaps, isFloat, blockerAnnotations, KnownChildSet) which no
+# longer exist in the v2 implementation. Replaced by 'Get-PortfolioBuckets v2'
+# Describe block below.
 # ===========================================================================
 
-    It 'puts spine leaf children of active-round umbrellas in Now; umbrellas are excluded (AC1/CR-2)' {
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        $issues = @(
-            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @())   # active-round umbrella
-            (New-IssueState -Number 571 -State 'OPEN' -BlockedBy @())   # active-round umbrella
-            (New-IssueState -Number 900 -State 'OPEN' -BlockedBy @())   # spine leaf (child of #425)
-        )
-        $knownChildSet = @([PSCustomObject]@{ number = 900; RoundIndex = 0; UmbrellaNumber = 425 })
+# ===========================================================================
+Describe 'Get-PortfolioBuckets v2' {
+# ===========================================================================
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet $knownChildSet
+    It 'ActiveUmbrella is first OPEN umbrella in list order (AC3)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella571 = New-IssueState -Number 571 -State 'OPEN' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
 
-        $buckets.Now | Should -Not -BeNullOrEmpty
-        $buckets.Now.number | Should -Contain 900 -Because 'spine leaf child of active-round umbrella must appear in Now'
-        $buckets.Now.number | Should -Not -Contain 425 -Because 'umbrellas must not appear as work items in Now (AC1)'
-        $buckets.Now.number | Should -Not -Contain 571 -Because 'umbrellas must not appear as work items in Now (AC1)'
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $umbrella571)
+
+        $buckets.ActiveUmbrella | Should -Not -BeNullOrEmpty -Because 'first OPEN umbrella must be the ActiveUmbrella'
+        $buckets.ActiveUmbrella.number | Should -Be 476 -Because '#476 is first in spec list and OPEN → ActiveUmbrella'
     }
 
-    It 'returns empty Now when all issues in lowest round are blocked' {
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        # Both round-1 issues are blocked — Now should be empty (honest stuck signal)
-        $issues = @(
-            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @(999))
-            (New-IssueState -Number 571 -State 'OPEN' -BlockedBy @(998))
-        )
+    It 'skips CLOSED listed umbrella for ActiveUmbrella and emits DriftWarning (AC3)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $umbrella476 = New-IssueState -Number 476 -State 'CLOSED' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella571 = New-IssueState -Number 571 -State 'OPEN' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $umbrella571)
 
-        $buckets.Now | Should -BeNullOrEmpty -Because 'all round-1 issues are blocked; Now must be empty to signal an honest stuck state'
+        $buckets.ActiveUmbrella.number | Should -Be 571 -Because '#476 is CLOSED → skip; #571 is OPEN → ActiveUmbrella'
+        $buckets.DriftWarnings | Should -Contain '⚠️ listed umbrella #476 is closed' `
+            -Because 'a CLOSED listed umbrella must emit a DriftWarning (AC3)'
     }
 
-    It 'holds empty Now when lowest round is all-blocked; round-2 umbrella excluded from Next (AC1/CR-2)' {
-        # Two-round spec: round 1 all-blocked, round 2 unblocked.
-        # CR-2: umbrellas are containers only — they do not appear as work items in Now or Next.
-        # #100 is a round-1 umbrella (blocked) → Now is empty; #100 lands in Blocked.
-        # #200 is a round-2 umbrella (unblocked) → excluded from Next because umbrellas are not work items.
-        # Spine leaf children of #200 would appear in Next, but none are provided here.
-        $twoRoundSpec = ConvertFrom-SequenceSpec (New-ValidSpecYaml -LegacyRoundsBlock @'
-rounds:
-  - lane: main
-    round: 1
-    issues: [100]
-  - lane: main
-    round: 2
-    issues: [200]
-'@)
-        $issues = @(
-            (New-IssueState -Number 100 -BlockedBy @(999)),   # round 1 umbrella, blocked
-            (New-IssueState -Number 200)                       # round 2 umbrella, unblocked — but excluded from Next (AC1)
-        )
-        $result = Get-PortfolioBuckets -spec $twoRoundSpec -issueStateObjects $issues
-        $result.Now   | Should -BeNullOrEmpty -Because 'round 1 is all-blocked; Now must be empty (honest stuck signal)'
-        $result.Blocked | Select-Object -ExpandProperty number | Should -Contain 100
-        $result.Next  | Should -BeNullOrEmpty -Because 'round-2 umbrella is a container only — not a work item in Next (AC1/CR-2)'
+    It 'ActiveUmbrella is null when all listed umbrellas are closed (AC3)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $umbrella476 = New-IssueState -Number 476 -State 'CLOSED' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella571 = New-IssueState -Number 571 -State 'CLOSED' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $umbrella571)
+
+        $buckets.ActiveUmbrella | Should -BeNullOrEmpty -Because 'no OPEN listed umbrella → ActiveUmbrella must be null'
     }
 
-    It "puts out-of-plan blockers in annotation format 'blocked by #N (out of plan)'" {
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        # Blocker 999 is not in sequence.yaml → out-of-plan
-        $issues = @(
-            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @(999) -BlockerInPlan $false)
-        )
+    It 'ActiveChildren are open direct children of active umbrella in priority→recency→number order (AC4)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $child900 = New-IssueState -Number 900 -State 'OPEN' -CreatedAt '2025-06-01T00:00:00Z' `
+            -Parent @{ number = 476 } -SubIssues @{ totalCount = 0; nodes = @() }
+        $child901 = New-IssueState -Number 901 -State 'OPEN' -CreatedAt '2025-01-01T00:00:00Z' `
+            -Parent @{ number = 476 } -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' `
+            -SubIssues @{
+                totalCount = 2
+                nodes = @(
+                    @{ number = 900; state = 'OPEN' },
+                    @{ number = 901; state = 'OPEN' }
+                )
+            }
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $child900, $child901)
 
-        $blockedEntry = $buckets.Blocked | Where-Object { $_.number -eq 425 }
-        $blockedEntry           | Should -Not -BeNullOrEmpty
-        $blockedEntry.blockerAnnotations | Should -Match 'blocked by #999 \(out of plan\)'
+        $buckets.ActiveChildren | Should -Not -BeNullOrEmpty
+        $buckets.ActiveChildren.Count | Should -Be 2 -Because 'both open children must appear'
+        # 900 has newer createdAt → must appear before 901
+        $idx900 = [array]::IndexOf([object[]]$buckets.ActiveChildren, ($buckets.ActiveChildren | Where-Object { $_.number -eq 900 }))
+        $idx901 = [array]::IndexOf([object[]]$buckets.ActiveChildren, ($buckets.ActiveChildren | Where-Object { $_.number -eq 901 }))
+        $idx900 | Should -BeLessThan $idx901 -Because '#900 (newer createdAt) must rank before #901 (AC4 priority→recency→number)'
     }
 
-    It 'annotates each blocker independently when an issue mixes in-plan and out-of-plan blockers (CR7)' {
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        # 425 is blocked by 571 (in sequence.yaml → in plan) AND 999 (not in
-        # sequence.yaml → out of plan). Each blocker must be labeled on its own
-        # merits, not collapsed to one issue-level verdict.
-        $issues = @(
-            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @(571, 999))
-        )
+    It 'ActiveChildren have BlockedAnnotation when blockedBy non-empty (AC4)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $child900 = New-IssueState -Number 900 -State 'OPEN' -BlockedBy @(800, 801) `
+            -Parent @{ number = 476 } -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' `
+            -SubIssues @{
+                totalCount = 1
+                nodes = @( @{ number = 900; state = 'OPEN' } )
+            }
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $child900)
 
-        $blockedEntry = $buckets.Blocked | Where-Object { $_.number -eq 425 }
-        $blockedEntry | Should -Not -BeNullOrEmpty
-        $blockedEntry.blockerAnnotations | Should -Match 'blocked by #571(?!\s*\(out of plan\))' -Because 'an in-plan blocker must not be tagged out of plan'
-        $blockedEntry.blockerAnnotations | Should -Match 'blocked by #999 \(out of plan\)' -Because 'an out-of-plan blocker must be tagged'
+        $childEntry = $buckets.ActiveChildren | Where-Object { $_.number -eq 900 }
+        $childEntry | Should -Not -BeNullOrEmpty
+        $childEntry.BlockedAnnotation | Should -Match '⛔ blocked by' -Because 'AC4: blocked child must have BlockedAnnotation'
+        $childEntry.BlockedAnnotation | Should -Match '#800' -Because 'blocker #800 must appear in annotation'
+        $childEntry.BlockedAnnotation | Should -Match '#801' -Because 'blocker #801 must appear in annotation'
     }
 
-    It 'puts closed issues in Recently Closed only, not in Now or Next' {
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        $closedAt = (Get-Date).AddDays(-3).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-        $issues = @(
-            (New-IssueState -Number 425 -State 'CLOSED' -ClosedAt $closedAt)
-            (New-IssueState -Number 571 -State 'OPEN'   -BlockedBy @())
-        )
+    It 'ActiveChildren number-asc tiebreak is deterministic for byte-identical renders (AC4)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $sameDate = '2025-06-01T00:00:00Z'
+        $child900 = New-IssueState -Number 900 -State 'OPEN' -CreatedAt $sameDate `
+            -Parent @{ number = 476 } -SubIssues @{ totalCount = 0; nodes = @() }
+        $child901 = New-IssueState -Number 901 -State 'OPEN' -CreatedAt $sameDate `
+            -Parent @{ number = 476 } -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' `
+            -SubIssues @{
+                totalCount = 2
+                nodes = @(
+                    @{ number = 901; state = 'OPEN' },
+                    @{ number = 900; state = 'OPEN' }
+                )
+            }
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $child900, $child901)
 
-        # 425 is closed — must NOT appear in Now
-        if ($buckets.Now) {
-            $buckets.Now.number | Should -Not -Contain 425 -Because 'closed issues must not appear in Now'
-        }
-        # 425 must appear in Recently Closed
-        $buckets.RecentlyClosed | Should -Not -BeNullOrEmpty
-        $buckets.RecentlyClosed.number | Should -Contain 425
+        $idx900 = [array]::IndexOf([object[]]$buckets.ActiveChildren, ($buckets.ActiveChildren | Where-Object { $_.number -eq 900 }))
+        $idx901 = [array]::IndexOf([object[]]$buckets.ActiveChildren, ($buckets.ActiveChildren | Where-Object { $_.number -eq 901 }))
+        $idx900 | Should -BeLessThan $idx901 -Because 'number-asc tiebreak: #900 before #901 when priority and createdAt are equal (AC4)'
     }
 
-    It 'puts triage-labeled issues in Triage bucket' {
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        # Issue 300 has triage label but is NOT in any round
-        $issues = @(
-            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 300 -State 'OPEN' -Labels @('triage'))
-        )
+    It 'RankedUmbrellas contains all listed umbrellas in spec order (AC5)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella571 = New-IssueState -Number 571 -State 'OPEN' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $umbrella571)
+
+        $buckets.RankedUmbrellas | Should -HaveCount 2
+        $buckets.RankedUmbrellas[0].Number | Should -Be 476 -Because 'first ranked umbrella must match first in spec list'
+        $buckets.RankedUmbrellas[1].Number | Should -Be 571 -Because 'second ranked umbrella must match second in spec list'
+    }
+
+    It 'RankedUmbrellas Done/Total counts direct children only (AC5)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' `
+            -SubIssues @{
+                totalCount = 2
+                nodes = @(
+                    @{ number = 900; state = 'OPEN'   },
+                    @{ number = 901; state = 'CLOSED' }
+                )
+            }
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476)
+
+        $ranked476 = $buckets.RankedUmbrellas | Where-Object { $_.Number -eq 476 }
+        $ranked476 | Should -Not -BeNullOrEmpty
+        $ranked476.Total | Should -Be 2 -Because 'Total = count of direct child nodes (AC5)'
+        $ranked476.Done  | Should -Be 1 -Because 'Done = count of CLOSED direct child nodes (AC5)'
+        $ranked476.DoneTotalLabel | Should -Be '1/2' -Because 'DoneTotalLabel must be Done/Total'
+    }
+
+    It 'closed child counts as Done in RankedUmbrellas regardless of its own children (AC5)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        # Node 900 is a closed child-umbrella; its own sub-issues are irrelevant for Done count
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' `
+            -SubIssues @{
+                totalCount = 2
+                nodes = @(
+                    @{ number = 900; state = 'CLOSED' },   # closed child-umbrella → counts as Done
+                    @{ number = 901; state = 'OPEN'   }
+                )
+            }
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476)
+
+        $ranked476 = $buckets.RankedUmbrellas | Where-Object { $_.Number -eq 476 }
+        $ranked476.Done | Should -Be 1 -Because 'CLOSED child-umbrella counts as Done; grandchildren are irrelevant (AC5)'
+    }
+
+    It 'zero-children umbrella shows "0/0 (no children linked)" in RankedUmbrellas (AC5)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476)
+
+        $ranked476 = $buckets.RankedUmbrellas | Where-Object { $_.Number -eq 476 }
+        $ranked476.DoneTotalLabel | Should -Be '0/0 (no children linked)' `
+            -Because 'zero-children umbrella must show the no-children-linked label (AC5)'
+    }
+
+    It 'Triage contains open∧parent-null∧totalCount-0∧not-in-list issues (AC6)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
+        # Classic triage candidate: open, parent null, totalCount 0, not in umbrella list
+        $triageIssue = New-IssueState -Number 999 -State 'OPEN' -Parent $null `
+            -SubIssues @{ totalCount = 0; nodes = @() }
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $triageIssue)
 
         $buckets.Triage | Should -Not -BeNullOrEmpty
-        $buckets.Triage.number | Should -Contain 300
+        ($buckets.Triage | ForEach-Object { $_.number }) | Should -Contain 999 `
+            -Because 'open∧parent-null∧totalCount-0∧not-in-list → Triage (AC6)'
     }
 
-    It 'puts registered-but-unsequenced issues in Triage bucket' {
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        # Issue 999 is open but appears in no round in sequence.yaml
-        $issues = @(
-            (New-IssueState -Number 425 -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 999 -State 'OPEN' -Labels @())
-        )
-
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues
-
-        # 999 is not in any round → must land in Triage
-        $buckets.Triage | Should -Not -BeNullOrEmpty
-        $buckets.Triage.number | Should -Contain 999 -Because 'open issues not in any sequence round belong in Triage'
-    }
-
-    # -----------------------------------------------------------------------
-    # NEW fixtures for #720 s1 (AC4 float detection, AC2 Next placement,
-    # AC5 dedup, AC6 blocked float, AC3 createdAt ordering, AC7 CoverageGaps)
-    # All RED until s2/s3 implement float-detection and createdAt ordering.
-    # -----------------------------------------------------------------------
-
-    It 'open non-umbrella issue NOT in known-child-set → float (AC4)' {
-        # Spec has umbrellas 425 and 571 as sequenced issues.
-        # Issue 800 is open but NOT in any round → it is a float.
-        # Float detection: open non-umbrella NOT in any sequenced umbrella child-set.
-        # RED: Get-PortfolioBuckets does not yet implement float sub-issue-set inversion.
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        $issues = @(
-            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 800  -State 'OPEN' -BlockedBy @())   # not in any round → float
-        )
-        # Provide empty known-child-set (no subIssue children fetched)
-        $knownChildSet = @()
-
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet $knownChildSet
-
-        $floatEntry = $buckets.Now | Where-Object { $_.number -eq 800 -and $_.isFloat -eq $true }
-        $floatEntry | Should -Not -BeNullOrEmpty -Because 'open issue not in any sequenced umbrella child-set must appear in Now as a float (isFloat=$true)'
-    }
-
-    It 'issue IN the known-child-set → not a float (AC4)' {
-        # Issue 800 appears in a sequenced umbrella child-set → not a float.
-        # RED: same as above.
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        $issues = @(
-            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 800  -State 'OPEN' -BlockedBy @())
-        )
-        $knownChildSet = @(800)   # 800 is a child of a sequenced umbrella
-
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet $knownChildSet
-
-        $entry = $buckets.Now | Where-Object { $_.number -eq 800 }
-        if ($entry) {
-            $entry.isFloat | Should -Not -Be $true -Because 'issue in the known-child-set must NOT be marked as a float'
+    It 'Triage cap is 5 with TriageResidualCount for overflow (AC6)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $triageIssues = 1..8 | ForEach-Object {
+            New-IssueState -Number (1000 + $_) -State 'OPEN' -Parent $null `
+                -SubIssues @{ totalCount = 0; nodes = @() }
         }
-        # It should land in Now/Next as a spine child, not in the float path
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $triageIssues
+
+        $buckets.Triage.Count | Should -Be 5 -Because 'Triage capped at 5 items (AC6)'
+        $buckets.TriageResidualCount | Should -Be 3 -Because '8 candidates - 5 cap = 3 residual (AC6)'
     }
 
-    It 'issues #711/#712 whose parent #692 is CLOSED → appear as floats (AC4)' {
-        # #692 is unsequenced/closed — its children #711 and #712 are not in any
-        # sequenced umbrella child-set → they appear as floats (isFloat=$true).
-        # RED: float detection not yet implemented.
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        $issues = @(
-            (New-IssueState -Number 425  -State 'OPEN'   -BlockedBy @())
-            (New-IssueState -Number 571  -State 'OPEN'   -BlockedBy @())
-            (New-IssueState -Number 711  -State 'OPEN'   -BlockedBy @())
-            (New-IssueState -Number 712  -State 'OPEN'   -BlockedBy @())
-        )
-        # #692 is closed/unsequenced → 711 and 712 are NOT in the known-child-set
-        $knownChildSet = @()
+    It 'Triage excludes issues with non-null parent even when not in umbrella list (AC6 / M4 — NO inversion fallback)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        # Issue 900 has a parent → must NOT appear in Triage (parent-null is required)
+        $childIssue = New-IssueState -Number 900 -State 'OPEN' -Parent @{ number = 476 } `
+            -SubIssues @{ totalCount = 0; nodes = @() }
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet $knownChildSet
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($childIssue)
 
-        $float711 = $buckets.Now | Where-Object { $_.number -eq 711 -and $_.isFloat -eq $true }
-        $float712 = $buckets.Now | Where-Object { $_.number -eq 712 -and $_.isFloat -eq $true }
-        $float711 | Should -Not -BeNullOrEmpty -Because 'issue whose parent is closed/unsequenced must appear as a float (isFloat=$true)'
-        $float712 | Should -Not -BeNullOrEmpty -Because 'issue whose parent is closed/unsequenced must appear as a float (isFloat=$true)'
+        $triageNums = @($buckets.Triage | ForEach-Object { $_.number })
+        $triageNums | Should -Not -Contain 900 `
+            -Because 'non-null parent disqualifies from Triage regardless of umbrella membership (AC6 / M4 — no inversion fallback)'
     }
 
-    It 'non-active sequenced umbrella child → Next, not float (M9 / AC2)' {
-        # Umbrella #476 is in round 2 (non-active: round 1 [425,571] is active).
-        # Child issue 900 is in the known-child-set of #476 → appears in Next, not Now, not float.
-        # RED: child-set Next placement not yet implemented.
-        $threeRoundSpec = ConvertFrom-SequenceSpec (New-ValidSpecYaml -LegacyRoundsBlock @'
-rounds:
-  - lane: main
-    round: 1
-    issues: [425, 571]
-  - lane: main
-    round: 2
-    issues: [476, 662]
-'@)
-        $issues = @(
-            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 476  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 662  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 900  -State 'OPEN' -BlockedBy @())   # child of #476 (round 2)
-        )
-        $knownChildSet = @(900)   # 900 is a sub-issue of #476
+    It 'Triage excludes issues with subIssues.totalCount > 0 (AC6)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        # Issue 800 is open, parent-null, but has subIssues → NOT a triage candidate
+        $parentIssue = New-IssueState -Number 800 -State 'OPEN' -Parent $null `
+            -SubIssues @{ totalCount = 2; nodes = @(@{ number = 900; state = 'OPEN' }) }
 
-        $buckets = Get-PortfolioBuckets -spec $threeRoundSpec -issueStateObjects $issues -KnownChildSet $knownChildSet
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($parentIssue)
 
-        $inNow  = $buckets.Now  | Where-Object { $_.number -eq 900 }
-        $inNext = $buckets.Next | Where-Object { $_.number -eq 900 }
-        $inNow  | Should -BeNullOrEmpty -Because 'child of non-active round umbrella must NOT appear in Now'
-        $inNext | Should -Not -BeNullOrEmpty -Because 'child of non-active round umbrella must appear in Next'
-        if ($inNext) {
-            $inNext.isFloat | Should -Not -Be $true -Because 'spine child in Next must not be flagged as float'
-        }
+        $triageNums = @($buckets.Triage | ForEach-Object { $_.number })
+        $triageNums | Should -Not -Contain 800 `
+            -Because 'issues with subIssues.totalCount > 0 are not leaf issues and must be excluded from Triage (AC6)'
     }
 
-    It 'spine wins dedup — issue in both child-set and open scan appears once (AC5)' {
-        # Issue 800 appears in knownChildSet AND in the open issue list.
-        # It must appear exactly once in the output (spine wins).
-        # RED: dedup logic not yet implemented.
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        $issues = @(
-            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 800  -State 'OPEN' -BlockedBy @())
-        )
-        $knownChildSet = @(800)
+    It 'DriftWarnings flags open issue with totalCount>0 not in list (AC7)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        # Issue 800 is open and has sub-issues but NOT in the umbrellas list → DriftWarning
+        $unlisted = New-IssueState -Number 800 -State 'OPEN' `
+            -SubIssues @{ totalCount = 3; nodes = @(@{ number = 900; state = 'OPEN' }) }
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet $knownChildSet
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($unlisted)
 
-        $allOutputNums = @(
-            @($buckets.Now)  + @($buckets.Next) + @($buckets.Blocked) +
-            @($buckets.Triage) + @($buckets.RecentlyClosed)
-        ) | ForEach-Object { $_.number }
-        $count800 = ($allOutputNums | Where-Object { $_ -eq 800 }).Count
-        $count800 | Should -Be 1 -Because 'issue in both the spine child-set and open scan must appear exactly once (spine wins dedup, AC5)'
+        $buckets.DriftWarnings | Should -Contain '⚠️ open umbrella #800 not in ranked list' `
+            -Because 'open issue with subIssues.totalCount>0 not in umbrella list must emit DriftWarning (AC7)'
     }
 
-    It 'float with open blockedBy → Blocked bucket with blocker annotation (AC6)' {
-        # Float (open, not in any child-set) that is also blocked → goes to Blocked,
-        # not to Now, with a blockerAnnotations field.
-        # RED: float detection not yet implemented; blocked floats may fall in wrong bucket.
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        $issues = @(
-            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 800  -State 'OPEN' -BlockedBy @(999))   # float + blocked
-        )
-        $knownChildSet = @()
+    It 'DriftWarnings flags closed listed umbrella (AC7)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $umbrella476 = New-IssueState -Number 476 -State 'CLOSED' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
+        $umbrella571 = New-IssueState -Number 571 -State 'OPEN' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet $knownChildSet
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $umbrella571)
 
-        $inNow     = $buckets.Now     | Where-Object { $_.number -eq 800 }
-        $inBlocked = $buckets.Blocked | Where-Object { $_.number -eq 800 }
-        $inNow | Should -BeNullOrEmpty -Because 'blocked float must NOT appear in Now'
-        $inBlocked | Should -Not -BeNullOrEmpty -Because 'float with open blockedBy must appear in Blocked (AC6)'
-        if ($inBlocked) {
-            $inBlocked.blockerAnnotations | Should -Not -BeNullOrEmpty -Because 'blocked float must carry blocker annotation'
-        }
+        $buckets.DriftWarnings | Should -Contain '⚠️ listed umbrella #476 is closed' `
+            -Because 'CLOSED listed umbrella must emit DriftWarning (AC7)'
     }
 
-    It 'createdAt-desc ordering: newer floats rank above older floats within Now (AC3)' {
-        # Fixture: float #801 created 2025-06-01 (newer), float #800 created 2025-01-01 (older).
-        # Issue numbers are reverse of creation date order to prove Sort-by-number is NOT used.
-        # AC3: order is createdAt desc (newest first) among floats.
-        # RED: createdAt-desc ordering not yet implemented.
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        $issues = @(
-            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z')
-            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z')
-            # Float 801 (higher number) is older; float 800 (lower number) is newer
-            (New-IssueState -Number 801  -State 'OPEN' -BlockedBy @() -CreatedAt '2025-01-01T00:00:00Z')
-            (New-IssueState -Number 800  -State 'OPEN' -BlockedBy @() -CreatedAt '2025-06-01T00:00:00Z')
-        )
-        $knownChildSet = @()
+    It 'IntegrityWarnings fires when totalCount does not match returned nodes count (AC8)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        # totalCount says 5 but only 1 node returned → truncation warning
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' `
+            -SubIssues @{
+                totalCount = 5
+                nodes = @( @{ number = 900; state = 'OPEN' } )
+            }
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet $knownChildSet
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476)
 
-        $floats = @($buckets.Now | Where-Object { $_.isFloat -eq $true })
-        $floats.Count | Should -BeGreaterOrEqual 2 -Because 'both floats must appear in Now'
-        $pos800 = [array]::IndexOf($floats, ($floats | Where-Object { $_.number -eq 800 }))
-        $pos801 = [array]::IndexOf($floats, ($floats | Where-Object { $_.number -eq 801 }))
-        $pos800 | Should -BeLessThan $pos801 -Because 'float #800 (newer, created 2025-06-01) must rank before #801 (older, created 2025-01-01) — createdAt desc; NOT sorted by number'
+        $buckets.IntegrityWarnings | Should -HaveCount 1
+        $buckets.IntegrityWarnings[0] | Should -Match 'umbrella #476.*totalCount=5.*only 1 nodes returned' `
+            -Because 'mismatch between totalCount and returned nodes must emit IntegrityWarning (AC8)'
     }
 
-    It 'priority-label tiebreak: priority:high float before unlabeled float at same createdAt (AC3)' {
-        # Two floats with identical createdAt — priority-label tiebreak applies.
-        # priority:high before priority:medium before priority:low before unlabeled.
-        # RED: priority-label tiebreak not yet implemented.
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        $issues = @(
-            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z')
-            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @() -CreatedAt '2024-01-01T00:00:00Z')
-            # Both floats with same createdAt; #900 has priority:high label, #901 is unlabeled
-            (New-IssueState -Number 901  -State 'OPEN' -BlockedBy @() -CreatedAt '2025-03-01T00:00:00Z' -Labels @())
-            (New-IssueState -Number 900  -State 'OPEN' -BlockedBy @() -CreatedAt '2025-03-01T00:00:00Z' -Labels @('priority: high'))
-        )
-        $knownChildSet = @()
+    It 'IntegrityWarnings does not block rendering (AC8 warn-and-render)' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' `
+            -SubIssues @{
+                totalCount = 5
+                nodes = @( @{ number = 900; state = 'OPEN' } )
+            }
+        $umbrella571 = New-IssueState -Number 571 -State 'OPEN' `
+            -SubIssues @{ totalCount = 0; nodes = @() }
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet $knownChildSet
+        # Must not throw; must return a model with RankedUmbrellas even when warnings fire
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $umbrella571)
 
-        $floats = @($buckets.Now | Where-Object { $_.isFloat -eq $true })
-        $idx900 = [array]::IndexOf($floats, ($floats | Where-Object { $_.number -eq 900 }))
-        $idx901 = [array]::IndexOf($floats, ($floats | Where-Object { $_.number -eq 901 }))
-        $idx900 | Should -BeLessThan $idx901 -Because 'priority:high float must rank above unlabeled float when createdAt is equal (AC3 priority-label tiebreak)'
+        $buckets | Should -Not -BeNullOrEmpty -Because 'integrity warnings must warn-and-render, not abort (AC8)'
+        $buckets.RankedUmbrellas | Should -Not -BeNullOrEmpty -Because 'RankedUmbrellas must still be populated when IntegrityWarnings fire'
     }
 
-    It 'active-round umbrella with zero open sub-issues → CoverageGaps entry (AC7)' {
-        # Umbrella #425 is in round 1 (active) but has no open sub-issues in knownChildSet.
-        # → CoverageGaps must list umbrella #425.
-        # RED: CoverageGaps derivation not yet implemented.
-        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
-        $issues = @(
-            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @())
-            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @())
-        )
-        # No children in child-set for either active-round umbrella
-        $knownChildSet = @()
+    It 'RecentlyClosed includes issues closed within the window' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476, 571))
+        $recentClosedAt = (Get-Date).AddDays(-3).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $oldClosedAt    = (Get-Date).AddDays(-30).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+        $recent = New-IssueState -Number 700 -State 'CLOSED' -ClosedAt $recentClosedAt
+        $old    = New-IssueState -Number 701 -State 'CLOSED' -ClosedAt $oldClosedAt
 
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet $knownChildSet
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($recent, $old)
 
-        $buckets.CoverageGaps | Should -Not -BeNullOrEmpty -Because 'active-round umbrella with zero open sub-issues must produce a CoverageGaps entry (AC7)'
-        $gapNums = @($buckets.CoverageGaps | ForEach-Object { $_.umbrella })
-        $gapNums | Should -Contain 425 -Because '#425 is an active-round umbrella with no known open sub-issues'
+        $rcNums = @($buckets.RecentlyClosed | ForEach-Object { $_.number })
+        $rcNums | Should -Contain 700 -Because '#700 closed within 14-day window must appear in RecentlyClosed'
+        $rcNums | Should -Not -Contain 701 -Because '#701 closed 30 days ago is outside the window'
     }
 }
 
