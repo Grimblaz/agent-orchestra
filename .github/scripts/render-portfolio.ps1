@@ -240,10 +240,7 @@ function Get-PortfolioBuckets {
     foreach ($issue in $issueStateObjects) {
         # Open issue that looks like an umbrella (has subIssues.totalCount > 0) but not listed
         if ($issue.state -eq 'OPEN') {
-            $subIssuesTotalCount = 0
-            if ($null -ne $issue.subIssues -and $null -ne $issue.subIssues.totalCount) {
-                $subIssuesTotalCount = [int]$issue.subIssues.totalCount
-            }
+            $subIssuesTotalCount = [int]($issue.subIssues?.totalCount ?? 0)
             if ($subIssuesTotalCount -gt 0 -and -not $umbrellaSet.Contains([int]$issue.number)) {
                 $driftWarnings.Add("⚠️ open umbrella #$($issue.number) not in ranked list")
             }
@@ -288,7 +285,7 @@ function Get-PortfolioBuckets {
                 $childObj = [PSCustomObject]@{
                     number    = $childNode.number
                     state     = $childNode.state
-                    title     = if ($null -ne $childNode.title) { $childNode.title } else { "Issue $($childNode.number)" }
+                    title     = $childNode.title ?? "Issue $($childNode.number)"
                     labels    = @()
                     blockedBy = @()
                     createdAt = $null
@@ -357,18 +354,11 @@ function Get-PortfolioBuckets {
         if ($issue.state -ne 'OPEN') { continue }
         if ($umbrellaSet.Contains([int]$issue.number)) { continue }
 
-        # parent must be null (the .parent field is null/absent)
-        $parentIsNull = $true
-        if ($null -ne $issue.PSObject.Properties['parent'] -and $null -ne $issue.parent) {
-            $parentIsNull = $false
-        }
-        if (-not $parentIsNull) { continue }
+        # parent must be null (field is always present on reconstructed objects, absent == $null)
+        if ($null -ne $issue.parent) { continue }
 
         # subIssues.totalCount must be 0
-        $subTotalCount = 0
-        if ($null -ne $issue.subIssues -and $null -ne $issue.subIssues.totalCount) {
-            $subTotalCount = [int]$issue.subIssues.totalCount
-        }
+        $subTotalCount = [int]($issue.subIssues?.totalCount ?? 0)
         if ($subTotalCount -ne 0) { continue }
 
         $triageCandidates.Add($issue)
@@ -891,10 +881,10 @@ query {
         }
         $issueStates.Add([PSCustomObject]@{
             number              = $clNum
-            title               = if ($cl.PSObject.Properties['title']) { $cl.title } else { "Issue $clNum" }
+            title               = $cl.title ?? "Issue $clNum"
             state               = 'CLOSED'
-            closedAt            = if ($cl.PSObject.Properties['closedAt']) { $cl.closedAt } else { $null }
-            createdAt           = if ($cl.PSObject.Properties['createdAt']) { $cl.createdAt } else { $null }
+            closedAt            = $cl.closedAt
+            createdAt           = $cl.createdAt
             labels              = $clLabels
             blockedBy           = @()
             blockerInPlan       = $true
