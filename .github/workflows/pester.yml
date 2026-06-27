@@ -46,7 +46,9 @@ jobs:
             # entry-point-scope-parity test — registered per s4 (#703)
             '.github/scripts/Tests/entry-point-scope-parity.Tests.ps1',
             # wall-clock fixture guard — issue #723
-            '.github/scripts/Tests/wall-clock-fixture-guard.Tests.ps1'
+            '.github/scripts/Tests/wall-clock-fixture-guard.Tests.ps1',
+            # naming-register-policy gate — issue #732 s1
+            '.github/scripts/Tests/naming-register-policy.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'

@@ -1,0 +1,291 @@
+[
+  {
+    "term": "upstream pipeline",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "Experience-Owner",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "Solution-Designer",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "Issue-Planner",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "Code-Conductor",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "Senior Engineer (SE)",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "Spine-Runner",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "Spine-Runner (the minimal frame-walking conductor agent that walks a v2 frame-spine plan step by step)"
+  },
+  {
+    "term": "CE Gate",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "Customer Experience Gate (the final validation step verifying the implementation achieves the intended customer experience)"
+  },
+  {
+    "term": "prosecution / defense / judge",
+    "register": "self-describing",
+    "kind": "family",
+    "decode": "prosecution = finding pass; defense = rebuttal pass; judge = scoring pass; see skills/adversarial-review/SKILL.md"
+  },
+  {
+    "term": "adversarial review",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "design challenge",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "frame / frame-spine",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "frame (the structured plan skeleton) / frame-spine (the machine-readable <!-- frame-spine --> block that routes plan execution to specialist agents)",
+    "decode": "See skills/frame-spine-lookup/SKILL.md and Documents/Design/frame-architecture.md"
+  },
+  {
+    "term": "frame slice (step_id: sN)",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "frame slice (a single executable plan step identified as sN, carrying the <!-- frame-slice --> HTML comment block with step_id: s{N} as a YAML field inside)"
+  },
+  {
+    "term": "frame port",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "frame port (a named delivery point in the frame-spine, e.g. implement-test, implement-docs, review, release-hygiene)"
+  },
+  {
+    "term": "adapter / skill-as-adapter",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "adapter (a skill configured to execute a specific port's work) / skill-as-adapter (the pattern of loading a skill as the work specification for a frame port)",
+    "decode": "See Documents/Design/frame-architecture.md § Adapter Model and CLAUDE.md § Senior Engineer + skill-as-adapter pattern"
+  },
+  {
+    "term": "SMC-NN",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "Session Memory Contract rule NN (e.g. SMC-01, SMC-08)",
+    "decode": "SMC-NN = Session Memory Contract rule NN; the full numbered list is in skills/session-memory-contract/SKILL.md"
+  },
+  {
+    "term": "plan-issue-{ID}",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "plan-issue-{ID} (the <!-- plan-issue-{ID} --> durable HTML comment posted on the GitHub issue carrying the approved implementation plan)"
+  },
+  {
+    "term": "engagement-record-{phase}-{ID}",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "engagement-record-{phase}-{ID} (the durable decision-record comment, e.g. <!-- engagement-record-plan-732 -->, recording load-bearing decisions for a pipeline phase)"
+  },
+  {
+    "term": "named decision",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "load-bearing (decision)",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "engagement gate",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "engagement gate (a required methodology checkpoint the agent must fire via AskUserQuestion — auto-mode does not suppress it)"
+  },
+  {
+    "term": "Value Reflex",
+    "register": "rename-candidate",
+    "kind": "atomic",
+    "replacement": "worth-it check (the upstream assessment of whether a feature is worth building — bet / falsifier / alternative)"
+  },
+  {
+    "term": "upstream-onboarding",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "upstream-onboarding (the orientation brief and standards check an agent runs when resuming an issue from a prior pipeline phase)"
+  },
+  {
+    "term": "scope classification",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "scope classification (the Code-Conductor tier decision: full pipeline vs abbreviated pipeline, based on a 5-criterion rubric)"
+  },
+  {
+    "term": "intent routing / nl_intent_routing",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "intent routing (natural-language routing of user requests to pipeline commands) / nl_intent_routing (the JSON key governing routing in routing-config.json)",
+    "decode": "See skills/routing-tables/assets/routing-config.json § nl_intent_routing"
+  },
+  {
+    "term": "routing-config.json",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "routing-config.json (the canonical routing table at skills/routing-tables/assets/routing-config.json governing intent routing and specialist dispatch)"
+  },
+  {
+    "term": "raw mode",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "credits[] / pipeline-metrics block",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "credits[] (the pipeline credit array field in the <!-- pipeline-metrics --> block) / pipeline-metrics block (the <!-- pipeline-metrics --> HTML comment in PR bodies recording what each phase produced)",
+    "decode": "See skills/calibration-pipeline/references/metrics-schema.md"
+  },
+  {
+    "term": "credit provenance / witness type",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "credit provenance (the source of a pipeline credit — which adapter produced it) / witness type (how the credit was verified, e.g. validation-evidence, manual, auto)",
+    "decode": "See skills/calibration-pipeline/references/metrics-schema.md"
+  },
+  {
+    "term": "enforce verdict / enforce check",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "enforce verdict (the pass/fail judgment on a pipeline credit's compliance check) / enforce check (the automated test a credit must pass to be considered compliant)",
+    "decode": "See skills/calibration-pipeline/references/metrics-schema.md"
+  },
+  {
+    "term": "judge-rulings YAML block",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "judge-rulings YAML block (the <!-- judge-rulings --> HTML comment in PR review comments carrying the machine-readable adversarial review verdict)"
+  },
+  {
+    "term": "review-judge-produced-{PR}",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "review-judge-produced-{PR} (the <!-- review-judge-produced-{PR} --> sentinel comment marking that a judge verdict exists for the given PR number)"
+  },
+  {
+    "term": "BDD / behavioral scenario",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "BDD (Behavior-Driven Development) / behavioral scenario (a Given/When/Then scenario that verifies a customer outcome)",
+    "decode": "BDD framework detection and scenario wiring: see skills/bdd-scenarios/SKILL.md"
+  },
+  {
+    "term": "prosecution depth",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "prosecution depth (the calibration metric controlling how deeply the adversarial prosecution examines each change category — transitions between skip, light, and full examination depth; see skills/calibration-pipeline/SKILL.md)"
+  },
+  {
+    "term": "calibration fixture / calibration pipeline",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "calibration fixture (a known-good or known-bad test case verifying the pipeline metrics schema) / calibration pipeline (the end-to-end infrastructure for verifying PR credit emission)",
+    "decode": "See skills/calibration-pipeline/ for the full reference set"
+  },
+  {
+    "term": "now-coupled / wall-clock dependent",
+    "register": "rename-candidate",
+    "kind": "family",
+    "replacement": "time-sensitive test (a test whose behavior depends on when it runs, such as date-based logic or elapsed-time checks)",
+    "decode": "now-coupled = assertion tightly bound to current date; wall-clock dependent = broader category; surfaces in issue tracker (e.g. #723)"
+  },
+  {
+    "term": "D1 / D2 / D3 (auto-mode rules)",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "D1 / D2 / D3 (auto-mode boundary rules governing which tool calls auto-approve, which prompt the user, and when AskUserQuestion is unconditional)",
+    "decode": "D1 / D2 / D3 = auto-mode boundary rules; see CLAUDE.md § Auto-mode boundary for the full definitions"
+  },
+  {
+    "term": "session-startup",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "session-startup (the plugin-distributed SessionStart hook that runs the cleanup detector and plugin drift check at each conversation start)"
+  },
+  {
+    "term": "worktree / sibling worktree / orphan branch",
+    "register": "self-describing",
+    "kind": "family",
+    "decode": "worktree = parallel git working tree; sibling = live peer worktree; orphan = branch with no live worktree and no open PR; see skills/session-startup/SKILL.md"
+  },
+  {
+    "term": "tracking file",
+    "register": "self-describing",
+    "kind": "atomic"
+  },
+  {
+    "term": "project references / sidecar",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "project references (named links from agent context to long-lived project documents) / sidecar (the companion .ref.json file alongside a doc that declares when it should load)",
+    "decode": "See skills/project-references/SKILL.md"
+  },
+  {
+    "term": "plugin cache / plugin.json",
+    "register": "stable-code",
+    "kind": "family",
+    "expansion": "plugin cache (the installed plugin version snapshot at ~/.claude/plugins/cache, keyed by version) / plugin.json (the version manifest in .claude-plugin/plugin.json that triggers cache invalidation when the version field changes)",
+    "decode": "See skills/plugin-release-hygiene/SKILL.md and CLAUDE.md § Releases"
+  },
+  {
+    "term": "proxy prosecution",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "proxy prosecution (the prosecution pass run against an external GitHub code review, treating the reviewer's comments as prosecution findings)"
+  },
+  {
+    "term": "inline-dispatch",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "inline-dispatch (running a frame slice's adapter in the active conductor context via executor: inline, rather than delegating to a separate specialist Agent call)"
+  },
+  {
+    "term": "halt-return",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "halt-return (the structured YAML block Senior Engineer returns when it cannot safely complete a slice, signaling Code-Conductor to intervene rather than producing partial work)"
+  },
+  {
+    "term": "subagent-env-handshake",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "subagent-env-handshake (the <!-- subagent-env-handshake v1 --> block prepended to each specialist Agent dispatch, carrying parent HEAD/branch/CWD/dirty-fingerprint for working-tree consistency verification)"
+  },
+  {
+    "term": "persist-changes",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "persist-changes (the git-portable commit+push primitive in skills/persist-changes/SKILL.md, caller-parameterized, executed at the terminal implementation step)"
+  },
+  {
+    "term": "post-PR review / post-merge cleanup",
+    "register": "self-describing",
+    "kind": "family",
+    "decode": "post-PR review = checklist run after PR merges; post-merge cleanup = worktree removal, orphan branch deletion, tracking file archival; see skills/post-pr-review/SKILL.md"
+  }
+]
