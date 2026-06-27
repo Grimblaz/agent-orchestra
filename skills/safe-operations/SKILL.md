@@ -114,10 +114,11 @@ gh issue create --title "..." --body "..."
 
 ### 2b-bis. Umbrella or Triage at Creation (Additive to §2b)
 
-Every new issue created by any agent **MUST** also receive one of the following at creation time — this rule is additive to the §2b priority mandate and does not replace it:
+Every new issue created by any agent **MUST** be placed under a tracked umbrella **or** left as an ungrouped open issue that the portfolio renderer auto-derives into Triage — this rule is additive to the §2b priority mandate and does not replace it. The intent is unchanged: **a new issue must not silently disappear from the control-tower tracker.** Under Control Tower v2 the mechanism changed (see [Documents/Design/control-tower-v2.md](../../Documents/Design/control-tower-v2.md)).
 
-- **Parent umbrella** — attach the new issue as a native sub-issue of an existing sequenced umbrella, if the work is scoped to a tracked initiative. Use `Add-FollowUpIssue` (canonical sub-issue attach) immediately after `gh issue create`.
-- **`triage` label** — if no sequenced umbrella applies, add `--label triage` to the `gh issue create` command so the portfolio renderer places the issue in the Triage bucket and it does not go missing.
+- **Parent umbrella (child issue)** — if the work is scoped to a tracked initiative, attach the new issue as a native sub-issue of an existing sequenced umbrella. Use `Add-FollowUpIssue` (canonical sub-issue attach) immediately after `gh issue create`.
+- **New umbrella → insert at rank** — if you are creating a *new umbrella* (an issue that will own sub-issues), you **MUST** also insert its number into `Documents/Planning/sequence.yaml`'s `umbrellas:` inline list at the correct priority rank. `sequence.yaml` is the **canonical home** for umbrella ranking — do **not** add a routing-tables JSON entry. Then attach the umbrella's own children as native sub-issues with `Add-FollowUpIssue`, exactly as for any other umbrella.
+- **Triage (ungrouped open issue)** — if no umbrella applies, just create the issue. Under v2 the renderer **derives** Triage from parent-edge data (open ∧ no parent ∧ no sub-issues ∧ not listed in `umbrellas:`), so an ungrouped open issue lands in the Triage zone **automatically** — it will not go missing even with no label. The `--label triage` flag is now **optional/advisory** (a human-readable hint only); it is **no longer load-bearing** for Triage placement, because v2 removed the triage-label query entirely.
 
 ```powershell
 # CORRECT — umbrella child (use the canonical Add-FollowUpIssue helper):
@@ -126,14 +127,15 @@ $url = gh issue create --title "..." --body "..." --label "priority: medium"
 $issueNum = $url -replace '.*/', ''
 pwsh skills/safe-operations/scripts/Add-FollowUpIssue.ps1 -ParentIssueNumber 425 -ChildIssueNumber $issueNum
 
-# CORRECT — triage fallback:
-gh issue create --title "..." --body "..." --label "priority: medium" --label "triage"
+# CORRECT — new umbrella: create it, insert its number into sequence.yaml umbrellas: at
+# the right rank, then attach its children as sub-issues. The sequence.yaml edit is
+# canonical and mandatory — do NOT add a routing-tables JSON entry.
 
-# WRONG — neither umbrella nor triage:
+# CORRECT — ungrouped open issue: v2 auto-derives this into Triage (no label required):
 gh issue create --title "..." --body "..." --label "priority: medium"
 ```
 
-> **Why**: the derived portfolio renderer surfaces only sequenced or triage-labeled issues. Issues created without either silently disappear from the tracker.
+> **Why**: under Control Tower v2 the renderer surfaces every umbrella listed in `sequence.yaml` plus every ungrouped open issue (auto-derived into Triage). A new umbrella that is never inserted into `umbrellas:` is invisible to the board; an ungrouped open issue is surfaced automatically, so no `triage` label is needed to keep it visible. Issues still must not silently disappear from the tracker — the v2 mechanism is parent-edge derivation, not a label scan.
 
 ### 2c. Deduplication Check (Mandatory)
 

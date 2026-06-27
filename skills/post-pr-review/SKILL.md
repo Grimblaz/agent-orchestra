@@ -177,7 +177,7 @@ git push origin --delete feature/issue-{ID}-description
 
 **Action**: Close related issues. The portfolio tracker issue updates automatically.
 
-The derived portfolio tracker (`Documents/Planning/sequence.yaml` + `render-portfolio.yml` workflow) re-renders the control-tower issue after every merge to `main` — no manual board update is required.
+The derived portfolio tracker (`Documents/Planning/sequence.yaml` + `render-portfolio.yml` workflow) re-renders the control-tower issue after every merge to `main` — no manual board update is required. The board model (ranked-umbrella zones, derived Triage) is documented in [Documents/Design/control-tower-v2.md](../../Documents/Design/control-tower-v2.md).
 
 **Manual fallback** (if the workflow did not run or needs a forced refresh):
 
