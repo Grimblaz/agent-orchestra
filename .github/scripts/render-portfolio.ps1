@@ -75,7 +75,10 @@ function ConvertFrom-SequenceSpec {
 
         # v1 is no longer supported
         if ($schema_version -eq 1) {
-            Write-Error "sequence.yaml: schema_version 1 is no longer supported; migrate to schema_version 2"
+            # -ErrorAction Continue: keep this diagnostic non-terminating so the function
+            # honors its "return $null on validation failure" contract even when the caller
+            # runs under $ErrorActionPreference = 'Stop' (e.g. GitHub Actions shell: pwsh).
+            Write-Error "sequence.yaml: schema_version 1 is no longer supported; migrate to schema_version 2" -ErrorAction Continue
             return $null
         }
 
@@ -92,7 +95,7 @@ function ConvertFrom-SequenceSpec {
 
         # Stray rounds: key is a schema violation in v2
         if ($yamlText -match '(?m)^\s*rounds\s*:') {
-            Write-Error "sequence.yaml: stray 'rounds:' key found in schema_version 2 document; remove it and use 'umbrellas:' instead"
+            Write-Error "sequence.yaml: stray 'rounds:' key found in schema_version 2 document; remove it and use 'umbrellas:' instead" -ErrorAction Continue
             return $null
         }
 
@@ -114,7 +117,7 @@ function ConvertFrom-SequenceSpec {
 
         # Empty list
         if ($rawList -eq '') {
-            Write-Error "sequence.yaml: umbrellas list is empty; at least one umbrella is required"
+            Write-Error "sequence.yaml: umbrellas list is empty; at least one umbrella is required" -ErrorAction Continue
             return $null
         }
 
@@ -125,7 +128,7 @@ function ConvertFrom-SequenceSpec {
             $token = $entry.Trim()
             # Reject quoted numbers
             if ($token -match '^".*"$' -or $token -match "^'.*'$") {
-                Write-Error "sequence.yaml: quoted number '$token' in umbrellas list; all entries must be bare integers"
+                Write-Error "sequence.yaml: quoted number '$token' in umbrellas list; all entries must be bare integers" -ErrorAction Continue
                 return $null
             }
             # Must be a bare integer
@@ -138,7 +141,7 @@ function ConvertFrom-SequenceSpec {
         # Reject duplicates
         $distinct = @($umbrellas | Sort-Object -Unique)
         if ($distinct.Count -ne $umbrellas.Count) {
-            Write-Error "sequence.yaml: duplicate entries in umbrellas list"
+            Write-Error "sequence.yaml: duplicate entries in umbrellas list" -ErrorAction Continue
             return $null
         }
 
@@ -150,7 +153,9 @@ function ConvertFrom-SequenceSpec {
         }
     }
     catch {
-        Write-Error "sequence.yaml: $_"
+        # Non-terminating so a thrown validation failure (e.g. non-integer umbrella entry)
+        # resolves to the documented $null return even under $ErrorActionPreference = 'Stop'.
+        Write-Error "sequence.yaml: $_" -ErrorAction Continue
         return $null
     }
 }
