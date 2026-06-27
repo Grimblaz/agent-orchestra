@@ -2,17 +2,16 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
 .SYNOPSIS
-    RED Pester v5 suite for render-portfolio.ps1 (issue #692, slice s3; extended for #720, slice s1).
+    Pester v5 suite for render-portfolio.ps1 (v2 schema; issue #692 s3, #720 s1, #753 s1-s4).
 
 .DESCRIPTION
     Hoisted Renderer Contract tests covering:
       - ConvertFrom-SequenceSpec  : parse, schema validation, fail-open on bad input
-      - Get-PortfolioBuckets      : bucket placement, blocked logic, triage, recently closed,
-                                    float detection (sub-issue-set inversion), createdAt ordering,
-                                    dedup (spine wins), CoverageGaps
-      - Format-PortfolioMarkdown  : footer (new label), section order, pagination overflow,
-                                    single ranked Now list, (unsequenced)/(in progress) tags,
-                                    cap-floor N=15 (+M more), recently-closed repo-wide section
+      - Get-PortfolioBuckets      : v2 bucket placement (ActiveUmbrella, ActiveChildren,
+                                    RankedUmbrellas, Triage, RecentlyClosed, DriftWarnings,
+                                    IntegrityWarnings), createdAt ordering, priority-label sort
+      - Format-PortfolioMarkdown  : v2 three-zone layout (Active / Umbrellas ranked / Triage /
+                                    Recently closed), footer label, pagination overflow, warnings
       - Get-SplicedBody           : marker splice, idempotency, migration fixture (old→new label)
       - Order independence        : createdAt-desc ordering with priority-label tiebreak (AC3)
       - Invoke-PortfolioRender    : hard-exit guard — gh issue edit NOT called on scan failure (AC8)
@@ -23,8 +22,6 @@
       - Deterministic sort keys
       - No live gh CLI calls
       - No Sort-Object number in fixture ordering assertions (AC3: producer owns order)
-
-    Tests added in #720 s1 are RED until s2/s3/s4 implement production behavior.
 #>
 
 BeforeAll {
@@ -37,7 +34,7 @@ BeforeAll {
 # Helper: build a minimal valid flat-YAML sequence spec string
 # v2 default: schema_version 2 with umbrellas inline list.
 # Legacy path: when $LegacyRoundsBlock is provided, emit schema_version 1 +
-# rounds block so surviving v1-format tests can still exercise old structure.
+# rounds block so the v1-rejection tests can exercise the invalid-schema path.
 # ---------------------------------------------------------------------------
 function New-ValidSpecYaml {
     param(
@@ -66,9 +63,8 @@ umbrellas: [$umbrellaList]
 
 # ---------------------------------------------------------------------------
 # Helper: build a minimal issue-state object (mimics gh GraphQL response shape)
-# Extended in #720 s1: added CreatedAt (for AC3 createdAt-desc ordering) and
-# Labels extended to support 'in progress' simulation (AC3/AC10 inProgress tag).
-# Extended in #753 s1: added Parent and SubIssues for s2/s3 downstream tests.
+# Extended in #720 s1: added CreatedAt (for AC3 createdAt-desc ordering).
+# Extended in #753 s1: added Parent and SubIssues for v2 bucket classification.
 # ---------------------------------------------------------------------------
 function New-IssueState {
     param(
@@ -582,9 +578,8 @@ Describe 'Format-PortfolioMarkdown' {
         $script:SimpleBuckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues
     }
 
-    It "includes footer with new label 'portfolio content unchanged since ...'" {
-        # AC: footer label updated from 'as of' to 'portfolio content unchanged since' (#720 s1)
-        # RED until s2/s3 update Format-PortfolioMarkdown to write the new footer label.
+    It "includes footer with label 'portfolio content unchanged since ...'" {
+        # AC: footer label is 'portfolio content unchanged since' (updated from 'as of' in #720 s1)
         $timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
         $output = Format-PortfolioMarkdown -bucketModel $script:SimpleBuckets -timestamp $timestamp
 
@@ -627,33 +622,28 @@ Describe 'Format-PortfolioMarkdown' {
         $output | Should -Match '\(\+50 more\)' -Because 'TriageResidualCount=50 must appear as (+50 more) in Triage section (v2 pagination)'
     }
 
-    It 'Now ordering tiebreaker: lower-numbered float precedes higher-numbered float (AC3/F18)' {
-        # Two floats with no createdAt and no priority labels — the number-asc tiebreaker
-        # (last key in the Sort-Object in Get-PortfolioBuckets) must put #800 before #801.
-        # Uses floats rather than umbrellas: AC1 forbids umbrellas from appearing in Now.
+    It 'Triage ordering tiebreaker: lower-numbered issue precedes higher-numbered when priority and createdAt are equal (AC6/F18)' {
+        # Two triage candidates with no createdAt and no priority labels — the number-asc
+        # tiebreaker (last key in Sort-Object in Get-PortfolioBuckets) must put #800 before #801.
+        # #425 and #571 are listed umbrellas (excluded from Triage by the umbrella-set filter).
         $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml)
         $issues = @(
-            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @())  # active-round umbrella (excluded by AC1)
-            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @())  # active-round umbrella (excluded by AC1)
-            (New-IssueState -Number 801  -State 'OPEN' -BlockedBy @())  # float (no KnownChildSet entry)
-            (New-IssueState -Number 800  -State 'OPEN' -BlockedBy @())  # float (lower number — must sort first)
+            (New-IssueState -Number 425  -State 'OPEN' -BlockedBy @())  # listed umbrella — excluded from Triage
+            (New-IssueState -Number 571  -State 'OPEN' -BlockedBy @())  # listed umbrella — excluded from Triage
+            (New-IssueState -Number 801  -State 'OPEN' -BlockedBy @())  # triage candidate (higher number)
+            (New-IssueState -Number 800  -State 'OPEN' -BlockedBy @())  # triage candidate (lower number — must sort first)
         )
-        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues -KnownChildSet @()
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects $issues
         $timestamp = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
 
         $output = Format-PortfolioMarkdown -bucketModel $buckets -timestamp $timestamp
 
         $pos800 = $output.IndexOf('#800')
         $pos801 = $output.IndexOf('#801')
-        $pos800 | Should -BeGreaterThan -1  -Because '#800 float must appear in output'
-        $pos801 | Should -BeGreaterThan -1  -Because '#801 float must appear in output'
-        $pos800 | Should -BeLessThan $pos801 -Because 'lower-numbered float (#800) must precede higher-numbered float (#801) as number-asc tiebreaker (AC3)'
+        $pos800 | Should -BeGreaterThan -1  -Because '#800 must appear in Triage output'
+        $pos801 | Should -BeGreaterThan -1  -Because '#801 must appear in Triage output'
+        $pos800 | Should -BeLessThan $pos801 -Because 'lower-numbered issue (#800) must precede higher-numbered issue (#801) as number-asc tiebreaker (AC6)'
     }
-
-    # -----------------------------------------------------------------------
-    # NEW fixtures for #720 s1 (AC3, AC9, AC10)
-    # All RED until s2/s3 implement single ranked list, tags, and cap-floor.
-    # -----------------------------------------------------------------------
 
     It 'v2-umbrellas-spec-order-preserved: Umbrellas section preserves spec list order — no re-sort by number (AC5)' {
         # v2: Umbrellas (ranked) section must preserve spec list order verbatim.
@@ -762,27 +752,22 @@ Describe 'Format-PortfolioMarkdown' {
         $output | Should -Match '\*\(no' -Because 'null ActiveUmbrella must show a labeled empty state in Active section'
     }
 
-    It 'repo-wide recently-closed section shows all leaf closures in window (AC9)' {
-        # AC9: RecentlyClosed shows repo-wide leaf closures within recently_closed_days window.
-        # This test verifies the formatter renders the RecentlyClosed section from the model.
-        # RED until Format-PortfolioMarkdown is updated to render repo-wide closures (not
-        # just sequence-filtered closures).
+    It 'repo-wide recently-closed section shows all closures in window (AC9)' {
+        # AC9: RecentlyClosed shows repo-wide closures within recently_closed_days window.
+        # Verifies the formatter renders the RecentlyClosed section from the v2 bucket model.
         $recentlyClosed = @(
-            [PSCustomObject]@{ number = 700; title = 'Closed Issue 700'; isFloat = $false; inProgress = $false }
-            [PSCustomObject]@{ number = 701; title = 'Closed Issue 701'; isFloat = $false; inProgress = $false }
+            [PSCustomObject]@{ number = 700; title = 'Closed Issue 700' }
+            [PSCustomObject]@{ number = 701; title = 'Closed Issue 701' }
         )
         $bucketModel = [PSCustomObject]@{
-            Now                      = @()
-            NowTotalCount            = 0
-            Next                     = @()
-            NextTotalCount           = 0
-            Blocked                  = @()
-            BlockedTotalCount        = 0
-            RecentlyClosed           = $recentlyClosed
-            RecentlyClosedTotalCount = 2
-            Triage                   = @()
-            TriageTotalCount         = 0
-            CoverageGaps             = @()
+            ActiveUmbrella      = $null
+            ActiveChildren      = @()
+            RankedUmbrellas     = @()
+            Triage              = @()
+            TriageResidualCount = 0
+            DriftWarnings       = @()
+            IntegrityWarnings   = @()
+            RecentlyClosed      = $recentlyClosed
         }
         $timestamp = '2026-06-25T00:00:00Z'
 
@@ -800,7 +785,7 @@ Describe 'Get-SplicedBody' {
     BeforeAll {
         $script:BeginMarker = '<!-- portfolio-tracker:begin -->'
         $script:EndMarker   = '<!-- portfolio-tracker:end -->'
-        # Updated to new footer label in #720 s1 (RED until s2/s3 update Format-PortfolioMarkdown).
+        # Footer label updated in #720 s1: 'portfolio content unchanged since ...'
         $script:ContentBlock = @"
 $($script:BeginMarker)
 ## Now
@@ -825,7 +810,6 @@ $($script:EndMarker)
     It 'replaces content strictly between markers, preserving outside content' {
         $beforeText = 'BEFORE MARKER CONTENT'
         $afterText  = 'AFTER MARKER CONTENT'
-        # Updated to new footer label in #720 s1.
         $oldContent = "$($script:BeginMarker)`nold content`nportfolio content unchanged since 2026-01-01T00:00:00Z — rendered by render-portfolio.ps1`n$($script:EndMarker)"
         $existingBody = "$beforeText`n$oldContent`n$afterText"
 
@@ -849,11 +833,9 @@ $($script:EndMarker)
         $result | Should -BeNullOrEmpty -Because 'identical content after timestamp-strip must return null to prevent a no-op write'
     }
 
-    It 'returns null when only timestamp differs — idempotent (new footer label)' {
-        # Updated to new footer label in #720 s1.
-        # RED until s2/s3 update Get-SplicedBody footer strip pattern to match new label.
-        # The idempotency strip rule must recognize 'portfolio content unchanged since {ts}'
-        # just as it currently recognizes 'as of {ts}'.
+    It 'returns null when only timestamp differs — idempotent (footer label)' {
+        # The idempotency strip rule recognizes 'portfolio content unchanged since {ts}'
+        # and returns null when only the timestamp differs.
         $oldTimestampBlock = @"
 $($script:BeginMarker)
 ## Now
@@ -884,7 +866,6 @@ $($script:EndMarker)
         # new render uses 'portfolio content unchanged since' label.
         # The label change is a semantic content change → Get-SplicedBody must return
         # a non-null body (trigger exactly one write), not null (idempotent skip).
-        # RED until s2/s3 update Get-SplicedBody to detect label-change as content change.
         $oldLabelBlock = @"
 $($script:BeginMarker)
 ## Now
@@ -1174,9 +1155,8 @@ Describe 'Format-PortfolioMarkdown v2' {
 # ===========================================================================
 Describe 'Invoke-PortfolioRender' {
 # ===========================================================================
-# Net-new Describe block for #720 s1 (AC8).
-# All tests in this block are RED until s2/s3 implement Invoke-PortfolioRender
-# with the hard-exit-before-write guard on scan failure.
+# Tests for Invoke-PortfolioRender (added in #720 s1 / #753 s1-s4).
+# Covers: Step-0 probe, hard-exit guard, v2 full pipeline, ceiling guards.
 #
 # Stub strategy: define a PowerShell function named `gh` that shadows the
 # external `gh` executable within this test's scope chain.  PowerShell

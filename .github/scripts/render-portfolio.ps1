@@ -638,28 +638,28 @@ query {
         Write-Error "Step 0 probe: GraphQL parent/subIssues fields unavailable — $errMsg. Cannot render v2 board without parent-edge data." -ErrorAction Stop
     }
 
-    # 2b. Bulk open scan (data source for leaf candidates).
+    # 2b. Bulk open scan (all open issues — data source for triage/drift classification).
     # Fail-loud: if this scan fails, the board must not be written in a partial
     # state. Hard-exit BEFORE any write step (gh issue edit) per AC8.
     # Use exit 1 (not throw) per the script's hard-exit contract; Write-Error
     # uses -ErrorAction Stop so the terminating error propagates cleanly through
     # Pester's try/catch without polluting the non-terminating error stream.
-    $openLeavesRaw = gh issue list --repo Grimblaz/agent-orchestra --state open `
+    $openIssuesRaw = gh issue list --repo Grimblaz/agent-orchestra --state open `
         --json number,title,labels,createdAt --limit $issueScanLimit
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Failed to fetch open issue list (exit $LASTEXITCODE)" -ErrorAction Stop
     }
-    $openLeaves = @()
+    $openIssues = @()
     try {
-        $openLeaves = @($openLeavesRaw | ConvertFrom-Json)
+        $openIssues = @($openIssuesRaw | ConvertFrom-Json)
     }
     catch {
         Write-Error "Failed to parse open issue list JSON: $_" -ErrorAction Stop
     }
     # Two-tier truncation contract: open/closed fail-loud (abort render).
     # count == limit is the only observable truncation signal; false-positive at exactly the ceiling is treated as truncation and accepted.
-    if ($openLeaves.Count -ge $issueScanLimit) {
-        Write-Error "Open issue list returned $($openLeaves.Count) results (limit $issueScanLimit) — refusing to render a potentially truncated board." -ErrorAction Stop
+    if ($openIssues.Count -ge $issueScanLimit) {
+        Write-Error "Open issue list returned $($openIssues.Count) results (limit $issueScanLimit) — refusing to render a potentially truncated board." -ErrorAction Stop
     }
 
     # 2c. Repo-wide closed scan (RecentlyClosed data source).
@@ -796,8 +796,8 @@ query {
     foreach ($q in $allIssueNums) { $null = $alreadyQueried.Add([int]$q) }
     $null = $alreadyQueried.Add([int]$tower)
 
-    $openLeafCandidateNums = @(
-        $openLeaves |
+    $openIssueCandidateNums = @(
+        $openIssues |
         Where-Object {
             $n = [int]$_.number
             -not $alreadyQueried.Contains($n)
@@ -805,7 +805,7 @@ query {
         ForEach-Object { [int]$_.number }
     )
 
-    foreach ($num in $openLeafCandidateNums) {
+    foreach ($num in $openIssueCandidateNums) {
         $query = @"
 query {
   repository(owner: "Grimblaz", name: "agent-orchestra") {
