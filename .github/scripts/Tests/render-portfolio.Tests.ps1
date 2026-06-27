@@ -35,19 +35,32 @@ BeforeAll {
 
 # ---------------------------------------------------------------------------
 # Helper: build a minimal valid flat-YAML sequence spec string
+# v2 default: schema_version 2 with umbrellas inline list.
+# Legacy path: when $LegacyRoundsBlock is provided, emit schema_version 1 +
+# rounds block so surviving v1-format tests can still exercise old structure.
 # ---------------------------------------------------------------------------
 function New-ValidSpecYaml {
     param(
-        [int]   $SchemaVersion      = 1,
-        [int]   $ControlTower       = 704,
-        [int]   $RecentlyClosedDays = 14,
-        [string]$RoundsBlock        = "rounds:`n  - lane: main`n    round: 1`n    issues: [425, 571]"
+        [int]    $SchemaVersion      = 2,
+        [int]    $ControlTower       = 704,
+        [int]    $RecentlyClosedDays = 14,
+        [int[]]  $Umbrellas          = @(476, 571),
+        [string] $LegacyRoundsBlock  = $null
     )
+    if (-not [string]::IsNullOrEmpty($LegacyRoundsBlock)) {
+        return @"
+schema_version: 1
+control_tower: $ControlTower
+recently_closed_days: $RecentlyClosedDays
+$LegacyRoundsBlock
+"@
+    }
+    $umbrellaList = $Umbrellas -join ', '
     return @"
 schema_version: $SchemaVersion
 control_tower: $ControlTower
 recently_closed_days: $RecentlyClosedDays
-$RoundsBlock
+umbrellas: [$umbrellaList]
 "@
 }
 
@@ -55,17 +68,20 @@ $RoundsBlock
 # Helper: build a minimal issue-state object (mimics gh GraphQL response shape)
 # Extended in #720 s1: added CreatedAt (for AC3 createdAt-desc ordering) and
 # Labels extended to support 'in progress' simulation (AC3/AC10 inProgress tag).
+# Extended in #753 s1: added Parent and SubIssues for s2/s3 downstream tests.
 # ---------------------------------------------------------------------------
 function New-IssueState {
     param(
-        [int]     $Number,
-        [string]  $State        = 'OPEN',
-        [string[]]$Labels       = @(),
-        [int[]]   $BlockedBy    = @(),
-        [bool]    $BlockerInPlan = $true,
-        [string]  $Title        = "Issue $Number",
-        [string]  $ClosedAt     = $null,
-        [string]  $CreatedAt    = '2025-01-01T00:00:00Z'
+        [int]       $Number,
+        [string]    $State        = 'OPEN',
+        [string[]]  $Labels       = @(),
+        [int[]]     $BlockedBy    = @(),
+        [bool]      $BlockerInPlan = $true,
+        [string]    $Title        = "Issue $Number",
+        [string]    $ClosedAt     = $null,
+        [string]    $CreatedAt    = '2025-01-01T00:00:00Z',
+        [hashtable] $Parent       = $null,
+        [hashtable] $SubIssues    = $null
     )
     return [PSCustomObject]@{
         number        = $Number
@@ -77,6 +93,8 @@ function New-IssueState {
         closedAt      = $ClosedAt
         createdAt     = $CreatedAt
         totalCount    = 1  # default rendered count = totalCount (no overflow)
+        parent        = $Parent
+        subIssues     = $SubIssues
     }
 }
 
@@ -84,37 +102,140 @@ function New-IssueState {
 Describe 'ConvertFrom-SequenceSpec' {
 # ===========================================================================
 
-    It 'parses a valid flat schema and returns correct structure' {
+    It 'parses v2 schema with umbrellas: inline list' {
         $yaml = New-ValidSpecYaml
         $spec = ConvertFrom-SequenceSpec -yamlText $yaml
 
         $spec                        | Should -Not -BeNullOrEmpty
-        $spec.schema_version         | Should -Be 1
+        $spec.schema_version         | Should -Be 2
         $spec.control_tower          | Should -Be 704
         $spec.control_tower.GetType().Name | Should -Match 'Int'  # must be integer, not string
         $spec.recently_closed_days   | Should -Be 14
-        $spec.rounds                 | Should -HaveCount 1
-        $spec.rounds[0].lane         | Should -Be 'main'
-        $spec.rounds[0].round        | Should -Be 1
-        $spec.rounds[0].issues       | Should -Contain 425
-        $spec.rounds[0].issues       | Should -Contain 571
+        $spec.umbrellas              | Should -Not -BeNullOrEmpty
+        $spec.umbrellas              | Should -Contain 476
+        $spec.umbrellas              | Should -Contain 571
     }
 
-    It 'rejects block-style issues list and returns null' {
-        # Block-style issues list is a schema violation per the Renderer Contract
-        $blockStyleYaml = @"
+    It 'returns umbrellas as ordered int array matching YAML order' {
+        $yaml = New-ValidSpecYaml -Umbrellas @(476, 571, 674, 662, 343, 693, 732)
+        $spec = ConvertFrom-SequenceSpec -yamlText $yaml
+
+        $spec.umbrellas              | Should -HaveCount 7
+        $spec.umbrellas[0]           | Should -Be 476
+        $spec.umbrellas[1]           | Should -Be 571
+        $spec.umbrellas[2]           | Should -Be 674
+        $spec.umbrellas[3]           | Should -Be 662
+        $spec.umbrellas[4]           | Should -Be 343
+        $spec.umbrellas[5]           | Should -Be 693
+        $spec.umbrellas[6]           | Should -Be 732
+    }
+
+    It 'rejects schema_version 1 with descriptive error' {
+        $yaml = @"
 schema_version: 1
 control_tower: 704
 recently_closed_days: 14
 rounds:
   - lane: main
     round: 1
-    issues:
-      - 425
-      - 571
+    issues: [425, 571]
 "@
-        $result = ConvertFrom-SequenceSpec -yamlText $blockStyleYaml
-        $result | Should -BeNullOrEmpty
+        $result = ConvertFrom-SequenceSpec -yamlText $yaml 2>&1 | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }
+        # The function writes an error and returns $null
+        $result = ConvertFrom-SequenceSpec -yamlText $yaml -ErrorAction SilentlyContinue
+        $result | Should -BeNullOrEmpty -Because 'schema_version 1 is no longer supported'
+    }
+
+    It 'rejects block-style umbrellas list' {
+        $blockStyleYaml = @"
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas:
+  - 476
+  - 571
+"@
+        $result = ConvertFrom-SequenceSpec -yamlText $blockStyleYaml -ErrorAction SilentlyContinue
+        $result | Should -BeNullOrEmpty -Because 'block-style umbrellas list is a schema violation'
+    }
+
+    It 'rejects quoted numbers in umbrellas list' {
+        $quotedYaml = @"
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: ["476", 571]
+"@
+        $result = ConvertFrom-SequenceSpec -yamlText $quotedYaml -ErrorAction SilentlyContinue
+        $result | Should -BeNullOrEmpty -Because 'quoted numbers in umbrellas list are not permitted'
+    }
+
+    It 'rejects empty umbrellas list' {
+        $emptyYaml = @"
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: []
+"@
+        $result = ConvertFrom-SequenceSpec -yamlText $emptyYaml -ErrorAction SilentlyContinue
+        $result | Should -BeNullOrEmpty -Because 'empty umbrellas list must be rejected'
+    }
+
+    It 'rejects duplicate umbrella entries' {
+        $dupYaml = @"
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [476, 571, 476]
+"@
+        $result = ConvertFrom-SequenceSpec -yamlText $dupYaml -ErrorAction SilentlyContinue
+        $result | Should -BeNullOrEmpty -Because 'duplicate entries in umbrellas list must be rejected'
+    }
+
+    It 'rejects stray rounds: key in a v2 doc' {
+        $strayYaml = @"
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [476, 571]
+rounds:
+  - lane: main
+    round: 1
+    issues: [476]
+"@
+        $result = ConvertFrom-SequenceSpec -yamlText $strayYaml -ErrorAction SilentlyContinue
+        $result | Should -BeNullOrEmpty -Because "stray 'rounds:' key in a v2 doc must be rejected"
+    }
+
+    It 'rejects missing umbrellas: key' {
+        $noUmbrellasYaml = @"
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+"@
+        $result = ConvertFrom-SequenceSpec -yamlText $noUmbrellasYaml -ErrorAction SilentlyContinue
+        $result | Should -BeNullOrEmpty -Because "missing 'umbrellas:' key must be rejected"
+    }
+
+    It 'returns null when control_tower is quoted' {
+        $yaml = @"
+schema_version: 2
+control_tower: "704"
+recently_closed_days: 14
+umbrellas: [476, 571]
+"@
+        $result = ConvertFrom-SequenceSpec -yamlText $yaml -ErrorAction SilentlyContinue
+        $result | Should -BeNullOrEmpty -Because 'quoted control_tower must be rejected'
+    }
+
+    It 'returns null when control_tower is absent' {
+        $yaml = @"
+schema_version: 2
+recently_closed_days: 14
+umbrellas: [476, 571]
+"@
+        $result = ConvertFrom-SequenceSpec -yamlText $yaml -ErrorAction SilentlyContinue
+        $result | Should -BeNullOrEmpty -Because 'absent control_tower must be rejected'
     }
 
     It 'returns null on malformed YAML input' {
@@ -178,7 +299,7 @@ Describe 'Get-PortfolioBuckets' {
         # #100 is a round-1 umbrella (blocked) → Now is empty; #100 lands in Blocked.
         # #200 is a round-2 umbrella (unblocked) → excluded from Next because umbrellas are not work items.
         # Spine leaf children of #200 would appear in Next, but none are provided here.
-        $twoRoundSpec = ConvertFrom-SequenceSpec (New-ValidSpecYaml -RoundsBlock @'
+        $twoRoundSpec = ConvertFrom-SequenceSpec (New-ValidSpecYaml -LegacyRoundsBlock @'
 rounds:
   - lane: main
     round: 1
@@ -226,20 +347,6 @@ rounds:
         $blockedEntry | Should -Not -BeNullOrEmpty
         $blockedEntry.blockerAnnotations | Should -Match 'blocked by #571(?!\s*\(out of plan\))' -Because 'an in-plan blocker must not be tagged out of plan'
         $blockedEntry.blockerAnnotations | Should -Match 'blocked by #999 \(out of plan\)' -Because 'an out-of-plan blocker must be tagged'
-    }
-
-    It 'throws on a multi-lane spec rather than silently merging lanes (CR8)' {
-        $multiLaneSpec = ConvertFrom-SequenceSpec (New-ValidSpecYaml -RoundsBlock @'
-rounds:
-  - lane: main
-    round: 1
-    issues: [100]
-  - lane: side
-    round: 1
-    issues: [200]
-'@)
-        { Get-PortfolioBuckets -spec $multiLaneSpec -issueStateObjects @() } |
-            Should -Throw -ExpectedMessage '*Multi-lane*' -Because 'per-lane derivation is unimplemented; merging lanes silently is the failure mode the tracker exists to kill'
     }
 
     It 'puts closed issues in Recently Closed only, not in Now or Next' {
@@ -362,7 +469,7 @@ rounds:
         # Umbrella #476 is in round 2 (non-active: round 1 [425,571] is active).
         # Child issue 900 is in the known-child-set of #476 → appears in Next, not Now, not float.
         # RED: child-set Next placement not yet implemented.
-        $threeRoundSpec = ConvertFrom-SequenceSpec (New-ValidSpecYaml -RoundsBlock @'
+        $threeRoundSpec = ConvertFrom-SequenceSpec (New-ValidSpecYaml -LegacyRoundsBlock @'
 rounds:
   - lane: main
     round: 1

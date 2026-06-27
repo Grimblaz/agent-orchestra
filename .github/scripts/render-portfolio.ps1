@@ -76,53 +76,78 @@ function ConvertFrom-SequenceSpec {
     param([string]$yamlText)
 
     try {
-        # Reject block-style issues list (issues on separate lines with leading dash)
-        if ($yamlText -match "issues:\s*\r?\n\s+-") {
+        # Require schema_version as integer
+        if ($yamlText -notmatch '(?m)^\s*schema_version:\s*(\d+)\s*$') {
             return $null
         }
-
-        # Require schema_version as integer
-        if ($yamlText -notmatch '(?m)^\s*schema_version:\s*(\d+)') { return $null }
         $schema_version = [int]$Matches[1]
+
+        # v1 is no longer supported
+        if ($schema_version -eq 1) {
+            Write-Error "sequence.yaml: schema_version 1 is no longer supported; migrate to schema_version 2"
+            return $null
+        }
 
         # Reject quoted control_tower
         if ($yamlText -match '(?m)^\s*control_tower:\s*"') { return $null }
 
         # Require control_tower as unquoted integer
-        if ($yamlText -notmatch '(?m)^\s*control_tower:\s*(\d+)') { return $null }
+        if ($yamlText -notmatch '(?m)^\s*control_tower:\s*(\d+)\s*$') { return $null }
         $control_tower = [int]$Matches[1]
 
         # Require recently_closed_days as integer
-        if ($yamlText -notmatch '(?m)^\s*recently_closed_days:\s*(\d+)') { return $null }
+        if ($yamlText -notmatch '(?m)^\s*recently_closed_days:\s*(\d+)\s*$') { return $null }
         $recently_closed_days = [int]$Matches[1]
 
-        # Parse rounds — each round block: "- lane: X\n    round: N\n    issues: [...]"
-        $rounds = @()
-        $roundMatches = [regex]::Matches(
-            $yamlText,
-            '-\s+lane:\s*(\S+)\s+round:\s*(\d+)\s+issues:\s*\[([^\]]*)\]'
-        )
-        foreach ($m in $roundMatches) {
-            $lane      = $m.Groups[1].Value.Trim()
-            $round     = [int]$m.Groups[2].Value
-            $rawList   = $m.Groups[3].Value
-            $issueNums = $rawList -split ',' |
-                         ForEach-Object { $_.Trim() } |
-                         Where-Object   { $_ -match '^\d+$' } |
-                         ForEach-Object { [int]$_ } |
-                         Where-Object   { $_ -gt 0 }
-            $rounds += [PSCustomObject]@{
-                lane   = $lane
-                round  = $round
-                issues = @($issueNums)
-            }
+        # Stray rounds: key is a schema violation in v2
+        if ($yamlText -match '(?m)^\s*rounds\s*:') {
+            Write-Error "sequence.yaml: stray 'rounds:' key found in schema_version 2 document; remove it and use 'umbrellas:' instead"
+            return $null
         }
 
-        # Validate: each "- lane:" block must produce exactly one parsed round
-        $expectedRoundCount = ([regex]::Matches($yamlText, '(?m)^\s*-\s+lane:')).Count
-        if ($expectedRoundCount -gt 0 -and $rounds.Count -ne $expectedRoundCount) {
-            Write-Error ("sequence.yaml: round parse mismatch — found {0} '- lane:' blocks but only {1} parsed correctly. " +
-                "Each round must have lane:, round:, and issues: on consecutive lines." -f $expectedRoundCount, $rounds.Count)
+        # Require umbrellas: key
+        if ($yamlText -notmatch '(?m)^\s*umbrellas\s*:') {
+            return $null
+        }
+
+        # Reject block-style umbrellas (items on separate lines with leading dash)
+        if ($yamlText -match '(?m)^\s*umbrellas\s*:\s*\r?\n\s*-') {
+            return $null
+        }
+
+        # Parse inline umbrellas list: umbrellas: [N, N, ...]
+        if ($yamlText -notmatch '(?m)^\s*umbrellas\s*:\s*\[([^\]]*)\]\s*$') {
+            return $null
+        }
+        $rawList = $Matches[1].Trim()
+
+        # Empty list
+        if ($rawList -eq '') {
+            Write-Error "sequence.yaml: umbrellas list is empty; at least one umbrella is required"
+            return $null
+        }
+
+        # Parse and validate each entry
+        $umbrellas = [System.Collections.Generic.List[int]]::new()
+        $entries = $rawList -split ','
+        foreach ($entry in $entries) {
+            $token = $entry.Trim()
+            # Reject quoted numbers
+            if ($token -match '^".*"$' -or $token -match "^'.*'$") {
+                Write-Error "sequence.yaml: quoted number '$token' in umbrellas list; all entries must be bare integers"
+                return $null
+            }
+            # Must be a bare integer
+            if ($token -notmatch '^\d+$') {
+                throw "sequence.yaml: non-integer entry '$token' in umbrellas list"
+            }
+            $umbrellas.Add([int]$token)
+        }
+
+        # Reject duplicates
+        $distinct = @($umbrellas | Sort-Object -Unique)
+        if ($distinct.Count -ne $umbrellas.Count) {
+            Write-Error "sequence.yaml: duplicate entries in umbrellas list"
             return $null
         }
 
@@ -130,10 +155,11 @@ function ConvertFrom-SequenceSpec {
             schema_version       = $schema_version
             control_tower        = $control_tower
             recently_closed_days = $recently_closed_days
-            rounds               = $rounds
+            umbrellas            = $umbrellas.ToArray()
         }
     }
     catch {
+        Write-Error "sequence.yaml: $_"
         return $null
     }
 }
@@ -1079,29 +1105,41 @@ query {
 
 function New-ValidSpecYaml {
     param(
-        [int]   $SchemaVersion      = 1,
-        [int]   $ControlTower       = 704,
-        [int]   $RecentlyClosedDays = 14,
-        [string]$RoundsBlock        = "rounds:`n  - lane: main`n    round: 1`n    issues: [425, 571]"
+        [int]    $SchemaVersion      = 2,
+        [int]    $ControlTower       = 704,
+        [int]    $RecentlyClosedDays = 14,
+        [int[]]  $Umbrellas          = @(476, 571),
+        [string] $LegacyRoundsBlock  = $null
     )
+    if (-not [string]::IsNullOrEmpty($LegacyRoundsBlock)) {
+        return @"
+schema_version: 1
+control_tower: $ControlTower
+recently_closed_days: $RecentlyClosedDays
+$LegacyRoundsBlock
+"@
+    }
+    $umbrellaList = $Umbrellas -join ', '
     return @"
 schema_version: $SchemaVersion
 control_tower: $ControlTower
 recently_closed_days: $RecentlyClosedDays
-$RoundsBlock
+umbrellas: [$umbrellaList]
 "@
 }
 
 function New-IssueState {
     param(
-        [int]     $Number,
-        [string]  $State        = 'OPEN',
-        [string[]]$Labels       = @(),
-        [int[]]   $BlockedBy    = @(),
-        [bool]    $BlockerInPlan = $true,
-        [string]  $Title        = "Issue $Number",
-        [string]  $ClosedAt     = $null,
-        [string]  $CreatedAt    = '2025-01-01T00:00:00Z'
+        [int]       $Number,
+        [string]    $State        = 'OPEN',
+        [string[]]  $Labels       = @(),
+        [int[]]     $BlockedBy    = @(),
+        [bool]      $BlockerInPlan = $true,
+        [string]    $Title        = "Issue $Number",
+        [string]    $ClosedAt     = $null,
+        [string]    $CreatedAt    = '2025-01-01T00:00:00Z',
+        [hashtable] $Parent       = $null,
+        [hashtable] $SubIssues    = $null
     )
     return [PSCustomObject]@{
         number        = $Number
@@ -1113,6 +1151,8 @@ function New-IssueState {
         closedAt      = $ClosedAt
         createdAt     = $CreatedAt
         totalCount    = 1  # default rendered count = totalCount (no overflow)
+        parent        = $Parent
+        subIssues     = $SubIssues
     }
 }
 
