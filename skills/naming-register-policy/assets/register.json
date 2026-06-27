@@ -68,7 +68,7 @@
     "term": "frame slice (step_id: sN)",
     "register": "stable-code",
     "kind": "atomic",
-    "expansion": "frame slice (a single executable plan step identified as sN, carrying the <!-- frame-slice id: sN --> YAML block)"
+    "expansion": "frame slice (a single executable plan step identified as sN, carrying the <!-- frame-slice --> HTML comment block with step_id: s{N} as a YAML field inside)"
   },
   {
     "term": "frame port",
@@ -198,7 +198,7 @@
     "term": "prosecution depth",
     "register": "stable-code",
     "kind": "atomic",
-    "expansion": "prosecution depth (the number of prosecution passes in a review cycle: standard = 5, lite = 1, proxy = 1)"
+    "expansion": "prosecution depth (the calibration metric controlling how deeply the adversarial prosecution examines each change category — transitions between skip, light, and full examination depth; see skills/calibration-pipeline/SKILL.md)"
   },
   {
     "term": "calibration fixture / calibration pipeline",

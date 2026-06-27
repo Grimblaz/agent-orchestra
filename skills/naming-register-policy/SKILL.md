@@ -41,15 +41,19 @@ Three classification tiers form the `register` field values in `register.json`:
 - **`self-describing`** — Already human-readable; no action needed. Examples: `prosecution / defense / judge`, `Experience-Owner`, `adversarial review`. Behavior: use as-is everywhere; these terms do not require expansion in either register.
 - **`rename-candidate`** — Pure prose jargon with no machine-anchor role; the code has no value in machine contexts and only obscures human-facing prose. Examples: `Value Reflex`, `now-coupled / wall-clock dependent`. Behavior: replace with the `replacement` field value in human-facing prose. These rows form **#750's closed backfill worklist**.
 
-## Numbered-Family Decode Rule
+## Family Decode Rule
 
-When a term covers a *numbered family* of instances (e.g., `SMC-NN` covers SMC-01 through SMC-23), the register carries a single family row rather than one row per instance. Family rows are identified by `kind: family` in `register.json`.
+`kind: family` in `register.json` covers two sub-types of terms grouped under a single row:
 
-To keep a reader who encounters a *specific* instance (e.g., `SMC-20`) from staying stuck, every numbered-family row carries a `decode` field pointing to the resolution home:
+**Numbered families** — a single row covers a numbered sequence of instances (e.g., `SMC-NN` covers SMC-01 through SMC-23; `D1 / D2 / D3` covers specific numbered rules). To keep a reader who encounters a specific numbered instance (e.g., `SMC-20`) from staying stuck, every numbered-family row carries a `decode` field pointing to the resolution home:
 
 > *"SMC-NN = Session Memory Contract rule NN; the full numbered list is in `skills/session-memory-contract/SKILL.md`."*
 
-To resolve a specific instance: find the family row whose `term` pattern matches the instance token, then follow the `decode` field to the resolution home.
+To resolve a specific numbered instance: find the family row whose `term` pattern matches the instance token, then follow the `decode` field to the resolution home.
+
+**Compound/slash-grouped terms** — a single row covers multiple related sub-terms that appear together as a set (e.g., `prosecution / defense / judge`, `frame / frame-spine`, `credit provenance / witness type`). The `decode` field explains what each component means and where to learn more — including for self-describing compound terms.
+
+All `kind: family` rows carry a `decode` field regardless of sub-type.
 
 ## Reader ≤1-Hop Escape Hatch
 
@@ -93,15 +97,16 @@ One settled rule: **`stable-code` terms stay as stable codes in machine-citation
 
 **Deferred (not yet in tree):** The concrete shared-file manifest listing which files #695/#696 and #750 both touch is deferred until #695/#696 edit-scope is designed. The sequencing rule above is the contract in the interim. The manifest will be added here when #695/#696 scope is established.
 
-## One-Way Binding Declaration
+## Binding Declaration
 
-The register asset (`register.json`) is **one-way bound** to the vocab-seed term set in `HOW-IT-WORKS.md` §5. The binding declaration is:
+The register asset (`register.json`) has a two-part binding to the vocab-seed term set in `HOW-IT-WORKS.md` §5:
 
-- The register is **keyed by vocab-seed terms** — each `register.json` `term` field is the verbatim bold-cell key from the vocab-seed table.
-- The vocab-seed does **not** carry register classification — the reader-facing table remains a clean 3-column `Term | Plain meaning | Where it appears` table.
-- The binding direction is intentional: the vocab-seed is the canonical human-readable source; the register is the machine-readable classification layer on top of it.
+- **Key-set binding (bidirectional)** — every vocab-seed bold-cell term must have a register entry, and the register must carry no terms absent from the vocab-seed. The two key-sets are kept in sync; the bidirectional key-set constraint is enforced by the Pester suite.
+- **Classification payload (one-directional)** — register classification (`register`, `expansion`, `replacement`, `decode`) flows only from the register outward. The vocab-seed does **not** carry these fields — the reader-facing table remains a clean 3-column `Term | Plain meaning | Where it appears` table.
 
-To read the register for a term: load `register.json`, find the entry where `term` equals the exact vocab-seed key, and use the `register`, `expansion`, `replacement`, and/or `decode` fields as appropriate for the context.
+The vocab-seed is the canonical human-readable source; the register is the machine-readable classification layer on top of it, keyed by the verbatim bold-cell text.
+
+To read the register for a term: load `skills/naming-register-policy/assets/register.json`, find the entry where `term` equals the exact vocab-seed key, and use the `register`, `expansion`, `replacement`, and/or `decode` fields as appropriate for the context.
 
 ## Scope & Boundaries
 
