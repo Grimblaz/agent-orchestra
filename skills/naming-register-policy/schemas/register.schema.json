@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "naming-register-policy register",
+  "description": "Schema for skills/naming-register-policy/assets/register.json",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["term", "register"],
+    "properties": {
+      "term": {
+        "type": "string",
+        "description": "Exact verbatim term key matching the bold cell from HOW-IT-WORKS.md vocab-seed"
+      },
+      "register": {
+        "type": "string",
+        "enum": ["stable-code", "self-describing", "rename-candidate"],
+        "description": "Classification tier for this term"
+      },
+      "expansion": {
+        "type": "string",
+        "description": "First-use expansion text for stable-code terms in human prose"
+      },
+      "replacement": {
+        "type": "string",
+        "description": "Drop-in human-readable replacement for rename-candidate terms"
+      },
+      "kind": {
+        "type": "string",
+        "enum": ["atomic", "family"],
+        "description": "Whether this row covers one term (atomic) or a numbered family (family)"
+      },
+      "decode": {
+        "type": "string",
+        "description": "For family rows: pattern describing how to resolve a specific instance (e.g. SMC-20) to its definition home"
+      }
+    },
+    "additionalProperties": false,
+    "if": {
+      "properties": { "register": { "const": "rename-candidate" } }
+    },
+    "then": {
+      "required": ["replacement"],
+      "properties": { "replacement": { "minLength": 1 } }
+    }
+  }
+}
