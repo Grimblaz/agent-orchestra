@@ -1,17 +1,7 @@
 # Agent Orchestra — Portfolio Sequence Spec
 # Managed by render-portfolio.ps1 — do not edit the control_tower value by hand.
-# Rounds represent work priority order within each lane.
-# Owner refines rounds via normal PRs.
-schema_version: 1
+# Umbrellas list work epics in priority order. New umbrellas insert at the correct rank.
+schema_version: 2
 control_tower: 704
 recently_closed_days: 14
-rounds:
-  - lane: main
-    round: 1
-    issues: [425, 571]
-  - lane: main
-    round: 2
-    issues: [476, 662]
-  - lane: main
-    round: 3
-    issues: [674, 693]
+umbrellas: [476, 571, 674, 662, 343, 693, 732]

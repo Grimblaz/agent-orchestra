@@ -2,6 +2,15 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.8] — 2026-06-27
+
+### Changed
+
+- **Control Tower v2 documentation + intake rule** (#753, s7): documented the ranked-umbrella portfolio board that shipped in #756. The board's zones changed from the v1 "Now / Next / Blocked / Recently closed / Triage" lane model to **🎯 Active** (first open umbrella, expanded) / **Umbrellas (ranked)** / **🔥 Triage** (derived) / **Recently closed**.
+  - New design doc `Documents/Design/control-tower-v2.md` — schema_version 2 spec, three-zone derivation, drift/integrity warn tiers, idempotent splice, and the #746 connection-cap dependency.
+  - `skills/safe-operations/SKILL.md` §2b-bis rewritten for v2: new umbrellas must be inserted into `Documents/Planning/sequence.yaml`'s `umbrellas:` list at the correct rank (canonical home, no routing-tables entry); Triage is now **auto-derived** from parent-edge data, so `--label triage` is optional/advisory rather than load-bearing.
+  - `skills/post-pr-review/SKILL.md` cross-reference to the new design doc.
+
 ## [2.35.7] — 2026-06-27
 
 ### Added
