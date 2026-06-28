@@ -931,3 +931,6 @@ PRs walked: **#411** (Phase 3 Code-Conductor, post-thin/fat), **#415** (inline-d
 | `process-retrospective` | 1 | 0 | 0 | **3** |
 
 Sample is too small to draw rates from. The audit-only sub-issue runs against the last 30+ PRs to produce statistically-meaningful gap rates.
+
+<!-- vocab-pointer -->
+> **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab).

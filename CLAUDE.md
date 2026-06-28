@@ -41,9 +41,9 @@ For commands with explicit `model:` frontmatter (`/orchestrate`, `/code-conducto
 
 Three agents cover the journey from an issue on the board to an implementation-ready plan. They call each other through durable GitHub-issue markers so a session can span multiple conversations. *(Cross-tool handoff between Copilot and Claude Code was supported; Copilot is now frozen — see Documents/Design/copilot-deprecation.md.)*
 
-1. **Experience-Owner** — frames the work in customer language. Optionally opens with the **Value Reflex** (a brief worth-it check — bet / falsifier / alternative — that recommends Proceed-full, Proceed-lite, Shrink, Park, or Decline; advisory only, skippable with `frame it`). Writes the problem statement, user journeys, scenarios, and surface/readiness assessment into the issue body. Activated with `/experience` or via the subagent name.
+1. **Experience-Owner** — frames the work in customer language. Optionally opens with the **worth-it check** (bet / falsifier / alternative — recommends Proceed-full, Proceed-lite, Shrink, Park, or Decline; advisory only, skippable with `frame it`). Writes the problem statement, user journeys, scenarios, and surface/readiness assessment into the issue body. Activated with `/experience` or via the subagent name.
 2. **Solution-Designer** — runs technical design exploration and the 3-pass non-blocking design challenge. Updates the issue body with decisions, acceptance criteria, and rejected alternatives. Activated with `/design` or via the subagent name.
-3. **Issue-Planner** — produces the implementation plan with CE Gate coverage and the full adversarial review pipeline (prosecution × 3 → defense → judge). Persists the approved plan as a GitHub issue comment with a `<!-- plan-issue-{ID} -->` marker per `SMC-01`. Activated with `/plan` or via the subagent name.
+3. **Issue-Planner** — produces the implementation plan with CE Gate (Customer Experience Gate) coverage and the full adversarial review pipeline (prosecution × 3 → defense → judge). Persists the approved plan as a GitHub issue comment with a `<!-- plan-issue-{ID} -->` marker per `SMC-01` (Session Memory Contract marker). Activated with `/plan` or via the subagent name.
 
 Each agent reads a shared tool-agnostic body from `agents/*.agent.md` and follows the named skills for methodology. Claude-specific tool bindings (structured questions, subagent dispatch, `gh` CLI for GitHub work) are documented in each skill's `platforms/claude.md`.
 
@@ -187,3 +187,6 @@ Before adding or changing any adapter that fills a frame port, read the Adapter 
 ## Issue #369 traces the full history
 
 See [issue #369](https://github.com/Grimblaz/agent-orchestra/issues/369) for the full design discussion, customer framing, and plan that produced this Claude Code integration.
+
+<!-- vocab-pointer -->
+> **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](HOW-IT-WORKS.md#vocab).

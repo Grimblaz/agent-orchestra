@@ -2,6 +2,18 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.9] — 2026-06-28
+
+### Added
+
+- **De-opaque living reader surfaces** (#750): applied #732 two-register naming policy to always-on entry points.
+  - Replaced "Value Reflex" with "worth-it check" at 3 prose locations (CLAUDE.md, HOW-IT-WORKS.md §2/§4); vocab-seed block and `## Value Reflex (First Beat)` heading in experience-owner.md preserved.
+  - Added stable `<a id="vocab"></a>` anchor in HOW-IT-WORKS.md §5 (renumber-safe; survives #696 ToC sweep). Added `<!-- vocab-pointer -->` escape-hatch footer on 9 living surfaces: CLAUDE.md, skills/README.md, CUSTOMIZATION.md, 6 Documents/Design orientation docs.
+  - Added first-use inline expansions in CLAUDE.md: SMC-01 → "SMC-01 (Session Memory Contract marker)"; CE Gate → "CE Gate (Customer Experience Gate)".
+  - Created minimal `.github/ISSUE_TEMPLATE/bug_report.md`, `.github/ISSUE_TEMPLATE/feature_request.md`, and `.github/PULL_REQUEST_TEMPLATE.md` — bare-structure templates each carrying the vocab-pointer footer.
+  - Fixed `skills/README.md`: count 47 → 53; added 6 missing rows (ai-first-documentation, engagement-record-emission, naming-register-policy, persist-changes, project-references, solution-authoring) using existing `description:` frontmatter verbatim.
+  - New bounded Pester guard `.github/scripts/Tests/NamingRegisterLivingSurface.Tests.ps1`: term-absence (with vocab-seed block exclusion), pointer-presence, anchor-uniqueness, file-existence assertions over the enumerated in-scope surface set.
+
 ## [2.35.8] — 2026-06-27
 
 ### Changed

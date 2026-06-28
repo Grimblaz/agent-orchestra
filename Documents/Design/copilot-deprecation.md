@@ -30,3 +30,6 @@ See [issue #651](https://github.com/Grimblaz/agent-orchestra/issues/651) for the
 ## For contributors and agents
 
 The signal to look for: if you're about to invest effort on a `.github/prompts/*.prompt.md` or a `platforms/copilot.md` — **stop**. That work is frozen. Build the Claude surface only.
+
+<!-- vocab-pointer -->
+> **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab).

@@ -18,7 +18,7 @@ Work moves through up to eight beats. Steps 2 and 3 (customer framing and techni
 
    [Source: CLAUDE.md § Upstream pipeline — "frames the work" phrasing implies issue as the entry point]
 
-2. **Customer framing (optional) — Experience-Owner.** Experience-Owner (the customer-journey framing agent) reads the issue and frames the feature as customer journeys (step-by-step descriptions of what a user is trying to accomplish), writes Given/When/Then scenarios (structured intent tests), and optionally runs the Value Reflex (a brief worth-it check: bet, falsifier, alternative) to recommend whether the feature should proceed, shrink, or be parked. The output is written back to the issue body.
+2. **Customer framing (optional) — Experience-Owner.** Experience-Owner (the customer-journey framing agent) reads the issue and frames the feature as customer journeys (step-by-step descriptions of what a user is trying to accomplish), writes Given/When/Then scenarios (structured intent tests), and optionally runs the worth-it check (bet, falsifier, alternative) to recommend whether the feature should proceed, shrink, or be parked. The output is written back to the issue body.
 
    [Source: CLAUDE.md § Upstream pipeline, step 1]
 
@@ -78,7 +78,7 @@ The spine in sections 1–3 covers most of what you need to orient yourself. If 
 
 Experience-Owner is the first agent in the upstream pipeline and the only agent with a customer lens. It reads a GitHub issue and frames the feature from the customer's perspective before any technical work begins.
 
-**Value Reflex (optional opening check).** Before framing, Experience-Owner can run a brief worth-it check called the Value Reflex. It evaluates three things: the bet (what outcome do we expect?), the falsifier (what would prove this wrong?), and the alternative (what else could we do?). The result is one of five recommendations: Proceed-full, Proceed-lite, Shrink, Park, or Decline. The Value Reflex is advisory — it can be skipped with `frame it`.
+**worth-it check (optional opening check).** Before framing, Experience-Owner can run a brief worth-it check. It evaluates three things: the bet (what outcome do we expect?), the falsifier (what would prove this wrong?), and the alternative (what else could we do?). The result is one of five recommendations: Proceed-full, Proceed-lite, Shrink, Park, or Decline. The worth-it check is advisory — it can be skipped with `frame it`.
 
 **Customer journeys.** The main framing output is a set of customer journeys: step-by-step narratives that describe what a specific type of user is trying to accomplish and how the system supports them. Journeys anchor the feature in real user need rather than technical requirement.
 
@@ -157,6 +157,7 @@ The adversarial review pipeline runs after implementation to find defects before
 
 </details>
 
+<a id="vocab"></a>
 ## 5. Plain-language vocabulary
 
 <!-- vocab-seed:begin -->

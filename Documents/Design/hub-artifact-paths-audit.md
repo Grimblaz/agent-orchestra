@@ -658,3 +658,6 @@ The following families are present in the classification but are explicitly excl
 - **`.vscode/settings.json`**: Consumer-generated VS Code workspace settings. Not a distribution artifact.
 - **`.tmp/*`**: Agent scratch / temp-file workspace (issue #643). Gitignored consumer-local scratch where agents write transient working files per `skills/terminal-hygiene/SKILL.md` Scratch & Temp-File Hygiene. Not a distribution artifact and not committed to any repo.
 - **`examples/{stack}/*.md`**: Reference templates for new consumer repo setup, not loaded at runtime by agents.
+
+<!-- vocab-pointer -->
+> **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab).

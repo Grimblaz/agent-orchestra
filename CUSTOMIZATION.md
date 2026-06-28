@@ -291,3 +291,6 @@ VS Code loads agents additively from all configured sources — there is no name
 3. **Global `chat.agentFilesLocations` + working in a repo with `.github/agents/`** — global path and workspace auto-discovery both find the agents. Fix: remove `chat.agentFilesLocations` from user settings if you only need agents in the agent-orchestra clone.
 
 > **Quick fix checklist**: Open VS Code user `settings.json` (`Ctrl+,` → open `settings.json`) and check for `chat.agentFilesLocations` and `chat.plugins.marketplaces`. Having entries for both plugin and clone-path settings is the most common cause of duplicates.
+
+<!-- vocab-pointer -->
+> **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](HOW-IT-WORKS.md#vocab).
