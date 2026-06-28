@@ -52,4 +52,10 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_CREATED_AT: ${{ github.event.pull_request.created_at }}
         run: |
+          # TRIGGER LANDMINE (AC7 / issue #760): this workflow runs on ubuntu-latest where
+          # ~/.claude/projects is absent, producing an empty cost walk.  The skip-when-absent
+          # gate in frame-credit-ledger.ps1 guards against the resulting empty walk overwriting
+          # a populated cost-pattern-data block.  If you add a merge_group or post-merge push
+          # trigger to this workflow the gate MUST still be present in the script, otherwise
+          # a CI clobber will reappear for any run that lacks a local projects root.
           ./.github/scripts/frame-credit-ledger.ps1 -Pr $env:PR_NUMBER -Mode enforce

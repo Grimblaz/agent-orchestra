@@ -1666,29 +1666,65 @@ function Invoke-FrameCreditLedger {
             }
             $completeness = Get-SessionCompleteness @completenessParameters
             $priorCostData = $null
+            $priorComment = $null
             if ($null -ne $script:PrComments) {
                 $priorComment = @($script:PrComments | Where-Object { $_.body -match '<!-- cost-pattern-data' }) | Select-Object -Last 1
                 if ($priorComment) {
-                    $priorCompleteness = @{ completeness = 'complete'; excluded_from_rolling_baseline = $false }
-                    $priorCostData = @{ completeness = $priorCompleteness }
+                    # Fix #760-D1-c: parse the actual prior comment body rather than using a
+                    # hardcoded stub, and use a flat shape so Resolve-CostDataPreservation can
+                    # read $Prior['completeness'] as a string (not a nested hashtable).
+                    $priorYaml = script:Get-CostPatternDataFromComment -Body $priorComment.body
+                    if ($null -ne $priorYaml) {
+                        $priorCostData = script:ConvertFrom-CostPatternYaml -Yaml $priorYaml
+                    }
+                    # Fallback: if parse fails or comment has no data block, synthesize a
+                    # minimal flat shape so preservation logic has something to compare.
+                    if ($null -eq $priorCostData) {
+                        $priorCostData = @{ completeness = 'unknown' }
+                    }
                 }
             }
-            # preservation result is computed for future use (D10 re-emission prevention);
-            # currently emitted to output pipeline for visibility — suppressed to avoid unused-var warning.
-            $null = Resolve-CostDataPreservation -Current $completeness -Prior $priorCostData
 
-            # 6f. Anomaly flags
-            $anomalyFlags = @()
-            if (-not $rollingResult.timed_out -and (script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
-                try { $anomalyFlags = @(Get-CostAnomalyFlags -ThisRun $costAttribution -RollingHistory @($rollingResult.entries) -RegimeCheckpoint $checkpoint) }
-                catch { $anomalyFlags = @() }
+            # Fix #760-D1-b: wire the Resolve-CostDataPreservation result instead of discarding it.
+            # This drives the skip-when-absent gate below (AC1 + AC2).
+            $preservationResult = Resolve-CostDataPreservation -Current $completeness -Prior $priorCostData
+
+            # Fix #760-D1-a: skip-when-absent gate — if preservation says to use_prior, reuse the
+            # prior comment's cost section verbatim.  This fires when the projects root is absent
+            # (CI enforce on ubuntu-latest) AND the prior comment had a complete render, preventing
+            # an empty walk from overwriting a populated cost-pattern-data block.  Invariant: a
+            # populated block is NEVER replaced by an empty one.
+            $usePriorCostSection = $preservationResult['use_prior'] -eq $true
+            if ($usePriorCostSection -and $null -ne $priorComment) {
+                # Extract the existing cost section (markdown + YAML) from the prior comment body.
+                # The section spans from the first cost heading/separator to end-of-comment or the
+                # next top-level section.  We use the raw YAML block as a safe fallback if a richer
+                # extraction is unavailable.
+                $priorYamlForSection = script:Get-CostPatternDataFromComment -Body $priorComment.body
+                if ($null -ne $priorYamlForSection) {
+                    $preservationNotice = $preservationResult['notice']
+                    $noticeBlock = if ($null -ne $preservationNotice -and $preservationNotice -ne '') {
+                        "> [!NOTE]`n> $preservationNotice`n`n"
+                    } else { '' }
+                    $costSection = $noticeBlock + "<!-- cost-pattern-data`n$priorYamlForSection`n-->"
+                }
+                # If extraction failed, leave $costSection as-is (empty string) — better to emit
+                # nothing than to emit a broken or truncated block.
             }
+            else {
+                # 6f. Anomaly flags — only compute when not using prior (AC2: guard on use_prior)
+                $anomalyFlags = @()
+                if (-not $rollingResult.timed_out -and (script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
+                    try { $anomalyFlags = @(Get-CostAnomalyFlags -ThisRun $costAttribution -RollingHistory @($rollingResult.entries) -RegimeCheckpoint $checkpoint) }
+                    catch { $anomalyFlags = @() }
+                }
 
-            # 6g. Render
-            if ((script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
-                $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$costBranch)
-                $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$costBranch)
-                $costSection = $costMarkdown + "`n" + $costYaml
+                # 6g. Render fresh cost section
+                if ((script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
+                    $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$costBranch)
+                    $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$costBranch)
+                    $costSection = $costMarkdown + "`n" + $costYaml
+                }
             }
         }
         catch {
