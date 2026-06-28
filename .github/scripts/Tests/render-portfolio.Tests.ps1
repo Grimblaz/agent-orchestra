@@ -28,6 +28,12 @@ BeforeAll {
     $scriptPath = Join-Path $PSScriptRoot '..' 'render-portfolio.ps1'
     # This will fail until s4 creates the script — making tests RED.
     . $scriptPath
+
+    # New-TempSpecPath: returns a unique temp-file path for a YAML spec without creating a
+    # file on disk. Avoids the GetTempFileName() + -replace pattern which leaks the .tmp file.
+    function global:New-TempSpecPath {
+        return Join-Path ([System.IO.Path]::GetTempPath()) "$([System.Guid]::NewGuid().ToString()).yaml"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -1222,7 +1228,7 @@ Describe 'Invoke-PortfolioRender' {
         #
         # With the Step-0 probe guard: pipeline exits before step 8 (write) → edit count = 0.
 
-        $tempSpec = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpec = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1340,7 +1346,7 @@ umbrellas: [425, 571]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpec2 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpec2 = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1410,7 +1416,7 @@ umbrellas: [425, 571]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpecCeil1 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpecCeil1 = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1479,7 +1485,7 @@ umbrellas: [425, 571]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpecCeil2 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpecCeil2 = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1549,7 +1555,7 @@ umbrellas: [425, 571]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpecCeil4 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpecCeil4 = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1631,7 +1637,7 @@ umbrellas: [425, 571]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpecNoTriage = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpecNoTriage = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1685,7 +1691,7 @@ umbrellas: [425]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpecProbe = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpecProbe = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1732,6 +1738,7 @@ umbrellas: [425, 571]
         }
 
         BeforeEach {
+            $script:GhViewBody  = '{"body":"# Control Tower\n\nNo portfolio block yet."}'
             $script:GhEditCallCount = 0
             $script:GhEditArgs      = @()
             $script:GhEditBody      = ''
@@ -1746,6 +1753,9 @@ umbrellas: [425, 571]
                     $bodyIdx = [Array]::IndexOf([string[]]$ghArgs, '--body')
                     if ($bodyIdx -ge 0 -and ($bodyIdx + 1) -lt $ghArgs.Count) {
                         $script:GhEditBody = $ghArgs[$bodyIdx + 1]
+                        # Persist the written body so the view stub returns it on the next render.
+                        # Encode as JSON so Invoke-PortfolioRender can parse it via ConvertFrom-Json.
+                        $script:GhViewBody = @{ body = $script:GhEditBody } | ConvertTo-Json -Compress
                     }
                     $global:LASTEXITCODE = 0
                     return
@@ -1766,7 +1776,7 @@ umbrellas: [425, 571]
 
                 if ($ghArgs -contains 'view') {
                     $global:LASTEXITCODE = 0
-                    return '{"body":"# Control Tower\n\nNo portfolio block yet."}'
+                    return $script:GhViewBody
                 }
 
                 $global:LASTEXITCODE = 0
@@ -1778,13 +1788,14 @@ umbrellas: [425, 571]
             $script:GhEditCallCount = 0
             $script:GhEditArgs      = @()
             $script:GhEditBody      = ''
+            $script:GhViewBody      = $null
             $script:OverflowJson    = $null
         }
 
         It 'labels overflow emits Write-Warning mentioning labels and issue number (AC5)' {
             # RED until Step 2 adds overflow check that calls Write-Warning when
             # labels.totalCount > labels.nodes.Count.
-            $tempSpecOvf = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+            $tempSpecOvf = New-TempSpecPath
             @'
 schema_version: 2
 control_tower: 704
@@ -1842,7 +1853,7 @@ umbrellas: [101]
                 $global:LASTEXITCODE = 0
             }
 
-            $tempSpecOvf = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+            $tempSpecOvf = New-TempSpecPath
             @'
 schema_version: 2
 control_tower: 704
@@ -1865,6 +1876,16 @@ umbrellas: [101]
                     -Because 'blockedBy overflow must route #101 to the overflow section: visible blockers are all closed but totalCount=51 means a hidden blocker exists (AC2)'
                 $script:GhEditBody | Should -Not -Match 'not found in GitHub' `
                     -Because 'a blockedBy-overflow issue exists in GitHub and must not render the false "not found — remove from sequence.yaml" footer line (P-M1 regression guard)'
+
+                # AC3 assertion: #101 must be specifically annotated in the v2 overflow footer.
+                # The v2 board uses ⚠️ Issue #N: blockedBy overflow — excluded from startable routing
+                # (not Now/Next/Blocked sections, which are retired v1 headings).
+                $script:GhEditBody | Should -Match '⚠️ Issue #101.*blockedBy overflow' `
+                    -Because 'issue #101 must appear in the overflow footer annotation — excluded from startable routing (AC3)'
+                # AC3 negative: #101 must not appear as a Triage (startable) item.
+                $triageSection = [regex]::Match($script:GhEditBody, '(?s)##[^\r\n]*Triage[\r\n]+(?<triage>.*?)##').Groups['triage'].Value
+                $triageSection | Should -Not -Match '(?m)#101\b' `
+                    -Because 'blockedBy overflow must exclude #101 from the Triage (startable) section (AC3)'
             }
             finally {
                 if (Test-Path $tempSpecOvf) { Remove-Item $tempSpecOvf -Force -ErrorAction SilentlyContinue }
@@ -1873,7 +1894,7 @@ umbrellas: [101]
 
         It 'subIssues overflow emits Write-Warning mentioning subIssues and issue number (AC5)' {
             # RED until Step 2 adds overflow check for subIssues.totalCount > subIssues.nodes.Count.
-            $tempSpecOvf = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+            $tempSpecOvf = New-TempSpecPath
             @'
 schema_version: 2
 control_tower: 704
@@ -1901,7 +1922,7 @@ umbrellas: [101]
             #   1. at least one overflow warning was emitted (RED without Step 2 — no overflow code yet)
             #   2. render completes (gh issue edit called >= 1)
             # Condition 1 is the RED driver — current code emits no overflow warnings.
-            $tempSpecOvf = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+            $tempSpecOvf = New-TempSpecPath
             @'
 schema_version: 2
 control_tower: 704
@@ -1930,13 +1951,12 @@ umbrellas: [101]
         }
 
         It 'idempotency: two renders of overflow issue produce identical body containing overflow marker (AC7)' {
-            # RED until Step 2: overflow handling must be deterministic AND produce an overflow
-            # indicator in the body.
             # Two parts:
-            #   1. The rendered body must contain an overflow marker (RED driver — no overflow
-            #      code yet, so the body won't have 'overflow' in it → first Should -Match fails)
-            #   2. Two identical invocations must produce byte-identical bodies (AC7 idempotency)
-            $tempSpecOvf = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+            #   1. The rendered body must contain an overflow marker (Part 1 RED driver — no
+            #      overflow code yet, so the body won't have 'overflow' in it → fails RED)
+            #   2. Second render must be a no-op: Get-SplicedBody detects the portfolio block is
+            #      already present (identical) and returns $null, skipping gh issue edit (AC7 true idempotency)
+            $tempSpecOvf = New-TempSpecPath
             @'
 schema_version: 2
 control_tower: 704
@@ -1958,15 +1978,13 @@ umbrellas: [101]
                 $script:GhEditBody      = ''
 
                 Invoke-PortfolioRender -specPath $tempSpecOvf
-                $secondBody = $script:GhEditBody
 
-                # Part 2: both renders must produce the same body. Strip the timestamp footer
-                # line (the only intentionally time-varying content — Get-SplicedBody strips it
-                # for its real idempotency comparison) so this assertion is not flaky when the two
-                # renders straddle a one-second boundary.
-                $stripTs = { param($b) ($b -split "`n" | Where-Object { $_ -notmatch '^portfolio content unchanged since ' }) -join "`n" }
-                (& $stripTs $firstBody) | Should -Be (& $stripTs $secondBody) `
-                    -Because 'two renders of the same overflow issue must produce identical board bodies modulo the timestamp footer (AC7 idempotency)'
+                # Part 2 (true idempotency): second render must be a no-op — Get-SplicedBody detects
+                # the portfolio block is already present and returns $null, skipping gh issue edit.
+                $script:GhEditCallCount | Should -Be 0 `
+                    -Because 'second render of an already-written board must be a no-op (AC7 no-op detection — Get-SplicedBody returns $null when content is identical)'
+                $script:GhViewBody | Should -Match 'overflow' `
+                    -Because 'persisted board body must still contain the overflow marker after the idempotent second render'
             }
             finally {
                 if (Test-Path $tempSpecOvf) { Remove-Item $tempSpecOvf -Force -ErrorAction SilentlyContinue }
@@ -1976,7 +1994,8 @@ umbrellas: [101]
         It 'GITHUB_ACTIONS annotation emits ::warning:: to information stream when env var set (M6/AC3)' {
             # RED until Step 2 adds GITHUB_ACTIONS annotation emission via Write-Host
             # (information stream 6, NOT warning stream 3) when overflow is detected in CI.
-            $tempSpecOvf = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+            $previousGithubActions = $env:GITHUB_ACTIONS
+            $tempSpecOvf = New-TempSpecPath
             @'
 schema_version: 2
 control_tower: 704
@@ -1993,7 +2012,11 @@ umbrellas: [101]
                     -Because 'at least one ::warning:: annotation must be emitted to the information stream when GITHUB_ACTIONS is set and overflow is detected (M6/AC3)'
             }
             finally {
-                Remove-Item env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
+                if ($null -eq $previousGithubActions) {
+                    Remove-Item env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
+                } else {
+                    $env:GITHUB_ACTIONS = $previousGithubActions
+                }
                 if (Test-Path $tempSpecOvf) { Remove-Item $tempSpecOvf -Force -ErrorAction SilentlyContinue }
             }
         }
@@ -2004,6 +2027,7 @@ umbrellas: [101]
             # A malicious issue title containing "::error::" must not appear in any warning
             # or annotation, preventing CI log injection.
 
+            $previousGithubActions = $env:GITHUB_ACTIONS
             $injectLabelNodes   = (1..50 | ForEach-Object { '{"name":"lbl-' + $_ + '"}' }) -join ','
             $injectSubIssueNodes = (1..50 | ForEach-Object { '{"number":' + (1000 + $_) + '}' }) -join ','
             $script:InjectJson = '{"data":{"repository":{"issue":{"number":102,"title":"::error:: injected","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":51,"nodes":[' + $injectLabelNodes + ']},"blockedBy":{"totalCount":0,"nodes":[]},"subIssues":{"totalCount":51,"nodes":[' + $injectSubIssueNodes + ']}}}}}'
@@ -2022,7 +2046,7 @@ umbrellas: [101]
                 $global:LASTEXITCODE = 0
             }
 
-            $tempSpecInject = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+            $tempSpecInject = New-TempSpecPath
             @'
 schema_version: 2
 control_tower: 704
@@ -2055,6 +2079,9 @@ umbrellas: [102]
                 $captured6 = Invoke-PortfolioRender -specPath $tempSpecInject 6>&1
                 $annotations = @($captured6 | Where-Object { $_ -match '::warning::' })
 
+                $annotations.Count | Should -BeGreaterThan 0 `
+                    -Because 'GITHUB_ACTIONS overflow handling must emit at least one ::warning:: annotation before injection safety can be verified (M9 count guard)'
+
                 # ::warning:: annotations must not contain a newline (would inject a second command)
                 foreach ($ann in $annotations) {
                     $ann.ToString() | Should -Not -Match "`n" `
@@ -2062,7 +2089,11 @@ umbrellas: [102]
                 }
             }
             finally {
-                Remove-Item env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
+                if ($null -eq $previousGithubActions) {
+                    Remove-Item env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
+                } else {
+                    $env:GITHUB_ACTIONS = $previousGithubActions
+                }
                 if (Test-Path $tempSpecInject) { Remove-Item $tempSpecInject -Force -ErrorAction SilentlyContinue }
                 $script:InjectJson = $null
             }
@@ -2118,7 +2149,7 @@ umbrellas: [102]
                 $global:LASTEXITCODE = 0
             }
 
-            $tempSpecLeaf = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+            $tempSpecLeaf = New-TempSpecPath
             @'
 schema_version: 2
 control_tower: 704
@@ -2141,6 +2172,16 @@ umbrellas: [101]
                     -Because 'leaf-loop blockedBy overflow must render #102 in the overflow section (AC2 leaf path)'
                 $script:GhEditBody | Should -Not -Match 'not found in GitHub' `
                     -Because 'a leaf blockedBy-overflow issue must not render the false "not found" footer line (P-M1 regression guard, leaf path)'
+
+                # AC3 assertion: #102 must be specifically annotated in the v2 overflow footer.
+                # The v2 board uses ⚠️ Issue #N: blockedBy overflow — excluded from startable routing
+                # (not Now/Next/Blocked sections, which are retired v1 headings).
+                $script:GhEditBody | Should -Match '⚠️ Issue #102.*blockedBy overflow' `
+                    -Because 'issue #102 must appear in the overflow footer annotation — excluded from startable routing (AC3 leaf path)'
+                # AC3 negative: #102 must not appear as a Triage (startable) item.
+                $triageSection = [regex]::Match($script:GhEditBody, '(?s)##[^\r\n]*Triage[\r\n]+(?<triage>.*?)##').Groups['triage'].Value
+                $triageSection | Should -Not -Match '(?m)#102\b' `
+                    -Because 'blockedBy overflow must exclude #102 from the Triage (startable) section (AC3 leaf path)'
             }
             finally {
                 Remove-Item function:global:gh -ErrorAction SilentlyContinue
@@ -2189,7 +2230,7 @@ umbrellas: [101]
                 $global:LASTEXITCODE = 0
             }
 
-            $tempSpecLeaf2 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+            $tempSpecLeaf2 = New-TempSpecPath
             @'
 schema_version: 2
 control_tower: 704
