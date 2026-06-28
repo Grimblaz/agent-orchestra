@@ -13,4 +13,4 @@ Closes #
 - [ ] CE Gate evidence captured (if customer-facing surface changed)
 
 <!-- vocab-pointer -->
-> **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](HOW-IT-WORKS.md#vocab).
+> **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../HOW-IT-WORKS.md#vocab).

@@ -44,10 +44,10 @@ This keeps prompts concise while preserving depth when needed.
 | `implementation-discipline` | Minimal implementation workflow for plan-driven coding | ✅ Included |
 | `naming-register-policy` | Two-register naming policy for agent-orchestra: rules for when machine codes stay as-is vs get human names or first-use expansion. Use when authoring human-facing prose, sweeping rename-candidates, or resolving what a code like SMC-20 means. DO NOT USE FOR: deciding whether to create new vocabulary (use design-exploration), auditing docs for general readability (use ai-first-documentation for agent docs or #750/#751 for human docs). | ✅ Included |
 | `parallel-execution` | Build-test orchestration protocol for parallel or serial implementation lanes | ✅ Included |
+| `persist-changes` | Git-portable commit+push primitive for applied changes. Caller-parameterized; no Code-Conductor session flags. Use after a validated terminal step to commit staged fix files and push to the current branch's PR head remote. DO NOT USE FOR: new-PR creation (that is Code-Conductor Step 4 git push -u origin); force-push; or any scenario requiring git add -A. | ✅ Included |
 | `plan-authoring` | Implementation-plan authoring methodology | ✅ Included |
 | `plugin-release-hygiene` | Version-bump guardrail and Claude startup drift backstop guidance | ✅ Included |
 | `post-pr-review` | Post-merge checklist for archiving, documentation, versioning, and release tagging | ✅ Included |
-| `persist-changes` | Git-portable commit+push primitive for applied changes. Caller-parameterized; no Code-Conductor session flags. Use after a validated terminal step to commit staged fix files and push to the current branch's PR head remote. DO NOT USE FOR: new-PR creation (that is Code-Conductor Step 4 git push -u origin); force-push; or any scenario requiring git add -A. | ✅ Included |
 | `pre-commit-formatting` | Final markdown and whitespace formatting backstop before validation | ✅ Included |
 | `process-analysis` | Retrospective and process-analysis methodology for workflow review | ✅ Included |
 | `process-retrospective` | Deferred process-retrospective frame-port skeleton | ✅ Included |

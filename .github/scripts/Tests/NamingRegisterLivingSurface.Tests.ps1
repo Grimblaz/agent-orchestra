@@ -5,7 +5,11 @@
 #     Growth-enforcement for new surfaces is #751's scope, not this guard.
 #   - "now-coupled / wall-clock dependent" term-absence assertions are FORWARD GUARDS:
 #     zero current in-scope occurrences; the assertion prevents future regressions.
-#   - Pointer-presence is text-based (sentinel check); does not validate live link resolution.
+#   - Term-absence assertions use hardcoded string literals (static decision). The register
+#     currently has exactly 2 rename-candidate terms, matching the assertions below.
+#     If register.json grows new rename-candidate entries, revisit toward a data-driven loop.
+#   - Pointer-presence uses exact depth-relative link resolution to detect depth-wrong paths.
+#     Each surface's expected vocab link is computed from its directory depth below repo root.
 
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
@@ -30,11 +34,6 @@ BeforeAll {
     # Surfaces that receive the vocab-pointer check (HOW-IT-WORKS.md is the target, not a holder)
     $script:PointerSurfaces = $script:AllSurfaces | Where-Object { $_ -ne 'HOW-IT-WORKS.md' }
 
-    # Load rename-candidate terms from register.json dynamically
-    $registerPath = Join-Path $script:RepoRoot 'skills/naming-register-policy/assets/register.json'
-    $register = Get-Content $registerPath -Raw | ConvertFrom-Json
-    $script:RenameCandidates = @($register | Where-Object { $_.register -eq 'rename-candidate' } | Select-Object -ExpandProperty term)
-
     # HOW-IT-WORKS.md path (used in multiple Describe blocks)
     $script:HowItWorksPath = Join-Path $script:RepoRoot 'HOW-IT-WORKS.md'
 
@@ -55,6 +54,19 @@ BeforeAll {
             if (-not $inFence) { $outsideFence.Add($line) }
         }
         return $outsideFence
+    }
+
+    # Helper: compute the correct depth-relative vocab link for a surface path.
+    # Depth = number of directory levels below repo root (path segments minus 1).
+    # E.g. 'CLAUDE.md' (0 levels) → 'HOW-IT-WORKS.md#vocab'
+    #      'skills/README.md' (1 level) → '../HOW-IT-WORKS.md#vocab'
+    #      '.github/PULL_REQUEST_TEMPLATE.md' (1 level) → '../HOW-IT-WORKS.md#vocab'
+    #      'Documents/Design/experience-owner.md' (2 levels) → '../../HOW-IT-WORKS.md#vocab'
+    function Get-ExpectedVocabLink {
+        param([string]$RelativeSurfacePath)
+        $depth = ($RelativeSurfacePath -split '[/\\]').Count - 1
+        $prefix = '../' * $depth
+        return "${prefix}HOW-IT-WORKS.md#vocab"
     }
 }
 
@@ -224,100 +236,115 @@ Describe "Rename-candidate term absence" {
 
 Describe "Vocab-pointer presence" {
     # 12 surfaces (all except HOW-IT-WORKS.md which is the target, not a pointer holder)
+    # Link assertions use Get-ExpectedVocabLink to compute the depth-relative path and match it
+    # inside Markdown link parentheses — e.g. (../HOW-IT-WORKS.md#vocab) — which correctly
+    # rejects depth-wrong bare paths like (HOW-IT-WORKS.md#vocab) in a .github/ nested file.
     It "CLAUDE.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot 'CLAUDE.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It "CLAUDE.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It "CLAUDE.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot 'CLAUDE.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink 'CLAUDE.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
     It "skills/README.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot 'skills/README.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It "skills/README.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It "skills/README.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot 'skills/README.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink 'skills/README.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
     It "CUSTOMIZATION.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot 'CUSTOMIZATION.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It "CUSTOMIZATION.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It "CUSTOMIZATION.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot 'CUSTOMIZATION.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink 'CUSTOMIZATION.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
     It "Documents/Design/agent-body-architecture.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/agent-body-architecture.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It "Documents/Design/agent-body-architecture.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It "Documents/Design/agent-body-architecture.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/agent-body-architecture.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink 'Documents/Design/agent-body-architecture.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
     It "Documents/Design/frame-architecture.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/frame-architecture.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It "Documents/Design/frame-architecture.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It "Documents/Design/frame-architecture.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/frame-architecture.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink 'Documents/Design/frame-architecture.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
     It "Documents/Design/session-memory-contract.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/session-memory-contract.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It "Documents/Design/session-memory-contract.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It "Documents/Design/session-memory-contract.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/session-memory-contract.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink 'Documents/Design/session-memory-contract.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
     It "Documents/Design/hub-artifact-paths-audit.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/hub-artifact-paths-audit.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It "Documents/Design/hub-artifact-paths-audit.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It "Documents/Design/hub-artifact-paths-audit.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/hub-artifact-paths-audit.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink 'Documents/Design/hub-artifact-paths-audit.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
     It "Documents/Design/copilot-deprecation.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/copilot-deprecation.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It "Documents/Design/copilot-deprecation.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It "Documents/Design/copilot-deprecation.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/copilot-deprecation.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink 'Documents/Design/copilot-deprecation.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
     It "Documents/Design/experience-owner.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/experience-owner.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It "Documents/Design/experience-owner.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It "Documents/Design/experience-owner.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot 'Documents/Design/experience-owner.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink 'Documents/Design/experience-owner.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
     It ".github/ISSUE_TEMPLATE/bug_report.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot '.github/ISSUE_TEMPLATE/bug_report.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It ".github/ISSUE_TEMPLATE/bug_report.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It ".github/ISSUE_TEMPLATE/bug_report.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot '.github/ISSUE_TEMPLATE/bug_report.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink '.github/ISSUE_TEMPLATE/bug_report.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
     It ".github/ISSUE_TEMPLATE/feature_request.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot '.github/ISSUE_TEMPLATE/feature_request.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It ".github/ISSUE_TEMPLATE/feature_request.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It ".github/ISSUE_TEMPLATE/feature_request.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot '.github/ISSUE_TEMPLATE/feature_request.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink '.github/ISSUE_TEMPLATE/feature_request.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
     It ".github/PULL_REQUEST_TEMPLATE.md contains the vocab-pointer sentinel" {
         $content = Get-Content (Join-Path $script:RepoRoot '.github/PULL_REQUEST_TEMPLATE.md') -Raw
         $content | Should -Match '<!--\s*vocab-pointer\s*-->' -Because "every in-scope surface must carry the vocab-pointer sentinel"
     }
-    It ".github/PULL_REQUEST_TEMPLATE.md contains a link to HOW-IT-WORKS.md#vocab" {
+    It ".github/PULL_REQUEST_TEMPLATE.md contains the correct depth-relative link to HOW-IT-WORKS.md#vocab" {
         $content = Get-Content (Join-Path $script:RepoRoot '.github/PULL_REQUEST_TEMPLATE.md') -Raw
-        $content | Should -Match 'HOW-IT-WORKS\.md#vocab' -Because "every in-scope surface must link readers to the plain-language vocabulary"
+        $expectedLink = Get-ExpectedVocabLink '.github/PULL_REQUEST_TEMPLATE.md'
+        $content | Should -Match ('\(' + [regex]::Escape($expectedLink) + '\)') -Because "vocab-pointer must use the correct depth-relative path (expected: '$expectedLink')"
     }
 }
