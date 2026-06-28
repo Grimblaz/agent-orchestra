@@ -725,6 +725,10 @@ Describe 'frame-credit-ledger cost integration' {
             $result.Comment | Should -Match '<!-- cost-pattern-data'
             # Preservation notice must be surfaced in the output (> [!NOTE] block)
             $result.Comment | Should -Match 'NOTE'
+            # Verify the prior block's content survived (not replaced by fresh-empty render).
+            # The prior body contains 'generated_at: 2026-04-01' which the fresh stub does not.
+            # A clobber would produce only 'pr: 467' with no prior timestamp.
+            $result.Comment | Should -Match '2026-04-01'
         }
 
         It 'returns use_prior=true when current is unknown and prior is complete' {

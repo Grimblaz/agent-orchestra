@@ -623,36 +623,60 @@ Describe 'Invoke-CostTranscriptWalk' {
             $script:TestRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         }
 
-        It 'admits events from two slug dirs that both resolve to the same git remote identity' {
-            # Both slug dirs contain events whose first-event cwd is the real repo root.
-            # git -C $TestRepoRoot remote get-url origin resolves to the same URL for both,
-            # so identity matching admits both dirs.
-            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-d2-$([System.Guid]::NewGuid())"
-            $branch = 'feature/d2-cross-clone'
+        It 'admits events from two slug dirs with different cwd paths that resolve to the same git remote identity (AC3)' {
+            # Get the target remote URL from the real repo
+            $targetRemote = @(& git -C $script:TestRepoRoot remote get-url origin 2>&1) | Select-Object -First 1
+            if ($global:LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($targetRemote)) {
+                Set-ItResult -Skipped -Because 'cannot resolve test repo remote (no git remote configured)'
+                return
+            }
+            $targetRemote = $targetRemote.Trim()
 
+            $tmpProj = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-ac3-$([System.Guid]::NewGuid())"
+            $tmpProjects = Join-Path $tmpProj 'projects'
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+
+            # Primary slug — events cwd is the actual repo root
             $primarySlug = Get-CostTranscriptSlug -CwdPath $script:TestRepoRoot
-            $primaryDir = Join-Path $tmp $primarySlug
+            $primaryDir = Join-Path $tmpProjects $primarySlug
             $null = New-Item -ItemType Directory -Path $primaryDir -Force
 
-            # Second slug dir — different name (simulates a cross-clone slug) but also has
-            # events pointing to the real repo root so git resolves the same identity.
-            $siblingSlug = 'cross-clone-sibling-slug'
-            $siblingDir = Join-Path $tmp $siblingSlug
+            # Sibling clone — a DIFFERENT cwd path, but same remote URL (simulates sibling clone)
+            $siblingCwdPath = Join-Path $tmpProj 'sibling-clone'
+            $null = New-Item -ItemType Directory -Path $siblingCwdPath -Force
+            $null = & git init $siblingCwdPath 2>&1
+            $null = & git -C $siblingCwdPath remote add origin $targetRemote  # same remote as TestRepoRoot
+
+            $siblingSlug = Get-CostTranscriptSlug -CwdPath $siblingCwdPath
+            $siblingDir = Join-Path $tmpProjects $siblingSlug
             $null = New-Item -ItemType Directory -Path $siblingDir -Force
 
-            $evPrimary = script:New-AssistantEvent -Uuid 'd2-primary-01' -Cwd $script:TestRepoRoot -Branch $branch
-            $evSibling = script:New-AssistantEvent -Uuid 'd2-sibling-01' -Cwd $script:TestRepoRoot -Branch $branch
+            $branch = 'feature/ac3-test'
 
-            script:Write-TestJsonl -Path (Join-Path $primaryDir 'session.jsonl') -Events @($evPrimary)
-            script:Write-TestJsonl -Path (Join-Path $siblingDir 'session.jsonl') -Events @($evSibling)
+            # Primary event — cwd = real repo root
+            @(@{
+                type = 'assistant'; uuid = 'ac3-primary-01'; timestamp = '2026-01-01T00:00:00Z'
+                cwd = $script:TestRepoRoot; gitBranch = $branch
+                message = @{ usage = @{ input_tokens = 10; output_tokens = 5 }; content = @() }
+            }) | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 10 } |
+                Set-Content (Join-Path $primaryDir 'session.jsonl') -Encoding utf8NoBOM
 
-            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:TestRepoRoot -ProjectsRoot $tmp -RepoRoot $script:TestRepoRoot)
+            # Sibling event — cwd = sibling clone path (DIFFERENT from primary, same remote)
+            @(@{
+                type = 'assistant'; uuid = 'ac3-sibling-01'; timestamp = '2026-01-01T00:00:00Z'
+                cwd = $siblingCwdPath; gitBranch = $branch  # different path, same remote
+                message = @{ usage = @{ input_tokens = 10; output_tokens = 5 }; content = @() }
+            }) | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 10 } |
+                Set-Content (Join-Path $siblingDir 'session.jsonl') -Encoding utf8NoBOM
 
-            # Both dirs resolve to the same git remote identity — both events admitted.
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:TestRepoRoot -ProjectsRoot $tmpProjects -RepoRoot $script:TestRepoRoot)
+
+            # AC3: both slug dirs admitted because both resolve to the same git identity
             $result.Count | Should -Be 2
-            $uuids = @($result | ForEach-Object { $_['uuid'] } | Sort-Object)
-            $uuids | Should -Be @('d2-primary-01', 'd2-sibling-01')
-            Remove-Item -Recurse -Force $tmp
+            @($result | Where-Object { $_['uuid'] -eq 'ac3-primary-01' }).Count | Should -Be 1
+            @($result | Where-Object { $_['uuid'] -eq 'ac3-sibling-01' }).Count | Should -Be 1
+
+            Remove-Item -Recurse -Force $tmpProj
         }
 
         It 'excludes slug dir whose first-event cwd has unresolvable git identity (fail-closed per-candidate)' {
@@ -723,6 +747,53 @@ Describe 'Invoke-CostTranscriptWalk' {
             $result.Count | Should -Be 1
             $result[0]['uuid'] | Should -Be 'd2-worktree-hash-01'
             Remove-Item -Recurse -Force $tmp
+        }
+
+        It 'rejects slug dir whose first-event cwd resolves to a different git remote (AC4)' {
+            $tmpProj = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-ac4-$([System.Guid]::NewGuid())"
+            $tmpProjects = Join-Path $tmpProj 'projects'
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+
+            # Matching slug dir — events cwd points to the REAL repo root (same identity as target)
+            $matchSlug = Get-CostTranscriptSlug -CwdPath $script:TestRepoRoot
+            $matchDir = Join-Path $tmpProjects $matchSlug
+            $null = New-Item -ItemType Directory -Path $matchDir -Force
+
+            # Non-matching slug dir — events cwd points to a tmp git repo with a DIFFERENT remote
+            $otherRepoPath = Join-Path $tmpProj 'other-repo'
+            $null = New-Item -ItemType Directory -Path $otherRepoPath -Force
+            $null = & git init $otherRepoPath 2>&1
+            $null = & git -C $otherRepoPath remote add origin 'https://github.com/fake-org/different-repo-ac4-test'
+
+            $otherSlug = Get-CostTranscriptSlug -CwdPath $otherRepoPath
+            $otherDir = Join-Path $tmpProjects $otherSlug
+            $null = New-Item -ItemType Directory -Path $otherDir -Force
+
+            $branch = 'feature/ac4-test'
+
+            # Write matching event (should be admitted)
+            @(@{
+                type      = 'assistant'; uuid = 'ac4-match-01'; timestamp = '2026-01-01T00:00:00Z'
+                cwd = $script:TestRepoRoot; gitBranch = $branch
+                message = @{ usage = @{ input_tokens = 10; output_tokens = 5 }; content = @() }
+            }) | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 10 } |
+                Set-Content (Join-Path $matchDir 'session.jsonl') -Encoding utf8NoBOM
+
+            # Write non-matching event (should be REJECTED because different remote)
+            @(@{
+                type      = 'assistant'; uuid = 'ac4-reject-01'; timestamp = '2026-01-01T00:00:00Z'
+                cwd = $otherRepoPath; gitBranch = $branch
+                message = @{ usage = @{ input_tokens = 10; output_tokens = 5 }; content = @() }
+            }) | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 10 } |
+                Set-Content (Join-Path $otherDir 'session.jsonl') -Encoding utf8NoBOM
+
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:TestRepoRoot -ProjectsRoot $tmpProjects -RepoRoot $script:TestRepoRoot)
+
+            # AC4: different-remote slug dir must be rejected; only matching slug's event admitted
+            $result.Count | Should -Be 1
+            $result[0]['uuid'] | Should -Be 'ac4-match-01'
+
+            Remove-Item -Recurse -Force $tmpProj
         }
     }
 }
