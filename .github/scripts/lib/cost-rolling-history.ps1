@@ -559,7 +559,7 @@ function Get-CostRollingHistory {
         return @{ timed_out = $true; entries = @() }
     }
 
-    $repoViewJson = & gh repo view --json owner, name 2>&1
+    $repoViewJson = & gh repo view --json 'owner,name' 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "cost-rolling-history: gh repo view failed: $repoViewJson"
         return @{ timed_out = $false; entries = @() }
