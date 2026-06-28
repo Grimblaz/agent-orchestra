@@ -362,6 +362,16 @@ function Invoke-CostTranscriptWalk {
         }
     }
 
+    # Backward compat: include explicit slug dir when identity resolution is unavailable
+    # (e.g., tests without a real git repo). In production, identity matching already
+    # finds this dir; dedup guard prevents double-counting.
+    if (-not [string]::IsNullOrWhiteSpace($Slug)) {
+        $primarySlugDir = script:Resolve-CostWalkerPrimarySlugDir -ProjectsRoot $ProjectsRoot -Slug $Slug
+        if ($null -ne $primarySlugDir -and $slugDirs -notcontains $primarySlugDir) {
+            $slugDirs.Add($primarySlugDir)
+        }
+    }
+
     if ($slugDirs.Count -eq 0) {
         return $included
     }

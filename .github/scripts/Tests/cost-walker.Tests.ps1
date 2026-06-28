@@ -140,7 +140,8 @@ Describe 'Invoke-CostTranscriptWalk' {
             Remove-Item -Recurse -Force $tmp
         }
 
-        It 'excludes assistant events with non-matching cwd' {
+        It 'admits assistant events whose branch matches even when cwd differs from ParentCwd' {
+            # D2: cwd-equality check was removed in s3; slug-dir identity is the admission gate.
             $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
             $slug = 'test--repo'
             $slugDir = Join-Path $tmp $slug
@@ -152,7 +153,7 @@ Describe 'Invoke-CostTranscriptWalk' {
             script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events $events
 
             $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp)
-            $result.Count | Should -Be 0
+            $result.Count | Should -Be 1
             Remove-Item -Recurse -Force $tmp
         }
 
@@ -345,13 +346,15 @@ Describe 'Invoke-CostTranscriptWalk' {
             Remove-Item -Recurse -Force $tmp
         }
 
-        It 'handles event with absent cwd field as non-matching' {
+        It 'admits event with absent cwd field when branch matches (cwd check removed in s3)' {
+            # D2: Test-CostWalkerAssistantMatchesStrictFilter checks only gitBranch after s3.
+            # An event with no cwd field is admitted as long as branch matches.
             $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-test-$([System.Guid]::NewGuid())"
             $slug = 'test--repo'
             $slugDir = Join-Path $tmp $slug
             $null = New-Item -ItemType Directory -Path $slugDir -Force
 
-            # Event with no cwd field
+            # Event with no cwd field but with matching branch
             $events = @(
                 @{
                     type      = 'assistant'
@@ -364,7 +367,7 @@ Describe 'Invoke-CostTranscriptWalk' {
             script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events $events
 
             $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp)
-            $result.Count | Should -Be 0
+            $result.Count | Should -Be 1
             Remove-Item -Recurse -Force $tmp
         }
 
@@ -611,4 +614,115 @@ Describe 'Invoke-CostTranscriptWalk' {
                 Remove-Item -Recurse -Force $tmp
             }
         }
+
+    Context 'D2 — cross-clone attribution (identity matching)' {
+        BeforeAll {
+            # Resolve the actual repo root so identity resolution (git remote get-url origin)
+            # succeeds in tests. Tests that use RepoRoot use the real repo; tests that omit
+            # RepoRoot and provide only Slug rely on the backward-compat path.
+            $script:TestRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        }
+
+        It 'admits events from two slug dirs that both resolve to the same git remote identity' {
+            # Both slug dirs contain events whose first-event cwd is the real repo root.
+            # git -C $TestRepoRoot remote get-url origin resolves to the same URL for both,
+            # so identity matching admits both dirs.
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-d2-$([System.Guid]::NewGuid())"
+            $branch = 'feature/d2-cross-clone'
+
+            $primarySlug = Get-CostTranscriptSlug -CwdPath $script:TestRepoRoot
+            $primaryDir = Join-Path $tmp $primarySlug
+            $null = New-Item -ItemType Directory -Path $primaryDir -Force
+
+            # Second slug dir — different name (simulates a cross-clone slug) but also has
+            # events pointing to the real repo root so git resolves the same identity.
+            $siblingSlug = 'cross-clone-sibling-slug'
+            $siblingDir = Join-Path $tmp $siblingSlug
+            $null = New-Item -ItemType Directory -Path $siblingDir -Force
+
+            $evPrimary = script:New-AssistantEvent -Uuid 'd2-primary-01' -Cwd $script:TestRepoRoot -Branch $branch
+            $evSibling = script:New-AssistantEvent -Uuid 'd2-sibling-01' -Cwd $script:TestRepoRoot -Branch $branch
+
+            script:Write-TestJsonl -Path (Join-Path $primaryDir 'session.jsonl') -Events @($evPrimary)
+            script:Write-TestJsonl -Path (Join-Path $siblingDir 'session.jsonl') -Events @($evSibling)
+
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:TestRepoRoot -ProjectsRoot $tmp -RepoRoot $script:TestRepoRoot)
+
+            # Both dirs resolve to the same git remote identity — both events admitted.
+            $result.Count | Should -Be 2
+            $uuids = @($result | ForEach-Object { $_['uuid'] } | Sort-Object)
+            $uuids | Should -Be @('d2-primary-01', 'd2-sibling-01')
+            Remove-Item -Recurse -Force $tmp
+        }
+
+        It 'excludes slug dir whose first-event cwd has unresolvable git identity (fail-closed per-candidate)' {
+            # One matching slug dir (cwd = real repo root → identity resolves and matches).
+            # One non-matching slug dir (cwd = fake path → git fails → excluded, fail-closed).
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-d2-$([System.Guid]::NewGuid())"
+            $branch = 'feature/d2-fail-closed-candidate'
+
+            $matchSlug = Get-CostTranscriptSlug -CwdPath $script:TestRepoRoot
+            $matchDir = Join-Path $tmp $matchSlug
+            $null = New-Item -ItemType Directory -Path $matchDir -Force
+
+            $nonMatchDir = Join-Path $tmp 'non-matching-slug'
+            $null = New-Item -ItemType Directory -Path $nonMatchDir -Force
+
+            $evMatch = script:New-AssistantEvent -Uuid 'd2-match-01' -Cwd $script:TestRepoRoot -Branch $branch
+            $evNonMatch = script:New-AssistantEvent -Uuid 'd2-nomatch-01' -Cwd 'C:\fake\nonexistent\path' -Branch $branch
+
+            script:Write-TestJsonl -Path (Join-Path $matchDir 'session.jsonl') -Events @($evMatch)
+            script:Write-TestJsonl -Path (Join-Path $nonMatchDir 'session.jsonl') -Events @($evNonMatch)
+
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd $script:TestRepoRoot -ProjectsRoot $tmp -RepoRoot $script:TestRepoRoot)
+
+            # Only the matching dir's event is admitted; non-matching dir's event is excluded.
+            $result.Count | Should -Be 1
+            $result[0]['uuid'] | Should -Be 'd2-match-01'
+            Remove-Item -Recurse -Force $tmp
+        }
+
+        It 'returns empty when target identity is unresolvable and no Slug is given (fail-closed)' {
+            # When RepoRoot has no git remote AND Slug is omitted, identity resolution fails
+            # and the backward-compat path is inactive (no Slug) — result must be empty.
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-d2-$([System.Guid]::NewGuid())"
+            $branch = 'feature/d2-fail-closed-target'
+
+            $slugDir = Join-Path $tmp 'some-slug'
+            $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+            $ev = script:New-AssistantEvent -Uuid 'd2-target-fail-01' -Cwd 'C:\fake\path' -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events @($ev)
+
+            # RepoRoot points to a path with no git remote; Slug is omitted.
+            $result = @(Invoke-CostTranscriptWalk -Branch $branch -ParentCwd 'C:\fake\path' -ProjectsRoot $tmp -RepoRoot 'C:\fake\path')
+
+            # Identity resolution fails for target AND no Slug → fail-closed: empty result.
+            $result.Count | Should -Be 0
+            Remove-Item -Recurse -Force $tmp
+        }
+
+        It 'admits worktree slug dir with hash name when primary Slug is given' {
+            # Worktree session dirs use slug names like {slug}--claude-worktrees-{hash}.
+            # They are discovered via the worktree-glob path when the primary Slug is given.
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-d2-$([System.Guid]::NewGuid())"
+            $slug = 'test--repo'
+            $branch = $script:TestBranch
+
+            $worktreeDir = Join-Path $tmp "$slug--claude-worktrees-deadbeef"
+            $null = New-Item -ItemType Directory -Path $worktreeDir -Force
+
+            # Event cwd is the worktree checkout path (a normal filesystem path, not the
+            # primary repo root); branch filter is what matters after s3 cwd-check removal.
+            $ev = script:New-AssistantEvent -Uuid 'd2-worktree-hash-01' -Cwd 'C:\Users\Test\.claude\worktrees\deadbeef' -Branch $branch
+            script:Write-TestJsonl -Path (Join-Path $worktreeDir 'session.jsonl') -Events @($ev)
+
+            $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $branch -ParentCwd $script:TestCwd -ProjectsRoot $tmp)
+
+            # Worktree dir is discovered via the $Slug--claude-worktrees-* glob.
+            $result.Count | Should -Be 1
+            $result[0]['uuid'] | Should -Be 'd2-worktree-hash-01'
+            Remove-Item -Recurse -Force $tmp
+        }
+    }
 }

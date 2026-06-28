@@ -655,6 +655,56 @@ Describe 'frame-credit-ledger cost integration' {
         }
     }
 
+    Context 'D2 — non-vacuous walker accuracy' {
+
+        It 'attributed events are correct and stable across two runs' {
+            # Create a synthetic projects root with known events.
+            # 3 events on the target branch + 1 on main (must be excluded by branch filter).
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-accuracy-$([System.Guid]::NewGuid())"
+            $slug = 'c--Users-Test-myrepo'
+            $slugDir = Join-Path $tmp $slug
+            $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+            $branch = 'feature/test-accuracy'
+            $cwd = 'C:\Users\Test\myrepo'
+
+            $events = @(
+                @{ type = 'assistant'; uuid = 'acc-0001'; timestamp = '2026-01-01T00:00:00Z'; cwd = $cwd; gitBranch = $branch; message = @{ usage = @{ input_tokens = 100; output_tokens = 50 }; content = @() } }
+                @{ type = 'assistant'; uuid = 'acc-0002'; timestamp = '2026-01-01T00:01:00Z'; cwd = $cwd; gitBranch = $branch; message = @{ usage = @{ input_tokens = 200; output_tokens = 100 }; content = @() } }
+                @{ type = 'assistant'; uuid = 'acc-0003'; timestamp = '2026-01-01T00:02:00Z'; cwd = $cwd; gitBranch = 'main'; message = @{ usage = @{ input_tokens = 999; output_tokens = 999 }; content = @() } }
+                @{ type = 'assistant'; uuid = 'acc-0004'; timestamp = '2026-01-01T00:03:00Z'; cwd = $cwd; gitBranch = $branch; message = @{ usage = @{ input_tokens = 300; output_tokens = 150 }; content = @() } }
+            )
+            $events | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 10 } | Set-Content -Path (Join-Path $slugDir 'session.jsonl') -Encoding utf8NoBOM
+
+            # Run the real walker twice in isolated scriptblock scopes to verify
+            # determinism. Each scriptblock dot-sources the walker fresh so stubs
+            # in the outer test scope do not shadow the real functions.
+            # Use .GetNewClosure() to capture local variables into the scriptblock scope
+            # (avoids $using: which is only valid in remote/parallel contexts).
+            $libDir = $script:LibDir
+            $walkerBlock = {
+                param($WSlug, $WBranch, $WCwd, $WTmp, $WLibDir)
+                . (Join-Path $WLibDir 'cost-walker.ps1')
+                . (Join-Path $WLibDir 'path-normalize.ps1')
+                @(Invoke-CostTranscriptWalk -Slug $WSlug -Branch $WBranch -ParentCwd $WCwd -ProjectsRoot $WTmp)
+            }
+            $run1 = & $walkerBlock $slug $branch $cwd $tmp $libDir
+            $run2 = & $walkerBlock $slug $branch $cwd $tmp $libDir
+
+            # Non-vacuous: must find exactly the 3 target-branch events (acc-0003 is on main → excluded).
+            $run1.Count | Should -Be 3
+            # Stable across 2 runs.
+            $run2.Count | Should -Be 3
+            # UUIDs are exactly the expected set.
+            $run1Uuids = @($run1 | ForEach-Object { $_['uuid'] } | Sort-Object)
+            $run1Uuids | Should -Be @('acc-0001', 'acc-0002', 'acc-0004')
+            $run2Uuids = @($run2 | ForEach-Object { $_['uuid'] } | Sort-Object)
+            $run2Uuids | Should -BeExactly $run1Uuids
+
+            Remove-Item -Recurse -Force $tmp
+        }
+    }
+
     Context 'D1 CI-contract preservation (skip-when-absent gate)' {
 
         It 'preserves prior cost-pattern-data block when projects root is absent (CI enforce path)' {
