@@ -32,6 +32,15 @@ $MARKER_END   = '<!-- portfolio-tracker:end -->'
 # Pure helper functions (no I/O)
 # ---------------------------------------------------------------------------
 
+# Returns $true when the fetched connection was truncated (totalCount exceeds fetched
+# node count). Compares against the raw fetched nodes — never a filtered/derived set.
+# Null nodes => no data, not overflow.
+function Test-ConnectionOverflow {
+    param([int]$TotalCount, $Nodes)
+    if ($null -eq $Nodes) { return $false }
+    return $TotalCount -gt @($Nodes).Count
+}
+
 # Returns a sort-key integer for priority labels: lower = higher priority.
 function Get-PriorityKey {
     param([string[]]$labels)
@@ -505,7 +514,7 @@ function Get-PortfolioBuckets {
 # Pagination: (+N more) when totalCount > rendered count.
 # ---------------------------------------------------------------------------
 function Format-PortfolioMarkdown {
-    param($bucketModel, [string]$timestamp, [int[]]$UnresolvedNums = @())
+    param($bucketModel, [string]$timestamp, [int[]]$UnresolvedNums = @(), [int[]]$BlockedByOverflowNums = @())
 
     $sb = [System.Text.StringBuilder]::new()
 
@@ -647,6 +656,12 @@ function Format-PortfolioMarkdown {
 
     # --- Footer ---
     $null = $sb.AppendLine("portfolio content unchanged since $timestamp — rendered by render-portfolio.ps1")
+
+    if ($BlockedByOverflowNums -and $BlockedByOverflowNums.Count -gt 0) {
+        foreach ($n in $BlockedByOverflowNums) {
+            $null = $sb.AppendLine("⚠️ Issue #${n}: blockedBy overflow — excluded from startable routing (blocker list truncated at 50)")
+        }
+    }
 
     if ($UnresolvedNums -and $UnresolvedNums.Count -gt 0) {
         foreach ($n in $UnresolvedNums) {
@@ -833,7 +848,8 @@ function Invoke-PortfolioRender {
 
     # 3. Query each issue via gh GraphQL (first: 50 per connection)
     $issueStates    = [System.Collections.Generic.List[object]]::new()
-    $unresolvedNums = @()
+    $unresolvedNums         = @()
+    $blockedByOverflowNums  = @()
 
     # Build round-index map for umbrella numbers: used to tag KnownChildSet entries
     # with the correct RoundIndex so Get-PortfolioBuckets can route children correctly.
@@ -868,7 +884,7 @@ query {
       }$(if ($isUmbrella) {
 "
       subIssues(first: 50) {
-        nodes { number }
+        totalCount nodes { number }
       }"
       })
     }
@@ -908,7 +924,31 @@ query {
         }
 
         $labels       = @($issueData.labels.nodes | ForEach-Object { $_.name })
+        if (Test-ConnectionOverflow -TotalCount $issueData.labels.totalCount -Nodes $issueData.labels.nodes) {
+            Write-Warning "Issue #${num}: labels truncated ($($issueData.labels.totalCount) total, 50 fetched) — bucket routing may be incomplete."
+            if ($env:GITHUB_ACTIONS -eq 'true') {
+                Write-Host "::warning::Issue #${num} labels connection truncated (>50)"
+            }
+        }
+        # subIssues overflow check runs before blockedBy continue so warning fires even when
+        # blockedBy also overflows for the same issue (both warnings must be observable, AC5).
+        if ($isUmbrella -and $null -ne $issueData.subIssues -and
+            (Test-ConnectionOverflow -TotalCount $issueData.subIssues.totalCount -Nodes $issueData.subIssues.nodes)) {
+            Write-Warning "Issue #${num}: subIssues truncated ($($issueData.subIssues.totalCount) total, 50 fetched) — child list may be incomplete."
+            if ($env:GITHUB_ACTIONS -eq 'true') {
+                Write-Host "::warning::Issue #${num} subIssues connection truncated (>50)"
+            }
+        }
         $allBlockers  = $issueData.blockedBy.nodes
+        if (Test-ConnectionOverflow -TotalCount $issueData.blockedBy.totalCount -Nodes $issueData.blockedBy.nodes) {
+            Write-Warning "Issue #${num}: blockedBy truncated ($($issueData.blockedBy.totalCount) total, 50 fetched) — a dropped open blocker may misroute this issue as startable."
+            if ($env:GITHUB_ACTIONS -eq 'true') {
+                Write-Host "::warning::Issue #${num} blockedBy connection truncated (>50)"
+            }
+            $unresolvedNums        += $num
+            $blockedByOverflowNums += $num
+            continue
+        }
         $openBlockers = @(
             $allBlockers |
             Where-Object { $_.state -eq 'OPEN' } |
@@ -1008,7 +1048,22 @@ query {
         }
 
         $labels       = @($issueData.labels.nodes | ForEach-Object { $_.name })
+        if (Test-ConnectionOverflow -TotalCount $issueData.labels.totalCount -Nodes $issueData.labels.nodes) {
+            Write-Warning "Issue #${num}: labels truncated ($($issueData.labels.totalCount) total, 50 fetched) — bucket routing may be incomplete."
+            if ($env:GITHUB_ACTIONS -eq 'true') {
+                Write-Host "::warning::Issue #${num} labels connection truncated (>50)"
+            }
+        }
         $allBlockers  = $issueData.blockedBy.nodes
+        if (Test-ConnectionOverflow -TotalCount $issueData.blockedBy.totalCount -Nodes $issueData.blockedBy.nodes) {
+            Write-Warning "Issue #${num}: blockedBy truncated ($($issueData.blockedBy.totalCount) total, 50 fetched) — a dropped open blocker may misroute this issue as startable."
+            if ($env:GITHUB_ACTIONS -eq 'true') {
+                Write-Host "::warning::Issue #${num} blockedBy connection truncated (>50)"
+            }
+            $unresolvedNums        += $num
+            $blockedByOverflowNums += $num
+            continue
+        }
         $openBlockers = @($allBlockers | Where-Object { $_.state -eq 'OPEN' } | ForEach-Object { $_.number })
         $blockerInPlan = $true
         foreach ($b in $openBlockers) {
@@ -1052,7 +1107,7 @@ query {
 
     # 6. Format content block
     $timestamp    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    $innerContent = Format-PortfolioMarkdown -bucketModel $buckets -timestamp $timestamp -UnresolvedNums $unresolvedNums
+    $innerContent = Format-PortfolioMarkdown -bucketModel $buckets -timestamp $timestamp -UnresolvedNums $unresolvedNums -BlockedByOverflowNums $blockedByOverflowNums
     $fullContent  = "$MARKER_BEGIN`n$innerContent$MARKER_END"
 
     # 7. Splice into body
