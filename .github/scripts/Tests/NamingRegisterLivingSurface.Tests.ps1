@@ -53,6 +53,11 @@ BeforeAll {
             if ($line -match '<!--\s*vocab-seed:end\s*-->') { $inFence = $false; continue }
             if (-not $inFence) { $outsideFence.Add($line) }
         }
+        # Fence-integrity guard: a missing vocab-seed:end causes all remaining lines to be
+        # excluded from the returned set, producing false-green term-absence assertions.
+        if ($inFence) {
+            throw "vocab-seed fence malformed in '$FilePath': vocab-seed:begin found but no matching vocab-seed:end"
+        }
         return $outsideFence
     }
 
