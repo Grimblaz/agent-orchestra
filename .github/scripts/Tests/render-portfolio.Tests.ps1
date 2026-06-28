@@ -28,6 +28,12 @@ BeforeAll {
     $scriptPath = Join-Path $PSScriptRoot '..' 'render-portfolio.ps1'
     # This will fail until s4 creates the script — making tests RED.
     . $scriptPath
+
+    # New-TempSpecPath: returns a unique temp-file path for a YAML spec without creating a
+    # file on disk. Avoids the GetTempFileName() + -replace pattern which leaks the .tmp file.
+    function global:New-TempSpecPath {
+        return Join-Path ([System.IO.Path]::GetTempPath()) "$([System.Guid]::NewGuid().ToString()).yaml"
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -1222,7 +1228,7 @@ Describe 'Invoke-PortfolioRender' {
         #
         # With the Step-0 probe guard: pipeline exits before step 8 (write) → edit count = 0.
 
-        $tempSpec = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpec = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1340,7 +1346,7 @@ umbrellas: [425, 571]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpec2 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpec2 = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1410,7 +1416,7 @@ umbrellas: [425, 571]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpecCeil1 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpecCeil1 = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1479,7 +1485,7 @@ umbrellas: [425, 571]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpecCeil2 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpecCeil2 = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1549,7 +1555,7 @@ umbrellas: [425, 571]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpecCeil4 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpecCeil4 = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1631,7 +1637,7 @@ umbrellas: [425, 571]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpecNoTriage = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpecNoTriage = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1685,7 +1691,7 @@ umbrellas: [425]
             $global:LASTEXITCODE = 0
         }
 
-        $tempSpecProbe = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+        $tempSpecProbe = New-TempSpecPath
         @'
 schema_version: 2
 control_tower: 704
@@ -1707,5 +1713,624 @@ umbrellas: [425, 571]
         finally {
             if (Test-Path $tempSpecProbe) { Remove-Item $tempSpecProbe -Force -ErrorAction SilentlyContinue }
         }
+    }
+
+    # ===========================================================================
+    # Connection overflow guards (issue #746)
+    # RED until Step 2 production code adds Test-ConnectionOverflow and
+    # the per-connection overflow checks in Invoke-PortfolioRender.
+    # ===========================================================================
+    Describe 'connection overflow guards' {
+
+        # ------------------------------------------------------------------
+        # Build the shared overflow JSON in BeforeAll so it is available
+        # when BeforeEach runs.
+        # All three connections (labels, blockedBy, subIssues) have
+        # totalCount=51 but only 50 nodes — overflow on all three.
+        # blockedBy nodes are all OPEN so without overflow the issue would be
+        # "Blocked"; with overflow it must become unresolved (AC2).
+        # ------------------------------------------------------------------
+        BeforeAll {
+            $labelNodes101    = (1..50 | ForEach-Object { '{"name":"label-' + $_ + '"}' }) -join ','
+            $blockerNodes101  = (1..50 | ForEach-Object { '{"number":' + $_ + ',"title":"Blocker ' + $_ + '","state":"OPEN"}' }) -join ','
+            $subIssueNodes101 = (1..50 | ForEach-Object { '{"number":' + (1000 + $_) + '}' }) -join ','
+            $script:OverflowJsonShared = '{"data":{"repository":{"issue":{"number":101,"title":"Test truncation guard issue","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":51,"nodes":[' + $labelNodes101 + ']},"blockedBy":{"totalCount":51,"nodes":[' + $blockerNodes101 + ']},"subIssues":{"totalCount":51,"nodes":[' + $subIssueNodes101 + ']}}}}}'
+        }
+
+        BeforeEach {
+            $script:GhViewBody  = '{"body":"# Control Tower\n\nNo portfolio block yet."}'
+            $script:GhEditCallCount = 0
+            $script:GhEditArgs      = @()
+            $script:GhEditBody      = ''
+
+            $script:OverflowJson = $script:OverflowJsonShared
+
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+
+                if ($ghArgs -contains 'edit') {
+                    $script:GhEditCallCount++
+                    $bodyIdx = [Array]::IndexOf([string[]]$ghArgs, '--body')
+                    if ($bodyIdx -ge 0 -and ($bodyIdx + 1) -lt $ghArgs.Count) {
+                        $script:GhEditBody = $ghArgs[$bodyIdx + 1]
+                        # Persist the written body so the view stub returns it on the next render.
+                        # Encode as JSON so Invoke-PortfolioRender can parse it via ConvertFrom-Json.
+                        $script:GhViewBody = @{ body = $script:GhEditBody } | ConvertTo-Json -Compress
+                    }
+                    $global:LASTEXITCODE = 0
+                    return
+                }
+
+                if ($ghArgs -contains 'list') {
+                    if ($ghArgs -contains 'closed') { $global:LASTEXITCODE = 0; return '[]' }
+                    if ($ghArgs -contains 'triage') { $global:LASTEXITCODE = 0; return '[]' }
+                    # open scan: umbrella #101 (has subIssues → is umbrella)
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":101,"title":"Test truncation guard issue","labels":["subIssues"],"createdAt":"2026-01-01T00:00:00Z"}]'
+                }
+
+                if ($ghArgs -contains 'api') {
+                    $global:LASTEXITCODE = 0
+                    return $script:OverflowJson
+                }
+
+                if ($ghArgs -contains 'view') {
+                    $global:LASTEXITCODE = 0
+                    return $script:GhViewBody
+                }
+
+                $global:LASTEXITCODE = 0
+            }
+        }
+
+        AfterEach {
+            Remove-Item function:global:gh -ErrorAction SilentlyContinue
+            $script:GhEditCallCount = 0
+            $script:GhEditArgs      = @()
+            $script:GhEditBody      = ''
+            $script:GhViewBody      = $null
+            $script:OverflowJson    = $null
+        }
+
+        It 'labels overflow emits Write-Warning mentioning labels and issue number (AC5)' {
+            # RED until Step 2 adds overflow check that calls Write-Warning when
+            # labels.totalCount > labels.nodes.Count.
+            $tempSpecOvf = New-TempSpecPath
+            @'
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [101]
+'@ | Set-Content -Path $tempSpecOvf -Encoding UTF8
+
+            try {
+                $captured = Invoke-PortfolioRender -specPath $tempSpecOvf 3>&1
+
+                $warnings = @($captured | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+                # Match-over-collection: NOT positional — any warning matching both criteria suffices.
+                $matchingWarnings = @($warnings | Where-Object { $_.Message -match 'labels' -and $_.Message -match '101' })
+                $matchingWarnings.Count | Should -BeGreaterThan 0 `
+                    -Because 'a Write-Warning mentioning "labels" and issue #101 must fire when labels overflow is detected (AC5)'
+            }
+            finally {
+                if (Test-Path $tempSpecOvf) { Remove-Item $tempSpecOvf -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It 'blockedBy overflow routes issue to unresolved section even when all visible blockers are closed (AC2)' {
+            # RED until Step 2 adds overflow check.
+            # Setup: all 50 visible blockers are CLOSED (so without overflow detection the issue
+            # would appear startable in Now/Next because no open blockers are visible).
+            # But totalCount=51 > 50 nodes → one blocker is hidden. The hidden blocker might be
+            # OPEN, so the issue MUST be routed to unresolved/overflow rather than startable.
+            # Without the Step 2 overflow check, the issue goes to Now/Next (startable) → RED.
+            # With the Step 2 check, the issue is routed to unresolved/overflow → GREEN.
+
+            $closedBlockerNodes = (1..50 | ForEach-Object { '{"number":' + $_ + ',"title":"Blocker ' + $_ + '","state":"CLOSED"}' }) -join ','
+            # Overflow ONLY on blockedBy (labels=0, subIssues=0) so this test binds the blockedBy
+            # routing guard exclusively — a disabled blockedBy guard must leave the body without
+            # any 'overflow' marker (otherwise a subIssues overflow would confound the assertion).
+            $closedBlockerOverflowJson = '{"data":{"repository":{"issue":{"number":101,"title":"Test truncated-blocker issue","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":51,"nodes":[' + $closedBlockerNodes + ']},"parent":null,"subIssues":{"totalCount":0,"nodes":[]}}}}}'
+
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+                if ($ghArgs -contains 'edit') {
+                    $script:GhEditCallCount++
+                    $bodyIdx = [Array]::IndexOf([string[]]$ghArgs, '--body')
+                    if ($bodyIdx -ge 0 -and ($bodyIdx + 1) -lt $ghArgs.Count) {
+                        $script:GhEditBody = $ghArgs[$bodyIdx + 1]
+                    }
+                    $global:LASTEXITCODE = 0; return
+                }
+                if ($ghArgs -contains 'list') {
+                    if ($ghArgs -contains 'closed') { $global:LASTEXITCODE = 0; return '[]' }
+                    if ($ghArgs -contains 'triage') { $global:LASTEXITCODE = 0; return '[]' }
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":101,"title":"Test truncated-blocker issue","labels":[],"createdAt":"2026-01-01T00:00:00Z"}]'
+                }
+                if ($ghArgs -contains 'api') { $global:LASTEXITCODE = 0; return $closedBlockerOverflowJson }
+                if ($ghArgs -contains 'view') { $global:LASTEXITCODE = 0; return '{"body":"# Control Tower\n\nNo portfolio block yet."}' }
+                $global:LASTEXITCODE = 0
+            }
+
+            $tempSpecOvf = New-TempSpecPath
+            @'
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [101]
+'@ | Set-Content -Path $tempSpecOvf -Encoding UTF8
+
+            try {
+                Invoke-PortfolioRender -specPath $tempSpecOvf
+
+                $script:GhEditBody | Should -Match '101' `
+                    -Because 'issue #101 must appear in the rendered board'
+                # With Step 2 overflow detection: issue routes to unresolved/overflow.
+                # Without overflow detection (current): all visible blockers are CLOSED so
+                # openBlockers=[] → issue goes to Now/Next (startable) — body won't match
+                # 'overflow' pattern → test FAILS RED as required.
+                # Match the specific footer text (not bare 'overflow') so a clean issue title
+                # cannot satisfy the assertion — this binds the blockedBy routing guard exactly.
+                $script:GhEditBody | Should -Match 'blockedBy overflow' `
+                    -Because 'blockedBy overflow must route #101 to the overflow section: visible blockers are all closed but totalCount=51 means a hidden blocker exists (AC2)'
+                $script:GhEditBody | Should -Not -Match 'not found in GitHub' `
+                    -Because 'a blockedBy-overflow issue exists in GitHub and must not render the false "not found — remove from sequence.yaml" footer line (P-M1 regression guard)'
+
+                # AC3 assertion: #101 must be specifically annotated in the v2 overflow footer.
+                # The v2 board uses ⚠️ Issue #N: blockedBy overflow — excluded from startable routing
+                # (not Now/Next/Blocked sections, which are retired v1 headings).
+                $script:GhEditBody | Should -Match '⚠️ Issue #101.*blockedBy overflow' `
+                    -Because 'issue #101 must appear in the overflow footer annotation — excluded from startable routing (AC3)'
+                # AC3 negative: #101 must not appear as a Triage (startable) item.
+                $triageSection = [regex]::Match($script:GhEditBody, '(?s)##[^\r\n]*Triage[\r\n]+(?<triage>.*?)##').Groups['triage'].Value
+                $triageSection | Should -Not -Match '(?m)#101\b' `
+                    -Because 'blockedBy overflow must exclude #101 from the Triage (startable) section (AC3)'
+            }
+            finally {
+                if (Test-Path $tempSpecOvf) { Remove-Item $tempSpecOvf -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It 'subIssues overflow emits Write-Warning mentioning subIssues and issue number (AC5)' {
+            # RED until Step 2 adds overflow check for subIssues.totalCount > subIssues.nodes.Count.
+            $tempSpecOvf = New-TempSpecPath
+            @'
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [101]
+'@ | Set-Content -Path $tempSpecOvf -Encoding UTF8
+
+            try {
+                $captured = Invoke-PortfolioRender -specPath $tempSpecOvf 3>&1
+
+                $warnings = @($captured | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+                # Match-over-collection: any warning matching both criteria suffices.
+                $matchingWarnings = @($warnings | Where-Object { $_.Message -match 'subIssues' -and $_.Message -match '101' })
+                $matchingWarnings.Count | Should -BeGreaterThan 0 `
+                    -Because 'a Write-Warning mentioning "subIssues" and issue #101 must fire when subIssues overflow is detected (AC5)'
+            }
+            finally {
+                if (Test-Path $tempSpecOvf) { Remove-Item $tempSpecOvf -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It 'render still completes with gh issue edit called AND overflow warning emitted (AC6 warn-and-continue)' {
+            # RED until Step 2: overflow guards must fire a Write-Warning AND still let render complete.
+            # This test requires BOTH conditions simultaneously:
+            #   1. at least one overflow warning was emitted (RED without Step 2 — no overflow code yet)
+            #   2. render completes (gh issue edit called >= 1)
+            # Condition 1 is the RED driver — current code emits no overflow warnings.
+            $tempSpecOvf = New-TempSpecPath
+            @'
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [101]
+'@ | Set-Content -Path $tempSpecOvf -Encoding UTF8
+
+            try {
+                $captured = Invoke-PortfolioRender -specPath $tempSpecOvf 3>&1
+
+                # Condition 1 (RED driver): at least one overflow warning must have been emitted.
+                $overflowWarnings = @($captured | Where-Object {
+                    $_ -is [System.Management.Automation.WarningRecord] -and
+                    ($_.Message -match 'overflow' -or $_.Message -match 'totalCount' -or $_.Message -match 'labels' -or $_.Message -match 'blockedBy' -or $_.Message -match 'subIssues')
+                })
+                $overflowWarnings.Count | Should -BeGreaterThan 0 `
+                    -Because 'at least one overflow warning must be emitted before we can verify warn-and-continue (AC6 RED driver)'
+
+                # Condition 2 (non-regression): render must complete despite the warning.
+                $script:GhEditCallCount | Should -BeGreaterThan 0 `
+                    -Because 'render must complete and call gh issue edit at least once even when overflow is detected (AC6 warn-and-continue)'
+            }
+            finally {
+                if (Test-Path $tempSpecOvf) { Remove-Item $tempSpecOvf -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It 'idempotency: two renders of overflow issue produce identical body containing overflow marker (AC7)' {
+            # Two parts:
+            #   1. The rendered body must contain an overflow marker (Part 1 RED driver — no
+            #      overflow code yet, so the body won't have 'overflow' in it → fails RED)
+            #   2. Second render must be a no-op: Get-SplicedBody detects the portfolio block is
+            #      already present (identical) and returns $null, skipping gh issue edit (AC7 true idempotency)
+            $tempSpecOvf = New-TempSpecPath
+            @'
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [101]
+'@ | Set-Content -Path $tempSpecOvf -Encoding UTF8
+
+            try {
+                Invoke-PortfolioRender -specPath $tempSpecOvf
+                $firstBody = $script:GhEditBody
+
+                # Part 1 (RED driver): body must contain overflow marker.
+                # Without Step 2, no overflow indicator appears → fails RED.
+                $firstBody | Should -Match 'overflow' `
+                    -Because 'overflow must be reflected in the rendered board body for idempotency to be meaningful (AC7 RED driver)'
+
+                # Reset call tracking for second render
+                $script:GhEditCallCount = 0
+                $script:GhEditBody      = ''
+
+                Invoke-PortfolioRender -specPath $tempSpecOvf
+
+                # Part 2 (true idempotency): second render must be a no-op — Get-SplicedBody detects
+                # the portfolio block is already present and returns $null, skipping gh issue edit.
+                $script:GhEditCallCount | Should -Be 0 `
+                    -Because 'second render of an already-written board must be a no-op (AC7 no-op detection — Get-SplicedBody returns $null when content is identical)'
+                $script:GhViewBody | Should -Match 'overflow' `
+                    -Because 'persisted board body must still contain the overflow marker after the idempotent second render'
+            }
+            finally {
+                if (Test-Path $tempSpecOvf) { Remove-Item $tempSpecOvf -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It 'GITHUB_ACTIONS annotation emits ::warning:: to information stream when env var set (M6/AC3)' {
+            # RED until Step 2 adds GITHUB_ACTIONS annotation emission via Write-Host
+            # (information stream 6, NOT warning stream 3) when overflow is detected in CI.
+            $previousGithubActions = $env:GITHUB_ACTIONS
+            $tempSpecOvf = New-TempSpecPath
+            @'
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [101]
+'@ | Set-Content -Path $tempSpecOvf -Encoding UTF8
+
+            try {
+                $env:GITHUB_ACTIONS = 'true'
+                # Capture information stream (6) — Write-Host output goes here.
+                $output = Invoke-PortfolioRender -specPath $tempSpecOvf 6>&1
+                $annotations = @($output | Where-Object { $_ -match '::warning::' })
+                $annotations.Count | Should -BeGreaterThan 0 `
+                    -Because 'at least one ::warning:: annotation must be emitted to the information stream when GITHUB_ACTIONS is set and overflow is detected (M6/AC3)'
+            }
+            finally {
+                if ($null -eq $previousGithubActions) {
+                    Remove-Item env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
+                } else {
+                    $env:GITHUB_ACTIONS = $previousGithubActions
+                }
+                if (Test-Path $tempSpecOvf) { Remove-Item $tempSpecOvf -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It 'warning message does not inject workflow commands from issue title (M9 log-injection guard)' {
+            # RED until Step 2 ensures warning messages interpolate only safe integer issue#
+            # and literal connection name — never the issue title or label names.
+            # A malicious issue title containing "::error::" must not appear in any warning
+            # or annotation, preventing CI log injection.
+
+            $previousGithubActions = $env:GITHUB_ACTIONS
+            $injectLabelNodes   = (1..50 | ForEach-Object { '{"name":"lbl-' + $_ + '"}' }) -join ','
+            $injectSubIssueNodes = (1..50 | ForEach-Object { '{"number":' + (1000 + $_) + '}' }) -join ','
+            $script:InjectJson = '{"data":{"repository":{"issue":{"number":102,"title":"::error:: injected","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":51,"nodes":[' + $injectLabelNodes + ']},"blockedBy":{"totalCount":0,"nodes":[]},"subIssues":{"totalCount":51,"nodes":[' + $injectSubIssueNodes + ']}}}}}'
+
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+                if ($ghArgs -contains 'edit') { $script:GhEditCallCount++; $global:LASTEXITCODE = 0; return }
+                if ($ghArgs -contains 'list') {
+                    if ($ghArgs -contains 'closed') { $global:LASTEXITCODE = 0; return '[]' }
+                    if ($ghArgs -contains 'triage') { $global:LASTEXITCODE = 0; return '[]' }
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":102,"title":"::error:: injected","labels":["subIssues"],"createdAt":"2026-01-01T00:00:00Z"}]'
+                }
+                if ($ghArgs -contains 'api') { $global:LASTEXITCODE = 0; return $script:InjectJson }
+                if ($ghArgs -contains 'view') { $global:LASTEXITCODE = 0; return '{"body":"# Control Tower\n\nNo portfolio block yet."}' }
+                $global:LASTEXITCODE = 0
+            }
+
+            $tempSpecInject = New-TempSpecPath
+            @'
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [102]
+'@ | Set-Content -Path $tempSpecInject -Encoding UTF8
+
+            try {
+                $env:GITHUB_ACTIONS = 'true'
+                # Capture warning stream (3) to check for title injection
+                $captured3 = Invoke-PortfolioRender -specPath $tempSpecInject 3>&1
+                $warnings = @($captured3 | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+
+                # RED driver: overflow must have produced at least one warning — otherwise the
+                # injection-absence check is vacuously satisfied. Without Step 2, no overflow
+                # warnings are emitted, so this assertion fails → test is RED.
+                $overflowWarnings = @($warnings | Where-Object {
+                    $_.Message -match 'overflow' -or $_.Message -match 'totalCount' -or
+                    $_.Message -match 'labels' -or $_.Message -match 'subIssues'
+                })
+                $overflowWarnings.Count | Should -BeGreaterThan 0 `
+                    -Because 'overflow must produce at least one warning before injection-absence can be verified (M9 RED driver)'
+
+                # Warning messages must NOT contain ::error:: (injected from title)
+                $injectedWarnings = @($warnings | Where-Object { $_.Message -match '::error::' })
+                $injectedWarnings.Count | Should -Be 0 `
+                    -Because 'overflow warning messages must not embed the issue title — no ::error:: from title injection (M9)'
+
+                # Capture information stream (6) to check annotation for newline injection
+                $captured6 = Invoke-PortfolioRender -specPath $tempSpecInject 6>&1
+                $annotations = @($captured6 | Where-Object { $_ -match '::warning::' })
+
+                $annotations.Count | Should -BeGreaterThan 0 `
+                    -Because 'GITHUB_ACTIONS overflow handling must emit at least one ::warning:: annotation before injection safety can be verified (M9 count guard)'
+
+                # ::warning:: annotations must not contain a newline (would inject a second command)
+                foreach ($ann in $annotations) {
+                    $ann.ToString() | Should -Not -Match "`n" `
+                        -Because '::warning:: annotation must not contain a newline (prevents multi-command log injection, M9)'
+                }
+            }
+            finally {
+                if ($null -eq $previousGithubActions) {
+                    Remove-Item env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
+                } else {
+                    $env:GITHUB_ACTIONS = $previousGithubActions
+                }
+                if (Test-Path $tempSpecInject) { Remove-Item $tempSpecInject -Force -ErrorAction SilentlyContinue }
+                $script:InjectJson = $null
+            }
+        }
+
+        It 'leaf-loop (float/non-umbrella) blockedBy overflow routes issue to overflow section, not startable (AC2 leaf path)' {
+            # Guards leaf-loop guard at render-portfolio.ps1:1058-1065 (the blockedBy overflow
+            # check inside foreach ($num in $openLeafCandidateNums)).
+            # Fixture: spec has umbrella #101; gh issue list open returns #101 AND #102.
+            # #102 is a non-umbrella float (no subIssues label, not in spec rounds).
+            # #102's blockedBy has totalCount=51 with 50 CLOSED nodes — without the leaf
+            # guard, #102's openBlockers=[] → classified startable (Now/Next). With the guard,
+            # it routes to the overflow section.
+            $closedLeafBlockers = (1..50 | ForEach-Object { '{"number":' + $_ + ',"title":"Blocker ' + $_ + '","state":"CLOSED"}' }) -join ','
+            # v2 leaf query selects subIssues(first:1){totalCount} (no nodes) — totalCount:0 keeps #102 a pure leaf.
+            $leafOverflowJson = '{"data":{"repository":{"issue":{"number":102,"title":"Leaf truncated-blocker issue","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":51,"nodes":[' + $closedLeafBlockers + ']},"parent":null,"subIssues":{"totalCount":0}}}}}'
+            # Childless umbrella #101 (no overflow) so only #102 exercises the leaf guard.
+            $umbrellaMinimalJson = '{"data":{"repository":{"issue":{"number":101,"title":"Umbrella issue","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"parent":null,"subIssues":{"totalCount":0,"nodes":[]}}}}}'
+            $probeJson = '{"data":{"repository":{"issue":{"parent":null,"subIssues":{"totalCount":0}}}}}'
+
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+                if ($ghArgs -contains 'edit') {
+                    $script:GhEditCallCount++
+                    $bodyIdx = [Array]::IndexOf([string[]]$ghArgs, '--body')
+                    if ($bodyIdx -ge 0 -and ($bodyIdx + 1) -lt $ghArgs.Count) {
+                        $script:GhEditBody = $ghArgs[$bodyIdx + 1]
+                    }
+                    $global:LASTEXITCODE = 0; return
+                }
+                if ($ghArgs -contains 'list') {
+                    if ($ghArgs -contains 'closed') { $global:LASTEXITCODE = 0; return '[]' }
+                    if ($ghArgs -contains 'triage') { $global:LASTEXITCODE = 0; return '[]' }
+                    # open scan: umbrella #101 + leaf float #102
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":101,"title":"Umbrella issue","labels":[],"createdAt":"2026-01-01T00:00:00Z"},{"number":102,"title":"Leaf truncated-blocker issue","labels":[],"createdAt":"2026-01-01T00:00:00Z"}]'
+                }
+                if ($ghArgs -contains 'api') {
+                    # v2 dispatch-by-number: Step-0 probe queries the control tower (#704),
+                    # then the umbrella loop queries #101, then the leaf loop queries #102.
+                    $queryStr = $ghArgs | Where-Object { $_ -like 'query=*' } | Select-Object -Last 1
+                    $issueNum = 0
+                    if ($queryStr -match 'issue\(number:\s*(\d+)') { $issueNum = [int]$Matches[1] }
+                    $global:LASTEXITCODE = 0
+                    if ($issueNum -eq 704) { return $probeJson }
+                    if ($issueNum -eq 101) { return $umbrellaMinimalJson }
+                    return $leafOverflowJson
+                }
+                if ($ghArgs -contains 'view') {
+                    $global:LASTEXITCODE = 0
+                    return '{"body":"# Control Tower\n\nNo portfolio block yet."}'
+                }
+                $global:LASTEXITCODE = 0
+            }
+
+            $tempSpecLeaf = New-TempSpecPath
+            @'
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [101]
+'@ | Set-Content -Path $tempSpecLeaf -Encoding UTF8
+
+            try {
+                $captured = Invoke-PortfolioRender -specPath $tempSpecLeaf 3>&1
+
+                # Leaf blockedBy overflow must emit a Write-Warning
+                $warnings = @($captured | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+                $leafWarnings = @($warnings | Where-Object { $_.Message -match 'blockedBy' -and $_.Message -match '102' })
+                $leafWarnings.Count | Should -BeGreaterThan 0 `
+                    -Because 'leaf-loop blockedBy overflow must emit a Write-Warning naming issue #102 and connection blockedBy (AC5 leaf path)'
+
+                # Leaf blockedBy overflow must route #102 to the overflow section, not Now/Next.
+                # Match the specific footer text so a clean issue title cannot satisfy it.
+                $script:GhEditBody | Should -Match 'blockedBy overflow' `
+                    -Because 'leaf-loop blockedBy overflow must render #102 in the overflow section (AC2 leaf path)'
+                $script:GhEditBody | Should -Not -Match 'not found in GitHub' `
+                    -Because 'a leaf blockedBy-overflow issue must not render the false "not found" footer line (P-M1 regression guard, leaf path)'
+
+                # AC3 assertion: #102 must be specifically annotated in the v2 overflow footer.
+                # The v2 board uses ⚠️ Issue #N: blockedBy overflow — excluded from startable routing
+                # (not Now/Next/Blocked sections, which are retired v1 headings).
+                $script:GhEditBody | Should -Match '⚠️ Issue #102.*blockedBy overflow' `
+                    -Because 'issue #102 must appear in the overflow footer annotation — excluded from startable routing (AC3 leaf path)'
+                # AC3 negative: #102 must not appear as a Triage (startable) item.
+                $triageSection = [regex]::Match($script:GhEditBody, '(?s)##[^\r\n]*Triage[\r\n]+(?<triage>.*?)##').Groups['triage'].Value
+                $triageSection | Should -Not -Match '(?m)#102\b' `
+                    -Because 'blockedBy overflow must exclude #102 from the Triage (startable) section (AC3 leaf path)'
+            }
+            finally {
+                Remove-Item function:global:gh -ErrorAction SilentlyContinue
+                if (Test-Path $tempSpecLeaf) { Remove-Item $tempSpecLeaf -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It 'leaf-loop labels overflow emits Write-Warning mentioning labels and issue number (AC5 leaf path)' {
+            # Guards leaf-loop labels guard at render-portfolio.ps1:1051-1056.
+            $leafLabelsNodes  = (1..50 | ForEach-Object { '{"name":"lbl-' + $_ + '"}' }) -join ','
+            # v2 leaf query selects subIssues(first:1){totalCount} (no nodes).
+            $leafLabelsJson   = '{"data":{"repository":{"issue":{"number":102,"title":"Leaf labels overflow","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":51,"nodes":[' + $leafLabelsNodes + ']},"blockedBy":{"totalCount":0,"nodes":[]},"parent":null,"subIssues":{"totalCount":0}}}}}'
+            $umbrellaMinimalJson2 = '{"data":{"repository":{"issue":{"number":101,"title":"Umbrella issue","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"parent":null,"subIssues":{"totalCount":0,"nodes":[]}}}}}'
+            $probeJson2 = '{"data":{"repository":{"issue":{"parent":null,"subIssues":{"totalCount":0}}}}}'
+
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+                if ($ghArgs -contains 'edit') {
+                    $script:GhEditCallCount++
+                    $bodyIdx = [Array]::IndexOf([string[]]$ghArgs, '--body')
+                    if ($bodyIdx -ge 0 -and ($bodyIdx + 1) -lt $ghArgs.Count) {
+                        $script:GhEditBody = $ghArgs[$bodyIdx + 1]
+                    }
+                    $global:LASTEXITCODE = 0; return
+                }
+                if ($ghArgs -contains 'list') {
+                    if ($ghArgs -contains 'closed') { $global:LASTEXITCODE = 0; return '[]' }
+                    if ($ghArgs -contains 'triage') { $global:LASTEXITCODE = 0; return '[]' }
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":101,"title":"Umbrella issue","labels":[],"createdAt":"2026-01-01T00:00:00Z"},{"number":102,"title":"Leaf labels overflow","labels":[],"createdAt":"2026-01-01T00:00:00Z"}]'
+                }
+                if ($ghArgs -contains 'api') {
+                    # v2 dispatch-by-number: #704 probe, #101 umbrella, #102 leaf.
+                    $queryStr = $ghArgs | Where-Object { $_ -like 'query=*' } | Select-Object -Last 1
+                    $issueNum = 0
+                    if ($queryStr -match 'issue\(number:\s*(\d+)') { $issueNum = [int]$Matches[1] }
+                    $global:LASTEXITCODE = 0
+                    if ($issueNum -eq 704) { return $probeJson2 }
+                    if ($issueNum -eq 101) { return $umbrellaMinimalJson2 }
+                    return $leafLabelsJson
+                }
+                if ($ghArgs -contains 'view') {
+                    $global:LASTEXITCODE = 0
+                    return '{"body":"# Control Tower\n\nNo portfolio block yet."}'
+                }
+                $global:LASTEXITCODE = 0
+            }
+
+            $tempSpecLeaf2 = New-TempSpecPath
+            @'
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [101]
+'@ | Set-Content -Path $tempSpecLeaf2 -Encoding UTF8
+
+            try {
+                $captured = Invoke-PortfolioRender -specPath $tempSpecLeaf2 3>&1
+
+                $warnings = @($captured | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+                $leafLabelWarnings = @($warnings | Where-Object { $_.Message -match 'labels' -and $_.Message -match '102' })
+                $leafLabelWarnings.Count | Should -BeGreaterThan 0 `
+                    -Because 'leaf-loop labels overflow must emit a Write-Warning naming issue #102 and connection labels (AC5 leaf path)'
+            }
+            finally {
+                Remove-Item function:global:gh -ErrorAction SilentlyContinue
+                if (Test-Path $tempSpecLeaf2) { Remove-Item $tempSpecLeaf2 -Force -ErrorAction SilentlyContinue }
+            }
+        }
+    }
+}
+
+# ===========================================================================
+# Test-ConnectionOverflow pure predicate (no I/O, no gh stub needed)
+# ===========================================================================
+# RED until Step 2 adds Test-ConnectionOverflow to render-portfolio.ps1.
+# This Describe block is OUTSIDE Invoke-PortfolioRender so it needs no stub.
+Describe 'Test-ConnectionOverflow' {
+
+    It 'returns $true when totalCount (51) exceeds node count (50) — overflow case' {
+        # Canonical overflow: API returned 50 nodes but totalCount is 51.
+        $nodes = @(1..50 | ForEach-Object { [PSCustomObject]@{ number = $_ } })
+        Test-ConnectionOverflow -TotalCount 51 -Nodes $nodes | Should -BeTrue `
+            -Because 'totalCount (51) > node count (50) is a truncation overflow'
+    }
+
+    It 'returns $false when totalCount equals node count (50/50) — boundary no-overflow' {
+        # Exact match: no pages were dropped.
+        $nodes = @(1..50 | ForEach-Object { [PSCustomObject]@{ number = $_ } })
+        Test-ConnectionOverflow -TotalCount 50 -Nodes $nodes | Should -BeFalse `
+            -Because 'totalCount (50) == node count (50) is the boundary non-overflow case'
+    }
+
+    It 'returns $true when totalCount (51) exceeds a smaller node count (40) — semantics check' {
+        # Confirms the predicate compares against actual returned count, not a fixed page size.
+        $nodes = @(1..40 | ForEach-Object { [PSCustomObject]@{ number = $_ } })
+        Test-ConnectionOverflow -TotalCount 51 -Nodes $nodes | Should -BeTrue `
+            -Because 'totalCount (51) > node count (40): overflow regardless of page sparsity'
+    }
+
+    It 'returns $false for single-element connection (1/1) — no scalar-unwrap throw' {
+        # PowerShell auto-unwraps single-element arrays; the helper must handle this
+        # without throwing a comparison error.
+        $nodes = @([PSCustomObject]@{ number = 99 })
+        Test-ConnectionOverflow -TotalCount 1 -Nodes $nodes | Should -BeFalse `
+            -Because 'single-element connection is not overflow; scalar-unwrap must not cause a throw'
+    }
+
+    It 'returns $false for empty connection (0/0)' {
+        # Zero totalCount, zero nodes — vacuously not truncated.
+        $nodes = @()
+        Test-ConnectionOverflow -TotalCount 0 -Nodes $nodes | Should -BeFalse `
+            -Because 'empty connection (0 totalCount, 0 nodes) is not overflow'
+    }
+
+    It 'returns $false when nodes is $null and totalCount=5 (M3: no-data-is-not-overflow)' {
+        # M3 no-data-is-not-overflow: a null nodes collection means the field was absent
+        # from the response (e.g. non-umbrella issue has no subIssues field).
+        # Absence of data is not evidence of truncation — must return $false, not throw.
+        Test-ConnectionOverflow -TotalCount 5 -Nodes $null | Should -BeFalse `
+            -Because 'null nodes means the connection field was absent — absence is not overflow (M3)'
+    }
+
+    It 'returns $false when totalCount=50 and 50 raw nodes include closed items (M3 closed-blocker analog)' {
+        # M3 closed-blocker analog: the predicate operates on the RAW fetched node set,
+        # NOT on a downstream-filtered subset (e.g. only OPEN blockers).
+        # totalCount=50, 50 raw nodes fetched → no overflow, even if 10 are CLOSED.
+        # A regression passing filtered nodes would incorrectly report overflow.
+        $rawNodes = @(
+            1..10  | ForEach-Object { [PSCustomObject]@{ number = $_;    state = 'CLOSED' } }
+            11..50 | ForEach-Object { [PSCustomObject]@{ number = $_;    state = 'OPEN'   } }
+        )
+        Test-ConnectionOverflow -TotalCount 50 -Nodes $rawNodes | Should -BeFalse `
+            -Because 'totalCount=50 with 50 raw nodes is not overflow even when some are closed (M3: use raw count)'
+    }
+}
+
+# ===========================================================================
+# Query-string assertion (M1: totalCount field must be in subIssues umbrella query)
+# ===========================================================================
+Describe 'render-portfolio query strings' {
+
+    It 'subIssues umbrella query selects totalCount (M1 regression guard)' {
+        # M1: the subIssues connection in the umbrella GraphQL query must request
+        # totalCount so that Test-ConnectionOverflow can detect truncation.
+        # Reading the script source and asserting the field is present.
+        # If a future edit drops totalCount from the subIssues block, this test turns RED.
+        $scriptContent = Get-Content -Path $scriptPath -Raw
+        $scriptContent | Should -Match 'subIssues\(first:\s*\d+\)\s*\{[^}]*totalCount' `
+            -Because 'the subIssues connection block in the umbrella GraphQL query must include totalCount for overflow detection (M1)'
     }
 }

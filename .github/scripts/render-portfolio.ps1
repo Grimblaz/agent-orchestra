@@ -32,6 +32,15 @@ $MARKER_END   = '<!-- portfolio-tracker:end -->'
 # Pure helper functions (no I/O)
 # ---------------------------------------------------------------------------
 
+# Returns $true when the fetched connection was truncated (totalCount exceeds fetched
+# node count). Compares against the raw fetched nodes — never a filtered/derived set.
+# Null nodes => no data, not overflow.
+function Test-ConnectionOverflow {
+    param([int]$TotalCount, $Nodes)
+    if ($null -eq $Nodes) { return $false }
+    return $TotalCount -gt @($Nodes).Count
+}
+
 # Returns a sort-key integer for priority labels: lower = higher priority.
 function Get-PriorityKey {
     param([string[]]$labels)
@@ -418,7 +427,7 @@ function Get-PortfolioBuckets {
 # Get-SplicedBody strips the footer line for idempotency comparison — do not move it.
 # ---------------------------------------------------------------------------
 function Format-PortfolioMarkdown {
-    param($bucketModel, [string]$timestamp, [int[]]$UnresolvedNums = @())
+    param($bucketModel, [string]$timestamp, [int[]]$UnresolvedNums = @(), [int[]]$BlockedByOverflowNums = @())
 
     $sb = [System.Text.StringBuilder]::new()
 
@@ -502,6 +511,13 @@ function Format-PortfolioMarkdown {
     if ($bucketModel.IntegrityWarnings) {
         foreach ($warn in $bucketModel.IntegrityWarnings) {
             $null = $sb.AppendLine($warn)
+        }
+    }
+
+    # --- BlockedByOverflowNums (truncated blocker list → excluded from startable routing) ---
+    if ($BlockedByOverflowNums -and $BlockedByOverflowNums.Count -gt 0) {
+        foreach ($n in $BlockedByOverflowNums) {
+            $null = $sb.AppendLine("⚠️ Issue #${n}: blockedBy overflow — excluded from startable routing (blocker list truncated at 50)")
         }
     }
 
@@ -693,7 +709,8 @@ query {
     # Each umbrella query includes parent { number } and subIssues(first:50) so
     # Get-PortfolioBuckets v2 can detect ActiveChildren, drift, and triage.
     $issueStates    = [System.Collections.Generic.List[object]]::new()
-    $unresolvedNums = @()
+    $unresolvedNums        = @()
+    $blockedByOverflowNums = @()
 
     foreach ($num in $allIssueNums) {
         $query = @"
@@ -752,7 +769,32 @@ query {
         }
 
         $labels       = @($issueData.labels.nodes | ForEach-Object { $_.name })
+        if (Test-ConnectionOverflow -TotalCount $issueData.labels.totalCount -Nodes $issueData.labels.nodes) {
+            Write-Warning "Issue #${num}: labels truncated ($($issueData.labels.totalCount) total, 50 fetched) — bucket routing may be incomplete."
+            if ($env:GITHUB_ACTIONS -eq 'true') {
+                Write-Host "::warning::Issue #${num} labels connection truncated (>50)"
+            }
+        }
+        # subIssues overflow check runs before the blockedBy continue so the warning fires
+        # even when blockedBy also overflows for the same umbrella (both must be observable, AC5).
+        # v2: every iteration of this loop is an umbrella, so no $isUmbrella guard is needed —
+        # only guard against a null subIssues field.
+        if ($null -ne $issueData.subIssues -and
+            (Test-ConnectionOverflow -TotalCount $issueData.subIssues.totalCount -Nodes $issueData.subIssues.nodes)) {
+            Write-Warning "Issue #${num}: subIssues truncated ($($issueData.subIssues.totalCount) total, 50 fetched) — child list may be incomplete."
+            if ($env:GITHUB_ACTIONS -eq 'true') {
+                Write-Host "::warning::Issue #${num} subIssues connection truncated (>50)"
+            }
+        }
         $allBlockers  = $issueData.blockedBy.nodes
+        if (Test-ConnectionOverflow -TotalCount $issueData.blockedBy.totalCount -Nodes $issueData.blockedBy.nodes) {
+            Write-Warning "Issue #${num}: blockedBy truncated ($($issueData.blockedBy.totalCount) total, 50 fetched) — a dropped open blocker may misroute this issue as startable."
+            if ($env:GITHUB_ACTIONS -eq 'true') {
+                Write-Host "::warning::Issue #${num} blockedBy connection truncated (>50)"
+            }
+            $blockedByOverflowNums += $num
+            continue
+        }
         $openBlockers = @(
             $allBlockers |
             Where-Object { $_.state -eq 'OPEN' } |
@@ -843,7 +885,21 @@ query {
         }
 
         $labels       = @($issueData.labels.nodes | ForEach-Object { $_.name })
+        if (Test-ConnectionOverflow -TotalCount $issueData.labels.totalCount -Nodes $issueData.labels.nodes) {
+            Write-Warning "Issue #${num}: labels truncated ($($issueData.labels.totalCount) total, 50 fetched) — bucket routing may be incomplete."
+            if ($env:GITHUB_ACTIONS -eq 'true') {
+                Write-Host "::warning::Issue #${num} labels connection truncated (>50)"
+            }
+        }
         $allBlockers  = $issueData.blockedBy.nodes
+        if (Test-ConnectionOverflow -TotalCount $issueData.blockedBy.totalCount -Nodes $issueData.blockedBy.nodes) {
+            Write-Warning "Issue #${num}: blockedBy truncated ($($issueData.blockedBy.totalCount) total, 50 fetched) — a dropped open blocker may misroute this issue as startable."
+            if ($env:GITHUB_ACTIONS -eq 'true') {
+                Write-Host "::warning::Issue #${num} blockedBy connection truncated (>50)"
+            }
+            $blockedByOverflowNums += $num
+            continue
+        }
         $openBlockers = @($allBlockers | Where-Object { $_.state -eq 'OPEN' } | ForEach-Object { $_.number })
         $blockerInPlan = $true
         foreach ($b in $openBlockers) {
@@ -921,7 +977,7 @@ query {
 
     # 6. Format content block
     $timestamp    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-    $innerContent = Format-PortfolioMarkdown -bucketModel $buckets -timestamp $timestamp -UnresolvedNums $unresolvedNums
+    $innerContent = Format-PortfolioMarkdown -bucketModel $buckets -timestamp $timestamp -UnresolvedNums $unresolvedNums -BlockedByOverflowNums $blockedByOverflowNums
     $fullContent  = "$MARKER_BEGIN`n$innerContent$MARKER_END"
 
     # 7. Splice into body
