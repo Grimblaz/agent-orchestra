@@ -880,7 +880,16 @@ function Invoke-RenderMode {
         "- **${BT}examples/{stack}/*.md${BT}**: Reference templates for new consumer repo setup, not loaded at runtime by agents."
     ) -join "`n"
 
-    # Assemble all sections in the required order (10 sections)
+    # vocab-pointer footer (issue #750): ≤1-hop escape hatch to the plain-language
+    # vocabulary. This doc is rendered, so the footer must be emitted here rather than
+    # hand-appended; a manual edit would be flagged as drift by the staleness gate.
+    # Path is depth-relative from Documents/Design/ (two levels below repo root).
+    $sectionVocabPointer = @(
+        '<!-- vocab-pointer -->',
+        "> **Unfamiliar with a code or term?** Shortcodes like ${BT}SMC-NN${BT}, ${BT}D1/D2/D3${BT}, and ${BT}CE Gate${BT} are defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab)."
+    ) -join "`n"
+
+    # Assemble all sections in the required order (11 sections)
     $doc = $sectionAuditMeta + "`n`n" +
            $sectionPurpose + "`n`n" +
            $sectionCustomer + "`n`n" +
@@ -891,7 +900,8 @@ function Invoke-RenderMode {
            $sectionUnresolvedExperience + "`n`n" +
            $sectionHistoricalContext + "`n`n" +
            $sectionStaleness + "`n`n" +
-           $sectionOutOfScope + "`n"
+           $sectionOutOfScope + "`n`n" +
+           $sectionVocabPointer + "`n"
 
     # Ensure output directory exists
     $outputDir = Split-Path $outputPath -Parent
