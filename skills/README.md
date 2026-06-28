@@ -20,11 +20,12 @@ Each skill should use this flow:
 
 This keeps prompts concise while preserving depth when needed.
 
-## Available Skills (47)
+## Available Skills (53)
 
 | Skill | Purpose | Status |
 | ----- | ------- | ------ |
 | `adversarial-review` | Evidence-first prosecution and defense methodology for review workflows | ✅ Included |
+| `ai-first-documentation` | Research-backed standards for documentation in AI-first codebases: context-file architecture (CLAUDE.md, skills, subagents, rules), multi-agent interop, and project-doc organization, with a tiered audit rubric. Use when authoring or auditing CLAUDE.md/AGENTS.md, deciding where guidance belongs, or running a documentation gap analysis. DO NOT USE FOR: post-implementation doc updates (use documentation-finalization) or reference sidecar setup (use project-references). | ✅ Included |
 | `bdd-scenarios` | Structured Given/When/Then scenario authoring with ID traceability and CE Gate coverage gap detection | ✅ Included |
 | `brainstorming` | Structured Socratic questioning for exploring ideas and solutions | ✅ Included |
 | `browser-canvas-testing` | VS Code native browser tool behavior for canvas-based games | ✅ Included |
@@ -34,20 +35,24 @@ This keeps prompts concise while preserving depth when needed.
 | `customer-experience` | Reusable customer framing and CE evidence methodology | ✅ Included |
 | `design-exploration` | Technical design option comparison and decision-framing workflow | ✅ Included |
 | `documentation-finalization` | Documentation cleanup and design-doc maintenance workflow | ✅ Included |
+| `engagement-record-emission` | Marker contract for Segment-A maintainer-evidence and cross-session engagement-state preservation. Use when an agent exits its phase. DO NOT USE FOR: runtime code execution, test writing, or PR creation. | ✅ Included |
 | `frame-credit-emission` | Frame credit row emission and deferred credit-input methodology | ✅ Included |
 | `frame-credit-ledger` | Warn-only frame port-coverage ledger posted as a PR comment after `gh pr create` | ✅ Included |
 | `frame-spine-lookup` | Frame spine lookup methodology for specialist plan-slice retrieval | ✅ Included |
 | `frontend-design` | Guide for creating distinctive UI designs that avoid generic templates | ✅ Included |
 | `guidance-measurement` | Guidance-complexity measurement tooling and deterministic analysis guidance | ✅ Included |
 | `implementation-discipline` | Minimal implementation workflow for plan-driven coding | ✅ Included |
+| `naming-register-policy` | Two-register naming policy for agent-orchestra: rules for when machine codes stay as-is vs get human names or first-use expansion. Use when authoring human-facing prose, sweeping rename-candidates, or resolving what a code like SMC-20 means. DO NOT USE FOR: deciding whether to create new vocabulary (use design-exploration), auditing docs for general readability (use ai-first-documentation for agent docs or #750/#751 for human docs). | ✅ Included |
 | `parallel-execution` | Build-test orchestration protocol for parallel or serial implementation lanes | ✅ Included |
 | `plan-authoring` | Implementation-plan authoring methodology | ✅ Included |
 | `plugin-release-hygiene` | Version-bump guardrail and Claude startup drift backstop guidance | ✅ Included |
 | `post-pr-review` | Post-merge checklist for archiving, documentation, versioning, and release tagging | ✅ Included |
+| `persist-changes` | Git-portable commit+push primitive for applied changes. Caller-parameterized; no Code-Conductor session flags. Use after a validated terminal step to commit staged fix files and push to the current branch's PR head remote. DO NOT USE FOR: new-PR creation (that is Code-Conductor Step 4 git push -u origin); force-push; or any scenario requiring git add -A. | ✅ Included |
 | `pre-commit-formatting` | Final markdown and whitespace formatting backstop before validation | ✅ Included |
 | `process-analysis` | Retrospective and process-analysis methodology for workflow review | ✅ Included |
 | `process-retrospective` | Deferred process-retrospective frame-port skeleton | ✅ Included |
 | `process-troubleshooting` | Five-scenario guide for diagnosing common orchestration failure patterns | ✅ Included |
+| `project-references` | Reference discoverability and loading methodology for Agent Orchestra. Use when project reference sidecars, index, or citation structure is relevant to the workflow or documentation. DO NOT USE FOR: general code navigation, symbol lookup, or when project reference structure is not relevant to the current task. | ✅ Included |
 | `property-based-testing` | Incremental rollout policy for property-based testing | ✅ Included |
 | `refactoring-methodology` | Proportionate refactoring workflow for touched files and nearby debt | ✅ Included |
 | `research-methodology` | Evidence-driven technical research and recommendation workflow | ✅ Included |
@@ -58,6 +63,7 @@ This keeps prompts concise while preserving depth when needed.
 | `session-startup` | Automatic startup cleanup guard for new conversations | ✅ Included |
 | `skill-creator` | Guide for creating new skills with proper frontmatter format | ✅ Included |
 | `software-architecture` | Clean Architecture, SOLID principles, and architectural decision guidance | ✅ Included |
+| `solution-authoring` | Reusable engagement-gate methodology for content-authoring structured questions in upstream phases. Use when classifying a decision as load-bearing or routine, authoring a decision brief, handling an override or decline, capturing articulation, or evaluating skip rules. DO NOT USE FOR: GitHub setup, completion-marker ownership, or adversarial review pipeline orchestration. | ✅ Included |
 | `specification-authoring` | Structured authoring guidance for formal specifications | ✅ Included |
 | `step-commit` | Discrete validated-step commit workflow for Code-Conductor | ✅ Included |
 | `subagent-env-handshake` | Claude subagent environment-handshake contract for tree-grounded claims | ✅ Included |
