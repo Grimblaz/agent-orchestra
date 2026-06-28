@@ -1594,6 +1594,7 @@ function Invoke-FrameCreditLedger {
                     Slug      = $slug
                     Branch    = $costBranch
                     ParentCwd = $repoRoot
+                    RepoRoot  = $repoRoot  # D2: used by identity-based slug discovery
                 }
                 if ($null -ne $resolvedIssueNumber) {
                     $walkParameters['IssueNumber'] = [int]$resolvedIssueNumber
