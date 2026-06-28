@@ -1,2 +1,12 @@
 schema_version: 1
-checkpoints: []
+checkpoints:
+  - id: "cp-20260628-203154"
+    timestamp: "2026-06-28T20:31:54.7099274Z"
+    reason: "CE Gate S1 — #760 fix validation"
+    metrics:
+      orchestrator_overhead.cost_estimate_usd.mean: 0
+      port.dispatches.general_purpose.cost_estimate_usd.mean: 0
+      port.experience.cost_estimate_usd.mean: 0
+      port.review.cost_estimate_usd.mean: 0
+    exclusions:
+      recent_count: 0
