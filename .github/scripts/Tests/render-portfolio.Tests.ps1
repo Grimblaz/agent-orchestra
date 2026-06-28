@@ -1638,6 +1638,8 @@ rounds:
                 # 'overflow' pattern → test FAILS RED as required.
                 $script:GhEditBody | Should -Match 'overflow' `
                     -Because 'blockedBy overflow must route #101 to an overflow section: visible blockers are all closed but totalCount=51 means a hidden blocker exists (AC2)'
+                $script:GhEditBody | Should -Not -Match 'not found in GitHub' `
+                    -Because 'a blockedBy-overflow issue exists in GitHub and must not render the false "not found — remove from sequence.yaml" footer line (P-M1 regression guard)'
             }
             finally {
                 if (Test-Path $tempSpecOvf) { Remove-Item $tempSpecOvf -Force -ErrorAction SilentlyContinue }
@@ -1849,6 +1851,146 @@ rounds:
                 Remove-Item env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
                 if (Test-Path $tempSpecInject) { Remove-Item $tempSpecInject -Force -ErrorAction SilentlyContinue }
                 $script:InjectJson = $null
+            }
+        }
+
+        It 'leaf-loop (float/non-umbrella) blockedBy overflow routes issue to overflow section, not startable (AC2 leaf path)' {
+            # Guards leaf-loop guard at render-portfolio.ps1:1058-1065 (the blockedBy overflow
+            # check inside foreach ($num in $openLeafCandidateNums)).
+            # Fixture: spec has umbrella #101; gh issue list open returns #101 AND #102.
+            # #102 is a non-umbrella float (no subIssues label, not in spec rounds).
+            # #102's blockedBy has totalCount=51 with 50 CLOSED nodes — without the leaf
+            # guard, #102's openBlockers=[] → classified startable (Now/Next). With the guard,
+            # it routes to the overflow section.
+            $closedLeafBlockers = (1..50 | ForEach-Object { '{"number":' + $_ + ',"title":"Blocker ' + $_ + '","state":"CLOSED"}' }) -join ','
+            $leafOverflowJson = '{"data":{"repository":{"issue":{"number":102,"title":"Leaf overflow issue","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":51,"nodes":[' + $closedLeafBlockers + ']}}}}}'
+            $umbrellaMinimalJson = '{"data":{"repository":{"issue":{"number":101,"title":"Umbrella issue","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"subIssues":{"totalCount":1,"nodes":[{"number":1001}]}}}}}'
+
+            $script:LeafApiCallCount = 0
+
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+                if ($ghArgs -contains 'edit') {
+                    $script:GhEditCallCount++
+                    $bodyIdx = [Array]::IndexOf([string[]]$ghArgs, '--body')
+                    if ($bodyIdx -ge 0 -and ($bodyIdx + 1) -lt $ghArgs.Count) {
+                        $script:GhEditBody = $ghArgs[$bodyIdx + 1]
+                    }
+                    $global:LASTEXITCODE = 0; return
+                }
+                if ($ghArgs -contains 'list') {
+                    if ($ghArgs -contains 'closed') { $global:LASTEXITCODE = 0; return '[]' }
+                    if ($ghArgs -contains 'triage') { $global:LASTEXITCODE = 0; return '[]' }
+                    # open scan: umbrella #101 + leaf float #102 (no subIssues label)
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":101,"title":"Umbrella issue","labels":["subIssues"],"createdAt":"2026-01-01T00:00:00Z"},{"number":102,"title":"Leaf overflow issue","labels":[],"createdAt":"2026-01-01T00:00:00Z"}]'
+                }
+                if ($ghArgs -contains 'api') {
+                    $script:LeafApiCallCount++
+                    $global:LASTEXITCODE = 0
+                    # First api call: umbrella #101 query (umbrella loop)
+                    # Second api call: leaf #102 query (leaf loop)
+                    if ($script:LeafApiCallCount -eq 1) { return $umbrellaMinimalJson }
+                    return $leafOverflowJson
+                }
+                if ($ghArgs -contains 'view') {
+                    $global:LASTEXITCODE = 0
+                    return '{"body":"# Control Tower\n\nNo portfolio block yet."}'
+                }
+                $global:LASTEXITCODE = 0
+            }
+
+            $tempSpecLeaf = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+            @'
+schema_version: 1
+control_tower: 704
+recently_closed_days: 14
+rounds:
+  - lane: main
+    round: 1
+    issues: [101]
+'@ | Set-Content -Path $tempSpecLeaf -Encoding UTF8
+
+            try {
+                $captured = Invoke-PortfolioRender -specPath $tempSpecLeaf 3>&1
+
+                # Leaf blockedBy overflow must emit a Write-Warning
+                $warnings = @($captured | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+                $leafWarnings = @($warnings | Where-Object { $_.Message -match 'blockedBy' -and $_.Message -match '102' })
+                $leafWarnings.Count | Should -BeGreaterThan 0 `
+                    -Because 'leaf-loop blockedBy overflow must emit a Write-Warning naming issue #102 and connection blockedBy (AC5 leaf path)'
+
+                # Leaf blockedBy overflow must route #102 to the overflow section, not Now/Next
+                $script:GhEditBody | Should -Match 'overflow' `
+                    -Because 'leaf-loop blockedBy overflow must render #102 in the overflow section (AC2 leaf path)'
+                $script:GhEditBody | Should -Not -Match 'not found in GitHub' `
+                    -Because 'a leaf blockedBy-overflow issue must not render the false "not found" footer line (P-M1 regression guard, leaf path)'
+            }
+            finally {
+                Remove-Item function:global:gh -ErrorAction SilentlyContinue
+                if (Test-Path $tempSpecLeaf) { Remove-Item $tempSpecLeaf -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It 'leaf-loop labels overflow emits Write-Warning mentioning labels and issue number (AC5 leaf path)' {
+            # Guards leaf-loop labels guard at render-portfolio.ps1:1051-1056.
+            $leafLabelsNodes  = (1..50 | ForEach-Object { '{"name":"lbl-' + $_ + '"}' }) -join ','
+            $leafLabelsJson   = '{"data":{"repository":{"issue":{"number":102,"title":"Leaf labels overflow","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":51,"nodes":[' + $leafLabelsNodes + ']},"blockedBy":{"totalCount":0,"nodes":[]}}}}}'
+            $umbrellaMinimalJson2 = '{"data":{"repository":{"issue":{"number":101,"title":"Umbrella issue","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"subIssues":{"totalCount":1,"nodes":[{"number":1001}]}}}}}'
+
+            $script:LeafLabelsApiCall = 0
+
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+                if ($ghArgs -contains 'edit') {
+                    $script:GhEditCallCount++
+                    $bodyIdx = [Array]::IndexOf([string[]]$ghArgs, '--body')
+                    if ($bodyIdx -ge 0 -and ($bodyIdx + 1) -lt $ghArgs.Count) {
+                        $script:GhEditBody = $ghArgs[$bodyIdx + 1]
+                    }
+                    $global:LASTEXITCODE = 0; return
+                }
+                if ($ghArgs -contains 'list') {
+                    if ($ghArgs -contains 'closed') { $global:LASTEXITCODE = 0; return '[]' }
+                    if ($ghArgs -contains 'triage') { $global:LASTEXITCODE = 0; return '[]' }
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":101,"title":"Umbrella issue","labels":["subIssues"],"createdAt":"2026-01-01T00:00:00Z"},{"number":102,"title":"Leaf labels overflow","labels":[],"createdAt":"2026-01-01T00:00:00Z"}]'
+                }
+                if ($ghArgs -contains 'api') {
+                    $script:LeafLabelsApiCall++
+                    $global:LASTEXITCODE = 0
+                    if ($script:LeafLabelsApiCall -eq 1) { return $umbrellaMinimalJson2 }
+                    return $leafLabelsJson
+                }
+                if ($ghArgs -contains 'view') {
+                    $global:LASTEXITCODE = 0
+                    return '{"body":"# Control Tower\n\nNo portfolio block yet."}'
+                }
+                $global:LASTEXITCODE = 0
+            }
+
+            $tempSpecLeaf2 = [System.IO.Path]::GetTempFileName() -replace '\.tmp$', '.yaml'
+            @'
+schema_version: 1
+control_tower: 704
+recently_closed_days: 14
+rounds:
+  - lane: main
+    round: 1
+    issues: [101]
+'@ | Set-Content -Path $tempSpecLeaf2 -Encoding UTF8
+
+            try {
+                $captured = Invoke-PortfolioRender -specPath $tempSpecLeaf2 3>&1
+
+                $warnings = @($captured | Where-Object { $_ -is [System.Management.Automation.WarningRecord] })
+                $leafLabelWarnings = @($warnings | Where-Object { $_.Message -match 'labels' -and $_.Message -match '102' })
+                $leafLabelWarnings.Count | Should -BeGreaterThan 0 `
+                    -Because 'leaf-loop labels overflow must emit a Write-Warning naming issue #102 and connection labels (AC5 leaf path)'
+            }
+            finally {
+                Remove-Item function:global:gh -ErrorAction SilentlyContinue
+                if (Test-Path $tempSpecLeaf2) { Remove-Item $tempSpecLeaf2 -Force -ErrorAction SilentlyContinue }
             }
         }
     }

@@ -945,7 +945,6 @@ query {
             if ($env:GITHUB_ACTIONS -eq 'true') {
                 Write-Host "::warning::Issue #${num} blockedBy connection truncated (>50)"
             }
-            $unresolvedNums        += $num
             $blockedByOverflowNums += $num
             continue
         }
@@ -1060,7 +1059,6 @@ query {
             if ($env:GITHUB_ACTIONS -eq 'true') {
                 Write-Host "::warning::Issue #${num} blockedBy connection truncated (>50)"
             }
-            $unresolvedNums        += $num
             $blockedByOverflowNums += $num
             continue
         }
