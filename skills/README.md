@@ -127,3 +127,6 @@ See `skill-creator/SKILL.md` for detailed guidance and `test-driven-development/
 ## Customization
 
 > Skills may include stack-specific examples. Keep conceptual guidance intact and adapt commands/selectors/URLs for your project.
+
+<!-- vocab-pointer -->
+> **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../HOW-IT-WORKS.md#vocab).

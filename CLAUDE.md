@@ -187,3 +187,6 @@ Before adding or changing any adapter that fills a frame port, read the Adapter 
 ## Issue #369 traces the full history
 
 See [issue #369](https://github.com/Grimblaz/agent-orchestra/issues/369) for the full design discussion, customer framing, and plan that produced this Claude Code integration.
+
+<!-- vocab-pointer -->
+> **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](HOW-IT-WORKS.md#vocab).

@@ -199,3 +199,6 @@ The `schema_version: 1` payload is intentionally minimal to keep the marker smal
   design history
 - [CLAUDE.md](../../CLAUDE.md) - Claude Code guide and handoff surface
 - [README.md](../../README.md) - public installation and workflow overview
+
+<!-- vocab-pointer -->
+> **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab).

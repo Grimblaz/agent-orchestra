@@ -110,3 +110,6 @@ Invoked by Code-Conductor as a subagent during the CE Gate:
 | `.github/architecture-rules.md` | Agent counts + Issue-Designer retired-name grep added |
 | `CONTRIBUTING.md` | User-facing count 6→7 |
 | `CUSTOMIZATION.md` | 13→14 agents |
+
+<!-- vocab-pointer -->
+> **Unfamiliar with a code or term?** Shortcodes like `SMC-NN`, `D1/D2/D3`, and `CE Gate` are defined in the [plain-language vocabulary](../../HOW-IT-WORKS.md#vocab).

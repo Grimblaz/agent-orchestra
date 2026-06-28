@@ -157,6 +157,7 @@ The adversarial review pipeline runs after implementation to find defects before
 
 </details>
 
+<a id="vocab"></a>
 ## 5. Plain-language vocabulary
 
 <!-- vocab-seed:begin -->
