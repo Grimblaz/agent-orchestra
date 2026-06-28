@@ -223,6 +223,50 @@ function script:Resolve-CostWalkerPrimarySlugDir {
     return $null
 }
 
+function script:Resolve-CostWalkerRepoIdentity {
+    <#
+    .SYNOPSIS
+        Normalize a git remote URL to a transport-agnostic host/path identity.
+    .DESCRIPTION
+        Fix #760-E1: collapse SSH, HTTPS, and credential-embedded URL forms to a
+        single comparable 'host/path' string so a session cloned over SSH matches
+        a ledger repo root configured over HTTPS (and vice versa).  Without this,
+        the same repo reached via different transports produces different raw URLs
+        and a session is silently excluded from attribution.
+
+        Handles:
+          - scp-like SSH:        git@github.com:owner/repo(.git)
+          - ssh:// scheme:       ssh://git@github.com/owner/repo(.git)
+          - credentialed HTTPS:  https://x-access-token:TOKEN@github.com/owner/repo
+          - plain HTTPS:         https://github.com/owner/repo(.git)
+        Returns $null for empty/whitespace input.
+    .OUTPUTS
+        [string] normalized 'host/path', or $null.
+    #>
+    param([string]$RawUrl)
+
+    if ([string]::IsNullOrWhiteSpace($RawUrl)) { return $null }
+
+    $u = $RawUrl.Trim()
+
+    # scp-like SSH form (no scheme, ':' separates host and path): git@host:owner/repo
+    if ($u -match '^[^/@]+@([^:/]+):(.+)$') {
+        $u = "$($Matches[1])/$($Matches[2])"
+    }
+    else {
+        # Strip URL scheme (https://, ssh://, git://, http://, ...)
+        $u = $u -replace '^[a-zA-Z][a-zA-Z0-9+.\-]*://', ''
+        # Strip userinfo (user@ or user:password@ / x-access-token:TOKEN@) before the host
+        $u = $u -replace '^[^/@]+@', ''
+    }
+
+    $u = $u.ToLowerInvariant().TrimEnd('/')
+    if ($u.EndsWith('.git')) { $u = $u.Substring(0, $u.Length - 4) }
+
+    if ([string]::IsNullOrWhiteSpace($u)) { return $null }
+    return $u
+}
+
 function script:Get-IdentityMatchedSlugDirs {
     param(
         [Parameter(Mandatory)][string]$ProjectsRoot,
@@ -233,9 +277,8 @@ function script:Get-IdentityMatchedSlugDirs {
     $targetIdentity = $null
     try {
         $rawUrl = @(& git -C $RepoRoot remote get-url origin 2>$null) | Select-Object -First 1
-        if ($global:LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rawUrl)) {
-            $targetIdentity = ([string]$rawUrl).Trim().ToLowerInvariant().TrimEnd('/')
-            if ($targetIdentity.EndsWith('.git')) { $targetIdentity = $targetIdentity.Substring(0, $targetIdentity.Length - 4) }
+        if ($global:LASTEXITCODE -eq 0) {
+            $targetIdentity = script:Resolve-CostWalkerRepoIdentity -RawUrl ([string]$rawUrl)
         }
     } catch { }
 
@@ -276,9 +319,8 @@ function script:Get-IdentityMatchedSlugDirs {
         $candidateIdentity = $null
         try {
             $rawUrl = @(& git -C $firstCwd remote get-url origin 2>$null) | Select-Object -First 1
-            if ($global:LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($rawUrl)) {
-                $candidateIdentity = ([string]$rawUrl).Trim().ToLowerInvariant().TrimEnd('/')
-                if ($candidateIdentity.EndsWith('.git')) { $candidateIdentity = $candidateIdentity.Substring(0, $candidateIdentity.Length - 4) }
+            if ($global:LASTEXITCODE -eq 0) {
+                $candidateIdentity = script:Resolve-CostWalkerRepoIdentity -RawUrl ([string]$rawUrl)
             }
         } catch { }
 

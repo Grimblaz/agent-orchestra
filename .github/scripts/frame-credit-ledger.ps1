@@ -1678,10 +1678,19 @@ function Invoke-FrameCreditLedger {
                     if ($null -ne $priorYaml) {
                         $priorCostData = script:ConvertFrom-CostPatternYaml -Yaml $priorYaml
                     }
-                    # Fallback: if parse fails or comment has no data block, synthesize a
-                    # minimal flat shape so preservation logic has something to compare.
+                    # Fix #760-C3: a populated prior cost-pattern-data block must never be
+                    # clobbered by an empty/partial current walk.  A block that predates the
+                    # session_completeness field parses with a null 'completeness' (and a fully
+                    # unextractable body yields $null priorCostData).  In both cases the marker's
+                    # presence means a genuine render already exists — the old contract only wrote
+                    # the block on a populated render — so default any prior block lacking an
+                    # explicit completeness to 'complete'.  Resolve-CostDataPreservation then
+                    # preserves it instead of overwriting with the empty/partial current.
                     if ($null -eq $priorCostData) {
-                        $priorCostData = @{ completeness = 'unknown' }
+                        $priorCostData = @{ completeness = 'complete' }
+                    }
+                    elseif ([string]::IsNullOrWhiteSpace([string]$priorCostData['completeness'])) {
+                        $priorCostData['completeness'] = 'complete'
                     }
                 }
             }

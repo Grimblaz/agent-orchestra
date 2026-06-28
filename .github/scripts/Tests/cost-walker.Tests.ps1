@@ -797,3 +797,51 @@ Describe 'Invoke-CostTranscriptWalk' {
         }
     }
 }
+
+Describe 'Resolve-CostWalkerRepoIdentity' {
+    BeforeAll {
+        $script:LibPath = Join-Path $PSScriptRoot '../lib/cost-walker.ps1'
+        if (Test-Path $script:LibPath) {
+            . $script:LibPath
+            . (Join-Path $PSScriptRoot '../lib/path-normalize.ps1')
+        }
+    }
+
+    Context 'transport-agnostic normalization (Fix #760-E1)' {
+        It 'normalizes plain HTTPS to host/path' {
+            script:Resolve-CostWalkerRepoIdentity -RawUrl 'https://github.com/owner/repo' |
+                Should -Be 'github.com/owner/repo'
+        }
+        It 'strips a trailing .git suffix' {
+            script:Resolve-CostWalkerRepoIdentity -RawUrl 'https://github.com/owner/repo.git' |
+                Should -Be 'github.com/owner/repo'
+        }
+        It 'normalizes scp-like SSH form to the same identity as HTTPS' {
+            $ssh   = script:Resolve-CostWalkerRepoIdentity -RawUrl 'git@github.com:owner/repo.git'
+            $https = script:Resolve-CostWalkerRepoIdentity -RawUrl 'https://github.com/owner/repo'
+            $ssh   | Should -Be 'github.com/owner/repo'
+            $ssh   | Should -Be $https -Because 'SSH and HTTPS forms of the same repo must match'
+        }
+        It 'normalizes ssh:// scheme form to the same identity' {
+            script:Resolve-CostWalkerRepoIdentity -RawUrl 'ssh://git@github.com/owner/repo.git' |
+                Should -Be 'github.com/owner/repo'
+        }
+        It 'strips credential userinfo (x-access-token) from HTTPS' {
+            script:Resolve-CostWalkerRepoIdentity -RawUrl 'https://x-access-token:ghs_SECRET@github.com/owner/repo' |
+                Should -Be 'github.com/owner/repo'
+        }
+        It 'is case-insensitive and trims trailing slashes' {
+            script:Resolve-CostWalkerRepoIdentity -RawUrl 'HTTPS://GitHub.com/Owner/Repo/' |
+                Should -Be 'github.com/owner/repo'
+        }
+        It 'returns $null for empty or whitespace input (fail-closed)' {
+            script:Resolve-CostWalkerRepoIdentity -RawUrl ''    | Should -BeNullOrEmpty
+            script:Resolve-CostWalkerRepoIdentity -RawUrl '   '  | Should -BeNullOrEmpty
+        }
+        It 'distinguishes different repos on the same host' {
+            $a = script:Resolve-CostWalkerRepoIdentity -RawUrl 'git@github.com:owner/repo-a.git'
+            $b = script:Resolve-CostWalkerRepoIdentity -RawUrl 'https://github.com/owner/repo-b'
+            $a | Should -Not -Be $b
+        }
+    }
+}
