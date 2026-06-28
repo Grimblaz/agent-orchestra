@@ -149,7 +149,7 @@ some_legacy_field: value
         function Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
         function Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
         function Get-SessionCompleteness { param([object[]]$Events, [string]$ExcludeReason = '', [string]$Branch = '') return @{ completeness = 'unknown'; excluded_from_rolling_baseline = $true; exclude_reason = 'no-events' } }
-        function Resolve-CostDataPreservation { param($Current, $Prior) return @{ action = 'emit'; reason = 'no-prior' } }
+        function Resolve-CostDataPreservation { param($Current, $Prior) return @{ use_prior = $false; notice = '' } }
         function Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
         function Format-CostPatternMarkdown { param($Attribution, $Completeness, [object[]]$AnomalyFlags, $RollingMeta, [int]$Pr, [string]$Branch) return '## Cost Pattern' }
         function Format-CostPatternYaml { param($Attribution, $Completeness, [object[]]$AnomalyFlags, [int]$Pr, [string]$Branch) return "<!-- cost-pattern-data`npr: $Pr`n-->" }
@@ -266,7 +266,7 @@ some_legacy_field: value
         function Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
         function Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
         function Get-SessionCompleteness { param([object[]]$Events, [string]$ExcludeReason = '', [string]$Branch = '') return @{ completeness = 'unknown'; excluded_from_rolling_baseline = $true; exclude_reason = 'no-events' } }
-        function Resolve-CostDataPreservation { param($Current, $Prior) return @{ action = 'emit'; reason = 'no-prior' } }
+        function Resolve-CostDataPreservation { param($Current, $Prior) return @{ use_prior = $false; notice = '' } }
         function Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
         function Format-CostPatternMarkdown {
             param($Attribution, $Completeness, [object[]]$AnomalyFlags, $RollingMeta, [int]$Pr, [string]$Branch)
@@ -282,6 +282,137 @@ some_legacy_field: value
         # Apply the same exit-code translation the top-level script applies in warn mode:
         # warn mode never sets exitCode > 0 for IsInternalError or HasBlock — it stays 0.
         # Only enforce mode escalates to exit 3 (HasBlock) or exit 5 (IsInternalError).
+        $processExitCode = 0
+        return @{
+            ExitCode = $processExitCode
+            Comment  = if ($null -ne $result.Comment) { [string]$result.Comment } else { '' }
+        }
+        }
+        finally {
+            $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = $previousInline
+            $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = $previousNoSleep
+        }
+    }
+
+    # -------------------------------------------------------------------------
+    # Variant of InvokeOrchestratorInProcess that does NOT stub
+    # Resolve-CostDataPreservation, allowing the real function (dot-sourced via
+    # the orchestrator) to run. Used by the CI-contract preserve test (AC1).
+    # Get-SessionCompleteness is still stubbed to return 'unknown' (simulating
+    # the empty-walk CI enforce condition). Invoke-CostTranscriptWalk and
+    # Get-CostAttribution stubs are preserved (s4 removes them; see s2<->s4
+    # fixture coupling note in the plan).
+    # -------------------------------------------------------------------------
+    $script:InvokeOrchestratorInProcessWithRealPreservation = {
+        param(
+            [string]$PrBody = '',
+            [string]$CostMarkdown = '## Cost Pattern',
+            [string]$CostYaml = "<!-- cost-pattern-data`npr: 467`n-->",
+            [object[]]$Comments = @(),
+            [string]$CostBranch = 'feature/test-cost-integration'
+        )
+
+        $bodyJson = (@{ body = $PrBody; comments = $Comments } | ConvertTo-Json -Compress -Depth 5)
+        $capturedCostMarkdown = $CostMarkdown
+        $capturedCostYaml = $CostYaml
+        $capturedRepoRoot = $script:RepoRoot
+
+        $previousInline = $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
+        $previousNoSleep = $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP
+        try {
+        $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = '1'
+        $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'
+
+        . $script:OrchestratorPath -Pr 467 -Mode 'warn'
+
+        function git {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'rev-parse --show-toplevel') {
+                $global:LASTEXITCODE = 0
+                return $capturedRepoRoot
+            }
+            if ($joined -match 'config --get remote\.origin\.url') {
+                $global:LASTEXITCODE = 0
+                return 'https://github.com/example/example.git'
+            }
+            if ($joined -match 'rev-parse --abbrev-ref HEAD') {
+                $global:LASTEXITCODE = 0
+                return $CostBranch
+            }
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+
+        function gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'pr view \d+ --json baseRefOid') {
+                $global:LASTEXITCODE = 0
+                return '{"baseRefOid":"abc123"}'
+            }
+            if ($joined -match 'pr view \d+ --json body') {
+                $global:LASTEXITCODE = 0
+                return $bodyJson
+            }
+            if ($joined -match 'issue view \d+ --json comments') {
+                $global:LASTEXITCODE = 0
+                return '{"comments":[]}'
+            }
+            if ($joined -match '(issue|pr) comment \d+ --body') {
+                $global:LASTEXITCODE = 0
+                return 'https://github.com/example/example/pull/467#issuecomment-1'
+            }
+            if ($joined -match 'api repos/[^/]+/[^/]+ ') {
+                $global:LASTEXITCODE = 0
+                return '{"owner":{"login":"example"},"name":"example"}'
+            }
+            if ($joined -match 'api -X PATCH repos/[^/]+/[^/]+/issues/comments/\d+') {
+                $global:LASTEXITCODE = 0
+                return '{"html_url":"https://github.com/example/example/pull/467#issuecomment-2"}'
+            }
+            if ($joined -match 'pr edit \d+ --body-file') {
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+
+        function Get-CostTranscriptSlug {
+            param([string]$CwdPath)
+            return 'test-slug'
+        }
+        function Invoke-CostTranscriptWalk {
+            param([string]$Slug, [string]$Branch, [string]$ParentCwd, [Nullable[int]]$IssueNumber = $null)
+            return @()
+        }
+        function Invoke-CostCopilotWalk {
+            param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+            return @()
+        }
+        function Get-CostAttribution {
+            param([object[]]$Events, [string]$RateTablePath = '')
+            return @{ ports = @{}; orchestrator_overhead = @{}; dispatches = @{}; totals = @{ total_cost_usd = 0.0 } }
+        }
+        function Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
+        function Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
+        # Get-SessionCompleteness returns 'unknown' — simulates the empty-walk CI enforce condition.
+        # Resolve-CostDataPreservation is NOT stubbed here; the real function (dot-sourced from the
+        # orchestrator's cost lib) is used so the skip gate can fire when prior is complete.
+        function Get-SessionCompleteness { param([object[]]$Events, [string]$ExcludeReason = '', [string]$Branch = '') return @{ completeness = 'unknown'; excluded_from_rolling_baseline = $true; exclude_reason = 'no-events' } }
+        function Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
+        function Format-CostPatternMarkdown {
+            param($Attribution, $Completeness, [object[]]$AnomalyFlags, $RollingMeta, [int]$Pr, [string]$Branch)
+            return $capturedCostMarkdown
+        }
+        function Format-CostPatternYaml {
+            param($Attribution, $Completeness, [object[]]$AnomalyFlags, [int]$Pr, [string]$Branch)
+            return $capturedCostYaml
+        }
+
+        $script:FrameCreditLedgerRepoRoot = $capturedRepoRoot
+        $result = Invoke-FrameCreditLedger -Pr 467 -Mode 'warn'
         $processExitCode = 0
         return @{
             ExitCode = $processExitCode
@@ -521,6 +652,51 @@ Describe 'frame-credit-ledger cost integration' {
             $result.ExitCode | Should -Be 0
             # Confirm the run completed and produced port coverage output
             $result.Comment | Should -Match '(?i)frame-credit-ledger-467'
+        }
+    }
+
+    Context 'D1 CI-contract preservation (skip-when-absent gate)' {
+
+        It 'preserves prior cost-pattern-data block when projects root is absent (CI enforce path)' {
+            # When the CI enforce run produces completeness='unknown' (empty walk) and
+            # the prior comment contains a session_completeness: complete block, the
+            # skip-when-absent gate must fire and the output comment must contain the
+            # prior block's cost-pattern-data plus the preservation notice.
+            # The InvokeOrchestratorInProcessWithRealPreservation variant omits the
+            # Resolve-CostDataPreservation stub so the real function can return use_prior=true.
+            $priorCostBody = "## Cost Pattern`n<!-- cost-pattern-data`nversion: 1`nsession_completeness: complete`nexcluded_from_rolling_baseline: false`ngenerated_at: 2026-04-01T00:00:00Z`nports:`nanomaly_flags: []`npr: 467`n-->"
+            $comments = @([pscustomobject]@{ body = $priorCostBody; databaseId = 2001 })
+
+            $result = & $script:InvokeOrchestratorInProcessWithRealPreservation `
+                -PrBody $script:V4AllCoveredBody `
+                -Comments $comments
+
+            $result.ExitCode | Should -Be 0
+            $result.Comment | Should -Match '<!-- cost-pattern-data'
+            # Preservation notice must be surfaced in the output (> [!NOTE] block)
+            $result.Comment | Should -Match 'NOTE'
+        }
+
+        It 'returns use_prior=true when current is unknown and prior is complete' {
+            # Unit test directly against Resolve-CostDataPreservation with the
+            # corrected flat $Prior shape (completeness + rendered_at keys).
+            . $script:OrchestratorPath -Pr 467 -Mode 'warn'
+            $prior = @{ completeness = 'complete'; rendered_at = '2026-01-01T00:00:00Z' }
+            $current = @{ completeness = 'unknown'; excluded_from_rolling_baseline = $true }
+            $result = Resolve-CostDataPreservation -Current $current -Prior $prior
+            $result['use_prior'] | Should -Be $true
+            $result['notice'] | Should -Not -BeNullOrEmpty
+        }
+
+        It 'renders fresh cost section without crash when no prior comment exists (cold start)' {
+            # Verify that when there is no prior cost-pattern-data comment (cold start),
+            # the orchestrator still renders normally — no crash, no preservation fires.
+            $result = & $script:InvokeOrchestratorInProcess `
+                -PrBody $script:V4AllCoveredBody `
+                -CostMarkdown '## Cost Pattern' `
+                -CostYaml "<!-- cost-pattern-data`npr: 467`n-->"
+            $result.ExitCode | Should -Be 0
+            $result.Comment | Should -Match '<!-- cost-pattern-data'
         }
     }
 }
