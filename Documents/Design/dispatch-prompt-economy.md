@@ -77,7 +77,7 @@ Issue #472 delivered **C2.a only** (Proceed-lite scope per the worth-it check). 
 
 **After** (~300 B — canonical-source reference + one novel constraint):
 
-> "Call @Code-Smith for Step 2: Read `<!-- plan-issue-472 --> step 2` for the
+> "Call @Code-Smith for Step 2: Read `<!-- plan-issue-N --> step 2` for the
 > full Requirement Contract. Novel constraint not in the plan: the debounce
 > timer must survive GC pressure at >100 events/sec (avoid closure capture
 > of large event payloads)."
