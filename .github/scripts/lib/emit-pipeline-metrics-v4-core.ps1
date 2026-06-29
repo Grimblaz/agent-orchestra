@@ -10,17 +10,17 @@
 
     The thin wrapper emit-pipeline-metrics-v4.ps1 dot-sources this file, calls the
     function, and translates ExitCode to a process exit code. Tests dot-source
-    this file and call the function in-process — the dot-source + in-process call
+    this file and call the function in-process -- the dot-source + in-process call
     pattern mandated by the #257 script-safety contract (no child pwsh per test).
 
     Three outcome cases (M5):
-      Case 1 — New-PipelineMetricsV4Block throws (empty/invalid -V3BaseYaml, or
+      Case 1 -- New-PipelineMetricsV4Block throws (empty/invalid -V3BaseYaml, or
                pre-existing v4 block): writes fallback body with
                <!-- cost-capture-failed --> sentinel, returns ExitCode=1.
-      Case 2 — Block built but Test-PipelineMetricsV4Block reports invalid
-               (empty credits, ≠1 marker): writes fallback body with sentinel,
+      Case 2 -- Block built but Test-PipelineMetricsV4Block reports invalid
+               (empty credits, != 1 marker): writes fallback body with sentinel,
                returns ExitCode=1.
-      Case 3 — Success: writes full body, returns ExitCode=0.
+      Case 3 -- Success: writes full body, returns ExitCode=0.
 
     Critical invariants (M8, M21):
       - The <!-- cost-capture-failed --> sentinel is written in the catch block
@@ -89,7 +89,7 @@ function Invoke-PipelineMetricsV4Emit {
                 . $accScript
                 $Credits = @(Get-FCLAccumulatedCredits -IssueNumber $IssueNumber)
             } else {
-                Write-Warning "harvest script not found at $accScript — proceeding with explicitly-passed credits only"
+                Write-Warning "harvest script not found at $accScript -- proceeding with explicitly-passed credits only"
             }
         }
 
@@ -99,27 +99,35 @@ function Invoke-PipelineMetricsV4Emit {
             -Credits $Credits `
             -DispatchCostSamples $DispatchCostSamples
 
-        # Validate (Case 2 surface: empty credits or ≠1 marker).
-        $testResult = Test-PipelineMetricsV4Block -PRBody $v4Body
-        if (-not $testResult.Valid) {
-            throw "Test-PipelineMetricsV4Block validation failed: $($testResult.FailureReason)"
-        }
-
-        # Case 3 — success: compose final body (rich content + v4 block).
+        # Compose final body FIRST (rich content + v4 block) so validation runs
+        # against the body we actually ship. A RichBody that already contains a
+        # pipeline-metrics block would otherwise produce a double-marker body that
+        # passes a v4-block-only check but fails the composed-body check.
         $finalBody = if ([string]::IsNullOrWhiteSpace($RichBody)) {
             $v4Body  # backwards-compat: no rich body passed
         } else {
             "$RichBody`n`n$v4Body"
         }
 
+        # Validate (Case 2 surface: empty credits or != 1 marker), against the
+        # composed final body so a duplicate marker fails into the sentinel fallback.
+        $testResult = Test-PipelineMetricsV4Block -PRBody $finalBody
+        if (-not $testResult.Valid) {
+            throw "Test-PipelineMetricsV4Block validation failed: $($testResult.FailureReason)"
+        }
+
+        # Case 3 -- success.
         $sentinelWritten = $true
-        Set-Content -Path $BodyFile -Value $finalBody -Encoding utf8NoBOM
+        Set-Content -LiteralPath $BodyFile -Value $finalBody -Encoding utf8NoBOM
         return [pscustomobject]@{ ExitCode = 0; SentinelWritten = $false }
     }
     catch {
         # Case 1 or 2: write fallback body + sentinel.
         $fallbackBase = if ([string]::IsNullOrWhiteSpace($RichBody)) {
-            if (-not [string]::IsNullOrWhiteSpace($V3BaseYaml)) {
+            # Only reuse V3BaseYaml when it does NOT carry a pipeline-metrics opener;
+            # reusing a poisoned base would re-ship the double-marker content that
+            # caused the failure in the first place.
+            if (-not [string]::IsNullOrWhiteSpace($V3BaseYaml) -and $V3BaseYaml -notmatch '<!--\s*pipeline-metrics') {
                 $V3BaseYaml
             } else {
                 'metrics_emission_failed: true'
@@ -129,7 +137,7 @@ function Invoke-PipelineMetricsV4Emit {
         }
         $fallbackBody = "$fallbackBase`n`n<!-- cost-capture-failed -->"
 
-        Set-Content -Path $BodyFile -Value $fallbackBody -Encoding utf8NoBOM
+        Set-Content -LiteralPath $BodyFile -Value $fallbackBody -Encoding utf8NoBOM
         $sentinelWritten = $true
 
         # Non-terminating warning keeps this function safe for in-process test
@@ -149,11 +157,11 @@ function Invoke-PipelineMetricsV4Emit {
                 $existing = Get-Content -LiteralPath $BodyFile -Raw
                 if ($existing -notmatch [regex]::Escape('<!-- cost-capture-failed -->')) {
                     $existing += "`n`n<!-- cost-capture-failed -->"
-                    Set-Content -Path $BodyFile -Value $existing -Encoding utf8NoBOM
+                    Set-Content -LiteralPath $BodyFile -Value $existing -Encoding utf8NoBOM
                 }
             }
             catch {
-                Write-Warning "emit-pipeline-metrics-v4 finally: could not write sentinel — $_"
+                Write-Warning "emit-pipeline-metrics-v4 finally: could not write sentinel -- $_"
             }
         }
     }

@@ -85,6 +85,7 @@ Describe 'script safety contract' {
                 # cost-integration.Tests.ps1 — CONVERTED in s5: all spawn-based Its now use InvokeOrchestratorInProcess (in-process pattern)
                 'frame-credit-ledger-fail-open.Tests.ps1',          # IRREDUCIBLE: 9 exit-code-contract Its that require subprocess to verify exit codes
                 'frame-credit-ledger-orchestrator.Tests.ps1',       # kept 9 real-spawn smoke layer per s2 decision
+                'frame-credit-ledger-suppress-failed-posts.Tests.ps1', # IRREDUCIBLE (#769 CR7): the off-switch bug lives in the cloned worker runspace; only a real subprocess exercises the runspace-isolation path an in-process dot-source call would mask
                 'frame-spine-core.Tests.ps1',                       # IRREDUCIBLE: 1 spawn tests -CommentBodyStdin CLI switch (stdin-pipe contract; cannot simulate in-process without production code changes)
                 'get-issue-drift.Tests.ps1',                        # IRREDUCIBLE: 1 spawn tests get-issue-drift.ps1 wrapper CLI surface (JSON output shape of the wrapper script)
                 'hub-artifact-paths-coverage.Tests.ps1',            # CLI integration tests: exercises -Diff mode against live repo; requires sub-process invocation

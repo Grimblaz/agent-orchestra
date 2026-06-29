@@ -242,6 +242,9 @@ Describe 'emit-pipeline-metrics-v4.ps1' {
 
                 $result.ExitCode    | Should -Not -Be 0
                 $result.BodyContent | Should -Match $script:SentinelRegex
+                # The poisoned opener must be absent from the fallback body (CR5):
+                # reusing the poisoned V3BaseYaml would re-ship the double marker.
+                $result.BodyContent | Should -Not -Match '<!--\s*pipeline-metrics'
             } finally {
                 Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
             }
@@ -270,6 +273,37 @@ Describe 'emit-pipeline-metrics-v4.ps1' {
                 $closesIndex  = $result.BodyContent.IndexOf('Closes #769')
                 $metricsIndex = $result.BodyContent.IndexOf('<!-- pipeline-metrics')
                 $closesIndex  | Should -BeLessThan $metricsIndex
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'fails into the sentinel path when RichBody already contains a v4 pipeline-metrics block (CR3 double-marker guard)' {
+            # A RichBody that already carries its own v4 pipeline-metrics block would,
+            # when composed with the freshly-built v4 block, produce a double-marker
+            # body. Validating the COMPOSED final body (CR3) must catch this and fail
+            # into the sentinel fallback rather than shipping two markers.
+            $richWithMarker = @(
+                '## Summary'
+                ''
+                'Closes #769'
+                ''
+                '<!-- pipeline-metrics'
+                'metrics_version: 4'
+                'pr_number: 42'
+                '-->'
+            ) -join "`n"
+
+            $bodyFile = & $script:TempBodyFile
+            try {
+                $result = & $script:InvokeScript `
+                    -BodyFile   $bodyFile `
+                    -V3BaseYaml $script:ValidV3Base `
+                    -Credits    @($script:ValidCredit) `
+                    -RichBody   $richWithMarker
+
+                $result.ExitCode    | Should -Not -Be 0
+                $result.BodyContent | Should -Match $script:SentinelRegex
             } finally {
                 Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
             }

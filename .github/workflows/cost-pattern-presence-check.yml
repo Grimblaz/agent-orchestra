@@ -16,11 +16,13 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  # Read-only: this job only calls `gh pr view` to inspect the PR body; it never writes.
   contents: read
   pull-requests: read
 
 jobs:
   check-cost-pattern:
+    name: Check cost pattern presence
     # NOTE: github.head_ref is null on issue_comment events; the startsWith() arm
     # covers pull_request events only. On issue_comment events only the cost-reduction
     # label arm fires. This is a known backstop-completeness gap (B6/P2-F3).
@@ -59,6 +61,6 @@ jobs:
           if echo "$pr_body" | grep -q '<!-- cost-capture-failed -->'; then
             echo "::error::cost-capture-failed sentinel present — emit script failed during PR creation"
           else
-            echo "::error::PR body missing <!-- pipeline-metrics block entirely"
+            echo "::error::PR body missing <!-- pipeline-metrics --> block entirely"
           fi
           exit 1

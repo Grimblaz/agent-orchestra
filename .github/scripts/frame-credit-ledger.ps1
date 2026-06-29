@@ -80,10 +80,22 @@ catch {
     $script:CostLibLoadFailed = $true
 }
 
-# Origin predicate dot-source (CI-safe; fail-open: if absent, $_isOrchestrated defaults to $false)
-$_originPredicatePath = Join-Path $PSScriptRoot 'lib/Get-FCLOriginContext.ps1'
-if (Test-Path $_originPredicatePath) {
-    . $_originPredicatePath
+# Origin predicate dot-source (CI-safe; fail-open: if absent OR malformed,
+# $_isOrchestrated defaults to $false at the consumer site via the
+# Get-Command guard). Wrapped in the same fail-open try/catch as the sibling
+# library loaders above: a present-but-malformed Get-FCLOriginContext.ps1 would
+# otherwise throw at parse/load time and abort the script BEFORE the warn-mode
+# exit 0 fail-open path, defeating the warn-only contract.
+try {
+    $_originPredicatePath = Join-Path $PSScriptRoot 'lib/Get-FCLOriginContext.ps1'
+    if (Test-Path $_originPredicatePath) {
+        . $_originPredicatePath
+    }
+}
+catch {
+    [Console]::Error.WriteLine("frame-credit-ledger: origin predicate load failed (orchestrated-origin detection disabled): $($_.Exception.Message)")
+    # Non-fatal: leave Get-FCLOriginContext undefined; the consumer guards the
+    # call with Get-Command and defaults `$_isOrchestrated = $false`.
 }
 
 # Off-switch: suppress only FAILED-state posts by default.
@@ -1209,6 +1221,16 @@ function Invoke-FrameCreditLedger {
     )
 
     $marker = "<!-- frame-credit-ledger-$Pr -->"
+
+    # Off-switch (worker-runspace safe): recompute from the process environment
+    # INSIDE the function. The top-level $_suppressFailedPosts (set near the lib
+    # dot-sources) is script-scoped and is NOT carried into the cloned worker
+    # runspace by New-FCLInitialSessionStateClone (it copies functions, global
+    # vars, and the 5 named cost vars only). Env vars are process-global and DO
+    # cross the runspace boundary (same mechanism as $env:GITHUB_HEAD_REF below),
+    # so reading the env var here makes the off-switch effective inside the worker.
+    # Truthiness convention matches the top-level assignment: strictly '1'.
+    $_suppressFailedPosts = ($env:FCL_SUPPRESS_FAILED_POSTS -eq '1')
 
     # 1. Resolve baseRefOid (best-effort; failure is non-fatal in warn mode).
     $baseRefOid = Get-FrameCreditLedgerBaseRefOid -Pr $Pr
