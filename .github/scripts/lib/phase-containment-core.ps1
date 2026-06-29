@@ -55,17 +55,19 @@ $script:ValidCategories        = @(
 function Get-PhaseContainmentBlock {
     <#
     .SYNOPSIS
-        Extracts the YAML content from a <!-- phase-containment-{ID} --> HTML comment block.
+        Extracts all YAML content blocks from <!-- phase-containment-{ID} --> HTML comment markers.
     .DESCRIPTION
-        Returns the raw YAML content as a string, or $null if the block is not found.
-        Strips code fences (``` yaml ... ``` or ``` ... ```) from the extracted content
-        before returning.
+        Returns an array of raw YAML content strings, one per block found in the text.
+        Returns $null if no blocks are found.
+        Strips code fences (``` yaml ... ``` or ``` ... ```) from each extracted block.
+        Multiple blocks in one comment body are all returned (supporting the case where
+        a judge emits multiple sustained findings into one PR comment).
     .PARAMETER Text
         The full text to search within (e.g., a GitHub issue comment body).
     .PARAMETER Id
         The ID suffix for the marker, e.g. '762' matches <!-- phase-containment-762 -->.
     .OUTPUTS
-        [string] Raw YAML content, or $null if block not found.
+        [string[]] Array of raw YAML content strings, or $null if no blocks found.
     #>
     param(
         [Parameter(Mandatory)][string]$Text,
@@ -75,33 +77,42 @@ function Get-PhaseContainmentBlock {
     $openTag  = "<!-- phase-containment-$Id -->"
     $closeTag = "<!-- /phase-containment-$Id -->"
 
-    $startIdx = $Text.IndexOf($openTag, [System.StringComparison]::Ordinal)
-    if ($startIdx -lt 0) { return $null }
+    $allBlocks  = [System.Collections.Generic.List[string]]::new()
+    $searchFrom = 0
 
-    $contentStart = $startIdx + $openTag.Length
-    $endIdx = $Text.IndexOf($closeTag, $contentStart, [System.StringComparison]::Ordinal)
-    if ($endIdx -lt 0) { return $null }
+    while ($true) {
+        $startIdx = $Text.IndexOf($openTag, $searchFrom, [System.StringComparison]::Ordinal)
+        if ($startIdx -lt 0) { break }
 
-    $raw = $Text.Substring($contentStart, $endIdx - $contentStart).Trim()
+        $contentStart = $startIdx + $openTag.Length
+        $endIdx = $Text.IndexOf($closeTag, $contentStart, [System.StringComparison]::Ordinal)
+        if ($endIdx -lt 0) { break }  # Unclosed block — stop scanning
 
-    # Strip code fences: lines matching ``` or ``` yaml (opening) and ``` (closing)
-    $lines = $raw -split '\r?\n'
-    $stripped = [System.Collections.Generic.List[string]]::new()
-    foreach ($line in $lines) {
-        if ($line -match '^\s*```') { continue }
-        $stripped.Add($line)
+        $raw = $Text.Substring($contentStart, $endIdx - $contentStart).Trim()
+
+        # Strip code fences: lines matching ``` or ``` yaml (opening) and ``` (closing)
+        $lines = $raw -split '\r?\n'
+        $stripped = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in $lines) {
+            if ($line -match '^\s*```') { continue }
+            $stripped.Add($line)
+        }
+
+        $result = ($stripped -join "`n").Trim()
+        if ($result.Length -gt 0) { $allBlocks.Add($result) }
+
+        $searchFrom = $endIdx + $closeTag.Length
     }
 
-    $result = ($stripped -join "`n").Trim()
-    if ($result.Length -eq 0) { return $null }
-    return $result
+    if ($allBlocks.Count -eq 0) { return $null }
+    return , $allBlocks.ToArray()
 }
 
 #endregion
 
 #region ConvertFrom-PhaseContainmentYaml (private/internal)
 
-function script:ConvertFrom-PhaseContainmentYaml {
+function script:ConvertFrom-PhaseContainmentYamlInternal {
     <#
     .SYNOPSIS
         Hand-rolled line-regex parser for phase-containment YAML blocks.
@@ -135,39 +146,39 @@ function script:ConvertFrom-PhaseContainmentYaml {
     $lines = $Yaml -split '\r?\n'
     foreach ($line in $lines) {
         if ($line -match '^\s*finding_key\s*:\s*(.+)$') {
-            $result['finding_key'] = $Matches[1].Trim()
+            $result['finding_key'] = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '')
         }
         elseif ($line -match '^\s*introduced_phase\s*:\s*(.+)$') {
-            $result['introduced_phase'] = $Matches[1].Trim()
+            $result['introduced_phase'] = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '')
         }
         elseif ($line -match '^\s*catchable_phase\s*:\s*(.+)$') {
-            $result['catchable_phase'] = $Matches[1].Trim()
+            $result['catchable_phase'] = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '')
         }
         elseif ($line -match '^\s*caught_stage\s*:\s*(.+)$') {
-            $result['caught_stage'] = $Matches[1].Trim()
+            $result['caught_stage'] = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '')
         }
         elseif ($line -match '^\s*escape_distance\s*:\s*(.+)$') {
-            $val = $Matches[1].Trim()
+            $val = ($Matches[1].Trim() -replace '\s+#.*$', '')
             $intVal = 0
             if ([int]::TryParse($val, [ref]$intVal)) {
                 $result['escape_distance'] = [int]$intVal
             }
         }
         elseif ($line -match '^\s*severity\s*:\s*(.+)$') {
-            $result['severity'] = $Matches[1].Trim()
+            $result['severity'] = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '')
         }
         elseif ($line -match '^\s*systemic_fix_type\s*:\s*(.+)$') {
-            $result['systemic_fix_type'] = $Matches[1].Trim()
+            $result['systemic_fix_type'] = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '')
         }
         elseif ($line -match '^\s*category\s*:\s*(.+)$') {
-            $result['category'] = $Matches[1].Trim()
+            $result['category'] = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '')
         }
         elseif ($line -match '^\s*apparatus_meta\s*:\s*(.+)$') {
-            $val = $Matches[1].Trim()
+            $val = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '').ToLowerInvariant()
             $result['apparatus_meta'] = ($val -eq 'true')
         }
         elseif ($line -match '^\s*seed\s*:\s*(.+)$') {
-            $val = $Matches[1].Trim()
+            $val = ($Matches[1].Trim() -replace '\s+#.*$', '' -replace '^[''"]|[''"]$', '').ToLowerInvariant()
             $result['seed'] = ($val -eq 'true')
         }
     }
@@ -176,12 +187,14 @@ function script:ConvertFrom-PhaseContainmentYaml {
 }
 
 # Expose ConvertFrom-PhaseContainmentYaml as a module-level function (not script-scoped only)
-# so tests can call it directly.
+# so tests can call it directly. The internal implementation lives in
+# script:ConvertFrom-PhaseContainmentYamlInternal to prevent the script:-qualifier
+# from resolving back to this wrapper in dot-source contexts (infinite recursion).
 function ConvertFrom-PhaseContainmentYaml {
     param(
         [Parameter(Mandatory)][string]$Yaml
     )
-    return script:ConvertFrom-PhaseContainmentYaml -Yaml $Yaml
+    return script:ConvertFrom-PhaseContainmentYamlInternal -Yaml $Yaml
 }
 
 #endregion

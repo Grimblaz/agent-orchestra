@@ -176,36 +176,38 @@ function Invoke-PhaseContainmentCommentScan {
         $body = $CommentBodies[$i]
         $createdAt = if ($i -lt $CreatedAtValues.Count) { $CreatedAtValues[$i] } else { '' }
 
-        $yamlText = Get-PhaseContainmentBlock -Text $body -Id $id
-        if ($null -eq $yamlText) { continue }
+        $yamlBlocks = Get-PhaseContainmentBlock -Text $body -Id $id
+        if ($null -eq $yamlBlocks) { continue }
 
-        $parsed = ConvertFrom-PhaseContainmentYaml -Yaml $yamlText
-        if ($null -eq $parsed) {
-            Write-Warning "phase-containment-rolling-history-core: failed to parse block in comment $i for ID $id"
-            continue
+        foreach ($yamlText in $yamlBlocks) {
+            $parsed = ConvertFrom-PhaseContainmentYaml -Yaml $yamlText
+            if ($null -eq $parsed) {
+                Write-Warning "phase-containment-rolling-history-core: failed to parse block in comment $i for ID $id"
+                continue
+            }
+
+            $validation = Test-PhaseContainmentEntry -Entry $parsed
+            if (-not $validation.IsValid) {
+                Write-Warning "phase-containment-rolling-history-core: invalid phase-containment block in comment $i for ID $id — $($validation.Errors -join '; ')"
+                continue
+            }
+
+            # Derive finding_key using cross-surface format
+            $stablePart    = if ($null -ne $parsed['finding_key'] -and $parsed['finding_key'] -ne '') { $parsed['finding_key'] } else { "$id:unknown" }
+            $derivedKey    = Get-PhaseContainmentFindingKey -Surface $Surface -StableFindingKey $stablePart
+
+            # Build the output entry — use the parsed finding_key directly (it may already be prefixed)
+            # The finding_key stored in the block is authoritative; we preserve it as-is per the core contract.
+            $entry = $parsed.Clone()
+            $entry['finding_key']      = $parsed['finding_key']
+            $entry['surface']          = $Surface
+            $entry['issueOrPrNumber']  = $IssueOrPrNumber
+            $entry['createdAt']        = $createdAt
+            $entry['seed']             = [bool]$parsed['seed']
+            $entry['apparatus_meta']   = [bool]$parsed['apparatus_meta']
+
+            $results.Add($entry)
         }
-
-        $validation = Test-PhaseContainmentEntry -Entry $parsed
-        if (-not $validation.IsValid) {
-            Write-Warning "phase-containment-rolling-history-core: invalid phase-containment block in comment $i for ID $id — $($validation.Errors -join '; ')"
-            continue
-        }
-
-        # Derive finding_key using cross-surface format
-        $stablePart    = if ($null -ne $parsed['finding_key'] -and $parsed['finding_key'] -ne '') { $parsed['finding_key'] } else { "$id:unknown" }
-        $derivedKey    = Get-PhaseContainmentFindingKey -Surface $Surface -StableFindingKey $stablePart
-
-        # Build the output entry — use the parsed finding_key directly (it may already be prefixed)
-        # The finding_key stored in the block is authoritative; we preserve it as-is per the core contract.
-        $entry = $parsed.Clone()
-        $entry['finding_key']      = $parsed['finding_key']
-        $entry['surface']          = $Surface
-        $entry['issueOrPrNumber']  = $IssueOrPrNumber
-        $entry['createdAt']        = $createdAt
-        $entry['seed']             = [bool]$parsed['seed']
-        $entry['apparatus_meta']   = [bool]$parsed['apparatus_meta']
-
-        $results.Add($entry)
     }
 
     return , $results.ToArray()

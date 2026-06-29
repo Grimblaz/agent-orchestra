@@ -20,7 +20,7 @@ BeforeAll {
 }
 
 Describe 'Get-PhaseContainmentBlock' {
-    It 'extracts YAML content from a valid phase-containment block' {
+    It 'extracts YAML content from a valid phase-containment block as a single-element array' {
         $text = @"
 Some preamble text.
 
@@ -33,8 +33,9 @@ Some epilogue.
 "@
         $result = Get-PhaseContainmentBlock -Text $text -Id '762'
         $result | Should -Not -BeNullOrEmpty
-        $result | Should -Match 'finding_key'
-        $result | Should -Match 'introduced_phase'
+        $result.Count | Should -Be 1
+        $result[0] | Should -Match 'finding_key'
+        $result[0] | Should -Match 'introduced_phase'
     }
 
     It 'returns $null when block is not found' {
@@ -53,8 +54,63 @@ catchable_phase: design
 <!-- /phase-containment-100 -->
 "@
         $result = Get-PhaseContainmentBlock -Text $text -Id '100'
-        $result | Should -Not -Match '```'
-        $result | Should -Match 'finding_key'
+        $result | Should -Not -BeNullOrEmpty
+        $result[0] | Should -Not -Match '```'
+        $result[0] | Should -Match 'finding_key'
+    }
+
+    It 'returns all blocks when multiple blocks appear in one comment body' {
+        $text = @"
+<!-- phase-containment-762 -->
+finding_key: code-review:gh-1111
+severity: high
+<!-- /phase-containment-762 -->
+<!-- phase-containment-762 -->
+finding_key: code-review:gh-2222
+severity: medium
+<!-- /phase-containment-762 -->
+"@
+        $result = Get-PhaseContainmentBlock -Text $text -Id '762'
+        $result | Should -Not -BeNullOrEmpty
+        $result.Count | Should -Be 2
+        $result[0] | Should -Match 'gh-1111'
+        $result[1] | Should -Match 'gh-2222'
+    }
+}
+
+Describe 'ConvertFrom-PhaseContainmentYaml - non-recursion guard' {
+    It 'returns a parsed result without hanging (CR1 regression guard)' {
+        # If the public wrapper self-recurses it hangs; this test verifies it completes.
+        $yaml = "severity: high`nfinding_key: code-review:gh-1"
+        $result = ConvertFrom-PhaseContainmentYaml -Yaml $yaml
+        $result | Should -Not -BeNullOrEmpty
+        $result['severity'] | Should -Be 'high'
+    }
+}
+
+Describe 'ConvertFrom-PhaseContainmentYaml - inline YAML comment stripping' {
+    It 'strips trailing inline YAML comment from string field' {
+        $yaml = "severity: high # this is a comment"
+        $result = ConvertFrom-PhaseContainmentYaml -Yaml $yaml
+        $result['severity'] | Should -Be 'high'
+    }
+
+    It 'strips trailing inline YAML comment from enum field' {
+        $yaml = "caught_stage: code-review # added by judge"
+        $result = ConvertFrom-PhaseContainmentYaml -Yaml $yaml
+        $result['caught_stage'] | Should -Be 'code-review'
+    }
+
+    It 'does not strip hash that is part of a value (no leading space before hash)' {
+        $yaml = "finding_key: code-review:gh-1234#suffix"
+        $result = ConvertFrom-PhaseContainmentYaml -Yaml $yaml
+        $result['finding_key'] | Should -Be 'code-review:gh-1234#suffix'
+    }
+
+    It 'normalises apparatus_meta: True (title-case) to $true' {
+        $yaml = "apparatus_meta: True"
+        $result = ConvertFrom-PhaseContainmentYaml -Yaml $yaml
+        $result['apparatus_meta'] | Should -Be $true
     }
 }
 

@@ -186,7 +186,7 @@ Before posting the design completion marker, follow `agents/Solution-Designer.ag
 
 ### Phase-containment emission
 
-After the disposition summary is finalized and before posting the `design-phase-complete` marker, emit one `<!-- phase-containment-{ID} -->` block per sustained (non-dismissed) design-challenge finding. Append these blocks onto the same `<!-- design-phase-complete-{ID} -->` issue comment:
+After the disposition summary is finalized and after posting the `design-phase-complete` marker, emit one `<!-- phase-containment-{ID} -->` block per sustained (non-dismissed) design-challenge finding by appending to the same `<!-- design-phase-complete-{ID} -->` issue comment (or editing it):
 
 - `finding_key`: `design-challenge:{issue}:{marker}:{finding_id}`
 - `introduced_phase`: set by explicit agent judgment — no default; reason which phase originated this defect
