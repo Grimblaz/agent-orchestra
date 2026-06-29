@@ -181,6 +181,23 @@ function script:ConvertFrom-CostPatternYaml {
                 $result['unmapped_session_count'] = [int](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
             }
 
+            # session_completeness (Fix #760-D1-c: needed by Resolve-CostDataPreservation)
+            if ($line -match '^session_completeness\s*:\s*(.+)$') {
+                $result['session_completeness'] = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+                # Populate completeness key so the flat shape Resolve-CostDataPreservation expects
+                # is satisfied when this parsed result is used as a Prior hashtable.
+                $result['completeness'] = $result['session_completeness']
+            }
+
+            # generated_at (Fix #760-D1-c: reconcile renderer field name to the name
+            # Resolve-CostDataPreservation reads; renderer emits generated_at, preservation
+            # reads rendered_at — map at the parse boundary so the renderer is unchanged)
+            if ($line -match '^generated_at\s*:\s*(.+)$') {
+                $parsedAt = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+                $result['generated_at'] = $parsedAt
+                $result['rendered_at'] = $parsedAt
+            }
+
             # cost_pattern_data block
             if ($line -match '^\s*cost_pattern_data\s*:\s*$') {
                 $j = $i + 1
@@ -559,7 +576,7 @@ function Get-CostRollingHistory {
         return @{ timed_out = $true; entries = @() }
     }
 
-    $repoViewJson = & gh repo view --json owner, name 2>&1
+    $repoViewJson = & gh repo view --json 'owner,name' 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "cost-rolling-history: gh repo view failed: $repoViewJson"
         return @{ timed_out = $false; entries = @() }

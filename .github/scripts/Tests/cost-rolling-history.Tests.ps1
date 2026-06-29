@@ -695,6 +695,47 @@ totals:
             ($refs | Where-Object { $_ -eq '#4690' }).Count | Should -Be 1
         }
 
+        It 'maps session_completeness->completeness and generated_at->rendered_at at the parse boundary (Fix #760-T3)' {
+            # ConvertFrom-CostPatternYaml projects the renderer's `session_completeness`
+            # and `generated_at` fields onto the `completeness` / `rendered_at` keys that
+            # Resolve-CostDataPreservation reads. Without these mappings the preservation
+            # gate silently sees null completeness and clobbers a complete prior block.
+            # The integration AC2 test hand-builds the flat shape and bypasses the parser,
+            # so this asserts the mappings directly — a revert of either line fails here.
+            $bodyText = @"
+<!-- cost-pattern-data
+version: 1
+session_completeness: complete
+generated_at: 2026-05-20T08:30:00Z
+pr: 1234
+branch: feature/issue-760-t3
+ports:
+- name: experience
+    cost_estimate_usd: 0.05
+orchestrator_overhead:
+  cost_estimate_usd: 0.01
+dispatches:
+  general_purpose_count: 1
+  unattributed_count: 0
+totals:
+  cost_estimate_usd: 0.06
+-->
+"@
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($bodyText)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.timed_out | Should -Be $false
+            $result.entries.Count | Should -Be 1
+            $entry = $result.entries[0]
+            # Both source field and mapped alias must be populated.
+            $entry['session_completeness'] | Should -Be 'complete'
+            $entry['completeness']         | Should -Be 'complete' -Because 'preservation gate reads $Prior[''completeness'']'
+            $entry['generated_at']         | Should -Be '2026-05-20T08:30:00Z'
+            $entry['rendered_at']          | Should -Be '2026-05-20T08:30:00Z' -Because 'preservation notice reads $Prior[''rendered_at'']'
+        }
+
         It 'returns empty entries array when no matching comments found (GraphQL 200 empty)' {
             # M19 regression: zero nodes is a valid zero-PR result
             Install-GhMock -GraphQLResponse (New-GraphQLEmptyNodesResponse) -GraphQLExitCode 0

@@ -97,14 +97,13 @@ function script:Test-CostWalkerPhaseMarkerBranchAllowed {
 function script:Test-CostWalkerAssistantMatchesStrictFilter {
     param(
         [Parameter(Mandatory)]$TranscriptEvent,
-        [Parameter(Mandatory)][string]$NormalizedParentCwd,
+        [Parameter(Mandatory)][string]$NormalizedParentCwd,  # keep param for signature compat
         [Parameter(Mandatory)][string]$Branch
     )
 
     $eventBranch = $TranscriptEvent['gitBranch']
     if ($null -eq $eventBranch) { return $false }
-    if (-not (script:Test-CostWalkerEventCwdMatchesParent -TranscriptEvent $TranscriptEvent -NormalizedParentCwd $NormalizedParentCwd)) { return $false }
-
+    # D2: identity check is done at slug-dir level; per-event filter uses branch only.
     return [string]$eventBranch -eq $Branch
 }
 
@@ -224,6 +223,118 @@ function script:Resolve-CostWalkerPrimarySlugDir {
     return $null
 }
 
+function script:Resolve-CostWalkerRepoIdentity {
+    <#
+    .SYNOPSIS
+        Normalize a git remote URL to a transport-agnostic host/path identity.
+    .DESCRIPTION
+        Fix #760-E1: collapse SSH, HTTPS, and credential-embedded URL forms to a
+        single comparable 'host/path' string so a session cloned over SSH matches
+        a ledger repo root configured over HTTPS (and vice versa).  Without this,
+        the same repo reached via different transports produces different raw URLs
+        and a session is silently excluded from attribution.
+
+        Handles:
+          - scp-like SSH:        git@github.com:owner/repo(.git)
+          - ssh:// scheme:       ssh://git@github.com/owner/repo(.git)
+          - credentialed HTTPS:  https://x-access-token:TOKEN@github.com/owner/repo
+          - plain HTTPS:         https://github.com/owner/repo(.git)
+        Returns $null for empty/whitespace input.
+    .OUTPUTS
+        [string] normalized 'host/path', or $null.
+    #>
+    param([string]$RawUrl)
+
+    if ([string]::IsNullOrWhiteSpace($RawUrl)) { return $null }
+
+    $u = $RawUrl.Trim()
+
+    # scp-like SSH form (no scheme, ':' separates host and path): git@host:owner/repo
+    if ($u -match '^[^/@]+@([^:/]+):(.+)$') {
+        $u = "$($Matches[1])/$($Matches[2])"
+    }
+    else {
+        # Strip URL scheme (https://, ssh://, git://, http://, ...)
+        $u = $u -replace '^[a-zA-Z][a-zA-Z0-9+.\-]*://', ''
+        # Strip userinfo (user@ or user:password@ / x-access-token:TOKEN@) before the host
+        $u = $u -replace '^[^/@]+@', ''
+    }
+
+    $u = $u.ToLowerInvariant().TrimEnd('/')
+    if ($u.EndsWith('.git')) { $u = $u.Substring(0, $u.Length - 4) }
+
+    if ([string]::IsNullOrWhiteSpace($u)) { return $null }
+    return $u
+}
+
+function script:Get-IdentityMatchedSlugDirs {
+    param(
+        [Parameter(Mandatory)][string]$ProjectsRoot,
+        [Parameter(Mandatory)][string]$RepoRoot
+    )
+
+    # Resolve target repo identity once from the ledger's repo root.
+    $targetIdentity = $null
+    try {
+        $rawUrl = @(& git -C $RepoRoot remote get-url origin 2>$null) | Select-Object -First 1
+        if ($global:LASTEXITCODE -eq 0) {
+            $targetIdentity = script:Resolve-CostWalkerRepoIdentity -RawUrl ([string]$rawUrl)
+        }
+    } catch { }
+
+    if ($null -eq $targetIdentity) {
+        # Can't resolve target identity — fail-closed: return empty list, no slug dirs admitted.
+        return [System.Collections.Generic.List[string]]::new()
+    }
+
+    $matched = [System.Collections.Generic.List[string]]::new()
+
+    $allDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue)
+    foreach ($dir in $allDirs) {
+        # Find the first event with a cwd field in any JSONL file in this slug dir.
+        $firstCwd = $null
+        $jsonls = @(Get-ChildItem -Path $dir.FullName -Filter '*.jsonl' -File -ErrorAction SilentlyContinue | Select-Object -First 5)
+        foreach ($jf in $jsonls) {
+            if ($null -ne $firstCwd) { break }
+            $lines = @(Get-Content -Path $jf.FullName -Encoding utf8 -ErrorAction SilentlyContinue | Select-Object -First 20)
+            foreach ($ln in $lines) {
+                $trimmed = $ln.Trim()
+                if ([string]::IsNullOrEmpty($trimmed)) { continue }
+                try {
+                    $ev = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+                    if (-not [string]::IsNullOrEmpty([string]$ev['cwd'])) {
+                        $cwd = [string]$ev['cwd']
+                        if (-not $cwd.StartsWith($script:CostWalkerCopilotOtelCwdPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                            $firstCwd = $cwd
+                            break
+                        }
+                    }
+                } catch { }
+            }
+        }
+
+        if ($null -eq $firstCwd) { continue }  # fail-closed: no usable cwd found
+
+        # Resolve this slug dir's identity from the first-event cwd.
+        $candidateIdentity = $null
+        try {
+            $rawUrl = @(& git -C $firstCwd remote get-url origin 2>$null) | Select-Object -First 1
+            if ($global:LASTEXITCODE -eq 0) {
+                $candidateIdentity = script:Resolve-CostWalkerRepoIdentity -RawUrl ([string]$rawUrl)
+            }
+        } catch { }
+
+        if ($null -eq $candidateIdentity) { continue }  # fail-closed: can't verify identity
+
+        if ($candidateIdentity -eq $targetIdentity) {
+            $matched.Add($dir.FullName)
+        }
+        # else: same-leaf different-repo → rejected (identity mismatch)
+    }
+
+    return $matched
+}
+
 function Invoke-CostTranscriptWalk {
     <#
     .SYNOPSIS
@@ -251,11 +362,12 @@ function Invoke-CostTranscriptWalk {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string]$Slug,
+        [AllowEmptyString()][string]$Slug = '',
         [Parameter(Mandatory)][string]$Branch,
         [Parameter(Mandatory)][string]$ParentCwd,
         [string]$ProjectsRoot = '',
-        [Nullable[int]]$IssueNumber = $null
+        [Nullable[int]]$IssueNumber = $null,
+        [string]$RepoRoot = ''
     )
 
     if (-not $ProjectsRoot) {
@@ -272,16 +384,34 @@ function Invoke-CostTranscriptWalk {
     # Collect all slug directories to search
     $slugDirs = [System.Collections.Generic.List[string]]::new()
 
-    $primaryDir = script:Resolve-CostWalkerPrimarySlugDir -ProjectsRoot $ProjectsRoot -Slug $Slug
-    if ($null -ne $primaryDir) {
-        $slugDirs.Add($primaryDir)
+    $resolvedRepoRoot = if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot } else { $ParentCwd }
+
+    # D2: discover all slug dirs in ProjectsRoot that belong to the same git repo (identity match).
+    $identityDirs = script:Get-IdentityMatchedSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $resolvedRepoRoot
+
+    foreach ($d in $identityDirs) {
+        $slugDirs.Add($d)
     }
 
-    # Worktree slug directories: {Slug}--claude-worktrees-*
-    $worktreeDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like "$Slug--claude-worktrees-*" })
-    foreach ($wtd in $worktreeDirs) {
-        $slugDirs.Add($wtd.FullName)
+    # Also include worktree directories for the primary slug (backward compat / graceful fallback
+    # for worktree slugs that may not have first-event cwd pointing to the main repo root).
+    if (-not [string]::IsNullOrWhiteSpace($Slug)) {
+        $worktreeDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "$Slug--claude-worktrees-*" } |
+            Where-Object { $slugDirs -notcontains $_.FullName })
+        foreach ($wtd in $worktreeDirs) {
+            $slugDirs.Add($wtd.FullName)
+        }
+    }
+
+    # Backward compat: include explicit slug dir when identity resolution is unavailable
+    # (e.g., tests without a real git repo). In production, identity matching already
+    # finds this dir; dedup guard prevents double-counting.
+    if (-not [string]::IsNullOrWhiteSpace($Slug)) {
+        $primarySlugDir = script:Resolve-CostWalkerPrimarySlugDir -ProjectsRoot $ProjectsRoot -Slug $Slug
+        if ($null -ne $primarySlugDir -and $slugDirs -notcontains $primarySlugDir) {
+            $slugDirs.Add($primarySlugDir)
+        }
     }
 
     if ($slugDirs.Count -eq 0) {
@@ -331,7 +461,7 @@ function Invoke-CostTranscriptWalk {
                         }
 
                         if ($currentWindowIssue -ne $targetIssueNumber) { continue }
-                        if (-not (script:Test-CostWalkerEventCwdMatchesParent -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd)) { continue }
+                        # D2: identity check is done at slug-dir level; cwd guard removed.
                         if (-not (script:Test-CostWalkerPhaseMarkerBranchAllowed -Branch $parsedEvent['gitBranch'])) { continue }
 
                         $parsedEvent['_phase_marker_port'] = $currentWindowPortHint
