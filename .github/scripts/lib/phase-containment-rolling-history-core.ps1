@@ -891,3 +891,219 @@ function Get-PhaseContainmentHistory {
         CacheAge  = [timespan]::Zero
     }
 }
+
+# -------------------------------------------------------------------------
+# Public function: Get-PhaseContainmentRollup
+# -------------------------------------------------------------------------
+
+function Get-PhaseContainmentRollup {
+    <#
+    .SYNOPSIS
+        Aggregates phase-containment entries into per-stage escape/irreducible rates
+        with statistical guards.
+    .DESCRIPTION
+        Takes the deduped entry list from Get-PhaseContainmentHistory.Entries and
+        produces per-stage escape/irreducible rates with:
+          - InsufficientData guard (N < 5, using cost-anomaly n<5 convention)
+          - DenominatorZero guard
+          - RelaxationEligible signal (requires N>=5, IrreducibleRate~0, no critical severity)
+          - DataUntrustworthy flag (when SustainedCounts completeness reconciliation fails)
+          - LeakageMatrix (introduced_phase x caught_stage counts)
+
+        Denominator mapping (experience-catchable entries are observation-only):
+          design-challenge  : catchable_phase == 'design'
+          plan-stress-test  : catchable_phase == 'plan'
+          code-review       : catchable_phase == 'implementation'
+
+        apparatus_meta: true entries are excluded from N and Denominator counts
+        but counted in ApparatusMetaCount and LeakageMatrix.
+    .PARAMETER Entries
+        Array of PSCustomObject (or hashtable) entries from Get-PhaseContainmentHistory.Entries.
+        Already deduped by finding_key.
+    .PARAMETER SustainedCounts
+        Optional hashtable @{ 'design-challenge'=N; 'plan-stress-test'=N; 'code-review'=N }
+        specifying expected count of sustained (non-apparatus_meta) findings per surface.
+        When provided, actual count mismatch marks DataUntrustworthy=$true for that stage.
+    .PARAMETER WindowLabel
+        Optional label for the window (for display purposes only).
+    .OUTPUTS
+        PSCustomObject with Stages, LeakageMatrix, LeakageMatrixByFixType,
+        ApparatusMetaCount, WindowEntryCount.
+    #>
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entries,
+        [hashtable]$SustainedCounts = $null,
+        [string]$WindowLabel = ''
+    )
+
+    # Stage → catchable_phase mapping
+    $stageToCatchablePhase = @{
+        'design-challenge' = 'design'
+        'plan-stress-test' = 'plan'
+        'code-review'      = 'implementation'
+    }
+
+    # Initialize per-stage accumulators
+    # Each entry: @{ NonApparatus = List; Apparatus = List }
+    $stageEntries = @{}
+    foreach ($stage in $stageToCatchablePhase.Keys) {
+        $stageEntries[$stage] = @{
+            NonApparatus = [System.Collections.Generic.List[object]]::new()
+            Apparatus    = [System.Collections.Generic.List[object]]::new()
+        }
+    }
+
+    # Leakage matrix: introduced_phase x caught_stage counts
+    $leakageMatrix = @{}
+    # Leakage matrix by fix type
+    $leakageMatrixByFixType = @{}
+
+    $apparatusMetaTotal = 0
+    $windowEntryCount   = $Entries.Count
+
+    foreach ($entry in $Entries) {
+        # Normalize field access for both hashtable and PSCustomObject
+        $catchablePhase  = if ($entry -is [hashtable]) { [string]$entry['catchable_phase']  } else { [string]$entry.catchable_phase  }
+        $introducedPhase = if ($entry -is [hashtable]) { [string]$entry['introduced_phase'] } else { [string]$entry.introduced_phase }
+        $caughtStage     = if ($entry -is [hashtable]) { [string]$entry['caught_stage']     } else { [string]$entry.caught_stage     }
+        $apparatusMeta   = if ($entry -is [hashtable]) { [bool]$entry['apparatus_meta']     } else { [bool]$entry.apparatus_meta     }
+        $fixType         = if ($entry -is [hashtable]) { [string]$entry['systemic_fix_type'] } else { [string]$entry.systemic_fix_type }
+
+        # Leakage matrix — all entries including apparatus_meta
+        $matrixKey = "${introducedPhase}×${caughtStage}"
+        if (-not $leakageMatrix.ContainsKey($matrixKey)) {
+            $leakageMatrix[$matrixKey] = 0
+        }
+        $leakageMatrix[$matrixKey]++
+
+        # Leakage matrix by fix type
+        if (-not $leakageMatrixByFixType.ContainsKey($fixType)) {
+            $leakageMatrixByFixType[$fixType] = @{}
+        }
+        if (-not $leakageMatrixByFixType[$fixType].ContainsKey($matrixKey)) {
+            $leakageMatrixByFixType[$fixType][$matrixKey] = 0
+        }
+        $leakageMatrixByFixType[$fixType][$matrixKey]++
+
+        if ($apparatusMeta) {
+            $apparatusMetaTotal++
+        }
+
+        # Route to the correct stage bucket based on catchable_phase
+        foreach ($stage in $stageToCatchablePhase.Keys) {
+            if ($catchablePhase -eq $stageToCatchablePhase[$stage]) {
+                if ($apparatusMeta) {
+                    $stageEntries[$stage].Apparatus.Add($entry)
+                }
+                else {
+                    $stageEntries[$stage].NonApparatus.Add($entry)
+                }
+                break
+            }
+        }
+        # experience-catchable entries fall through to leakage matrix only (no stage bucket)
+    }
+
+    # Build per-stage results
+    $stages = @{}
+    foreach ($stage in $stageToCatchablePhase.Keys) {
+        $nonApparatusEntries = @($stageEntries[$stage].NonApparatus)
+        $n           = $nonApparatusEntries.Count
+        $denominator = $n   # Denominator == N (entries with this catchable_phase, excluding apparatus_meta)
+
+        $denominatorZero   = ($denominator -eq 0)
+        $insufficientData  = $denominatorZero -or ($n -lt 5)
+
+        # Completeness reconciliation (fail-closed, P14)
+        $dataUntrustworthy       = $false
+        $dataUntrustworthyReason = $null
+        if ($null -ne $SustainedCounts -and $SustainedCounts.ContainsKey($stage)) {
+            $expectedCount = [int]$SustainedCounts[$stage]
+            if ($n -ne $expectedCount) {
+                $dataUntrustworthy       = $true
+                $dataUntrustworthyReason = "Entry count mismatch: expected $expectedCount sustained findings for '$stage', observed $n."
+            }
+        }
+
+        $escapeRate      = $null
+        $irreducibleRate = $null
+
+        if (-not $denominatorZero -and -not $insufficientData) {
+            # Count escapes (escape_distance > 0) and irreducibles (escape_distance == 0)
+            $escapeCount      = 0
+            $irreducibleCount = 0
+            foreach ($e in $nonApparatusEntries) {
+                $dist = if ($e -is [hashtable]) { [int]$e['escape_distance'] } else { [int]$e.escape_distance }
+                if ($dist -gt 0) { $escapeCount++ }
+                else             { $irreducibleCount++ }
+            }
+            $escapeRate      = [double]$escapeCount      / [double]$denominator
+            $irreducibleRate = [double]$irreducibleCount / [double]$denominator
+        }
+
+        # Relaxation eligibility
+        $relaxationEligible = $null
+        if (-not $insufficientData -and -not $denominatorZero -and -not $dataUntrustworthy) {
+            # Check: IrreducibleRate ~0 (< 0.05) — NOT eligible for relaxation via IrreducibleRate alone
+            # RelaxationEligible = $true ONLY when IrreducibleRate >= 0.95 (i.e., escape rate ~0)
+            # Re-reading: "IrreducibleRate ~0 AND N >= 5" — wait, the spec says:
+            # RelaxationEligible = $true only when ALL:
+            #   1. InsufficientData = $false (N >= 5)
+            #   2. DenominatorZero = $false
+            #   3. DataUntrustworthy = $false
+            #   4. IrreducibleRate ~0 (use: $IrreducibleRate -lt 0.05 as the threshold — "~0")
+            #   5. No entry with severity == 'critical'
+            #
+            # Wait — condition 4 says IrreducibleRate ~0 means RelaxationEligible = $true?
+            # That would mean low irreducible rate (high escape rate) is good? That seems backwards.
+            # Re-reading: "$IrreducibleRate -lt 0.05 as the threshold — ~0" for RelaxationEligible.
+            # But the plan says "EscapeRate ~0" not "IrreducibleRate ~0".
+            # Looking at the test: clean stage (all escape_distance=0) → IrreducibleRate=1.0, EscapeRate=0.0 → RelaxationEligible=$true
+            # And test 3: "NOT ELIGIBLE (escape_rate > 0)" → escape rate matters.
+            # The spec literally says "IrreducibleRate ~0" but the test says EscapeRate=0 → eligible.
+            # The ~0 threshold must apply to EscapeRate, not IrreducibleRate.
+            # The spec text "$IrreducibleRate -lt 0.05" is a copy error — it should be $EscapeRate -lt 0.05.
+            # Evidence: test 5 expects RelaxationEligible=$true with IrreducibleRate=1.0 (not ~0).
+            # Conclusion: the threshold applies to EscapeRate.
+
+            $hasCritical = $false
+            foreach ($e in $nonApparatusEntries) {
+                $sev = if ($e -is [hashtable]) { [string]$e['severity'] } else { [string]$e.severity }
+                if ($sev -eq 'critical') {
+                    $hasCritical = $true
+                    break
+                }
+            }
+
+            if ($null -ne $escapeRate -and $escapeRate -lt 0.05 -and -not $hasCritical) {
+                $relaxationEligible = $true
+            }
+            else {
+                $relaxationEligible = $false
+            }
+        }
+
+        $stages[$stage] = [PSCustomObject]@{
+            Stage                    = $stage
+            N                        = $n
+            Denominator              = $denominator
+            DenominatorZero          = $denominatorZero
+            EscapeRate               = $escapeRate
+            IrreducibleRate          = $irreducibleRate
+            InsufficientData         = $insufficientData
+            RelaxationEligible       = $relaxationEligible
+            DataUntrustworthy        = $dataUntrustworthy
+            DataUntrustworthyReason  = $dataUntrustworthyReason
+        }
+    }
+
+    return [PSCustomObject]@{
+        Stages                  = $stages
+        LeakageMatrix           = $leakageMatrix
+        LeakageMatrixByFixType  = $leakageMatrixByFixType
+        ApparatusMetaCount      = $apparatusMetaTotal
+        WindowEntryCount        = $windowEntryCount
+    }
+}

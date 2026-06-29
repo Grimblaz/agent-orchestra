@@ -335,3 +335,442 @@ seed: false
         $result[0].apparatus_meta | Should -Be $false
     }
 }
+
+# ---------------------------------------------------------------------------
+# 9. Rollup — n=4 stage → InsufficientData + withheld relaxation signal
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentRollup — n=4 insufficient data withholds relaxation' {
+    BeforeAll {
+        function script:New-ImplEntry {
+            param(
+                [string]$FindingKey,
+                [int]$EscapeDistance = 0,
+                [string]$Severity = 'low',
+                [bool]$ApparatusMeta = $false
+            )
+            return [PSCustomObject]@{
+                finding_key       = $FindingKey
+                introduced_phase  = 'implementation'
+                catchable_phase   = 'implementation'
+                caught_stage      = 'code-review'
+                escape_distance   = $EscapeDistance
+                severity          = $Severity
+                systemic_fix_type = 'none'
+                category          = 'pattern'
+                apparatus_meta    = $ApparatusMeta
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'pr'
+                issueOrPrNumber   = 800
+            }
+        }
+    }
+
+    It 'marks code-review stage as InsufficientData when N=4 and withholds relaxation signal' {
+        $entries = @(
+            script:New-ImplEntry -FindingKey 'code-review:800:F1'
+            script:New-ImplEntry -FindingKey 'code-review:800:F2'
+            script:New-ImplEntry -FindingKey 'code-review:800:F3'
+            script:New-ImplEntry -FindingKey 'code-review:800:F4'
+        )
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $result.Stages['code-review'].InsufficientData | Should -Be $true
+        $result.Stages['code-review'].EscapeRate       | Should -BeNullOrEmpty
+        $result.Stages['code-review'].RelaxationEligible | Should -BeNullOrEmpty
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 10. Rollup — denominator==0 → null rate, no crash
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentRollup — denominator zero returns null rate without crash' {
+    It 'returns DenominatorZero=$true and null EscapeRate for plan-stress-test when no entries have catchable_phase=plan' {
+        # Pass entries with catchable_phase=implementation only — no plan entries
+        $entries = @(
+            [PSCustomObject]@{
+                finding_key       = 'code-review:800:F1'
+                introduced_phase  = 'implementation'
+                catchable_phase   = 'implementation'
+                caught_stage      = 'code-review'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'none'
+                category          = 'pattern'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'pr'
+                issueOrPrNumber   = 800
+            }
+        )
+
+        { $result = Get-PhaseContainmentRollup -Entries $entries } | Should -Not -Throw
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+        $result.Stages['plan-stress-test'].DenominatorZero | Should -Be $true
+        $result.Stages['plan-stress-test'].EscapeRate      | Should -BeNullOrEmpty
+    }
+
+    It 'handles an empty entries array without throwing' {
+        { Get-PhaseContainmentRollup -Entries @() } | Should -Not -Throw
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 11. Rollup — critical severity in window → RelaxationEligible not $true
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentRollup — critical severity blocks relaxation eligibility' {
+    BeforeAll {
+        function script:New-PlanEntry {
+            param(
+                [string]$FindingKey,
+                [int]$EscapeDistance = 0,
+                [string]$Severity = 'low'
+            )
+            return [PSCustomObject]@{
+                finding_key       = $FindingKey
+                introduced_phase  = 'plan'
+                catchable_phase   = 'plan'
+                caught_stage      = 'plan-stress-test'
+                escape_distance   = $EscapeDistance
+                severity          = $Severity
+                systemic_fix_type = 'instruction'
+                category          = 'architecture'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'issue'
+                issueOrPrNumber   = 801
+            }
+        }
+    }
+
+    It 'sets RelaxationEligible to $false (not $true) when a critical-severity finding is present' {
+        $entries = @(
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F1' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F2' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F3' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F4' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F5' -Severity 'low'
+            script:New-PlanEntry -FindingKey 'plan-stress-test:801:F6' -Severity 'critical'
+        )
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $stageResult = $result.Stages['plan-stress-test']
+        $stageResult.RelaxationEligible | Should -Not -Be $true
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 12. Rollup — entry count < sustained count → DataUntrustworthy
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentRollup — completeness mismatch marks DataUntrustworthy' {
+    It 'sets DataUntrustworthy=$true when entry count differs from SustainedCounts expectation' {
+        $entries = @(
+            [PSCustomObject]@{
+                finding_key       = 'design-challenge:802:F1'
+                introduced_phase  = 'design'
+                catchable_phase   = 'design'
+                caught_stage      = 'design-challenge'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'skill'
+                category          = 'architecture'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'issue'
+                issueOrPrNumber   = 802
+            }
+            [PSCustomObject]@{
+                finding_key       = 'design-challenge:802:F2'
+                introduced_phase  = 'design'
+                catchable_phase   = 'design'
+                caught_stage      = 'design-challenge'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'skill'
+                category          = 'architecture'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'issue'
+                issueOrPrNumber   = 802
+            }
+            [PSCustomObject]@{
+                finding_key       = 'design-challenge:802:F3'
+                introduced_phase  = 'design'
+                catchable_phase   = 'design'
+                caught_stage      = 'design-challenge'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'skill'
+                category          = 'architecture'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'issue'
+                issueOrPrNumber   = 802
+            }
+        )
+
+        $sustainedCounts = @{ 'design-challenge' = 5; 'plan-stress-test' = 0; 'code-review' = 0 }
+        $result = Get-PhaseContainmentRollup -Entries $entries -SustainedCounts $sustainedCounts
+
+        $result.Stages['design-challenge'].DataUntrustworthy  | Should -Be $true
+        $result.Stages['design-challenge'].RelaxationEligible | Should -BeNullOrEmpty
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 13. Rollup — clean stage with n>=5 → RelaxationEligible=$true
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentRollup — clean stage n>=5 sets RelaxationEligible=$true' {
+    It 'returns RelaxationEligible=$true, EscapeRate=0.0, IrreducibleRate=1.0 for a clean code-review stage with 6 entries' {
+        $entries = @(
+            [PSCustomObject]@{
+                finding_key       = 'code-review:803:F1'
+                introduced_phase  = 'implementation'
+                catchable_phase   = 'implementation'
+                caught_stage      = 'code-review'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'none'
+                category          = 'pattern'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'pr'
+                issueOrPrNumber   = 803
+            }
+            [PSCustomObject]@{
+                finding_key       = 'code-review:803:F2'
+                introduced_phase  = 'implementation'
+                catchable_phase   = 'implementation'
+                caught_stage      = 'code-review'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'none'
+                category          = 'pattern'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'pr'
+                issueOrPrNumber   = 803
+            }
+            [PSCustomObject]@{
+                finding_key       = 'code-review:803:F3'
+                introduced_phase  = 'implementation'
+                catchable_phase   = 'implementation'
+                caught_stage      = 'code-review'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'none'
+                category          = 'pattern'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'pr'
+                issueOrPrNumber   = 803
+            }
+            [PSCustomObject]@{
+                finding_key       = 'code-review:803:F4'
+                introduced_phase  = 'implementation'
+                catchable_phase   = 'implementation'
+                caught_stage      = 'code-review'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'none'
+                category          = 'pattern'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'pr'
+                issueOrPrNumber   = 803
+            }
+            [PSCustomObject]@{
+                finding_key       = 'code-review:803:F5'
+                introduced_phase  = 'implementation'
+                catchable_phase   = 'implementation'
+                caught_stage      = 'code-review'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'none'
+                category          = 'pattern'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'pr'
+                issueOrPrNumber   = 803
+            }
+            [PSCustomObject]@{
+                finding_key       = 'code-review:803:F6'
+                introduced_phase  = 'implementation'
+                catchable_phase   = 'implementation'
+                caught_stage      = 'code-review'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'none'
+                category          = 'pattern'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'pr'
+                issueOrPrNumber   = 803
+            }
+        )
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $stageResult = $result.Stages['code-review']
+        $stageResult.RelaxationEligible | Should -Be $true
+        $stageResult.EscapeRate         | Should -Be 0.0
+        $stageResult.IrreducibleRate    | Should -Be 1.0
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 14. Rollup — apparatus_meta entries excluded from N
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentRollup — apparatus_meta entries excluded from N count' {
+    It 'reports N=3 (not 5) when 2 of 5 entries have apparatus_meta=$true' {
+        $entries = @(
+            [PSCustomObject]@{
+                finding_key       = 'plan-stress-test:804:F1'
+                introduced_phase  = 'plan'
+                catchable_phase   = 'plan'
+                caught_stage      = 'plan-stress-test'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'instruction'
+                category          = 'architecture'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'issue'
+                issueOrPrNumber   = 804
+            }
+            [PSCustomObject]@{
+                finding_key       = 'plan-stress-test:804:F2'
+                introduced_phase  = 'plan'
+                catchable_phase   = 'plan'
+                caught_stage      = 'plan-stress-test'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'instruction'
+                category          = 'architecture'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'issue'
+                issueOrPrNumber   = 804
+            }
+            [PSCustomObject]@{
+                finding_key       = 'plan-stress-test:804:F3'
+                introduced_phase  = 'plan'
+                catchable_phase   = 'plan'
+                caught_stage      = 'plan-stress-test'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'instruction'
+                category          = 'architecture'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'issue'
+                issueOrPrNumber   = 804
+            }
+            [PSCustomObject]@{
+                finding_key       = 'plan-stress-test:804:META1'
+                introduced_phase  = 'plan'
+                catchable_phase   = 'plan'
+                caught_stage      = 'plan-stress-test'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'none'
+                category          = 'pattern'
+                apparatus_meta    = $true
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'issue'
+                issueOrPrNumber   = 804
+            }
+            [PSCustomObject]@{
+                finding_key       = 'plan-stress-test:804:META2'
+                introduced_phase  = 'plan'
+                catchable_phase   = 'plan'
+                caught_stage      = 'plan-stress-test'
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'none'
+                category          = 'pattern'
+                apparatus_meta    = $true
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'issue'
+                issueOrPrNumber   = 804
+            }
+        )
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $stageResult = $result.Stages['plan-stress-test']
+        $stageResult.N                | Should -Be 3
+        $stageResult.InsufficientData | Should -Be $true
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 15. Rollup — leakage matrix populated correctly
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentRollup — leakage matrix populated correctly' {
+    It 'records experience×code-review=1 and design×plan-stress-test=1 from two entries' {
+        $entries = @(
+            [PSCustomObject]@{
+                finding_key       = 'code-review:805:F1'
+                introduced_phase  = 'experience'
+                catchable_phase   = 'implementation'
+                caught_stage      = 'code-review'
+                escape_distance   = 0
+                severity          = 'high'
+                systemic_fix_type = 'skill'
+                category          = 'architecture'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'pr'
+                issueOrPrNumber   = 805
+            }
+            [PSCustomObject]@{
+                finding_key       = 'plan-stress-test:805:F2'
+                introduced_phase  = 'design'
+                catchable_phase   = 'plan'
+                caught_stage      = 'plan-stress-test'
+                escape_distance   = 1
+                severity          = 'medium'
+                systemic_fix_type = 'instruction'
+                category          = 'security'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'issue'
+                issueOrPrNumber   = 805
+            }
+        )
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $result.LeakageMatrix['experience×code-review']    | Should -Be 1
+        $result.LeakageMatrix['design×plan-stress-test']   | Should -Be 1
+    }
+}
