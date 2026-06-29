@@ -193,6 +193,20 @@ Exception: if the incorporation was user-confirmed (the finding was escalated vi
 
 Update the `Plan Stress-Test` summary block with the judge's final ruling and maintainer disposition. Prosecution-only adapters such as `design-challenge` keep the pre-judge disposition triad: `incorporate | dismiss | escalate`.
 
+### Phase-containment emission
+
+After Post-Judge Reconciliation is complete and the `Plan Stress-Test` summary is updated, emit one `<!-- phase-containment-{ID} -->` block per sustained (judge-ruling: sustained) plan-stress-test finding. Append these blocks onto the existing `<!-- plan-issue-{ID} -->` comment:
+
+- `finding_key`: `plan-stress-test:{issue}:{marker}:{finding_id}`
+- `introduced_phase`: set by explicit agent judgment — no default; reason which phase originated this defect
+- `catchable_phase`: set by explicit agent judgment — no default; reason which phase was the earliest this defect could have been caught
+- `caught_stage: plan-stress-test`
+- `escape_distance`: recomputed as `2 - ordinal(catchable_phase)` (plan-stress-test projection = 2; phase ordinals: experience=0, design=1, plan=2, implementation=3)
+- `severity`, `systemic_fix_type`, `category`: carry forward from the finding
+- `apparatus_meta: false` unless a stated criterion justifies `true`
+
+**Setter rule**: `catchable_phase` and `introduced_phase` must each be set by explicit agent judgment with no default — the agent must reason about which phase was the earliest in which this specific defect was catchable. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
+
 ## Plan Style Guide
 
 ### Spine and Slice Discipline

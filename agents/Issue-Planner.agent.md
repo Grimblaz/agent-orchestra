@@ -179,6 +179,10 @@ When persisting or amending the target phase artifact, you MUST monitor the tota
    - **If engagement-record emission fails:** emit a terminal warning `⚠️ Engagement-record emission failed for plan-{ISSUE_NUMBER}: {reason}`, HALT the burst, and do NOT post the credit-input marker comment. The phase remains complete (the phase completion artifact is durable), but `same-decision-resume` next session will degrade to v1.1 behavior.
 3. **Only after successful engagement-record emission**, post the credit-input marker (see § Credit-input emission below).
 
+### Phase-containment emission (plan-stress-test)
+
+After emitting the plan approval burst, for each sustained plan-stress-test finding append one `<!-- phase-containment-{ID} -->` block to the `<!-- plan-issue-{ID} -->` comment (see `skills/plan-authoring/SKILL.md` § Post-Judge Reconciliation → Phase-containment emission for the full field contract). Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
+
 ### Credit-input emission
 
 **After successful engagement-record emission** (see § Named Decisions write-discipline above), post a credit-input marker comment (SMC-17 deferred-emission):
