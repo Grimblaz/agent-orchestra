@@ -1706,20 +1706,45 @@ function Invoke-FrameCreditLedger {
             # populated block is NEVER replaced by an empty one.
             $usePriorCostSection = $preservationResult['use_prior'] -eq $true
             if ($usePriorCostSection -and $null -ne $priorComment) {
-                # Extract the existing cost section (markdown + YAML) from the prior comment body.
-                # The section spans from the first cost heading/separator to end-of-comment or the
-                # next top-level section.  We use the raw YAML block as a safe fallback if a richer
-                # extraction is unavailable.
                 $priorYamlForSection = script:Get-CostPatternDataFromComment -Body $priorComment.body
+                $preservationNotice = $preservationResult['notice']
+                $noticeBlock = if ($null -ne $preservationNotice -and $preservationNotice -ne '') {
+                    "> [!NOTE]`n> $preservationNotice`n`n"
+                } else { '' }
                 if ($null -ne $priorYamlForSection) {
-                    $preservationNotice = $preservationResult['notice']
-                    $noticeBlock = if ($null -ne $preservationNotice -and $preservationNotice -ne '') {
-                        "> [!NOTE]`n> $preservationNotice`n`n"
-                    } else { '' }
-                    $costSection = $noticeBlock + "<!-- cost-pattern-data`n$priorYamlForSection`n-->"
+                    # Fix #760-F3: preserve the full visible section (heading + rendered markdown
+                    # table + YAML block) from the prior comment, not only the hidden YAML comment.
+                    # Without this, the human-readable Cost Pattern table disappears when preservation
+                    # fires, even though the underlying data (rolling-baseline YAML) survives.
+                    $sectionMatch = [regex]::Match(
+                        $priorComment.body,
+                        '(?ms)(?<section>^##\s+Cost Pattern\b.*?<!--\s*cost-pattern-data[\s\S]*?-->)'
+                    )
+                    $priorSection = if ($sectionMatch.Success) {
+                        $sectionMatch.Groups['section'].Value.TrimEnd()
+                    } else {
+                        # Fallback: visible heading unavailable — use YAML block only.
+                        "<!-- cost-pattern-data`n$priorYamlForSection`n-->"
+                    }
+                    $costSection = $noticeBlock + $priorSection
                 }
-                # If extraction failed, leave $costSection as-is (empty string) — better to emit
-                # nothing than to emit a broken or truncated block.
+                else {
+                    # Fix #760-F9: prior block exists (loose selector matched) but the strict
+                    # extractor could not parse its body (malformed block — missing closing -->,
+                    # no newline after marker, etc.).  C3 defaulted priorCostData to 'complete'
+                    # above, which correctly triggers use_prior=true, but without this fallback
+                    # the rebuild path left $costSection='' and erased the prior block — the
+                    # exact opposite of the D1 invariant.  Carry the raw block verbatim instead.
+                    $rawBlockMatch = [regex]::Match(
+                        $priorComment.body,
+                        '<!--\s*cost-pattern-data[\s\S]*?-->'
+                    )
+                    if ($rawBlockMatch.Success) {
+                        $costSection = $noticeBlock + $rawBlockMatch.Value
+                    }
+                    # else: truly no cost block in the body despite the selector match — leave
+                    # $costSection as-is (empty string). This path is not normally reachable.
+                }
             }
             else {
                 # 6f. Anomaly flags — only compute when not using prior (AC2: guard on use_prior)

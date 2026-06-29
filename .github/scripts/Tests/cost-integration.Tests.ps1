@@ -731,6 +731,32 @@ Describe 'frame-credit-ledger cost integration' {
             $result.Comment | Should -Match '2026-04-01'
         }
 
+        It 'preserves malformed-but-present prior block verbatim (Fix #760-F9)' {
+            # Regression for the C3 erase defect: when a prior cost-pattern-data block
+            # exists (matches loose selector) but its body cannot be extracted by the
+            # strict multiline regex (malformed — no newline after marker), the C3 fix
+            # correctly defaults priorCostData to 'complete' → use_prior=true.  Before
+            # the F9 fix, the section-rebuild re-called the failing extractor, got $null,
+            # left $costSection='', and ERASED the prior block.  After the fix, the raw
+            # block is carried verbatim, honoring the D1 invariant.
+            # A malformed block: matches '<!-- cost-pattern-data' (loose) but the strict
+            # multiline regex '<!--\s*cost-pattern-data\s*\r?\n([\s\S]*?)\r?\n?-->' fails
+            # because there is no newline after the marker — single-line form.
+            $malformedBlockSentinel = 'f9-sentinel-malformed-unique'
+            $priorCostBody = "## Cost Pattern`n<!-- cost-pattern-data $malformedBlockSentinel -->"
+            $comments = @([pscustomobject]@{ body = $priorCostBody; databaseId = 2999 })
+
+            $result = & $script:InvokeOrchestratorInProcessWithRealPreservation `
+                -PrBody $script:V4AllCoveredBody `
+                -Comments $comments
+
+            $result.ExitCode | Should -Be 0
+            # The malformed block must survive verbatim — if F9 regresses, $costSection
+            # is '' and the sentinel disappears from the comment.
+            $result.Comment | Should -Match $malformedBlockSentinel -Because 'malformed prior block must be carried verbatim, not erased'
+            $result.Comment | Should -Match '<!-- cost-pattern-data' -Because 'cost marker must be present'
+        }
+
         It 'returns use_prior=true when current is unknown and prior is complete' {
             # Unit test directly against Resolve-CostDataPreservation with the
             # corrected flat $Prior shape (completeness + rendered_at keys).
