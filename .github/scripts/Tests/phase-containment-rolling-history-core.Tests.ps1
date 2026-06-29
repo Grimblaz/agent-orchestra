@@ -530,6 +530,232 @@ Describe 'Get-PhaseContainmentRollup — completeness mismatch marks DataUntrust
 }
 
 # ---------------------------------------------------------------------------
+# 13. Surface A/B outer search pagination — nodes from page 2 are processed
+# ---------------------------------------------------------------------------
+
+Describe 'Get-SurfaceAEntriesGraphQL — outer search pagination collects nodes from all pages' {
+    BeforeAll {
+        # A comment body carrying a plan-issue marker plus a valid phase-containment
+        # block, so Invoke-PhaseContainmentCommentScan produces one entry per issue.
+        function script:New-SurfacePageBody {
+            param([int]$Number, [string]$FindingKey)
+            return @"
+<!-- plan-issue-$Number -->
+<!-- phase-containment-$Number -->
+finding_key: $FindingKey
+introduced_phase: design
+catchable_phase: design
+caught_stage: code-review
+escape_distance: 2
+severity: high
+systemic_fix_type: skill
+category: architecture
+apparatus_meta: false
+seed: false
+<!-- /phase-containment-$Number -->
+"@
+        }
+
+        # Build a search-result GraphQL response with one issue node.
+        function script:New-SearchPageResponse {
+            param(
+                [int]$IssueNumber,
+                [string]$CommentBody,
+                [bool]$HasNextPage,
+                [string]$EndCursor
+            )
+            $payload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $HasNextPage; endCursor = $EndCursor }
+                        nodes    = @(
+                            @{
+                                number   = $IssueNumber
+                                comments = @{
+                                    nodes    = @(@{ body = $CommentBody; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+    }
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'processes an issue that only appears on the second search page' {
+        $page1 = script:New-SearchPageResponse `
+            -IssueNumber 901 `
+            -CommentBody (script:New-SurfacePageBody -Number 901 -FindingKey 'code-review:901:F1') `
+            -HasNextPage $true `
+            -EndCursor 'SEARCHCURSOR1'
+
+        $page2 = script:New-SearchPageResponse `
+            -IssueNumber 902 `
+            -CommentBody (script:New-SurfacePageBody -Number 902 -FindingKey 'code-review:902:F1') `
+            -HasNextPage $false `
+            -EndCursor $null
+
+        $global:mockSearchPage1 = $page1
+        $global:mockSearchPage2 = $page2
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            # The outer search query carries 'after:' only on the second page.
+            if ($joined -match 'after:') {
+                return $global:mockSearchPage2
+            }
+            return $global:mockSearchPage1
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceAEntriesGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30
+
+        $findingKeys = @($result | ForEach-Object { $_['finding_key'] })
+        $findingKeys | Should -Contain 'code-review:901:F1'
+        # The page-2 node must be processed — this is the regression guard for F10.
+        $findingKeys | Should -Contain 'code-review:902:F1'
+    }
+
+    It 'terminates when a search page claims hasNextPage but returns a null/empty endCursor (F1)' {
+        # Malformed page: hasNextPage = $true but endCursor = $null. Before the
+        # F1 guard, the advance produced after: "" and re-issued the identical
+        # query every iteration, only exiting via the timeout. With the guard,
+        # the loop must terminate cleanly and still surface the single page's entry.
+        $malformedPage = script:New-SearchPageResponse `
+            -IssueNumber 905 `
+            -CommentBody (script:New-SurfacePageBody -Number 905 -FindingKey 'code-review:905:F1') `
+            -HasNextPage $true `
+            -EndCursor $null
+
+        $global:mockMalformedPage = $malformedPage
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            # Same malformed page regardless of after: clause. If the guard
+            # regresses, the after: "" re-query would spin until the timeout.
+            return $global:mockMalformedPage
+        }
+
+        # Small timeout: a regressed guard would visibly stall ~5s rather than pass.
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceAEntriesGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 5
+
+        # The call returned (did not exhaust the timeout) and the single page's entry is present.
+        $stopwatch.Elapsed.TotalSeconds | Should -BeLessThan 5
+        $findingKeys = @($result | ForEach-Object { $_['finding_key'] })
+        $findingKeys | Should -Contain 'code-review:905:F1'
+    }
+}
+
+Describe 'Get-SurfaceBEntriesGraphQL — outer search pagination collects nodes from all pages' {
+    BeforeAll {
+        # A PR comment body carrying a judge-rulings marker plus a valid block.
+        function script:New-SurfaceBPageBody {
+            param([int]$Number, [string]$FindingKey)
+            return @"
+<!-- judge-rulings pr-$Number -->
+<!-- phase-containment-$Number -->
+finding_key: $FindingKey
+introduced_phase: design
+catchable_phase: design
+caught_stage: code-review
+escape_distance: 2
+severity: high
+systemic_fix_type: skill
+category: architecture
+apparatus_meta: false
+seed: false
+<!-- /phase-containment-$Number -->
+"@
+        }
+
+        function script:New-SearchBPageResponse {
+            param(
+                [int]$PrNumber,
+                [string]$CommentBody,
+                [bool]$HasNextPage,
+                [string]$EndCursor
+            )
+            $payload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $HasNextPage; endCursor = $EndCursor }
+                        nodes    = @(
+                            @{
+                                number   = $PrNumber
+                                comments = @{
+                                    nodes    = @(@{ body = $CommentBody; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+    }
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'processes a merged PR that only appears on the second search page' {
+        $page1 = script:New-SearchBPageResponse `
+            -PrNumber 901 `
+            -CommentBody (script:New-SurfaceBPageBody -Number 901 -FindingKey 'code-review:901:F1') `
+            -HasNextPage $true `
+            -EndCursor 'SEARCHCURSOR1'
+
+        $page2 = script:New-SearchBPageResponse `
+            -PrNumber 902 `
+            -CommentBody (script:New-SurfaceBPageBody -Number 902 -FindingKey 'code-review:902:F1') `
+            -HasNextPage $false `
+            -EndCursor $null
+
+        $global:mockSearchBPage1 = $page1
+        $global:mockSearchBPage2 = $page2
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'after:') {
+                return $global:mockSearchBPage2
+            }
+            return $global:mockSearchBPage1
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceBEntriesGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30
+
+        $findingKeys = @($result | ForEach-Object { $_['finding_key'] })
+        $findingKeys | Should -Contain 'code-review:901:F1'
+        # The page-2 node must be processed — this is the regression guard for F10.
+        $findingKeys | Should -Contain 'code-review:902:F1'
+    }
+}
+
+# ---------------------------------------------------------------------------
 # 13. Rollup — clean stage with n>=5 → RelaxationEligible=$true
 # ---------------------------------------------------------------------------
 

@@ -58,7 +58,7 @@ $rollup = Get-PhaseContainmentRollup -Entries $entries -WindowLabel "${WindowDay
 
 Write-Output ''
 Write-Output 'Phase-Containment Escape-Rate Ledger'
-Write-Output "Window: ${WindowDays}d | Fetched: $($fetchedAt.ToString('yyyy-MM-dd HH:mm:ss')) UTC | Source: $source"
+Write-Output "Window: ${WindowDays}d | Fetched: $($fetchedAt.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')) UTC | Source: $source"
 Write-Output "Total entries processed: $($rollup.WindowEntryCount) | Apparatus-meta entries: $($rollup.ApparatusMetaCount)"
 Write-Output ''
 

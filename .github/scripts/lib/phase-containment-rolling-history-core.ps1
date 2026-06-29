@@ -192,10 +192,6 @@ function Invoke-PhaseContainmentCommentScan {
                 continue
             }
 
-            # Derive finding_key using cross-surface format
-            $stablePart    = if ($null -ne $parsed['finding_key'] -and $parsed['finding_key'] -ne '') { $parsed['finding_key'] } else { "$id:unknown" }
-            $derivedKey    = Get-PhaseContainmentFindingKey -Surface $Surface -StableFindingKey $stablePart
-
             # Build the output entry — use the parsed finding_key directly (it may already be prefixed)
             # The finding_key stored in the block is authoritative; we preserve it as-is per the core contract.
             $entry = $parsed.Clone()
@@ -264,90 +260,6 @@ function script:Write-PhaseContainmentCache {
 }
 
 # -------------------------------------------------------------------------
-# Private: paginated GraphQL comment fetch for a single issue or PR number
-# -------------------------------------------------------------------------
-
-function script:Invoke-GraphQLCommentPageFetch {
-    <#
-    .SYNOPSIS
-        Fetches all comment bodies for a given issue/PR number via paginated GraphQL.
-    .OUTPUTS
-        [string[]] All comment body strings, or $null on error.
-    #>
-    param(
-        [Parameter(Mandatory)][string]$Owner,
-        [Parameter(Mandatory)][string]$Repo,
-        [Parameter(Mandatory)][int]$Number,
-        [Parameter(Mandatory)][string]$NodeType,   # 'Issue' or 'PullRequest'
-        [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
-        [Parameter(Mandatory)][int]$TimeoutSeconds
-    )
-
-    $bodies  = [System.Collections.Generic.List[string]]::new()
-    $cursor  = $null
-    $hasNext = $true
-
-    while ($hasNext) {
-        if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
-            Write-Warning "phase-containment-rolling-history-core: timed out fetching comments for $NodeType #$Number"
-            return $null
-        }
-
-        $afterClause = if ($null -ne $cursor) { ", after: \`"$cursor\`"" } else { '' }
-        $query = @"
-{
-  repository(owner: "$Owner", name: "$Repo") {
-    issueOrPullRequest: $($NodeType.ToLower())(number: $Number) {
-      ... on $NodeType {
-        comments(first: 100$afterClause) {
-          nodes { body createdAt }
-          pageInfo { hasNextPage endCursor }
-        }
-      }
-    }
-  }
-}
-"@
-
-        $output = & gh api graphql -f "query=$query" 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "phase-containment-rolling-history-core: GraphQL error fetching comments for $NodeType #$Number (exit $LASTEXITCODE)"
-            return $null
-        }
-
-        try {
-            $parsed = ($output | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
-
-            if ($parsed.ContainsKey('errors') -and $null -ne $parsed['errors'] -and @($parsed['errors']).Count -gt 0) {
-                Write-Warning "phase-containment-rolling-history-core: GraphQL returned errors for $NodeType #$Number"
-                return $null
-            }
-
-            $repo         = $parsed['data']['repository']
-            $issueOrPr    = $repo['issueOrPullRequest']
-            $commentBlock = $issueOrPr['comments']
-            $nodes        = @($commentBlock['nodes'])
-            $pageInfo     = $commentBlock['pageInfo']
-
-            foreach ($node in $nodes) {
-                if ($null -ne $node -and $null -ne $node['body']) {
-                    $bodies.Add([string]$node['body'])
-                }
-            }
-
-            $hasNext = [bool]$pageInfo['hasNextPage']
-            $cursor  = if ($hasNext) { [string]$pageInfo['endCursor'] } else { $null }
-        }
-        catch {
-            Write-Warning "phase-containment-rolling-history-core: failed to parse GraphQL response for $NodeType #${Number}: $_"
-            return $null
-        }
-    }
-
-    return , $bodies.ToArray()
-}
-
-# -------------------------------------------------------------------------
 # Private: collect Surface A entries via GraphQL (issue comments)
 # -------------------------------------------------------------------------
 
@@ -364,9 +276,23 @@ function script:Get-SurfaceAEntriesGraphQL {
 
     # Search for recently-closed issues in the window
     $since = (Get-Date).ToUniversalTime().AddDays(-$WindowDays).ToString('yyyy-MM-dd')
-    $query = @"
+
+    # Outer search pagination: accumulate nodes across all search result pages.
+    $searchCursor   = $null
+    $searchHasNext  = $true
+
+    try {
+        while ($searchHasNext) {
+            if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+                Write-Warning "phase-containment-rolling-history-core: timed out paginating Surface A search"
+                break
+            }
+
+            $searchAfterClause = if ($null -ne $searchCursor) { ", after: `"$searchCursor`"" } else { '' }
+            $query = @"
 {
-  search(query: "repo:$Owner/$Repo is:issue is:closed closed:>$since", type: ISSUE, first: 50) {
+  search(query: "repo:$Owner/$Repo is:issue is:closed closed:>$since", type: ISSUE, first: 50$searchAfterClause) {
+    pageInfo { hasNextPage endCursor }
     nodes {
       ... on Issue {
         number
@@ -380,59 +306,57 @@ function script:Get-SurfaceAEntriesGraphQL {
 }
 "@
 
-    if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { return , $entries.ToArray() }
-
-    $output = & gh api graphql -f "query=$query" 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "phase-containment-rolling-history-core: Surface A GraphQL search failed (exit $LASTEXITCODE)"
-        return $null   # signal error for fallback
-    }
-
-    try {
-        $parsed = ($output | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
-        if ($parsed.ContainsKey('errors') -and $null -ne $parsed['errors'] -and @($parsed['errors']).Count -gt 0) {
-            Write-Warning "phase-containment-rolling-history-core: Surface A GraphQL returned errors"
-            return $null
-        }
-
-        $nodes = @($parsed['data']['search']['nodes'])
-
-        foreach ($issueNode in $nodes) {
-            if ($null -eq $issueNode) { continue }
-            $issueNum = [int]$issueNode['number']
-
-            # Collect all comment bodies from the initial page
-            $commentBodies   = [System.Collections.Generic.List[string]]::new()
-            $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
-
-            $commentBlock = $issueNode['comments']
-            $commentNodes = @($commentBlock['nodes'])
-
-            foreach ($cn in $commentNodes) {
-                if ($null -ne $cn) {
-                    $commentBodies.Add([string]$cn['body'])
-                    $cnCreatedAt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
-                    $commentCreatedAt.Add($cnCreatedAt)
-                }
+            $output = & gh api graphql -f "query=$query" 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "phase-containment-rolling-history-core: Surface A GraphQL search failed (exit $LASTEXITCODE)"
+                return $null   # signal error for fallback
             }
 
-            # Check whether this issue has a design-phase-complete or plan-issue marker
-            $allBodiesText = $commentBodies -join "`n"
-            $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$issueNum\s*-->") -or
-                         ($allBodiesText -match "<!--\s*plan-issue-$issueNum\s*-->")
-            if (-not $hasMarker) { continue }
+            $parsed = ($output | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+            if ($parsed.ContainsKey('errors') -and $null -ne $parsed['errors'] -and @($parsed['errors']).Count -gt 0) {
+                Write-Warning "phase-containment-rolling-history-core: Surface A GraphQL returned errors"
+                return $null
+            }
 
-            # Paginate if needed
-            $pageInfo = $commentBlock['pageInfo']
-            $cursor   = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
+            $searchBlock = $parsed['data']['search']
+            $nodes = @($searchBlock['nodes'])
 
-            while ($null -ne $cursor) {
-                if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
-                    Write-Warning "phase-containment-rolling-history-core: timed out paginating issue #$issueNum"
-                    break
+            foreach ($issueNode in $nodes) {
+                if ($null -eq $issueNode) { continue }
+                $issueNum = [int]$issueNode['number']
+
+                # Collect all comment bodies from the initial page
+                $commentBodies   = [System.Collections.Generic.List[string]]::new()
+                $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+
+                $commentBlock = $issueNode['comments']
+                $commentNodes = @($commentBlock['nodes'])
+
+                foreach ($cn in $commentNodes) {
+                    if ($null -ne $cn) {
+                        $commentBodies.Add([string]$cn['body'])
+                        $cnCreatedAt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                        $commentCreatedAt.Add($cnCreatedAt)
+                    }
                 }
 
-                $pageQuery = @"
+                # Check whether this issue has a design-phase-complete or plan-issue marker
+                $allBodiesText = $commentBodies -join "`n"
+                $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$issueNum\s*-->") -or
+                             ($allBodiesText -match "<!--\s*plan-issue-$issueNum\s*-->")
+                if (-not $hasMarker) { continue }
+
+                # Paginate comments if needed
+                $pageInfo = $commentBlock['pageInfo']
+                $cursor   = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
+
+                while ($null -ne $cursor) {
+                    if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+                        Write-Warning "phase-containment-rolling-history-core: timed out paginating issue #$issueNum"
+                        break
+                    }
+
+                    $pageQuery = @"
 {
   repository(owner: "$Owner", name: "$Repo") {
     issue(number: $issueNum) {
@@ -444,36 +368,50 @@ function script:Get-SurfaceAEntriesGraphQL {
   }
 }
 "@
-                $pageOutput = & gh api graphql -f "query=$pageQuery" 2>&1
-                if ($LASTEXITCODE -ne 0) { break }
+                    $pageOutput = & gh api graphql -f "query=$pageQuery" 2>&1
+                    if ($LASTEXITCODE -ne 0) { break }
 
-                try {
-                    $pageParsed = ($pageOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
-                    $pageComments = $pageParsed['data']['repository']['issue']['comments']
-                    foreach ($cn in @($pageComments['nodes'])) {
-                        if ($null -ne $cn) {
-                            $commentBodies.Add([string]$cn['body'])
-                            $cnCreatedAt2 = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
-                            $commentCreatedAt.Add($cnCreatedAt2)
+                    try {
+                        $pageParsed = ($pageOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+                        $pageComments = $pageParsed['data']['repository']['issue']['comments']
+                        foreach ($cn in @($pageComments['nodes'])) {
+                            if ($null -ne $cn) {
+                                $commentBodies.Add([string]$cn['body'])
+                                $cnCreatedAt2 = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                $commentCreatedAt.Add($cnCreatedAt2)
+                            }
                         }
+                        $pi = $pageComments['pageInfo']
+                        $cursor = if ([bool]$pi['hasNextPage']) { [string]$pi['endCursor'] } else { $null }
                     }
-                    $pi = $pageComments['pageInfo']
-                    $cursor = if ([bool]$pi['hasNextPage']) { [string]$pi['endCursor'] } else { $null }
+                    catch {
+                        Write-Warning "phase-containment-rolling-history-core: failed to parse pagination response for issue #${issueNum}: $_"
+                        break
+                    }
                 }
-                catch {
-                    Write-Warning "phase-containment-rolling-history-core: failed to parse pagination response for issue #${issueNum}: $_"
-                    break
-                }
+
+                # Scan all collected bodies
+                $scanned = Invoke-PhaseContainmentCommentScan `
+                    -CommentBodies $commentBodies.ToArray() `
+                    -IssueOrPrNumber $issueNum `
+                    -Surface 'issue' `
+                    -CreatedAtValues $commentCreatedAt.ToArray()
+
+                foreach ($e in $scanned) { $entries.Add($e) }
             }
 
-            # Scan all collected bodies
-            $scanned = Invoke-PhaseContainmentCommentScan `
-                -CommentBodies $commentBodies.ToArray() `
-                -IssueOrPrNumber $issueNum `
-                -Surface 'issue' `
-                -CreatedAtValues $commentCreatedAt.ToArray()
-
-            foreach ($e in $scanned) { $entries.Add($e) }
+            # Advance the outer search cursor
+            $searchPageInfo = $searchBlock['pageInfo']
+            $nextCursor     = if ($null -ne $searchPageInfo -and $searchPageInfo.ContainsKey('endCursor')) { [string]$searchPageInfo['endCursor'] } else { '' }
+            if ([bool]$searchPageInfo['hasNextPage'] -and -not [string]::IsNullOrEmpty($nextCursor)) {
+                $searchCursor  = $nextCursor
+                $searchHasNext = $true
+            }
+            else {
+                # hasNextPage with a missing/empty endCursor is a malformed page — stop rather than re-querying after: "" forever
+                $searchCursor  = $null
+                $searchHasNext = $false
+            }
         }
     }
     catch {
@@ -500,9 +438,23 @@ function script:Get-SurfaceBEntriesGraphQL {
     $entries = [System.Collections.Generic.List[hashtable]]::new()
 
     $since = (Get-Date).ToUniversalTime().AddDays(-$WindowDays).ToString('yyyy-MM-dd')
-    $query = @"
+
+    # Outer search pagination: accumulate nodes across all search result pages.
+    $searchCursor   = $null
+    $searchHasNext  = $true
+
+    try {
+        while ($searchHasNext) {
+            if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+                Write-Warning "phase-containment-rolling-history-core: timed out paginating Surface B search"
+                break
+            }
+
+            $searchAfterClause = if ($null -ne $searchCursor) { ", after: `"$searchCursor`"" } else { '' }
+            $query = @"
 {
-  search(query: "repo:$Owner/$Repo is:pr is:merged merged:>$since", type: ISSUE, first: 50) {
+  search(query: "repo:$Owner/$Repo is:pr is:merged merged:>$since", type: ISSUE, first: 50$searchAfterClause) {
+    pageInfo { hasNextPage endCursor }
     nodes {
       ... on PullRequest {
         number
@@ -516,57 +468,55 @@ function script:Get-SurfaceBEntriesGraphQL {
 }
 "@
 
-    if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { return , $entries.ToArray() }
-
-    $output = & gh api graphql -f "query=$query" 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "phase-containment-rolling-history-core: Surface B GraphQL search failed (exit $LASTEXITCODE)"
-        return $null
-    }
-
-    try {
-        $parsed = ($output | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
-        if ($parsed.ContainsKey('errors') -and $null -ne $parsed['errors'] -and @($parsed['errors']).Count -gt 0) {
-            Write-Warning "phase-containment-rolling-history-core: Surface B GraphQL returned errors"
-            return $null
-        }
-
-        $nodes = @($parsed['data']['search']['nodes'])
-
-        foreach ($prNode in $nodes) {
-            if ($null -eq $prNode) { continue }
-            $prNum = [int]$prNode['number']
-
-            $commentBodies   = [System.Collections.Generic.List[string]]::new()
-            $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
-
-            $commentBlock = $prNode['comments']
-            $commentNodes = @($commentBlock['nodes'])
-
-            foreach ($cn in $commentNodes) {
-                if ($null -ne $cn) {
-                    $commentBodies.Add([string]$cn['body'])
-                    $cnCreatedAtB = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
-                    $commentCreatedAt.Add($cnCreatedAtB)
-                }
+            $output = & gh api graphql -f "query=$query" 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "phase-containment-rolling-history-core: Surface B GraphQL search failed (exit $LASTEXITCODE)"
+                return $null
             }
 
-            # Check whether this PR has a judge-rulings block (marks review pipeline)
-            $allBodiesText = $commentBodies -join "`n"
-            $hasJudgeRulings = ($allBodiesText -match '<!--\s*judge-rulings')
-            if (-not $hasJudgeRulings) { continue }
+            $parsed = ($output | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+            if ($parsed.ContainsKey('errors') -and $null -ne $parsed['errors'] -and @($parsed['errors']).Count -gt 0) {
+                Write-Warning "phase-containment-rolling-history-core: Surface B GraphQL returned errors"
+                return $null
+            }
 
-            # Paginate if needed
-            $pageInfo = $commentBlock['pageInfo']
-            $cursor   = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
+            $searchBlock = $parsed['data']['search']
+            $nodes = @($searchBlock['nodes'])
 
-            while ($null -ne $cursor) {
-                if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
-                    Write-Warning "phase-containment-rolling-history-core: timed out paginating PR #$prNum"
-                    break
+            foreach ($prNode in $nodes) {
+                if ($null -eq $prNode) { continue }
+                $prNum = [int]$prNode['number']
+
+                $commentBodies   = [System.Collections.Generic.List[string]]::new()
+                $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+
+                $commentBlock = $prNode['comments']
+                $commentNodes = @($commentBlock['nodes'])
+
+                foreach ($cn in $commentNodes) {
+                    if ($null -ne $cn) {
+                        $commentBodies.Add([string]$cn['body'])
+                        $cnCreatedAtB = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                        $commentCreatedAt.Add($cnCreatedAtB)
+                    }
                 }
 
-                $pageQuery = @"
+                # Check whether this PR has a judge-rulings block (marks review pipeline)
+                $allBodiesText = $commentBodies -join "`n"
+                $hasJudgeRulings = ($allBodiesText -match '<!--\s*judge-rulings')
+                if (-not $hasJudgeRulings) { continue }
+
+                # Paginate comments if needed
+                $pageInfo = $commentBlock['pageInfo']
+                $cursor   = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
+
+                while ($null -ne $cursor) {
+                    if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+                        Write-Warning "phase-containment-rolling-history-core: timed out paginating PR #$prNum"
+                        break
+                    }
+
+                    $pageQuery = @"
 {
   repository(owner: "$Owner", name: "$Repo") {
     pullRequest(number: $prNum) {
@@ -578,35 +528,49 @@ function script:Get-SurfaceBEntriesGraphQL {
   }
 }
 "@
-                $pageOutput = & gh api graphql -f "query=$pageQuery" 2>&1
-                if ($LASTEXITCODE -ne 0) { break }
+                    $pageOutput = & gh api graphql -f "query=$pageQuery" 2>&1
+                    if ($LASTEXITCODE -ne 0) { break }
 
-                try {
-                    $pageParsed = ($pageOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
-                    $pageComments = $pageParsed['data']['repository']['pullRequest']['comments']
-                    foreach ($cn in @($pageComments['nodes'])) {
-                        if ($null -ne $cn) {
-                            $commentBodies.Add([string]$cn['body'])
-                            $cnCreatedAtB2 = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
-                            $commentCreatedAt.Add($cnCreatedAtB2)
+                    try {
+                        $pageParsed = ($pageOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+                        $pageComments = $pageParsed['data']['repository']['pullRequest']['comments']
+                        foreach ($cn in @($pageComments['nodes'])) {
+                            if ($null -ne $cn) {
+                                $commentBodies.Add([string]$cn['body'])
+                                $cnCreatedAtB2 = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                $commentCreatedAt.Add($cnCreatedAtB2)
+                            }
                         }
+                        $pi = $pageComments['pageInfo']
+                        $cursor = if ([bool]$pi['hasNextPage']) { [string]$pi['endCursor'] } else { $null }
                     }
-                    $pi = $pageComments['pageInfo']
-                    $cursor = if ([bool]$pi['hasNextPage']) { [string]$pi['endCursor'] } else { $null }
+                    catch {
+                        Write-Warning "phase-containment-rolling-history-core: failed to parse pagination response for PR #${prNum}: $_"
+                        break
+                    }
                 }
-                catch {
-                    Write-Warning "phase-containment-rolling-history-core: failed to parse pagination response for PR #${prNum}: $_"
-                    break
-                }
+
+                $scanned = Invoke-PhaseContainmentCommentScan `
+                    -CommentBodies $commentBodies.ToArray() `
+                    -IssueOrPrNumber $prNum `
+                    -Surface 'pr' `
+                    -CreatedAtValues $commentCreatedAt.ToArray()
+
+                foreach ($e in $scanned) { $entries.Add($e) }
             }
 
-            $scanned = Invoke-PhaseContainmentCommentScan `
-                -CommentBodies $commentBodies.ToArray() `
-                -IssueOrPrNumber $prNum `
-                -Surface 'pr' `
-                -CreatedAtValues $commentCreatedAt.ToArray()
-
-            foreach ($e in $scanned) { $entries.Add($e) }
+            # Advance the outer search cursor
+            $searchPageInfo = $searchBlock['pageInfo']
+            $nextCursor     = if ($null -ne $searchPageInfo -and $searchPageInfo.ContainsKey('endCursor')) { [string]$searchPageInfo['endCursor'] } else { '' }
+            if ([bool]$searchPageInfo['hasNextPage'] -and -not [string]::IsNullOrEmpty($nextCursor)) {
+                $searchCursor  = $nextCursor
+                $searchHasNext = $true
+            }
+            else {
+                # hasNextPage with a missing/empty endCursor is a malformed page — stop rather than re-querying after: "" forever
+                $searchCursor  = $null
+                $searchHasNext = $false
+            }
         }
     }
     catch {
@@ -757,7 +721,7 @@ function Get-PhaseContainmentHistory {
             return [PSCustomObject]@{
                 Entries   = @()
                 FetchedAt = (Get-Date)
-                Source    = 'rest'
+                Source    = 'repo-resolution-failed'
                 CacheAge  = [timespan]::Zero
             }
         }
@@ -771,7 +735,7 @@ function Get-PhaseContainmentHistory {
             return [PSCustomObject]@{
                 Entries   = @()
                 FetchedAt = (Get-Date)
-                Source    = 'rest'
+                Source    = 'repo-resolution-failed'
                 CacheAge  = [timespan]::Zero
             }
         }
@@ -1048,27 +1012,8 @@ function Get-PhaseContainmentRollup {
         # Relaxation eligibility
         $relaxationEligible = $null
         if (-not $insufficientData -and -not $denominatorZero -and -not $dataUntrustworthy) {
-            # Check: IrreducibleRate ~0 (< 0.05) — NOT eligible for relaxation via IrreducibleRate alone
-            # RelaxationEligible = $true ONLY when IrreducibleRate >= 0.95 (i.e., escape rate ~0)
-            # Re-reading: "IrreducibleRate ~0 AND N >= 5" — wait, the spec says:
-            # RelaxationEligible = $true only when ALL:
-            #   1. InsufficientData = $false (N >= 5)
-            #   2. DenominatorZero = $false
-            #   3. DataUntrustworthy = $false
-            #   4. IrreducibleRate ~0 (use: $IrreducibleRate -lt 0.05 as the threshold — "~0")
-            #   5. No entry with severity == 'critical'
-            #
-            # Wait — condition 4 says IrreducibleRate ~0 means RelaxationEligible = $true?
-            # That would mean low irreducible rate (high escape rate) is good? That seems backwards.
-            # Re-reading: "$IrreducibleRate -lt 0.05 as the threshold — ~0" for RelaxationEligible.
-            # But the plan says "EscapeRate ~0" not "IrreducibleRate ~0".
-            # Looking at the test: clean stage (all escape_distance=0) → IrreducibleRate=1.0, EscapeRate=0.0 → RelaxationEligible=$true
-            # And test 3: "NOT ELIGIBLE (escape_rate > 0)" → escape rate matters.
-            # The spec literally says "IrreducibleRate ~0" but the test says EscapeRate=0 → eligible.
-            # The ~0 threshold must apply to EscapeRate, not IrreducibleRate.
-            # The spec text "$IrreducibleRate -lt 0.05" is a copy error — it should be $EscapeRate -lt 0.05.
-            # Evidence: test 5 expects RelaxationEligible=$true with IrreducibleRate=1.0 (not ~0).
-            # Conclusion: the threshold applies to EscapeRate.
+            # Relaxation-eligible when escape_rate < 0.05 (effectively zero escapes) and no
+            # critical-severity finding in the window. See #762 design notes for the threshold rationale.
 
             $hasCritical = $false
             foreach ($e in $nonApparatusEntries) {
