@@ -30,6 +30,15 @@ Both implementation and testing lanes must use the same contract.
 3. **Run lanes**:
    - `parallel`: launch Code-Smith and Test-Writer against the same contract.
    - `serial`: run one lane first, then the second against the same contract.
+4. **Run triage** via Test-Writer after outputs are available.
+5. **Classify failures** as `code defect`, `test defect`, `harness/env defect`, or `rc-divergence` with evidence.
+6. **Route corrections bidirectionally** until convergence:
+   - `code defect` -> Code-Smith
+   - `test defect` -> Test-Writer
+   - `harness/env defect` -> responsible specialist or tooling path
+   - `rc-divergence` -> Code-Smith fixes implementation to match the Requirement Contract; CC re-evaluates; if divergence remains, Test-Writer re-derives assertions from the Requirement Contract, not the corrected implementation.
+7. **Enforce convergence gate** before advancing.
+8. **Run RC conformance check**: CC evaluates the step's Requirement Contract AC items against delivered code after convergence. Divergences route as `rc-divergence` using step 6.
 
 ### Lean dispatch example
 
@@ -56,16 +65,6 @@ Both implementation and testing lanes must use the same contract.
 The "after" form is shorter because the Requirement Contract already lives in
 the plan comment; only the constraint that is NOT already documented there
 travels inline.
-
-4. **Run triage** via Test-Writer after outputs are available.
-5. **Classify failures** as `code defect`, `test defect`, `harness/env defect`, or `rc-divergence` with evidence.
-6. **Route corrections bidirectionally** until convergence:
-   - `code defect` -> Code-Smith
-   - `test defect` -> Test-Writer
-   - `harness/env defect` -> responsible specialist or tooling path
-   - `rc-divergence` -> Code-Smith fixes implementation to match the Requirement Contract; CC re-evaluates; if divergence remains, Test-Writer re-derives assertions from the Requirement Contract, not the corrected implementation.
-7. **Enforce convergence gate** before advancing.
-8. **Run RC conformance check**: CC evaluates the step's Requirement Contract AC items against delivered code after convergence. Divergences route as `rc-divergence` using step 6.
 
 ## Convergence Gate (Mandatory)
 

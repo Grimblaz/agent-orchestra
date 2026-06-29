@@ -148,6 +148,7 @@ When the user invokes Code-Conductor without a specific slash command (e.g., `@c
 - `<!-- engagement-record-orchestration-{ID} -->` found → prior orchestration decisions exist; on entry to the Scope Classification Gate, invoke `Read-EngagementRecords -IssueNumber {ID} -Phase orchestration` (against the same comment scan already retrieved above — no separate gh round-trip) and apply solution-authoring's `same-decision-resume` rule to suppress re-firing the gate when the prior `conductor-scope-classification` decision still applies. Emit the canonical resume-note `Reusing prior conductor-scope-classification: {engineer_choice}` when reuse fires.
 
 Because the conductor skips the upstream agent, it cannot inherit its render and must independently author and output the terse snapshot:
+
 - **current phase**: latest phase marker detected.
 - **last decision**: most recent `engagement-record` decision or "last decision: not recorded" fallback.
 - **next step**: next incomplete step in the active pipeline position.
