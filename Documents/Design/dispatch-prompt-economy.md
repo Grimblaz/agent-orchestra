@@ -24,9 +24,9 @@ Before issue #472, dispatch prompts routinely restated the Requirement Contract 
 
 The economy rule lands as a sub-bullet under the "focused instructions" bullet in Code-Conductor Step 3 ("Execute Each Step"), co-located with the existing dispatch-economy machinery (`dispatch-cost-samples`, `frame-spine-lookup`). Placing the rule at the dispatch-construction site (rather than a separate skill) keeps the guidance proximate to the action it governs.
 
-### DD2 — Lean dispatch example added to `skills/parallel-execution/SKILL.md`
+### DD2 — Lean dispatch example documented in this design doc
 
-A before/after lean dispatch example was added under `### Lean dispatch example` in the Protocol section of `skills/parallel-execution/SKILL.md`. No existing example was converted — the skill was a purely abstract protocol before this change. The example concretely demonstrates the ~2 KB → ~300 B reduction achieved by pointing at `<!-- plan-issue-N --> step M` rather than restating its content.
+A before/after lean dispatch example is documented below (see `## Lean dispatch example`). The example was originally added to the Protocol section of `skills/parallel-execution/SKILL.md`, then moved here to keep the composite skill within the 80-line compact-entryway ceiling enforced by `composite-skill-structure.Tests.ps1`. No existing example was converted — the skill was a purely abstract protocol before this change. The example concretely demonstrates the ~2 KB → ~300 B reduction achieved by pointing at `<!-- plan-issue-N --> step M` rather than restating its content.
 
 ### DD3 — Rule scope: contract-restatement economy within the dispatch prompt
 
@@ -54,5 +54,33 @@ Issue #472 delivered **C2.a only** (Proceed-lite scope per the worth-it check). 
 ## Related Files
 
 - `agents/Code-Conductor.agent.md` — the economy rule lives in Step 3 ("Execute Each Step"), under the "focused instructions" sub-bullet
-- `skills/parallel-execution/SKILL.md` — lean dispatch example under `### Lean dispatch example` in the Protocol section
+- `Documents/Design/dispatch-prompt-economy.md § Lean dispatch example` — concrete before/after (this file)
 - `skills/frame-spine-lookup/SKILL.md` — the reference-lookup contract the specialist uses to resolve adjacent spine slices
+
+---
+
+## Lean dispatch example
+
+**Before** (~2 KB — contract restatement inlined in the dispatch prompt):
+
+> "Call @Code-Smith for Step 2 (event-batch debouncer): implement the
+> file-watch debounce. Requirements: the watcher batches events with a
+> 500 ms window; overlapping events within the window collapse to one
+> emit; the debounce is per-resource-id, not global; if a resource is
+> deleted mid-window, emit the delete immediately and cancel the pending
+> batch. Acceptance criteria: a 600 ms wait with two events yields one
+> callback; a delete mid-window fires immediately and cancels the batch.
+> Non-goals: no retry logic; no cross-process coordination. Edge case:
+> high-frequency emission (>100 events/sec) must not accumulate unbounded
+> pending batches — collapse into one."
+
+**After** (~300 B — canonical-source reference + one novel constraint):
+
+> "Call @Code-Smith for Step 2: Read `<!-- plan-issue-472 --> step 2` for the
+> full Requirement Contract. Novel constraint not in the plan: the debounce
+> timer must survive GC pressure at >100 events/sec (avoid closure capture
+> of large event payloads — see design doc §3.2)."
+
+The "after" form is shorter because the Requirement Contract already lives in
+the plan comment; only the constraint that is NOT already documented there
+travels inline.
