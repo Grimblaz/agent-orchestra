@@ -80,6 +80,16 @@ catch {
     $script:CostLibLoadFailed = $true
 }
 
+# Origin predicate dot-source (CI-safe; fail-open: if absent, $_isOrchestrated defaults to $false)
+$_originPredicatePath = Join-Path $PSScriptRoot 'lib/Get-FCLOriginContext.ps1'
+if (Test-Path $_originPredicatePath) {
+    . $_originPredicatePath
+}
+
+# Off-switch: suppress only FAILED-state posts by default.
+# Set $env:FCL_SUPPRESS_FAILED_POSTS=1 to activate.
+$_suppressFailedPosts = ($env:FCL_SUPPRESS_FAILED_POSTS -eq '1')
+
 # ---------------------------------------------------------------------------
 # Read a single scalar field from an adapter's frontmatter block.
 # ---------------------------------------------------------------------------
@@ -1234,6 +1244,18 @@ function Invoke-FrameCreditLedger {
     # 3. Parse pipeline-metrics block.
     $metrics = Read-PRMetricsBlock -PrBody $prBody
 
+    # 3a. Compute orchestrated-origin context using the CI-safe predicate (s1).
+    # PRIMARY: $env:GITHUB_HEAD_REF (populated on pull_request events; never 'HEAD').
+    # FALLBACK: PR body linked-issue signals.
+    # If Get-FCLOriginContext is unavailable (predicate not dot-sourced), default
+    # to $false — safe: fails quiet, never produces false-FAILED posts.
+    $_isOrchestrated = $false
+    if (Get-Command 'Get-FCLOriginContext' -ErrorAction SilentlyContinue) {
+        $_prHeadRef = $env:GITHUB_HEAD_REF
+        $_originCtx = Get-FCLOriginContext -HeadRef $_prHeadRef -PrBody $prBody
+        $_isOrchestrated = [bool]$_originCtx.IsOrchestratedOrigin
+    }
+
     # 4. Non-v4 short-circuit. Read-PRMetricsBlock returns one of three
     # non-v4 shapes that we must distinguish so the posted comment is
     # honest about what actually happened:
@@ -1243,12 +1265,20 @@ function Invoke-FrameCreditLedger {
     # Any other non-4 shape we have not seen before falls through to the
     # pre-v4 comment as a conservative default.
     if ($null -eq $metrics) {
-        $comment = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker
-        try {
-            $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $marker -Body $comment
+        # Taxonomy decision: FAILED only for orchestrated-origin; quiet for non-orchestrated.
+        $comment = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker -IsOrchestrated $_isOrchestrated
+        # FAILED-state posts are gated by off-switch; non-orchestrated posts always fire.
+        $postComment = $true
+        if ($_isOrchestrated -and $_suppressFailedPosts) {
+            $postComment = $false
         }
-        catch {
-            [Console]::Error.WriteLine("frame-credit-ledger: upsert failed: $($_.Exception.Message)")
+        if ($postComment) {
+            try {
+                $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $marker -Body $comment
+            }
+            catch {
+                [Console]::Error.WriteLine("frame-credit-ledger: upsert failed: $($_.Exception.Message)")
+            }
         }
 
         return @{

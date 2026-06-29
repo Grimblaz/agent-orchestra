@@ -1597,6 +1597,38 @@ Describe 'Compose-MissingMetricsShortCircuitComment (C-Behavior-1: distinct bran
 }
 
 # ---------------------------------------------------------------------------
+# Issue #769 — Origin-gated 3-state taxonomy
+# Tests: Compose-MissingMetricsShortCircuitComment renders 🛑 FAILED for
+# orchestrated-origin and "not measured (non-orchestrated)" for non-orchestrated.
+# ---------------------------------------------------------------------------
+Describe 'Compose-MissingMetricsShortCircuitComment — origin-gated taxonomy (issue #769 AC3)' {
+
+    It 'IsOrchestrated=$true renders 🛑 FAILED heading and never "not measured"' {
+        $marker = '<!-- frame-credit-ledger-PR-769 -->'
+        $out = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker -IsOrchestrated $true
+
+        $out | Should -Not -BeNullOrEmpty
+        $out | Should -Match ([regex]::Escape($marker))
+        $out | Should -Match '🛑'
+        $out | Should -Match 'FAILED'
+        $out | Should -Match 'no pipeline-metrics block found'
+        $out | Should -Not -Match 'non-orchestrated'
+        $out | Should -Not -Match 'not measured'
+    }
+
+    It 'IsOrchestrated=$false renders "not measured (non-orchestrated)" and never 🛑 FAILED' {
+        $marker = '<!-- frame-credit-ledger-PR-769 -->'
+        $out = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker -IsOrchestrated $false
+
+        $out | Should -Not -BeNullOrEmpty
+        $out | Should -Match ([regex]::Escape($marker))
+        $out | Should -Match 'not measured \(non-orchestrated\)'
+        $out | Should -Not -Match '🛑'
+        $out | Should -Not -Match 'FAILED'
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Issue #441 Step 3 — v4 extended schema parser tests (RED until GREEN lands)
 # Tests: status:not-persisted, per-port fields, run_index, mode.synthetic-backfill,
 #        and last-wins-by-run_index selection.
