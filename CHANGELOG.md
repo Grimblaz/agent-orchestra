@@ -2,6 +2,26 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.12] — 2026-06-29
+
+### Added
+
+- **Phase-containment escape-rate ledger** (#762, review-efficacy sub-1): instrumentation that measures how far review-pipeline defects escape from the phase where they were catchable.
+  - New schema `skills/calibration-pipeline/schemas/phase-containment.schema.json` — 10-field JSON Schema (draft-07) for `<!-- phase-containment-{ID} -->` YAML blocks.
+  - New `.github/scripts/lib/phase-containment-core.ps1` — hand-rolled (powershell-yaml-free) parser/validator: `Get-PhaseContainmentBlock` (multi-block), `ConvertFrom-PhaseContainmentYaml`, `Test-PhaseContainmentEntry`, `Get-PhaseContainmentFindingKey`, `Get-PhaseContainmentEnumDriftStatus`.
+  - New `.github/scripts/lib/phase-containment-rolling-history-core.ps1` — two-surface walk (issue + merged-PR comments), 1-hour two-sided cache, GraphQL→REST fallback, dedup-by-finding_key, and `Get-PhaseContainmentRollup` (InsufficientData / DenominatorZero / DataUntrustworthy guards, RelaxationEligible signal, leakage matrix).
+  - New CLI `.github/scripts/phase-containment-report.ps1` — per-stage CE Gate report with INSUFFICIENT DATA / DATA UNTRUSTWORTHY / NOT ELIGIBLE / ELIGIBLE labels.
+  - Wired phase-containment emission into `skills/design-exploration`, `skills/plan-authoring`, and `skills/review-judgment` with setter rules and detective-sample audit.
+  - CE Gate verification `.github/scripts/Tests/Invoke-CEGate762.ps1` (AC3/AC4/AC8/AC12) plus Pester coverage in `phase-containment-core.Tests.ps1` (25) and `phase-containment-rolling-history-core.Tests.ps1` (24).
+
+## [2.35.11] — 2026-06-28
+
+### Added
+
+- **Dispatch-prompt economy** (#472): added a dispatch-prompt economy rule to Code-Conductor Step 3 ("Execute Each Step") directing the conductor to reference the canonical plan source (`Read <!-- plan-issue-N --> step M for contract`) instead of re-inlining contract detail in specialist dispatch prompts; novel constraints not already in the plan/design always stay inline.
+  - New design doc `Documents/Design/dispatch-prompt-economy.md` — rule placement, scope (C2.a delivered; C2.b prepared-payload and M1 telemetry-proof deferred), and a before/after lean dispatch example.
+  - New `skills/parallel-execution/references/lean-dispatch-example.md` — canonical lean before/after dispatch example, indexed in the skill's Composite References.
+
 ## [2.35.10] — 2026-06-28
 
 ### Added
