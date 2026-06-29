@@ -216,5 +216,7 @@ The adversarial review pipeline runs after implementation to find defects before
 | **subagent-env-handshake** | A `<!-- subagent-env-handshake v1 -->` block the parent embeds in a dispatch prompt; the subagent live-verifies its git state matches the parent before making tree-grounded claims. | `skills/subagent-env-handshake/SKILL.md` |
 | **persist-changes** | The git-portable commit+push primitive (`skills/persist-changes/SKILL.md`) called as the terminal step after validated changes are staged. | `skills/persist-changes/SKILL.md` |
 | **post-PR review / post-merge cleanup** | The checklist and automation run after a PR merges: archiving tracking files, removing worktrees, deleting orphan branches, and updating docs. | `skills/post-pr-review/SKILL.md` |
+| **`cost-capture-failed` sentinel** | `<!-- cost-capture-failed -->` written to the PR body by `emit-pipeline-metrics-v4.ps1` when the v4 block cannot be built; detected by the CI cost-pattern-presence-check gate. | `.github/scripts/emit-pipeline-metrics-v4.ps1`; `.github/workflows/cost-pattern-presence-check.yml` |
+| **`Get-FCLOriginContext`** | CI-safe origin predicate that classifies a PR as orchestrated (eligible for v4 emission) or non-orchestrated. Primary signal: `$env:GITHUB_HEAD_REF` matching `feature/issue-N`; fallback: PR body linked-issue signals. | `lib/Get-FCLOriginContext.ps1` |
 
 <!-- vocab-seed:end -->

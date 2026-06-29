@@ -2,6 +2,17 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.12] — 2026-06-29
+
+### Fixed
+
+- **Cost telemetry v4 emission reliability** (#769): deterministic fail-loud v4 emission path wired end-to-end into Code-Conductor.
+  - **`lib/Get-FCLOriginContext.ps1`**: new CI-safe orchestrated-origin predicate using `$env:GITHUB_HEAD_REF` (primary) and PR body linked-issue signals (fallback). Excludes detached-HEAD `HEAD` literal (M3 bug fix). Returns `IsOrchestratedOrigin`, `LinkedIssueNumber`, `DetectionMethod`.
+  - **`emit-pipeline-metrics-v4.ps1`**: deterministic 3-case fail-loud emitter — builder-throw → `<!-- cost-capture-failed -->` sentinel; empty credits → sentinel; success → v4 block. Called before `gh pr create` in Code-Conductor's fresh-PR path; push-only path explicitly exempted. Non-zero exit on failure.
+  - **`lib/Add-FCLCreditRow.ps1` / `lib/Get-FCLAccumulatedCredits.ps1`**: file-based credit accumulator at `.tmp/issue-{N}/fclcredits.jsonl`; harvest hook in emit script ensures credits are non-empty on orchestrated runs. Conductor body gains `Add-FCLCreditRow` call after each `Build-*CreditRow` step.
+  - **`frame-credit-ledger.ps1`**: origin-gated 3-state taxonomy (`🛑 FAILED` / `not measured (non-orchestrated)` / `pre-v4`) at each short-circuit site; off-switch via `FCL_SUPPRESS_FAILED_POSTS` env var.
+  - **`.github/workflows/cost-pattern-presence-check.yml`**: widened `if:` to include `startsWith(github.head_ref, 'feature/issue-')` head refs; step now checks PR body for `<!-- pipeline-metrics` instead of PR comments for `<!-- cost-pattern-data`.
+
 ## [2.35.11] — 2026-06-28
 
 ### Added
