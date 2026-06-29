@@ -203,6 +203,10 @@ The canonical session-memory handoff artifacts remain `/memories/session/plan-is
 
 > **Survival**: Copilot plan and design caches are same-conversation state under `SMC-01` and `SMC-03`. Durable cross-tool handoff stays on the existing GitHub markers governed by `SMC-08`; Claude `/plan` uses the `SMC-01` GitHub marker instead of a Claude-local cache.
 
+### Phase-containment emission (plan-stress-test)
+
+After emitting the plan approval burst, for each sustained plan-stress-test finding append one `<!-- phase-containment-{ID} -->` block to the `<!-- plan-issue-{ID} -->` comment (see `skills/plan-authoring/SKILL.md` § Post-Judge Reconciliation → Phase-containment emission for the full field contract). Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
+
 ## Context Management
 
 Load `skills/plan-authoring/SKILL.md` for compaction guidance. Compact proactively after a long discovery phase and before drafting.

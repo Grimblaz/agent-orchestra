@@ -184,6 +184,20 @@ For load-bearing findings, use a batched AskUserQuestion flow. When there are <=
 
 Before posting the design completion marker, follow `agents/Solution-Designer.agent.md` section `Stage 4: Update Issue` -> section `Pre-post YAML integrity check` for AC6: the disposition summary and `finding_dispositions:` block must account for the merged ledger before the marker is posted.
 
+### Phase-containment emission
+
+After the disposition summary is finalized and after posting the `design-phase-complete` marker, emit one `<!-- phase-containment-{ID} -->` block per sustained (non-dismissed) design-challenge finding by appending to the same `<!-- design-phase-complete-{ID} -->` issue comment (or editing it):
+
+- `finding_key`: `design-challenge:{issue}:{marker}:{finding_id}`
+- `introduced_phase`: set by explicit agent judgment — no default; reason which phase originated this defect
+- `catchable_phase`: set by explicit agent judgment — no default; reason which phase was the earliest this defect could have been caught
+- `caught_stage: design-challenge`
+- `escape_distance`: recomputed as `1 - ordinal(catchable_phase)` (design-challenge projection = 1; phase ordinals: experience=0, design=1, plan=2, implementation=3)
+- `severity`, `systemic_fix_type`, `category`: carry forward from the finding
+- `apparatus_meta: false` unless a stated criterion justifies `true`
+
+**Setter rule**: `catchable_phase` and `introduced_phase` must each be set by explicit agent judgment with no default — the agent must reason about which phase was the earliest in which this specific defect was catchable, and which phase introduced it. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
+
 ## Related Guidance
 
 - Load `software-architecture` when the design changes dependency direction or layer boundaries
