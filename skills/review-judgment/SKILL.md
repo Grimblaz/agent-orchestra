@@ -129,6 +129,22 @@ After the sentinel, emit the `judge-rulings` block in the same PR comment as the
 
 Keep the Markdown score summary and the `judge-rulings` block together in the same response payload. On GitHub, keep them in the same PR comment rather than splitting them across separate comments. **This comment does not include `<!-- code-review-complete-{PR} -->`** — that marker is retired as of issue #441 Step 11; Code-Conductor reads `credits[]` from the `<!-- pipeline-metrics -->` PR body block directly. **This comment does not include pipeline-metrics body emission** — that is owned by Code-Conductor's `## Pipeline Metrics` emitter at PR creation time.
 
+### Phase-containment emission
+
+In the same PR comment as the `<!-- judge-rulings ... -->` block, emit one `<!-- phase-containment-{PR} -->` block per sustained finding (`judge_ruling: sustained`):
+
+- `finding_key`: `code-review:{stable_finding_key}`
+- `introduced_phase`: set by explicit agent judgment — no default; reason which phase originated this defect
+- `catchable_phase`: set by explicit agent judgment — no default; reason which phase was the earliest this defect could have been caught
+- `caught_stage: code-review`
+- `escape_distance`: recomputed as `3 - ordinal(catchable_phase)` (code-review projection = 3; phase ordinals: experience=0, design=1, plan=2, implementation=3)
+- `severity`, `systemic_fix_type`, `category`: carry forward from the finding
+- `apparatus_meta: false` unless a stated criterion justifies `true`; when `apparatus_meta: true`, the entry is audited
+
+**Setter rule**: `catchable_phase` and `introduced_phase` must each be set by explicit agent judgment with no default — the agent must reason about which phase was the earliest in which this specific defect was catchable. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
+
+**Detective-sample extension**: the Code-Critic detective-sample (from `agents/Code-Critic.agent.md:110`) is extended to sample `apparatus_meta: true` entries and `catchable_phase == caught_stage` entries for plausibility review.
+
 Field values:
 
 - `judge_ruling`: `sustained` or `defense-sustained`

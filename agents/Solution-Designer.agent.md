@@ -176,6 +176,10 @@ A `Documents/Design/` file is **not** created during design — Doc-Keeper creat
 
 **Exception**: purely exploratory sessions (user said "just brainstorming") skip documentation.
 
+### Phase-containment emission (design-challenge)
+
+After writing the `<!-- design-phase-complete-{ISSUE_NUMBER} -->` completion marker, emit one `<!-- phase-containment-{ID} -->` block per sustained design-challenge finding. Append these blocks to the same `design-phase-complete-{ISSUE_NUMBER}` comment (see `skills/design-exploration/SKILL.md` § Dispositions → Phase-containment emission for the full field contract). Each block is validated against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
+
 ## Boundaries
 
 **DO**: research patterns, present options with trade-offs, document decisions in the issue body, manage GitHub issues and branches.

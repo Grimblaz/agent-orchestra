@@ -1,0 +1,76 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "phase-containment",
+  "description": "Payload for <!-- phase-containment-{ID} --> HTML comment YAML blocks. Records per-finding phase-containment metadata for escape-rate ledger tracking. Governed by the calibration-pipeline skill.",
+  "type": "object",
+  "required": [
+    "finding_key",
+    "introduced_phase",
+    "catchable_phase",
+    "caught_stage",
+    "escape_distance",
+    "severity",
+    "systemic_fix_type",
+    "category"
+  ],
+  "properties": {
+    "finding_key": {
+      "type": "string",
+      "description": "Uniform cross-surface identifier: {surface}:{stable_finding_key}. Surface is one of: code-review, design-challenge, plan-stress-test."
+    },
+    "introduced_phase": {
+      "type": "string",
+      "enum": ["experience", "design", "plan", "implementation"],
+      "description": "The phase in which the defect was introduced."
+    },
+    "catchable_phase": {
+      "type": "string",
+      "enum": ["experience", "design", "plan", "implementation"],
+      "description": "The earliest phase in which the defect could have been caught."
+    },
+    "caught_stage": {
+      "type": "string",
+      "enum": ["design-challenge", "plan-stress-test", "code-review"],
+      "description": "The stage at which the defect was actually caught."
+    },
+    "escape_distance": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Computed as: projection(caught_stage) - ordinal(catchable_phase). Must match the recomputed value or the entry is rejected."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low"],
+      "description": "Finding severity. MUST match routing-config.json:378 severity enum. Drift is verified by phase-containment-core.Tests.ps1 enum drift test."
+    },
+    "systemic_fix_type": {
+      "type": "string",
+      "enum": ["instruction", "skill", "agent-prompt", "plan-template", "none"],
+      "description": "Type of systemic fix required. MUST match routing-config.json:397 systemic_fix_type enum. Drift is verified by phase-containment-core.Tests.ps1 enum drift test."
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "architecture",
+        "security",
+        "performance",
+        "pattern",
+        "implementation-clarity",
+        "script-automation",
+        "documentation-audit"
+      ],
+      "description": "Finding category. MUST match routing-config.json:386 category enum. Drift is verified by phase-containment-core.Tests.ps1 enum drift test."
+    },
+    "apparatus_meta": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, this entry is excluded from all rate numerators, denominators, and n counts. Use for seeded baseline entries that are part of the apparatus, not organic findings."
+    },
+    "seed": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, distinguishes seeded baseline entries from organic entries. Seeded entries are known injected defects used to calibrate the pipeline."
+    }
+  },
+  "additionalProperties": false
+}
