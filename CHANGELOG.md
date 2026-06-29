@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.10] — 2026-06-28
+
+### Added
+
+Add ## Grounding Discipline section to skills/design-exploration/SKILL.md — four-quadrant pre-challenge artifact trace gate (Q1 output->consumer, Q2 input->exec-env, Q3 current-behavior, Q4 premise-citation) with timing split, disposition enum, **Grounding Evidence** block, and 60 KB guard. Wire **grounding gate** forcing-function into agents/Solution-Designer.agent.md between Stage 2 and Stage 3. Add 5th Issue-Planner-lens backstop row to skills/upstream-onboarding/SKILL.md. Add Pester structural test design-grounding-discipline.Tests.ps1 (14 tests). Closes #763.
+
 ## [2.35.9] — 2026-06-28
 
 ### Added
