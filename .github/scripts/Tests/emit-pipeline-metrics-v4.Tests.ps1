@@ -18,13 +18,20 @@
 #      -> builder throws -> sentinel emitted correctly.
 
 BeforeAll {
-    $script:RepoRoot    = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-    $script:ScriptPath  = Join-Path $script:RepoRoot '.github/scripts/emit-pipeline-metrics-v4.ps1'
-    $script:CoreLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/frame-credit-ledger-core.ps1'
+    $script:RepoRoot     = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+    $script:CoreLibPath  = Join-Path $script:RepoRoot '.github/scripts/lib/frame-credit-ledger-core.ps1'
+    $script:EmitCorePath = Join-Path $script:RepoRoot '.github/scripts/lib/emit-pipeline-metrics-v4-core.ps1'
 
-    # Load core lib so helpers are available to test assertions.
+    # Load core lib so helpers (New-/Test-/Read-PipelineMetricsV4Block) are
+    # available to test assertions.
     if (Test-Path $script:CoreLibPath) {
         . $script:CoreLibPath
+    }
+
+    # Dot-source the emit core so Invoke-PipelineMetricsV4Emit can be called
+    # in-process (no child pwsh spawn — #257 script-safety contract).
+    if (Test-Path $script:EmitCorePath) {
+        . $script:EmitCorePath
     }
 
     # Minimal valid v3 base YAML (no pipeline-metrics wrapper, no metrics_version line).
@@ -53,8 +60,9 @@ BeforeAll {
         )
     }
 
-    # Helper: invoke the script in a child process and return @{ ExitCode; BodyContent }.
-    # Uses pwsh -File so $ErrorActionPreference = 'Stop' and exit codes propagate correctly.
+    # Helper: invoke the emit core in-process and return @{ ExitCode; BodyContent }.
+    # Dot-source + in-process call pattern (#257) — Invoke-PipelineMetricsV4Emit
+    # returns an ExitCode object instead of calling exit, so no child pwsh is spawned.
     $script:InvokeScript = {
         param(
             [string]$BodyFile,
@@ -65,59 +73,14 @@ BeforeAll {
             [string]$RichBody = ''
         )
 
-        # Serialize credits to a temp JSON file so the child process can reload them.
-        $creditsJson  = if ($Credits.Count -gt 0)            { $Credits | ConvertTo-Json -Depth 5 }            else { '[]' }
-        $samplesJson  = if ($DispatchCostSamples.Count -gt 0) { $DispatchCostSamples | ConvertTo-Json -Depth 5 } else { '[]' }
-
-        $creditsTemp  = [System.IO.Path]::GetTempFileName()
-        $samplesTemp  = [System.IO.Path]::GetTempFileName()
-        $richBodyTemp = [System.IO.Path]::GetTempFileName()
-        Set-Content -Path $creditsTemp  -Value $creditsJson -Encoding utf8NoBOM
-        Set-Content -Path $samplesTemp  -Value $samplesJson -Encoding utf8NoBOM
-        # Store RichBody in a file to avoid quoting issues in the wrapper here-string.
-        Set-Content -Path $richBodyTemp -Value $RichBody    -Encoding utf8NoBOM
-
-        # Escape paths for use inside single-quoted strings in the wrapper.
-        $safeBodyFile    = $BodyFile              -replace "'", "''"
-        $safeScript      = $script:ScriptPath     -replace "'", "''"
-        $safeCredTemp    = $creditsTemp            -replace "'", "''"
-        $safeSampTemp    = $samplesTemp            -replace "'", "''"
-        $safeV3          = $V3BaseYaml             -replace "'", "''"
-        $safeRichTemp    = $richBodyTemp           -replace "'", "''"
-
-        $wrapperContent = @"
-#Requires -Version 7.0
-`$ErrorActionPreference = 'Stop'
-`$creditsRaw  = Get-Content -LiteralPath '$safeCredTemp'   -Raw | ConvertFrom-Json
-`$samplesRaw  = Get-Content -LiteralPath '$safeSampTemp'   -Raw | ConvertFrom-Json
-`$richBodyVal = Get-Content -LiteralPath '$safeRichTemp'   -Raw
-# Trim the trailing newline that Set-Content appends so the value matches what callers pass.
-`$richBodyVal = `$richBodyVal -replace '\r?\n$', ''
-`$credits  = if (`$null -eq `$creditsRaw  -or @(`$creditsRaw).Count  -eq 0)  { @() } else { @(`$creditsRaw  | ForEach-Object { [pscustomobject]`$_ }) }
-`$samples  = if (`$null -eq `$samplesRaw -or @(`$samplesRaw).Count -eq 0) { @() } else { @(`$samplesRaw | ForEach-Object { [pscustomobject]`$_ }) }
-& '$safeScript' ``
-    -BodyFile '$safeBodyFile' ``
-    -V3BaseYaml '$safeV3' ``
-    -Credits `$credits ``
-    -DispatchCostSamples `$samples ``
-    -IssueNumber $IssueNumber ``
-    -RichBody `$richBodyVal
-exit `$LASTEXITCODE
-"@
-        $wrapperTemp = [System.IO.Path]::GetTempFileName() + '.ps1'
-        Set-Content -Path $wrapperTemp -Value $wrapperContent -Encoding utf8NoBOM
-
-        try {
-            $proc = Start-Process -FilePath 'pwsh' `
-                -ArgumentList @('-NonInteractive', '-NoProfile', '-File', $wrapperTemp) `
-                -Wait -PassThru -NoNewWindow
-            $exitCode = $proc.ExitCode
-        } finally {
-            Remove-Item -LiteralPath $wrapperTemp   -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $creditsTemp   -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $samplesTemp   -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $richBodyTemp  -ErrorAction SilentlyContinue
-        }
+        $emitResult = Invoke-PipelineMetricsV4Emit `
+            -BodyFile            $BodyFile `
+            -V3BaseYaml          $V3BaseYaml `
+            -Credits             $Credits `
+            -DispatchCostSamples $DispatchCostSamples `
+            -IssueNumber         $IssueNumber `
+            -RichBody            $RichBody `
+            -WarningAction       SilentlyContinue
 
         $bodyContent = ''
         if (Test-Path -LiteralPath $BodyFile) {
@@ -125,7 +88,7 @@ exit `$LASTEXITCODE
         }
 
         return [pscustomobject]@{
-            ExitCode    = $exitCode
+            ExitCode    = $emitResult.ExitCode
             BodyContent = $bodyContent
         }
     }

@@ -33,8 +33,11 @@ jobs:
       - name: Check PR body for v4 pipeline-metrics block with non-empty credits
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
         run: |
+          # GH_REPO is required: this job has no actions/checkout, so gh cannot
+          # infer the repo from a local git remote (otherwise: "not a git repository").
           pr_body=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
 
           # pre-v4 block: marker present but not v4 — taxonomy state: pre-v4 (distinct from FAILED)
