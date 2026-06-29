@@ -84,8 +84,8 @@ Describe 'design grounding discipline' {
     # --- Group 2: Ordering in agents/Solution-Designer.agent.md ---
 
     It 'places the grounding gate token between Stage 2 and Stage 3 in Solution-Designer.agent.md' {
-        $script:AgentContent | Should -Match '(?s)Stage 2.+grounding gate.+Stage 3' `
-            -Because 'issue #763 s2 requires the literal grounding gate token between Stage 2 and Stage 3 so the gate is enforced by the agent body'
+        $script:AgentContent | Should -Match '(?s)## Stage 2:.+\*\*grounding gate\*\*.+## Stage 3:' `
+            -Because 'issue #763 s2 requires the grounding gate token anchored between the ## Stage 2 and ## Stage 3 headings, not just any "Stage 3" occurrence within the gate paragraph itself'
     }
 
     # --- Group 3: Issue-Planner-lens backstop in skills/upstream-onboarding/SKILL.md ---
