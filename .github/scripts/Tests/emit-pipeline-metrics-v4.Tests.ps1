@@ -304,6 +304,10 @@ Describe 'emit-pipeline-metrics-v4.ps1' {
 
                 $result.ExitCode    | Should -Not -Be 0
                 $result.BodyContent | Should -Match $script:SentinelRegex
+                # CR-NEW-1 / CR-DUP-1: the fallback must strip the embedded metrics
+                # block from RichBody so downstream readers cannot mistake the failure
+                # body for a real v4 emission.
+                $result.BodyContent | Should -Not -Match '<!--\s*pipeline-metrics'
             } finally {
                 Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
             }

@@ -123,7 +123,23 @@ function Invoke-PipelineMetricsV4Emit {
     }
     catch {
         # Case 1 or 2: write fallback body + sentinel.
-        $fallbackBase = if ([string]::IsNullOrWhiteSpace($RichBody)) {
+
+        # Strip any embedded pipeline-metrics block from RichBody before using it
+        # as the fallback base.  If RichBody was the source of the double-marker
+        # (CR-NEW-1), writing it back unchanged would leave a stale metrics block in
+        # the failure body, confusing downstream consumers despite the failure
+        # sentinel that follows.
+        $sanitizedRichBody = if ([string]::IsNullOrWhiteSpace($RichBody)) {
+            ''
+        } else {
+            [regex]::Replace(
+                $RichBody,
+                '(?s)\s*<!--\s*pipeline-metrics.*?-->\s*',
+                ''
+            ).Trim()
+        }
+
+        $fallbackBase = if ([string]::IsNullOrWhiteSpace($sanitizedRichBody)) {
             # Only reuse V3BaseYaml when it does NOT carry a pipeline-metrics opener;
             # reusing a poisoned base would re-ship the double-marker content that
             # caused the failure in the first place.
@@ -133,7 +149,7 @@ function Invoke-PipelineMetricsV4Emit {
                 'metrics_emission_failed: true'
             }
         } else {
-            $RichBody
+            $sanitizedRichBody
         }
         $fallbackBody = "$fallbackBase`n`n<!-- cost-capture-failed -->"
 

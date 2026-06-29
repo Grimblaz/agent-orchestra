@@ -2,7 +2,7 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
-## [2.35.12] — 2026-06-29
+## [2.35.13] — 2026-06-29
 
 ### Fixed
 
