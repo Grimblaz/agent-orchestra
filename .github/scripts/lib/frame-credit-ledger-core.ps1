@@ -2054,14 +2054,36 @@ function Compose-ParseErrorShortCircuitComment {
 # Render the short-circuit comment for the case where the PR body has no
 # pipeline-metrics marker block at all (Read-PRMetricsBlock returned $null).
 # Distinct from pre-v4 and parse-error.
+#
+# -IsOrchestrated: when $true the PR is confirmed orchestrated-origin, so the
+# absent block is a genuine 🛑 FAILED signal. When $false the PR is not
+# orchestrated-origin, so the absent block is expected — render a quiet
+# "not measured (non-orchestrated)" notice instead.
 function Compose-MissingMetricsShortCircuitComment {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseApprovedVerbs', '', Justification = 'Public helper name retained for compatibility with existing tests and callers.')]
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$MarkerToken)
+    param(
+        [Parameter(Mandatory)][string]$MarkerToken,
+        [bool]$IsOrchestrated = $false
+    )
 
+    if (-not $IsOrchestrated) {
+        # Non-orchestrated origin: absent block is expected. Quiet notice only.
+        $lines = @(
+            $MarkerToken,
+            '**Frame credit ledger — not measured (non-orchestrated)**',
+            '',
+            'This PR was not opened from a `feature/issue-*` branch and does not contain linked-issue signals in the PR body, so no orchestrated pipeline-metrics block is expected. Port-by-port credit reporting is not applicable for non-orchestrated PRs.',
+            '',
+            '(Hook ran in `warn` mode; PR creation was not blocked.)'
+        )
+        return ($lines -join [Environment]::NewLine)
+    }
+
+    # Orchestrated origin: the absent block is a genuine failure.
     $lines = @(
         $MarkerToken,
-        '⚠️ **Frame credit ledger — no pipeline-metrics block found in the PR body**',
+        '🛑 **FAILED — Frame credit ledger — no pipeline-metrics block found in the PR body**',
         '',
         'The frame credit-ledger hook reads `metrics_version: 4` frame credits emitted inside an HTML-comment marker block (`<!-- pipeline-metrics ... -->`). This PR''s body does not contain that block, so port-by-port credit reporting is unavailable.',
         '',

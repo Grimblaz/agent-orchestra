@@ -1580,7 +1580,7 @@ Describe 'Compose-MissingMetricsShortCircuitComment (C-Behavior-1: distinct bran
 
     It 'renders missing-marker-specific text (NOT the pre-v4 or parse-error phrasing)' {
         $marker = '<!-- frame-credit-ledger-PR-429 -->'
-        $out = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker
+        $out = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker -IsOrchestrated $true
 
         $out | Should -Not -BeNullOrEmpty
         $out | Should -Match ([regex]::Escape($marker))
@@ -1593,6 +1593,52 @@ Describe 'Compose-MissingMetricsShortCircuitComment (C-Behavior-1: distinct bran
         # Suggested next step still points operators at the v4 schema.
         $out | Should -Match 'frame/pipeline-metrics-v4-schema.md'
         $out | Should -Match '(?i)warn'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #769 — Origin-gated 3-state taxonomy
+# Tests: Compose-MissingMetricsShortCircuitComment renders 🛑 FAILED for
+# orchestrated-origin and "not measured (non-orchestrated)" for non-orchestrated.
+# ---------------------------------------------------------------------------
+Describe 'Compose-MissingMetricsShortCircuitComment — origin-gated taxonomy (issue #769 AC3)' {
+
+    It 'IsOrchestrated=$true renders 🛑 FAILED heading and never "not measured"' {
+        $marker = '<!-- frame-credit-ledger-PR-769 -->'
+        $out = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker -IsOrchestrated $true
+
+        $out | Should -Not -BeNullOrEmpty
+        $out | Should -Match ([regex]::Escape($marker))
+        $out | Should -Match '🛑'
+        $out | Should -Match 'FAILED'
+        $out | Should -Match 'no pipeline-metrics block found'
+        $out | Should -Not -Match 'non-orchestrated'
+        $out | Should -Not -Match 'not measured'
+    }
+
+    It 'IsOrchestrated=$false renders "not measured (non-orchestrated)" and never 🛑 FAILED' {
+        $marker = '<!-- frame-credit-ledger-PR-769 -->'
+        $out = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker -IsOrchestrated $false
+
+        $out | Should -Not -BeNullOrEmpty
+        $out | Should -Match ([regex]::Escape($marker))
+        $out | Should -Match 'not measured \(non-orchestrated\)'
+        $out | Should -Not -Match '🛑'
+        $out | Should -Not -Match 'FAILED'
+    }
+}
+
+Describe 'Compose-MissingMetricsShortCircuitComment — default IsOrchestrated is $false (P2-F4 fix)' {
+
+    It 'default call (no -IsOrchestrated arg) renders not-measured (default is now $false)' {
+        $marker = '<!-- frame-credit-ledger-PR-pf4 -->'
+        $result = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker
+
+        $result | Should -Not -BeNullOrEmpty
+        $result | Should -Match ([regex]::Escape($marker))
+        $result | Should -Match 'non-orchestrated'
+        $result | Should -Not -Match '🛑'
+        $result | Should -Not -Match 'FAILED'
     }
 }
 

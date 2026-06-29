@@ -287,5 +287,17 @@
     "register": "self-describing",
     "kind": "family",
     "decode": "post-PR review = checklist run after PR merges; post-merge cleanup = worktree removal, orphan branch deletion, tracking file archival; see skills/post-pr-review/SKILL.md"
+  },
+  {
+    "term": "`cost-capture-failed` sentinel",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "`cost-capture-failed` sentinel (the <!-- cost-capture-failed --> HTML comment emit-pipeline-metrics-v4.ps1 writes to a PR body when the v4 pipeline-metrics block cannot be built; the CI cost-pattern-presence-check gate detects it as a distinct FAILED state)"
+  },
+  {
+    "term": "`Get-FCLOriginContext`",
+    "register": "stable-code",
+    "kind": "atomic",
+    "expansion": "`Get-FCLOriginContext` (the CI-safe origin predicate in .github/scripts/lib/Get-FCLOriginContext.ps1 that classifies a PR as orchestrated or non-orchestrated; primary signal $env:GITHUB_HEAD_REF, fallback PR-body linked-issue markers)"
   }
 ]

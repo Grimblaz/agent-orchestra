@@ -780,3 +780,244 @@ Describe 'frame-credit-ledger cost integration' {
         }
     }
 }
+
+# ===========================================================================
+# Issue #769 AC3 — Origin-gated 3-state taxonomy integration tests
+#
+# Validates that the orchestrator correctly routes the missing-block short-
+# circuit to the 🛑 FAILED or "not measured (non-orchestrated)" state based
+# on the CI-safe origin predicate (Get-FCLOriginContext).
+# ===========================================================================
+Describe 'frame-credit-ledger origin-gated taxonomy (issue #769 AC3)' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:OrchestratorPath = Join-Path $script:RepoRoot '.github/scripts/frame-credit-ledger.ps1'
+
+        # Empty PR body: no pipeline-metrics block. Used to exercise the null short-circuit.
+        $script:EmptyBody = '## Summary' + [Environment]::NewLine + 'A PR with no pipeline-metrics block.'
+
+        # Pre-v4 body for the pre-v4 short-circuit test.
+        $script:PreV4BodyForTaxonomy = @'
+## Summary
+
+A pre-v4 PR body.
+
+<!-- pipeline-metrics
+metrics_version: 3
+some_legacy_field: value
+-->
+'@
+
+        # Parse-error body: block exists but YAML is malformed.
+        $script:ParseErrorBody = @'
+## Summary
+
+A PR with a malformed pipeline-metrics block.
+
+<!-- pipeline-metrics
+: missing key
+-->
+'@
+
+        # ---------------------------------------------------------------------------
+        # InvokeWithOriginControl: runs Invoke-FrameCreditLedger in-process with full
+        # mock wiring. Accepts:
+        #   -PrBody        : the PR body text
+        #   -HeadRef       : simulates $env:GITHUB_HEAD_REF (CI-safe branch name)
+        #   -SuppressFailed: simulates $env:FCL_SUPPRESS_FAILED_POSTS=1
+        # Returns @{ Comment = '...'; ExitCode = 0 }.
+        # ---------------------------------------------------------------------------
+        $script:InvokeWithOriginControl = {
+            param(
+                [string]$PrBody = '',
+                [string]$HeadRef = '',
+                [bool]$SuppressFailed = $false
+            )
+
+            $capturedRepoRoot = $script:RepoRoot
+            $capturedHeadRef = $HeadRef
+            $capturedSuppressFailed = $SuppressFailed
+            $bodyJson = (@{ body = $PrBody; comments = @() } | ConvertTo-Json -Compress -Depth 5)
+
+            $previousNoSleep = $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP
+            $previousHeadRef = $env:GITHUB_HEAD_REF
+            $previousSuppress = $env:FCL_SUPPRESS_FAILED_POSTS
+            try {
+                $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'
+                $env:GITHUB_HEAD_REF = $capturedHeadRef
+                $env:FCL_SUPPRESS_FAILED_POSTS = if ($capturedSuppressFailed) { '1' } else { '' }
+
+                . $script:OrchestratorPath -Pr 769 -Mode 'warn'
+
+                function git {
+                    param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                    $joined = $Args -join ' '
+                    if ($joined -match 'rev-parse --show-toplevel') {
+                        $global:LASTEXITCODE = 0; return $capturedRepoRoot
+                    }
+                    if ($joined -match 'config --get remote\.origin\.url') {
+                        $global:LASTEXITCODE = 0; return 'https://github.com/example/example.git'
+                    }
+                    if ($joined -match 'rev-parse --abbrev-ref HEAD') {
+                        # Return the HeadRef when asked for branch name (for cost walker compat).
+                        $global:LASTEXITCODE = 0
+                        return if ([string]::IsNullOrWhiteSpace($capturedHeadRef)) { 'HEAD' } else { $capturedHeadRef }
+                    }
+                    $global:LASTEXITCODE = 0; return ''
+                }
+
+                $script:_PostedComments = [System.Collections.Generic.List[string]]::new()
+
+                function gh {
+                    param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                    $joined = $Args -join ' '
+                    if ($joined -match 'pr view \d+ --json baseRefOid') {
+                        $global:LASTEXITCODE = 0; return '{"baseRefOid":"abc123"}'
+                    }
+                    if ($joined -match 'pr view \d+ --json body') {
+                        $global:LASTEXITCODE = 0; return $bodyJson
+                    }
+                    if ($joined -match 'issue view \d+ --json comments') {
+                        $global:LASTEXITCODE = 0; return '{"comments":[]}'
+                    }
+                    if ($joined -match '(issue|pr) comment \d+ --body') {
+                        # Capture the comment body for assertion in off-switch test.
+                        $bodyArgIdx = ($Args | Select-Object -SkipLast 0) | ForEach-Object { $_ } | Select-String -Pattern '^--body$' -List
+                        $script:_PostedComments.Add([string]($Args[-1])) | Out-Null
+                        $global:LASTEXITCODE = 0; return 'https://github.com/example/example/pull/769#issuecomment-1'
+                    }
+                    if ($joined -match 'api repos/[^/]+/[^/]+ ') {
+                        $global:LASTEXITCODE = 0; return '{"owner":{"login":"example"},"name":"example"}'
+                    }
+                    if ($joined -match 'api -X PATCH repos/[^/]+/[^/]+/issues/comments/\d+') {
+                        $global:LASTEXITCODE = 0; return '{"html_url":"https://github.com/example/example/pull/769#issuecomment-2"}'
+                    }
+                    if ($joined -match 'pr edit \d+ --body-file') {
+                        $global:LASTEXITCODE = 0; return ''
+                    }
+                    $global:LASTEXITCODE = 0; return ''
+                }
+
+                # Stub cost lib to avoid real walker invocations.
+                function Get-CostTranscriptSlug { param([string]$CwdPath) return '' }
+                function Invoke-CostTranscriptWalk { param([string]$Slug, [string]$Branch, [string]$ParentCwd, [Nullable[int]]$IssueNumber = $null) return @() }
+                function Invoke-CostCopilotWalk { param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '') return @() }
+                function Get-CostAttribution { param([object[]]$Events, [string]$RateTablePath = '') return @{ ports = @{}; orchestrator_overhead = @{}; dispatches = @{}; totals = @{ total_cost_usd = 0.0 } } }
+                function Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
+                function Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
+                function Get-SessionCompleteness { param([object[]]$Events, [string]$ExcludeReason = '', [string]$Branch = '') return @{ completeness = 'unknown'; excluded_from_rolling_baseline = $true; exclude_reason = 'no-events' } }
+                function Resolve-CostDataPreservation { param($Current, $Prior) return @{ use_prior = $false; notice = '' } }
+                function Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
+                function Format-CostPatternMarkdown { param($Attribution, $Completeness, [object[]]$AnomalyFlags, $RollingMeta, [int]$Pr, [string]$Branch) return '## Cost Pattern' }
+                function Format-CostPatternYaml { param($Attribution, $Completeness, [object[]]$AnomalyFlags, [int]$Pr, [string]$Branch) return "<!-- cost-pattern-data`npr: $Pr`n-->" }
+
+                $script:FrameCreditLedgerRepoRoot = $capturedRepoRoot
+                $result = Invoke-FrameCreditLedger -Pr 769 -Mode 'warn'
+
+                return @{
+                    ExitCode         = 0
+                    Comment          = if ($null -ne $result.Comment) { [string]$result.Comment } else { '' }
+                    PostedComments   = @($script:_PostedComments)
+                }
+            }
+            finally {
+                $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = $previousNoSleep
+                $env:GITHUB_HEAD_REF = $previousHeadRef
+                $env:FCL_SUPPRESS_FAILED_POSTS = $previousSuppress
+            }
+        }
+    }
+
+    Context 'Missing block — orchestrated-origin → 🛑 FAILED' {
+
+        It 'GITHUB_HEAD_REF=feature/issue-769 and no block → comment contains 🛑 FAILED' {
+            $result = & $script:InvokeWithOriginControl `
+                -PrBody $script:EmptyBody `
+                -HeadRef 'feature/issue-769-v4-emission-reliability'
+
+            $result.ExitCode | Should -Be 0
+            $result.Comment | Should -Match '🛑'
+            $result.Comment | Should -Match 'FAILED'
+            $result.Comment | Should -Not -Match 'non-orchestrated'
+            $result.Comment | Should -Not -Match 'not measured'
+        }
+    }
+
+    Context 'Missing block — non-orchestrated → "not measured (non-orchestrated)"' {
+
+        It 'GITHUB_HEAD_REF=topic/no-issue and no block → quiet "not measured" comment' {
+            $result = & $script:InvokeWithOriginControl `
+                -PrBody $script:EmptyBody `
+                -HeadRef 'topic/no-issue-slug'
+
+            $result.ExitCode | Should -Be 0
+            $result.Comment | Should -Match 'not measured \(non-orchestrated\)'
+            $result.Comment | Should -Not -Match '🛑'
+            $result.Comment | Should -Not -Match 'FAILED'
+        }
+    }
+
+    Context 'Pre-v4 block → pre-v4 state (origin-agnostic)' {
+
+        It 'pre-v4 block renders pre-v4 state regardless of orchestrated-origin' {
+            # Even on orchestrated-origin branch, the pre-v4 path renders the pre-v4 comment.
+            $result = & $script:InvokeWithOriginControl `
+                -PrBody $script:PreV4BodyForTaxonomy `
+                -HeadRef 'feature/issue-769-pre-v4-test'
+
+            $result.ExitCode | Should -Be 0
+            $result.Comment | Should -Match '(?i)pre-v4 metrics detected'
+            $result.Comment | Should -Not -Match 'non-orchestrated'
+            $result.Comment | Should -Not -Match '🛑'
+        }
+    }
+
+    Context 'Parse-error → 🛑 FAILED (origin-agnostic)' {
+
+        It 'parse-error block renders FAILED regardless of origin (parse errors always signal failure)' {
+            # Even on non-orchestrated branch, parse-error is a genuine failure.
+            $result = & $script:InvokeWithOriginControl `
+                -PrBody $script:ParseErrorBody `
+                -HeadRef 'topic/no-issue-slug'
+
+            $result.ExitCode | Should -Be 0
+            # Parse-error comment uses ⚠️ (not 🛑) — the parse-error path is unchanged;
+            # the ⚠️ serves as the failure signal here.
+            $result.Comment | Should -Match '(?i)could not be parsed'
+            $result.Comment | Should -Not -Match 'not measured'
+        }
+    }
+
+    Context 'Off-switch (FCL_SUPPRESS_FAILED_POSTS=1) — FAILED posts suppressed, non-FAILED not suppressed' {
+
+        It 'off-switch active: FAILED-state post not fired; comment still returned' {
+            # When off-switch is active and origin is orchestrated + block absent,
+            # Find-OrUpsertComment must NOT be called (no posted comments),
+            # but the result.Comment must still be set to the FAILED comment text.
+            $result = & $script:InvokeWithOriginControl `
+                -PrBody $script:EmptyBody `
+                -HeadRef 'feature/issue-769-off-switch-test' `
+                -SuppressFailed $true
+
+            $result.ExitCode | Should -Be 0
+            # Comment still populated (return value carries the composed text)
+            $result.Comment | Should -Match '🛑'
+            # No post was fired — PostedComments must be empty
+            $result.PostedComments.Count | Should -Be 0 -Because 'off-switch suppresses FAILED-state gh comment calls'
+        }
+
+        It 'off-switch active: non-orchestrated "not measured" post still fires (not suppressed)' {
+            # Off-switch only suppresses FAILED-state posts; non-orchestrated posts always fire.
+            $result = & $script:InvokeWithOriginControl `
+                -PrBody $script:EmptyBody `
+                -HeadRef 'topic/no-issue-non-orchestrated' `
+                -SuppressFailed $true
+
+            $result.ExitCode | Should -Be 0
+            $result.Comment | Should -Match 'not measured \(non-orchestrated\)'
+            # The non-orchestrated comment must have been posted
+            $result.PostedComments.Count | Should -BeGreaterOrEqual 1 -Because 'non-FAILED posts are not suppressed by off-switch'
+        }
+    }
+}

@@ -15,49 +15,52 @@ concurrency:
   group: cost-pattern-presence-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
+permissions:
+  # Read-only: this job only calls `gh pr view` to inspect the PR body; it never writes.
+  contents: read
+  pull-requests: read
+
 jobs:
   check-cost-pattern:
-    if: contains(github.event.pull_request.labels.*.name, 'cost-reduction') || (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.issue.labels.*.name, 'cost-reduction'))
+    name: Check cost pattern presence
+    # NOTE: github.head_ref is null on issue_comment events; the startsWith() arm
+    # covers pull_request events only. On issue_comment events only the cost-reduction
+    # label arm fires. This is a known backstop-completeness gap (B6/P2-F3).
+    if: |
+      contains(github.event.pull_request.labels.*.name, 'cost-reduction') ||
+      startsWith(github.head_ref, 'feature/issue-') ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.issue.labels.*.name, 'cost-reduction'))
     runs-on: ubuntu-latest
     steps:
-      - name: Check for cost-pattern-data marker
+      - name: Check PR body for v4 pipeline-metrics block with non-empty credits
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
         run: |
-          PR_NUM="${{ github.event.pull_request.number || github.event.issue.number }}"
-          for i in 1 2 3 4 5; do
-            COMMENTS="$(gh pr view "$PR_NUM" -R "$GH_REPO" --json comments --jq '.comments[].body')"
-            if printf '%s\n' "$COMMENTS" | grep -q '<!-- cost-pattern-data'; then
-              echo "Cost Pattern marker found on attempt $i"
+          # GH_REPO is required: this job has no actions/checkout, so gh cannot
+          # infer the repo from a local git remote (otherwise: "not a git repository").
+          pr_body=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
 
-              COVERAGE="$(printf '%s\n' "$COMMENTS" | awk '
-                /<!-- cost-pattern-data/ { in_block=1; next }
-                in_block && /^coverage:[[:space:]]*/ { sub(/^coverage:[[:space:]]*/, "", $0); print $0; exit }
-                in_block && /-->/ { in_block=0 }
-              ')"
-
-              case "$COVERAGE" in
-                "claude+copilot")
-                  echo "Cost Pattern coverage is claude+copilot"
-                  ;;
-                "claude-only"|"copilot-only"|"claude-only-with-copilot-fallback-warning")
-                  echo "::warning::Cost Pattern coverage is $COVERAGE; full cross-tool telemetry was not merged for this run"
-                  ;;
-                "")
-                  echo "::error::cost-pattern-data marker is missing a coverage line"
-                  exit 1
-                  ;;
-                *)
-                  echo "::error::cost-pattern-data marker has unexpected coverage '$COVERAGE'"
-                  exit 1
-                  ;;
-              esac
-
+          # pre-v4 block: marker present but not v4 — taxonomy state: pre-v4 (distinct from FAILED)
+          if echo "$pr_body" | grep -q '<!-- pipeline-metrics'; then
+            if ! echo "$pr_body" | grep -qE '^metrics_version:[[:space:]]*4[[:space:]]*$'; then
+              echo "::notice::Pre-v4 pipeline-metrics block detected — not a failure, migration in progress"
               exit 0
             fi
-            echo "Marker not found, attempt $i/5; sleeping 30s"
-            sleep 30
-          done
-          echo "::error::cost-reduction PR is missing cost-pattern-data marker after 5 retries (~150s)"
+            # v4 block present — check credits
+            if ! echo "$pr_body" | grep -qE '^[[:space:]]*-[[:space:]]+port:[[:space:]]+[^[:space:]]'; then
+              echo "::warning::v4 block found but credits[] is empty (cost-capture-failed or accumulation missed)"
+              exit 1
+            fi
+            echo "v4 block present with non-empty credits[] — OK"
+            exit 0
+          fi
+
+          # No block at all — FAILED state (orchestrated PR must have a v4 block)
+          if echo "$pr_body" | grep -q '<!-- cost-capture-failed -->'; then
+            echo "::error::cost-capture-failed sentinel present — emit script failed during PR creation"
+          else
+            echo "::error::PR body missing <!-- pipeline-metrics --> block entirely"
+          fi
           exit 1
