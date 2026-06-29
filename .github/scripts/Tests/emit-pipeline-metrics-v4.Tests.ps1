@@ -1,0 +1,277 @@
+#Requires -Version 7.0
+#Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
+
+# Tests for emit-pipeline-metrics-v4.ps1 (issue #769 s2).
+#
+# Script under test: .github/scripts/emit-pipeline-metrics-v4.ps1
+#
+# Coverage:
+#   1. Success: valid V3BaseYaml + credit row -> BodyFile contains
+#      metrics_version: 4 and the credit; exit 0.
+#   2. Builder-throw (empty V3BaseYaml) -> BodyFile contains cost-capture-failed sentinel;
+#      exit non-zero.
+#   3. Empty credits -> Test-PipelineMetricsV4Block rejects -> sentinel emitted;
+#      exit non-zero.
+#   4. Sentinel token mismatch (M21): sentinel does NOT match pipeline-metrics pattern;
+#      Test-PipelineMetricsV4Block does not count it.
+#   5. v3-base opener injection (M7): V3BaseYaml containing pipeline-metrics opener
+#      -> builder throws -> sentinel emitted correctly.
+
+BeforeAll {
+    $script:RepoRoot    = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+    $script:ScriptPath  = Join-Path $script:RepoRoot '.github/scripts/emit-pipeline-metrics-v4.ps1'
+    $script:CoreLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/frame-credit-ledger-core.ps1'
+
+    # Load core lib so helpers are available to test assertions.
+    if (Test-Path $script:CoreLibPath) {
+        . $script:CoreLibPath
+    }
+
+    # Minimal valid v3 base YAML (no pipeline-metrics wrapper, no metrics_version line).
+    $script:ValidV3Base = 'pr_number: 42'
+
+    # Sentinel token (stored to avoid parser confusion with HTML comment syntax in test titles).
+    $script:SentinelToken  = '<!-- cost-capture-failed -->'
+    $script:SentinelRegex  = [regex]::Escape($script:SentinelToken)
+
+    # A valid credit row pscustomobject shaped as Build-ImplementCodeCreditRow returns.
+    $script:ValidCredit = [pscustomobject]@{
+        port               = 'implement-code'
+        adapter            = 'skills/implementation-discipline/adapters/implement-code-adapter.md'
+        status             = 'passed'
+        run_index          = 1
+        evidence           = 'emit-pipeline-metrics-v4.Tests.ps1 -- success fixture'
+        'terminal-step-id' = 2
+    }
+
+    # Helper: create a unique temp body file path (not yet created -- the script creates it).
+    # Stored as a scriptblock so It-blocks can invoke it via & $script:TempBodyFile.
+    $script:TempBodyFile = {
+        return [System.IO.Path]::Combine(
+            [System.IO.Path]::GetTempPath(),
+            "emit-v4-test-$([System.Guid]::NewGuid().ToString('N')).md"
+        )
+    }
+
+    # Helper: invoke the script in a child process and return @{ ExitCode; BodyContent }.
+    # Uses pwsh -File so $ErrorActionPreference = 'Stop' and exit codes propagate correctly.
+    $script:InvokeScript = {
+        param(
+            [string]$BodyFile,
+            [string]$V3BaseYaml = '',
+            [pscustomobject[]]$Credits = @(),
+            [pscustomobject[]]$DispatchCostSamples = @(),
+            [int]$IssueNumber = 0
+        )
+
+        # Serialize credits to a temp JSON file so the child process can reload them.
+        $creditsJson  = if ($Credits.Count -gt 0)            { $Credits | ConvertTo-Json -Depth 5 }            else { '[]' }
+        $samplesJson  = if ($DispatchCostSamples.Count -gt 0) { $DispatchCostSamples | ConvertTo-Json -Depth 5 } else { '[]' }
+
+        $creditsTemp = [System.IO.Path]::GetTempFileName()
+        $samplesTemp = [System.IO.Path]::GetTempFileName()
+        Set-Content -Path $creditsTemp -Value $creditsJson -Encoding utf8NoBOM
+        Set-Content -Path $samplesTemp -Value $samplesJson -Encoding utf8NoBOM
+
+        # Escape paths for use inside single-quoted strings in the wrapper.
+        $safeBodyFile  = $BodyFile      -replace "'", "''"
+        $safeScript    = $script:ScriptPath -replace "'", "''"
+        $safeCredTemp  = $creditsTemp   -replace "'", "''"
+        $safeSampTemp  = $samplesTemp   -replace "'", "''"
+        $safeV3        = $V3BaseYaml    -replace "'", "''"
+
+        $wrapperContent = @"
+#Requires -Version 7.0
+`$ErrorActionPreference = 'Stop'
+`$creditsRaw = Get-Content -LiteralPath '$safeCredTemp' -Raw | ConvertFrom-Json
+`$samplesRaw = Get-Content -LiteralPath '$safeSampTemp' -Raw | ConvertFrom-Json
+`$credits  = if (`$null -eq `$creditsRaw  -or @(`$creditsRaw).Count  -eq 0)  { @() } else { @(`$creditsRaw  | ForEach-Object { [pscustomobject]`$_ }) }
+`$samples  = if (`$null -eq `$samplesRaw -or @(`$samplesRaw).Count -eq 0) { @() } else { @(`$samplesRaw | ForEach-Object { [pscustomobject]`$_ }) }
+& '$safeScript' ``
+    -BodyFile '$safeBodyFile' ``
+    -V3BaseYaml '$safeV3' ``
+    -Credits `$credits ``
+    -DispatchCostSamples `$samples ``
+    -IssueNumber $IssueNumber
+exit `$LASTEXITCODE
+"@
+        $wrapperTemp = [System.IO.Path]::GetTempFileName() + '.ps1'
+        Set-Content -Path $wrapperTemp -Value $wrapperContent -Encoding utf8NoBOM
+
+        try {
+            $proc = Start-Process -FilePath 'pwsh' `
+                -ArgumentList @('-NonInteractive', '-NoProfile', '-File', $wrapperTemp) `
+                -Wait -PassThru -NoNewWindow
+            $exitCode = $proc.ExitCode
+        } finally {
+            Remove-Item -LiteralPath $wrapperTemp  -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $creditsTemp  -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $samplesTemp  -ErrorAction SilentlyContinue
+        }
+
+        $bodyContent = ''
+        if (Test-Path -LiteralPath $BodyFile) {
+            $bodyContent = Get-Content -LiteralPath $BodyFile -Raw
+        }
+
+        return [pscustomobject]@{
+            ExitCode    = $exitCode
+            BodyContent = $bodyContent
+        }
+    }
+}
+
+Describe 'emit-pipeline-metrics-v4.ps1' {
+
+    Context 'Case 3 - success: valid V3BaseYaml plus credit row' {
+
+        It 'writes metrics_version 4 and the credit row to BodyFile, exits 0' {
+            $bodyFile = & $script:TempBodyFile
+            try {
+                $result = & $script:InvokeScript `
+                    -BodyFile $bodyFile `
+                    -V3BaseYaml $script:ValidV3Base `
+                    -Credits @($script:ValidCredit)
+
+                $result.ExitCode    | Should -Be 0
+                $result.BodyContent | Should -Match 'metrics_version: 4'
+                $result.BodyContent | Should -Match 'implement-code'
+                $result.BodyContent | Should -Not -Match $script:SentinelRegex
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'round-trips through Read-PRMetricsBlock and reports MetricsVersion=4 with credits' {
+            $bodyFile = & $script:TempBodyFile
+            try {
+                $result = & $script:InvokeScript `
+                    -BodyFile $bodyFile `
+                    -V3BaseYaml $script:ValidV3Base `
+                    -Credits @($script:ValidCredit)
+
+                $result.ExitCode | Should -Be 0
+
+                $parsed = Read-PRMetricsBlock -PrBody $result.BodyContent
+                $parsed                  | Should -Not -BeNullOrEmpty
+                $parsed.MetricsVersion   | Should -Be 4
+                @($parsed.Credits).Count | Should -BeGreaterThan 0
+                ($parsed.Credits | Where-Object { $_.Port -eq 'implement-code' }) | Should -Not -BeNullOrEmpty
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Context 'Case 1 - builder throws: empty V3BaseYaml' {
+
+        It 'writes cost-capture-failed sentinel to BodyFile and exits non-zero' {
+            $bodyFile = & $script:TempBodyFile
+            try {
+                $result = & $script:InvokeScript `
+                    -BodyFile $bodyFile `
+                    -V3BaseYaml '' `
+                    -Credits @($script:ValidCredit)
+
+                $result.ExitCode    | Should -Not -Be 0
+                $result.BodyContent | Should -Match $script:SentinelRegex
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
+            }
+        }
+
+        It 'fallback body contains metrics_emission_failed when no V3BaseYaml and no Credits' {
+            $bodyFile = & $script:TempBodyFile
+            try {
+                $result = & $script:InvokeScript `
+                    -BodyFile $bodyFile `
+                    -V3BaseYaml '' `
+                    -Credits @()
+
+                $result.ExitCode    | Should -Not -Be 0
+                $result.BodyContent | Should -Match 'metrics_emission_failed'
+                $result.BodyContent | Should -Match $script:SentinelRegex
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Context 'Case 2 - empty credits: Test-PipelineMetricsV4Block rejects' {
+
+        It 'writes sentinel when credits array is empty and Test- reports invalid' {
+            # New-PipelineMetricsV4Block with valid V3BaseYaml but no credits
+            # produces a block with no credits[] section, which Test- rejects (no credits).
+            $bodyFile = & $script:TempBodyFile
+            try {
+                $result = & $script:InvokeScript `
+                    -BodyFile $bodyFile `
+                    -V3BaseYaml $script:ValidV3Base `
+                    -Credits @()
+
+                $result.ExitCode    | Should -Not -Be 0
+                $result.BodyContent | Should -Match $script:SentinelRegex
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Context 'M21 - sentinel token does not match pipeline-metrics pattern' {
+
+        It 'sentinel token does not match the pipeline-metrics regex' {
+            $script:SentinelToken | Should -Not -Match '<!--\s*pipeline-metrics'
+        }
+
+        It 'Test-PipelineMetricsV4Block counts sentinel as zero pipeline-metrics markers' {
+            # Build a body containing only the sentinel (no real pipeline-metrics block).
+            # The function must report DetectedMarkerCount=0 (sentinel is not counted).
+            $bodyWithSentinelOnly = "Some PR text.`n`n$($script:SentinelToken)`n`nMore text."
+
+            $testResult = Test-PipelineMetricsV4Block -PRBody $bodyWithSentinelOnly
+            $testResult.Valid               | Should -Be $false
+            $testResult.DetectedMarkerCount | Should -Be 0
+        }
+
+        It 'body with sentinel alongside a valid v4 block still reports exactly 1 marker' {
+            # Sentinel plus a real v4 block: marker count must remain 1 (M21).
+            $bodyFile = & $script:TempBodyFile
+            try {
+                $result = & $script:InvokeScript `
+                    -BodyFile $bodyFile `
+                    -V3BaseYaml $script:ValidV3Base `
+                    -Credits @($script:ValidCredit)
+
+                $result.ExitCode | Should -Be 0
+
+                # Append sentinel and re-validate.
+                $bodyWithBoth = $result.BodyContent + "`n`n$($script:SentinelToken)"
+                $testResult = Test-PipelineMetricsV4Block -PRBody $bodyWithBoth
+                $testResult.DetectedMarkerCount | Should -Be 1
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Context 'M7 - v3-base containing pipeline-metrics opener causes builder throw then sentinel' {
+
+        It 'emits sentinel when V3BaseYaml contains the pipeline-metrics opener' {
+            # Injecting a pipeline-metrics opener into V3BaseYaml causes
+            # New-PipelineMetricsV4Block to throw its double-wrap guard.
+            $poisonedBase = "pr_number: 42`n<!-- pipeline-metrics`nsome_field: value`n-->"
+            $bodyFile = & $script:TempBodyFile
+            try {
+                $result = & $script:InvokeScript `
+                    -BodyFile $bodyFile `
+                    -V3BaseYaml $poisonedBase `
+                    -Credits @($script:ValidCredit)
+
+                $result.ExitCode    | Should -Not -Be 0
+                $result.BodyContent | Should -Match $script:SentinelRegex
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
