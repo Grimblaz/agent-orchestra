@@ -194,7 +194,8 @@ function Invoke-PhaseContainmentCommentScan {
 
             # Build the output entry — use the parsed finding_key directly (it may already be prefixed)
             # The finding_key stored in the block is authoritative; we preserve it as-is per the core contract.
-            $entry = $parsed.Clone()
+            $entry = @{}
+            foreach ($parsedKey in $parsed.Keys) { $entry[$parsedKey] = $parsed[$parsedKey] }
             $entry['finding_key']      = $parsed['finding_key']
             $entry['surface']          = $Surface
             $entry['issueOrPrNumber']  = $IssueOrPrNumber
