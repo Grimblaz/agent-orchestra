@@ -2,6 +2,14 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.11] — 2026-06-28
+
+### Added
+
+- **Dispatch-prompt economy** (#472): added a dispatch-prompt economy rule to Code-Conductor Step 3 ("Execute Each Step") directing the conductor to reference the canonical plan source (`Read <!-- plan-issue-N --> step M for contract`) instead of re-inlining contract detail in specialist dispatch prompts; novel constraints not already in the plan/design always stay inline.
+  - New design doc `Documents/Design/dispatch-prompt-economy.md` — rule placement, scope (C2.a delivered; C2.b prepared-payload and M1 telemetry-proof deferred), and a before/after lean dispatch example.
+  - New `skills/parallel-execution/references/lean-dispatch-example.md` — canonical lean before/after dispatch example, indexed in the skill's Composite References.
+
 ## [2.35.10] — 2026-06-28
 
 ### Added
