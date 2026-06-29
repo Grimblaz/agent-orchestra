@@ -148,7 +148,7 @@ Inference fields must not contain literal triple-backtick sequences. If a cited 
 
 After grounding all artifacts and before running the challenge, write a `**Grounding Evidence**` block into the design session:
 
-````
+````text
 **Grounding Evidence** (HEAD: {sha})
 
 | Artifact | Q1 consumer | Q2 exec-env | Q3 current | Q4 premise | Disposition |

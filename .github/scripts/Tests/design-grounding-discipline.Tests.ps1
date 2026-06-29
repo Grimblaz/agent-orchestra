@@ -57,7 +57,7 @@ Describe 'design grounding discipline' {
     }
 
     It 'requires path:line citation and stated inference (anti-rubber-stamp)' {
-        $script:SkillContent | Should -Match '(?si)path:line.{0,50}inference|inference.{0,50}path:line' `
+        $script:SkillContent | Should -Match '(?si)(?:path:line.{0,50}inference|inference.{0,50}path:line)' `
             -Because 'issue #763 M4 requires path:line AND stated inference to prevent rubber-stamp citations'
     }
 
@@ -77,8 +77,10 @@ Describe 'design grounding discipline' {
     }
 
     It 'includes the fence/content-trust discipline clause' {
-        $script:SkillContent | Should -Match '(?si)triple-backtick|skills/project-references/SKILL\.md' `
-            -Because 'issue #763 J5 requires fence-safe rendering and a project-references anchor for cited content'
+        $script:SkillContent | Should -Match '(?si)triple-backtick' `
+            -Because 'issue #763 J5 requires fence-safe rendering for cited content'
+        $script:SkillContent | Should -Match '(?si)skills/project-references/SKILL\.md' `
+            -Because 'issue #763 J5 requires a project-references anchor for cited content'
     }
 
     # --- Group 2: Ordering in agents/Solution-Designer.agent.md ---

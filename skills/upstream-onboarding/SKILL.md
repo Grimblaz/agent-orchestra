@@ -300,7 +300,7 @@ Each agent applies the standards check through its own lens, using the anchors b
 | CE Gate is listed as false but the change has a customer-facing surface | CE Gate gap | `skills/plan-authoring/SKILL.md` |
 | Requirement Contract is missing from one or more implementation steps | Missing Requirement Contract | `skills/plan-authoring/SKILL.md` |
 | Plan scope covers files or systems not mentioned in the AC | Scope mismatch | `skills/plan-authoring/SKILL.md` |
-| design body names a changed artifact with no matching `**Grounding Evidence**` row (or all rows show `could-not-ground-escalate` disposition with no accompanying escalation note in the design body) | Missing grounding evidence | `skills/design-exploration/SKILL.md` |
+| Design body names a changed artifact with no matching `**Grounding Evidence**` row (or one or more rows show `could-not-ground-escalate` disposition with no accompanying escalation note in the design body) | Missing grounding evidence | `skills/design-exploration/SKILL.md` |
 
 ## Platform-specific invocation
 
