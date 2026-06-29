@@ -30,6 +30,33 @@ Both implementation and testing lanes must use the same contract.
 3. **Run lanes**:
    - `parallel`: launch Code-Smith and Test-Writer against the same contract.
    - `serial`: run one lane first, then the second against the same contract.
+
+### Lean dispatch example
+
+**Before** (~2 KB — contract restatement inlined in the dispatch prompt):
+
+> "Call @Code-Smith for Step 2 (event-batch debouncer): implement the
+> file-watch debounce. Requirements: the watcher batches events with a
+> 500 ms window; overlapping events within the window collapse to one
+> emit; the debounce is per-resource-id, not global; if a resource is
+> deleted mid-window, emit the delete immediately and cancel the pending
+> batch. Acceptance criteria: a 600 ms wait with two events yields one
+> callback; a delete mid-window fires immediately and cancels the batch.
+> Non-goals: no retry logic; no cross-process coordination. Edge case:
+> high-frequency emission (>100 events/sec) must not accumulate unbounded
+> pending batches — collapse into one."
+
+**After** (~300 B — canonical-source reference + one novel constraint):
+
+> "Call @Code-Smith for Step 2: Read `<!-- plan-issue-472 --> step 2` for the
+> full Requirement Contract. Novel constraint not in the plan: the debounce
+> timer must survive GC pressure at >100 events/sec (avoid closure capture
+> of large event payloads — see design doc §3.2)."
+
+The "after" form is shorter because the Requirement Contract already lives in
+the plan comment; only the constraint that is NOT already documented there
+travels inline.
+
 4. **Run triage** via Test-Writer after outputs are available.
 5. **Classify failures** as `code defect`, `test defect`, `harness/env defect`, or `rc-divergence` with evidence.
 6. **Route corrections bidirectionally** until convergence:
