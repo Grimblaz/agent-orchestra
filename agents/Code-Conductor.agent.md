@@ -320,7 +320,9 @@ Bundle-specific frame-spine semantics are deferred to #515; #512 v1 spine behavi
    - **Formatting gate**: Load `skills/pre-commit-formatting/SKILL.md` and execute the protocol on branch-changed files. If the protocol stages and commits formatting fixes, note the formatting commit in the PR description.
    - **Validation evidence**: run required validation commands from plan/repo instructions and capture pass results for PR body
    - `git push -u origin {branch-name}`
-   - **Emit v4 pipeline-metrics block (fresh-PR path only)**: Before calling `gh pr create`, run the emit script to write the PR body file:
+   - **Emit v4 pipeline-metrics block (fresh-PR path only)**: Before calling `gh pr create`, compose the full rich PR body string first, then pass it to the emit script so the v4 block is appended and the human-readable content (including `Closes #{issue}`) always survives in the shipped body:
+     1. Compose the full rich PR body (summary, changed files, validation evidence, migration scan, `Closes #{issue}`, review score table, etc.) into a string `$richBody` as normal.
+     2. Emit the v4 pipeline-metrics block appended to the rich body:
      ```powershell
      $bodyFile = Join-Path $env:TEMP "pr-body-{ISSUE}.md"
      $v3Base = @"
@@ -331,13 +333,14 @@ Bundle-specific frame-spine semantics are deferred to #515; #512 v1 spine behavi
           -File '.github/scripts/emit-pipeline-metrics-v4.ps1' `
           -BodyFile $bodyFile `
           -V3BaseYaml $v3Base `
+          -RichBody $richBody `
           -IssueNumber {ISSUE_NUMBER}
      if ($LASTEXITCODE -ne 0) {
          Write-Warning "emit-pipeline-metrics-v4.ps1 failed (exit $LASTEXITCODE) — PR body may lack the v4 block."
          # Non-fatal: gh pr create proceeds with whatever body is in $bodyFile (M9)
      }
      ```
-     Substitute `{ISSUE}`, `{BRANCH}`, and `{ISSUE_NUMBER}` from the conductor's resolved issue context. The `$bodyFile` path is unique per issue to avoid cross-PR body collisions. This call is warn-only: a non-zero exit does NOT abort PR creation. **Push-only path** (pushing additional commits to an already-open PR branch): skip this emit call — the v4 block was emitted at initial PR creation and must not be re-emitted here.
+     Substitute `{ISSUE}`, `{BRANCH}`, and `{ISSUE_NUMBER}` from the conductor's resolved issue context. The `$bodyFile` path is unique per issue to avoid cross-PR body collisions. The emit script appends the v4 block to `$richBody`; on failure it appends `<!-- cost-capture-failed -->` instead — either way `Closes #{issue}` and the summary are always present in the shipped body. `$richBody` is the full PR body string you would have passed to `gh pr create --body "..."` before this wiring was added; the emit step now owns the file-composition step that appends the v4 block. This call is warn-only: a non-zero exit does NOT abort PR creation. **Push-only path** (pushing additional commits to an already-open PR branch): skip this emit call — the v4 block was emitted at initial PR creation and must not be re-emitted here.
    - Create PR via `github-pull-request/*` tools or `gh pr create --body-file $bodyFile`
    - **Frame credit-ledger (warn-only)**: After PR creation, load `skills/frame-credit-ledger/SKILL.md` and follow its protocol. The hook is warn-only by default; PR creation is never blocked.
    - PR body MUST include: summary, changed files, validation evidence, migration-scan result (migration-type issues only — when the scan step was auto-inserted by Code-Conductor, the `planner-omitted-scan` dispatch-fallback-events row records this), Review Mode, CE Gate result, adversarial review score table, prosecution depth summary, pipeline metrics, process gaps found (if any), and `Closes #{issue}`

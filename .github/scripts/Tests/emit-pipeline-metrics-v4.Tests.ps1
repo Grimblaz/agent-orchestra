@@ -61,30 +61,38 @@ BeforeAll {
             [string]$V3BaseYaml = '',
             [pscustomobject[]]$Credits = @(),
             [pscustomobject[]]$DispatchCostSamples = @(),
-            [int]$IssueNumber = 0
+            [int]$IssueNumber = 0,
+            [string]$RichBody = ''
         )
 
         # Serialize credits to a temp JSON file so the child process can reload them.
         $creditsJson  = if ($Credits.Count -gt 0)            { $Credits | ConvertTo-Json -Depth 5 }            else { '[]' }
         $samplesJson  = if ($DispatchCostSamples.Count -gt 0) { $DispatchCostSamples | ConvertTo-Json -Depth 5 } else { '[]' }
 
-        $creditsTemp = [System.IO.Path]::GetTempFileName()
-        $samplesTemp = [System.IO.Path]::GetTempFileName()
-        Set-Content -Path $creditsTemp -Value $creditsJson -Encoding utf8NoBOM
-        Set-Content -Path $samplesTemp -Value $samplesJson -Encoding utf8NoBOM
+        $creditsTemp  = [System.IO.Path]::GetTempFileName()
+        $samplesTemp  = [System.IO.Path]::GetTempFileName()
+        $richBodyTemp = [System.IO.Path]::GetTempFileName()
+        Set-Content -Path $creditsTemp  -Value $creditsJson -Encoding utf8NoBOM
+        Set-Content -Path $samplesTemp  -Value $samplesJson -Encoding utf8NoBOM
+        # Store RichBody in a file to avoid quoting issues in the wrapper here-string.
+        Set-Content -Path $richBodyTemp -Value $RichBody    -Encoding utf8NoBOM
 
         # Escape paths for use inside single-quoted strings in the wrapper.
-        $safeBodyFile  = $BodyFile      -replace "'", "''"
-        $safeScript    = $script:ScriptPath -replace "'", "''"
-        $safeCredTemp  = $creditsTemp   -replace "'", "''"
-        $safeSampTemp  = $samplesTemp   -replace "'", "''"
-        $safeV3        = $V3BaseYaml    -replace "'", "''"
+        $safeBodyFile    = $BodyFile              -replace "'", "''"
+        $safeScript      = $script:ScriptPath     -replace "'", "''"
+        $safeCredTemp    = $creditsTemp            -replace "'", "''"
+        $safeSampTemp    = $samplesTemp            -replace "'", "''"
+        $safeV3          = $V3BaseYaml             -replace "'", "''"
+        $safeRichTemp    = $richBodyTemp           -replace "'", "''"
 
         $wrapperContent = @"
 #Requires -Version 7.0
 `$ErrorActionPreference = 'Stop'
-`$creditsRaw = Get-Content -LiteralPath '$safeCredTemp' -Raw | ConvertFrom-Json
-`$samplesRaw = Get-Content -LiteralPath '$safeSampTemp' -Raw | ConvertFrom-Json
+`$creditsRaw  = Get-Content -LiteralPath '$safeCredTemp'   -Raw | ConvertFrom-Json
+`$samplesRaw  = Get-Content -LiteralPath '$safeSampTemp'   -Raw | ConvertFrom-Json
+`$richBodyVal = Get-Content -LiteralPath '$safeRichTemp'   -Raw
+# Trim the trailing newline that Set-Content appends so the value matches what callers pass.
+`$richBodyVal = `$richBodyVal -replace '\r?\n$', ''
 `$credits  = if (`$null -eq `$creditsRaw  -or @(`$creditsRaw).Count  -eq 0)  { @() } else { @(`$creditsRaw  | ForEach-Object { [pscustomobject]`$_ }) }
 `$samples  = if (`$null -eq `$samplesRaw -or @(`$samplesRaw).Count -eq 0) { @() } else { @(`$samplesRaw | ForEach-Object { [pscustomobject]`$_ }) }
 & '$safeScript' ``
@@ -92,7 +100,8 @@ BeforeAll {
     -V3BaseYaml '$safeV3' ``
     -Credits `$credits ``
     -DispatchCostSamples `$samples ``
-    -IssueNumber $IssueNumber
+    -IssueNumber $IssueNumber ``
+    -RichBody `$richBodyVal
 exit `$LASTEXITCODE
 "@
         $wrapperTemp = [System.IO.Path]::GetTempFileName() + '.ps1'
@@ -104,9 +113,10 @@ exit `$LASTEXITCODE
                 -Wait -PassThru -NoNewWindow
             $exitCode = $proc.ExitCode
         } finally {
-            Remove-Item -LiteralPath $wrapperTemp  -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $creditsTemp  -ErrorAction SilentlyContinue
-            Remove-Item -LiteralPath $samplesTemp  -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $wrapperTemp   -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $creditsTemp   -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $samplesTemp   -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $richBodyTemp  -ErrorAction SilentlyContinue
         }
 
         $bodyContent = ''
@@ -269,6 +279,61 @@ Describe 'emit-pipeline-metrics-v4.ps1' {
 
                 $result.ExitCode    | Should -Not -Be 0
                 $result.BodyContent | Should -Match $script:SentinelRegex
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Context 'Case 7 - RichBody merging: success path appends v4 block after rich body content' {
+
+        It 'body file contains Closes #769 before the pipeline-metrics block when RichBody is provided' {
+            $richBodyContent = "## Summary`n`nCloses #769`n"
+            $bodyFile = & $script:TempBodyFile
+            try {
+                $result = & $script:InvokeScript `
+                    -BodyFile    $bodyFile `
+                    -V3BaseYaml  $script:ValidV3Base `
+                    -Credits     @($script:ValidCredit) `
+                    -RichBody    $richBodyContent
+
+                $result.ExitCode    | Should -Be 0
+                $result.BodyContent | Should -Match 'Closes #769'
+                $result.BodyContent | Should -Match '<!-- pipeline-metrics'
+                $result.BodyContent | Should -Match 'metrics_version: 4'
+                $result.BodyContent | Should -Not -Match $script:SentinelRegex
+
+                # Ordering: "Closes #769" must appear before "<!-- pipeline-metrics"
+                $closesIndex  = $result.BodyContent.IndexOf('Closes #769')
+                $metricsIndex = $result.BodyContent.IndexOf('<!-- pipeline-metrics')
+                $closesIndex  | Should -BeLessThan $metricsIndex
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    Context 'Case 8 - RichBody preserved in fallback: rich content survives emit failure' {
+
+        It 'body file contains Closes #769 before the sentinel when RichBody is provided and builder throws' {
+            # Empty V3BaseYaml forces builder throw (Case 1), so RichBody must survive in fallback.
+            $richBodyContent = "## Summary`n`nCloses #769`n"
+            $bodyFile = & $script:TempBodyFile
+            try {
+                $result = & $script:InvokeScript `
+                    -BodyFile    $bodyFile `
+                    -V3BaseYaml  '' `
+                    -Credits     @($script:ValidCredit) `
+                    -RichBody    $richBodyContent
+
+                $result.ExitCode    | Should -Not -Be 0
+                $result.BodyContent | Should -Match 'Closes #769'
+                $result.BodyContent | Should -Match $script:SentinelRegex
+
+                # Ordering: "Closes #769" must appear before the sentinel
+                $closesIndex   = $result.BodyContent.IndexOf('Closes #769')
+                $sentinelIndex = $result.BodyContent.IndexOf($script:SentinelToken)
+                $closesIndex   | Should -BeLessThan $sentinelIndex
             } finally {
                 Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
             }

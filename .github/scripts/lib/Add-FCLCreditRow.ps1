@@ -21,7 +21,7 @@
 function Add-FCLCreditRow {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][int]$IssueNumber,
+        [Parameter(Mandatory)][ValidateRange(1, [int]::MaxValue)][int]$IssueNumber,
         [Parameter(Mandatory)][pscustomobject]$CreditRow
     )
 

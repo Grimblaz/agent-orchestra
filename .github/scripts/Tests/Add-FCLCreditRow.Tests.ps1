@@ -136,3 +136,83 @@ Describe 'Add-FCLCreditRow / Get-FCLAccumulatedCredits' {
         }
     }
 }
+
+Describe 'Accumulator robustness (B4b/B5/P1-F2 fixes)' {
+
+    It 'Get-FCLAccumulatedCredits skips malformed JSONL and returns valid rows' {
+        $issue = 99998
+        $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $dir = Join-Path $repoRoot ".tmp/issue-$issue"
+        if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+
+        # Add first valid row
+        $row1 = [pscustomobject]@{ port = 'test'; status = 'passed' }
+        Add-FCLCreditRow -IssueNumber $issue -CreditRow $row1
+
+        # Inject a corrupt line directly into the file
+        $file = Join-Path $dir 'fclcredits.jsonl'
+        Add-Content -Path $file -Value 'THIS IS NOT JSON {{{' -Encoding utf8NoBOM
+
+        # Add second valid row
+        $row2 = [pscustomobject]@{ port = 'impl'; status = 'passed' }
+        Add-FCLCreditRow -IssueNumber $issue -CreditRow $row2
+
+        # Must get 2 valid rows; the corrupt line is skipped with a warning
+        $results = Get-FCLAccumulatedCredits -IssueNumber $issue -WarningAction SilentlyContinue
+        @($results).Count | Should -Be 2
+        @($results)[0].port | Should -Be 'test'
+        @($results)[1].port | Should -Be 'impl'
+
+        Remove-Item -Recurse -Force $dir
+    }
+
+    It 'Get-FCLAccumulatedCredits returns zero rows for empty-but-present file (no parse error)' {
+        $issue = 99997
+        $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $dir = Join-Path $repoRoot ".tmp/issue-$issue"
+        if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+        New-Item -ItemType Directory -Force -Path $dir | Out-Null
+
+        # Create an empty file (whitespace-only content)
+        Set-Content -Path (Join-Path $dir 'fclcredits.jsonl') -Value '' -Encoding utf8NoBOM
+
+        # With @() wrapper: empty file must yield 0 rows, not throw
+        $rows = @(Get-FCLAccumulatedCredits -IssueNumber $issue)
+        $rows.Count | Should -Be 0
+
+        Remove-Item -Recurse -Force $dir
+    }
+
+    It 'Get-FCLAccumulatedCredits returns exactly 1 row for single-row file (no scalar collapse)' {
+        $issue = 99996
+        $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $dir = Join-Path $repoRoot ".tmp/issue-$issue"
+        if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+
+        $row = [pscustomobject]@{ port = 'singleton'; status = 'passed' }
+        Add-FCLCreditRow -IssueNumber $issue -CreditRow $row
+
+        # With @() wrapper: single row must yield exactly 1 element
+        $rows = @(Get-FCLAccumulatedCredits -IssueNumber $issue)
+        $rows.Count | Should -Be 1
+        $rows[0].port | Should -Be 'singleton'
+
+        Remove-Item -Recurse -Force $dir
+    }
+
+    It 'Add-FCLCreditRow rejects IssueNumber 0' {
+        { Add-FCLCreditRow -IssueNumber 0 -CreditRow ([pscustomobject]@{ port = 'x' }) } | Should -Throw
+    }
+
+    It 'Add-FCLCreditRow rejects negative IssueNumber' {
+        { Add-FCLCreditRow -IssueNumber -1 -CreditRow ([pscustomobject]@{ port = 'x' }) } | Should -Throw
+    }
+
+    It 'Get-FCLAccumulatedCredits rejects IssueNumber 0' {
+        { Get-FCLAccumulatedCredits -IssueNumber 0 } | Should -Throw
+    }
+
+    It 'Get-FCLAccumulatedCredits rejects negative IssueNumber' {
+        { Get-FCLAccumulatedCredits -IssueNumber -1 } | Should -Throw
+    }
+}

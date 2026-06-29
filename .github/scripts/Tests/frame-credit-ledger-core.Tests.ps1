@@ -1580,7 +1580,7 @@ Describe 'Compose-MissingMetricsShortCircuitComment (C-Behavior-1: distinct bran
 
     It 'renders missing-marker-specific text (NOT the pre-v4 or parse-error phrasing)' {
         $marker = '<!-- frame-credit-ledger-PR-429 -->'
-        $out = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker
+        $out = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker -IsOrchestrated $true
 
         $out | Should -Not -BeNullOrEmpty
         $out | Should -Match ([regex]::Escape($marker))
@@ -1625,6 +1625,20 @@ Describe 'Compose-MissingMetricsShortCircuitComment — origin-gated taxonomy (i
         $out | Should -Match 'not measured \(non-orchestrated\)'
         $out | Should -Not -Match '🛑'
         $out | Should -Not -Match 'FAILED'
+    }
+}
+
+Describe 'Compose-MissingMetricsShortCircuitComment — default IsOrchestrated is $false (P2-F4 fix)' {
+
+    It 'default call (no -IsOrchestrated arg) renders not-measured (default is now $false)' {
+        $marker = '<!-- frame-credit-ledger-PR-pf4 -->'
+        $result = Compose-MissingMetricsShortCircuitComment -MarkerToken $marker
+
+        $result | Should -Not -BeNullOrEmpty
+        $result | Should -Match ([regex]::Escape($marker))
+        $result | Should -Match 'non-orchestrated'
+        $result | Should -Not -Match '🛑'
+        $result | Should -Not -Match 'FAILED'
     }
 }
 

@@ -106,8 +106,17 @@ Describe 'Get-FCLOriginContext — body fallback signals' {
         $ctx.DetectionMethod      | Should -Be 'body'
     }
 
-    It 'body fallback: Fixes #769 keyword pattern returns IsOrchestratedOrigin=$true via body' {
+    It 'body fallback: Fixes #769 keyword pattern NO LONGER returns IsOrchestratedOrigin=$true (keyword-linked leg removed)' {
         $prBody = "Fixes #769`n`nMore description."
+        $ctx = Get-FCLOriginContext -HeadRef $null -PrBody $prBody
+
+        # keyword-linked pattern was removed (B4a fix) — must NOT classify as orchestrated
+        $ctx.IsOrchestratedOrigin | Should -Be $false
+        $ctx.DetectionMethod      | Should -Be 'none'
+    }
+
+    It 'body fallback: PR with Fixes #N AND plan-issue comment marker is orchestrated (plan-issue signal survives removal of keyword leg)' {
+        $prBody = "Fixes #769`n`n<!-- plan-issue-769 -->`n"
         $ctx = Get-FCLOriginContext -HeadRef $null -PrBody $prBody
 
         $ctx.IsOrchestratedOrigin | Should -Be $true

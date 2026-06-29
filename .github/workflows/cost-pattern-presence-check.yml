@@ -15,23 +15,47 @@ concurrency:
   group: cost-pattern-presence-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   check-cost-pattern:
+    # NOTE: github.head_ref is null on issue_comment events; the startsWith() arm
+    # covers pull_request events only. On issue_comment events only the cost-reduction
+    # label arm fires. This is a known backstop-completeness gap (B6/P2-F3).
     if: |
       contains(github.event.pull_request.labels.*.name, 'cost-reduction') ||
       startsWith(github.head_ref, 'feature/issue-') ||
       (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.issue.labels.*.name, 'cost-reduction'))
     runs-on: ubuntu-latest
     steps:
-      - name: Check PR body for v4 pipeline-metrics block
+      - name: Check PR body for v4 pipeline-metrics block with non-empty credits
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
         run: |
           pr_body=$(gh pr view "$PR_NUMBER" --json body --jq '.body')
+
+          # pre-v4 block: marker present but not v4 — taxonomy state: pre-v4 (distinct from FAILED)
           if echo "$pr_body" | grep -q '<!-- pipeline-metrics'; then
-            echo "v4 block present"
-          else
-            echo "::warning::PR body missing <!-- pipeline-metrics block (cost-capture-failed or not emitted)"
-            exit 1
+            if ! echo "$pr_body" | grep -qE '^metrics_version:[[:space:]]*4[[:space:]]*$'; then
+              echo "::notice::Pre-v4 pipeline-metrics block detected — not a failure, migration in progress"
+              exit 0
+            fi
+            # v4 block present — check credits
+            if ! echo "$pr_body" | grep -qE '^[[:space:]]*-[[:space:]]+port:[[:space:]]+[^[:space:]]'; then
+              echo "::warning::v4 block found but credits[] is empty (cost-capture-failed or accumulation missed)"
+              exit 1
+            fi
+            echo "v4 block present with non-empty credits[] — OK"
+            exit 0
           fi
+
+          # No block at all — FAILED state (orchestrated PR must have a v4 block)
+          if echo "$pr_body" | grep -q '<!-- cost-capture-failed -->'; then
+            echo "::error::cost-capture-failed sentinel present — emit script failed during PR creation"
+          else
+            echo "::error::PR body missing <!-- pipeline-metrics block entirely"
+          fi
+          exit 1

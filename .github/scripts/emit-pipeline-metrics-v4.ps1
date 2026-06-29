@@ -42,6 +42,15 @@
     is empty, s-acc will inject a Get-FCLAccumulatedCredits harvest call here.
     This script does NOT implement the harvest — the parameter reserves the
     injection point.
+
+.PARAMETER RichBody
+    Optional full markdown PR body already composed by the conductor (summary,
+    changed files, Closes #N, review table, etc.).  When provided, the v4 block
+    is appended to this rich body so the final file contains both the human-
+    readable PR content AND the metrics block.  When omitted, the script writes
+    only the v4 block (backwards-compatible behaviour for unit tests).
+    On failure the rich body is still written followed by the sentinel so
+    Closes #N always survives in the shipped PR body.
 #>
 [CmdletBinding()]
 param(
@@ -49,7 +58,8 @@ param(
     [string]$V3BaseYaml = '',
     [pscustomobject[]]$Credits = @(),
     [pscustomobject[]]$DispatchCostSamples = @(),
-    [int]$IssueNumber = 0
+    [int]$IssueNumber = 0,
+    [string]$RichBody = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -77,6 +87,8 @@ try {
         if (Test-Path -LiteralPath $accScript) {
             . $accScript
             $Credits = @(Get-FCLAccumulatedCredits -IssueNumber $IssueNumber)
+        } else {
+            Write-Warning "harvest script not found at $accScript — proceeding with explicitly-passed credits only"
         }
     }
 
@@ -92,19 +104,29 @@ try {
         throw "Test-PipelineMetricsV4Block validation failed: $($testResult.FailureReason)"
     }
 
-    # Case 3 — success; mark sentinel as "not needed" so finally does not append it.
+    # Case 3 — success: compose final body (rich content + v4 block)
+    $finalBody = if ([string]::IsNullOrWhiteSpace($RichBody)) {
+        $v4Body  # backwards-compat: no rich body passed
+    } else {
+        "$RichBody`n`n$v4Body"
+    }
+
     $script:sentinelWritten = $true
-    Set-Content -Path $BodyFile -Value $v4Body -Encoding utf8NoBOM
+    Set-Content -Path $BodyFile -Value $finalBody -Encoding utf8NoBOM
     exit 0
 }
 catch {
     # Case 1 or 2: write fallback body + sentinel
-    $fallbackBody = if (-not [string]::IsNullOrWhiteSpace($V3BaseYaml)) {
-        $V3BaseYaml
+    $fallbackBase = if ([string]::IsNullOrWhiteSpace($RichBody)) {
+        if (-not [string]::IsNullOrWhiteSpace($V3BaseYaml)) {
+            $V3BaseYaml
+        } else {
+            'metrics_emission_failed: true'
+        }
     } else {
-        'metrics_emission_failed: true'
+        $RichBody
     }
-    $fallbackBody += "`n`n<!-- cost-capture-failed -->"
+    $fallbackBody = "$fallbackBase`n`n<!-- cost-capture-failed -->"
 
     Set-Content -Path $BodyFile -Value $fallbackBody -Encoding utf8NoBOM
     $script:sentinelWritten = $true

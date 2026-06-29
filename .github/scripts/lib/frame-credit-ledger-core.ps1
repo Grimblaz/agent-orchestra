@@ -2064,7 +2064,7 @@ function Compose-MissingMetricsShortCircuitComment {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$MarkerToken,
-        [bool]$IsOrchestrated = $true
+        [bool]$IsOrchestrated = $false
     )
 
     if (-not $IsOrchestrated) {

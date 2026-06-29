@@ -15,7 +15,7 @@
 #             frame-credit-ledger.ps1:469-484 (Resolve-FCLLinkedIssueNumber
 #             body leg), but exposed as a public function importable by
 #             external scripts.
-#             Patterns: close/fix/resolve #N, issue_id: N, <!-- plan-issue-N -->
+#             Patterns: issue_id: N, <!-- plan-issue-N --> (close/fix/resolve #N excluded — see B4a)
 #
 # Usage (dot-source and call):
 #   . (Join-Path $PSScriptRoot 'Get-FCLOriginContext.ps1')
@@ -87,16 +87,16 @@ function Get-FCLOriginContext {
     }
 
     # -----------------------------------------------------------------------
-    # FALLBACK: PR body linked-issue signals
-    # Mirrors frame-credit-ledger.ps1:469-484 (Resolve-FCLLinkedIssueNumber
-    # body leg). Patterns in priority order:
-    #   1. close/fix/resolve/ref/references/issue #N (keyword-linked)
-    #   2. issue_id: N
-    #   3. <!-- plan-issue-N --> or <!-- design-issue-N -->
+    # FALLBACK: PR body orchestration-specific signals.
+    # Only patterns that are unambiguous orchestration markers:
+    #   1. issue_id: N — explicit machine-format field in PR body
+    #   2. <!-- plan-issue-N --> or <!-- design-issue-N --> — orchestration comment markers
+    # NOTE: close/fix/resolve/ref #N patterns are intentionally EXCLUDED — these are
+    #   standard GitHub issue-linking prose that any contributor writes and do NOT
+    #   indicate the PR was produced by Agent Orchestra orchestration.
     # -----------------------------------------------------------------------
     if (-not [string]::IsNullOrWhiteSpace($PrBody)) {
         $bodyPatterns = @(
-            '(?im)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?|ref(?:s|erences)?|issue)\s+(?:[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#(?<issue>\d+)\b',
             '(?im)^\s*issue_id\s*:\s*(?<issue>\d+)\s*$',
             '(?im)<!--\s*(?:plan|design)-issue-(?<issue>\d+)\s*-->'
         )
