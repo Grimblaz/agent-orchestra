@@ -459,6 +459,15 @@ Load and follow these references:
 
 Code-Conductor keeps only the emission timing and ownership boundary: at fresh PR creation time, the `.github/scripts/emit-pipeline-metrics-v4.ps1` script (called in the **Create PR** step above) owns `New-PipelineMetricsV4Block` invocation, `Test-PipelineMetricsV4Block` validation, and writing the body file — pass `-V3BaseYaml` (plain YAML string of v3 base fields; do not wrap in the HTML comment, do not include `metrics_version: 4`; the builder adds those), the accumulated `-Credits` / `-DispatchCostSamples` from the session-memory accumulator, and `-IssueNumber`. `Build-*CreditRow` outputs are `[pscustomobject]` rows — pass them directly, the builder normalizes them. The script is warn-only: if it exits non-zero, log the warning and proceed to `gh pr create` regardless (#429). On re-emit the initial-creation guard prevents double-wrapping; use additive-merge writers for updates after the initial PR exists.
 
+After each `Build-*CreditRow` call that produces a credit row for the current issue, persist it to the file-based accumulator so `emit-pipeline-metrics-v4.ps1` can harvest it deterministically at PR creation time (issue #769 s-acc):
+
+```powershell
+. '.github/scripts/lib/Add-FCLCreditRow.ps1'
+Add-FCLCreditRow -IssueNumber {ISSUE_NUMBER} -CreditRow $creditRow
+```
+
+This call is additive alongside the existing prose instruction — do not remove the `Build-*CreditRow` call itself. When `-IssueNumber` is provided to `emit-pipeline-metrics-v4.ps1` and no `-Credits` are passed explicitly, the script auto-harvests from `.tmp/issue-{N}/fclcredits.jsonl`.
+
 For v4 release-hygiene credit row construction (state-file reading, YAML examples) and the CE Gate S2 synthetic-PR test protocol, follow `skills/calibration-pipeline/references/release-hygiene-credit-emission.md`.
 
 <!-- TODO: remove legacy v3 pipeline-metrics fallback at v2.9.0 when pre-v4 back-catalog backfill is confirmed complete (issue #441). -->

@@ -71,8 +71,14 @@ $originScript = Join-Path $PSScriptRoot 'lib/Get-FCLOriginContext.ps1'
 # Main body
 # ---------------------------------------------------------------------------
 try {
-    # s-acc: harvest from Get-FCLAccumulatedCredits here (when IssueNumber > 0 and Credits empty)
-    # (s-acc will inject: if ($IssueNumber -gt 0 -and $Credits.Count -eq 0) { ... })
+    # s-acc: harvest from file-based accumulator when Credits not provided
+    if ($IssueNumber -gt 0 -and $Credits.Count -eq 0) {
+        $accScript = Join-Path $PSScriptRoot 'lib/Get-FCLAccumulatedCredits.ps1'
+        if (Test-Path -LiteralPath $accScript) {
+            . $accScript
+            $Credits = @(Get-FCLAccumulatedCredits -IssueNumber $IssueNumber)
+        }
+    }
 
     # Build v4 block (Case 1 throw surface: empty V3BaseYaml or pre-existing v4)
     $v4Body = New-PipelineMetricsV4Block `

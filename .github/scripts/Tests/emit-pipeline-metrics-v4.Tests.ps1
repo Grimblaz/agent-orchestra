@@ -274,4 +274,46 @@ Describe 'emit-pipeline-metrics-v4.ps1' {
             }
         }
     }
+
+    Context 'Case 6 (s-acc) - harvest hook: file-based accumulator provides credits when -Credits is empty' {
+
+        It 'produces a valid v4 body with the credit from fclcredits.jsonl when -Credits is empty and -IssueNumber matches' {
+            # Arrange: pre-populate the accumulator file for test issue 99999.
+            $repoRoot        = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+            $accDir          = Join-Path $repoRoot '.tmp/issue-99999'
+            $accFile         = Join-Path $accDir 'fclcredits.jsonl'
+            New-Item -ItemType Directory -Force -Path $accDir | Out-Null
+
+            # Write the same shape as Build-ImplementCodeCreditRow returns.
+            $creditRow = [pscustomobject]@{
+                port               = 'implement-code'
+                adapter            = 'skills/implementation-discipline/adapters/implement-code-adapter.md'
+                status             = 'passed'
+                run_index          = 1
+                evidence           = 'emit-pipeline-metrics-v4.Tests.ps1 -- s-acc harvest fixture'
+                'terminal-step-id' = 5
+            }
+            $creditRow | ConvertTo-Json -Compress -Depth 10 | Set-Content -Path $accFile -Encoding utf8NoBOM
+
+            $bodyFile = & $script:TempBodyFile
+            try {
+                # Act: call with empty -Credits and -IssueNumber 99999.
+                $result = & $script:InvokeScript `
+                    -BodyFile    $bodyFile `
+                    -V3BaseYaml  $script:ValidV3Base `
+                    -Credits     @() `
+                    -IssueNumber 99999
+
+                # Assert: harvest ran, body is valid v4.
+                $result.ExitCode    | Should -Be 0
+                $result.BodyContent | Should -Match 'metrics_version: 4'
+                $result.BodyContent | Should -Match 'implement-code'
+                $result.BodyContent | Should -Not -Match $script:SentinelRegex
+            } finally {
+                Remove-Item -LiteralPath $bodyFile  -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $accFile   -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $accDir    -ErrorAction SilentlyContinue
+            }
+        }
+    }
 }
