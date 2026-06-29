@@ -2,12 +2,12 @@
 name: parallel-execution
 description: "Build-test orchestration protocol for choosing and running parallel or serial implementation lanes with shared requirement contracts, convergence gates, and triage routing. Use when coordinating multiple concurrent implementation paths, managing convergence gates, or running triage routing. DO NOT USE FOR: exploring ideas or trade-offs (use brainstorming) or evaluating architecture (use software-architecture)."
 ---
-
 # Parallel Execution Skill
 
 ## Composite References
 
 - [references/error-handling.md](references/error-handling.md): canonical R5 subagent-call resilience, common issue routing, escalation patterns, terminal non-interactive guardrails, and terminal lifecycle protocol.
+- [references/lean-dispatch-example.md](references/lean-dispatch-example.md): dispatch-prompt economy — lean before/after dispatch example for the canonical-source reference pattern.
 
 ## Mode Declaration
 
