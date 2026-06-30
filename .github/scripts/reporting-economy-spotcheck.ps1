@@ -132,7 +132,24 @@ function Get-SpotcheckRecord {
     }
 }
 
-if (-not $ImportMode) {
+function Invoke-ReportingEconomySpotcheck {
+    <#
+    .SYNOPSIS
+        Resolve the slug dir, collect spot-check records, and return a result object.
+    .DESCRIPTION
+        Returns a PSCustomObject with:
+          Message — a "Baseline unavailable ..." string when no usable transcripts
+                    are found, otherwise $null.
+          Records — the collected per-dispatch records (empty when Message is set).
+        Designed for in-process invocation by both the CLI main block and the
+        Pester suite (script-safety contract #257: no child-pwsh spawn per test).
+    #>
+    [CmdletBinding()]
+    param(
+        [string]$SlugDirOverride,
+        [Parameter(Mandatory)][string[]]$InScope
+    )
+
     if ($SlugDirOverride) {
         $slugDir = $SlugDirOverride
     } else {
@@ -151,8 +168,10 @@ if (-not $ImportMode) {
     }
 
     if (-not (Test-Path -LiteralPath $slugDir)) {
-        Write-Output "Baseline unavailable -- slug directory not found: $slugDir"
-        exit 0
+        return [PSCustomObject]@{
+            Message = "Baseline unavailable -- slug directory not found: $slugDir"
+            Records = @()
+        }
     }
 
     # Real layout: {slug}/{session-uuid}/subagents/agent-*.jsonl
@@ -167,23 +186,36 @@ if (-not $ImportMode) {
     )
 
     if ($jsonlFiles.Count -eq 0) {
-        Write-Output "Baseline unavailable -- no subagent transcripts found at $slugDir"
-        exit 0
+        return [PSCustomObject]@{
+            Message = "Baseline unavailable -- no subagent transcripts found at $slugDir"
+            Records = @()
+        }
     }
 
     $records = [System.Collections.Generic.List[PSCustomObject]]::new()
 
     foreach ($file in $jsonlFiles) {
-        $record = Get-SpotcheckRecord -JsonlPath $file.FullName -InScope $InScopeAgents
+        $record = Get-SpotcheckRecord -JsonlPath $file.FullName -InScope $InScope
         if ($null -ne $record) {
             $records.Add($record)
         }
     }
 
     if ($records.Count -eq 0) {
-        Write-Output "Baseline unavailable -- no in-scope agent transcripts found at $slugDir"
-        exit 0
+        return [PSCustomObject]@{
+            Message = "Baseline unavailable -- no in-scope agent transcripts found at $slugDir"
+            Records = @()
+        }
     }
 
-    $records | Format-Table -AutoSize
+    return [PSCustomObject]@{ Message = $null; Records = $records }
+}
+
+if (-not $ImportMode) {
+    $result = Invoke-ReportingEconomySpotcheck -SlugDirOverride $SlugDirOverride -InScope $InScopeAgents
+    if ($null -ne $result.Message) {
+        Write-Output $result.Message
+        exit 0
+    }
+    $result.Records | Format-Table -AutoSize
 }

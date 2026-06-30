@@ -269,23 +269,41 @@ Describe 'reporting-economy-spotcheck parser logic' {
 
     Context 'baseline-unavailable behavior' {
 
-        It 'emits the baseline-unavailable message for a non-existent slug dir' {
+        # In-process invocation per script-safety contract (#257): no child-pwsh spawn.
+
+        It 'returns the baseline-unavailable message for a non-existent slug dir' {
             $nonExistentDir = Join-Path $TestDrive 'no-such-slug-dir'
 
-            $output     = & pwsh -NonInteractive -NoProfile -File $script:ScriptPath -SlugDirOverride $nonExistentDir 2>&1
-            $outputText = $output -join "`n"
+            $result = Invoke-ReportingEconomySpotcheck -SlugDirOverride $nonExistentDir -InScope $script:InScopeAgents
 
-            $outputText | Should -Match 'Baseline unavailable'
+            $result.Message       | Should -Match 'Baseline unavailable'
+            @($result.Records).Count | Should -Be 0
         }
 
-        It 'emits baseline-unavailable when slug dir exists but has no session subdirs with agent JSONL files' {
+        It 'returns baseline-unavailable when slug dir exists but has no session subdirs with agent JSONL files' {
             $emptySlugDir = Join-Path $TestDrive 'empty-slug'
             New-Item -ItemType Directory -Path $emptySlugDir -Force | Out-Null
 
-            $output     = & pwsh -NonInteractive -NoProfile -File $script:ScriptPath -SlugDirOverride $emptySlugDir 2>&1
-            $outputText = $output -join "`n"
+            $result = Invoke-ReportingEconomySpotcheck -SlugDirOverride $emptySlugDir -InScope $script:InScopeAgents
 
-            $outputText | Should -Match 'Baseline unavailable'
+            $result.Message       | Should -Match 'Baseline unavailable'
+            @($result.Records).Count | Should -Be 0
+        }
+
+        It 'returns collected records when in-scope transcripts exist under the session subdir' {
+            # {slug}/{session-uuid}/subagents/agent-*.jsonl — the real nested layout
+            $slugDir    = Join-Path $TestDrive 'populated-slug'
+            $subagents  = Join-Path (Join-Path $slugDir 'session-uuid-1') 'subagents'
+            New-Item -ItemType Directory -Path $subagents -Force | Out-Null
+            $line = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:code-smith' `
+                -ContentBlocks @(@{ type = 'text'; text = 'done' })
+            script:Write-JsonlFile -Path (Join-Path $subagents 'agent-deadbeef.jsonl') -Lines @($line)
+
+            $result = Invoke-ReportingEconomySpotcheck -SlugDirOverride $slugDir -InScope $script:InScopeAgents
+
+            $result.Message            | Should -BeNullOrEmpty
+            @($result.Records).Count   | Should -Be 1
+            $result.Records[0].Agent   | Should -Be 'agent-orchestra:code-smith'
         }
     }
 }
