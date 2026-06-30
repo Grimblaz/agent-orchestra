@@ -20,6 +20,8 @@ Add-FCLCreditRow -IssueNumber {ISSUE_NUMBER} -CreditRow $creditRow
 
 This call is additive alongside the existing prose instruction — do not remove the `Build-*CreditRow` call itself. When `-IssueNumber` is provided to `emit-pipeline-metrics-v4.ps1` and no `-Credits` are passed explicitly, the script auto-harvests from `.tmp/issue-{N}/fclcredits.jsonl`.
 
+**Output contract**: PR bodies must still include a `## Pipeline Metrics` section containing the `<!-- pipeline-metrics -->` block. The Create-PR emit step appends this automatically; do not remove the section from the PR body.
+
 For v4 release-hygiene credit row construction (state-file reading, YAML examples) and the CE Gate S2 synthetic-PR test protocol, follow `skills/calibration-pipeline/references/release-hygiene-credit-emission.md`.
 
 <!-- TODO: remove legacy v3 pipeline-metrics fallback at v2.9.0 when pre-v4 back-catalog backfill is confirmed complete (issue #441). -->
