@@ -117,7 +117,7 @@ AGENTS.md  ›  CLAUDE.md  ›  copilot-instructions.md
 
 The detector reads each file in this order and takes the **first file that contains a valid `## BDD Framework` heading at column 0** (a real level-2 Markdown heading, not a backticked mention or mid-line reference). This file becomes the **winning file** for the current detection pass. A higher-precedence file that lacks the heading is **skipped**, not treated as a disabling signal — detection continues to the next candidate. If no candidate file contains the heading, the result is the silent natural-language fallback (see **Silent fallback** below).
 
-**Precedence is BDD-config discovery order only.** This ordering does NOT modify or contradict instruction-merge precedence as documented in `ai-first-documentation/rubric.md` E7. These are independent axes: E7 governs which instruction layers apply to agents; this section governs where BDD configuration lives. Do not conflate them.
+**Precedence is BDD-config discovery order only.** This ordering does NOT modify or contradict instruction-merge precedence as documented in `ai-first-documentation/rubric.md` E7. These are independent axes: E7 governs which instruction layers apply to agents; this section governs where BDD configuration lives. Do not conflate them. Note the orderings appear inverted (E7: `copilot-instructions.md` highest; BDD discovery: `AGENTS.md` first) — this is not a conflict: E7 answers *which instruction layer applies*, while BDD discovery answers *which file holds the opt-in config*; the two axes answer different questions.
 
 **Widened enablement surface (AC8)**: A bare `## BDD Framework` heading in `AGENTS.md` or `CLAUDE.md` enables Phase 1 BDD for any repo that uses those files as its primary instruction source. Repos that previously relied on `copilot-instructions.md` continue to work — the file is still the third candidate. Maintainers adding BDD to a repo via `AGENTS.md` or `CLAUDE.md` should be aware that a bare heading without a `bdd: {framework}` line activates Phase 1 only; Phase 2 requires both (see **Phase 2 Detection** below).
 
@@ -133,13 +133,21 @@ Returns at least one line → heading found; this file wins. The anchored `^` en
 
 The heading must appear at column 0 with no leading whitespace — CommonMark allows 1–3 spaces before an ATX heading, but the detector requires zero; an indented `## BDD Framework` will not be detected and silently advances to the next candidate file.
 
+If a file contains more than one `## BDD Framework` heading, the **first** heading governs — subsequent headings in the same file are ignored.
+
 ### Same-file `bdd:` read (Phase 2)
 
 When a winning file is found, Phase 2 dispatch reads `bdd: {framework}` from **that same winning file** — not from a hardcoded `copilot-instructions.md`. If the winning file is `AGENTS.md`, the `bdd:` line is expected under the `## BDD Framework` heading in `AGENTS.md`. See **Phase 2 Detection** below for the full two-condition check.
 
+Scope the `bdd:` read to lines between the winning `## BDD Framework` heading and the next column-0 `##` heading (H2 boundary), mirroring the `## Scenarios` extraction boundary.
+
+The heading and `bdd:` line must be in the **same** winning file. A `bdd:` line in any lower-precedence file is never read — if the winning file has the heading but no `bdd:` line, the repo is Phase 1 only.
+
 ### Silent fallback
 
 If no candidate file contains a valid column-0 `## BDD Framework` heading, BDD is inactive. No error is emitted. Agents use the natural-language / prose fallback silently. This is detect-only behavior — the absence of BDD config is never surfaced as a warning.
+
+A candidate file that cannot be read (absent, unreadable, or not a regular text file) is treated identically to a file lacking the heading — skipped, detection advances to the next candidate (fail-open).
 
 ## Gotchas
 
@@ -170,7 +178,7 @@ Keep the Test-Writer agent body thin by pointing here instead of restating the f
 
 Phase 2 is active when **both** conditions are met in the **winning file** (the first of `AGENTS.md`, `CLAUDE.md`, `copilot-instructions.md` that contains a valid column-0 `## BDD Framework` heading — see **BDD Detection Mechanism** above):
 
-1. `## BDD Framework` **line-start heading** at column 0 is present in at least one candidate file (Phase 1 condition; a mid-line mention does not qualify)
+1. `## BDD Framework` **line-start heading** at column 0 is present **in the winning file** (Phase 1 condition; a mid-line mention does not qualify)
 2. A `bdd: {framework}` config line is present in that **same winning file** with a recognized framework name
 
 **Known migration case — `bdd: true`**: If a consumer repo was set up under Phase 1 only and still has `bdd: true` in a comment, emit a warning: _"bdd: true detected — Phase 2 requires a recognized framework name. Set `bdd: {framework}` with one of: cucumber.js, behave, jest-cucumber, cucumber. Falling back to Phase 1 behavior."_ Then fall back to Phase 1.

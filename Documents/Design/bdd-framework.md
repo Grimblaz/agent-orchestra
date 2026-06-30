@@ -161,7 +161,7 @@ See [customer-experience-gate.md](customer-experience-gate.md) for the full CE G
 
 Phase 2 requires **both** conditions:
 
-1. `## BDD Framework` line-start heading (column 0) present in the winning candidate file (`AGENTS.md › CLAUDE.md › copilot-instructions.md` — see `skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism`)
+1. `## BDD Framework` line-start heading (column 0) present in the winning file (`AGENTS.md › CLAUDE.md › copilot-instructions.md` — see `skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism`)
 2. `bdd: {framework}` line under that heading in that same winning file with a recognized framework value
 
 | Condition | Behavior |
@@ -235,7 +235,7 @@ When the unified evidence record contains a `source` field, Code-Critic applies 
 | BDD enabled | `## BDD Framework` line-start heading (column 0) present in the first of `AGENTS.md › CLAUDE.md › copilot-instructions.md` that contains it (see `skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism`) | G/W/T authoring required; S-IDs mandatory; pre-flight gate active |
 | BDD disabled | No line-start heading in any candidate file | Natural-language CE scenarios; no S-IDs; pre-flight gate skipped |
 
-The template repo (`Agent-Orchestra`) ships BDD-**disabled**. Example repos (`examples/*/copilot-instructions.md`) ship with a `## BDD Framework` section and a commented note showing how to remove it.
+The template repo (`Agent-Orchestra`) ships BDD-**disabled**. Example repos (`examples/*/copilot-instructions.md`) ship with a `## BDD Framework` section and a commented note showing how to disable it (remove the `## BDD Framework` heading from all candidate files — `AGENTS.md`, `CLAUDE.md`, and `copilot-instructions.md`).
 
 ---
 
@@ -258,7 +258,7 @@ Structured authoring and traceability infrastructure:
 
 Gherkin conversion and framework runner integration:
 
-- `bdd: {framework}` key in consumer `copilot-instructions.md` under `## BDD Framework` line-start heading activates Phase 2
+- `bdd: {framework}` key in consumer `copilot-instructions.md` under `## BDD Framework` line-start heading activates Phase 2 (detection later widened in #776 — `bdd:` now read from the winning candidate file; see `skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism`)
 - Test-Writer generates a single `.feature` file per issue with `@S{N}` tags for each `[auto]` scenario
 - Code-Conductor CE Gate runner dispatch: pre-check → per-scenario dispatch → evidence capture → conditional EO delegation → evidence merge
 - Code-Critic runner evidence evaluation keyed on `source` field in unified evidence record
