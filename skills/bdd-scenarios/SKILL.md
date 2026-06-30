@@ -99,7 +99,7 @@ Scenarios that require external services (auth emulators, backend APIs, database
 
 When reading scenario IDs from an issue body:
 
-- Match the pattern `### S\d+` headings within the `## Scenarios` section. Scope the extraction to content between the `## Scenarios` heading and the next H2 heading (`##`) — do not match `### S\d+` patterns outside this boundary.
+- Match the pattern `### S\d+` headings within the `## Scenarios` section. Scope the extraction to content between the `## Scenarios` heading and the next H2 heading (`##`), or end-of-file if no subsequent H2 heading exists — do not match `### S\d+` patterns outside this boundary.
 - Extract the full heading: `### S{N} — {title} (Type)` where `S{N}` is a concrete numbered ID such as `S1`
 - IDs are ordinal integers starting at 1; there must be **no gaps** in the sequence.
 - When a scenario is retired, keep its numbered `### S{N}` heading and replace the title with `[REMOVED]` (e.g., `### S2 — [REMOVED] (manual)`) instead of deleting the heading; this preserves the immutable ID space and allows extraction regex to still match retired-but-preserved headings.
@@ -139,7 +139,7 @@ If a file contains more than one `## BDD Framework` heading, the **first** headi
 
 When a winning file is found, Phase 2 dispatch reads `bdd: {framework}` from **that same winning file** — not from a hardcoded `copilot-instructions.md`. If the winning file is `AGENTS.md`, the `bdd:` line is expected under the `## BDD Framework` heading in `AGENTS.md`. See **Phase 2 Detection** below for the full two-condition check.
 
-Scope the `bdd:` read to lines between the winning `## BDD Framework` heading and the next column-0 `##` heading (H2 boundary), mirroring the `## Scenarios` extraction boundary.
+Scope the `bdd:` read to lines between the winning `## BDD Framework` heading and the next column-0 `##` heading (H2 boundary) — or end-of-file if no subsequent column-0 `##` heading exists — mirroring the `## Scenarios` extraction boundary.
 
 The heading and `bdd:` line must be in the **same** winning file. A `bdd:` line in any lower-precedence file is never read — if the winning file has the heading but no `bdd:` line, the repo is Phase 1 only.
 
