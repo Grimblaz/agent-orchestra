@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+#Requires -Version 7.1
 <#
 .SYNOPSIS
     Behavioral spot-check analyzer for the reporting-economy directive.
@@ -153,8 +153,14 @@ function Invoke-ReportingEconomySpotcheck {
     if ($SlugDirOverride) {
         $slugDir = $SlugDirOverride
     } else {
-        $cwd          = (Get-Location).Path
-        $slug         = Get-SpotcheckSlug -CwdPath $cwd
+        $cwd  = (Get-Location).Path
+        $slug = Get-SpotcheckSlug -CwdPath $cwd
+        if ([string]::IsNullOrEmpty($slug)) {
+            return [PSCustomObject]@{
+                Message = "Baseline unavailable -- could not derive project slug from CWD: $cwd"
+                Records = @()
+            }
+        }
         $projectsRoot = Join-Path $HOME '.claude' 'projects'
         $slugDir      = Join-Path $projectsRoot $slug
 
