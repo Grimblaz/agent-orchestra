@@ -64,3 +64,48 @@ jobs:
             echo "::error::PR body missing <!-- pipeline-metrics --> block entirely"
           fi
           exit 1
+
+      - name: Check PR comments for cost-pattern-data marker with coverage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        run: |
+          for i in 1 2 3 4 5; do
+            comment_bodies=$(gh pr view "$PR_NUMBER" --repo "$GH_REPO" --json comments --jq '[.comments[].body] | join("\n---COMMENT---\n")')
+            if echo "$comment_bodies" | grep -q '<!-- cost-pattern-data'; then
+              coverage=$(echo "$comment_bodies" | awk '
+                /<!-- cost-pattern-data/ { in_block=1; next }
+                in_block && /^coverage:/ { gsub(/^coverage:[[:space:]]*/, ""); print; exit }
+                in_block && /-->/ { in_block=0 }
+              ')
+              echo "coverage: $coverage"
+              case "$coverage" in
+                claude+copilot)
+                  echo "Cost Pattern coverage is claude+copilot — OK"
+                  exit 0
+                  ;;
+                copilot-only)
+                  echo "::warning::Cost Pattern coverage is copilot-only — Copilot cost collection present but Claude telemetry absent"
+                  exit 0
+                  ;;
+                claude-only-with-copilot-fallback-warning)
+                  echo "::warning::Cost Pattern coverage is claude-only-with-copilot-fallback-warning — Copilot telemetry absent"
+                  exit 0
+                  ;;
+                claude-only)
+                  echo "::warning::Cost Pattern coverage is claude-only — Copilot cost collection not installed"
+                  exit 0
+                  ;;
+                *)
+                  echo "::error::Cost Pattern coverage is unknown or missing: '$coverage'"
+                  exit 1
+                  ;;
+              esac
+            fi
+            if [ "$i" -lt 5 ]; then
+              sleep 10
+            fi
+          done
+          echo "::error::cost-pattern-data marker not found in PR comments after 5 attempts"
+          exit 1

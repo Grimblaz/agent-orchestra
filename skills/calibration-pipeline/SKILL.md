@@ -35,6 +35,7 @@ Reusable entryway for deterministic tooling, committed assets, and pipeline-metr
 - [references/release-hygiene-credit-emission.md](references/release-hygiene-credit-emission.md): v4 release-hygiene credit row construction (state-file reading, YAML examples) and CE Gate S2 synthetic-PR test protocol (issue #441 Step 7b)
 - [references/review-credit-emission.md](references/review-credit-emission.md): v4 review credit row construction via `Build-ReviewCreditRow` — adapter selection, RunIndex semantics, cross-tool handoff, and CE Gate S3 coverage (issue #441 Step 8b)
 - [references/conductor-credit-emission.md](references/conductor-credit-emission.md): Code-Conductor-owned credit-row emission procedures — Pipeline-Entry Credit Harvest (SMC-17), Deferred Port Credit Rows, `process-review` trigger-absent emission, and the Post-PR Credit Row (D10 category 3)
+- [references/conductor-metrics-protocol.md](references/conductor-metrics-protocol.md): emission timing and ownership boundary, Add-FCLCreditRow accumulator pattern, release-hygiene and review credit row pointers, and dispatch-cost samples — extracted from `agents/Code-Conductor.agent.md` via D5 compression (issue #774)
 
 ## Boundary
 
