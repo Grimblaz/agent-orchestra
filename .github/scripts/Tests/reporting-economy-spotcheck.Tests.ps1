@@ -2,321 +2,290 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 <#
 .SYNOPSIS
-    Unit tests for the reporting-economy spot-check analyzer parser logic (issue #471).
-
+    Pester 5 unit tests for reporting-economy-spotcheck.ps1 parser logic.
 .DESCRIPTION
-    Tests use inline JSONL fixtures — not controlled agent-behavior fixtures and not
-    real transcript data. Tests cover:
-      - attributionAgent read and in-scope filtering
-      - word count measurement (above and below the ~150-word threshold)
-      - echo detection via [Tool: ...] pattern
-      - exclusion of out-of-scope agents (code-conductor)
-      - baseline-unavailable signal when slug dir does not exist
+    Dot-sources the production script with -ImportMode so Get-SpotcheckRecord and
+    Get-SpotcheckSlug are imported into the test scope without running the main block.
+    Fixtures use the real subagent JSONL schema verified in issue #471 s4:
+      { "type": "assistant", "attributionAgent": "...",
+        "message": { "role": "assistant", "content": [{ "type": "text", "text": "..." }] } }
 #>
 
 Describe 'reporting-economy-spotcheck parser logic' {
 
     BeforeAll {
-        $script:ScriptPath = Join-Path $PSScriptRoot '../reporting-economy-spotcheck.ps1'
+        $script:RepoRoot   = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:ScriptPath = Join-Path $script:RepoRoot '.github/scripts/reporting-economy-spotcheck.ps1'
 
-        # ---------------------------------------------------------------------------
-        # In-scope set (mirrors the script)
-        # ---------------------------------------------------------------------------
-        $script:InScopeAgents = [System.Collections.Generic.HashSet[string]]@(
-            'agent-orchestra:code-critic',
-            'agent-orchestra:code-review-response',
-            'agent-orchestra:code-smith',
-            'agent-orchestra:doc-keeper',
-            'agent-orchestra:process-review',
-            'agent-orchestra:refactor-specialist',
-            'agent-orchestra:research-agent',
-            'agent-orchestra:senior-engineer',
-            'agent-orchestra:specification',
-            'agent-orchestra:test-writer',
+        # Import functions without running main block
+        . $script:ScriptPath -ImportMode
+
+        $script:InScopeAgents = @(
+            'agent-orchestra:code-critic'
+            'agent-orchestra:code-review-response'
+            'agent-orchestra:code-smith'
+            'agent-orchestra:doc-keeper'
+            'agent-orchestra:process-review'
+            'agent-orchestra:refactor-specialist'
+            'agent-orchestra:research-agent'
+            'agent-orchestra:senior-engineer'
+            'agent-orchestra:specification'
+            'agent-orchestra:test-writer'
             'agent-orchestra:ui-iterator'
         )
 
-        # ---------------------------------------------------------------------------
-        # Parser helpers — inline copies of the logic under test so tests are
-        # self-contained and not brittle against unrelated script changes.
-        # ---------------------------------------------------------------------------
-        function script:Get-WordCount {
-            param([string]$Text)
-            if ([string]::IsNullOrWhiteSpace($Text)) { return 0 }
-            return @($Text -split '\s+' | Where-Object { $_ -ne '' }).Count
-        }
-
-        function script:Get-TextContent {
-            param([object]$ContentArray)
-            if ($null -eq $ContentArray) { return '' }
-            if ($ContentArray -is [string]) { return $ContentArray }
-            $parts = foreach ($item in $ContentArray) {
-                if ($item -is [System.Collections.IDictionary]) {
-                    if ($item['type'] -eq 'text') { $item['text'] }
-                }
-                elseif ($item -is [PSCustomObject]) {
-                    if ($item.type -eq 'text') { $item.text }
-                }
-            }
-            return ($parts -join '') ?? ''
-        }
-
-        function script:Invoke-SpotcheckParser {
-            <#
-            .SYNOPSIS
-                Parse a JSONL string and return spot-check rows for in-scope agents.
-            #>
+        # Build a JSONL event line using the real subagent transcript schema
+        function script:New-AssistantEventLine {
             param(
-                [Parameter(Mandatory)][string]$JsonlContent,
-                [System.Collections.Generic.HashSet[string]]$InScopeSet = $script:InScopeAgents
+                [string]$AttributionAgent,
+                [object[]]$ContentBlocks = @(@{ type = 'text'; text = 'Hello world.' })
             )
-
-            $results = [System.Collections.Generic.List[PSCustomObject]]::new()
-            $lastAssistantEvent = $null
-
-            foreach ($line in ($JsonlContent -split "`r?`n")) {
-                $trimmed = $line.Trim()
-                if ([string]::IsNullOrEmpty($trimmed)) { continue }
-                try {
-                    $event = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop
-                    if ($event['role'] -eq 'assistant') {
-                        $lastAssistantEvent = $event
-                    }
+            $e = @{
+                type             = 'assistant'
+                attributionAgent = $AttributionAgent
+                message          = @{
+                    role    = 'assistant'
+                    content = $ContentBlocks
                 }
-                catch { }
             }
-
-            if ($null -eq $lastAssistantEvent) { return $results }
-
-            $attributionAgent = $lastAssistantEvent['attributionAgent']
-            if ([string]::IsNullOrEmpty($attributionAgent)) { return $results }
-            if (-not $InScopeSet.Contains($attributionAgent)) { return $results }
-
-            $textContent = script:Get-TextContent -ContentArray $lastAssistantEvent['content']
-            $wordCount   = script:Get-WordCount -Text $textContent
-            $echoDetected = $textContent -match '\[Tool:'
-            $overrideFlag = $textContent -imatch 'full detail'
-
-            $results.Add([PSCustomObject]@{
-                Agent        = $attributionAgent
-                WordCount    = $wordCount
-                EchoDetected = $echoDetected
-                OverrideFlag = $overrideFlag
-            })
-
-            return $results
+            return ($e | ConvertTo-Json -Compress -Depth 10)
         }
 
-        # ---------------------------------------------------------------------------
-        # JSONL fixtures
-        # ---------------------------------------------------------------------------
-
-        # Fixture A: code-smith, over-threshold (~200+ words)
-        # The final assistant event is over ~150 words.
-        $longWords = ('alpha ' * 205).TrimEnd()
-        $script:FixtureOverThreshold = @"
-{"role":"user","content":[{"type":"text","text":"Implement the widget."}]}
-{"role":"assistant","attributionAgent":"agent-orchestra:code-smith","content":[{"type":"text","text":"$longWords"}]}
-"@
-
-        # Fixture B: code-smith, under-threshold (~80 words)
-        $shortWords = ('beta ' * 80).TrimEnd()
-        $script:FixtureUnderThreshold = @"
-{"role":"user","content":[{"type":"text","text":"Implement the widget."}]}
-{"role":"assistant","attributionAgent":"agent-orchestra:code-smith","content":[{"type":"text","text":"$shortWords"}]}
-"@
-
-        # Fixture C: code-conductor (out-of-scope) — should be excluded
-        $script:FixtureOutOfScope = @"
-{"role":"user","content":[{"type":"text","text":"Orchestrate the plan."}]}
-{"role":"assistant","attributionAgent":"agent-orchestra:code-conductor","content":[{"type":"text","text":"Running all slices now."}]}
-"@
-
-        # Fixture D: echo detected — contains [Tool: read]
-        $echoText = 'Here is the result. [Tool: read] returned the file contents. ' + ('gamma ' * 10).TrimEnd()
-        $script:FixtureEchoDetected = @"
-{"role":"user","content":[{"type":"text","text":"Read the file."}]}
-{"role":"assistant","attributionAgent":"agent-orchestra:senior-engineer","content":[{"type":"text","text":"$echoText"}]}
-"@
-
-        # Fixture E: no echo, no override
-        $cleanText = ('delta ' * 50).TrimEnd()
-        $script:FixtureClean = @"
-{"role":"user","content":[{"type":"text","text":"Write the tests."}]}
-{"role":"assistant","attributionAgent":"agent-orchestra:test-writer","content":[{"type":"text","text":"$cleanText"}]}
-"@
-
-        # Fixture F: override flag — contains "full detail"
-        $overrideText = 'Here is the full detail of the implementation. ' + ('epsilon ' * 30).TrimEnd()
-        $script:FixtureOverride = @"
-{"role":"user","content":[{"type":"text","text":"Give me everything."}]}
-{"role":"assistant","attributionAgent":"agent-orchestra:doc-keeper","content":[{"type":"text","text":"$overrideText"}]}
-"@
-
-        # Fixture G: last assistant event wins (earlier assistant event should be ignored)
-        $earlyText  = ('early ' * 50).TrimEnd()
-        $finalText  = ('final ' * 160).TrimEnd()
-        $script:FixtureLastEventWins = @"
-{"role":"user","content":[{"type":"text","text":"Step one."}]}
-{"role":"assistant","attributionAgent":"agent-orchestra:research-agent","content":[{"type":"text","text":"$earlyText"}]}
-{"role":"user","content":[{"type":"text","text":"Step two."}]}
-{"role":"assistant","attributionAgent":"agent-orchestra:research-agent","content":[{"type":"text","text":"$finalText"}]}
-"@
-    }
-
-    # ---------------------------------------------------------------------------
-    # Context: word-count measurement
-    # ---------------------------------------------------------------------------
-    Context 'word-count measurement' {
-
-        It 'counts words correctly for over-threshold fixture (~205 words)' {
-            $rows = script:Invoke-SpotcheckParser -JsonlContent $script:FixtureOverThreshold
-            $rows.Count | Should -Be 1
-            $rows[0].WordCount | Should -BeGreaterThan 150
-        }
-
-        It 'counts words correctly for under-threshold fixture (~80 words)' {
-            $rows = script:Invoke-SpotcheckParser -JsonlContent $script:FixtureUnderThreshold
-            $rows.Count | Should -Be 1
-            $rows[0].WordCount | Should -BeLessThan 150
-            $rows[0].WordCount | Should -BeGreaterThan 0
-        }
-
-        It 'reports zero words for empty content' {
-            $count = script:Get-WordCount -Text ''
-            $count | Should -Be 0
-        }
-
-        It 'reports zero words for whitespace-only content' {
-            $count = script:Get-WordCount -Text '   '
-            $count | Should -Be 0
+        function script:Write-JsonlFile {
+            param([string]$Path, [string[]]$Lines)
+            Set-Content -LiteralPath $Path -Value ($Lines -join "`n") -NoNewline
         }
     }
 
-    # ---------------------------------------------------------------------------
-    # Context: attributionAgent filtering
-    # ---------------------------------------------------------------------------
-    Context 'attributionAgent in-scope filtering' {
+    Context 'attributionAgent parsing' {
 
-        It 'includes agent-orchestra:code-smith (in-scope)' {
-            $rows = script:Invoke-SpotcheckParser -JsonlContent $script:FixtureOverThreshold
-            $rows.Count | Should -Be 1
-            $rows[0].Agent | Should -Be 'agent-orchestra:code-smith'
+        It 'reads attributionAgent from the last assistant event' {
+            $tmpFile = Join-Path $TestDrive 'agent-abc123.jsonl'
+            $line = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:senior-engineer' `
+                -ContentBlocks @(@{ type = 'text'; text = 'Work done.' })
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result                | Should -Not -BeNullOrEmpty
+            $result.Agent          | Should -Be 'agent-orchestra:senior-engineer'
+            $result.ToolUseId      | Should -Be 'abc123'
         }
 
-        It 'excludes agent-orchestra:code-conductor (out-of-scope)' {
-            $rows = script:Invoke-SpotcheckParser -JsonlContent $script:FixtureOutOfScope
-            $rows.Count | Should -Be 0
-        }
+        It 'uses the LAST assistant event when multiple events are present' {
+            $tmpFile = Join-Path $TestDrive 'agent-xyz.jsonl'
+            $first  = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:senior-engineer' `
+                -ContentBlocks @(@{ type = 'text'; text = 'First.' })
+            $second = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:code-smith' `
+                -ContentBlocks @(@{ type = 'text'; text = 'Second.' })
+            script:Write-JsonlFile -Path $tmpFile -Lines @($first, $second)
 
-        It 'includes all 11 in-scope agent identifiers in the set' {
-            $script:InScopeAgents.Count | Should -Be 11
-            $script:InScopeAgents | Should -Contain 'agent-orchestra:code-critic'
-            $script:InScopeAgents | Should -Contain 'agent-orchestra:ui-iterator'
-            $script:InScopeAgents | Should -Not -Contain 'agent-orchestra:code-conductor'
-            $script:InScopeAgents | Should -Not -Contain 'agent-orchestra:spine-runner'
-            $script:InScopeAgents | Should -Not -Contain 'agent-orchestra:experience-owner'
-        }
-    }
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
 
-    # ---------------------------------------------------------------------------
-    # Context: echo detection
-    # ---------------------------------------------------------------------------
-    Context 'echo detection via [Tool: ...] pattern' {
-
-        It 'detects echo when [Tool: read] appears in content' {
-            $rows = script:Invoke-SpotcheckParser -JsonlContent $script:FixtureEchoDetected
-            $rows.Count | Should -Be 1
-            $rows[0].EchoDetected | Should -Be $true
-        }
-
-        It 'does not set EchoDetected for clean content with no [Tool: ...] marker' {
-            $rows = script:Invoke-SpotcheckParser -JsonlContent $script:FixtureClean
-            $rows.Count | Should -Be 1
-            $rows[0].EchoDetected | Should -Be $false
+            $result       | Should -Not -BeNullOrEmpty
+            $result.Agent | Should -Be 'agent-orchestra:code-smith'
         }
     }
 
-    # ---------------------------------------------------------------------------
-    # Context: override flag
-    # ---------------------------------------------------------------------------
-    Context 'override flag detection' {
+    Context 'out-of-scope agent exclusion' {
 
-        It 'sets OverrideFlag when content contains "full detail" (case-insensitive)' {
-            $rows = script:Invoke-SpotcheckParser -JsonlContent $script:FixtureOverride
-            $rows.Count | Should -Be 1
-            $rows[0].OverrideFlag | Should -Be $true
+        It 'excludes events where attributionAgent is not in the in-scope set' {
+            $tmpFile = Join-Path $TestDrive 'agent-oos1.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:code-conductor'
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result | Should -BeNullOrEmpty
         }
 
-        It 'does not set OverrideFlag for content without "full detail"' {
-            $rows = script:Invoke-SpotcheckParser -JsonlContent $script:FixtureClean
-            $rows.Count | Should -Be 1
-            $rows[0].OverrideFlag | Should -Be $false
-        }
-    }
+        It 'excludes an unknown agent value' {
+            $tmpFile = Join-Path $TestDrive 'agent-oos2.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:unknown-agent'
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
 
-    # ---------------------------------------------------------------------------
-    # Context: last-assistant-event wins
-    # ---------------------------------------------------------------------------
-    Context 'final-report event selection' {
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
 
-        It 'uses the last assistant event, not an earlier one' {
-            $rows = script:Invoke-SpotcheckParser -JsonlContent $script:FixtureLastEventWins
-            $rows.Count | Should -Be 1
-            # The last event has 160 "final" words; the early event has 50 "early" words
-            $rows[0].WordCount | Should -BeGreaterThan 150
+            $result | Should -BeNullOrEmpty
         }
     }
 
-    # ---------------------------------------------------------------------------
-    # Context: baseline-unavailable signal
-    # ---------------------------------------------------------------------------
-    Context 'baseline-unavailable signal' {
+    Context 'word counting' {
 
-        It 'emits baseline-unavailable message when slug dir does not exist' {
-            # Use a guaranteed-nonexistent CWD path as the slug source
-            $fakeCwd = 'Z:\DoesNotExist\NoSuchProject\xyz99'
-            $output = pwsh -NoProfile -NonInteractive -Command "& '$script:ScriptPath' -CwdPath '$fakeCwd'" 2>&1
-            $combined = $output -join ' '
-            $combined | Should -Match 'Baseline unavailable'
+        It 'counts words correctly for simple text' {
+            $tmpFile = Join-Path $TestDrive 'agent-wc1.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:doc-keeper' `
+                -ContentBlocks @(@{ type = 'text'; text = 'one two three four five' })
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result.WordCount | Should -Be 5
         }
 
-        It 'script file exists at expected path' {
-            Test-Path -LiteralPath $script:ScriptPath | Should -Be $true
+        It 'counts zero words for empty text' {
+            $tmpFile = Join-Path $TestDrive 'agent-wc2.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:doc-keeper' `
+                -ContentBlocks @(@{ type = 'text'; text = '' })
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result.WordCount | Should -Be 0
+        }
+
+        It 'handles extra whitespace between words' {
+            $tmpFile = Join-Path $TestDrive 'agent-wc3.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:doc-keeper' `
+                -ContentBlocks @(@{ type = 'text'; text = "alpha   beta`ngamma" })
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result.WordCount | Should -Be 3
+        }
+
+        It 'correctly counts words across multiple text content blocks' {
+            $tmpFile = Join-Path $TestDrive 'agent-wc4.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:doc-keeper' `
+                -ContentBlocks @(
+                    @{ type = 'text'; text = 'end' },
+                    @{ type = 'text'; text = 'start' }
+                )
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            # Without separator, "end"+"start" -> "endstart" = 1 word (the bug this test guards)
+            $result.WordCount | Should -Be 2
         }
     }
 
-    # ---------------------------------------------------------------------------
-    # Context: Get-TextContent extraction
-    # ---------------------------------------------------------------------------
-    Context 'text content extraction from content array' {
+    Context 'echo detection' {
 
-        It 'concatenates multiple text blocks into a single string' {
-            $blocks = @(
-                @{ type = 'text'; text = 'Hello ' },
-                @{ type = 'text'; text = 'world' }
-            )
-            $result = script:Get-TextContent -ContentArray $blocks
-            $result | Should -Be 'Hello world'
+        It 'sets EchoDetected to true when text contains [Tool:' {
+            $tmpFile = Join-Path $TestDrive 'agent-echo1.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:test-writer' `
+                -ContentBlocks @(@{ type = 'text'; text = 'Output includes [Tool: read] call.' })
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result.EchoDetected | Should -Be $true
         }
 
-        It 'skips non-text typed blocks' {
-            $blocks = @(
-                @{ type = 'tool_result'; content = 'should be ignored' },
-                @{ type = 'text'; text = 'kept' }
-            )
-            $result = script:Get-TextContent -ContentArray $blocks
-            $result | Should -Be 'kept'
+        It 'sets EchoDetected to false when text does not contain [Tool:' {
+            $tmpFile = Join-Path $TestDrive 'agent-echo2.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:test-writer' `
+                -ContentBlocks @(@{ type = 'text'; text = 'Clean output.' })
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result.EchoDetected | Should -Be $false
+        }
+    }
+
+    Context 'override flag' {
+
+        It 'sets OverrideFlag to true when parent explicitly requested full detail' {
+            $tmpFile = Join-Path $TestDrive 'agent-ovr1.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:research-agent' `
+                -ContentBlocks @(@{ type = 'text'; text = 'Providing full detail as requested.' })
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result.OverrideFlag | Should -Be $true
         }
 
-        It 'returns empty string for null content' {
-            $result = script:Get-TextContent -ContentArray $null
-            $result | Should -Be ''
+        It 'sets OverrideFlag to false for a response that does not claim override' {
+            $tmpFile = Join-Path $TestDrive 'agent-ovr2.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:research-agent' `
+                -ContentBlocks @(@{ type = 'text'; text = 'Concise summary only.' })
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result.OverrideFlag | Should -Be $false
         }
 
-        It 'returns the string directly when content is a plain string' {
-            $result = script:Get-TextContent -ContentArray 'plain text'
-            $result | Should -Be 'plain text'
+        It 'does not false-positive when agent quotes the directive carve-out text' {
+            # "The parent may always request full detail" is the canonical carve-out;
+            # an agent quoting it should NOT trigger the override flag
+            $tmpFile = Join-Path $TestDrive 'agent-ovr3.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:research-agent' `
+                -ContentBlocks @(@{ type = 'text'; text = 'The parent may always request full detail.' })
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result.OverrideFlag | Should -Be $false
+        }
+    }
+
+    Context 'missing attributionAgent field' {
+
+        It 'skips event when attributionAgent is absent' {
+            $tmpFile = Join-Path $TestDrive 'agent-noattr.jsonl'
+            $e = @{
+                type    = 'assistant'
+                message = @{ role = 'assistant'; content = @(@{ type = 'text'; text = 'Some output.' }) }
+            }
+            script:Write-JsonlFile -Path $tmpFile -Lines @(($e | ConvertTo-Json -Compress -Depth 10))
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'skips event when attributionAgent is null' {
+            $tmpFile = Join-Path $TestDrive 'agent-nullattr.jsonl'
+            $e = @{
+                type             = 'assistant'
+                attributionAgent = $null
+                message          = @{ role = 'assistant'; content = @(@{ type = 'text'; text = 'Out.' }) }
+            }
+            script:Write-JsonlFile -Path $tmpFile -Lines @(($e | ConvertTo-Json -Compress -Depth 10))
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result | Should -BeNullOrEmpty
+        }
+    }
+
+    Context 'ToolUseId derivation' {
+
+        It 'strips the agent- prefix from the filename to produce the ToolUseId' {
+            $tmpFile = Join-Path $TestDrive 'agent-deadbeef1234.jsonl'
+            $line    = script:New-AssistantEventLine -AttributionAgent 'agent-orchestra:code-smith'
+            script:Write-JsonlFile -Path $tmpFile -Lines @($line)
+
+            $result = Get-SpotcheckRecord -JsonlPath $tmpFile -InScope $script:InScopeAgents
+
+            $result.ToolUseId | Should -Be 'deadbeef1234'
+        }
+    }
+
+    Context 'baseline-unavailable behavior' {
+
+        It 'emits the baseline-unavailable message for a non-existent slug dir' {
+            $nonExistentDir = Join-Path $TestDrive 'no-such-slug-dir'
+
+            $output     = & pwsh -NonInteractive -NoProfile -File $script:ScriptPath -SlugDirOverride $nonExistentDir 2>&1
+            $outputText = $output -join "`n"
+
+            $outputText | Should -Match 'Baseline unavailable'
+        }
+
+        It 'emits baseline-unavailable when slug dir exists but has no session subdirs with agent JSONL files' {
+            $emptySlugDir = Join-Path $TestDrive 'empty-slug'
+            New-Item -ItemType Directory -Path $emptySlugDir -Force | Out-Null
+
+            $output     = & pwsh -NonInteractive -NoProfile -File $script:ScriptPath -SlugDirOverride $emptySlugDir 2>&1
+            $outputText = $output -join "`n"
+
+            $outputText | Should -Match 'Baseline unavailable'
         }
     }
 }

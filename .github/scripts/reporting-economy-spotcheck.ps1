@@ -2,7 +2,6 @@
 <#
 .SYNOPSIS
     Behavioral spot-check analyzer for the reporting-economy directive.
-
 .DESCRIPTION
     Scans subagent JSONL transcripts from the Claude projects slug directory for
     the current working directory, identifies final-report events (last assistant
@@ -18,7 +17,10 @@
 
 [CmdletBinding()]
 param(
-    [string]$SlugDirOverride
+    [string]$SlugDirOverride,
+    # When set, functions are dot-sourced into the caller scope and the main
+    # execution block is skipped. Used by the Pester test suite.
+    [switch]$ImportMode
 )
 
 Set-StrictMode -Version Latest
@@ -63,6 +65,15 @@ function Get-SpotcheckSlug {
 }
 
 function Get-SpotcheckRecord {
+    <#
+    .SYNOPSIS
+        Parse the last assistant event from a subagent JSONL file and return metrics.
+    .DESCRIPTION
+        Real subagent JSONL schema (issue #471 s4 verified):
+          { "type": "assistant", "attributionAgent": "...", "message": { "role": "assistant",
+            "content": [ { "type": "text", "text": "..." } ] }, ... }
+        Discriminates by top-level "type" (not "role"). Content is at message.content[].
+    #>
     param(
         [Parameter(Mandatory)][string]$JsonlPath,
         [Parameter(Mandatory)][string[]]$InScope
@@ -78,33 +89,39 @@ function Get-SpotcheckRecord {
     foreach ($line in $lines) {
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         try {
-            $obj = $line | ConvertFrom-Json -ErrorAction Stop
+            # -AsHashtable avoids StrictMode PropertyNotFoundException on unknown fields
+            $obj = $line | ConvertFrom-Json -AsHashtable -ErrorAction Stop
         } catch {
             continue
         }
-        if ($obj.role -eq 'assistant') {
+        if ($obj['type'] -eq 'assistant') {
             $lastAssistant = $obj
         }
     }
 
     if ($null -eq $lastAssistant) { return $null }
 
-    $agent = $lastAssistant.attributionAgent
+    $agent = [string]$lastAssistant['attributionAgent']
     if ([string]::IsNullOrWhiteSpace($agent)) { return $null }
     if ($agent -notin $InScope) { return $null }
 
     $text = ''
-    if ($null -ne $lastAssistant.content) {
-        foreach ($item in $lastAssistant.content) {
-            if ($item.type -eq 'text' -and -not [string]::IsNullOrEmpty($item.text)) {
-                $text += $item.text
+    $msgContent = $lastAssistant['message']?['content']
+    if ($null -ne $msgContent) {
+        foreach ($item in $msgContent) {
+            $itemText = [string]$item['text']
+            if ($item['type'] -eq 'text' -and -not [string]::IsNullOrEmpty($itemText)) {
+                $text += ($itemText + ' ')
             }
         }
     }
 
-    $wordCount    = ($text -split '\s+' | Where-Object { $_ -ne '' }).Count
+    $text         = $text.Trim()
+    $wordCount    = @($text -split '\s+' | Where-Object { $_ -ne '' }).Count
     $echoDetected = $text -match '\[Tool:'
-    $overrideFlag = $text -imatch 'full detail'
+    # Match active override invocations; exclude agents quoting the directive's own carve-out
+    # ("may always request full detail") by anchoring on provide/providing, not request.
+    $overrideFlag = $text -imatch '\bprovid(?:e|ing)\s+(?:the\s+)?full\s+detail\b|\bfull\s+detail\s+(?:as\s+)?requested\b'
 
     return [PSCustomObject]@{
         Agent         = $agent
@@ -115,40 +132,58 @@ function Get-SpotcheckRecord {
     }
 }
 
-if ($SlugDirOverride) {
-    $slugDir = $SlugDirOverride
-} else {
-    $cwd     = (Get-Location).Path
-    $slug    = Get-SpotcheckSlug -CwdPath $cwd
-    $slugDir = Join-Path (Join-Path $HOME '.claude' 'projects') $slug
-}
+if (-not $ImportMode) {
+    if ($SlugDirOverride) {
+        $slugDir = $SlugDirOverride
+    } else {
+        $cwd          = (Get-Location).Path
+        $slug         = Get-SpotcheckSlug -CwdPath $cwd
+        $projectsRoot = Join-Path $HOME '.claude' 'projects'
+        $slugDir      = Join-Path $projectsRoot $slug
 
-$subagentsDir = Join-Path $slugDir 'subagents'
-
-if (-not (Test-Path -LiteralPath $slugDir)) {
-    Write-Output "Baseline unavailable -- no subagent transcripts found at $subagentsDir"
-    exit 0
-}
-
-$jsonlFiles = @(Get-ChildItem -LiteralPath $subagentsDir -Filter 'agent-*.jsonl' -File -ErrorAction SilentlyContinue)
-
-if ($jsonlFiles.Count -eq 0) {
-    Write-Output "Baseline unavailable -- no subagent transcripts found at $subagentsDir"
-    exit 0
-}
-
-$records = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-foreach ($file in $jsonlFiles) {
-    $record = Get-SpotcheckRecord -JsonlPath $file.FullName -InScope $InScopeAgents
-    if ($null -ne $record) {
-        $records.Add($record)
+        # Case-insensitive fallback — slug is lowercased but real dir may differ in casing
+        if (-not (Test-Path -LiteralPath $slugDir)) {
+            $ci = Get-ChildItem -Path $projectsRoot -Directory -ErrorAction SilentlyContinue |
+                Where-Object { [string]::Equals($_.Name, $slug, [System.StringComparison]::OrdinalIgnoreCase) } |
+                Select-Object -First 1
+            if ($null -ne $ci) { $slugDir = $ci.FullName }
+        }
     }
-}
 
-if ($records.Count -eq 0) {
-    Write-Output "Baseline unavailable -- no subagent transcripts found at $subagentsDir"
-    exit 0
-}
+    if (-not (Test-Path -LiteralPath $slugDir)) {
+        Write-Output "Baseline unavailable -- slug directory not found: $slugDir"
+        exit 0
+    }
 
-$records | Format-Table -AutoSize
+    # Real layout: {slug}/{session-uuid}/subagents/agent-*.jsonl
+    $jsonlFiles = @(
+        Get-ChildItem -LiteralPath $slugDir -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            $sessionSubagents = Join-Path $_.FullName 'subagents'
+            if (Test-Path -LiteralPath $sessionSubagents) {
+                Get-ChildItem -LiteralPath $sessionSubagents -Filter 'agent-*.jsonl' -File -ErrorAction SilentlyContinue
+            }
+        }
+    )
+
+    if ($jsonlFiles.Count -eq 0) {
+        Write-Output "Baseline unavailable -- no subagent transcripts found at $slugDir"
+        exit 0
+    }
+
+    $records = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    foreach ($file in $jsonlFiles) {
+        $record = Get-SpotcheckRecord -JsonlPath $file.FullName -InScope $InScopeAgents
+        if ($null -ne $record) {
+            $records.Add($record)
+        }
+    }
+
+    if ($records.Count -eq 0) {
+        Write-Output "Baseline unavailable -- no in-scope agent transcripts found at $slugDir"
+        exit 0
+    }
+
+    $records | Format-Table -AutoSize
+}
