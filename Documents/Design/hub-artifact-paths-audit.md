@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: d1850abaa181dfef143875b920430fb0c6a11ab9
-generated-at: 2026-06-26T08:01:26Z
+last-verified: a12842a5a11c1f20e535e45d440bb9bdd2c645c4
+generated-at: 2026-06-30T15:32:43Z
 -->
 
 ## Purpose
@@ -554,6 +554,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `skills/ai-first-documentation/templates/CLAUDE.md-starter.md`
 - **notes**: Markdown template/seed files nested within skill directories. Bare-relative paths such as 'templates/CLAUDE.md-starter.md' appearing in skill body text are relative references that map to this family. Distinct from the root-level templates/*.md family (BDD/test scaffolding). The /audit-docs init action copies the starter template into a consumer root; a missing template produces visible-warning because init can fall back to inline guidance rather than hard-failing the pipeline.
+
+### `skills/ai-first-documentation/rubric.md`
+
+- **claude_resolves**: both
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: true
+- **experience**: hard-failure
+- **examples**:
+  - `skills/ai-first-documentation/rubric.md`
+- **notes**: The testable, practice-by-practice ai-first-documentation audit rubric (sections A-F). Primary consumer is the ai-first-documentation skill body and the /audit-docs flow, which Read it to apply judgment passes. Cross-referenced from skills/bdd-scenarios/SKILL.md (BDD precedence vs. E7 instruction-merge axis disambiguation). A sibling top-level skill doc (not under references/), so it falls outside skills/*/references/*.md and is catalogued explicitly. Missing = /audit-docs loses its rubric judgment surface.
 
 ### `templates/*.md`
 
