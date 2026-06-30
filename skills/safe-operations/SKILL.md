@@ -118,7 +118,7 @@ Every new issue created by any agent **MUST** be placed under a tracked umbrella
 
 - **Parent umbrella (child issue)** — if the work is scoped to a tracked initiative, attach the new issue as a native sub-issue of an existing sequenced umbrella. Use `Add-FollowUpIssue` (canonical sub-issue attach) immediately after `gh issue create`.
 - **New umbrella → insert at rank** — if you are creating a *new umbrella* (an issue that will own sub-issues), you **MUST** also insert its number into `Documents/Planning/sequence.yaml`'s `umbrellas:` inline list at the correct priority rank. `sequence.yaml` is the **canonical home** for umbrella ranking — do **not** add a routing-tables JSON entry. Then attach the umbrella's own children as native sub-issues with `Add-FollowUpIssue`, exactly as for any other umbrella.
-- **Triage (ungrouped open issue)** — if no umbrella applies, just create the issue. Under v2 the renderer **derives** Triage from parent-edge data (open ∧ no parent ∧ no sub-issues ∧ not listed in `umbrellas:`), so an ungrouped open issue lands in the Triage zone **automatically** — it will not go missing even with no label. The `--label triage` flag is now **optional/advisory** (a human-readable hint only); it is **no longer load-bearing** for Triage placement, because v2 removed the triage-label query entirely.
+- **Triage (ungrouped open issue)** — if no umbrella applies, just create the issue. Under v2 the renderer **derives** Triage from parent-edge data (open ∧ no parent ∧ no sub-issues ∧ not listed in `umbrellas:`), so an ungrouped open issue is always a Triage **candidate** under the v2 derivation rules — it is never silently excluded from the board count, though it may fall below the cap-5 rendering fold (see Caveat below). The `--label triage` flag is now **optional/advisory** (a human-readable hint only); it is **no longer load-bearing** for Triage placement, because v2 removed the triage-label query entirely. **Caveat**: Triage is capped at 5 issues and sorted priority-first (`Get-PriorityKey` order). An unlabeled issue resolves to `Get-PriorityKey = 3` (lowest rank tier) and may fall below the fold if the Triage bucket is already full. See [Documents/Design/control-tower-v2.md](../../Documents/Design/control-tower-v2.md) for cap and ranking mechanics.
 
 ```powershell
 # CORRECT — umbrella child (use the canonical Add-FollowUpIssue helper):
@@ -136,6 +136,35 @@ gh issue create --title "..." --body "..." --label "priority: medium"
 ```
 
 > **Why**: under Control Tower v2 the renderer surfaces every umbrella listed in `sequence.yaml` plus every ungrouped open issue (auto-derived into Triage). A new umbrella that is never inserted into `umbrellas:` is invisible to the board; an ungrouped open issue is surfaced automatically, so no `triage` label is needed to keep it visible. Issues still must not silently disappear from the tracker — the v2 mechanism is parent-edge derivation, not a label scan.
+
+### 2b-ter. Creation-Time Board Positioning (Additive to §2b and §2b-bis)
+
+Before every `gh issue create` or `Add-FollowUpIssue` call, the agent **must** make a conscious positioning decision covering two questions:
+
+**(a) What priority label to apply** — the label controls `Get-PriorityKey` rank within Triage and umbrella children. A deliberate choice of `priority: low` (or no label, which resolves to the lowest rank tier) is a valid and acceptable outcome when the issue genuinely represents low-urgency work.
+
+**(b) Parent-or-standalone** — attach to an active umbrella via `Add-FollowUpIssue`, or leave as a standalone issue that auto-derives into Triage. A deliberate "low priority / standalone / may not stay on board" decision is a valid and acceptable outcome.
+
+**Lever mapping — what the filer controls and its board effect**:
+
+| Lever | Mechanism | Board effect |
+| --- | --- | --- |
+| **Priority label** (`--label priority:h/m/l`) | Sets `Get-PriorityKey` = 0 (high), 1 (medium), or 2 (low) | Affects rank/sort order within Triage or umbrella children; no label → `Get-PriorityKey = 3` (lowest tier, may fall below Triage fold if bucket is full) |
+| **Parent edge** (`Add-FollowUpIssue -ParentIssueNumber N`) | Attaches issue as ActiveChildren of a tracked umbrella | Places issue in the umbrella's children section; requires a spec-listed active umbrella |
+| **Standalone** (bare `gh issue create`) | No parent edge set | Auto-derives into Triage under v2 derivation rules |
+
+> **Render-derived buckets (NOT filer-controllable)**: RecentlyClosed, DriftWarnings, and IntegrityWarnings are computed by the renderer from issue state and relationship data — the filer cannot directly place an issue in these zones. See [Documents/Design/control-tower-v2.md](../../Documents/Design/control-tower-v2.md) for cap-5 and priority-ranking mechanics; do not copy those numbers or formulas here.
+
+**Positioning residue** — at creation time, record a single positioning note in the issue body using this format:
+
+```text
+Board positioning: priority=<h|m|l>; placement=standalone|parent #N; rationale=<one line>
+```
+
+- Record positioning-decision content only — do NOT paste finding detail (issue bodies are world-readable).
+- No enforcement script is required; this is an honor-system record for auditability.
+
+**Automated-path carve-out**: on the `Add-FollowUpIssue` automated path, the canonical `[Structural] {criterion_id}` title prefix and the injected `Parent: #N` body field already serve as the positioning record. This satisfies the *placement* portion of the residue — priority is carried by the issue's `--label` flag, and no free-text rationale is required on the automated path. No additional `gh issue edit` step is needed.
 
 ### 2c. Deduplication Check (Mandatory)
 

@@ -4,9 +4,12 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ## [2.35.15] — 2026-06-30
 
-### Fixed
+### Added
 
-- Widen BDD detection to scan AGENTS.md, CLAUDE.md, and copilot-instructions.md in priority order (first file with a column-0 `## BDD Framework` heading wins); previously detection was hardcoded to copilot-instructions.md. Restores release-version lockstep across all manifests (#776).
+- **Deliberate board positioning at issue creation** (#774): `safe-operations` §2b-ter adds a creation-time board-positioning decision (priority label + parent-or-standalone) with a lever-mapping table and positioning-residue format. §2b-bis gains a Triage cap-5 caveat; the lever table pins the correct `Get-PriorityKey` values (high=0, medium=1, low=2; unlabeled=3) matching `render-portfolio.ps1`.
+  - Board-positioning directives wired into Code-Conductor filing sequences and CE Gate Track 2, Process-Review §4.8/§4.9, code-review-intake structural deferrals, and the Experience-Owner issue-creation step.
+  - New contract test `safe-operations-2b-bis-contract.Tests.ps1` locks the §2b-bis/§2b-ter invariants including the numeric `Get-PriorityKey` mapping.
+  - D5 compression: `## Pipeline Metrics` body extracted to `skills/calibration-pipeline/references/conductor-metrics-protocol.md`, bringing `Code-Conductor.agent.md` to 497 lines (<=500 cap).
 
 ## [2.35.14] — 2026-06-29
 
