@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.16] — 2026-06-30
+
+### Fixed
+
+- Widen BDD detection to scan AGENTS.md, CLAUDE.md, and copilot-instructions.md in priority order (first file with a column-0 `## BDD Framework` heading wins); previously detection was hardcoded to copilot-instructions.md (#776).
+
 ## [2.35.15] — 2026-06-30
 
 ### Added
