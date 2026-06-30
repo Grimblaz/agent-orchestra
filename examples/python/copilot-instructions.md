@@ -27,7 +27,8 @@ bdd: behave
 <!-- Phase 2: `bdd: {framework}` enables Gherkin file generation and runner dispatch at CE Gate time.
      Recognized values: cucumber.js, behave, jest-cucumber, cucumber.
      To revert to **Phase 1** (G/W/T scenario authoring only, no Gherkin generation), remove the `bdd:` line but keep the `## BDD Framework` heading.
-     To DISABLE BDD, remove the `## BDD Framework` section heading entirely. -->
+     To DISABLE BDD, remove the `## BDD Framework` heading from **all** candidate files (`AGENTS.md`, `CLAUDE.md`, and `copilot-instructions.md`). BDD is active as long as any candidate file contains the heading at column 0.
+     To ENABLE BDD, add a `## BDD Framework` heading at column 0 to `AGENTS.md`, `CLAUDE.md`, or `copilot-instructions.md`. The first file (in that priority order) containing the heading wins. -->
 
 ## Architecture
 
