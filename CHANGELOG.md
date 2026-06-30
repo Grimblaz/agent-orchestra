@@ -2,6 +2,15 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [2.35.14] — 2026-06-29
+
+### Added
+
+- **Reporting-economy directive across specialist bodies** (#471): canonical reporting-economy bullet added as the terminal `## Core Principles` bullet in all 11 dispatched specialist agent bodies (Code-Critic, Code-Review-Response, Code-Smith, Doc-Keeper, Process-Review, Refactor-Specialist, Research-Agent, Senior-Engineer, Specification, Test-Writer, UI-Iterator). Bans tool-call transcript echo (load-bearing for frozen Copilot path); caps free narration at ~150 words, subordinate to any role-mandated structured artifact, with a carve-out for fixed-form output (Step 0 / ND-2 / parity-locked literals). Parent override preserved.
+  - **`reporting-economy.Tests.ps1`**: discovery-based Pester test (glob `agents/*.agent.md` minus 5 pinned exclusions = 11 in-scope); count guard (==11 in-scope, ==5 excluded); terminal-bullet anchor; `BeforeDiscovery` parameterization; reuses parity helpers `GetSectionBody` / `NormalizeContent`.
+  - **`reporting-economy-spotcheck.ps1`**: behavioral spot-check analyzer; reads `attributionAgent` from each subagent's final-report assistant event at `{SlugDir}/subagents/agent-{id}.jsonl`; emits per-dispatch word count, echo-detected, and override-flag; explicit baseline-unavailable signal when no transcripts found.
+  - **`reporting-economy-spotcheck.Tests.ps1`**: 19 Pester unit tests for the production parser (attributionAgent parsing, last-event selection, out-of-scope exclusion, word count across single and multi-block content, echo detection, override flag with false-positive guard, missing attributionAgent, ToolUseId derivation, baseline-unavailable, nested session-dir record collection). Tests dot-source the production `Get-SpotcheckRecord` / `Invoke-ReportingEconomySpotcheck` functions via `-ImportMode` and use the real subagent JSONL schema — in-process invocation per the #257 script-safety contract (no child-pwsh spawn).
+
 ## [2.35.13] — 2026-06-29
 
 ### Fixed
