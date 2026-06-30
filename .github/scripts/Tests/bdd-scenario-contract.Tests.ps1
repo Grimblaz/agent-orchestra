@@ -304,7 +304,7 @@ Describe 'BDD detection anchor guard — hub stays disabled, skill uses anchored
     }
 
     It 'hub AGENTS.md has no BDD Framework heading (hub stays BDD-disabled, AC7 three-file guard, issue #776)' {
-        if (-not (Test-Path (Join-Path $script:RepoRoot 'AGENTS.md'))) { 0 | Should -Be 0; return }
+        if (-not (Test-Path (Join-Path $script:RepoRoot 'AGENTS.md'))) { Set-ItResult -Skipped -Because 'AGENTS.md not present in hub; nothing to guard'; return }
         $matches = Select-String -Path (Join-Path $script:RepoRoot 'AGENTS.md') -Pattern '^## BDD Framework' | Measure-Object
         $matches.Count | Should -Be 0 -Because 'the hub repo must not have a line-start ## BDD Framework heading in AGENTS.md (issue #776 AC7)'
     }
@@ -319,101 +319,39 @@ Describe 'BDD detection anchor guard — hub stays disabled, skill uses anchored
         $detectionSites = @(
             'agents/Experience-Owner.agent.md',
             'agents/Issue-Planner.agent.md',
+            'agents/Test-Writer.agent.md',
             'skills/customer-experience/references/orchestration-protocol.md'
         )
-        # A site has "sole-source" phrasing when it mentions copilot-instructions.md as the BDD detection
-        # file without also citing AGENTS.md or CLAUDE.md in the same detection-context paragraph.
-        # Pattern: line-start-heading check that references only copilot-instructions.md — no three-file list present.
-        # After s3 hybrid conversion, each site must reference skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism
-        # (the canonical three-file list) instead of hardcoding copilot-instructions.md as the sole source.
+        # A site has "sole-source" phrasing when a detection-context paragraph mentions copilot-instructions.md
+        # without also citing AGENTS.md or CLAUDE.md in that same paragraph.
+        # Paragraph-scoped check: split on blank lines, then inspect only paragraphs that contain both
+        # a copilot-instructions.md reference AND a BDD detection context marker.
         foreach ($site in $detectionSites) {
             $fullPath = Join-Path $script:RepoRoot $site
             if (-not (Test-Path $fullPath)) { continue }
             $content = Get-Content $fullPath -Raw
-            # The old sole-source pattern: mentions copilot-instructions.md in BDD detection context
-            # WITHOUT also mentioning AGENTS.md or CLAUDE.md in that same context.
-            # A converted site will either: (a) not mention copilot-instructions.md in BDD detection,
-            # or (b) mention it alongside AGENTS.md and CLAUDE.md as part of the three-file list.
-            $hasCopilotRef = $content -match "copilot-instructions\.md[^`n]{0,200}(BDD|## BDD Framework|bdd-scenarios|line-start|column 0)"
-            if ($hasCopilotRef) {
-                # Check whether the three-file list (AGENTS.md > CLAUDE.md > copilot-instructions.md) is also present
-                # in the same file — indicating a converted hybrid reference rather than sole-source
-                $hasThreeFileList = $content -match 'AGENTS\.md.*CLAUDE\.md.*copilot-instructions\.md'
-                $hasThreeFileList | Should -Be $true -Because "$site references copilot-instructions.md as BDD detection source but does not include the three-file precedence list (AGENTS.md > CLAUDE.md > copilot-instructions.md) — sole-source phrasing must be converted to reference skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism (issue #776 AC6)"
+            $paragraphs = $content -split '\r?\n\r?\n'
+            $hasSoleSource = $false
+            foreach ($para in $paragraphs) {
+                if ($para -match 'copilot-instructions\.md' -and $para -match '(?i)(BDD|## BDD Framework|bdd-scenarios)') {
+                    if (-not ($para -match 'AGENTS\.md' -and $para -match 'CLAUDE\.md')) {
+                        $hasSoleSource = $true
+                    }
+                }
             }
+            $hasSoleSource | Should -Be $false -Because "$site has a detection-context paragraph with sole-source copilot-instructions.md phrasing without the three-file list (AGENTS.md > CLAUDE.md > copilot-instructions.md) — convert to reference skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism (issue #776 AC6)"
         }
     }
-}
 
-Describe 'BDD detection widening — new-file fixtures (issue #776)' {
-
-    BeforeAll {
-        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+    It 'bdd-scenarios SKILL.md documents same-file bdd: read from winning file including AGENTS.md (AC2, issue #776)' {
+        $skill = Get-Content (Join-Path $script:RepoRoot 'skills/bdd-scenarios/SKILL.md') -Raw
+        # The same-file bdd: read section should reference the winning file (which can be AGENTS.md)
+        $skill | Should -Match '(?i)winning file'
+        $skill | Should -Match '(?i)bdd:'
     }
 
-    It 'AGENTS.md-only fixture: Phase 1 enabled when heading present in AGENTS.md, copilot-instructions.md absent (AC1, AC8)' {
-        $agentsContent = @'
-## BDD Framework
-bdd: cucumber.js
-'@
-        # Simulate detection: scan AGENTS.md first — heading found at column 0, wins immediately.
-        # copilot-instructions.md absence is irrelevant — detection stops at the first winning file.
-        $agentsHasHeading = $agentsContent -match '(?m)^## BDD Framework'
-        $agentsHasHeading | Should -Be $true -Because 'AGENTS.md with a column-0 ## BDD Framework heading must be detected as the winning file (Phase 1 enabled), regardless of copilot-instructions.md presence or absence (issue #776 AC1/AC8)'
-    }
-
-    It 'precedence skip: higher-precedence file without heading does not disable BDD — detection continues (AC3, issue #776)' {
-        # AGENTS.md lacks the heading (simulates a repo that has AGENTS.md but no BDD config there)
-        $agentsContent = @'
-# Agent instructions
-This repo uses no BDD config here.
-'@
-        # CLAUDE.md also lacks the heading
-        $claudeContent = @'
-# Claude instructions
-No BDD here either.
-'@
-        # copilot-instructions.md has the heading
-        $copilotContent = @'
-## BDD Framework
-bdd: behave
-'@
-        $agentsHasHeading  = $agentsContent  -match '(?m)^## BDD Framework'
-        $claudeHasHeading  = $claudeContent  -match '(?m)^## BDD Framework'
-        $copilotHasHeading = $copilotContent -match '(?m)^## BDD Framework'
-
-        # Detector: first file with heading wins; absence in higher-priority file is a skip, not a disable
-        $winningFile = if ($agentsHasHeading) { 'AGENTS.md' }
-                       elseif ($claudeHasHeading) { 'CLAUDE.md' }
-                       elseif ($copilotHasHeading) { 'copilot-instructions.md' }
-                       else { $null }
-
-        $winningFile | Should -Be 'copilot-instructions.md' -Because 'when AGENTS.md and CLAUDE.md lack the BDD heading, the detector must continue to copilot-instructions.md (not treat absence as disabling — issue #776 AC3 / precedence-skip rule)'
-    }
-
-    It 'same-file bdd: read: when winning file is CLAUDE.md, bdd: framework is read from CLAUDE.md (AC2, issue #776)' {
-        # Simulate: AGENTS.md absent, CLAUDE.md is the winning file with both heading and bdd: line
-        $claudeContent = @'
-## BDD Framework
-bdd: jest-cucumber
-'@
-        $claudeHasHeading = $claudeContent -match '(?m)^## BDD Framework'
-        $claudeHasHeading | Should -Be $true -Because 'CLAUDE.md heading must be detected at column 0'
-
-        # The bdd: value is read from the same winning file (CLAUDE.md), not from copilot-instructions.md
-        $bddLine = ($claudeContent -split "`n" | Where-Object { $_ -match '^\s*bdd:\s*\S' } | Select-Object -First 1)
-        $bddLine | Should -Match 'jest-cucumber' -Because 'when CLAUDE.md is the winning file, bdd: {framework} must be read from CLAUDE.md — not from a hardcoded copilot-instructions.md (issue #776 AC2)'
-    }
-
-    It 'column-0 guard: mid-line ## BDD Framework mention must NOT match the detection discriminator (AC7, issue #733/#776)' {
-        # A file where ## BDD Framework appears inside a sentence (not at column 0)
-        $midLineContent = @'
-# Agent body
-When the consumer adds a `## BDD Framework` section, BDD is enabled.
-Refer to the skill for detection details.
-'@
-        # The anchored detection discriminator must NOT match a mid-line mention
-        $lineStartMatch = $midLineContent -match '(?m)^## BDD Framework'
-        $lineStartMatch | Should -Be $false -Because 'a ## BDD Framework mention inside a backtick or sentence does not start at column 0 and must not trigger Phase 1 detection (issue #733 / issue #776 AC7 column-0 guard)'
+    It 'skills/bdd-scenarios/SKILL.md contains the BDD Detection Mechanism heading (anchor guard, issue #776)' {
+        $skill = Get-Content (Join-Path $script:RepoRoot 'skills/bdd-scenarios/SKILL.md') -Raw
+        $skill | Should -Match '(?m)^## BDD Detection Mechanism'
     }
 }
