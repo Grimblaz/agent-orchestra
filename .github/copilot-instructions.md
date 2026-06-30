@@ -30,7 +30,7 @@ Multi-agent workflow system for GitHub Copilot. Provides specialized agents, ski
 - **Framework**: VS Code Custom Agents (`.agent.md` format with YAML frontmatter)
 - **Build Tool**: None (no compiled code)
 - **Testing**: Pester (`.github/scripts/Tests/`), plus manual verification and grep-based structural checks
-- **BDD Framework (opt-in)**: Structured G/W/T scenarios with scenario ID traceability and CE Gate coverage gap detection. Consumer repos enable by adding a `## BDD Framework` **line-start heading** (column 0 — not inside a bullet or backtick quote) to their `copilot-instructions.md`. Template ships BDD-disabled; see `skills/bdd-scenarios/SKILL.md` for authoring patterns. **Phase 2 (runner dispatch)**: add `bdd: {framework}` under the heading (recognized values: `cucumber.js`, `behave`, `jest-cucumber`, `cucumber`) to enable Gherkin file generation by Test-Writer and automated runner dispatch at CE Gate time by Code-Conductor.
+- **BDD Framework (opt-in)**: Structured G/W/T scenarios with scenario ID traceability and CE Gate coverage gap detection. To enable BDD in a consumer repo, add a `## BDD Framework` heading at column 0 to `AGENTS.md`, `CLAUDE.md`, or `copilot-instructions.md` (in that priority order — see `skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism`). Template ships BDD-disabled. **Phase 2 (runner dispatch)**: add `bdd: {framework}` under the heading in that same file (recognized values: `cucumber.js`, `behave`, `jest-cucumber`, `cucumber`) to enable Gherkin file generation by Test-Writer and automated runner dispatch at CE Gate time by Code-Conductor.
 
 ## Architecture
 

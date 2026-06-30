@@ -4,7 +4,7 @@
 
 The BDD Framework adds structured Given/When/Then scenario authoring with numbered ID traceability across the full agent pipeline. Experience-Owner authors G/W/T scenarios in the issue body before implementation; Scenario IDs (S1, S2…) flow through Issue-Planner classification, Code-Conductor CE pre-flight, the PR coverage table, and Code-Critic CE prosecution. A hard coverage-gap gate in Code-Conductor catches unexercised scenarios before a PR is created.
 
-Consumer repos opt in via a `## BDD Framework` line-start heading (column 0) in `copilot-instructions.md`. Repos without that line-start heading keep the existing natural-language workflow unchanged.
+Consumer repos opt in via a `## BDD Framework` line-start heading (column 0) in `AGENTS.md`, `CLAUDE.md`, or `copilot-instructions.md` (first file wins, in that priority order). See `skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism` for the canonical three-file detection rule. Repos where no candidate file contains that heading keep the existing natural-language workflow unchanged.
 
 **CE Gate integration**: see [Documents/Design/customer-experience-gate.md](customer-experience-gate.md).
 
@@ -18,7 +18,7 @@ Consumer repos opt in via a `## BDD Framework` line-start heading (column 0) in 
 | D2 | Scenario ID convention | S-integer IDs (S1, S2, S3…); immutable after plan approval; no ID reuse; scenario splits create new sequential IDs | Immutability prevents traceability breaks mid-pipeline; sequential IDs are human-readable and grep-stable; deferred Gherkin conversion can map these IDs to feature file tags |
 | D3 | Scenario extraction mechanism | Code-Conductor uses `### S\d+` grep scoped within `## Scenarios` to next H2 boundary to enumerate IDs before CE pre-flight | Grep-based extraction is stateless, requires no tooling beyond what agents already have, and is trivially auditable |
 | D4 | Coverage gap detection | Hard pre-flight gate in Code-Conductor (`vscode/askQuestions`): Re-exercise / Waive / Abort; max 2 recovery cycles; abort marker written to PR body | Hard gate prevents silent misses; `vscode/askQuestions` is the established recovery mechanism used by CE Track 1; 2-cycle budget matches the existing CE fix-revalidate loop budget (D2 in customer-experience-gate.md) |
-| D5 | Opt-in detection | Presence of a `## BDD Framework` line-start heading (column 0) in consumer repo's `copilot-instructions.md`; template ships BDD-disabled | Heading-based detection requires no tooling config and is grep-stable **because enablement is a line-start `^## BDD Framework` heading, not a substring** — so a prose mention does not false-positive; template stays BDD-disabled so downstream repos that are not code repos are not forced into G/W/T workflow |
+| D5 | Opt-in detection | Presence of a `## BDD Framework` line-start heading (column 0) in the first of `AGENTS.md › CLAUDE.md › copilot-instructions.md` that contains it; template ships BDD-disabled. See `skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism` for the canonical three-file precedence rule. | Heading-based detection requires no tooling config and is grep-stable **because enablement is a line-start `^## BDD Framework` heading, not a substring** — so a prose mention does not false-positive; template stays BDD-disabled so downstream repos that are not code repos are not forced into G/W/T workflow |
 | D6 | Phase 2 activation mechanism | Both `## BDD Framework` **line-start heading** (column 0) AND `bdd: {framework}` line required; `bdd: true` / unrecognized → warning + Phase 1 fallback | Requiring both conditions prevents accidental activation; sentinel `bdd: true` had a documented Phase 2 placeholder role in Phase 1 that must be preserved as a graceful upgrade path rather than silent failure |
 | D7 | Supported framework mapping | Four entries: `cucumber.js`, `behave`, `jest-cucumber`, `cucumber` (JVM); each maps to a runner command, version check, and default feature directory | Explicit mapping table allows exact, testable dispatch commands and predictable output locations; unrecognized values fall back to Phase 1 to limit blast radius of misconfiguration |
 | D8 | Unified evidence record schema | 5-field record: `scenario_id`, `source` (`runner \| eo \| runner+eo`), `result` (`pass \| fail \| conflict`), `detail`, `raw_exit_code` (runner only) | Unified schema flows from runner → merge → EO evidence → Code-Critic without format negotiation; `source` field enables per-source evaluation rules in prosecution |
@@ -149,7 +149,7 @@ BDD scenarios flow into the CE Gate as follows:
 4. Experience-Owner exercises each scenario and records S-ID labels in Evidence Summary
 5. Code-Critic CE prosecution evaluates each S-ID individually in the adversarial review
 
-Repos **without** a `## BDD Framework` **line-start heading** keep the existing natural-language CE Gate workflow — no structural changes to Evidence Summary format or CE prosecution perspectives.
+Repos where no candidate file (`AGENTS.md`, `CLAUDE.md`, or `copilot-instructions.md`) contains a `## BDD Framework` **line-start heading** keep the existing natural-language CE Gate workflow — no structural changes to Evidence Summary format or CE prosecution perspectives.
 
 See [customer-experience-gate.md](customer-experience-gate.md) for the full CE Gate protocol (delegation model, two-track defect response, fix-revalidate budget).
 
@@ -161,8 +161,8 @@ See [customer-experience-gate.md](customer-experience-gate.md) for the full CE G
 
 Phase 2 requires **both** conditions:
 
-1. `## BDD Framework` line-start heading (column 0) present in consumer's `copilot-instructions.md`
-2. `bdd: {framework}` line under that heading with a recognized framework value
+1. `## BDD Framework` line-start heading (column 0) present in the winning file (`AGENTS.md › CLAUDE.md › copilot-instructions.md` — see `skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism`)
+2. `bdd: {framework}` line under that heading in that same winning file with a recognized framework value
 
 | Condition | Behavior |
 |-----------|----------|
@@ -232,10 +232,10 @@ When the unified evidence record contains a `source` field, Code-Critic applies 
 
 | State | Detection | Behavior |
 |-------|-----------|----------|
-| BDD enabled | `## BDD Framework` line-start heading (column 0) present in `copilot-instructions.md` | G/W/T authoring required; S-IDs mandatory; pre-flight gate active |
-| BDD disabled | No line-start heading | Natural-language CE scenarios; no S-IDs; pre-flight gate skipped |
+| BDD enabled | `## BDD Framework` line-start heading (column 0) present in the first of `AGENTS.md › CLAUDE.md › copilot-instructions.md` that contains it (see `skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism`) | G/W/T authoring required; S-IDs mandatory; pre-flight gate active |
+| BDD disabled | No line-start heading in any candidate file | Natural-language CE scenarios; no S-IDs; pre-flight gate skipped |
 
-The template repo (`Agent-Orchestra`) ships BDD-**disabled**. Example repos (`examples/*/copilot-instructions.md`) ship with a `## BDD Framework` section and a commented note showing how to remove it.
+The template repo (`Agent-Orchestra`) ships BDD-**disabled**. Example repos (`examples/*/copilot-instructions.md`) ship with a `## BDD Framework` section and a commented note showing how to disable it (remove the `## BDD Framework` heading from all candidate files — `AGENTS.md`, `CLAUDE.md`, and `copilot-instructions.md`).
 
 ---
 
@@ -258,7 +258,7 @@ Structured authoring and traceability infrastructure:
 
 Gherkin conversion and framework runner integration:
 
-- `bdd: {framework}` key in consumer `copilot-instructions.md` under `## BDD Framework` line-start heading activates Phase 2
+- `bdd: {framework}` key in consumer `copilot-instructions.md` under `## BDD Framework` line-start heading activates Phase 2 (detection later widened in #776 — `bdd:` now read from the winning candidate file; see `skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism`)
 - Test-Writer generates a single `.feature` file per issue with `@S{N}` tags for each `[auto]` scenario
 - Code-Conductor CE Gate runner dispatch: pre-check → per-scenario dispatch → evidence capture → conditional EO delegation → evidence merge
 - Code-Critic runner evidence evaluation keyed on `source` field in unified evidence record

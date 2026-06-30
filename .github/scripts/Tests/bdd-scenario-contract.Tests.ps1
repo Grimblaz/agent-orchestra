@@ -297,4 +297,63 @@ Describe 'BDD detection anchor guard — hub stays disabled, skill uses anchored
         $twContent = Get-Content -Path (Join-Path $script:RepoRoot 'agents/Test-Writer.agent.md') -Raw
         $twContent | Should -Match '(?is)(## BDD Framework).{0,100}(line.start|column 0)' -Because 'issue #733 requires Test-Writer to use line-start heading phrasing for BDD detection, not the old bare "heading" language'
     }
+
+    It 'bdd-scenarios SKILL.md documents AGENTS.md > CLAUDE.md > copilot-instructions.md precedence in BDD Detection Mechanism (AC4, issue #776)' {
+        $skill = Get-Content (Join-Path $script:RepoRoot 'skills/bdd-scenarios/SKILL.md') -Raw
+        $skill | Should -Match 'AGENTS\.md.*CLAUDE\.md.*copilot-instructions\.md' -Because 'issue #776 requires the BDD Detection Mechanism section to document the three-file precedence order: AGENTS.md > CLAUDE.md > copilot-instructions.md'
+    }
+
+    It 'hub AGENTS.md has no BDD Framework heading (hub stays BDD-disabled, AC7 three-file guard, issue #776)' {
+        if (-not (Test-Path (Join-Path $script:RepoRoot 'AGENTS.md'))) { Set-ItResult -Skipped -Because 'AGENTS.md not present in hub; nothing to guard'; return }
+        $matches = Select-String -Path (Join-Path $script:RepoRoot 'AGENTS.md') -Pattern '^## BDD Framework' | Measure-Object
+        $matches.Count | Should -Be 0 -Because 'the hub repo must not have a line-start ## BDD Framework heading in AGENTS.md (issue #776 AC7)'
+    }
+
+    It 'hub CLAUDE.md has no BDD Framework heading (hub stays BDD-disabled, AC7 three-file guard, issue #776)' {
+        if (-not (Test-Path (Join-Path $script:RepoRoot 'CLAUDE.md'))) { Set-ItResult -Skipped -Because 'CLAUDE.md not present in hub; nothing to guard'; return }
+        $matches = Select-String -Path (Join-Path $script:RepoRoot 'CLAUDE.md') -Pattern '^## BDD Framework' | Measure-Object
+        $matches.Count | Should -Be 0 -Because 'the hub repo must not have a line-start ## BDD Framework heading in CLAUDE.md (issue #776 AC7)'
+    }
+
+    It 'no detection site retains sole-source copilot-instructions.md BDD phrasing (AC6, issue #776) — expected RED until s3/s4' {
+        $detectionSites = @(
+            'agents/Experience-Owner.agent.md',
+            'agents/Issue-Planner.agent.md',
+            'agents/Test-Writer.agent.md',
+            'skills/customer-experience/references/orchestration-protocol.md'
+        )
+        # A site has "sole-source" phrasing when a detection-context paragraph mentions copilot-instructions.md
+        # without also citing AGENTS.md or CLAUDE.md in that same paragraph.
+        # Paragraph-scoped check: split on blank lines, then inspect only paragraphs that contain both
+        # a copilot-instructions.md reference AND a BDD detection context marker.
+        foreach ($site in $detectionSites) {
+            $fullPath = Join-Path $script:RepoRoot $site
+            if (-not (Test-Path $fullPath)) { continue }
+            $content = Get-Content $fullPath -Raw
+            $paragraphs = $content -split '\r?\n\r?\n'
+            $hasSoleSource = $false
+            foreach ($para in $paragraphs) {
+                if ($para -match 'copilot-instructions\.md' -and $para -match '(?i)(BDD|## BDD Framework|bdd-scenarios)') {
+                    if (-not ($para -match 'AGENTS\.md' -and $para -match 'CLAUDE\.md')) {
+                        $hasSoleSource = $true
+                    }
+                }
+            }
+            $hasSoleSource | Should -Be $false -Because "$site has a detection-context paragraph with sole-source copilot-instructions.md phrasing without the three-file list (AGENTS.md > CLAUDE.md > copilot-instructions.md) — convert to reference skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism (issue #776 AC6)"
+        }
+    }
+
+    It 'bdd-scenarios SKILL.md documents same-file bdd: read from winning file including AGENTS.md (AC2, issue #776)' {
+        $skill = Get-Content (Join-Path $script:RepoRoot 'skills/bdd-scenarios/SKILL.md') -Raw
+        # AC2: bdd: must be read from the SAME winning file — assert the co-location language, not bare token presence.
+        # Fails if the same-file invariant is removed; does not pass merely because "winning file" and "bdd:"
+        # appear in unrelated sections.
+        $skill | Should -Match '(?is)same\s+winning\s+file' -Because 'AC2 (issue #776) requires SKILL.md to state that bdd: is read from the SAME winning file, not any lower-precedence file'
+        $skill | Should -Match '(?is)bdd:.{0,400}winning file|winning file.{0,400}bdd:' -Because 'AC2 (issue #776) requires the bdd: read and the winning-file rule to be co-located, tying the bdd: line to the winning file rather than a hardcoded source'
+    }
+
+    It 'skills/bdd-scenarios/SKILL.md contains the BDD Detection Mechanism heading (anchor guard, issue #776)' {
+        $skill = Get-Content (Join-Path $script:RepoRoot 'skills/bdd-scenarios/SKILL.md') -Raw
+        $skill | Should -Match '(?m)^## BDD Detection Mechanism'
+    }
 }

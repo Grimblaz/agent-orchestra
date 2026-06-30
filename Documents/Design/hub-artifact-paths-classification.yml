@@ -85,6 +85,20 @@ families:
       and map to this same family. Both Claude (plugin-cache D1 or source-tree fallback) and
       Copilot (source-tree) must resolve these for agent methodology to function."
 
+  "skills/ai-first-documentation/rubric.md":
+    claude_resolves: both
+    copilot_resolves: source-tree
+    requires_version_bump: true
+    experience: hard-failure
+    examples:
+      - skills/ai-first-documentation/rubric.md
+    notes: "The testable, practice-by-practice ai-first-documentation audit rubric (sections
+      A-F). Primary consumer is the ai-first-documentation skill body and the /audit-docs flow,
+      which Read it to apply judgment passes. Cross-referenced from skills/bdd-scenarios/SKILL.md
+      (BDD precedence vs. E7 instruction-merge axis disambiguation). A sibling top-level skill
+      doc (not under references/), so it falls outside skills/*/references/*.md and is catalogued
+      explicitly. Missing = /audit-docs loses its rubric judgment surface."
+
   "skills/*/platforms/*.md":
     claude_resolves: both
     copilot_resolves: source-tree
