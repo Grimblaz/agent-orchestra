@@ -148,6 +148,7 @@ When the user invokes Code-Conductor without a specific slash command (e.g., `@c
 - `<!-- engagement-record-orchestration-{ID} -->` found → prior orchestration decisions exist; on entry to the Scope Classification Gate, invoke `Read-EngagementRecords -IssueNumber {ID} -Phase orchestration` (against the same comment scan already retrieved above — no separate gh round-trip) and apply solution-authoring's `same-decision-resume` rule to suppress re-firing the gate when the prior `conductor-scope-classification` decision still applies. Emit the canonical resume-note `Reusing prior conductor-scope-classification: {engineer_choice}` when reuse fires.
 
 Because the conductor skips the upstream agent, it cannot inherit its render and must independently author and output the terse snapshot:
+
 - **current phase**: latest phase marker detected.
 - **last decision**: most recent `engagement-record` decision or "last decision: not recorded" fallback.
 - **next step**: next incomplete step in the active pipeline position.
@@ -199,7 +200,7 @@ Before any editing delegation or file mutation in hub mode, run a pre-edit owner
 - If the needed change is `upstream shared-workflow mutation`, fail closed immediately with `requires upstream issue` instead of starting mixed-repo implementation.
 - Reuse the existing upstream-routing conventions instead of inventing a second escalation path: if an upstream issue already exists, link it and stop; otherwise, when the upstream repo can be resolved and upstream access is available, follow the existing safe-operations rules for dedup search, priority-labeled `gh issue create`, and output capture. If the upstream repo cannot be resolved or upstream access is unavailable, create a local fallback artifact labeled `process-gap-upstream` and stop with an explicit manual upstream handoff path.
 - Safe-operations retains ownership of deduplication, priority-label, and output-capture rules for any upstream issue creation.
-- **Auto-Tracking & Filing Sequence**: When a finding is categorized as `📋 DEFERRED-SIGNIFICANT (structural)`, file a follow-up tracking issue autonomously using the following ordered sequence:
+- **Auto-Tracking & Filing Sequence**: When a finding is categorized as `📋 DEFERRED-SIGNIFICANT (structural)`, file a follow-up tracking issue autonomously using the following ordered sequence: Before filing, apply the board-positioning decision per `skills/safe-operations/SKILL.md §2b`, §2b-bis, and §2b-ter (creation-time lever mapping and residue).
   1. **Canonicalize Title**: Invoke the canonical title helper `ConvertTo-CanonicalFollowupTitle` (dot-sourced from `skills/safe-operations/scripts/Add-FollowUpIssue.ps1`) to construct a deterministic title of the form `[Structural] {criterion_id}: {finding_subject}` (where `criterion_id` is the matched S-* identifier and `finding_subject` is the finding's normalized subject phrase).
   2. **Prevention Analysis**: Before creating any tracking issue proposing a new rule or directive, apply the prevention-analysis advisory from `skills/safe-operations/SKILL.md` §2d.
   - **AC Refs Pre-Population (verdict-evaluation phase)**: Earlier in the pipeline, before invoking the deferral judge `Get-StructuralVerdict`, the conductor MUST call `Get-AcRefsFromIssue -IssueNumber {parent_issue_number}` to extract the parent issue's `## Acceptance Criteria` file-path list. The returned `$AcRefs` array is passed as the `-AcRefs` parameter to `Get-StructuralVerdict` so AC precedence is enforced at runtime rather than as dead code. If the helper returns an empty array (no `## Acceptance Criteria` section, no parseable file paths), `$AcRefs` is `@()` and AC precedence simply does not fire — structural criteria proceed normally. Helper paths: `skills/review-judgment/scripts/Get-AcRefsFromIssue.ps1` (file-path ARM 1); `skills/review-judgment/scripts/Get-AcTermsFromIssue.ps1` (behavioral-term ARM 2). The conductor MUST also call `Get-AcTermsFromIssue -IssueNumber {parent_issue_number}` and pass the result as `-AcTerms` to `Get-StructuralVerdict`. If the helper returns an empty array (no AC section or no backtick tokens), pass `@()` — ARM 2 simply does not fire for that finding. The `ac_cross_check` OUT object populated by `Get-StructuralVerdict` carries the ARM 1 + ARM 2 combined outcome and is used by the disposition gate and the `Add-FollowUpIssue` guard.
@@ -416,11 +417,7 @@ Include in prompt: _"Use the `{skill-name}` skill (`skills/{skill-name}/SKILL.md
 
 ## Validation Ladder (Mandatory)
 
-Use the `validation-methodology` skill (`skills/validation-methodology/SKILL.md`) for the graduated 4-tier validation ladder and the Failure Triage Rule.
-
-- Code-Conductor keeps the orchestration around that ladder: incremental validation timing during step execution, post-fix review entry, CE Gate sequencing, and PR-gate ownership.
-- Tier 4 in this agent continues through the review, post-fix, and CE Gate sections below.
-- When routing a failed tier, always include the failure evidence, attempted diagnosis, and next action in the handoff prompt.
+Use the `validation-methodology` skill (`skills/validation-methodology/SKILL.md`) for the graduated 4-tier validation ladder and the Failure Triage Rule. Code-Conductor owns the orchestration around that ladder: incremental validation timing, post-fix review entry, CE Gate sequencing, and PR-gate ownership. Tier 4 continues through the review and CE Gate sections below. On failed-tier routing, always include failure evidence, attempted diagnosis, and next action in the handoff prompt.
 
 ## Customer Experience Gate (CE Gate)
 
@@ -439,7 +436,7 @@ PR-body per-scenario coverage table header: `| ID | Type | Class | Result | Evid
 
 Code-Conductor keeps only the shell responsibilities here: identify the surface, delegate scenario evidence capture to Experience-Owner, preserve CE sequencing through prosecution/defense/judgment, and emit the documented PR-body outputs.
 
-When CE Gate Track 2 systemic analysis creates a systemic follow-up issue, Code-Conductor applies the prevention-analysis advisory from `skills/safe-operations/SKILL.md` §2d before issue creation.
+When CE Gate Track 2 systemic analysis creates a systemic follow-up issue, Code-Conductor applies the board-positioning decision per §2b, §2b-bis, and §2b-ter, and the prevention-analysis advisory from `skills/safe-operations/SKILL.md` §2d, before issue creation.
 
 1. CE Gate result markers (emitted by the judge in conjunction with Code-Conductor's read of the verdict):
    - `✅ CE Gate passed — intent match: strong` — all scenarios passed, no defects found, design intent fully achieved
@@ -450,10 +447,6 @@ When CE Gate Track 2 systemic analysis creates a systemic follow-up issue, Code-
    - `❌ CE Gate aborted — {reason}` — pre-flight uncovered scenarios not resolved within recovery budget
    - `⏭️ CE Gate not applicable — {reason}` — no customer surface for this change
 
-### PR Body Pipeline Metrics
-
-PR bodies must still include a `## Pipeline Metrics` section containing the `<!-- pipeline-metrics -->` block. Treat the references below as the canonical schema and write contract.
-
 ## Pipeline Metrics
 
 Load and follow these references:
@@ -462,42 +455,15 @@ Load and follow these references:
 - `skills/calibration-pipeline/references/verdict-mapping.md`
 - `skills/calibration-pipeline/references/findings-construction.md`
 
-Code-Conductor keeps only the emission timing and ownership boundary: at fresh PR creation time, the `.github/scripts/emit-pipeline-metrics-v4.ps1` script (called in the **Create PR** step above) owns `New-PipelineMetricsV4Block` invocation, `Test-PipelineMetricsV4Block` validation, and writing the body file — pass `-V3BaseYaml` (plain YAML string of v3 base fields; do not wrap in the HTML comment, do not include `metrics_version: 4`; the builder adds those), the accumulated `-Credits` / `-DispatchCostSamples` from the session-memory accumulator, and `-IssueNumber`. `Build-*CreditRow` outputs are `[pscustomobject]` rows — pass them directly, the builder normalizes them. The script is warn-only: if it exits non-zero, log the warning and proceed to `gh pr create` regardless (#429). On re-emit the initial-creation guard prevents double-wrapping; use additive-merge writers for updates after the initial PR exists.
-
-After each `Build-*CreditRow` call that produces a credit row for the current issue, persist it to the file-based accumulator so `emit-pipeline-metrics-v4.ps1` can harvest it deterministically at PR creation time (issue #769 s-acc):
-
-```powershell
-. '.github/scripts/lib/Add-FCLCreditRow.ps1'
-Add-FCLCreditRow -IssueNumber {ISSUE_NUMBER} -CreditRow $creditRow
-```
-
-This call is additive alongside the existing prose instruction — do not remove the `Build-*CreditRow` call itself. When `-IssueNumber` is provided to `emit-pipeline-metrics-v4.ps1` and no `-Credits` are passed explicitly, the script auto-harvests from `.tmp/issue-{N}/fclcredits.jsonl`.
-
-For v4 release-hygiene credit row construction (state-file reading, YAML examples) and the CE Gate S2 synthetic-PR test protocol, follow `skills/calibration-pipeline/references/release-hygiene-credit-emission.md`.
-
-<!-- TODO: remove legacy v3 pipeline-metrics fallback at v2.9.0 when pre-v4 back-catalog backfill is confirmed complete (issue #441). -->
-
-For v4 review credit row construction (parsing judge-rulings block, determining pass/fail status, building the credit row), follow `skills/calibration-pipeline/references/review-credit-emission.md`.
-
-Dispatch-cost samples are additive v4 instrumentation owned by Code-Conductor. During implementation, placeholders and pre-PR RC/judge updates live in the same session-memory or PR-body draft accumulator used to build the initial PR body. PR creation flushes that accumulator into the emitted `<!-- pipeline-metrics -->` block. After PR creation, RC conformance and judge disposition back-fills update the live PR body only for the targeted `(step-id, mode)` sample.
-
-For the Code-Conductor-owned credit-row emission procedures — Pipeline-Entry Credit Harvest (SMC-17), Deferred Port Credit Rows, the `process-review` trigger-absent emission, and the Post-PR Credit Row (D10 category 3) — load and follow `skills/calibration-pipeline/references/conductor-credit-emission.md`. Harvest pipeline-entry credits before emitting the `credits[]` block at PR creation; emit deferred-port and post-PR rows per the reference; apply the additive-merge rule (D9) on every upsert.
-
----
+Load and follow `skills/calibration-pipeline/references/conductor-metrics-protocol.md` for emission timing, credit row procedures, and dispatch-cost samples. After PR creation, RC conformance and judge disposition back-fills update the live PR body only for the targeted `(step-id, mode)` sample.
 
 ## Refactoring Phase is MANDATORY
 
-**ALWAYS call Refactor-Specialist after Code-Smith completes.**
-
-Load `skills/refactoring-methodology/SKILL.md` and follow its `## Conductor Integration` section for the mandatory handoff, flow, and scope guardrails.
+**ALWAYS call Refactor-Specialist after Code-Smith completes.** Load `skills/refactoring-methodology/SKILL.md` and follow its `## Conductor Integration` section for the mandatory handoff, flow, and scope guardrails.
 
 ## Tactical Adaptation
 
-You are expected to follow the plan, but not blindly. A good engineering manager adapts to reality while staying aligned with the goal.
-
-**Adapt without asking** when: a referenced file was renamed/moved (find the new location and proceed); a step is redundant (skip it, note why in the progress summary); the step ordering creates unnecessary churn (reorder for efficiency); or a step needs a minor sub-task the plan didn't anticipate, such as a missing import or type update (include it).
-
-**Escalate** (use `#tool:vscode/askQuestions` with options and a recommended choice) when: a step's entire premise is invalid (the feature it builds on doesn't exist or works differently than assumed); the plan's scope seems wrong (too much or too little for the issue); or you discover a significant design question the plan didn't address.
+**Adapt without asking** when: a referenced file was renamed/moved; a step is redundant; the step ordering creates unnecessary churn; or a step needs a minor unanticipated sub-task (missing import, type update). **Escalate** via `#tool:vscode/askQuestions` when: a step's entire premise is invalid; the plan's scope seems wrong; or you discover a significant design question the plan didn't address.
 
 ## Subagent Call Resilience (R5)
 

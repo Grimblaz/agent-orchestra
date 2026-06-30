@@ -72,7 +72,7 @@ Create a feature branch if one doesn't already exist. Extract issue number; ask 
 
 ## Safe-Operations Compliance
 
-Load `skills/safe-operations/SKILL.md` §2 when creating a GitHub issue (dedup, priority label, approval prompt, output capture).
+Load `skills/safe-operations/SKILL.md` §2 when creating a GitHub issue (dedup, priority label, board positioning per §2b-ter, approval prompt, output capture).
 
 ## Upstream Phase: Customer Framing
 

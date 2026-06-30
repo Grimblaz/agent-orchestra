@@ -372,7 +372,7 @@ For each entry already marked `<!-- gotcha-status: upstream:{url} -->`: check if
 - Skipped: {reason or "none"}
 ```
 
-**Guardrail**: This section reads and writes `local-gotchas.instructions.md` to update status markers, and creates GitHub issues. It does NOT modify any other agent, skill, or system instruction file. Issue creation must follow output-capture verification (§2a) and deduplication search (§2c) from `skills/safe-operations/SKILL.md`. For rule-addition proposals, apply the prevention-analysis advisory (§2d) from `skills/safe-operations/SKILL.md` before the §2c dedup search.
+**Guardrail**: This section reads and writes `local-gotchas.instructions.md` to update status markers, and creates GitHub issues. It does NOT modify any other agent, skill, or system instruction file. Issue creation must follow the board-positioning decision (§2b, §2b-bis, §2b-ter), output-capture verification (§2a), and deduplication search (§2c) from `skills/safe-operations/SKILL.md`. **Note**: this section creates issues in the upstream Agent Orchestra repo (`--repo {agent-orchestra-repo}`); the §2b-ter board-placement levers (Triage derivation, umbrella attach) affect that repo's board, not the local Control Tower board. The §2b priority-label and §2c dedup obligations apply as usual. For rule-addition proposals, apply the prevention-analysis advisory (§2d) from `skills/safe-operations/SKILL.md` before the §2c dedup search.
 
 ### 4.9 Root Cause Analysis & Guardrail Proposals
 
@@ -527,7 +527,7 @@ For each proposal from Step 3 where `previously_proposed: false`:
 - Patterns previously proposed: {N}
 ```
 
-**Guardrail**: Advisory only — this agent does NOT apply guardrail changes directly. Proposals require human approval. Code-Conductor handles application through normal change orchestration (Doc-Keeper for instruction/skill updates, Code-Smith for agent prompt changes, per D6).
+**Guardrail**: Advisory only — this agent does NOT apply guardrail changes directly. Proposals require human approval. Code-Conductor handles application through normal change orchestration (Doc-Keeper for instruction/skill updates, Code-Smith for agent prompt changes, per D6). Issue creation in Step 4 is delegated to `create-improvement-issue.ps1`, which owns the `gh issue create` call internally. The board-positioning decision (§2b, §2b-bis, §2b-ter) for this path is exercised via the script's `-Labels` parameter — the agent's priority choice is the positioning lever; the script's structured output format satisfies the placement portion of the §2b-ter residue.
 
 ### 5. Standard Retrospective Analysis
 
