@@ -310,7 +310,7 @@ Describe 'BDD detection anchor guard — hub stays disabled, skill uses anchored
     }
 
     It 'hub CLAUDE.md has no BDD Framework heading (hub stays BDD-disabled, AC7 three-file guard, issue #776)' {
-        if (-not (Test-Path (Join-Path $script:RepoRoot 'CLAUDE.md'))) { 0 | Should -Be 0; return }
+        if (-not (Test-Path (Join-Path $script:RepoRoot 'CLAUDE.md'))) { Set-ItResult -Skipped -Because 'CLAUDE.md not present in hub; nothing to guard'; return }
         $matches = Select-String -Path (Join-Path $script:RepoRoot 'CLAUDE.md') -Pattern '^## BDD Framework' | Measure-Object
         $matches.Count | Should -Be 0 -Because 'the hub repo must not have a line-start ## BDD Framework heading in CLAUDE.md (issue #776 AC7)'
     }
@@ -345,9 +345,11 @@ Describe 'BDD detection anchor guard — hub stays disabled, skill uses anchored
 
     It 'bdd-scenarios SKILL.md documents same-file bdd: read from winning file including AGENTS.md (AC2, issue #776)' {
         $skill = Get-Content (Join-Path $script:RepoRoot 'skills/bdd-scenarios/SKILL.md') -Raw
-        # The same-file bdd: read section should reference the winning file (which can be AGENTS.md)
-        $skill | Should -Match '(?i)winning file'
-        $skill | Should -Match '(?i)bdd:'
+        # AC2: bdd: must be read from the SAME winning file — assert the co-location language, not bare token presence.
+        # Fails if the same-file invariant is removed; does not pass merely because "winning file" and "bdd:"
+        # appear in unrelated sections.
+        $skill | Should -Match '(?is)same\s+winning\s+file' -Because 'AC2 (issue #776) requires SKILL.md to state that bdd: is read from the SAME winning file, not any lower-precedence file'
+        $skill | Should -Match '(?is)bdd:.{0,400}winning file|winning file.{0,400}bdd:' -Because 'AC2 (issue #776) requires the bdd: read and the winning-file rule to be co-located, tying the bdd: line to the winning file rather than a hardcoded source'
     }
 
     It 'skills/bdd-scenarios/SKILL.md contains the BDD Detection Mechanism heading (anchor guard, issue #776)' {
