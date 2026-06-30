@@ -76,7 +76,7 @@ Draft a comprehensive plan per the **Plan Style Guide** in `skills/plan-authorin
 
 ### BDD Scenario Classification (opt-in)
 
-When a `## BDD Framework` **line-start heading** (column 0) exists in the consumer's `copilot-instructions.md`, BDD is enabled/active and each scenario is classified using the `bdd-scenarios` skill:
+When a `## BDD Framework` **line-start heading** (column 0) is found in a candidate file (see `skills/bdd-scenarios/SKILL.md` § BDD Detection Mechanism — `AGENTS.md › CLAUDE.md › copilot-instructions.md`), BDD is enabled/active and each scenario is classified using the `bdd-scenarios` skill:
 
 | Condition                                           | Classification        |
 | --------------------------------------------------- | --------------------- |
