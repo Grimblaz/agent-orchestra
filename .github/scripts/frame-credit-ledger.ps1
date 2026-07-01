@@ -1749,7 +1749,56 @@ function Invoke-FrameCreditLedger {
 
             # Fix #760-D1-b: wire the Resolve-CostDataPreservation result instead of discarding it.
             # This drives the skip-when-absent gate below (AC1 + AC2).
-            $preservationResult = Resolve-CostDataPreservation -Current $completeness -Prior $priorCostData
+
+            # Compute current token sum from attribution (populated predicate, issue #777 s2).
+            # Use totals['tokens'] as the authoritative full-session sum (includes overhead +
+            # unattributed tokens that are never placed into any port bucket — CR2).
+            # Fall back to ports-only sum if totals is unavailable (e.g., old data format).
+            [long]$currentTokenSum = 0
+            $currentTotalsTokens = if ($null -ne $costAttribution -and $costAttribution.ContainsKey('totals') -and
+                                        $null -ne $costAttribution['totals'] -and $costAttribution['totals'].ContainsKey('tokens')) {
+                $costAttribution['totals']['tokens']
+            } else { $null }
+            if ($null -ne $currentTotalsTokens) {
+                foreach ($tk in @('input', 'output', 'cache_creation', 'cache_read')) {
+                    if ($currentTotalsTokens.ContainsKey($tk) -and $null -ne $currentTotalsTokens[$tk]) {
+                        $currentTokenSum += [long]$currentTotalsTokens[$tk]
+                    }
+                }
+            } elseif ($null -ne $costAttribution -and $costAttribution.ContainsKey('ports')) {
+                foreach ($portBucket in $costAttribution['ports'].Values) {
+                    if ($null -ne $portBucket -and $portBucket.ContainsKey('tokens')) {
+                        $tok = $portBucket['tokens']
+                        foreach ($tk in @('input', 'output', 'cache_creation', 'cache_read')) {
+                            if ($tok.ContainsKey($tk) -and $null -ne $tok[$tk]) {
+                                $currentTokenSum += [long]$tok[$tk]
+                            }
+                        }
+                    }
+                }
+            }
+
+            # Compute prior token sum from parsed prior YAML (if available).
+            # cost-rolling-history ConvertFrom-CostPatternYaml does not parse totals.tokens, so
+            # use ports-only sum for prior. This is consistent with what was stored.
+            [long]$priorTokenSum = 0
+            if ($null -ne $priorCostData -and $priorCostData.ContainsKey('ports')) {
+                $priorPorts = $priorCostData['ports']
+                # ports is a hashtable keyed by port name (ConvertFrom-CostPatternYaml line 327)
+                $priorPortValues = if ($priorPorts -is [hashtable]) { $priorPorts.Values } elseif ($priorPorts -is [array]) { $priorPorts } else { @() }
+                foreach ($portBucket in $priorPortValues) {
+                    if ($null -ne $portBucket -and $portBucket.ContainsKey('tokens')) {
+                        $tok = $portBucket['tokens']
+                        foreach ($tk in @('input', 'output', 'cache_creation', 'cache_read')) {
+                            if ($tok.ContainsKey($tk) -and $null -ne $tok[$tk]) {
+                                $priorTokenSum += [long]$tok[$tk]
+                            }
+                        }
+                    }
+                }
+            }
+
+            $preservationResult = Resolve-CostDataPreservation -Current $completeness -Prior $priorCostData -CurrentTokenSum $currentTokenSum -PriorTokenSum $priorTokenSum
 
             # Fix #760-D1-a: skip-when-absent gate — if preservation says to use_prior, reuse the
             # prior comment's cost section verbatim.  This fires when the projects root is absent
