@@ -239,8 +239,10 @@ function Resolve-CostDataPreservation {
     .PARAMETER Prior
         Optional prior render's completeness hashtable. Pass $null or omit when no prior exists.
     .PARAMETER CurrentTokenSum
-        Sum of all per-port token counts (input + output + cache_creation + cache_read) for the
-        current session. Used by the populated predicate. Default 0.
+        Total token count for the current session. The caller derives this from totals['tokens']
+        when available (which includes overhead and unattributed tokens outside any per-port
+        bucket), otherwise the sum of per-port token counts (input + output + cache_creation +
+        cache_read). Used by the populated predicate. Default 0.
     .PARAMETER PriorTokenSum
         Sum of all per-port token counts for the prior render. Used by the populated predicate.
         Default 0.

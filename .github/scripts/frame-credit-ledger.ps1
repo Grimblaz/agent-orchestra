@@ -1209,6 +1209,22 @@ function script:Get-FCLRemainingCostBudgetSeconds {
     return $remaining
 }
 
+# Sum the four token-count keys (input + output + cache_creation + cache_read)
+# from a single token bucket. Used by both the current-ports-fallback path and
+# the prior-side path (issue #777, R2). The internal $null check subsumes the
+# per-loop bucket null-guard (present key, null value).
+function script:Get-FCLTokenSumFromBucket {
+    param([hashtable]$Bucket)
+    [long]$sum = 0
+    if ($null -eq $Bucket) { return $sum }
+    foreach ($tk in @('input', 'output', 'cache_creation', 'cache_read')) {
+        if ($Bucket.ContainsKey($tk) -and $null -ne $Bucket[$tk]) {
+            $sum += [long]$Bucket[$tk]
+        }
+    }
+    return $sum
+}
+
 # ---------------------------------------------------------------------------
 # Invoke-FrameCreditLedger
 # ---------------------------------------------------------------------------
@@ -1760,20 +1776,11 @@ function Invoke-FrameCreditLedger {
                 $costAttribution['totals']['tokens']
             } else { $null }
             if ($null -ne $currentTotalsTokens) {
-                foreach ($tk in @('input', 'output', 'cache_creation', 'cache_read')) {
-                    if ($currentTotalsTokens.ContainsKey($tk) -and $null -ne $currentTotalsTokens[$tk]) {
-                        $currentTokenSum += [long]$currentTotalsTokens[$tk]
-                    }
-                }
+                $currentTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $currentTotalsTokens
             } elseif ($null -ne $costAttribution -and $costAttribution.ContainsKey('ports')) {
                 foreach ($portBucket in $costAttribution['ports'].Values) {
                     if ($null -ne $portBucket -and $portBucket.ContainsKey('tokens')) {
-                        $tok = $portBucket['tokens']
-                        foreach ($tk in @('input', 'output', 'cache_creation', 'cache_read')) {
-                            if ($tok.ContainsKey($tk) -and $null -ne $tok[$tk]) {
-                                $currentTokenSum += [long]$tok[$tk]
-                            }
-                        }
+                        $currentTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $portBucket['tokens']
                     }
                 }
             }
@@ -1788,12 +1795,7 @@ function Invoke-FrameCreditLedger {
                 $priorPortValues = if ($priorPorts -is [hashtable]) { $priorPorts.Values } elseif ($priorPorts -is [array]) { $priorPorts } else { @() }
                 foreach ($portBucket in $priorPortValues) {
                     if ($null -ne $portBucket -and $portBucket.ContainsKey('tokens')) {
-                        $tok = $portBucket['tokens']
-                        foreach ($tk in @('input', 'output', 'cache_creation', 'cache_read')) {
-                            if ($tok.ContainsKey($tk) -and $null -ne $tok[$tk]) {
-                                $priorTokenSum += [long]$tok[$tk]
-                            }
-                        }
+                        $priorTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $portBucket['tokens']
                     }
                 }
             }
