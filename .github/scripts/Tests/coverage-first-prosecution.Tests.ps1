@@ -43,14 +43,6 @@
     file — that would run their Describe blocks too.
 #>
 
-BeforeDiscovery {
-    $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-
-    $script:DiscoveryAdversarialReviewPath = Join-Path $RepoRoot 'skills/adversarial-review/SKILL.md'
-    $script:DiscoveryCodeCriticPath        = Join-Path $RepoRoot 'agents/Code-Critic.agent.md'
-    $script:DiscoveryReviewJudgmentPath    = Join-Path $RepoRoot 'skills/review-judgment/SKILL.md'
-}
-
 Describe 'Coverage-first prosecution rewrite (issue #784)' {
 
     BeforeAll {
