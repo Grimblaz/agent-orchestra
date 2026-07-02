@@ -453,13 +453,24 @@ function script:Get-SurfaceAEntriesGraphQL {
 
     $entries = [System.Collections.Generic.List[hashtable]]::new()
     foreach ($tuple in $tuples) {
-        $scanned = Invoke-PhaseContainmentCommentScan `
-            -CommentBodies $tuple['Bodies'] `
-            -IssueOrPrNumber $tuple['Number'] `
-            -Surface $tuple['Surface'] `
-            -CreatedAtValues $tuple['CreatedAtValues']
+        # M7 fix (issue #782 post-review): restore per-item isolation. A
+        # single malformed tuple (e.g. Number/Bodies/CreatedAtValues that
+        # cannot bind to Invoke-PhaseContainmentCommentScan's typed
+        # parameters) must degrade that ONE tuple, not abort every other
+        # tuple in this loop — the original per-item try/catch this
+        # extraction moved away from.
+        try {
+            $scanned = Invoke-PhaseContainmentCommentScan `
+                -CommentBodies $tuple['Bodies'] `
+                -IssueOrPrNumber $tuple['Number'] `
+                -Surface $tuple['Surface'] `
+                -CreatedAtValues $tuple['CreatedAtValues']
 
-        foreach ($e in $scanned) { $entries.Add($e) }
+            foreach ($e in $scanned) { $entries.Add($e) }
+        }
+        catch {
+            Write-Warning "phase-containment-rolling-history-core: Surface A tuple scan failed for Number='$($tuple['Number'])': $_"
+        }
     }
 
     return , $entries.ToArray()
@@ -650,13 +661,20 @@ function script:Get-SurfaceBEntriesGraphQL {
 
     $entries = [System.Collections.Generic.List[hashtable]]::new()
     foreach ($tuple in $tuples) {
-        $scanned = Invoke-PhaseContainmentCommentScan `
-            -CommentBodies $tuple['Bodies'] `
-            -IssueOrPrNumber $tuple['Number'] `
-            -Surface $tuple['Surface'] `
-            -CreatedAtValues $tuple['CreatedAtValues']
+        # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
+        # identical per-item try/catch for the rationale.
+        try {
+            $scanned = Invoke-PhaseContainmentCommentScan `
+                -CommentBodies $tuple['Bodies'] `
+                -IssueOrPrNumber $tuple['Number'] `
+                -Surface $tuple['Surface'] `
+                -CreatedAtValues $tuple['CreatedAtValues']
 
-        foreach ($e in $scanned) { $entries.Add($e) }
+            foreach ($e in $scanned) { $entries.Add($e) }
+        }
+        catch {
+            Write-Warning "phase-containment-rolling-history-core: Surface B tuple scan failed for Number='$($tuple['Number'])': $_"
+        }
     }
 
     return , $entries.ToArray()
@@ -758,13 +776,20 @@ function script:Get-PhaseContainmentEntriesRest {
 
     $entries = [System.Collections.Generic.List[hashtable]]::new()
     foreach ($tuple in $tuples) {
-        $scanned = Invoke-PhaseContainmentCommentScan `
-            -CommentBodies $tuple['Bodies'] `
-            -IssueOrPrNumber $tuple['Number'] `
-            -Surface $tuple['Surface'] `
-            -CreatedAtValues $tuple['CreatedAtValues']
+        # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
+        # identical per-item try/catch for the rationale.
+        try {
+            $scanned = Invoke-PhaseContainmentCommentScan `
+                -CommentBodies $tuple['Bodies'] `
+                -IssueOrPrNumber $tuple['Number'] `
+                -Surface $tuple['Surface'] `
+                -CreatedAtValues $tuple['CreatedAtValues']
 
-        foreach ($e in $scanned) { $entries.Add($e) }
+            foreach ($e in $scanned) { $entries.Add($e) }
+        }
+        catch {
+            Write-Warning "phase-containment-rolling-history-core: REST tuple scan failed for Number='$($tuple['Number'])': $_"
+        }
     }
 
     return , $entries.ToArray()
@@ -799,6 +824,18 @@ function Get-PhaseContainmentCommentCorpus {
         Falls back from GraphQL to REST on error, matching
         Get-PhaseContainmentHistory's fallback behavior. Does not use the
         1-hour cache (that cache stores parsed Entries, not raw bodies).
+
+        M12 note (issue #782 post-review, informational only — no behavior
+        change): under the REST fallback path (Source = 'rest'), every
+        tuple's CreatedAtValues is always an empty array. The REST discovery
+        helper (script:Get-PhaseContainmentCorpusRest) uses `gh issue/pr
+        view --json comments`, whose comment objects do not carry a
+        createdAt field the way the GraphQL path's `comments(first: 100) {
+        nodes { body createdAt } }` query does, so REST-sourced tuples
+        cannot populate per-comment timestamps. Callers that rely on
+        CreatedAtValues (e.g. Invoke-PhaseContainmentDedup's latest-wins
+        comparison) degrade gracefully under REST (empty string per entry),
+        but should not expect real timestamps when Source = 'rest'.
     .PARAMETER RepoOwner
         GitHub repository owner (e.g., 'Grimblaz'). Resolved via 'gh repo view' if not supplied.
     .PARAMETER RepoName

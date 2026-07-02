@@ -158,7 +158,12 @@ function script:Format-EmissionGapLine {
     )
 
     if ($Gap.ParseStatus -eq 'could-not-verify') {
-        return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (sustained=$($Gap.SustainedCount), blocks=$($Gap.BlockCount))"
+        # M13 fix (issue #782 post-review): could-not-verify means the
+        # sustained/blocks numbers reflect only the bodies that DID parse —
+        # a skimming maintainer could otherwise mistake a small-looking
+        # count for a trustworthy one. Qualify the numbers explicitly rather
+        # than presenting them at face value.
+        return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (partial, do not trust: sustained=$($Gap.SustainedCount), blocks=$($Gap.BlockCount))"
     }
     if ($Gap.Gap -gt 0) {
         return "  ${Surface} #${Id}: GAP -- sustained=$($Gap.SustainedCount) blocks=$($Gap.BlockCount) missing=$($Gap.Gap)"
@@ -167,8 +172,23 @@ function script:Format-EmissionGapLine {
 }
 
 # ---------------------------------------------------------------------------
-# Render ready-to-paste scaffold blocks for a gap (M7: paste-safe until a
-# human sets the phases). One block per missing finding (Gap count).
+# Render ready-to-paste scaffold blocks for a gap (paste-safe until a human
+# sets the phases). One block per missing finding (Gap count).
+#
+# Issue #782 post-review Fix A (M2 defense-in-depth): open/close tag lines
+# render via Format-InertMarkerLabel rather than live
+# <!-- phase-containment-{ID} --> / <!-- /phase-containment-{ID} --> HTML
+# comment literals. Fix A's schema-validation gate in Get-EmissionGap
+# (escape_distance: -1 always fails Test-PhaseContainmentEntry) already
+# structurally prevents this scaffold from ever counting toward a real gap
+# even if pasted verbatim with live markers restored — this inert rendering
+# is a second, independent layer so the posted REPORT comment itself never
+# carries a live phase-containment marker literal that a later sweep could
+# misparse, matching the hygiene already applied to the trailer mention
+# (M9/Format-InertMarkerLabel). A human backfilling for real strips the
+# backticks and restores the live `<!--`/`-->` HTML-comment syntax by hand
+# after setting the TODO-human phases, exactly as they must already rewrite
+# every TODO-human placeholder.
 # ---------------------------------------------------------------------------
 function script:Format-BackfillScaffold {
     param(
@@ -179,9 +199,12 @@ function script:Format-BackfillScaffold {
 
     if ($MissingCount -le 0) { return '' }
 
+    $openLabel = script:Format-InertMarkerLabel -MarkerText "<!-- phase-containment-$Id -->"
+    $closeLabel = script:Format-InertMarkerLabel -MarkerText "<!-- /phase-containment-$Id -->"
+
     $lines = [System.Collections.Generic.List[string]]::new()
     for ($i = 1; $i -le $MissingCount; $i++) {
-        $lines.Add("<!-- phase-containment-$Id -->")
+        $lines.Add($openLabel)
         $lines.Add("finding_key: ${Surface}:${Id}:TODO-human-$i")
         $lines.Add('introduced_phase: TODO-human')
         $lines.Add('catchable_phase: TODO-human')
@@ -192,7 +215,7 @@ function script:Format-BackfillScaffold {
         $lines.Add('category: TODO-human')
         $lines.Add('apparatus_meta: false')
         $lines.Add('seed: false')
-        $lines.Add("<!-- /phase-containment-$Id -->")
+        $lines.Add($closeLabel)
     }
     return ($lines -join "`n")
 }

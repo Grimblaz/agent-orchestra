@@ -228,8 +228,22 @@ Describe 'Could-not-verify rendering' {
         }
     }
 
-    It 'renders COULD NOT VERIFY when the body is unparseable/ambiguous' {
-        $malformedBody = '<!-- judge-rulings pr=1 -->' # unclosed / no recognizable vocabulary
+    It 'renders COULD NOT VERIFY when the body carries a real marker head with recognizable-but-unparseable vocabulary' {
+        # Post-M6-fix: a bare head with NO follow-on vocabulary at all (e.g.
+        # a lone '<!-- judge-rulings pr=1 -->' with nothing else) is now
+        # correctly treated as a bare mention, not a real marker (M6). This
+        # fixture instead anchors a real marker: the head IS followed by a
+        # recognizable `judge_ruling:` field token, so Test-EmissionMarkerPresent
+        # correctly identifies it as a real judge-rulings surface — but its
+        # value ('maybe-sustained-ish') is unrecognized vocabulary, so DD3's
+        # fail-loud invariant still applies via Get-SustainedFindingCount.
+        $malformedBody = @'
+<!-- judge-rulings
+- id: Z1
+  judge_ruling: maybe-sustained-ish
+  judge_confidence: high
+-->
+'@
         function global:gh {
             param([Parameter(ValueFromRemainingArguments = $true)]$Args)
             $global:LASTEXITCODE = 0
@@ -240,6 +254,47 @@ Describe 'Could-not-verify rendering' {
         $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -PrNumber '1'
 
         $report | Should -Match 'COULD NOT VERIFY -- treat as gap'
+    }
+
+    It 'renders clean (not could-not-verify) for a bare marker-head mention with no follow-on vocabulary (M6)' {
+        $bareMentionBody = '<!-- judge-rulings pr=1 -->' # unclosed / no recognizable vocabulary anywhere nearby
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            return (@{ comments = @(@{ body = $bareMentionBody }) } | ConvertTo-Json -Depth 6)
+        }
+        Mock Find-OrUpsertComment { return 'https://example.invalid/comment' }
+
+        $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -PrNumber '1'
+
+        $report | Should -Not -Match 'COULD NOT VERIFY'
+        $report | Should -Match 'code-review #1: clean -- sustained=0 blocks=0'
+    }
+
+    It 'M13 fix: qualifies the sustained/blocks numbers on a COULD NOT VERIFY line so a skimming maintainer is not misled' {
+        # ParseStatus could-not-verify means the numbers reflect only the
+        # bodies that DID parse — a skimming maintainer reading
+        # "sustained=1, blocks=0" could mistake it for a small, trustworthy
+        # gap when the real count is unknown. The line must qualify the
+        # numbers (e.g. "(partial, do not trust)") rather than presenting
+        # them at face value.
+        $malformedBody = @'
+<!-- judge-rulings
+- id: Z1
+  judge_ruling: maybe-sustained-ish
+  judge_confidence: high
+-->
+'@
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            return (@{ comments = @(@{ body = $malformedBody }) } | ConvertTo-Json -Depth 6)
+        }
+        Mock Find-OrUpsertComment { return 'https://example.invalid/comment' }
+
+        $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -PrNumber '1'
+
+        $report | Should -Match 'COULD NOT VERIFY -- treat as gap \(partial, do not trust: sustained=\d+, blocks=\d+\)'
     }
 }
 
@@ -254,7 +309,7 @@ Describe '-ScaffoldBackfill rendering' {
         }
     }
 
-    It 'renders open AND closing tags with TODO-human placeholders and escape_distance: -1' {
+    It 'renders open AND closing marker labels (inert, M2 defense-in-depth) with TODO-human placeholders and escape_distance: -1' {
         $prBody = @'
 <!-- judge-rulings pr=42 -->
 judge_ruling: sustained
@@ -269,8 +324,15 @@ judge_ruling: sustained
 
         $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -PrNumber '42' -ScaffoldBackfill
 
-        $report | Should -Match '<!-- phase-containment-42 -->'
-        $report | Should -Match '<!-- /phase-containment-42 -->'
+        # Fix A (M2 defense-in-depth): the scaffold's open/close tags render
+        # via Format-InertMarkerLabel, never as live HTML-comment literals,
+        # so a posted report can never be re-parsed as a phantom
+        # phase-containment block by a later sweep (same hygiene as M9's
+        # trailer mention).
+        $report | Should -Not -Match '<!--\s*phase-containment-42\s*-->'
+        $report | Should -Not -Match '<!--\s*/phase-containment-42\s*-->'
+        $report | Should -Match '`phase-containment-42`'
+        $report | Should -Match '`/phase-containment-42`'
         $report | Should -Match 'introduced_phase: TODO-human'
         $report | Should -Match 'catchable_phase: TODO-human'
         $report | Should -Match 'escape_distance: -1'
@@ -293,7 +355,11 @@ judge_ruling: sustained
 
         $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -PrNumber '43' -ScaffoldBackfill
 
-        $openTagMatches = [regex]::Matches($report, [regex]::Escape('<!-- phase-containment-43 -->'))
+        # Count only scaffold OPEN labels immediately followed by
+        # finding_key: (the trailer mention's inert label at the bottom of
+        # the report is a different occurrence of the same marker name, not
+        # a scaffold block, and must not be double-counted here).
+        $openTagMatches = [regex]::Matches($report, [regex]::Escape('`phase-containment-43`') + '\r?\nfinding_key:')
         $openTagMatches.Count | Should -Be 3
     }
 

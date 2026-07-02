@@ -25,13 +25,20 @@ Set-StrictMode -Version Latest
 
 #region Valid surfaces / id-domain mapping
 
-# -Surface uses the core's stage names exactly (StageProjections keys).
+# -Surface uses the core's stage names exactly (StageProjections keys):
+# 'code-review', 'design-challenge', 'plan-stress-test' — see the three
+# [ValidateSet('code-review', 'design-challenge', 'plan-stress-test')]
+# parameter attributes in this file for the single source of truth (M11:
+# removed the redundant, never-referenced $script:ValidEmissionCheckSurfaces
+# array — PowerShell's ValidateSet attribute requires compile-time constant
+# values, so it cannot reference a script-scoped variable as a dynamic
+# source without a custom IValidateSetValuesGenerator class, which is more
+# machinery than three inline literal lists warrant here).
 # id-domain per surface:
 #   code-review                -> Id = PR number,    blocks live on PR comments
 #   design-challenge            -> Id = issue number, blocks live on issue comments (design-phase-complete-{ID})
 #   plan-stress-test            -> Id = issue number, blocks live on issue comments (plan-issue-{ID})
 # Callers must pass the matching domain; this module does not verify it.
-$script:ValidEmissionCheckSurfaces = @('code-review', 'design-challenge', 'plan-stress-test')
 
 #endregion
 
@@ -63,6 +70,22 @@ function Test-EmissionMarkerPresent {
           code-review / plan-stress-test: bare `<!-- judge-rulings` or
             attributed `<!-- judge-rulings pr=N -->`
           design-challenge: `finding_dispositions:` YAML key
+
+        M6 fix (issue #782 post-review): a bare head-substring match alone
+        used to be sufficient, which meant a maintainer describing the
+        marker convention in ordinary prose (e.g. "this PR uses the
+        standard <!-- judge-rulings pr=N --> marker for tracking review
+        dispositions") forced the whole-PR aggregate to could-not-verify
+        even when the real judge-rulings comment elsewhere on the PR parsed
+        cleanly. The head match now must additionally anchor a region that
+        looks like it is trying to be a real judge-rulings /
+        finding_dispositions body: within a bounded lookahead window after
+        the head, at least one recognizable field-vocabulary token
+        (disposition/judge_ruling/verdict/finding_key for code-review and
+        plan-stress-test; disposition/finding_id/schema_version for
+        design-challenge) must appear as a YAML-shaped `key:` token. A bare
+        mention with no such follow-on content is treated as ordinary prose,
+        not a real marker.
     .PARAMETER Surface
         One of: code-review, design-challenge, plan-stress-test
     .PARAMETER Body
@@ -79,12 +102,33 @@ function Test-EmissionMarkerPresent {
         return $false
     }
 
+    # Bounded lookahead window after a matched head, within which real
+    # marker content is expected to appear. Generous enough to cover every
+    # live fixture's head-to-first-field distance, small enough that a
+    # single sentence of surrounding prose cannot accidentally satisfy it.
+    $lookaheadWindow = 400
+
     if ($Surface -eq 'design-challenge') {
-        return [regex]::IsMatch($Body, '(?m)^finding_dispositions\s*:\s*$')
+        $headMatch = [regex]::Match($Body, '(?m)^finding_dispositions\s*:\s*$')
+        if (-not $headMatch.Success) { return $false }
+        $windowEnd = [Math]::Min($Body.Length, $headMatch.Index + $headMatch.Length + $lookaheadWindow)
+        $window = $Body.Substring($headMatch.Index, $windowEnd - $headMatch.Index)
+        return [regex]::IsMatch($window, '(?m)^\s*(disposition|finding_id|schema_version)\s*:')
     }
 
     # code-review and plan-stress-test share the judge-rulings marker head.
-    return [regex]::IsMatch($Body, '<!--\s*judge-rulings\b')
+    # M9 fix: \b is a non-word boundary, and a hyphen is ALSO a non-word
+    # character, so a bare \b-anchored regex matched superstring marker
+    # names like '<!-- judge-rulings-report -->' as if they were the real
+    # judge-rulings head. Tightened so the head must be followed by
+    # whitespace (the real marker's normal continuation), the closing
+    # '-->' (immediate self-close), or end-of-string — never an unrelated
+    # identifier character run like '-report'.
+    $headMatch = [regex]::Match($Body, '<!--\s*judge-rulings(?:\s|-->|$)')
+    if (-not $headMatch.Success) { return $false }
+    $windowEnd = [Math]::Min($Body.Length, $headMatch.Index + $headMatch.Length + $lookaheadWindow)
+    $window = $Body.Substring($headMatch.Index, $windowEnd - $headMatch.Index)
+    return [regex]::IsMatch($window, '(?m)(?:^\s*|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')
 }
 
 #endregion
@@ -169,7 +213,10 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     #   - bare, unclosed on the head line: `<!-- judge-rulings` (PRs #775/#781)
     #     — the tag's `-->` closes only at the END of the YAML content.
     $attributedHeadMatch = [regex]::Match($Body, '<!--\s*judge-rulings\s+pr=\d+\s*-->')
-    $bareHeadMatch = [regex]::Match($Body, '<!--\s*judge-rulings\b')
+    # M9 fix: see Test-EmissionMarkerPresent's identical fix for the
+    # superstring-marker-name rationale (e.g. '<!-- judge-rulings-report -->'
+    # must never match this real judge-rulings head).
+    $bareHeadMatch = [regex]::Match($Body, '<!--\s*judge-rulings(?:\s|-->|$)')
 
     $headMatch = $null
     if ($attributedHeadMatch.Success) {
@@ -205,6 +252,53 @@ function script:Get-JudgeRulingsSustainedCountInternal {
         return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
     }
 
+    # M8 fix (issue #782 post-review): region-end detection previously
+    # trusted the FIRST '-->' or code-fence found after the head
+    # unconditionally. A stray closer-like sequence inside ordinary prose
+    # BEFORE the real closing marker (e.g. a sentence describing the
+    # phase-flow notation "introduced --> catchable --> caught", which
+    # contains the literal 3-char substring '-->' twice) truncated the
+    # region early, silently dropping real disposition/judge_ruling lines
+    # that appeared after those stray sequences — a silent under-count with
+    # ParseStatus 'ok', exactly the failure mode DD3 exists to prevent.
+    # Detect the ambiguity instead of guessing: walk forward through
+    # consecutive candidate closers (bounded lookahead), and if recognizable
+    # disposition/judge_ruling vocabulary is found strictly BETWEEN the
+    # chosen close point and the NEXT candidate closer, the chosen boundary
+    # was very likely a false positive (prose containing a stray closer-like
+    # sequence, not the real marker boundary) — fail loud. Content found only
+    # AFTER a run of closely-spaced candidate closers (e.g. a downstream,
+    # unrelated phase-containment block that legitimately follows the real
+    # close) does not trigger this: the scan stops walking once a gap
+    # between consecutive candidates is large enough to look like ordinary
+    # post-marker content rather than another stray in-region sequence.
+    $ambiguityLookahead = 400
+    $maxGapBetweenCandidates = 120
+    $walkPos = $regionEnd + 3
+    $walkBudgetEnd = [Math]::Min($Body.Length, $regionEnd + 3 + $ambiguityLookahead)
+    while ($walkPos -lt $walkBudgetEnd) {
+        $nextCloseCommentIdx = $Body.IndexOf('-->', $walkPos, [System.StringComparison]::Ordinal)
+        $nextCloseFenceIdx = $Body.IndexOf('```', $walkPos, [System.StringComparison]::Ordinal)
+        $nextCandidateCloser = -1
+        if ($nextCloseCommentIdx -ge 0 -and $nextCloseFenceIdx -ge 0) {
+            $nextCandidateCloser = [Math]::Min($nextCloseCommentIdx, $nextCloseFenceIdx)
+        }
+        elseif ($nextCloseCommentIdx -ge 0) {
+            $nextCandidateCloser = $nextCloseCommentIdx
+        }
+        elseif ($nextCloseFenceIdx -ge 0) {
+            $nextCandidateCloser = $nextCloseFenceIdx
+        }
+        if ($nextCandidateCloser -lt 0 -or $nextCandidateCloser - $walkPos -gt $maxGapBetweenCandidates) {
+            break
+        }
+        $between = $Body.Substring($walkPos, $nextCandidateCloser - $walkPos)
+        if ([regex]::IsMatch($between, '(?m)(?:^\s*|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')) {
+            return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+        }
+        $walkPos = $nextCandidateCloser + 3
+    }
+
     $region = $Body.Substring($regionStart, $regionEnd - $regionStart)
 
     # required_fixes: is a parallel decoy list present in the intake variant
@@ -216,15 +310,29 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     }
 
     # Detect vocabulary in priority order: four-value variant > intake variant > canonical.
-    $hasDismiss = $region -match '(?m)disposition\s*:\s*Dismiss\b'
-    $hasFixNow = $region -match '(?m)disposition\s*:\s*(Fix-now|Fix-in-PR|Defer)\b'
+    # M3 fix: anchor `disposition:` to a real YAML key position, not just
+    # (?m) multiline mode alone. (?m) only anchors ^/$ to line boundaries; it
+    # does NOT require the match to start there, so "disposition: Dismiss"
+    # embedded mid-line inside free-text prose (e.g. a summary: string
+    # quoting another finding's disposition) previously still matched and
+    # could silently hijack detection into the wrong variant branch,
+    # producing SustainedCount=0 despite real sustained findings (DD3
+    # fail-loud violation). A real disposition key position is either at
+    # true line-start (block-mapping style, e.g. PR #775) or immediately
+    # after `{` / `,` (flow-mapping style, e.g. live PR #778's
+    # `U1: {disposition: Fix-now, ...}` shape) — prose mentions inside a
+    # summary/description string value are preceded by ordinary sentence
+    # characters and are excluded by this anchor.
+    $keyAnchor = '(?:^\s*|[{,]\s*)'
+    $hasDismiss = $region -match "(?m)${keyAnchor}disposition\s*:\s*Dismiss\b"
+    $hasFixNow = $region -match "(?m)${keyAnchor}disposition\s*:\s*(Fix-now|Fix-in-PR|Defer)\b"
     $hasReviewModeIntake = $region -match "review_mode\s*:\s*['""]?github-intake-proxy-prosecution"
-    $hasAcceptReject = $region -match '(?m)disposition\s*:\s*(accept|reject)\b'
+    $hasAcceptReject = $region -match "(?m)${keyAnchor}disposition\s*:\s*(accept|reject)\b"
     $hasJudgeRuling = $region -match '(?m)judge_ruling\s*:\s*\S'
 
     if ($hasDismiss -or $hasFixNow) {
         # Four-value variant: sustained = every finding whose disposition is not Dismiss.
-        $dispositionMatches = [regex]::Matches($region, '(?m)disposition\s*:\s*(Fix-now|Fix-in-PR|Defer|Dismiss)\b')
+        $dispositionMatches = [regex]::Matches($region, "(?m)${keyAnchor}disposition\s*:\s*(Fix-now|Fix-in-PR|Defer|Dismiss)\b")
         if ($dispositionMatches.Count -eq 0) {
             return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
         }
@@ -240,7 +348,7 @@ function script:Get-JudgeRulingsSustainedCountInternal {
             return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
         }
         $findingsRegion = $findingsMatch.Groups[1].Value
-        $dispositionMatches = [regex]::Matches($findingsRegion, '(?m)disposition\s*:\s*(accept|reject)\b')
+        $dispositionMatches = [regex]::Matches($findingsRegion, "(?m)${keyAnchor}disposition\s*:\s*(accept|reject)\b")
         if ($dispositionMatches.Count -eq 0) {
             return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
         }
@@ -362,7 +470,9 @@ function Get-EmissionGap {
     $anyCouldNotVerify = $false
 
     foreach ($body in $Bodies) {
-        if (Test-EmissionMarkerPresent -Surface $Surface -Body $body) {
+        $bodyHasMarker = Test-EmissionMarkerPresent -Surface $Surface -Body $body
+
+        if ($bodyHasMarker) {
             $sustainedResult = Get-SustainedFindingCount -Surface $Surface -Body $body
             if ($sustainedResult.ParseStatus -eq 'could-not-verify') {
                 $anyCouldNotVerify = $true
@@ -373,10 +483,44 @@ function Get-EmissionGap {
         # chatter, not a judge-rulings surface. Skip it (0 contribution,
         # does not poison ParseStatus). See Get-EmissionGap's .DESCRIPTION.
 
-        $blocks = Get-PhaseContainmentBlock -Text $body -Id $Id
-        if ($blocks) {
-            $totalBlocks += $blocks.Count
+        # Fix A (issue #782 judge-required fixes, closes M1/M2/M4/M5):
+        # a block only counts toward this surface's BlockCount when ALL of:
+        #   1. Its body ALSO carries this surface's own authoritative marker
+        #      head (M4) — closes the pure-chatter-with-injected-blocks
+        #      vector (e.g. a scaffold-report re-sweep, M2).
+        #   2. The individual block's finding_key is prefixed for THIS
+        #      surface specifically (M1) — body-level marker co-location
+        #      alone is not sufficient, since design-challenge and
+        #      plan-stress-test marker heads can legitimately co-occur in
+        #      the SAME issue body, and each block must be attributed to its
+        #      own surface via its finding_key prefix
+        #      ("design-challenge:...", "plan-stress-test:...",
+        #      "code-review:...").
+        #   3. The block passes Test-PhaseContainmentEntry schema validation
+        #      (M2/M5) — TODO-human scaffolds (escape_distance: -1) and
+        #      other invalid entries can never silently count as satisfied.
+        if ($bodyHasMarker) {
+            $rawBlocks = Get-PhaseContainmentBlock -Text $body -Id $Id
+            if ($rawBlocks) {
+                $surfacePrefix = "${Surface}:"
+                foreach ($rawBlock in $rawBlocks) {
+                    $parsedEntry = ConvertFrom-PhaseContainmentYaml -Yaml $rawBlock
+                    $findingKey = [string]$parsedEntry['finding_key']
+                    if (-not $findingKey.StartsWith($surfacePrefix, [System.StringComparison]::Ordinal)) {
+                        continue
+                    }
+                    $validation = Test-PhaseContainmentEntry -Entry $parsedEntry
+                    if (-not $validation.IsValid) {
+                        continue
+                    }
+                    $totalBlocks++
+                }
+            }
         }
+        # else: body carries no marker head for this surface — its blocks
+        # (if any) do not count either. A bare phase-containment block with
+        # no accompanying authoritative marker on the same body is exactly
+        # the pure-chatter-with-injected-blocks vector M4 closes.
     }
 
     $parseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
@@ -486,6 +630,21 @@ function Add-CommentBlocks {
     if (-not $originalBody.Contains($ExpectedMarker)) {
         [Console]::Error.WriteLine("Add-CommentBlocks: expected marker '$ExpectedMarker' not found in comment $CommentId; refusing to append.")
         return [PSCustomObject]@{ Success = $false; Reason = "Expected marker '$ExpectedMarker' not found in comment body" }
+    }
+
+    # --- 2b. M10 fix: refuse the no-op case up front. ---
+    # NewContent carrying zero <!-- phase-containment-{ID} --> blocks means
+    # there is nothing for the post-write positive-proof loop to verify —
+    # step 5c's foreach over $newBlockIds is vacuously satisfied with zero
+    # iterations, so the function previously reported Success=$true for a
+    # write that appended content the caller never intended to be
+    # unverifiable filler (or masked a caller bug, e.g. a backfill scaffold
+    # that failed to render any blocks). Detect this before ever issuing the
+    # PATCH, so a no-op never masquerades as a successful append.
+    $preflightBlockIds = [regex]::Matches($NewContent, '<!--\s*phase-containment-([A-Za-z0-9_-]+)\s*-->')
+    if ($preflightBlockIds.Count -eq 0) {
+        [Console]::Error.WriteLine("Add-CommentBlocks: NewContent carries zero phase-containment blocks for comment $CommentId; refusing as a no-op.")
+        return [PSCustomObject]@{ Success = $false; Reason = 'no-op: NewContent carries zero phase-containment blocks' }
     }
 
     # --- 3. Concatenate. ---

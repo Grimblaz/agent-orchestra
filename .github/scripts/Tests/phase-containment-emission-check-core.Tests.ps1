@@ -17,6 +17,43 @@ BeforeAll {
     $script:LibRoot = Join-Path $PSScriptRoot '..' 'lib'
     . (Join-Path $script:LibRoot 'phase-containment-emission-check-core.ps1')
 
+#region Test helper: New-ValidPhaseContainmentBlockText (Fix A / M2 M5 support)
+
+# Builds a schema-valid <!-- phase-containment-{Id} --> block with a
+# surface-prefixed finding_key, for tests exercising Fix A's
+# marker-co-location + finding_key-prefix + Test-PhaseContainmentEntry gating.
+# escape_distance is computed correctly by default (projection(caught_stage)
+# - ordinal(catchable_phase)) so the block passes schema validation unless a
+# test deliberately overrides a field to make it invalid.
+function script:New-ValidPhaseContainmentBlockText {
+    param(
+        [Parameter(Mandatory)][string]$Id,
+        [Parameter(Mandatory)][string]$Surface,
+        [Parameter(Mandatory)][string]$FindingSuffix,
+        [string]$CatchablePhase = 'implementation',
+        [string]$CaughtStage = 'code-review',
+        [int]$EscapeDistance = 0
+    )
+    $findingKey = "${Surface}:${Id}:${FindingSuffix}"
+    $lines = @(
+        "<!-- phase-containment-$Id -->"
+        "finding_key: $findingKey"
+        "introduced_phase: $CatchablePhase"
+        "catchable_phase: $CatchablePhase"
+        "caught_stage: $CaughtStage"
+        "escape_distance: $EscapeDistance"
+        'severity: low'
+        'systemic_fix_type: none'
+        'category: pattern'
+        'apparatus_meta: false'
+        'seed: false'
+        "<!-- /phase-containment-$Id -->"
+    )
+    return ($lines -join "`n")
+}
+
+#endregion
+
 #region Live fixture: PR #775 — GitHub-intake proxy-prosecution variant
 
 # Verbatim from PR #775's judge-rulings comment (gh pr view 775 --json comments).
@@ -326,6 +363,38 @@ $script:UnknownVocabularyBody = @'
 
 #endregion
 
+#region Synthetic fixture: M3 regression — free-text prose substring mimics a disposition line
+
+# The judge's exact required regression case. This is the intake-mode variant
+# (review_mode: github-intake-proxy-prosecution) with 2 REAL sustained
+# findings (disposition: accept). Finding M2's free-text `summary:` prose
+# contains the literal substring "disposition: Dismiss" describing an
+# UNRELATED finding's history in prose, not a real structured disposition
+# line. Pre-fix, the unanchored regex `(?m)disposition\s*:\s*Dismiss\b`
+# matched this prose substring anywhere in the region (mid-line, not at true
+# YAML line-start) and set $hasDismiss = $true. Because the four-value
+# detectors ($hasDismiss/$hasFixNow) are checked BEFORE the intake-mode
+# detector in the priority-order chain, this silently hijacked routing away
+# from the correct intake-mode branch and into the four-value branch, where
+# "accept" is not a recognized four-value token — leaving only the phantom
+# prose "Dismiss" match, which yields SustainedCount=0 despite 2 real
+# sustained findings. This is exactly the DD3 fail-loud violation the judge
+# required a regression test for: a silent 0 instead of could-not-verify (or,
+# with the fix, the correct real count).
+$script:M3DismissSubstringInProseBody = @'
+<!-- judge-rulings pr=901 -->
+findings:
+  - id: M1
+    disposition: accept
+  - id: M2
+    disposition: accept
+    summary: "Old prosecution notes said disposition: Dismiss for a different finding, later reversed on appeal."
+review_mode: github-intake-proxy-prosecution
+-->
+'@
+
+#endregion
+
 }
 
 Describe 'Get-SustainedFindingCount - code-review surface (live fixtures)' {
@@ -400,6 +469,20 @@ Describe 'Get-SustainedFindingCount - fail-loud paths (DD3)' {
     }
 }
 
+Describe 'Get-SustainedFindingCount - M3 regression: line-start anchoring on disposition detectors' {
+    It 'does not mis-trigger or under-count when free-text prose contains the substring "disposition: Dismiss" (judge-required regression test)' {
+        # Pre-fix, unanchored `(?m)disposition\s*:\s*Dismiss\b` etc. could match
+        # inside indented prose (a summary: string), not just at true YAML
+        # line-start. This body has 2 REAL structured Fix-now dispositions and
+        # a prose mention of the "disposition: Dismiss" substring buried in a
+        # summary string. The real sustained count (2) must survive: no silent
+        # Sustained=0, no ParseStatus regression.
+        $result = Get-SustainedFindingCount -Surface 'code-review' -Body $script:M3DismissSubstringInProseBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+    }
+}
+
 Describe 'Get-SustainedFindingCount - decoy resistance (M3)' {
     It 'does not count prose ACCEPT badges or table Sustained columns outside the marker region' {
         # PR #775's table has 2 uppercase "✅ ACCEPT" badges and PR #778's table
@@ -446,6 +529,77 @@ Describe 'Test-EmissionMarkerPresent - marker head detection' {
     }
 }
 
+Describe 'Test-EmissionMarkerPresent - M6 regression: bare prose mention does not force could-not-verify' {
+    It 'returns false for a docs-style prose sentence that mentions the judge-rulings marker syntax but anchors no parseable region' {
+        # A maintainer describing the marker convention in ordinary prose
+        # (e.g. a comment explaining "this PR uses the standard
+        # <!-- judge-rulings pr=N --> marker") is not a real judge-rulings
+        # surface. Pre-fix, the bare head-substring match alone returned
+        # true, which forced Get-SustainedFindingCount to be called and fail
+        # to parse -> could-not-verify, poisoning an otherwise-clean PR's
+        # whole aggregate even though the real judge comment elsewhere on
+        # the same PR parses fine.
+        $body = 'This PR uses the standard <!-- judge-rulings pr=N --> marker convention for tracking review dispositions. See the skill docs for details.'
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $body | Should -Be $false
+    }
+
+    It 'still returns true for a real head immediately followed by recognizable disposition/verdict vocabulary (no regression on live shapes)' {
+        # All 3 live PR fixtures (#775, #778, #781) and the design/plan
+        # fixtures must keep returning true — covered by the pre-existing
+        # tests in this Describe block. This test locks in the bare
+        # self-closing-head-with-immediate-YAML-follow shape specifically.
+        $body = "<!-- judge-rulings pr=50 -->`njudge_ruling: sustained`n-->"
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $body | Should -Be $true
+    }
+
+    It 'returns false for a design-challenge body where finding_dispositions: appears in an unrelated code snippet with no entries following' {
+        $body = @'
+Here is an example schema key name for reference: `finding_dispositions:` is
+used by the design-challenge surface. This comment does not itself contain
+any real disposition entries.
+'@
+        Test-EmissionMarkerPresent -Surface 'design-challenge' -Body $body | Should -Be $false
+    }
+}
+
+Describe 'Test-EmissionMarkerPresent / Get-SustainedFindingCount - M9 regression: superstring marker names do not false-match' {
+    It 'Test-EmissionMarkerPresent returns false for a body carrying only a differently-named judge-rulings-report marker, even with real-looking vocabulary following it' {
+        # \b is a non-word boundary; a hyphen immediately after 'judge-rulings'
+        # is ALSO a non-word character, so the bare \b-anchored regex matched
+        # a completely different, unrelated marker name
+        # ('<!-- judge-rulings-report -->') as if it were the real
+        # judge-rulings head. This is not fully defeated by the M6
+        # vocabulary-lookahead fix alone: when the unrelated marker's body
+        # legitimately contains a judge_ruling: line on its own (e.g. a
+        # differently-scoped report that happens to embed review vocabulary),
+        # M6's lookahead check is satisfied and the false head-match still
+        # goes through. Tightened separately: the head must be followed by
+        # whitespace, the attributed 'pr=' token, or the closing '-->' —
+        # never an unrelated identifier character run like '-report'.
+        $body = @'
+<!-- judge-rulings-report -->
+judge_ruling: sustained
+-->
+'@
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $body | Should -Be $false
+    }
+
+    It 'Get-SustainedFindingCount still returns could-not-verify (not a false head-match) for a judge-rulings-report-only body' {
+        $body = @'
+<!-- judge-rulings-report -->
+judge_ruling: sustained
+-->
+'@
+        $result = Get-SustainedFindingCount -Surface 'code-review' -Body $body
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'still matches the real bare head shape (no regression on live fixtures)' {
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:Pr781Body | Should -Be $true
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:Pr778Body | Should -Be $true
+    }
+}
+
 Describe 'Get-EmissionGap - aggregation across multiple bodies' {
     It 'sums SustainedCount and BlockCount across bodies and computes Gap for PR #775 pre-backfill (2 sustained, 0 blocks)' {
         $result = Get-EmissionGap -Bodies @($script:Pr775Body) -Id 775 -Surface 'code-review'
@@ -455,8 +609,12 @@ Describe 'Get-EmissionGap - aggregation across multiple bodies' {
         $result.ParseStatus | Should -Be 'ok'
     }
 
-    It 'computes Gap 0 when a matching phase-containment block is present for every sustained finding' {
-        $bodyWithBlock = $script:ZeroSustainedBody + "`n<!-- phase-containment-999 -->`nfinding_key: x`n<!-- /phase-containment-999 -->"
+    It 'computes Gap 0 when a matching, schema-valid, correctly-prefixed phase-containment block is present for every sustained finding' {
+        # Fix A (M4): the block only counts because its body ALSO carries the
+        # surface's own authoritative marker head (ZeroSustainedBody carries
+        # <!-- judge-rulings pr=999 -->, the code-review marker).
+        $validBlock = script:New-ValidPhaseContainmentBlockText -Id '999' -Surface 'code-review' -FindingSuffix 'F1'
+        $bodyWithBlock = $script:ZeroSustainedBody + "`n$validBlock"
         $result = Get-EmissionGap -Bodies @($bodyWithBlock) -Id 999 -Surface 'code-review'
         $result.SustainedCount | Should -Be 0
         $result.BlockCount | Should -Be 1
@@ -471,7 +629,9 @@ Describe 'Get-EmissionGap - aggregation across multiple bodies' {
         # judge-rulings surfaces (marker-less-skip behavior is covered
         # separately below).
         $bodyOne = $script:Pr781Body
-        $bodyTwo = $script:ZeroSustainedBody + "`n<!-- phase-containment-781 -->`nfinding_key: a`n<!-- /phase-containment-781 -->`n<!-- phase-containment-781 -->`nfinding_key: b`n<!-- /phase-containment-781 -->"
+        $blockA = script:New-ValidPhaseContainmentBlockText -Id '781' -Surface 'code-review' -FindingSuffix 'a'
+        $blockB = script:New-ValidPhaseContainmentBlockText -Id '781' -Surface 'code-review' -FindingSuffix 'b'
+        $bodyTwo = $script:ZeroSustainedBody + "`n$blockA`n$blockB"
         $result = Get-EmissionGap -Bodies @($bodyOne, $bodyTwo) -Id 781 -Surface 'code-review'
         $result.SustainedCount | Should -Be 4
         $result.BlockCount | Should -Be 2
@@ -487,25 +647,32 @@ Describe 'Get-EmissionGap - aggregation across multiple bodies' {
         # surface" and made every real multi-comment PR permanently
         # unverifiable (live PRs #775/#778/#781 all reported COULD NOT VERIFY
         # despite their judge-rulings comment parsing fine). Corrected
-        # contract: a marker-less body contributes 0 and is skipped; only a
-        # body that DOES carry a marker head but fails to parse remains
-        # could-not-verify (covered by the next test).
+        # contract: a marker-less body contributes 0 sustained and is skipped
+        # for SustainedCount. Fix A (M4) tightens block counting further: a
+        # marker-less body's blocks ALSO do not count toward BlockCount now
+        # (co-location gate), since a bare block with no accompanying
+        # authoritative marker on the same body is exactly the
+        # pure-chatter-with-injected-blocks vector M4 closes.
         $bodyOne = $script:Pr781Body
-        $bodyTwo = "<!-- phase-containment-781 -->`nfinding_key: a`n<!-- /phase-containment-781 -->"
+        $blockOnly = script:New-ValidPhaseContainmentBlockText -Id '781' -Surface 'code-review' -FindingSuffix 'a'
+        $bodyTwo = $blockOnly
         $result = Get-EmissionGap -Bodies @($bodyOne, $bodyTwo) -Id 781 -Surface 'code-review'
         $result.ParseStatus | Should -Be 'ok'
         $result.SustainedCount | Should -Be 4
-        $result.BlockCount | Should -Be 1
-        $result.Gap | Should -Be 3
+        $result.BlockCount | Should -Be 0
+        $result.Gap | Should -Be 4
     }
 
     It 'propagates could-not-verify when a body carries a marker head but its content is malformed (DD3 fail-loud still applies)' {
         # Distinguishes "marker present but unparseable" (still could-not-verify
         # per DD3) from "no marker at all" (skipped, prior test). Uses
         # UnknownVocabularyBody, which has a real `<!-- judge-rulings` head
-        # but an unrecognized disposition value.
-        $cleanBody = "<!-- phase-containment-1 -->`nfinding_key: a`n<!-- /phase-containment-1 -->"
-        $result = Get-EmissionGap -Bodies @($script:UnknownVocabularyBody, $cleanBody) -Id 1 -Surface 'code-review'
+        # but an unrecognized disposition value. The second body's block does
+        # not count (no marker head co-located, per Fix A M4), but that is
+        # incidental here — the point of this test is the could-not-verify
+        # propagation from the first body.
+        $cleanBlockOnly = script:New-ValidPhaseContainmentBlockText -Id '1' -Surface 'code-review' -FindingSuffix 'a'
+        $result = Get-EmissionGap -Bodies @($script:UnknownVocabularyBody, $cleanBlockOnly) -Id 1 -Surface 'code-review'
         $result.ParseStatus | Should -Be 'could-not-verify'
     }
 
@@ -523,6 +690,160 @@ Describe 'Get-EmissionGap - aggregation across multiple bodies' {
         $result.BlockCount | Should -Be 0
         $result.Gap | Should -Be 0
         $result.ParseStatus | Should -Be 'ok'
+    }
+}
+
+Describe 'Get-EmissionGap - Fix A (M1) cross-surface block isolation — THE required M1 regression test' {
+    It 'does not count a design-challenge-prefixed block toward a plan-stress-test surface check on the same issue, and vice versa' {
+        # A single issue body can legitimately carry BOTH a design-challenge
+        # AND a plan-stress-test marker head in the same comment (e.g. a
+        # design-phase-complete comment that also discusses plan status).
+        # finding_key prefix — not just body-level marker co-location — must
+        # discriminate which blocks count toward which surface.
+        $designMarker = "finding_dispositions:`n  schema_version: 1"
+        $planMarker = "<!-- judge-rulings pr=900 -->`njudge_ruling: sustained`n-->"
+        $designBlock = script:New-ValidPhaseContainmentBlockText -Id '900' -Surface 'design-challenge' -FindingSuffix 'F1' -CatchablePhase 'design' -CaughtStage 'design-challenge' -EscapeDistance 0
+        $planBlock = script:New-ValidPhaseContainmentBlockText -Id '900' -Surface 'plan-stress-test' -FindingSuffix 'F1' -CatchablePhase 'plan' -CaughtStage 'plan-stress-test' -EscapeDistance 0
+        $coOccurringBody = "$designMarker`n`n$planMarker`n`n$designBlock`n`n$planBlock"
+
+        $designResult = Get-EmissionGap -Bodies @($coOccurringBody) -Id 900 -Surface 'design-challenge'
+        $planResult = Get-EmissionGap -Bodies @($coOccurringBody) -Id 900 -Surface 'plan-stress-test'
+
+        # Each surface's BlockCount reflects ONLY its own finding_key-prefixed
+        # block, never the other surface's co-located block.
+        $designResult.BlockCount | Should -Be 1
+        $planResult.BlockCount | Should -Be 1
+    }
+
+    It 'a code-review-prefixed block does not count toward a design-challenge surface check even when both marker heads co-occur' {
+        $designMarker = "finding_dispositions:`n  schema_version: 1"
+        $codeReviewBlock = script:New-ValidPhaseContainmentBlockText -Id '901' -Surface 'code-review' -FindingSuffix 'F1'
+        $body = "$designMarker`n`n$codeReviewBlock"
+
+        $designResult = Get-EmissionGap -Bodies @($body) -Id 901 -Surface 'design-challenge'
+        $designResult.BlockCount | Should -Be 0
+    }
+}
+
+Describe 'Get-EmissionGap - Fix A (M5) schema-invalid blocks do not count' {
+    It 'a block with escape_distance: -1 (TODO-human scaffold shape) does not count toward BlockCount' {
+        $marker = "<!-- judge-rulings pr=902 -->`njudge_ruling: sustained`n-->"
+        $scaffoldBlock = @(
+            '<!-- phase-containment-902 -->'
+            'finding_key: code-review:902:TODO-human-1'
+            'introduced_phase: TODO-human'
+            'catchable_phase: TODO-human'
+            'caught_stage: code-review'
+            'escape_distance: -1'
+            'severity: TODO-human'
+            'systemic_fix_type: TODO-human'
+            'category: TODO-human'
+            'apparatus_meta: false'
+            'seed: false'
+            '<!-- /phase-containment-902 -->'
+        ) -join "`n"
+        $body = "$marker`n`n$scaffoldBlock"
+
+        $result = Get-EmissionGap -Bodies @($body) -Id 902 -Surface 'code-review'
+        $result.BlockCount | Should -Be 0
+    }
+
+    It 'a block with an invalid enum value does not count toward BlockCount' {
+        $marker = "<!-- judge-rulings pr=903 -->`njudge_ruling: sustained`n-->"
+        $invalidBlock = script:New-ValidPhaseContainmentBlockText -Id '903' -Surface 'code-review' -FindingSuffix 'F1'
+        $invalidBlock = $invalidBlock -replace 'severity: low', 'severity: not-a-real-severity'
+        $body = "$marker`n`n$invalidBlock"
+
+        $result = Get-EmissionGap -Bodies @($body) -Id 903 -Surface 'code-review'
+        $result.BlockCount | Should -Be 0
+    }
+
+    It 'a valid block still counts alongside an invalid one in the same body (per-block gating, not whole-body rejection)' {
+        $marker = "<!-- judge-rulings pr=904 -->`njudge_ruling: sustained`n-->"
+        $validBlock = script:New-ValidPhaseContainmentBlockText -Id '904' -Surface 'code-review' -FindingSuffix 'F1'
+        $invalidBlock = (script:New-ValidPhaseContainmentBlockText -Id '904' -Surface 'code-review' -FindingSuffix 'F2') -replace 'escape_distance: 0', 'escape_distance: -1'
+        $body = "$marker`n`n$validBlock`n`n$invalidBlock"
+
+        $result = Get-EmissionGap -Bodies @($body) -Id 904 -Surface 'code-review'
+        $result.BlockCount | Should -Be 1
+    }
+}
+
+Describe 'Get-EmissionGap - Fix A (M2) posted scaffold-report re-sweep does not close a real gap' {
+    It 'a scaffold-report body (rendered by -ScaffoldBackfill, using inert marker labels) contributes zero blocks when re-swept' {
+        # Simulates the -ScaffoldBackfill report renderer's OWN output (after
+        # the M2 defense-in-depth fix applies Format-InertMarkerLabel to the
+        # scaffold too): the report never emits a live phase-containment
+        # marker literal, so re-sweeping the posted report comment can never
+        # be misread as satisfying the gap it just reported.
+        $marker = "<!-- judge-rulings pr=905 -->`njudge_ruling: sustained`njudge_ruling: sustained`n-->"
+        $scaffoldReportBody = @'
+## Phase-Containment Emission Check
+
+Backfill scaffold for code-review:
+```yaml
+`phase-containment-905`
+finding_key: code-review:905:TODO-human-1
+introduced_phase: TODO-human
+catchable_phase: TODO-human
+caught_stage: code-review
+escape_distance: -1
+severity: TODO-human
+systemic_fix_type: TODO-human
+category: TODO-human
+apparatus_meta: false
+seed: false
+`/phase-containment-905`
+```
+'@
+        $body = "$marker`n`n$scaffoldReportBody"
+
+        $result = Get-EmissionGap -Bodies @($body) -Id 905 -Surface 'code-review'
+        $result.BlockCount | Should -Be 0
+        $result.SustainedCount | Should -Be 2
+        $result.Gap | Should -Be 2
+    }
+}
+
+Describe 'Get-SustainedFindingCount - M8 regression: ambiguous region-end detection fails loud' {
+    It 'returns could-not-verify (not a silent under-count) when a stray closer in prose precedes real disposition lines that would otherwise be truncated away' {
+        # Region-end detection historically picked the FIRST '-->' or code
+        # fence found after the head, with no ambiguity check. A stray '-->'
+        # sequence inside ordinary prose BEFORE the real YAML content (e.g. a
+        # sentence describing the phase-flow arrow notation
+        # "introduced --> catchable --> caught") truncated the region early,
+        # silently dropping real judge_ruling: sustained lines that appear
+        # AFTER that stray closer — SustainedCount=1 with ParseStatus='ok'
+        # when the real count is 3. M8 requires detecting this ambiguity
+        # (multiple candidate closers before any real finding pattern is
+        # reached) and failing loud instead.
+        $body = @'
+<!-- judge-rulings pr=801 -->
+judge_ruling: sustained
+Note: the flow is introduced --> catchable --> caught for phase projection.
+judge_ruling: sustained
+judge_ruling: sustained
+-->
+'@
+        $result = Get-SustainedFindingCount -Surface 'code-review' -Body $body
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'still returns ok for the live PR #775/#778/#781 fixtures (no regression on real, unambiguous shapes)' {
+        # Real live fixtures have no stray closer-like sequences between the
+        # head and the true closing marker, so region-end detection must
+        # remain unambiguous and keep returning ok with the correct counts.
+        $result775 = Get-SustainedFindingCount -Surface 'code-review' -Body $script:Pr775Body
+        $result775.ParseStatus | Should -Be 'ok'
+        $result775.SustainedCount | Should -Be 2
+
+        $result778 = Get-SustainedFindingCount -Surface 'code-review' -Body $script:Pr778Body
+        $result778.ParseStatus | Should -Be 'ok'
+        $result778.SustainedCount | Should -Be 10
+
+        $result781 = Get-SustainedFindingCount -Surface 'code-review' -Body $script:Pr781Body
+        $result781.ParseStatus | Should -Be 'ok'
+        $result781.SustainedCount | Should -Be 4
     }
 }
 
@@ -661,8 +982,23 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
         $result.Reason | Should -Match 'phase-containment-775'
     }
 
-    It 'still succeeds via marker + truncation checks when NewContent carries no phase-containment block (degrade path)' {
+    It 'M10 fix: returns Success=$false with a no-op reason when NewContent carries zero phase-containment blocks, without writing' {
+        # Before the M10 fix, NewContent with no phase-containment blocks at
+        # all still proceeded through GET -> PATCH -> verify and reported
+        # Success=$true — a "positive-proof" loop that vacuously passed
+        # because there was nothing to prove. This silently masked a caller
+        # bug (e.g. a backfill scaffold that failed to render any blocks)
+        # as a successful append. The append primitive now refuses the
+        # no-op case up front and never issues the PATCH.
         $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent "`nplain text with no block markers"
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'no-op'
+        # Confirms no write was attempted: lastPatchArgs stays unset.
+        $script:lastPatchArgs | Should -BeNullOrEmpty
+    }
+
+    It 'still succeeds when NewContent carries at least one real phase-containment block' {
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $script:mockNewContent
         $result.Success | Should -Be $true
     }
 }
