@@ -483,6 +483,49 @@ Describe 'Get-SustainedFindingCount - M3 regression: line-start anchoring on dis
     }
 }
 
+Describe 'Test-EmissionMarkerPresent / Get-EmissionGap - PF-F2 regression: dash-space YAML block-sequence key position' {
+    It 'Test-EmissionMarkerPresent returns true for a body whose only vocabulary tokens are dash-space "- disposition:" list items (no plain line-start field, no flow-mapping)' {
+        # Pre-fix, $keyAnchor-equivalent '(?:^\s*|[{,]\s*)' did not recognize
+        # a YAML block-sequence item's key as being in key position when the
+        # only thing preceding it on the line was a `- ` dash-space list
+        # marker (not whitespace alone, not `{`/`,`). A body whose only
+        # field tokens are dash-space `- disposition:` items therefore
+        # failed this vocab gate entirely, so Get-EmissionGap treated the
+        # whole body as ordinary chatter and silently skipped it.
+        $body = @'
+<!-- judge-rulings
+findings:
+  - disposition: Fix-now
+  - disposition: Dismiss
+-->
+'@
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $body | Should -Be $true
+    }
+
+    It 'Get-EmissionGap counts the real Fix-now finding (not a silent Gap=0/ok false-clean) for a dash-space-only judge-rulings body' {
+        # THE required PF-F2 regression test. Before the fix this body
+        # produced Gap=0/ParseStatus=ok (a silent false-clean, DD3
+        # violation) because Test-EmissionMarkerPresent's vocab gate never
+        # recognized the dash-space "- disposition:" tokens, so
+        # Get-EmissionGap skipped the body as ordinary chatter and never
+        # even called Get-SustainedFindingCount on it. After the fix, the
+        # body is recognized as a real judge-rulings surface and the one
+        # real Fix-now finding is counted; Dismiss is correctly excluded.
+        $body = @'
+<!-- judge-rulings
+findings:
+  - disposition: Fix-now
+  - disposition: Dismiss
+-->
+'@
+        $result = Get-EmissionGap -Bodies @($body) -Id 1 -Surface 'code-review'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 1
+        $result.BlockCount | Should -Be 0
+        $result.Gap | Should -Be 1
+    }
+}
+
 Describe 'Get-SustainedFindingCount - decoy resistance (M3)' {
     It 'does not count prose ACCEPT badges or table Sustained columns outside the marker region' {
         # PR #775's table has 2 uppercase "✅ ACCEPT" badges and PR #778's table

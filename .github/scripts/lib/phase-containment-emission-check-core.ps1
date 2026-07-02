@@ -128,7 +128,18 @@ function Test-EmissionMarkerPresent {
     if (-not $headMatch.Success) { return $false }
     $windowEnd = [Math]::Min($Body.Length, $headMatch.Index + $headMatch.Length + $lookaheadWindow)
     $window = $Body.Substring($headMatch.Index, $windowEnd - $headMatch.Index)
-    return [regex]::IsMatch($window, '(?m)(?:^\s*|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')
+    # PF-F2 fix (issue #782 post-fix defense pass): the key-position anchor
+    # must also recognize a YAML block-sequence item whose key is the first
+    # token after a `- ` dash-space list marker (e.g. `- disposition:
+    # Fix-now`), not just true line-start or flow-mapping `{`/`,` position.
+    # Without this, a body whose ONLY vocabulary tokens are dash-space
+    # `- disposition:` items (no plain line-start field, no flow-mapping)
+    # fails this vocab gate entirely, so Get-EmissionGap treats the whole
+    # body as ordinary chatter and silently contributes 0 — a false-clean
+    # (Gap=0/ok) despite real sustained findings. See the identical anchor
+    # in Get-JudgeRulingsSustainedCountInternal ($keyAnchor) for the
+    # counting-side counterpart; this window-gate copy must stay in sync.
+    return [regex]::IsMatch($window, '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')
 }
 
 #endregion
@@ -293,7 +304,10 @@ function script:Get-JudgeRulingsSustainedCountInternal {
             break
         }
         $between = $Body.Substring($walkPos, $nextCandidateCloser - $walkPos)
-        if ([regex]::IsMatch($between, '(?m)(?:^\s*|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')) {
+        # PF-F2 fix: same dash-space list-item anchor extension as
+        # Test-EmissionMarkerPresent's vocab window and $keyAnchor below —
+        # this ambiguity-detector copy must stay in sync with both.
+        if ([regex]::IsMatch($between, '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')) {
             return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
         }
         $walkPos = $nextCandidateCloser + 3
@@ -323,7 +337,16 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     # `U1: {disposition: Fix-now, ...}` shape) — prose mentions inside a
     # summary/description string value are preceded by ordinary sentence
     # characters and are excluded by this anchor.
-    $keyAnchor = '(?:^\s*|[{,]\s*)'
+    # PF-F2 fix (issue #782 post-fix defense pass): also anchor after a
+    # `- ` dash-space list-item prefix, so a YAML block-sequence item like
+    # `- disposition: Fix-now` is recognized as a real key position. Without
+    # this, dash-space-first findings were excluded from the disposition
+    # counts here AND (via the identical literal in Test-EmissionMarkerPresent
+    # and the ambiguity-walk detector above) from the vocab gate that decides
+    # whether this function is even called — producing a silent Gap=0/ok
+    # false-clean when a body's only field tokens are dash-space items. All
+    # three copies of this pattern must be kept in sync.
+    $keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'
     $hasDismiss = $region -match "(?m)${keyAnchor}disposition\s*:\s*Dismiss\b"
     $hasFixNow = $region -match "(?m)${keyAnchor}disposition\s*:\s*(Fix-now|Fix-in-PR|Defer)\b"
     $hasReviewModeIntake = $region -match "review_mode\s*:\s*['""]?github-intake-proxy-prosecution"
