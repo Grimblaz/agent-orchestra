@@ -200,6 +200,22 @@ Describe 'Resolve-CostDataPreservation' {
                 rendered_at                    = $Timestamp
             }
         }
+
+        # Helper: build completeness result WITH token data
+        function script:New-CompletenessResultWithTokens {
+            param(
+                [string]$Completeness = 'complete',
+                [string]$StopReason = 'end_turn',
+                [string]$Timestamp = '2026-01-01T00:00:00Z'
+            )
+            return @{
+                completeness                   = $Completeness
+                stop_reason                    = $StopReason
+                excluded_from_rolling_baseline = ($Completeness -ne 'complete')
+                exclude_reason                 = $null
+                rendered_at                    = $Timestamp
+            }
+        }
     }
 
     It '(complete, any prior) -> use current' {
@@ -273,5 +289,117 @@ Describe 'Resolve-CostDataPreservation' {
         # Resolve-CostDataPreservation just signals use_prior=false so the current data wins.
         $current.excluded_from_rolling_baseline | Should -Be $true
         $current.exclude_reason | Should -Be $excludeReason
+    }
+
+    Context 'populated-predicate (token-magnitude)' {
+        # Non-landing root cause: Code-Conductor posts local render immediately after gh pr create.
+        # Local session is in-flight → completeness='partial', tokens>0. CI runs later on ubuntu-latest
+        # (no transcript) → completeness='unknown', tokens=0. Without the populated predicate, both are
+        # non-complete so Resolve-CostDataPreservation returns use_prior=false → CI zeros overwrite the
+        # populated local render. The populated predicate (sum port tokens > 0) fixes this: a populated
+        # prior always beats an empty current, regardless of completeness or write order.
+
+        It 'empty-complete current must NOT clobber complete-populated prior' {
+            # Cell 2: current=complete tokens=0, prior=complete tokens>0
+            # Current code: complete → use_prior=false (complete always wins). Should be true.
+            $current = script:New-CompletenessResultWithTokens -Completeness 'complete' -StopReason 'end_turn'
+            $prior = script:New-CompletenessResultWithTokens -Completeness 'complete' -StopReason 'end_turn'
+            $result = Resolve-CostDataPreservation -Current $current -Prior $prior -CurrentTokenSum 0 -PriorTokenSum 1500
+            $result.use_prior | Should -Be $true
+            $result.notice | Should -Not -BeNullOrEmpty
+        }
+
+        It 'partial-nonzero current beats complete-zero prior' {
+            # Cell 3: current=partial tokens>0, prior=complete tokens=0
+            # Current code: partial + prior=complete → use_prior=true (preserve complete). Should be false.
+            $current = script:New-CompletenessResultWithTokens -Completeness 'partial' -StopReason 'max_tokens'
+            $prior = script:New-CompletenessResultWithTokens -Completeness 'complete' -StopReason 'end_turn'
+            $result = Resolve-CostDataPreservation -Current $current -Prior $prior -CurrentTokenSum 800 -PriorTokenSum 0
+            $result.use_prior | Should -Be $false
+        }
+
+        It 'empty-unknown current must NOT clobber unknown-populated prior (CI-overwrites-local scenario)' {
+            # Cell 5: current=unknown tokens=0, prior=unknown tokens>0
+            # This is the dominant non-landing bug: local renders first (unknown, populated),
+            # CI renders second (unknown, zeros). Without populated predicate, both-unknown → use_prior=false → CI wins.
+            $current = script:New-CompletenessResultWithTokens -Completeness 'unknown' -StopReason $null
+            $prior = script:New-CompletenessResultWithTokens -Completeness 'unknown' -StopReason $null
+            $result = Resolve-CostDataPreservation -Current $current -Prior $prior -CurrentTokenSum 0 -PriorTokenSum 1200
+            $result.use_prior | Should -Be $true
+            $result.notice | Should -Match 'populated'
+        }
+
+        It 'populated-unknown current beats complete-zero prior' {
+            # Cell 6: current=unknown tokens>0, prior=complete tokens=0
+            # Current code: unknown + prior=complete → use_prior=true (preserve complete). Should be false.
+            $current = script:New-CompletenessResultWithTokens -Completeness 'unknown' -StopReason $null
+            $prior = script:New-CompletenessResultWithTokens -Completeness 'complete' -StopReason 'end_turn'
+            $result = Resolve-CostDataPreservation -Current $current -Prior $prior -CurrentTokenSum 900 -PriorTokenSum 0
+            $result.use_prior | Should -Be $false
+        }
+    }
+
+    Context 'populated-predicate — regression guards' {
+        It '#760 regression guard: legacy populated prior (null completeness) still preserved when current is empty' {
+            # Prior has null completeness (legacy render before completeness field existed).
+            # Lines 1741-1746 of call site default null completeness to complete.
+            # Even if the predicate sees it as complete, empty current must not clobber populated prior.
+            $current = script:New-CompletenessResultWithTokens -Completeness 'complete' -StopReason 'end_turn'
+            $prior = @{
+                completeness                   = $null
+                stop_reason                    = $null
+                excluded_from_rolling_baseline = $false
+                exclude_reason                 = $null
+                rendered_at                    = '2026-01-01T00:00:00Z'
+                token_sum                      = 2000
+            }
+            $result = Resolve-CostDataPreservation -Current $current -Prior $prior -CurrentTokenSum 0 -PriorTokenSum 2000
+            $result.use_prior | Should -Be $true
+            $result.notice | Should -Not -BeNullOrEmpty
+        }
+
+        It 'both-empty no-op idempotence: both complete tokens=0 -> use current (no churn)' {
+            $current = script:New-CompletenessResultWithTokens -Completeness 'complete' -StopReason 'end_turn'
+            $prior = script:New-CompletenessResultWithTokens -Completeness 'complete' -StopReason 'end_turn'
+            $result = Resolve-CostDataPreservation -Current $current -Prior $prior -CurrentTokenSum 0 -PriorTokenSum 0
+            $result.use_prior | Should -Be $false
+        }
+
+        It 'both-populated falls back to completeness: current=complete, prior=complete -> use current' {
+            $current = script:New-CompletenessResultWithTokens -Completeness 'complete' -StopReason 'end_turn'
+            $prior = script:New-CompletenessResultWithTokens -Completeness 'complete' -StopReason 'end_turn'
+            $result = Resolve-CostDataPreservation -Current $current -Prior $prior -CurrentTokenSum 1000 -PriorTokenSum 1500
+            $result.use_prior | Should -Be $false
+        }
+
+        It 'both-populated falls back to completeness: current=partial, prior=complete-populated -> use prior' {
+            $current = script:New-CompletenessResultWithTokens -Completeness 'partial' -StopReason 'max_tokens'
+            $prior = script:New-CompletenessResultWithTokens -Completeness 'complete' -StopReason 'end_turn'
+            $result = Resolve-CostDataPreservation -Current $current -Prior $prior -CurrentTokenSum 600 -PriorTokenSum 1200
+            $result.use_prior | Should -Be $true
+            $result.notice | Should -Not -BeNullOrEmpty
+        }
+
+        It 'synthetic-fallback prior (completeness=complete, no ports) + empty current -> use_prior=true via completeness fallback' {
+            # Exercises the path where priorCostData is the frame-credit-ledger synthetic fallback
+            # (@{ completeness = 'complete' }, no ports key) and both token sums are 0.
+            # Both-empty falls through to completeness logic: prior=complete beats current=unknown.
+            $current = script:New-CompletenessResultWithTokens -Completeness 'unknown'
+            $prior = @{ completeness = 'complete' }  # synthetic fallback shape -- no ports, no rendered_at
+            $result = Resolve-CostDataPreservation -Current $current -Prior $prior -CurrentTokenSum 0 -PriorTokenSum 0
+            $result.use_prior | Should -Be $true
+        }
+
+        It 'long-boundary: PriorTokenSum > int32.max does not throw and populated prior wins over empty current' {
+            # Regression for CR1 (int->long fix): a token sum exceeding Int32.MaxValue must not throw
+            # ParameterBindingArgumentTransformationException.
+            $current = script:New-CompletenessResultWithTokens -Completeness 'unknown'
+            $prior = script:New-CompletenessResultWithTokens -Completeness 'unknown'
+            # Invoke in the current scope so $result is populated after the throw-check.
+            { Resolve-CostDataPreservation -Current $current -Prior $prior -CurrentTokenSum 0 -PriorTokenSum 3000000000 } | Should -Not -Throw
+            $result = Resolve-CostDataPreservation -Current $current -Prior $prior -CurrentTokenSum 0 -PriorTokenSum 3000000000
+            $result.use_prior | Should -Be $true  # populated prior (>0) beats empty current
+            $result.notice | Should -Match 'populated'
+        }
     }
 }
