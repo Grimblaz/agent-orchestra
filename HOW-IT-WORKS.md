@@ -12,7 +12,7 @@ Agent Orchestra is a multi-agent workflow system built for Claude Code that take
 
 ## 2. The path a piece of work takes
 
-Work moves through up to eight beats. Steps 2 and 3 (customer framing and technical design) are optional — the pipeline can start directly at planning for routine or clear-scope work. Step 6 (adversarial review) has two variants: full (three-pass panel) and lite (one compact prosecution pass).
+Work moves through up to eight beats. Steps 2 and 3 (customer framing and technical design) are optional — the pipeline can start directly at planning for routine or clear-scope work. Step 6 (adversarial review) has two variants: full (five-pass panel, then defense, then judge) and lite (one compact prosecution pass, then defense, then judge).
 
 1. **Idea becomes a GitHub issue.** Work starts as a software idea that is filed as a GitHub issue (an entry in the project's issue tracker). The issue number is the durable reference every later beat reads and writes.
 
@@ -34,7 +34,7 @@ Work moves through up to eight beats. Steps 2 and 3 (customer framing and techni
 
    [Source: CLAUDE.md § Orchestration]
 
-6. **Adversarial review — prosecution, defense, judge.** A dedicated review pipeline runs over the changed code. Prosecution (the finding pass) identifies defects with evidence. Defense (the rebuttal pass) either concedes or rebuts each finding. Judge (the scoring pass) evaluates the ledger and emits a verdict. Two variants are available: `/orchestra:review` runs three prosecution passes then defense then judge; `/orchestra:review-lite` runs one compact prosecution pass before defense and judge.
+6. **Adversarial review — prosecution, defense, judge.** A dedicated review pipeline runs over the changed code. Prosecution (the finding pass) identifies defects with evidence. Defense (the rebuttal pass) either concedes or rebuts each finding. Judge (the scoring pass) evaluates the ledger and emits a verdict. Two variants are available: `/orchestra:review` runs five prosecution passes then defense then judge; `/orchestra:review-lite` runs one compact prosecution pass before defense and judge.
 
    [Source: CLAUDE.md § Review pipeline]
 
@@ -150,7 +150,7 @@ The adversarial review pipeline runs after implementation to find defects before
 
 **Full vs. lite variants.**
 
-- `/orchestra:review` — full variant: three prosecution passes (different critics with different focus areas), then defense, then judge. Used for significant or high-risk changes.
+- `/orchestra:review` — full variant: five prosecution passes (different critics with different focus areas), then defense, then judge. Used for significant or high-risk changes.
 - `/orchestra:review-lite` — lite variant: one compact prosecution pass, then defense, then judge. Used for small changes or when speed matters more than exhaustive coverage.
 
 **GitHub review intake.** `/review-github` is a separate entry point that ingests an existing GitHub PR review and runs proxy prosecution — treating the human reviewer's comments as the prosecution ledger and running them through Code-Conductor's response loop for fix dispatch.
@@ -158,6 +158,7 @@ The adversarial review pipeline runs after implementation to find defects before
 </details>
 
 <a id="vocab"></a>
+
 ## 5. Plain-language vocabulary
 
 <!-- vocab-seed:begin -->

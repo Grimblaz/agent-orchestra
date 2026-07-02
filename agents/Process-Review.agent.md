@@ -256,6 +256,7 @@ if ($null -ne $healthReportTempFile -and -not (Test-Path $healthReportTempFile))
 **Step 3 — Identify actionable signals** (only for categories/metrics with `sufficient_data: true`):
 
 - **High false-positive rate**: category `sustain_rate` < 0.5 → recommend strengthening evidence requirements in the corresponding Code-Critic prosecution perspective before filing findings
+  > **Note**: sustain-rate readings spanning the 2026-07-02 coverage-first epoch (issue #784) are not comparable across the boundary — coverage-first prosecution mechanically surfaces previously-omitted low-confidence findings, which lowers sustain_rate independent of prosecutor quality. Do not recommend strengthening evidence requirements based on a sustain-rate dip that could be epoch-driven rather than a genuine prosecutor-quality regression; cross-reference `skills/calibration-pipeline/SKILL.md` § Gotchas.
 - **Judge overconfidence**: `high` confidence level `sustain_rate` < 0.85 → recommend adding calibration caveats to Code-Review-Response's high-confidence ruling guidance
 - **Defense underreach**: `defense_challenge_rate` < 0.10 → recommend reviewing Code-Critic defense perspective prompts for passive acceptance bias
 - **Defense overreach**: `overreach_rate` > 0.30 → recommend adding specificity requirements to defense challenges

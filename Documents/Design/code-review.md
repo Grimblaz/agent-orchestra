@@ -170,7 +170,7 @@ Prosecutor assigns severity; judge may override.
 
 | Selector line | Mode | Passes | Perspectives |
 |-----------------|------|--------|-------------|
-| *(none / default)* | Code prosecution | 3 (parallel) | 6 code perspectives |
+| *(none / default)* | Code prosecution | 5 (parallel) | 6 code perspectives |
 | `Review mode selector: "Use lite code review perspectives"` | Lite code prosecution | 1 | All 6 standard code-review perspectives in one compact pass |
 | `Review mode selector: "Use design review perspectives"` | Design/plan prosecution | 2 (parallel) | 3 design perspectives (passes 1–2) |
 | `Review mode selector: "Use product-alignment perspectives"` | Product-alignment prosecution | 1 | 3 product-alignment perspectives (pass 3) |
@@ -1075,3 +1075,66 @@ Replaced the effort-based estimation model (`<1 day` vs `>1 day`) with a robust 
 - AC Cross-Check precedence explicitly documented and behaviorally enforced.
 - Conductor filing path refactored to execute sequential steps: canonicalize -> §2d -> §2c -> `Add-FollowUpIssue`.
 - `Add-FollowUpIssue` script implements GraphQL `addSubIssue` parenting with retry, `Parent: #X` fallback, multi-label support, and title canonicalization.
+
+---
+
+## Coverage-First Prosecution
+
+**Issue**: #784 | **Companion**: #785 (design-challenge judge migration)
+
+### Summary
+
+Current-tier models (Opus 4.7/4.8, Sonnet 5, Fable 5) follow conservative-reporting instructions too literally: told to "be conservative" or to downgrade-or-omit weak findings, they investigate thoroughly, identify the defect, then silently decline to report it — precision rises but measured recall falls. Prosecution's evidence-standards language leaned into that failure mode. This change makes the prosecution stage coverage-first (report every finding with a statable failure mode, tagged confidence + severity) and relocates all importance/confidence filtering to the judge stage, which already existed for exactly that purpose. As a consequence, no shipped review surface may return an unfiltered coverage-first ledger — `/orchestra:review-lite` gained the missing defense and judge stages to close that gap.
+
+### Decision Log
+
+| # | Decision | Choice | Rationale |
+|---|----------|--------|-----------|
+| D55 | Recall vs. filtering ownership | Recall owned by prosecution (report everything statable); importance owned by judge | Two orthogonal jobs were conflated in one prompt; separating them lets each stage optimize for its own goal instead of prosecution pre-filtering the judge's input |
+| D56 | Evidence-standards rewrite | Replace "match the evidence quality" / "downgrade the item or omit it" with an explicit per-finding confidence + severity tag, and omission scoped to no-statable-failure-mode only | The line-79 sentence read as license to self-filter at the finding stage; the surviving text only ever omits pure noise, never a real-but-weak finding |
+| D57 | Coverage vs. economy | Explicit orthogonal-axes split added at the point reporting-economy guidance is co-located with prosecution method | Without the split, the reporting-economy directive (#471) and coverage-first read as contradictory; economy governs how tersely a finding is written, never whether it is reported |
+| D58 | Judge positioning | `skills/review-judgment/SKILL.md` names the judge the filter of record over coverage-first ledgers; scoring bar and Improvement Test unchanged | Confirms the downstream stage already had the right job — the fix is upstream, not a new judge behavior |
+| D59 | Lite adapter shape | `/orchestra:review-lite` runs prosecution → defense → judge (prosecution width 1), replacing prosecution-only | A judge-less surface fed a coverage-first ledger straight to the maintainer unfiltered; every shipped review surface now has a filter of record |
+| D60 | Calibration comparability | Dated coverage-first epoch note in `skills/calibration-pipeline/SKILL.md`; no metric change in this issue | Coverage-first mechanically lowers `sustain_rate` by inflating the denominator with previously-omitted low-confidence findings — reading that dip as a prosecutor-quality regression would be wrong. Metric segmentation (sustain-rate by confidence tier) is deferred to umbrella #761 |
+| D61 | Design-challenge scope | Out of scope for #784; owned by companion #785 | Design-challenge prosecution (Solution-Designer's disposition gate) is judge-less today for the same structural reason lite was — #785 extends the same judge-filter pattern there |
+
+### Coverage-First Rewrite
+
+`skills/adversarial-review/SKILL.md` § 2 "Apply Evidence Standards" no longer asks a finding's severity/confidence to "match the evidence quality" as a precondition for reporting it — every finding now carries an explicit confidence + severity tag (canonical enums from `skills/routing-tables/assets/routing-config.json`) regardless of how weak the evidence is. The prior omission rule ("if the failure mode cannot be stated clearly, downgrade the item or omit it") is replaced: omission is scoped narrowly to findings with **no** statable failure mode at all (pure noise) — a concrete failure mode that is merely low-severity or uncertain is surfaced, tagged low, never dropped. § 4 "Emit a Usable Ledger" and the matching gotcha row now state the coverage-vs-economy split explicitly: coverage governs whether a finding is reported (maximize — report every finding with a statable failure mode), economy governs how tersely it is written (the reporting-economy directive, #471, controls length per finding, not inclusion). `agents/Code-Critic.agent.md` carries a matching Core Principles bullet, and `skills/review-judgment/SKILL.md` gains an additive sentence confirming the judge is the filter of record over these wider, coverage-first ledgers — the judge's scoring bar and Improvement Test are unchanged.
+
+### Lite Adapter: Full Pipeline
+
+`/orchestra:review-lite` previously ran one compact prosecution pass and returned the raw ledger unfiltered (`integrity-contract: pipeline-stages: [prosecution]`, `atomic: n/a`). Once prosecution stopped self-filtering, an unfiltered lite ledger would surface every low-confidence, low-severity finding directly to the maintainer with no judge in between — the coverage lift would have shown up as ledger noise on the one surface with no filter of record. `skills/adversarial-review/adapters/lite.md` now declares `pipeline-stages: [prosecution, defense, judge]` and `atomic: true`, keeping prosecution at width 1 (one compact, all-perspectives pass) while adding the same defense and judge stages `standard` already runs. `commands/orchestra-review-lite.md` documents the atomic prosecution → defense → judge sequence, the `<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->` marker, and a post-judgment disposition gate matching `/orchestra:review-judge`'s. `skills/solution-authoring/SKILL.md`'s prosecution-only adapter classification no longer lists `lite`. `/orchestra:review-prosecute` is unaffected as a power-user stage tool, but its output is now documented as an intermediate stage artifact (input to `/orchestra:review-defend` → `/orchestra:review-judge`) rather than a filtered verdict.
+
+### Acceptance Criteria (from issue #784)
+
+- `skills/adversarial-review/SKILL.md` § 2 instructs coverage-first reporting with per-finding confidence + severity tags; the prior "match the evidence quality" / "downgrade the item or omit it" sentence no longer appears; omission is scoped to no-statable-failure-mode only.
+- § 4 and the gotcha row state the coverage-vs-economy split; "downgrade" consistently means re-type (Issue → Concern/Nit), never drop.
+- `agents/Code-Critic.agent.md` carries the coverage-first Core Principles bullet; the terminal reporting-economy bullet is unchanged and still last.
+- `skills/review-judgment/SKILL.md` names the judge the filter of record over coverage-first ledgers; scoring bar and Improvement Test otherwise unchanged.
+- `/orchestra:review-lite` runs prosecution → defense → judge as one atomic pipeline; no shipped review surface returns an unfiltered coverage-first ledger.
+- `skills/calibration-pipeline/SKILL.md` carries a dated coverage-first epoch note; pre/post `sustain_rate` readings are flagged non-comparable; metric segmentation deferred to umbrella #761.
+
+### Rejected Alternatives
+
+| Alternative | Why rejected |
+|-------------|--------------|
+| Per-dispatch distribution of the coverage-first directive across every dispatch shape | Duplicates the rule across 6+ dispatch sites; the SKILL + Code-Critic body already propagate to every pass that loads them |
+| Leave prosecution untouched, tune only at judge | The judge cannot rule on a finding the prosecutor never emitted — filtering downstream cannot recover upstream recall loss |
+| Leave `/orchestra:review-lite` prosecution-only, present the ledger unfiltered | Re-introduces the exact self-filter problem this issue removes, on the one surface with no downstream filter |
+| Segment the `sustain_rate` metric by confidence tier now | Correct long-term fix but pulls PowerShell tooling and its test surface into a prompt-methodology issue; deferred to umbrella #761 |
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `skills/adversarial-review/SKILL.md` | § 2 evidence-standards rewrite (confidence + severity tag, narrowed omission rule); § 4 coverage-vs-economy split; gotcha row reworded; adapter tables updated for lite's new pipeline shape |
+| `agents/Code-Critic.agent.md` | New coverage-first Core Principles bullet; "empty findings list" and "insufficient-evidence" language reconciled to never mean silent drop |
+| `skills/review-judgment/SKILL.md` | Judge named filter of record over coverage-first ledgers; Improvement Test reminder that low-confidence/low-severity items are expected input |
+| `skills/adversarial-review/adapters/lite.md` | `pipeline-stages: [prosecution, defense, judge]`, `atomic: true` |
+| `skills/adversarial-review/platforms/claude.md` | Lite rows updated for defense/judge dispatch and atomic-marker emission |
+| `commands/orchestra-review-lite.md` | Documents full pipeline, atomic marker, and post-judgment disposition gate |
+| `skills/solution-authoring/SKILL.md` | `lite` removed from prosecution-only adapter classification |
+| `skills/calibration-pipeline/SKILL.md` | Dated coverage-first epoch note; sustain-rate comparability gotcha; umbrella #761 cross-link |
+| `agents/Process-Review.agent.md` | Matching epoch caveat where §4.7 reads `sustain_rate` |
+| `Documents/Design/code-review.md` | This section |
