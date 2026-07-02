@@ -420,6 +420,32 @@ Describe 'Get-SustainedFindingCount - decoy resistance (M3)' {
     }
 }
 
+Describe 'Test-EmissionMarkerPresent - marker head detection' {
+    It 'returns true for a code-review body with a bare judge-rulings head' {
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:Pr781Body | Should -Be $true
+    }
+
+    It 'returns true for a code-review body with an attributed judge-rulings head' {
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:Pr778Body | Should -Be $true
+    }
+
+    It 'returns false for ordinary PR chatter with no marker head' {
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:MalformedBody | Should -Be $false
+    }
+
+    It 'returns true when the marker head is present even if the content ultimately fails to parse (head presence only, not content validity)' {
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:UnknownVocabularyBody | Should -Be $true
+    }
+
+    It 'returns true for a design-challenge body with a finding_dispositions key' {
+        Test-EmissionMarkerPresent -Surface 'design-challenge' -Body $script:Design782Body | Should -Be $true
+    }
+
+    It 'returns false for an empty body' {
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body '' | Should -Be $false
+    }
+}
+
 Describe 'Get-EmissionGap - aggregation across multiple bodies' {
     It 'sums SustainedCount and BlockCount across bodies and computes Gap for PR #775 pre-backfill (2 sustained, 0 blocks)' {
         $result = Get-EmissionGap -Bodies @($script:Pr775Body) -Id 775 -Surface 'code-review'
@@ -439,12 +465,11 @@ Describe 'Get-EmissionGap - aggregation across multiple bodies' {
     }
 
     It 'aggregates across multiple comment bodies for the same Id (2-body loop-level coverage)' {
-        # Scope note (M17): one judge-rulings comment per PR is assumed, so a
-        # realistic second body is another comment that ALSO carries its own
-        # judge-rulings marker (e.g. a re-review) rather than a marker-less
-        # comment — a marker-less body is correctly could-not-verify per DD3
-        # (covered by the fail-loud test below), so this test uses two bodies
-        # that each independently parse ok to exercise loop-level summation.
+        # Scope note (M17): one judge-rulings comment per PR is assumed. This
+        # test uses two bodies that each independently carry a marker head
+        # and parse ok, to exercise loop-level summation across genuine
+        # judge-rulings surfaces (marker-less-skip behavior is covered
+        # separately below).
         $bodyOne = $script:Pr781Body
         $bodyTwo = $script:ZeroSustainedBody + "`n<!-- phase-containment-781 -->`nfinding_key: a`n<!-- /phase-containment-781 -->`n<!-- phase-containment-781 -->`nfinding_key: b`n<!-- /phase-containment-781 -->"
         $result = Get-EmissionGap -Bodies @($bodyOne, $bodyTwo) -Id 781 -Surface 'code-review'
@@ -454,17 +479,42 @@ Describe 'Get-EmissionGap - aggregation across multiple bodies' {
         $result.ParseStatus | Should -Be 'ok'
     }
 
-    It 'propagates could-not-verify when a body has no judge-rulings marker at all (marker-less comment is unverifiable, not silently zero)' {
+    It 'skips a marker-less comment body entirely — ordinary PR chatter does not poison the aggregate (issue #782 live-validation correction)' {
+        # OLD (incorrect) expectation: a body with no judge-rulings marker head
+        # at all (e.g. a phase-containment ledger comment, a bot notice, "LGTM")
+        # forced the whole-PR aggregate to could-not-verify. That conflated
+        # "not a judge-rulings surface" with "unparseable judge-rulings
+        # surface" and made every real multi-comment PR permanently
+        # unverifiable (live PRs #775/#778/#781 all reported COULD NOT VERIFY
+        # despite their judge-rulings comment parsing fine). Corrected
+        # contract: a marker-less body contributes 0 and is skipped; only a
+        # body that DOES carry a marker head but fails to parse remains
+        # could-not-verify (covered by the next test).
         $bodyOne = $script:Pr781Body
         $bodyTwo = "<!-- phase-containment-781 -->`nfinding_key: a`n<!-- /phase-containment-781 -->"
         $result = Get-EmissionGap -Bodies @($bodyOne, $bodyTwo) -Id 781 -Surface 'code-review'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 4
+        $result.BlockCount | Should -Be 1
+        $result.Gap | Should -Be 3
+    }
+
+    It 'propagates could-not-verify when a body carries a marker head but its content is malformed (DD3 fail-loud still applies)' {
+        # Distinguishes "marker present but unparseable" (still could-not-verify
+        # per DD3) from "no marker at all" (skipped, prior test). Uses
+        # UnknownVocabularyBody, which has a real `<!-- judge-rulings` head
+        # but an unrecognized disposition value.
+        $cleanBody = "<!-- phase-containment-1 -->`nfinding_key: a`n<!-- /phase-containment-1 -->"
+        $result = Get-EmissionGap -Bodies @($script:UnknownVocabularyBody, $cleanBody) -Id 1 -Surface 'code-review'
         $result.ParseStatus | Should -Be 'could-not-verify'
     }
 
-    It 'propagates could-not-verify to the aggregate ParseStatus when any body is unparseable, treated as a gap regardless of arithmetic' {
-        $cleanBody = "<!-- phase-containment-1 -->`nfinding_key: a`n<!-- /phase-containment-1 -->"
-        $result = Get-EmissionGap -Bodies @($script:MalformedBody, $cleanBody) -Id 1 -Surface 'code-review'
-        $result.ParseStatus | Should -Be 'could-not-verify'
+    It 'a marker-less body alone (no judge-rulings surface anywhere) yields a clean ok result, not could-not-verify' {
+        $result = Get-EmissionGap -Bodies @($script:MalformedBody) -Id 1 -Surface 'code-review'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 0
+        $result.BlockCount | Should -Be 0
+        $result.Gap | Should -Be 0
     }
 
     It 'returns Gap 0 for an empty Bodies array' {

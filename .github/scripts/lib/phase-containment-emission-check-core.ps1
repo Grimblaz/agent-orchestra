@@ -35,6 +35,60 @@ $script:ValidEmissionCheckSurfaces = @('code-review', 'design-challenge', 'plan-
 
 #endregion
 
+#region Test-EmissionMarkerPresent
+
+function Test-EmissionMarkerPresent {
+    <#
+    .SYNOPSIS
+        Reports whether a comment body contains a recognizable judge-rulings /
+        finding_dispositions marker HEAD for the given surface, without
+        attempting to parse or validate the marker's content.
+    .DESCRIPTION
+        Used by Get-EmissionGap to distinguish two cases that DD3's fail-loud
+        invariant otherwise conflated (issue #782 live-validation correction):
+
+          1. No marker head at all -> this body is ordinary PR/issue chatter
+             (bot notices, "LGTM", unrelated replies) that was never meant to
+             carry a phase-containment marker. It is NOT a could-not-verify
+             condition; it simply contributes nothing.
+          2. A marker head IS present -> this body claims to be an
+             authoritative judge-rulings surface. Its content must then parse
+             cleanly via Get-SustainedFindingCount, or the existing DD3
+             fail-loud invariant applies (unparseable/ambiguous/unknown
+             vocabulary is still could-not-verify, never silently zero).
+
+        Matches the SAME marker-head patterns Get-SustainedFindingCount's
+        internal parsers use for each surface, so head detection here can
+        never diverge from head detection there:
+          code-review / plan-stress-test: bare `<!-- judge-rulings` or
+            attributed `<!-- judge-rulings pr=N -->`
+          design-challenge: `finding_dispositions:` YAML key
+    .PARAMETER Surface
+        One of: code-review, design-challenge, plan-stress-test
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .OUTPUTS
+        [bool] $true when a recognizable marker head is present, else $false.
+    #>
+    param(
+        [Parameter(Mandatory)][ValidateSet('code-review', 'design-challenge', 'plan-stress-test')][string]$Surface,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Body)) {
+        return $false
+    }
+
+    if ($Surface -eq 'design-challenge') {
+        return [regex]::IsMatch($Body, '(?m)^finding_dispositions\s*:\s*$')
+    }
+
+    # code-review and plan-stress-test share the judge-rulings marker head.
+    return [regex]::IsMatch($Body, '<!--\s*judge-rulings\b')
+}
+
+#endregion
+
 #region Get-SustainedFindingCount
 
 function Get-SustainedFindingCount {
@@ -266,10 +320,24 @@ function Get-EmissionGap {
         ParseStatus other than 'ok' as an unconditional gap regardless of the
         arithmetic result).
 
-        If ANY body in the set is could-not-verify, the aggregate ParseStatus
-        is 'could-not-verify' and callers MUST treat the result as a gap,
-        never as clean — even if the arithmetic Gap happens to compute to 0
-        or negative from the parseable bodies alone.
+        Real PRs/issues have several comments; only one is expected to be the
+        authoritative judge-rulings surface (M17 scope note) — the rest are
+        ordinary chatter (bot notices, "LGTM", unrelated replies) that were
+        never meant to carry a marker at all. Per body, Test-EmissionMarkerPresent
+        gates whether Get-SustainedFindingCount is even called:
+          - No marker head present -> the body is skipped entirely: it
+            contributes 0 to SustainedCount and does NOT set could-not-verify.
+            This is the issue #782 live-validation correction — marker-less
+            chatter must not poison the whole-PR aggregate.
+          - Marker head present -> Get-SustainedFindingCount parses it, and
+            DD3's fail-loud invariant still applies in full: unparseable,
+            ambiguous, or unknown-vocabulary content under a real marker head
+            remains could-not-verify, never silently zero.
+
+        If ANY body with a marker head present is could-not-verify, the
+        aggregate ParseStatus is 'could-not-verify' and callers MUST treat the
+        result as a gap, never as clean — even if the arithmetic Gap happens
+        to compute to 0 or negative from the parseable bodies alone.
     .PARAMETER Bodies
         Array of raw comment body text (e.g. all comments on the target PR/issue).
     .PARAMETER Id
@@ -294,11 +362,16 @@ function Get-EmissionGap {
     $anyCouldNotVerify = $false
 
     foreach ($body in $Bodies) {
-        $sustainedResult = Get-SustainedFindingCount -Surface $Surface -Body $body
-        if ($sustainedResult.ParseStatus -eq 'could-not-verify') {
-            $anyCouldNotVerify = $true
+        if (Test-EmissionMarkerPresent -Surface $Surface -Body $body) {
+            $sustainedResult = Get-SustainedFindingCount -Surface $Surface -Body $body
+            if ($sustainedResult.ParseStatus -eq 'could-not-verify') {
+                $anyCouldNotVerify = $true
+            }
+            $totalSustained += $sustainedResult.SustainedCount
         }
-        $totalSustained += $sustainedResult.SustainedCount
+        # else: no recognizable marker head in this body — ordinary PR/issue
+        # chatter, not a judge-rulings surface. Skip it (0 contribution,
+        # does not poison ParseStatus). See Get-EmissionGap's .DESCRIPTION.
 
         $blocks = Get-PhaseContainmentBlock -Text $body -Id $Id
         if ($blocks) {
