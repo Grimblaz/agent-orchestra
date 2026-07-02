@@ -723,6 +723,7 @@ function Format-CostPatternYaml {
     $null = $sb.AppendLine("session_completeness: $completenessValue")
     $null = $sb.AppendLine("excluded_from_rolling_baseline: $excludedStr")
     $null = $sb.AppendLine("generated_at: $generatedAt")
+    $null = $sb.AppendLine('phase_scope: branch-session-only')
     $null = $sb.AppendLine("pr: $Pr")
     $null = $sb.AppendLine("branch: $Branch")
 
