@@ -1000,3 +1000,134 @@ Describe 'Get-PhaseContainmentRollup — leakage matrix populated correctly' {
         $result.LeakageMatrix['design×plan-stress-test']   | Should -Be 1
     }
 }
+
+# ---------------------------------------------------------------------------
+# 14. Get-PhaseContainmentCommentCorpus — shared discovery seam (#782 M11)
+# Fixture-driven Pester target for the discovery predicate extracted for
+# both Get-PhaseContainmentHistory and the phase-containment-emission-check
+# sweep to consume.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentCommentCorpus — returns raw per-surface tuples' {
+    BeforeAll {
+        function script:New-CorpusSearchAResponse {
+            param([int]$IssueNumber, [string]$CommentBody)
+            $payload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        nodes    = @(
+                            @{
+                                number   = $IssueNumber
+                                comments = @{
+                                    nodes    = @(@{ body = $CommentBody; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+
+        function script:New-CorpusSearchBResponse {
+            param([int]$PrNumber, [string]$CommentBody)
+            $payload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        nodes    = @(
+                            @{
+                                number   = $PrNumber
+                                comments = @{
+                                    nodes    = @(@{ body = $CommentBody; createdAt = '2024-01-01T13:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+    }
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'returns raw, unparsed bodies for both surfaces without validating phase-containment blocks' {
+        # A malformed/unparseable phase-containment block on the issue surface — the
+        # corpus function must still return the raw body untouched (no parse/validate).
+        $issueBody = @"
+<!-- plan-issue-901 -->
+<!-- phase-containment-901 -->
+finding_key: plan-stress-test:901:F1
+introduced_phase: NOT-A-VALID-PHASE
+<!-- /phase-containment-901 -->
+"@
+        $prBody = @"
+<!-- judge-rulings pr=902 -->
+judge_ruling: sustained
+"@
+
+        $searchAJson = script:New-CorpusSearchAResponse -IssueNumber 901 -CommentBody $issueBody
+        $searchBJson = script:New-CorpusSearchBResponse -PrNumber 902 -CommentBody $prBody
+
+        $global:mockCorpusSearchA = $searchAJson
+        $global:mockCorpusSearchB = $searchBJson
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'is:issue') { return $global:mockCorpusSearchA }
+            if ($joined -match 'is:pr')    { return $global:mockCorpusSearchB }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+
+        $result.Source | Should -Be 'graphql'
+        $result.Tuples | Should -HaveCount 2
+
+        $issueTuple = $result.Tuples | Where-Object { $_['Number'] -eq 901 }
+        $issueTuple['Surface'] | Should -Be 'issue'
+        $issueTuple['Bodies'] | Should -Contain $issueBody
+
+        $prTuple = $result.Tuples | Where-Object { $_['Number'] -eq 902 }
+        $prTuple['Surface'] | Should -Be 'pr'
+        $prTuple['Bodies'] | Should -Contain $prBody
+    }
+
+    It 'falls back to REST when GraphQL search fails, still returning raw tuples' {
+        $restIssueList = (@(@{ number = 950 }) | ConvertTo-Json)
+        $restIssueView = (@{ comments = @(@{ body = "<!-- plan-issue-950 -->`nfinding_dispositions:`n  - id: F1`n    disposition: incorporate" }) } | ConvertTo-Json -Depth 6)
+        $restPrList = '[]'
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') { return $restIssueList }
+            if ($joined -match 'issue view') { return $restIssueView }
+            if ($joined -match 'pr list')    { return $restPrList }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+
+        $result.Source | Should -Be 'rest'
+        $issueTuple = $result.Tuples | Where-Object { $_['Number'] -eq 950 }
+        $issueTuple | Should -Not -BeNullOrEmpty
+        $issueTuple['Surface'] | Should -Be 'issue'
+        $issueTuple['Bodies'][0] | Should -Match 'plan-issue-950'
+    }
+}
