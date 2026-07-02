@@ -406,13 +406,38 @@ function Add-CommentBlocks {
           2. Verify the expected marker is present in the fetched body.
           3. Concatenate NewContent after the existing body.
           4. gh api PATCH the full combined body.
-          5. Post-write verify: GET again and assert the original body is a
-             byte-identical prefix of the new body (encoding round-trip guard).
+          5. Post-write verify: GET again and apply positive-proof
+             verification (see below) instead of an exact-ordinal
+             byte-prefix comparison.
 
         Any mismatch at any step is fail-loud: the function returns
         Success=$false with a Reason describing the failure, and performs no
         further action. This function never truncates or overwrites existing
         comment content.
+
+        Why not an exact byte-prefix comparison (live-validation correction,
+        #782 backfill against PRs #775/#778/#781): GitHub's API benignly
+        normalizes some whitespace on write/read (observed: trailing
+        whitespace and blank-line-run collapsing) that does not affect
+        content integrity but breaks `$verifyBody.StartsWith($originalBody)`
+        under ordinal comparison. That produced false negatives on every
+        real-world write, training callers to ignore the fail-loud signal —
+        exactly the failure mode this module exists to prevent. Rather than
+        weaken the check into a normalized-whitespace prefix comparison
+        (which still only proves "roughly the same text showed up," not
+        "the specific new blocks landed intact"), post-write verify now
+        does positive proof of both halves:
+          (a) the ExpectedMarker string is still present in the verify body
+              (the original content survived), and
+          (b) every `<!-- phase-containment-{ID} -->` block referenced in
+              NewContent is present, parses via the shared
+              Get-PhaseContainmentBlock parser, and its raw YAML content
+              matches what NewContent intended to append (the new content
+              landed correctly, not merely "something" landed).
+        This is stricter about the content that matters (markers, block
+        parseability, block content) and tolerant of formatting the API is
+        free to normalize. Truncation, a dropped marker, or a corrupted/
+        unparseable new block all still fail loud with a specific Reason.
     .PARAMETER Owner
         Repository owner (e.g. from the git remote).
     .PARAMETER Repo
@@ -485,7 +510,7 @@ function Add-CommentBlocks {
         return [PSCustomObject]@{ Success = $false; Reason = "PATCH failed (exit $LASTEXITCODE)" }
     }
 
-    # --- 5. Post-write verify: GET again and assert byte-identical prefix. ---
+    # --- 5. Post-write verify: GET again and apply positive-proof checks. ---
     $verifyOutput = & gh api $getPath 2>$null
     if ($LASTEXITCODE -ne 0) {
         [Console]::Error.WriteLine("Add-CommentBlocks: post-write verify GET $getPath failed (exit $LASTEXITCODE)")
@@ -501,9 +526,66 @@ function Add-CommentBlocks {
     }
 
     $verifyBody = [string]$verifyObj.body
-    if (-not $verifyBody.StartsWith($originalBody, [System.StringComparison]::Ordinal)) {
-        [Console]::Error.WriteLine("Add-CommentBlocks: post-write verify FAILED — original body is not a byte-identical prefix of the new body for comment $CommentId.")
-        return [PSCustomObject]@{ Success = $false; Reason = 'Post-write verify failed: original body is not a byte-identical prefix of the new body' }
+
+    # --- 5a. Gross-truncation guard. ---
+    # A body that shrank dramatically relative to what was just written is
+    # corruption/data-loss regardless of what the positive-proof checks below
+    # find; catch it early with a clear reason. Benign normalization trims a
+    # handful of characters at most, never a large fraction of the body.
+    $expectedMinLength = [int]($combinedBody.Length * 0.5)
+    if ($verifyBody.Length -lt $expectedMinLength) {
+        [Console]::Error.WriteLine("Add-CommentBlocks: post-write verify FAILED — verify body ($($verifyBody.Length) chars) is dramatically shorter than the written body ($($combinedBody.Length) chars) for comment $CommentId.")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: verify body ($($verifyBody.Length) chars) is dramatically shorter than expected ($($combinedBody.Length) chars written)" }
+    }
+
+    # --- 5b. Positive proof #1: original content survived. ---
+    if (-not $verifyBody.Contains($ExpectedMarker)) {
+        [Console]::Error.WriteLine("Add-CommentBlocks: post-write verify FAILED — expected marker '$ExpectedMarker' missing from verify body for comment $CommentId.")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: expected marker '$ExpectedMarker' missing from verify body" }
+    }
+
+    # --- 5c. Positive proof #2: every new phase-containment block landed
+    #          intact. Extract the IDs Add-CommentBlocks was asked to append
+    #          from NewContent itself, then confirm each one is present,
+    #          parseable, and content-identical in the verify body — reusing
+    #          the shared parser rather than re-implementing block matching.
+    $newBlockIds = [System.Collections.Generic.List[string]]::new()
+    $idMatches = [regex]::Matches($NewContent, '<!--\s*phase-containment-([A-Za-z0-9_-]+)\s*-->')
+    foreach ($m in $idMatches) {
+        $id = $m.Groups[1].Value
+        if (-not $newBlockIds.Contains($id)) { $newBlockIds.Add($id) }
+    }
+
+    foreach ($id in $newBlockIds) {
+        $expectedBlocks = Get-PhaseContainmentBlock -Text $NewContent -Id $id
+        $verifyBlocks = Get-PhaseContainmentBlock -Text $verifyBody -Id $id
+
+        if ($null -eq $verifyBlocks) {
+            [Console]::Error.WriteLine("Add-CommentBlocks: post-write verify FAILED — phase-containment-$id block(s) from NewContent did not parse out of the verify body for comment $CommentId.")
+            return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: phase-containment-$id block(s) missing or unparseable in verify body" }
+        }
+
+        $expectedCount = if ($null -eq $expectedBlocks) { 0 } else { $expectedBlocks.Count }
+        if ($verifyBlocks.Count -lt $expectedCount) {
+            [Console]::Error.WriteLine("Add-CommentBlocks: post-write verify FAILED — phase-containment-$id expected $expectedCount block(s), found $($verifyBlocks.Count) in verify body for comment $CommentId.")
+            return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: phase-containment-$id expected $expectedCount block(s), found $($verifyBlocks.Count)" }
+        }
+
+        # Every expected block's raw content must appear among the verify
+        # body's parsed blocks for this id (order-independent — a caller may
+        # append multiple blocks per id and GitHub's normalization does not
+        # guarantee ordinal stability of unrelated whitespace runs between
+        # them, even though the content itself is intact). Ordinal
+        # comparison here (not PowerShell's default case-insensitive
+        # -contains) so a corrupted value that differs only in case still
+        # fails loud.
+        $verifyBlocksSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$verifyBlocks, [System.StringComparer]::Ordinal)
+        foreach ($expected in $expectedBlocks) {
+            if (-not $verifyBlocksSet.Contains($expected)) {
+                [Console]::Error.WriteLine("Add-CommentBlocks: post-write verify FAILED — a phase-containment-$id block from NewContent does not match any parsed block in the verify body for comment $CommentId.")
+                return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: a phase-containment-$id block's content does not match the verify body" }
+            }
+        }
     }
 
     return [PSCustomObject]@{ Success = $true; Reason = $null }

@@ -531,8 +531,17 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
         $script:lastGetPath = $null
         $script:lastPatchArgs = $null
         $script:getCallCount = 0
-        $script:simulateFailure = ''  # 'get' | 'patch' | 'verify-mismatch' | ''
-        $script:mockOriginalBody = "<!-- judge-rulings`n- id: F1`n  judge_ruling: sustained`n-->"
+        # 'get' | 'patch' | 'verify-truncated' |
+        # 'verify-marker-missing' | 'verify-blocks-missing' | ''
+        $script:simulateFailure = ''
+        # Sized well above the NewContent block below so a body that echoes
+        # only the original content (verify-blocks-missing) does not also
+        # trip the gross-truncation guard — that scenario is specifically
+        # testing the missing-new-block check, not the truncation check.
+        $script:mockOriginalBody = "## Judge Rulings`n`nSome long-form prose summary of the review outcome that mirrors a real judge-rulings comment body in size.`n`n<!-- judge-rulings`n- id: F1`n  judge_ruling: sustained`n-->"
+        # Real caller shape: NewContent carries a phase-containment block, not
+        # arbitrary text, so post-write verify has a block to positively prove.
+        $script:mockNewContent = "`n<!-- phase-containment-775 -->`nfinding_id: GF-1`nverdict: sustained`n<!-- /phase-containment-775 -->"
 
         function global:gh {
             param([Parameter(ValueFromRemainingArguments = $true)]$Args)
@@ -546,13 +555,40 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
                     return ''
                 }
                 $global:LASTEXITCODE = 0
-                # On the post-write verify GET (2nd call), return the patched body
-                # unless simulating a verify mismatch.
-                if ($script:getCallCount -ge 2 -and $script:simulateFailure -ne 'verify-mismatch') {
-                    return (@{ body = $script:mockOriginalBody + "`nAPPENDED" } | ConvertTo-Json)
-                }
-                if ($script:getCallCount -ge 2 -and $script:simulateFailure -eq 'verify-mismatch') {
-                    return (@{ body = 'completely different body' } | ConvertTo-Json)
+
+                if ($script:getCallCount -ge 2) {
+                    # Post-write verify GET (2nd call onward).
+                    switch ($script:simulateFailure) {
+                        'verify-truncated' {
+                            # Simulates genuine data loss: only a sliver of the
+                            # combined body comes back.
+                            return (@{ body = $script:mockOriginalBody.Substring(0, 5) } | ConvertTo-Json)
+                        }
+                        'verify-marker-missing' {
+                            # New block present and body length is comparable
+                            # to what was written, but the original
+                            # judge-rulings marker itself is gone — genuine
+                            # corruption distinct from truncation.
+                            $corrupted = "## Judge Rulings (marker stripped)`n`nSome long-form prose summary of the review outcome that mirrors a real judge-rulings comment body in size, but without the marker.$($script:mockNewContent)"
+                            return (@{ body = $corrupted } | ConvertTo-Json)
+                        }
+                        'verify-blocks-missing' {
+                            # Original marker survived, but the new
+                            # phase-containment block did not land.
+                            return (@{ body = $script:mockOriginalBody } | ConvertTo-Json)
+                        }
+                        default {
+                            # Happy path: simulate GitHub's benign whitespace
+                            # normalization (trailing-space and blank-line-run
+                            # collapsing) rather than an exact byte-identical
+                            # echo — this is the shape that broke the old
+                            # ordinal StartsWith prefix check.
+                            $normalized = ($script:mockOriginalBody + $script:mockNewContent) `
+                                -replace '[ \t]+\r?\n', "`n" `
+                                -replace '\n{3,}', "`n`n"
+                            return (@{ body = $normalized } | ConvertTo-Json)
+                        }
+                    }
                 }
                 return (@{ body = $script:mockOriginalBody } | ConvertTo-Json)
             }
@@ -576,14 +612,15 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
         Remove-Item Function:gh -ErrorAction SilentlyContinue
     }
 
-    It 'succeeds when the expected marker is present, PATCH succeeds, and the post-write verify prefix matches' {
-        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent "`nNEW BLOCK"
+    It 'succeeds when the marker is present, PATCH succeeds, and post-write verify tolerates benign whitespace normalization' {
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $script:mockNewContent
         $result.Success | Should -Be $true
+        $result.Reason | Should -BeNullOrEmpty
         $script:lastPatchArgs | Should -Not -BeNullOrEmpty
     }
 
     It 'fails without patching when the expected marker is not found in the fetched body' {
-        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- finding_dispositions' -NewContent "`nNEW BLOCK"
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- finding_dispositions' -NewContent $script:mockNewContent
         $result.Success | Should -Be $false
         $result.Reason | Should -Match 'not found'
         $script:lastPatchArgs | Should -BeNullOrEmpty
@@ -591,22 +628,41 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
 
     It 'fails when the GET call fails' {
         $script:simulateFailure = 'get'
-        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent "`nNEW BLOCK"
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $script:mockNewContent
         $result.Success | Should -Be $false
         $result.Reason | Should -Match 'GET failed'
     }
 
     It 'fails when the PATCH call fails' {
         $script:simulateFailure = 'patch'
-        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent "`nNEW BLOCK"
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $script:mockNewContent
         $result.Success | Should -Be $false
         $result.Reason | Should -Match 'PATCH failed'
     }
 
-    It 'fails loud when the post-write verify body is not a byte-identical prefix (encoding round-trip guard)' {
-        $script:simulateFailure = 'verify-mismatch'
-        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent "`nNEW BLOCK"
+    It 'fails loud when the post-write verify body is dramatically shorter than what was written (truncation/data-loss)' {
+        $script:simulateFailure = 'verify-truncated'
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $script:mockNewContent
         $result.Success | Should -Be $false
-        $result.Reason | Should -Match 'prefix'
+        $result.Reason | Should -Match 'shorter than expected'
+    }
+
+    It 'fails loud when the original marker is missing from the post-write verify body (genuine corruption)' {
+        $script:simulateFailure = 'verify-marker-missing'
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $script:mockNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'missing from verify body'
+    }
+
+    It 'fails loud when the new phase-containment block does not appear in the post-write verify body' {
+        $script:simulateFailure = 'verify-blocks-missing'
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent $script:mockNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'phase-containment-775'
+    }
+
+    It 'still succeeds via marker + truncation checks when NewContent carries no phase-containment block (degrade path)' {
+        $result = Add-CommentBlocks -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 999 -ExpectedMarker '<!-- judge-rulings' -NewContent "`nplain text with no block markers"
+        $result.Success | Should -Be $true
     }
 }
