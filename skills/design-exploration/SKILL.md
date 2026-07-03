@@ -166,11 +166,22 @@ After design decisions are confirmed with the user and before updating the issue
 
 Use the adapter and dispatcher to run the three independent prosecution passes, enforce subagent working-tree discipline, and merge/deduplicate the returned findings before dispositions. Do not share findings between passes before merging.
 
+### Convergence Filter
+
+After the 3 finders return and are merged into the pre-filter union, Solution-Designer dispatches the Fable-tier `agents/code-review-response.md` shell for a two-phase convergence pass. This is Solution-Designer methodology layered on top of prosecution — it is not a fourth pipeline stage, and it does not change the `design-challenge` adapter's `[prosecution]`/`atomic: n/a` contract in `skills/adversarial-review/platforms/claude.md`.
+
+- **Phase 1 (cold-read)**: dispatch the Fable shell to cold-read the design directly — before opening any of the 3 finder ledgers — and record its own independent observations.
+- **Phase 2 (synthesis)**: dispatch the Fable shell with all 3 finder ledgers plus the Phase 1 cold-read observations. It dedupes, ranks, and merges the cold-read observations against the finder ledgers, then emits a kept/filtered rulings block spanning the **full pre-filter union** — every finder finding plus every cold-read observation, each marked `kept` or `filtered` with rationale.
+
+The per-finding classification gate below (§ Dispositions) then fires on **convergence-sustained** (kept) findings only; filtered findings do not enter the classification gate but remain visible in the rulings block and in the disposition summary's pre-filter accounting (§ Dispositions).
+
+**Convergence refusal handling**: if the Fable-tier dispatch returns `stop_reason: refusal` at either phase, retry that phase once on `fable`. If the retry also refuses, re-dispatch that phase on `model: opus` and visibly note the degraded tier (e.g. `Convergence phase 2 degraded to opus after refusal`). This is a methodology-level retry owned here, not an adapter- or pipeline-level rule — it does not touch `skills/adversarial-review/platforms/claude.md`.
+
 ### Dispositions
 
 Handle the merged finding ledger in this literal order: classify -> escalate load-bearing -> incorporate/dismiss remainder -> emit summary -> update issue body.
 
-For each merged finding, assign one disposition while invoking the per-finding classification gate inline with that assignment:
+For each convergence-sustained finding, assign one disposition while invoking the per-finding classification gate inline with that assignment:
 
 - **Incorporate** - refine the design and note the change
 - **Dismiss** - record rationale inline with the finding
@@ -178,7 +189,7 @@ For each merged finding, assign one disposition while invoking the per-finding c
 
 Use `skills/solution-authoring/SKILL.md` section `Applying the gate to adversarial-review dispositions` for the gate procedure and the `finding_dispositions:` marker schema. The gate classifies the maintainer action for each finding as `routine` or `load-bearing`; routine findings are recorded without firing the platform's structured-question tool, while load-bearing findings are asked before the issue body is updated. If the maintainer questions a classification or disposition, route the question-back through the solution-authoring re-audit/default handler before revising the disposition.
 
-Always emit a disposition summary after classification and before any issue-body update. The summary lists every finding, its `incorporate`, `dismiss`, or `escalate` outcome, its `routine` or `load-bearing` classification, and the per-finding rationale that will be persisted. If there are no non-dismissed findings, the summary still emits and says `all findings dismissed`; if every non-dismissed finding is routine, the summary still emits and says `all classified routine`.
+Always emit a disposition summary after classification and before any issue-body update. The summary lists every finding, its `incorporate`, `dismiss`, or `escalate` outcome, its `routine` or `load-bearing` classification, and the per-finding rationale that will be persisted. This guarantee extends over the **pre-filter ledger**: the summary lists every finding the 3 finders originally reported, plus every convergence cold-read observation, not only the convergence-sustained subset — findings filtered by convergence are listed with their `filtered` disposition and rationale from the rulings block rather than omitted. If there are no non-dismissed findings, the summary still emits and says `all findings dismissed`; if every non-dismissed finding is routine, the summary still emits and says `all classified routine`.
 
 For load-bearing findings, use a batched AskUserQuestion flow. When there are <=4 load-bearing findings, ask them in one batched call; when there are >4, ask in successive batched rounds, each preceded by a running-decisions summary covering findings already locked in earlier rounds. Each finding in a batched call that carries a load-bearing adversarial-review disposition renders the escalation tier per `skills/solution-authoring/SKILL.md §Rule: Decision brief structure` (#556) — full prose with current-state evidence, the conflict, and the customer failure mode before options — so explain-before-options is honored even when multiple findings share one structured-question call.
 
@@ -186,7 +197,7 @@ Before posting the design completion marker, follow `agents/Solution-Designer.ag
 
 ### Phase-containment emission
 
-After the disposition summary is finalized and after posting the `design-phase-complete` marker, emit one `<!-- phase-containment-{ID} -->` block per sustained (non-dismissed) design-challenge finding by appending to the same `<!-- design-phase-complete-{ID} -->` issue comment (or editing it):
+After the disposition summary is finalized and after posting the `design-phase-complete` marker, emit one `<!-- phase-containment-{ID} -->` block per sustained (non-dismissed) design-challenge finding by appending to the same `<!-- design-phase-complete-{ID} -->` issue comment (or editing it). This emission is anchored on **convergence-sustained** findings specifically — the same set that entered the classification gate in § Dispositions above; findings filtered by convergence do not receive a phase-containment block:
 
 - `finding_key`: `design-challenge:{issue}:{marker}:{finding_id}`
 - `introduced_phase`: set by explicit agent judgment — no default; reason which phase originated this defect
