@@ -696,9 +696,16 @@ function script:Get-PhaseContainmentCorpusRest {
     $tuples = [System.Collections.Generic.List[hashtable]]::new()
     $limit  = 20
 
+    # GH-8 fix (issue #782 GitHub-review response loop, PR #789): compute
+    # $since from $WindowDays the same way the GraphQL path does
+    # (Get-SurfaceACorpusGraphQL / Get-SurfaceBCorpusGraphQL), so the REST
+    # fallback is genuinely window-scoped rather than accepting -WindowDays
+    # and silently dropping it.
+    $since = (Get-Date).ToUniversalTime().AddDays(-$WindowDays).ToString('yyyy-MM-dd')
+
     # Surface A: recent closed issues
     if ($Stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
-        $issueListOutput = & gh issue list --state closed --limit $limit --json number 2>&1
+        $issueListOutput = & gh issue list --state closed --search "closed:>$since" --limit $limit --json number 2>&1
         if ($LASTEXITCODE -eq 0) {
             try {
                 $issueList = @(($issueListOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop)
@@ -711,6 +718,18 @@ function script:Get-PhaseContainmentCorpusRest {
                         $data     = ($viewOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
                         $comments = @($data['comments'])
                         $bodies   = @($comments | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_['body'] })
+                        # GH-8 fix: apply the same marker-presence gate the
+                        # GraphQL path uses (Get-SurfaceACorpusGraphQL) before
+                        # including this issue's tuple in the returned
+                        # corpus. Without this, the REST fallback included
+                        # every closed issue's comments unconditionally,
+                        # unlike the GraphQL path which only includes issues
+                        # carrying a design-phase-complete-{N} or
+                        # plan-issue-{N} marker.
+                        $allBodiesText = $bodies -join "`n"
+                        $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$num\s*-->") -or
+                                     ($allBodiesText -match "<!--\s*plan-issue-$num\s*-->")
+                        if (-not $hasMarker) { continue }
                         $tuples.Add(@{ Number = $num; Surface = 'issue'; Bodies = $bodies; CreatedAtValues = @() })
                     }
                     catch {
@@ -726,7 +745,7 @@ function script:Get-PhaseContainmentCorpusRest {
 
     # Surface B: recent merged PRs
     if ($Stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
-        $prListOutput = & gh pr list --state merged --limit $limit --json number 2>&1
+        $prListOutput = & gh pr list --state merged --search "merged:>$since" --limit $limit --json number 2>&1
         if ($LASTEXITCODE -eq 0) {
             try {
                 $prList = @(($prListOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop)

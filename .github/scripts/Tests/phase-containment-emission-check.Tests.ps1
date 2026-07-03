@@ -185,6 +185,65 @@ judge_ruling: sustained
 }
 
 # ---------------------------------------------------------------------------
+# 4b. GH-7 regression (code-review response loop, PR #789): gh view stderr
+#    must not be merged into the JSON stdout stream. `gh pr view` / `gh issue
+#    view` previously used `2>&1`, which merges PowerShell error-stream
+#    records (e.g. a benign gh deprecation/auth notice written via
+#    Write-Error) into the array later piped to ConvertFrom-Json, corrupting
+#    the parse and silently false-aborting the whole check (caught by the
+#    existing try/catch, returns $null, no report emitted). The fix changes
+#    both redirects to `2>$null`, matching the convention already used
+#    elsewhere in this file (Find-OrUpsertComment) and in
+#    phase-containment-rolling-history-core.ps1's REST/GraphQL paths.
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-PhaseContainmentEmissionCheckSingleTarget — GH-7 regression: gh view stderr must not corrupt JSON parse' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'parses PR comments successfully even when gh pr view emits benign stderr content alongside valid JSON stdout' {
+        $prBody = '<!-- judge-rulings pr=1010 -->'
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            # Simulate a benign gh deprecation/auth notice on the PowerShell
+            # error stream — the exact condition GH-7 identified as breaking
+            # `2>&1`-based capture (Write-Error is what genuinely merges into
+            # the array under 2>&1, unlike a raw stderr byte write).
+            Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+            return (@{ comments = @(@{ body = $prBody }) } | ConvertTo-Json -Depth 6)
+        }
+        Mock Find-OrUpsertComment { return 'https://example.invalid/comment' }
+
+        $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -PrNumber '1010'
+
+        # Pre-fix (2>&1), the merged ErrorRecord corrupted the JSON parse,
+        # the catch block fired, and $null was returned with no report.
+        $report | Should -Not -BeNullOrEmpty
+        $report | Should -Match 'code-review #1010:'
+    }
+
+    It 'parses issue comments successfully even when gh issue view emits benign stderr content alongside valid JSON stdout' {
+        $issueBody = '<!-- design-phase-complete-1011 -->'
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+            return (@{ comments = @(@{ body = $issueBody }) } | ConvertTo-Json -Depth 6)
+        }
+        Mock Find-OrUpsertComment { return 'https://example.invalid/comment' }
+
+        $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -IssueNumber '1011'
+
+        $report | Should -Not -BeNullOrEmpty
+        $report | Should -Match 'design-challenge #1011:'
+    }
+}
+
+# ---------------------------------------------------------------------------
 # 5. Single-target mode (Issue) — both design-challenge and plan-stress-test
 #    surfaces are probed
 # ---------------------------------------------------------------------------

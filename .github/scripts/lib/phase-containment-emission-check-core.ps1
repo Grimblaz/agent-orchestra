@@ -424,7 +424,16 @@ function script:Get-DesignChallengeSustainedCountInternal {
         $Body.Substring($regionStart)
     }
 
-    $dispositionMatches = [regex]::Matches($region, '(?m)disposition\s*:\s*(incorporate|escalate|dismiss)\b')
+    # GH-5 fix (issue #782 GitHub-review response loop, PR #789): anchor
+    # `disposition:` to a real YAML key position, matching the code-review
+    # surface's $keyAnchor pattern (line-start, dash-space list item, or
+    # flow-mapping `{`/`,` position). Without this anchor, a free-text
+    # disposition_rationale string quoting the substring "disposition:
+    # incorporate" for an unrelated finding is miscounted as a real entry,
+    # exactly the DD3 fail-loud violation the M3/PF-F2 fixes closed for the
+    # code-review surface's equivalent detectors.
+    $keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'
+    $dispositionMatches = [regex]::Matches($region, "(?m)${keyAnchor}disposition\s*:\s*(incorporate|escalate|dismiss)\b")
     if ($dispositionMatches.Count -eq 0) {
         return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
     }

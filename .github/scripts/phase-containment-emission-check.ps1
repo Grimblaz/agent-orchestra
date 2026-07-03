@@ -246,12 +246,19 @@ function Invoke-PhaseContainmentEmissionCheckSingleTarget {
     # so the params are accepted on this function for parameter-surface
     # parity but are not separately threaded here — write calls also resolve
     # owner/repo from the git remote independently.
+    # GH-7 fix (issue #782 GitHub-review response loop, PR #789): use
+    # 2>$null, not 2>&1. Merging stderr into the stream later piped to
+    # ConvertFrom-Json means any benign gh notice (deprecation, auth) on
+    # stderr corrupts the JSON parse and silently false-aborts the whole
+    # check. Matches the convention already used elsewhere in this codebase
+    # (Find-OrUpsertComment, phase-containment-rolling-history-core.ps1's
+    # REST/GraphQL paths).
     $viewArgs = @($targetId, '--json', 'comments')
     if ($isPr) {
-        $viewOutput = & gh pr view @viewArgs 2>&1
+        $viewOutput = & gh pr view @viewArgs 2>$null
     }
     else {
-        $viewOutput = & gh issue view @viewArgs 2>&1
+        $viewOutput = & gh issue view @viewArgs 2>$null
     }
 
     if ($LASTEXITCODE -ne 0) {

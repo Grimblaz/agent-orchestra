@@ -300,6 +300,37 @@ finding_dispositions:
 
 #endregion
 
+#region Synthetic fixture: GH-5 regression — free-text disposition_rationale substring mimics a disposition line (design-challenge)
+
+# GH-5 (code-review response loop, PR #789): the design-challenge disposition
+# scanner used a bare `(?m)disposition\s*:\s*(incorporate|escalate|dismiss)\b`
+# regex with no key-position anchor, unlike the code-review surface's
+# $keyAnchor-anchored detectors. This body has exactly ONE real finding
+# (disposition: dismiss) plus a disposition_rationale free-text string that
+# quotes the substring "disposition: incorporate" describing a DIFFERENT,
+# unrelated finding's history in prose. Pre-fix, the unanchored regex matched
+# BOTH the real "disposition: dismiss" key and the prose substring
+# "disposition: incorporate", yielding SustainedCount=1 (only the prose
+# "incorporate" survives the != 'dismiss' filter) despite the real finding
+# being dismissed and zero real findings being sustained. Post-fix, the
+# $keyAnchor-equivalent anchor excludes the mid-line prose match, and the
+# correct SustainedCount=0 is returned.
+$script:GH5DesignChallengeProseSubstringBody = @'
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [1]
+  entries:
+    - finding_id: F1
+      pass: 1
+      disposition: dismiss
+      classification: routine
+      disposition_rationale: "Not applicable; an earlier related finding had disposition: incorporate but was superseded by this analysis."
+```
+'@
+
+#endregion
+
 #region Synthetic fixture: plan-issue-782's own plan-stress-test judge-rulings
 
 # Issue #782's own plan-issue-782 comment does not yet contain a
@@ -428,6 +459,18 @@ Describe 'Get-SustainedFindingCount - design-challenge surface (live fixture)' {
         $result = Get-SustainedFindingCount -Surface 'design-challenge' -Body $script:DesignDismissBody
         $result.ParseStatus | Should -Be 'ok'
         $result.SustainedCount | Should -Be 2
+    }
+}
+
+Describe 'Get-SustainedFindingCount - GH-5 regression: key-position anchoring on design-challenge disposition detector' {
+    It 'does not mis-count a free-text disposition_rationale substring as a real finding (judge-required regression test)' {
+        # Pre-fix, the unanchored regex matched the prose substring
+        # "disposition: incorporate" inside disposition_rationale in addition
+        # to the one real "disposition: dismiss" finding, yielding
+        # SustainedCount=1 instead of the correct 0.
+        $result = Get-SustainedFindingCount -Surface 'design-challenge' -Body $script:GH5DesignChallengeProseSubstringBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 0
     }
 }
 

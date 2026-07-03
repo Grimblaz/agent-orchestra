@@ -1202,4 +1202,74 @@ judge_ruling: sustained
         $issueTuple['Surface'] | Should -Be 'issue'
         $issueTuple['Bodies'][0] | Should -Match 'plan-issue-950'
     }
+
+    # -----------------------------------------------------------------
+    # GH-8 regression (code-review response loop, PR #789): the REST
+    # fallback's issue surface (Surface A) previously included every
+    # closed issue's comments unconditionally, with NO marker gate — while
+    # the GraphQL path only includes issues whose bodies match
+    # <!-- design-phase-complete-{N} --> or <!-- plan-issue-{N} -->.
+    # Additionally, $WindowDays was accepted but never threaded into the
+    # REST discovery query (fixed --limit 20, no date filter), unlike the
+    # GraphQL path's closed:>$since filter. Both regressions are covered
+    # below. Surface B (PR/code-review) already correctly gates on
+    # judge-rulings — out of scope for this fix.
+    # -----------------------------------------------------------------
+
+    It 'GH-8: excludes a closed issue whose body has neither design-phase-complete nor plan-issue marker from the REST fallback corpus' {
+        $restIssueList = (@(@{ number = 960 }, @{ number = 961 }) | ConvertTo-Json)
+        # #960 carries a real marker -> must be included.
+        $restIssueView960 = (@{ comments = @(@{ body = '<!-- plan-issue-960 -->' }) } | ConvertTo-Json -Depth 6)
+        # #961 is ordinary chatter with NO marker -> must be excluded.
+        $restIssueView961 = (@{ comments = @(@{ body = 'Closed as not-a-bug, no phase-containment relevance here.' }) } | ConvertTo-Json -Depth 6)
+        $restPrList = '[]'
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') { return $restIssueList }
+            if ($joined -match 'issue view 960') { return $restIssueView960 }
+            if ($joined -match 'issue view 961') { return $restIssueView961 }
+            if ($joined -match 'pr list')    { return $restPrList }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+
+        $result.Source | Should -Be 'rest'
+        ($result.Tuples | Where-Object { $_['Number'] -eq 960 }) | Should -Not -BeNullOrEmpty
+        ($result.Tuples | Where-Object { $_['Number'] -eq 961 }) | Should -BeNullOrEmpty
+    }
+
+    It 'GH-8: threads WindowDays into the REST gh issue list / gh pr list query construction (not merely accepted and dropped)' {
+        $script:observedIssueListArgs = $null
+        $script:observedPrListArgs = $null
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match '^issue list') { $script:observedIssueListArgs = $joined; return '[]' }
+            if ($joined -match '^pr list')    { $script:observedPrListArgs = $joined; return '[]' }
+            return '{}'
+        }
+
+        $null = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 7
+
+        $expectedSince = (Get-Date).ToUniversalTime().AddDays(-7).ToString('yyyy-MM-dd')
+
+        $script:observedIssueListArgs | Should -Not -BeNullOrEmpty
+        $script:observedIssueListArgs | Should -Match ([regex]::Escape($expectedSince))
+        $script:observedPrListArgs | Should -Not -BeNullOrEmpty
+        $script:observedPrListArgs | Should -Match ([regex]::Escape($expectedSince))
+    }
 }
