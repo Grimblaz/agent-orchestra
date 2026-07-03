@@ -2,6 +2,15 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.1.0] — 2026-07-03
+
+### Added
+
+- Re-tier the adversarial-review pipeline to the Claude 5 family: judge and generalist-B move to Fable, specialists stay Opus (#785).
+- Add the design-challenge convergence-filter methodology to Solution-Designer Stage 3, replacing generic design-review lenses with three specialist lenses (#785).
+- Add model/effort frontmatter to Experience-Owner, Solution-Designer, Issue-Planner, Research-Agent, and Specification shells (previously inherit) (#785).
+- Extend the design-disposition schema to a fourth pass value for convergence-origin findings (#785).
+
 ## [3.0.0] — 2026-07-02
 
 ### Changed
