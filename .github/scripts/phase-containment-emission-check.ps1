@@ -253,7 +253,7 @@ function Invoke-PhaseContainmentEmissionCheckSingleTarget {
     # check. Matches the convention already used elsewhere in this codebase
     # (Find-OrUpsertComment) and, as of the PF2-F2 fix (issue #782 post-fix
     # prosecution pass), now also matches
-    # phase-containment-rolling-history-core.ps1's REST/GraphQL paths, which
+    # phase-containment-rolling-history-core.ps1 REST/GraphQL paths, which
     # carried the identical 2>&1 vulnerability at the time this GH-7 comment
     # was originally written.
     $viewArgs = @($targetId, '--json', 'comments')
