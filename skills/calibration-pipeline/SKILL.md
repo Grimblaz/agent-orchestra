@@ -27,6 +27,7 @@ Reusable entryway for deterministic tooling, committed assets, and pipeline-metr
 - `scripts/` contains calibration writers, aggregation tools, improvement-issue helpers, and related shared helpers
 - `assets/` contains committed pipeline configuration and data consumed by those scripts
 - `references/` contains extracted pipeline-metrics contract material that other skills and agents can load directly
+- `schemas/phase-containment.schema.json` is the validation schema for `<!-- phase-containment-{ID} -->` ledger entries; the ledger's warn-only enforcement surface is `.github/scripts/phase-containment-emission-check.ps1` (hub maintainers only — repo-relative, does not resolve from a consumer repo's CWD), which sweeps code-review, design-challenge, and plan-stress-test surfaces for judge-sustained findings missing a paired ledger block and reports the gap; it never blocks a caller flow
 
 ## Composite References
 

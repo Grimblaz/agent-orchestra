@@ -261,10 +261,16 @@ function script:Write-PhaseContainmentCache {
 }
 
 # -------------------------------------------------------------------------
-# Private: collect Surface A entries via GraphQL (issue comments)
+# Private: Surface A discovery+fetch via GraphQL (issue comments)
+# Shared seam (#782 M11): returns raw per-number corpus tuples — the same
+# discovery predicate (search query shape, marker-presence check, comment
+# pagination) that both the existing entry-scanning walker (below) and the
+# new phase-containment-emission-check.ps1 sweep (via the public
+# Get-PhaseContainmentCommentCorpus wrapper) consume. $null return signals a
+# GraphQL-level error so callers fall back to REST.
 # -------------------------------------------------------------------------
 
-function script:Get-SurfaceAEntriesGraphQL {
+function script:Get-SurfaceACorpusGraphQL {
     param(
         [Parameter(Mandatory)][string]$Owner,
         [Parameter(Mandatory)][string]$Repo,
@@ -273,7 +279,8 @@ function script:Get-SurfaceAEntriesGraphQL {
         [Parameter(Mandatory)][int]$TimeoutSeconds
     )
 
-    $entries = [System.Collections.Generic.List[hashtable]]::new()
+    # Each tuple: @{ Number = <int>; Surface = 'issue'; Bodies = <string[]>; CreatedAtValues = <string[]> }
+    $tuples = [System.Collections.Generic.List[hashtable]]::new()
 
     # Search for recently-closed issues in the window
     $since = (Get-Date).ToUniversalTime().AddDays(-$WindowDays).ToString('yyyy-MM-dd')
@@ -307,7 +314,16 @@ function script:Get-SurfaceAEntriesGraphQL {
 }
 "@
 
-            $output = & gh api graphql -f "query=$query" 2>&1
+            # PF2-F2 fix (issue #782 post-fix prosecution pass): use 2>$null,
+            # not 2>&1. Merging stderr into the stream later piped to
+            # ConvertFrom-Json means a benign gh notice (deprecation/auth/
+            # rate-limit) corrupts the JSON parse and silently false-aborts
+            # this surface. Same vulnerability class GH-7 fixed in
+            # phase-containment-emission-check.ps1 gh view calls; the GH-7
+            # fix comment claimed this file already used this convention --
+            # that claim was false at the time, and this line is one of the
+            # sites that made it false.
+            $output = & gh api graphql -f "query=$query" 2>$null
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "phase-containment-rolling-history-core: Surface A GraphQL search failed (exit $LASTEXITCODE)"
                 return $null   # signal error for fallback
@@ -369,7 +385,9 @@ function script:Get-SurfaceAEntriesGraphQL {
   }
 }
 "@
-                    $pageOutput = & gh api graphql -f "query=$pageQuery" 2>&1
+                    # PF2-F2 fix: see the Surface A search-page call above for
+                    # the same stderr/ConvertFrom-Json rationale.
+                    $pageOutput = & gh api graphql -f "query=$pageQuery" 2>$null
                     if ($LASTEXITCODE -ne 0) { break }
 
                     try {
@@ -391,14 +409,13 @@ function script:Get-SurfaceAEntriesGraphQL {
                     }
                 }
 
-                # Scan all collected bodies
-                $scanned = Invoke-PhaseContainmentCommentScan `
-                    -CommentBodies $commentBodies.ToArray() `
-                    -IssueOrPrNumber $issueNum `
-                    -Surface 'issue' `
-                    -CreatedAtValues $commentCreatedAt.ToArray()
-
-                foreach ($e in $scanned) { $entries.Add($e) }
+                # Record the discovered per-number tuple (raw bodies — no scan/parse here).
+                $tuples.Add(@{
+                    Number           = $issueNum
+                    Surface          = 'issue'
+                    Bodies           = $commentBodies.ToArray()
+                    CreatedAtValues  = $commentCreatedAt.ToArray()
+                })
             }
 
             # Advance the outer search cursor
@@ -420,14 +437,17 @@ function script:Get-SurfaceAEntriesGraphQL {
         return $null
     }
 
-    return , $entries.ToArray()
+    return , $tuples.ToArray()
 }
 
 # -------------------------------------------------------------------------
-# Private: collect Surface B entries via GraphQL (merged PR comments)
+# Private: Surface A entries via GraphQL — thin wrapper over the shared
+# corpus discovery seam. Preserves the pre-#782 public contract (an array of
+# parsed, validated entry hashtables) for Get-PhaseContainmentHistory and its
+# existing direct-call Pester coverage.
 # -------------------------------------------------------------------------
 
-function script:Get-SurfaceBEntriesGraphQL {
+function script:Get-SurfaceAEntriesGraphQL {
     param(
         [Parameter(Mandatory)][string]$Owner,
         [Parameter(Mandatory)][string]$Repo,
@@ -436,7 +456,53 @@ function script:Get-SurfaceBEntriesGraphQL {
         [Parameter(Mandatory)][int]$TimeoutSeconds
     )
 
+    $tuples = script:Get-SurfaceACorpusGraphQL `
+        -Owner $Owner -Repo $Repo -WindowDays $WindowDays `
+        -Stopwatch $Stopwatch -TimeoutSeconds $TimeoutSeconds
+
+    if ($null -eq $tuples) { return $null }
+
     $entries = [System.Collections.Generic.List[hashtable]]::new()
+    foreach ($tuple in $tuples) {
+        # M7 fix (issue #782 post-review): restore per-item isolation. A
+        # single malformed tuple (e.g. Number/Bodies/CreatedAtValues that
+        # cannot bind to Invoke-PhaseContainmentCommentScan's typed
+        # parameters) must degrade that ONE tuple, not abort every other
+        # tuple in this loop — the original per-item try/catch this
+        # extraction moved away from.
+        try {
+            $scanned = Invoke-PhaseContainmentCommentScan `
+                -CommentBodies $tuple['Bodies'] `
+                -IssueOrPrNumber $tuple['Number'] `
+                -Surface $tuple['Surface'] `
+                -CreatedAtValues $tuple['CreatedAtValues']
+
+            foreach ($e in $scanned) { $entries.Add($e) }
+        }
+        catch {
+            Write-Warning "phase-containment-rolling-history-core: Surface A tuple scan failed for Number='$($tuple['Number'])': $_"
+        }
+    }
+
+    return , $entries.ToArray()
+}
+
+# -------------------------------------------------------------------------
+# Private: Surface B discovery+fetch via GraphQL (merged PR comments)
+# Shared seam (#782 M11) — see Get-SurfaceACorpusGraphQL header comment.
+# -------------------------------------------------------------------------
+
+function script:Get-SurfaceBCorpusGraphQL {
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][int]$WindowDays,
+        [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
+        [Parameter(Mandatory)][int]$TimeoutSeconds
+    )
+
+    # Each tuple: @{ Number = <int>; Surface = 'pr'; Bodies = <string[]>; CreatedAtValues = <string[]> }
+    $tuples = [System.Collections.Generic.List[hashtable]]::new()
 
     $since = (Get-Date).ToUniversalTime().AddDays(-$WindowDays).ToString('yyyy-MM-dd')
 
@@ -469,7 +535,9 @@ function script:Get-SurfaceBEntriesGraphQL {
 }
 "@
 
-            $output = & gh api graphql -f "query=$query" 2>&1
+            # PF2-F2 fix: see Get-SurfaceACorpusGraphQL identical stderr/
+            # ConvertFrom-Json rationale.
+            $output = & gh api graphql -f "query=$query" 2>$null
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "phase-containment-rolling-history-core: Surface B GraphQL search failed (exit $LASTEXITCODE)"
                 return $null
@@ -529,7 +597,9 @@ function script:Get-SurfaceBEntriesGraphQL {
   }
 }
 "@
-                    $pageOutput = & gh api graphql -f "query=$pageQuery" 2>&1
+                    # PF2-F2 fix: see the Surface A search-page call for the
+                    # same stderr/ConvertFrom-Json rationale.
+                    $pageOutput = & gh api graphql -f "query=$pageQuery" 2>$null
                     if ($LASTEXITCODE -ne 0) { break }
 
                     try {
@@ -551,13 +621,13 @@ function script:Get-SurfaceBEntriesGraphQL {
                     }
                 }
 
-                $scanned = Invoke-PhaseContainmentCommentScan `
-                    -CommentBodies $commentBodies.ToArray() `
-                    -IssueOrPrNumber $prNum `
-                    -Surface 'pr' `
-                    -CreatedAtValues $commentCreatedAt.ToArray()
-
-                foreach ($e in $scanned) { $entries.Add($e) }
+                # Record the discovered per-number tuple (raw bodies — no scan/parse here).
+                $tuples.Add(@{
+                    Number           = $prNum
+                    Surface          = 'pr'
+                    Bodies           = $commentBodies.ToArray()
+                    CreatedAtValues  = $commentCreatedAt.ToArray()
+                })
             }
 
             # Advance the outer search cursor
@@ -579,40 +649,107 @@ function script:Get-SurfaceBEntriesGraphQL {
         return $null
     }
 
+    return , $tuples.ToArray()
+}
+
+# -------------------------------------------------------------------------
+# Private: Surface B entries via GraphQL — thin wrapper over the shared
+# corpus discovery seam. Preserves the pre-#782 public contract (an array of
+# parsed, validated entry hashtables) for Get-PhaseContainmentHistory and its
+# existing direct-call Pester coverage.
+# -------------------------------------------------------------------------
+
+function script:Get-SurfaceBEntriesGraphQL {
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][int]$WindowDays,
+        [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
+        [Parameter(Mandatory)][int]$TimeoutSeconds
+    )
+
+    $tuples = script:Get-SurfaceBCorpusGraphQL `
+        -Owner $Owner -Repo $Repo -WindowDays $WindowDays `
+        -Stopwatch $Stopwatch -TimeoutSeconds $TimeoutSeconds
+
+    if ($null -eq $tuples) { return $null }
+
+    $entries = [System.Collections.Generic.List[hashtable]]::new()
+    foreach ($tuple in $tuples) {
+        # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
+        # identical per-item try/catch for the rationale.
+        try {
+            $scanned = Invoke-PhaseContainmentCommentScan `
+                -CommentBodies $tuple['Bodies'] `
+                -IssueOrPrNumber $tuple['Number'] `
+                -Surface $tuple['Surface'] `
+                -CreatedAtValues $tuple['CreatedAtValues']
+
+            foreach ($e in $scanned) { $entries.Add($e) }
+        }
+        catch {
+            Write-Warning "phase-containment-rolling-history-core: Surface B tuple scan failed for Number='$($tuple['Number'])': $_"
+        }
+    }
+
     return , $entries.ToArray()
 }
 
 # -------------------------------------------------------------------------
-# Private: REST fallback — simplified scan via gh CLI
+# Private: REST fallback discovery+fetch — simplified corpus scan via gh CLI.
+# Shared seam (#782 M11) — see Get-SurfaceACorpusGraphQL header comment.
 # -------------------------------------------------------------------------
 
-function script:Get-PhaseContainmentEntriesRest {
+function script:Get-PhaseContainmentCorpusRest {
     param(
         [Parameter(Mandatory)][int]$WindowDays,
         [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
         [Parameter(Mandatory)][int]$TimeoutSeconds
     )
 
-    $entries = [System.Collections.Generic.List[hashtable]]::new()
-    $limit   = 20
+    # Each tuple: @{ Number = <int>; Surface = 'issue'|'pr'; Bodies = <string[]>; CreatedAtValues = <string[]> }
+    $tuples = [System.Collections.Generic.List[hashtable]]::new()
+    $limit  = 20
+
+    # GH-8 fix (issue #782 GitHub-review response loop, PR #789): compute
+    # $since from $WindowDays the same way the GraphQL path does
+    # (Get-SurfaceACorpusGraphQL / Get-SurfaceBCorpusGraphQL), so the REST
+    # fallback is genuinely window-scoped rather than accepting -WindowDays
+    # and silently dropping it.
+    $since = (Get-Date).ToUniversalTime().AddDays(-$WindowDays).ToString('yyyy-MM-dd')
 
     # Surface A: recent closed issues
     if ($Stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
-        $issueListOutput = & gh issue list --state closed --limit $limit --json number 2>&1
+        # PF2-F2 fix: see Get-SurfaceACorpusGraphQL identical stderr/
+        # ConvertFrom-Json rationale — applies equally to the REST surface.
+        $issueListOutput = & gh issue list --state closed --search "closed:>$since" --limit $limit --json number 2>$null
         if ($LASTEXITCODE -eq 0) {
             try {
                 $issueList = @(($issueListOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop)
                 foreach ($issue in $issueList) {
                     if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { break }
                     $num = [int]$issue['number']
-                    $viewOutput = & gh issue view $num --json comments 2>&1
+                    # PF2-F2 fix: see Get-SurfaceACorpusGraphQL identical
+                    # stderr/ConvertFrom-Json rationale.
+                    $viewOutput = & gh issue view $num --json comments 2>$null
                     if ($LASTEXITCODE -ne 0) { continue }
                     try {
                         $data     = ($viewOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
                         $comments = @($data['comments'])
                         $bodies   = @($comments | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_['body'] })
-                        $scanned  = Invoke-PhaseContainmentCommentScan -CommentBodies $bodies -IssueOrPrNumber $num -Surface 'issue'
-                        foreach ($e in $scanned) { $entries.Add($e) }
+                        # GH-8 fix: apply the same marker-presence gate the
+                        # GraphQL path uses (Get-SurfaceACorpusGraphQL) before
+                        # including this issue's tuple in the returned
+                        # corpus. Without this, the REST fallback included
+                        # every closed issue's comments unconditionally,
+                        # unlike the GraphQL path which only includes issues
+                        # carrying a design-phase-complete-{N} or
+                        # plan-issue-{N} marker.
+                        $allBodiesText = $bodies -join "`n"
+                        $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$num\s*-->") -or
+                                     ($allBodiesText -match "<!--\s*plan-issue-$num\s*-->")
+                        if (-not $hasMarker) { continue }
+                        $tuples.Add(@{ Number = $num; Surface = 'issue'; Bodies = $bodies; CreatedAtValues = @() })
                     }
                     catch {
                         Write-Warning "phase-containment-rolling-history-core: REST failed to parse issue #$num comments: $_"
@@ -627,14 +764,18 @@ function script:Get-PhaseContainmentEntriesRest {
 
     # Surface B: recent merged PRs
     if ($Stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
-        $prListOutput = & gh pr list --state merged --limit $limit --json number 2>&1
+        # PF2-F2 fix: see Get-SurfaceACorpusGraphQL identical stderr/
+        # ConvertFrom-Json rationale — applies equally to the REST surface.
+        $prListOutput = & gh pr list --state merged --search "merged:>$since" --limit $limit --json number 2>$null
         if ($LASTEXITCODE -eq 0) {
             try {
                 $prList = @(($prListOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop)
                 foreach ($pr in $prList) {
                     if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { break }
                     $num = [int]$pr['number']
-                    $viewOutput = & gh pr view $num --json comments 2>&1
+                    # PF2-F2 fix: see Get-SurfaceACorpusGraphQL identical
+                    # stderr/ConvertFrom-Json rationale.
+                    $viewOutput = & gh pr view $num --json comments 2>$null
                     if ($LASTEXITCODE -ne 0) { continue }
                     try {
                         $data     = ($viewOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
@@ -642,9 +783,8 @@ function script:Get-PhaseContainmentEntriesRest {
                         # Only scan PRs that have judge-rulings
                         $allText  = $comments | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_['body'] }
                         if (-not (($allText -join "`n") -match '<!--\s*judge-rulings')) { continue }
-                        $bodies  = @($allText)
-                        $scanned = Invoke-PhaseContainmentCommentScan -CommentBodies $bodies -IssueOrPrNumber $num -Surface 'pr'
-                        foreach ($e in $scanned) { $entries.Add($e) }
+                        $bodies = @($allText)
+                        $tuples.Add(@{ Number = $num; Surface = 'pr'; Bodies = $bodies; CreatedAtValues = @() })
                     }
                     catch {
                         Write-Warning "phase-containment-rolling-history-core: REST failed to parse PR #$num comments: $_"
@@ -657,7 +797,202 @@ function script:Get-PhaseContainmentEntriesRest {
         }
     }
 
+    return , $tuples.ToArray()
+}
+
+# -------------------------------------------------------------------------
+# Private: REST fallback entries — thin wrapper over the shared corpus
+# discovery seam. Preserves the pre-#782 public contract (an array of
+# parsed, validated entry hashtables) for Get-PhaseContainmentHistory.
+# -------------------------------------------------------------------------
+
+function script:Get-PhaseContainmentEntriesRest {
+    param(
+        [Parameter(Mandatory)][int]$WindowDays,
+        [Parameter(Mandatory)][System.Diagnostics.Stopwatch]$Stopwatch,
+        [Parameter(Mandatory)][int]$TimeoutSeconds
+    )
+
+    $tuples = script:Get-PhaseContainmentCorpusRest `
+        -WindowDays $WindowDays -Stopwatch $Stopwatch -TimeoutSeconds $TimeoutSeconds
+
+    $entries = [System.Collections.Generic.List[hashtable]]::new()
+    foreach ($tuple in $tuples) {
+        # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
+        # identical per-item try/catch for the rationale.
+        try {
+            $scanned = Invoke-PhaseContainmentCommentScan `
+                -CommentBodies $tuple['Bodies'] `
+                -IssueOrPrNumber $tuple['Number'] `
+                -Surface $tuple['Surface'] `
+                -CreatedAtValues $tuple['CreatedAtValues']
+
+            foreach ($e in $scanned) { $entries.Add($e) }
+        }
+        catch {
+            Write-Warning "phase-containment-rolling-history-core: REST tuple scan failed for Number='$($tuple['Number'])': $_"
+        }
+    }
+
     return , $entries.ToArray()
+}
+
+# -------------------------------------------------------------------------
+# Public function: Get-PhaseContainmentCommentCorpus
+# Shared discovery seam (#782 M11): surface-discovery + raw-comment-body
+# fetch, consumed by BOTH Get-PhaseContainmentHistory (via the Entries
+# wrappers above) and the phase-containment-emission-check.ps1 sweep, so
+# #772's pagination/marker-presence hardening lands in one place instead of
+# diverging across two copies.
+# -------------------------------------------------------------------------
+
+function Get-PhaseContainmentCommentCorpus {
+    <#
+    .SYNOPSIS
+        Discovers phase-containment-relevant issues/PRs and returns their raw
+        comment bodies, without parsing or validating phase-containment blocks.
+    .DESCRIPTION
+        Walks the same two surfaces as Get-PhaseContainmentHistory:
+          Surface A: issue comments (design-phase-complete-{N} or plan-issue-{N} markers)
+          Surface B: merged PR comments (judge-rulings markers)
+
+        Unlike Get-PhaseContainmentHistory, this function performs NO block
+        parsing/validation — it returns the raw per-surface tuples that
+        callers doing their own analysis (e.g. the emission-check sweep's
+        sustained-vs-block gap counting) need. Get-PhaseContainmentHistory's
+        Entries output remains the validated, parsed phase-containment-block
+        view; this function is the shared discovery/fetch layer beneath it.
+
+        Falls back from GraphQL to REST on error, matching
+        Get-PhaseContainmentHistory's fallback behavior. Does not use the
+        1-hour cache (that cache stores parsed Entries, not raw bodies).
+
+        M12 note (issue #782 post-review, informational only — no behavior
+        change): under the REST fallback path (Source = 'rest'), every
+        tuple's CreatedAtValues is always an empty array. The REST discovery
+        helper (script:Get-PhaseContainmentCorpusRest) uses `gh issue/pr
+        view --json comments`, whose comment objects do not carry a
+        createdAt field the way the GraphQL path's `comments(first: 100) {
+        nodes { body createdAt } }` query does, so REST-sourced tuples
+        cannot populate per-comment timestamps. Callers that rely on
+        CreatedAtValues (e.g. Invoke-PhaseContainmentDedup's latest-wins
+        comparison) degrade gracefully under REST (empty string per entry),
+        but should not expect real timestamps when Source = 'rest'.
+    .PARAMETER RepoOwner
+        GitHub repository owner (e.g., 'Grimblaz'). Resolved via 'gh repo view' if not supplied.
+    .PARAMETER RepoName
+        GitHub repository name (e.g., 'agent-orchestra'). Resolved via 'gh repo view' if not supplied.
+    .PARAMETER WindowDays
+        Number of past days to scan. Default: 90.
+    .PARAMETER Token
+        GitHub token. Currently unused (gh CLI uses ambient auth). Reserved for future use.
+    .PARAMETER TimeoutSeconds
+        Per-run budget in seconds. Default: 30.
+    .OUTPUTS
+        [PSCustomObject] with:
+          Tuples    [array]  — each entry: @{ Number; Surface ('issue'|'pr'); Bodies [string[]]; CreatedAtValues [string[]] }
+          FetchedAt [datetime]
+          Source    [string] — 'graphql' | 'rest' | 'timeout' | 'repo-resolution-failed'
+    #>
+    [CmdletBinding()]
+    [OutputType([PSCustomObject])]
+    param(
+        [string]$RepoOwner    = '',
+        [string]$RepoName     = '',
+        [int]$WindowDays      = 90,
+        [string]$Token        = '',
+        [int]$TimeoutSeconds  = 30
+    )
+
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    # ---- Resolve repo owner/name ----
+    if (-not $RepoOwner -or -not $RepoName) {
+        if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+            Write-Warning "phase-containment-rolling-history-core: timed out before repo resolution"
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout' }
+        }
+        # PF2-F2 fix: use 2>$null, not 2>&1 — see Get-SurfaceACorpusGraphQL
+        # stderr/ConvertFrom-Json rationale. The failure-path warning below no
+        # longer echoes gh's stderr text (dropped, not merged); this matches
+        # the GH-7 precedent in phase-containment-emission-check.ps1 gh
+        # view failure branch, which also does not echo captured output.
+        $repoViewJson = & gh repo view --json 'owner,name' 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "phase-containment-rolling-history-core: gh repo view failed (exit $LASTEXITCODE)"
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'repo-resolution-failed' }
+        }
+        try {
+            $repoInfo = ($repoViewJson | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+            if (-not $RepoOwner) { $RepoOwner = [string]$repoInfo['owner']['login'] }
+            if (-not $RepoName)  { $RepoName  = [string]$repoInfo['name'] }
+        }
+        catch {
+            Write-Warning "phase-containment-rolling-history-core: failed to parse repo view: $_"
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'repo-resolution-failed' }
+        }
+    }
+
+    # ---- GraphQL fetch ----
+    if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+        Write-Warning "phase-containment-rolling-history-core: timed out before corpus GraphQL fetch"
+        return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout' }
+    }
+
+    $useRest = $false
+    $allTuples = [System.Collections.Generic.List[hashtable]]::new()
+
+    $surfaceATuples = script:Get-SurfaceACorpusGraphQL `
+        -Owner $RepoOwner -Repo $RepoName -WindowDays $WindowDays `
+        -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
+
+    if ($null -eq $surfaceATuples) {
+        $useRest = $true
+    }
+    else {
+        foreach ($t in $surfaceATuples) { $allTuples.Add($t) }
+    }
+
+    if (-not $useRest) {
+        if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+            Write-Warning "phase-containment-rolling-history-core: timed out before corpus Surface B fetch"
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout' }
+        }
+
+        $surfaceBTuples = script:Get-SurfaceBCorpusGraphQL `
+            -Owner $RepoOwner -Repo $RepoName -WindowDays $WindowDays `
+            -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
+
+        if ($null -eq $surfaceBTuples) {
+            $useRest = $true
+            $allTuples.Clear()
+        }
+        else {
+            foreach ($t in $surfaceBTuples) { $allTuples.Add($t) }
+        }
+    }
+
+    # ---- REST fallback ----
+    $sourceLabel = 'graphql'
+    if ($useRest) {
+        if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+            Write-Warning "phase-containment-rolling-history-core: timed out before corpus REST fallback"
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout' }
+        }
+
+        $restTuples = script:Get-PhaseContainmentCorpusRest `
+            -WindowDays $WindowDays -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
+
+        $allTuples.Clear()
+        foreach ($t in $restTuples) { $allTuples.Add($t) }
+        $sourceLabel = 'rest'
+    }
+
+    return [PSCustomObject]@{
+        Tuples    = $allTuples.ToArray()
+        FetchedAt = (Get-Date)
+        Source    = $sourceLabel
+    }
 }
 
 # -------------------------------------------------------------------------
@@ -716,9 +1051,14 @@ function Get-PhaseContainmentHistory {
                 CacheAge  = [timespan]::Zero
             }
         }
-        $repoViewJson = & gh repo view --json 'owner,name' 2>&1
+        # PF2-F2 fix: use 2>$null, not 2>&1 — see Get-SurfaceACorpusGraphQL
+        # stderr/ConvertFrom-Json rationale. The failure-path warning below no
+        # longer echoes gh's stderr text (dropped, not merged); this matches
+        # the GH-7 precedent in phase-containment-emission-check.ps1 gh
+        # view failure branch, which also does not echo captured output.
+        $repoViewJson = & gh repo view --json 'owner,name' 2>$null
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "phase-containment-rolling-history-core: gh repo view failed: $repoViewJson"
+            Write-Warning "phase-containment-rolling-history-core: gh repo view failed (exit $LASTEXITCODE)"
             return [PSCustomObject]@{
                 Entries   = @()
                 FetchedAt = (Get-Date)

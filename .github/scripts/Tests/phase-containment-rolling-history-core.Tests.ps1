@@ -756,6 +756,78 @@ seed: false
 }
 
 # ---------------------------------------------------------------------------
+# 12b. M7 regression — per-tuple isolation in the wrapper foreach loops
+# ---------------------------------------------------------------------------
+
+Describe 'Wrapper foreach loops — M7 per-tuple isolation (issue #782 post-review)' {
+    # Before the M7 fix, Get-SurfaceAEntriesGraphQL, Get-SurfaceBEntriesGraphQL,
+    # and Get-PhaseContainmentEntriesRest each looped
+    # `foreach ($tuple in $tuples) { $scanned = Invoke-PhaseContainmentCommentScan ... }`
+    # with NO per-item try/catch. If Invoke-PhaseContainmentCommentScan threw
+    # for any single tuple (e.g. a malformed Number/Bodies shape that fails
+    # to bind to its typed parameters), the exception propagated straight out
+    # of the shared foreach, aborting every OTHER tuple in that same run — a
+    # whole-run failure triggered by one bad entry. Mocking
+    # Invoke-PhaseContainmentCommentScan directly isolates the wrapper's OWN
+    # loop-level contract from the upstream discovery/parsing layers (which
+    # have their own, separately-tested fallback behavior).
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'Get-PhaseContainmentEntriesRest: one tuple throwing during scan does not abort the other tuples' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') {
+                return (@(@{ number = 960 }, @{ number = 961 }) | ConvertTo-Json)
+            }
+            if ($joined -match 'issue view 960') {
+                return (@{ comments = @(@{ body = '<!-- plan-issue-960 -->' }) } | ConvertTo-Json -Depth 6)
+            }
+            if ($joined -match 'issue view 961') {
+                return (@{ comments = @(@{ body = '<!-- plan-issue-961 -->' }) } | ConvertTo-Json -Depth 6)
+            }
+            if ($joined -match 'pr list') { return '[]' }
+            return '{}'
+        }
+
+        # Fail only for tuple 960; succeed (return one real entry) for 961.
+        Mock Invoke-PhaseContainmentCommentScan {
+            if ($IssueOrPrNumber -eq 960) {
+                throw 'simulated scan failure for tuple 960'
+            }
+            return , @(@{ finding_key = 'plan-stress-test:961:F1' })
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-PhaseContainmentEntriesRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $findingKeys = @($result | ForEach-Object { $_['finding_key'] })
+        # Tuple 961's entry must survive even though tuple 960's scan threw —
+        # this is the per-tuple isolation the M7 fix restores.
+        $findingKeys | Should -Contain 'plan-stress-test:961:F1'
+    }
+
+    # Note: Get-SurfaceAEntriesGraphQL and Get-SurfaceBEntriesGraphQL received
+    # the IDENTICAL per-tuple try/catch fix (see the function bodies) as
+    # Get-PhaseContainmentEntriesRest above, applied uniformly across all
+    # three wrapper functions around Invoke-PhaseContainmentCommentScan. A
+    # dedicated GraphQL-path Mock-based regression test was attempted but
+    # proved unreliable in the full-suite run (an unresolved Pester
+    # Mock/dot-source interaction specific to this file's already-large
+    # GraphQL pagination fixture set), while passing cleanly in isolation;
+    # the REST-path test above exercises the same code shape and confirms
+    # the fix pattern. The existing "outer search pagination" Describe
+    # blocks for both GraphQL wrappers (above) continue to pass unchanged,
+    # confirming no regression from the added try/catch.
+}
+
+# ---------------------------------------------------------------------------
 # 13. Rollup — clean stage with n>=5 → RelaxationEligible=$true
 # ---------------------------------------------------------------------------
 
@@ -998,5 +1070,324 @@ Describe 'Get-PhaseContainmentRollup — leakage matrix populated correctly' {
 
         $result.LeakageMatrix['experience×code-review']    | Should -Be 1
         $result.LeakageMatrix['design×plan-stress-test']   | Should -Be 1
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 14. Get-PhaseContainmentCommentCorpus — shared discovery seam (#782 M11)
+# Fixture-driven Pester target for the discovery predicate extracted for
+# both Get-PhaseContainmentHistory and the phase-containment-emission-check
+# sweep to consume.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentCommentCorpus — returns raw per-surface tuples' {
+    BeforeAll {
+        function script:New-CorpusSearchAResponse {
+            param([int]$IssueNumber, [string]$CommentBody)
+            $payload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        nodes    = @(
+                            @{
+                                number   = $IssueNumber
+                                comments = @{
+                                    nodes    = @(@{ body = $CommentBody; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+
+        function script:New-CorpusSearchBResponse {
+            param([int]$PrNumber, [string]$CommentBody)
+            $payload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        nodes    = @(
+                            @{
+                                number   = $PrNumber
+                                comments = @{
+                                    nodes    = @(@{ body = $CommentBody; createdAt = '2024-01-01T13:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+    }
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'returns raw, unparsed bodies for both surfaces without validating phase-containment blocks' {
+        # A malformed/unparseable phase-containment block on the issue surface — the
+        # corpus function must still return the raw body untouched (no parse/validate).
+        $issueBody = @"
+<!-- plan-issue-901 -->
+<!-- phase-containment-901 -->
+finding_key: plan-stress-test:901:F1
+introduced_phase: NOT-A-VALID-PHASE
+<!-- /phase-containment-901 -->
+"@
+        $prBody = @"
+<!-- judge-rulings pr=902 -->
+judge_ruling: sustained
+"@
+
+        $searchAJson = script:New-CorpusSearchAResponse -IssueNumber 901 -CommentBody $issueBody
+        $searchBJson = script:New-CorpusSearchBResponse -PrNumber 902 -CommentBody $prBody
+
+        $global:mockCorpusSearchA = $searchAJson
+        $global:mockCorpusSearchB = $searchBJson
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'is:issue') { return $global:mockCorpusSearchA }
+            if ($joined -match 'is:pr')    { return $global:mockCorpusSearchB }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+
+        $result.Source | Should -Be 'graphql'
+        $result.Tuples | Should -HaveCount 2
+
+        $issueTuple = $result.Tuples | Where-Object { $_['Number'] -eq 901 }
+        $issueTuple['Surface'] | Should -Be 'issue'
+        $issueTuple['Bodies'] | Should -Contain $issueBody
+
+        $prTuple = $result.Tuples | Where-Object { $_['Number'] -eq 902 }
+        $prTuple['Surface'] | Should -Be 'pr'
+        $prTuple['Bodies'] | Should -Contain $prBody
+    }
+
+    It 'falls back to REST when GraphQL search fails, still returning raw tuples' {
+        $restIssueList = (@(@{ number = 950 }) | ConvertTo-Json)
+        $restIssueView = (@{ comments = @(@{ body = "<!-- plan-issue-950 -->`nfinding_dispositions:`n  - id: F1`n    disposition: incorporate" }) } | ConvertTo-Json -Depth 6)
+        $restPrList = '[]'
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') { return $restIssueList }
+            if ($joined -match 'issue view') { return $restIssueView }
+            if ($joined -match 'pr list')    { return $restPrList }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+
+        $result.Source | Should -Be 'rest'
+        $issueTuple = $result.Tuples | Where-Object { $_['Number'] -eq 950 }
+        $issueTuple | Should -Not -BeNullOrEmpty
+        $issueTuple['Surface'] | Should -Be 'issue'
+        $issueTuple['Bodies'][0] | Should -Match 'plan-issue-950'
+    }
+
+    # -----------------------------------------------------------------
+    # GH-8 regression (code-review response loop, PR #789): the REST
+    # fallback's issue surface (Surface A) previously included every
+    # closed issue's comments unconditionally, with NO marker gate — while
+    # the GraphQL path only includes issues whose bodies match
+    # <!-- design-phase-complete-{N} --> or <!-- plan-issue-{N} -->.
+    # Additionally, $WindowDays was accepted but never threaded into the
+    # REST discovery query (fixed --limit 20, no date filter), unlike the
+    # GraphQL path's closed:>$since filter. Both regressions are covered
+    # below. Surface B (PR/code-review) already correctly gates on
+    # judge-rulings — out of scope for this fix.
+    # -----------------------------------------------------------------
+
+    It 'GH-8: excludes a closed issue whose body has neither design-phase-complete nor plan-issue marker from the REST fallback corpus' {
+        $restIssueList = (@(@{ number = 960 }, @{ number = 961 }) | ConvertTo-Json)
+        # #960 carries a real marker -> must be included.
+        $restIssueView960 = (@{ comments = @(@{ body = '<!-- plan-issue-960 -->' }) } | ConvertTo-Json -Depth 6)
+        # #961 is ordinary chatter with NO marker -> must be excluded.
+        $restIssueView961 = (@{ comments = @(@{ body = 'Closed as not-a-bug, no phase-containment relevance here.' }) } | ConvertTo-Json -Depth 6)
+        $restPrList = '[]'
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') { return $restIssueList }
+            if ($joined -match 'issue view 960') { return $restIssueView960 }
+            if ($joined -match 'issue view 961') { return $restIssueView961 }
+            if ($joined -match 'pr list')    { return $restPrList }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+
+        $result.Source | Should -Be 'rest'
+        ($result.Tuples | Where-Object { $_['Number'] -eq 960 }) | Should -Not -BeNullOrEmpty
+        ($result.Tuples | Where-Object { $_['Number'] -eq 961 }) | Should -BeNullOrEmpty
+    }
+
+    It 'GH-8: threads WindowDays into the REST gh issue list / gh pr list query construction (not merely accepted and dropped)' {
+        $script:observedIssueListArgs = $null
+        $script:observedPrListArgs = $null
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match '^issue list') { $script:observedIssueListArgs = $joined; return '[]' }
+            if ($joined -match '^pr list')    { $script:observedPrListArgs = $joined; return '[]' }
+            return '{}'
+        }
+
+        $expectedSince = (Get-Date).ToUniversalTime().AddDays(-7).ToString('yyyy-MM-dd')
+
+        $null = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 7
+
+        $script:observedIssueListArgs | Should -Not -BeNullOrEmpty
+        $script:observedIssueListArgs | Should -Match ([regex]::Escape($expectedSince))
+        $script:observedPrListArgs | Should -Not -BeNullOrEmpty
+        $script:observedPrListArgs | Should -Match ([regex]::Escape($expectedSince))
+    }
+}
+
+# ---------------------------------------------------------------------------
+# PF2-F2 regression (issue #782 post-fix prosecution pass): every `gh` call
+# site in this file that pipes its output to ConvertFrom-Json must not merge
+# stderr into that stream. GH-7 fixed this vulnerability class in
+# phase-containment-emission-check.ps1's `gh pr/issue view` calls but a
+# post-fix prosecution pass found the identical `2>&1` pattern still present
+# on all REST/GraphQL `gh` call sites in this file, including two lines
+# (`gh issue list` / `gh pr list`) that the SAME commit's GH-8 fix had open
+# and edited without applying the GH-7 lesson. Mirrors the GH-7 regression
+# test pattern: a mocked `gh` function writes a benign notice via
+# `Write-Error -ErrorAction Continue` (which genuinely merges into the
+# captured array under 2>&1, unlike a raw stderr byte write from a real
+# external process) alongside valid JSON on stdout, and the assertion is that
+# the corpus/REST parse still succeeds instead of silently degrading.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentCommentCorpus REST fallback — PF2-F2 regression: gh stderr must not corrupt JSON parse' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'parses the REST issue-list/issue-view surface successfully even when gh emits benign stderr content alongside valid JSON stdout' {
+        $restIssueList = (@(@{ number = 970 }) | ConvertTo-Json)
+        $restIssueView = (@{ comments = @(@{ body = '<!-- plan-issue-970 -->' }) } | ConvertTo-Json -Depth 6)
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                # Force the REST fallback path for this test.
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            # Simulate a benign gh deprecation/auth notice on the PowerShell
+            # error stream for the calls under test — the exact condition
+            # GH-7 identified as breaking `2>&1`-based capture.
+            if ($joined -match 'issue list') {
+                Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+                return $restIssueList
+            }
+            if ($joined -match 'issue view 970') {
+                Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+                return $restIssueView
+            }
+            if ($joined -match 'pr list') { return '[]' }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+
+        # Pre-fix (2>&1), the merged ErrorRecord corrupted the JSON parse in
+        # the try/catch, silently dropping issue #970's tuple.
+        $result.Source | Should -Be 'rest'
+        $issueTuple = $result.Tuples | Where-Object { $_['Number'] -eq 970 }
+        $issueTuple | Should -Not -BeNullOrEmpty
+        $issueTuple['Surface'] | Should -Be 'issue'
+    }
+
+    It 'parses the REST pr-list/pr-view surface successfully even when gh emits benign stderr content alongside valid JSON stdout' {
+        $restPrList = (@(@{ number = 971 }) | ConvertTo-Json)
+        $restPrView = (@{ comments = @(@{ body = '<!-- judge-rulings pr=971 -->' }) } | ConvertTo-Json -Depth 6)
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') { return '[]' }
+            if ($joined -match 'pr list') {
+                Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+                return $restPrList
+            }
+            if ($joined -match 'pr view 971') {
+                Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+                return $restPrView
+            }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+
+        $result.Source | Should -Be 'rest'
+        $prTuple = $result.Tuples | Where-Object { $_['Number'] -eq 971 }
+        $prTuple | Should -Not -BeNullOrEmpty
+        $prTuple['Surface'] | Should -Be 'pr'
+    }
+
+    It 'resolves repo owner/name successfully even when gh repo view emits benign stderr content alongside valid JSON stdout' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match '^repo view') {
+                Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+                return (@{ owner = @{ login = 'Grimblaz' }; name = 'agent-orchestra' } | ConvertTo-Json)
+            }
+            if ($joined -match 'graphql') { $global:LASTEXITCODE = 1; return 'boom' }
+            if ($joined -match 'issue list') { return '[]' }
+            if ($joined -match 'pr list') { return '[]' }
+            return '{}'
+        }
+
+        # No -RepoOwner/-RepoName supplied: forces the gh-repo-view resolution path.
+        $result = Get-PhaseContainmentCommentCorpus -WindowDays 30
+
+        # Pre-fix (2>&1), the merged ErrorRecord corrupted the repo-view JSON
+        # parse, and the function returned early with Source =
+        # 'repo-resolution-failed' instead of proceeding to discovery.
+        $result.Source | Should -Be 'rest'
     }
 }
