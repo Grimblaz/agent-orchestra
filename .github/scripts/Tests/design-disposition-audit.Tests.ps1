@@ -7,7 +7,7 @@ BeforeAll {
 
     $script:FixtureRoot = Join-Path $PSScriptRoot 'fixtures/design-disposition-audit'
     $script:ValidFixtures = @(Get-ChildItem -Path $script:FixtureRoot -Filter 'valid-*.txt' | Sort-Object Name)
-    $script:AllowedPasses = @(1, 2, 3)
+    $script:AllowedPasses = @(1, 2, 3, 4)
     $script:AllowedDispositions = @('incorporate', 'dismiss', 'escalate')
     $script:AllowedClassifications = @('load-bearing', 'routine')
 
@@ -193,7 +193,7 @@ BeforeAll {
         } else {
             $passesRun = @(script:ConvertTo-IntegerArray -Value (script:Get-YamlValue -Map $block -Key 'passes_run') -FieldName 'passes_run' -Errors $errors)
             if ($passesRun.Count -eq 0 -or @($passesRun | Where-Object { $_ -notin $script:AllowedPasses }).Count -gt 0) {
-                $errors.Add('invalid passes_run: must be a non-empty subset of 1, 2, 3')
+                $errors.Add('invalid passes_run: must be a non-empty subset of 1, 2, 3, 4')
             }
         }
 
@@ -396,11 +396,11 @@ Describe 'design disposition marker payload malformed fixtures' {
         ($errors -join "`n") | Should -Match ([regex]::Escape($ExpectedMessage))
     }
 
-    It 'enforces passes_run as a non-empty subset of 1, 2, 3' {
+    It 'enforces passes_run as a non-empty subset of 1, 2, 3, 4' {
         $fixturePath = Join-Path $script:FixtureRoot 'invalid-passes-run-empty.txt'
         $errors = @(script:Test-DesignDispositionFixture -Path $fixturePath)
 
-        $errors | Should -Contain 'invalid passes_run: must be a non-empty subset of 1, 2, 3'
+        $errors | Should -Contain 'invalid passes_run: must be a non-empty subset of 1, 2, 3, 4'
     }
 
     It 'enforces passes_run equality with the populated entries pass set' {

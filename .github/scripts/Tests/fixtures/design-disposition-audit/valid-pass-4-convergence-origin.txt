@@ -1,0 +1,16 @@
+<!-- design-phase-complete-586 -->
+
+Phase summary: the convergence cold read (pass 4) originated a finding not seen by any of the three prosecution finder passes. Pass 4 is entries-only / origin-only for the convergence cold read and is not expected to appear as a secondary `also_flagged_by` value on findings originated by passes 1-3.
+
+```yaml
+finding_dispositions:
+  schema_version: 1
+  passes_run: [4]
+  entries:
+    - finding_id: F1
+      pass: 4
+      disposition: incorporate
+      classification: routine
+      disposition_rationale: "The convergence cold read surfaced a cross-lens contradiction not raised by any prosecution finder; incorporated as a documentation clarification."
+      artifact_citation: "skills/design-exploration/SKILL.md#design-challenge"
+```

@@ -10,5 +10,5 @@ finding_dispositions:
       disposition: escalate
       classification: load-bearing
       disposition_rationale: "The finding changes the required maintainer decision path."
-      also_flagged_by: [4]
+      also_flagged_by: [5]
 ```
