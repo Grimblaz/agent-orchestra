@@ -251,8 +251,11 @@ function Invoke-PhaseContainmentEmissionCheckSingleTarget {
     # ConvertFrom-Json means any benign gh notice (deprecation, auth) on
     # stderr corrupts the JSON parse and silently false-aborts the whole
     # check. Matches the convention already used elsewhere in this codebase
-    # (Find-OrUpsertComment, phase-containment-rolling-history-core.ps1's
-    # REST/GraphQL paths).
+    # (Find-OrUpsertComment) and, as of the PF2-F2 fix (issue #782 post-fix
+    # prosecution pass), now also matches
+    # phase-containment-rolling-history-core.ps1's REST/GraphQL paths, which
+    # carried the identical 2>&1 vulnerability at the time this GH-7 comment
+    # was originally written.
     $viewArgs = @($targetId, '--json', 'comments')
     if ($isPr) {
         $viewOutput = & gh pr view @viewArgs 2>$null

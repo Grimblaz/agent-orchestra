@@ -1273,3 +1273,121 @@ judge_ruling: sustained
         $script:observedPrListArgs | Should -Match ([regex]::Escape($expectedSince))
     }
 }
+
+# ---------------------------------------------------------------------------
+# PF2-F2 regression (issue #782 post-fix prosecution pass): every `gh` call
+# site in this file that pipes its output to ConvertFrom-Json must not merge
+# stderr into that stream. GH-7 fixed this vulnerability class in
+# phase-containment-emission-check.ps1's `gh pr/issue view` calls but a
+# post-fix prosecution pass found the identical `2>&1` pattern still present
+# on all REST/GraphQL `gh` call sites in this file, including two lines
+# (`gh issue list` / `gh pr list`) that the SAME commit's GH-8 fix had open
+# and edited without applying the GH-7 lesson. Mirrors the GH-7 regression
+# test pattern: a mocked `gh` function writes a benign notice via
+# `Write-Error -ErrorAction Continue` (which genuinely merges into the
+# captured array under 2>&1, unlike a raw stderr byte write from a real
+# external process) alongside valid JSON on stdout, and the assertion is that
+# the corpus/REST parse still succeeds instead of silently degrading.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentCommentCorpus REST fallback — PF2-F2 regression: gh stderr must not corrupt JSON parse' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'parses the REST issue-list/issue-view surface successfully even when gh emits benign stderr content alongside valid JSON stdout' {
+        $restIssueList = (@(@{ number = 970 }) | ConvertTo-Json)
+        $restIssueView = (@{ comments = @(@{ body = '<!-- plan-issue-970 -->' }) } | ConvertTo-Json -Depth 6)
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                # Force the REST fallback path for this test.
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            # Simulate a benign gh deprecation/auth notice on the PowerShell
+            # error stream for the calls under test — the exact condition
+            # GH-7 identified as breaking `2>&1`-based capture.
+            if ($joined -match 'issue list') {
+                Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+                return $restIssueList
+            }
+            if ($joined -match 'issue view 970') {
+                Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+                return $restIssueView
+            }
+            if ($joined -match 'pr list') { return '[]' }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+
+        # Pre-fix (2>&1), the merged ErrorRecord corrupted the JSON parse in
+        # the try/catch, silently dropping issue #970's tuple.
+        $result.Source | Should -Be 'rest'
+        $issueTuple = $result.Tuples | Where-Object { $_['Number'] -eq 970 }
+        $issueTuple | Should -Not -BeNullOrEmpty
+        $issueTuple['Surface'] | Should -Be 'issue'
+    }
+
+    It 'parses the REST pr-list/pr-view surface successfully even when gh emits benign stderr content alongside valid JSON stdout' {
+        $restPrList = (@(@{ number = 971 }) | ConvertTo-Json)
+        $restPrView = (@{ comments = @(@{ body = '<!-- judge-rulings pr=971 -->' }) } | ConvertTo-Json -Depth 6)
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'graphql') {
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') { return '[]' }
+            if ($joined -match 'pr list') {
+                Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+                return $restPrList
+            }
+            if ($joined -match 'pr view 971') {
+                Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+                return $restPrView
+            }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30
+
+        $result.Source | Should -Be 'rest'
+        $prTuple = $result.Tuples | Where-Object { $_['Number'] -eq 971 }
+        $prTuple | Should -Not -BeNullOrEmpty
+        $prTuple['Surface'] | Should -Be 'pr'
+    }
+
+    It 'resolves repo owner/name successfully even when gh repo view emits benign stderr content alongside valid JSON stdout' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match '^repo view') {
+                Write-Error 'gh: a benign deprecation notice' -ErrorAction Continue
+                return (@{ owner = @{ login = 'Grimblaz' }; name = 'agent-orchestra' } | ConvertTo-Json)
+            }
+            if ($joined -match 'graphql') { $global:LASTEXITCODE = 1; return 'boom' }
+            if ($joined -match 'issue list') { return '[]' }
+            if ($joined -match 'pr list') { return '[]' }
+            return '{}'
+        }
+
+        # No -RepoOwner/-RepoName supplied: forces the gh-repo-view resolution path.
+        $result = Get-PhaseContainmentCommentCorpus -WindowDays 30
+
+        # Pre-fix (2>&1), the merged ErrorRecord corrupted the repo-view JSON
+        # parse, and the function returned early with Source =
+        # 'repo-resolution-failed' instead of proceeding to discovery.
+        $result.Source | Should -Not -Be 'repo-resolution-failed'
+    }
+}

@@ -314,7 +314,16 @@ function script:Get-SurfaceACorpusGraphQL {
 }
 "@
 
-            $output = & gh api graphql -f "query=$query" 2>&1
+            # PF2-F2 fix (issue #782 post-fix prosecution pass): use 2>$null,
+            # not 2>&1. Merging stderr into the stream later piped to
+            # ConvertFrom-Json means a benign gh notice (deprecation/auth/
+            # rate-limit) corrupts the JSON parse and silently false-aborts
+            # this surface. Same vulnerability class GH-7 fixed in
+            # phase-containment-emission-check.ps1's gh view calls; the GH-7
+            # fix's claim that this file already used this convention was
+            # false at the time, and this line is one of the sites that made
+            # it false.
+            $output = & gh api graphql -f "query=$query" 2>$null
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "phase-containment-rolling-history-core: Surface A GraphQL search failed (exit $LASTEXITCODE)"
                 return $null   # signal error for fallback
@@ -376,7 +385,9 @@ function script:Get-SurfaceACorpusGraphQL {
   }
 }
 "@
-                    $pageOutput = & gh api graphql -f "query=$pageQuery" 2>&1
+                    # PF2-F2 fix: see the Surface A search-page call above for
+                    # the same stderr/ConvertFrom-Json rationale.
+                    $pageOutput = & gh api graphql -f "query=$pageQuery" 2>$null
                     if ($LASTEXITCODE -ne 0) { break }
 
                     try {
@@ -524,7 +535,9 @@ function script:Get-SurfaceBCorpusGraphQL {
 }
 "@
 
-            $output = & gh api graphql -f "query=$query" 2>&1
+            # PF2-F2 fix: see Get-SurfaceACorpusGraphQL's identical stderr/
+            # ConvertFrom-Json rationale.
+            $output = & gh api graphql -f "query=$query" 2>$null
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "phase-containment-rolling-history-core: Surface B GraphQL search failed (exit $LASTEXITCODE)"
                 return $null
@@ -584,7 +597,9 @@ function script:Get-SurfaceBCorpusGraphQL {
   }
 }
 "@
-                    $pageOutput = & gh api graphql -f "query=$pageQuery" 2>&1
+                    # PF2-F2 fix: see the Surface A search-page call for the
+                    # same stderr/ConvertFrom-Json rationale.
+                    $pageOutput = & gh api graphql -f "query=$pageQuery" 2>$null
                     if ($LASTEXITCODE -ne 0) { break }
 
                     try {
@@ -705,14 +720,18 @@ function script:Get-PhaseContainmentCorpusRest {
 
     # Surface A: recent closed issues
     if ($Stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
-        $issueListOutput = & gh issue list --state closed --search "closed:>$since" --limit $limit --json number 2>&1
+        # PF2-F2 fix: see Get-SurfaceACorpusGraphQL's identical stderr/
+        # ConvertFrom-Json rationale — applies equally to the REST surface.
+        $issueListOutput = & gh issue list --state closed --search "closed:>$since" --limit $limit --json number 2>$null
         if ($LASTEXITCODE -eq 0) {
             try {
                 $issueList = @(($issueListOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop)
                 foreach ($issue in $issueList) {
                     if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { break }
                     $num = [int]$issue['number']
-                    $viewOutput = & gh issue view $num --json comments 2>&1
+                    # PF2-F2 fix: see Get-SurfaceACorpusGraphQL's identical
+                    # stderr/ConvertFrom-Json rationale.
+                    $viewOutput = & gh issue view $num --json comments 2>$null
                     if ($LASTEXITCODE -ne 0) { continue }
                     try {
                         $data     = ($viewOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
@@ -745,14 +764,18 @@ function script:Get-PhaseContainmentCorpusRest {
 
     # Surface B: recent merged PRs
     if ($Stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
-        $prListOutput = & gh pr list --state merged --search "merged:>$since" --limit $limit --json number 2>&1
+        # PF2-F2 fix: see Get-SurfaceACorpusGraphQL's identical stderr/
+        # ConvertFrom-Json rationale — applies equally to the REST surface.
+        $prListOutput = & gh pr list --state merged --search "merged:>$since" --limit $limit --json number 2>$null
         if ($LASTEXITCODE -eq 0) {
             try {
                 $prList = @(($prListOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop)
                 foreach ($pr in $prList) {
                     if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { break }
                     $num = [int]$pr['number']
-                    $viewOutput = & gh pr view $num --json comments 2>&1
+                    # PF2-F2 fix: see Get-SurfaceACorpusGraphQL's identical
+                    # stderr/ConvertFrom-Json rationale.
+                    $viewOutput = & gh pr view $num --json comments 2>$null
                     if ($LASTEXITCODE -ne 0) { continue }
                     try {
                         $data     = ($viewOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
@@ -889,9 +912,14 @@ function Get-PhaseContainmentCommentCorpus {
             Write-Warning "phase-containment-rolling-history-core: timed out before repo resolution"
             return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout' }
         }
-        $repoViewJson = & gh repo view --json 'owner,name' 2>&1
+        # PF2-F2 fix: use 2>$null, not 2>&1 — see Get-SurfaceACorpusGraphQL's
+        # stderr/ConvertFrom-Json rationale. The failure-path warning below no
+        # longer echoes gh's stderr text (dropped, not merged); this matches
+        # the GH-7 precedent in phase-containment-emission-check.ps1's gh
+        # view failure branch, which also does not echo captured output.
+        $repoViewJson = & gh repo view --json 'owner,name' 2>$null
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "phase-containment-rolling-history-core: gh repo view failed: $repoViewJson"
+            Write-Warning "phase-containment-rolling-history-core: gh repo view failed (exit $LASTEXITCODE)"
             return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'repo-resolution-failed' }
         }
         try {
@@ -1023,9 +1051,14 @@ function Get-PhaseContainmentHistory {
                 CacheAge  = [timespan]::Zero
             }
         }
-        $repoViewJson = & gh repo view --json 'owner,name' 2>&1
+        # PF2-F2 fix: use 2>$null, not 2>&1 — see Get-SurfaceACorpusGraphQL's
+        # stderr/ConvertFrom-Json rationale. The failure-path warning below no
+        # longer echoes gh's stderr text (dropped, not merged); this matches
+        # the GH-7 precedent in phase-containment-emission-check.ps1's gh
+        # view failure branch, which also does not echo captured output.
+        $repoViewJson = & gh repo view --json 'owner,name' 2>$null
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "phase-containment-rolling-history-core: gh repo view failed: $repoViewJson"
+            Write-Warning "phase-containment-rolling-history-core: gh repo view failed (exit $LASTEXITCODE)"
             return [PSCustomObject]@{
                 Entries   = @()
                 FetchedAt = (Get-Date)

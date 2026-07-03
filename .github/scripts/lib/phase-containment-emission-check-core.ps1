@@ -345,7 +345,11 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     # and the ambiguity-walk detector above) from the vocab gate that decides
     # whether this function is even called — producing a silent Gap=0/ok
     # false-clean when a body's only field tokens are dash-space items. All
-    # three copies of this pattern must be kept in sync.
+    # four copies of this pattern must be kept in sync (the fourth copy,
+    # added by the later GH-5 fix, lives in
+    # Get-DesignChallengeSustainedCountInternal below). A drift-catching
+    # meta-test (Tests/phase-containment-emission-check-core.Tests.ps1)
+    # asserts all four literal copies stay byte-identical.
     $keyAnchor = '(?:^\s*(?:-\s+)?|[{,]\s*)'
     $hasDismiss = $region -match "(?m)${keyAnchor}disposition\s*:\s*Dismiss\b"
     $hasFixNow = $region -match "(?m)${keyAnchor}disposition\s*:\s*(Fix-now|Fix-in-PR|Defer)\b"

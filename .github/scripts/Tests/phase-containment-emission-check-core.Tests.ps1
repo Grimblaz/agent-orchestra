@@ -1088,3 +1088,25 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
         $result.Success | Should -Be $true
     }
 }
+
+# ---------------------------------------------------------------------------
+# PF2-F1 (issue #782 post-fix prosecution pass): drift-catching meta-test.
+# The GH-5 fix added a fourth literal copy of the key-anchor regex
+# '(?:^\s*(?:-\s+)?|[{,]\s*)' (Get-DesignChallengeSustainedCountInternal) on
+# top of the three pre-existing copies (Test-EmissionMarkerPresent's vocab
+# window, the ambiguity-walk detector, and
+# Get-JudgeRulingsSustainedCountInternal's $keyAnchor). A stale comment
+# claimed only three copies existed and must be kept in sync; this test is
+# the tripwire so a future edit to one copy that is not propagated to the
+# others fails CI instead of silently drifting.
+# ---------------------------------------------------------------------------
+
+Describe 'Key-anchor pattern — all literal copies stay byte-identical (PF2-F1 drift guard)' {
+    It 'finds exactly four literal copies of the key-anchor pattern, all byte-identical' {
+        $srcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
+        $src = Get-Content -LiteralPath $srcPath -Raw
+        $copies = [regex]::Matches($src, [regex]::Escape('(?:^\s*(?:-\s+)?|[{,]\s*)'))
+        $copies.Count | Should -Be 4
+        @($copies.Value | Select-Object -Unique).Count | Should -Be 1
+    }
+}
