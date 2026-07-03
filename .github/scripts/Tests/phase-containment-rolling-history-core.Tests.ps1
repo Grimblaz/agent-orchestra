@@ -1263,9 +1263,9 @@ judge_ruling: sustained
             return '{}'
         }
 
-        $null = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 7
-
         $expectedSince = (Get-Date).ToUniversalTime().AddDays(-7).ToString('yyyy-MM-dd')
+
+        $null = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 7
 
         $script:observedIssueListArgs | Should -Not -BeNullOrEmpty
         $script:observedIssueListArgs | Should -Match ([regex]::Escape($expectedSince))
@@ -1388,6 +1388,6 @@ Describe 'Get-PhaseContainmentCommentCorpus REST fallback — PF2-F2 regression:
         # Pre-fix (2>&1), the merged ErrorRecord corrupted the repo-view JSON
         # parse, and the function returned early with Source =
         # 'repo-resolution-failed' instead of proceeding to discovery.
-        $result.Source | Should -Not -Be 'repo-resolution-failed'
+        $result.Source | Should -Be 'rest'
     }
 }
