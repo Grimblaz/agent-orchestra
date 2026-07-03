@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.0.1] — 2026-07-02
+
+### Added
+
+- Add phase-containment emission-check nudge to design-exploration, plan-authoring, and review-judgment skills; catalog the sweep script in calibration-pipeline (#782)
+
 ## [3.0.0] — 2026-07-02
 
 ### Changed

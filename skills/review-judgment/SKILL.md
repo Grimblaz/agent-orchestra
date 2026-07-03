@@ -147,6 +147,8 @@ In the same PR comment as the `<!-- judge-rulings ... -->` block, emit one `<!--
 
 **Setter rule**: `catchable_phase` and `introduced_phase` must each be set by explicit agent judgment with no default — the agent must reason about which phase was the earliest in which this specific defect was catchable. Validate each block against `skills/calibration-pipeline/schemas/phase-containment.schema.json`.
 
+**Emission check (hub maintainers only)**: after posting the `judge-rulings` PR comment with its phase-containment blocks, run `pwsh ./.github/scripts/phase-containment-emission-check.ps1 -Pr {N}` and treat its output as advisory — warn-only, never blocking. The repo-relative script path does not resolve from a consumer repo's CWD, so this nudge applies only when working in the Agent Orchestra hub repo itself; see the script header for the full contract.
+
 **Detective-sample extension**: the Code-Critic detective-sample (from `agents/Code-Critic.agent.md:110`) is extended to sample `apparatus_meta: true` entries and `catchable_phase == caught_stage` entries for plausibility review.
 
 Field values:
