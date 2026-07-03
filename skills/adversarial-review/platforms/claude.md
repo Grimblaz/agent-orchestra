@@ -82,7 +82,7 @@ The spec-security specialist lens (Pass 4) is never mapped to `fable`: it stays 
 
 ## Merge And Progress Signal
 
-After all available prosecution passes return, merge and deduplicate findings using cross-layer dedup: merge on same failure-mode plus same code-location (not perspective label). When two passes report the same defect, prefer the finding from the deepest-tier pass (Opus preferred over Sonnet). This resolves inter-layer duplicates more precisely than perspective-label matching. Emit the visible progress signal exactly in this shape:
+After all available prosecution passes return, merge and deduplicate findings using cross-layer dedup: merge on same failure-mode plus same code-location (not perspective label). When two passes report the same defect, prefer the finding from the deepest-tier pass (Fable preferred over Opus, Opus preferred over Sonnet). This resolves inter-layer duplicates more precisely than perspective-label matching. Emit the visible progress signal exactly in this shape:
 
 ```text
 Merged prosecution ledger: {count} finding(s).

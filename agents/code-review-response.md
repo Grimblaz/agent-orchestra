@@ -21,6 +21,8 @@ After loading, follow everything under its `## Core Principles`, `## Overview`, 
 
 The Copilot-specific tool names in that file map to Claude Code equivalents below.
 
+When dispatched by Solution-Designer for design-challenge convergence, the operating contract is defined in `skills/design-exploration/SKILL.md` § Convergence Filter — this is a different task shape than standard/lite/judge-only judgment (a single dispatch carrying a two-part cold-read-then-synthesis prompt); follow that skill's instructions for that dispatch shape.
+
 ## Claude Code tool mapping
 
 | Shared body references                    | Claude Code tool |

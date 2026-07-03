@@ -3,7 +3,7 @@
 ```yaml
 finding_dispositions:
   schema_version: 1
-  passes_run: [1]
+  passes_run: [1, 5]
   entries:
     - finding_id: F6
       pass: 1

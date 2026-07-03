@@ -168,14 +168,18 @@ Use the adapter and dispatcher to run the three independent prosecution passes, 
 
 ### Convergence Filter
 
-After the 3 finders return and are merged into the pre-filter union, Solution-Designer dispatches the Fable-tier `agents/code-review-response.md` shell for a two-phase convergence pass. This is Solution-Designer methodology layered on top of prosecution — it is not a fourth pipeline stage, and it does not change the `design-challenge` adapter's `[prosecution]`/`atomic: n/a` contract in `skills/adversarial-review/platforms/claude.md`.
+After the 3 finders return and are merged into the pre-filter union, Solution-Designer dispatches the Fable-tier `agents/code-review-response.md` shell **once** for a single-dispatch, two-part convergence pass. This is Solution-Designer methodology layered on top of prosecution — it is not a fourth pipeline stage, and it does not change the `design-challenge` adapter's `[prosecution]`/`atomic: n/a` contract in `skills/adversarial-review/platforms/claude.md`.
 
-- **Phase 1 (cold-read)**: dispatch the Fable shell to cold-read the design directly — before opening any of the 3 finder ledgers — and record its own independent observations.
-- **Phase 2 (synthesis)**: dispatch the Fable shell with all 3 finder ledgers plus the Phase 1 cold-read observations. It dedupes, ranks, and merges the cold-read observations against the finder ledgers, then emits a kept/filtered rulings block spanning the **full pre-filter union** — every finder finding plus every cold-read observation, each marked `kept` or `filtered` with rationale.
+This is **one** `Agent`-tool dispatch carrying a two-part prompt, not two separate dispatches:
+
+- **Part (a) — cold-read**: the prompt instructs the Fable shell to first cold-read the design directly and record its own independent observations, before the prompt reveals the 3 finder ledgers.
+- **Part (b) — synthesis**: within that same dispatch and response, the shell then proceeds to open the 3 finder ledgers, dedupe, rank, and merge them against its own Part (a) cold-read observations, then emit a kept/filtered rulings block spanning the **full pre-filter union** — every finder finding plus every cold-read observation, each marked `kept` or `filtered` with rationale.
 
 The per-finding classification gate below (§ Dispositions) then fires on **convergence-sustained** (kept) findings only; filtered findings do not enter the classification gate but remain visible in the rulings block and in the disposition summary's pre-filter accounting (§ Dispositions).
 
-**Convergence refusal handling**: if the Fable-tier dispatch returns `stop_reason: refusal` at either phase, retry that phase once on `fable`. If the retry also refuses, re-dispatch that phase on `model: opus` and visibly note the degraded tier (e.g. `Convergence phase 2 degraded to opus after refusal`). This is a methodology-level retry owned here, not an adapter- or pipeline-level rule — it does not touch `skills/adversarial-review/platforms/claude.md`.
+Cold-read-originated findings (those that trace to Part (a) rather than to one of the 3 finder ledgers) are tagged `pass: 4` in the `finding_dispositions:` marker's `passes_run`/`pass` origin-tracking fields, per `skills/solution-authoring/SKILL.md`'s pass-4 convergence-origin convention.
+
+**Convergence refusal handling**: if the single Fable-tier dispatch returns `stop_reason: refusal`, is malformed/unparseable, or times out, retry that same dispatch once on `fable`. If the retry also fails with any of those three outcomes, re-dispatch on `model: opus` and visibly note the degraded tier (e.g. `Convergence dispatch degraded to opus after refusal`). This retry is dispatch-scoped — the entire two-part prompt is retried as one unit, not one part in isolation. If the opus fallback also fails (refusal, malformed, or timeout), HALT convergence with an explicit `convergence-dispatch-exhausted` reason: the classification gate must never silently receive the raw unfiltered pre-filter union. This is a methodology-level retry owned here, not an adapter- or pipeline-level rule — it does not touch `skills/adversarial-review/platforms/claude.md`.
 
 ### Dispositions
 
