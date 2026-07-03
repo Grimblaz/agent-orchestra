@@ -26,9 +26,14 @@ Describe 'Adversarial review panel — role-to-tier map and fallback (AC8)' {
             -Because 'generalist-A pass must use sonnet tier per the role-to-tier map'
     }
 
-    It 'platforms/claude.md declares generalist-B mapped to opus in the role-to-tier map' {
-        $script:DispatcherContent | Should -Match 'generalist-B:\s*opus' `
-            -Because 'generalist-B pass must use opus tier per the role-to-tier map'
+    It 'platforms/claude.md declares generalist-B mapped to fable in the role-to-tier map' {
+        $script:DispatcherContent | Should -Match 'generalist-B:\s*fable' `
+            -Because 'generalist-B pass must use fable tier per the role-to-tier map'
+    }
+
+    It 'platforms/claude.md declares judge mapped to fable in the role-to-tier map' {
+        $script:DispatcherContent | Should -Match 'judge:\s*fable' `
+            -Because 'judge tier must use fable tier per the role-to-tier map'
     }
 
     It 'platforms/claude.md declares specialist mapped to opus in the role-to-tier map' {
@@ -46,11 +51,11 @@ Describe 'Adversarial review panel — role-to-tier map and fallback (AC8)' {
             -Because 'the standard adapter must document the two-layer panel with generalist and specialist pass roles'
     }
 
-    It 'platforms/claude.md assigns Pass 1 (generalist-A) sonnet and Pass 2 (generalist-B) opus at Agent-tool call time' {
+    It 'platforms/claude.md assigns Pass 1 (generalist-A) sonnet and Pass 2 (generalist-B) fable at Agent-tool call time' {
         $script:DispatcherContent | Should -Match '(?is)Pass 1.{0,80}generalist-A.{0,80}sonnet' `
             -Because 'Pass 1 generalist-A must set model: sonnet on the Agent tool call'
-        $script:DispatcherContent | Should -Match '(?is)Pass 2.{0,80}generalist-B.{0,80}opus' `
-            -Because 'Pass 2 generalist-B must set model: opus on the Agent tool call'
+        $script:DispatcherContent | Should -Match '(?is)Pass 2.{0,80}generalist-B.{0,80}fable' `
+            -Because 'Pass 2 generalist-B must set model: fable on the Agent tool call'
     }
 
     It 'platforms/claude.md assigns Passes 3, 4, and 5 (specialist) opus at Agent-tool call time' {
@@ -160,5 +165,36 @@ Describe 'Adversarial review panel — cross-layer dedup prefers deepest-tier fi
         )
 
         $merged.Count | Should -Be 2 -Because 'findings at different code locations must not be merged even if the failure mode is the same'
+    }
+}
+
+Describe 'Adversarial review panel — generalist-B/judge fable re-tier prose literals (AC9)' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:DispatcherPath = Join-Path $script:RepoRoot 'skills/adversarial-review/platforms/claude.md'
+        $script:DispatcherContent = Get-Content -Path $script:DispatcherPath -Raw -ErrorAction Stop
+    }
+
+    It 'platforms/claude.md role-to-tier map declares generalist-B: fable' {
+        $script:DispatcherContent | Should -Match '(?im)^\s*generalist-B:\s*fable\s*$' `
+            -Because 'AC9 requires the role-to-tier map to declare generalist-B mapped to fable'
+    }
+
+    It 'platforms/claude.md role-to-tier map declares judge: fable' {
+        $script:DispatcherContent | Should -Match '(?im)^\s*judge:\s*fable\s*$' `
+            -Because 'AC9 requires the role-to-tier map to declare a judge key mapped to fable'
+    }
+
+    It 'platforms/claude.md declares a durable negative rule that the spec-security specialist lens is never mapped to fable' {
+        $script:DispatcherContent | Should -Match '(?is)spec-security specialist lens \(Pass 4\) is never mapped to .fable.' `
+            -Because 'the spec-security specialist lens (Pass 4) must never be mapped to fable per the negative rule'
+    }
+
+    It 'platforms/claude.md keeps Pass 4 (spec-security specialist) assigned to opus at Agent-tool call time' {
+        $script:DispatcherContent | Should -Match '(?is)Pass 4.{0,120}spec-security specialist.{0,120}opus' `
+            -Because 'Pass 4 spec-security specialist must stay on model: opus, never fable'
+        $script:DispatcherContent | Should -Not -Match '(?is)Pass 4.{0,120}spec-security specialist.{0,120}fable' `
+            -Because 'the Pass 4 dispatch bullet must never assign fable to the spec-security specialist'
     }
 }

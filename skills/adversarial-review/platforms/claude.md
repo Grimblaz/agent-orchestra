@@ -49,7 +49,7 @@ Select prosecution shape from the adapter contract.
 
 - `standard`: emit `Dispatching prosecution panel (5-pass, 2 generalist + 3 specialist)...`, then dispatch five Code-Critic prosecution passes in one parallel tool-use block with `subagent_type: code-critic`. Prepend the per-pass handshake block, then the authoritative selector `Review mode selector: "Use code review perspectives"`, then the resolved review target context. Keep selector text outside quoted or carried material. Apply the role→tier map at Agent-tool call time (not in the Code-Critic shell — the shell stays `model: opus`):
   - Pass 1 — **generalist-A**: full 6-perspective sweep; set `model: sonnet` on the Agent tool call
-  - Pass 2 — **generalist-B**: full 6-perspective sweep; set `model: opus` on the Agent tool call
+  - Pass 2 — **generalist-B**: full 6-perspective sweep; set `model: fable` on the Agent tool call
   - Pass 3 — **spec-correctness specialist**: edge cases, boundary violations, logic errors; set `model: opus` on the Agent tool call
   - Pass 4 — **spec-security specialist**: data integrity, injection vectors, permission/auth errors; set `model: opus` on the Agent tool call
   - Pass 5 — **spec-architecture specialist**: cross-module contracts, abstraction boundaries, interface consistency; set `model: opus` on the Agent tool call
@@ -59,12 +59,15 @@ Select prosecution shape from the adapter contract.
 ```yaml
 role→tier map:
   generalist-A: sonnet
-  generalist-B: opus
+  generalist-B: fable
   specialist: opus (now); fable (when permanent)
+  judge: fable
 
 fallback order (when a tier is unavailable):
   fable → opus → sonnet → haiku
 ```
+
+The spec-security specialist lens (Pass 4) is never mapped to `fable`: it stays on the `specialist: opus` row above regardless of any future generalist or judge tier changes. This is a durable constraint, not an artifact of the current "opus (now); fable (when permanent)" transition note.
 
 - `lite`: dispatch one Code-Critic prosecution pass with `subagent_type: code-critic`. Prepend the fresh handshake block when constructed, then `Review mode selector: "Use lite code review perspectives"`, then the resolved review target context. This singleton prosecution pass feeds the Defense Dispatch and Judge Dispatch sections below — `lite` is no longer prosecution-only; see those sections for how the subsequent stages run.
 - `design-challenge`: emit the three-pass design challenge in one parallel tool-use block with `subagent_type: code-critic`. Passes 1 and 2 use `Review mode selector: "Use design review perspectives"`; pass 3 uses `Review mode selector: "Use product-alignment perspectives"`.
@@ -84,6 +87,8 @@ Panel: {role} ({tier}) x{N} [degraded: {list or 'none'}]
 ```
 
 For degraded prosecution, name the failed pass visibly (by role and tier) and merge only the surviving valid passes. For singleton prosecution, there is no degraded merge path.
+
+**Dual-credit on merged duplicates:** when cross-layer dedup collapses two passes reporting the same defect into one surviving finding, ledger credit records **both** finders, not just the winner. Attribute the finding with a primary finder (the deepest-tier pass that was selected to survive) and a secondary finder (the shallower-tier pass whose duplicate was collapsed). Do not drop the secondary finder from credit attribution merely because its instance of the finding did not survive the merge.
 
 ## Defense Dispatch
 
@@ -120,6 +125,7 @@ Run judge only when the adapter includes `judge` in `integrity-contract.pipeline
 - Singleton defense paths are halt-strict: if Code-Critic defense body load fails, stop and do not continue to judge, marker emission, or review-state persistence.
 - Singleton judge paths are halt-strict: if Code-Review-Response body load fails, stop and do not emit a terminal success marker or write completion state.
 - Do not use degraded-recovery for defense or judge.
+- **Generalist-B refusal reroute:** if the Pass 2 (generalist-B) Agent-tool call returns `stop_reason: refusal` on the `fable` tier, retry that pass once on `fable`. If the retry also returns `stop_reason: refusal`, re-dispatch Pass 2 on `model: opus` and visibly note the degraded tier (e.g. `Pass 2 (generalist-B) degraded to opus after refusal`) in the panel-composition line. This reroute applies only to the generalist-B finder pass; it does not apply to judge-class dispatches, which remain covered by the "no degraded-recovery for defense or judge" rule above.
 
 ## Post-terminal Marker Emission
 
