@@ -51,10 +51,14 @@ Describe 'orchestra-review command contract' {
                 Path                        = Join-Path $script:CommandsDirectory 'orchestra-review-lite.md'
                 ExpectedProsecutionMarker   = 'Use lite code review perspectives'
                 RequiresDefaultRouteNote    = $false
-                ExpectedSubagents           = @('code-critic')
+                ExpectedSubagents           = @('code-critic', 'code-review-response')
                 ExpectedReviewStatePatterns = @(
-                    'does not write terminal review-state persistence',
-                    'no terminal-state persistence is required by this adapter'
+                    '/memories/session/review-state-\{ISSUE_ID\}\.md',
+                    'review_mode: lite',
+                    'prosecution_complete: true',
+                    'defense_complete: true',
+                    'judgment_complete: true',
+                    'last_updated'
                 )
             },
             [pscustomobject]@{

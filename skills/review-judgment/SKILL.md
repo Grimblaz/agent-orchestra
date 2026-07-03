@@ -21,6 +21,8 @@ Reusable judgment method for a single referee pass over prosecution and defense.
 
 Make one final, evidence-backed ruling per finding. The goal is not to split the difference between prosecutor and defense, but to decide whether the proposed change would improve the code and to record that decision in a format the pipeline can consume.
 
+Prosecution ledgers are coverage-first by contract: prosecution reports every finding with a statable failure mode, including low-confidence and low-severity ones. The judge is the `filter of record` — expect a wide, uneven ledger as normal input, not a sign that prosecution failed. Filtering happens here, at judgment, not upstream.
+
 ## Single-Shot Judgment Workflow
 
 1. Read the prosecution finding, including severity, points, citation, and failure mode.
@@ -32,6 +34,8 @@ Make one final, evidence-backed ruling per finding. The goal is not to split the
 No rebuttal rounds. Uncertain items still need a ruling.
 
 ## Improvement Test
+
+Reminder: because prosecution is coverage-first, this test will routinely see low-confidence and low-severity items — that is expected input, not noise to wave through. Rule on each the same way, evidence-first.
 
 Ask this first for every item:
 
@@ -348,6 +352,7 @@ Write each token to the authoritative L0 location per `skills/solution-authoring
 At the start of the disposition pass, call `Read-EngagementRecords -Phase review -PullRequestNumber {PR}` (from `.github/scripts/lib/frame-engagement-record-core.ps1`). If a prior `engagement-record-review-{PR}` exists, extract its `load_bearing_decisions[].decision_id` values. These are `stable_finding_key` values of previously-gate-fired findings.
 
 For each finding in the current judge-sustained set, check whether its `stable_finding_key` appears in the prior record:
+
 - **Match found** → `same-decision-resume` skip: reuse the prior `engineer_choice`, log `Reusing prior {stable_finding_key}: {engineer_choice}`, do not fire `AskUserQuestion`.
 - **No match** → run the gate normally.
 

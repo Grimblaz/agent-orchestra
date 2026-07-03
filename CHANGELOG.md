@@ -2,6 +2,14 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.0.0] — 2026-07-02
+
+### Changed
+
+- **BREAKING: Coverage-first adversarial review prosecution** (#784): prosecution now reports every finding with a statable failure mode — including low-confidence/low-severity findings previously silently dropped — tagged with explicit confidence + severity. Importance/confidence filtering is relocated to the judge stage, which is now the filter of record; the judge's scoring bar is unchanged. `skills/adversarial-review/SKILL.md` §2/§4 and `agents/Code-Critic.agent.md` carry the rewritten methodology.
+- **BREAKING: `lite` adversarial-review adapter gains defense + judge** (#784): `/orchestra:review-lite` now runs the full prosecution → defense → judge pipeline (atomic), a change from its previous prosecution-only contract that returned the raw prosecution ledger unchanged. Consumers relying on the old unfiltered-ledger return shape will see a judge verdict + score summary instead. `skills/adversarial-review/adapters/lite.md`, `skills/adversarial-review/platforms/claude.md`, and `commands/orchestra-review-lite.md` updated accordingly; `skills/solution-authoring/SKILL.md` removes `lite` from its prosecution-only adapter classification.
+- Calibration `skills/calibration-pipeline/SKILL.md` documents a coverage-first epoch note: `sustain_rate` readings before/after this change are non-comparable; metric segmentation deferred to #761.
+
 ## [2.35.16] — 2026-06-30
 
 ### Fixed

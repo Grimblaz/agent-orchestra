@@ -117,8 +117,8 @@ Describe 'Per-adapter integrity contract declarations (Step 8a — Decision 6)' 
             (Join-Path $script:AdaptersPath 'lite.md')
 
         $contract                   | Should -Not -BeNullOrEmpty -Because 'lite.md must have integrity-contract frontmatter'
-        $contract.PipelineStages    | Should -Be @('prosecution')
-        $contract.Atomic            | Should -Be 'n/a'
+        $contract.PipelineStages    | Should -Be @('prosecution', 'defense', 'judge')
+        $contract.Atomic            | Should -Be 'true'
         $contract.Exempt            | Should -Be $false -Because 'lite adapter is not exempt'
         $contract.ProsecutionPasses | Should -Be @(1) -Because 'lite review runs only one compact prosecution pass'
     }

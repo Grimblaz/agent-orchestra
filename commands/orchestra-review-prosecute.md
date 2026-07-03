@@ -5,7 +5,7 @@ argument-hint: "[PR number, PR URL, or short review context]"
 
 # /orchestra:review-prosecute
 
-Run only the Code-Critic prosecution stage and return the resulting prosecution ledger for later defense or judge reruns.
+Run only the Code-Critic prosecution stage and return the resulting prosecution ledger as an intermediate stage artifact — input for a later `/orchestra:review-defend` run followed by `/orchestra:review-judge`, not a filtered or terminal verdict.
 
 **Pre-flight**:
 
@@ -21,6 +21,6 @@ Run only the Code-Critic prosecution stage and return the resulting prosecution 
 
 **Stage-only prosecution override**:
 
-Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller for a standalone prosecution rerun. Reuse the standard code-review selector and prosecution-pass mechanics, but do not claim or execute the atomic multi-stage `standard` adapter contract: dispatch the three Code-Critic prosecution passes with `Review mode selector: "Use code review perspectives"`, merge the prosecution ledger per the shared dispatcher, then stop before defense and judge. Pass the resolved review target, diff, linked issue or plan context, prior review notes, active issue id if available, and review-state persistence target as the pre-dispatch context. Return the merged prosecution ledger unchanged.
+Read `skills/adversarial-review/platforms/claude.md` and follow its parent-side dispatcher checklist as a thin caller for a standalone prosecution rerun. Reuse the standard code-review selector and prosecution-pass mechanics, but do not claim or execute the atomic multi-stage `standard` adapter contract: dispatch the five Code-Critic prosecution passes with `Review mode selector: "Use code review perspectives"`, merge the prosecution ledger per the shared dispatcher, then stop before defense and judge. Pass the resolved review target, diff, linked issue or plan context, prior review notes, active issue id if available, and review-state persistence target as the pre-dispatch context. Return the merged prosecution ledger unchanged as the intermediate stage artifact for a later `/orchestra:review-defend` → `/orchestra:review-judge` sequence.
 
 ARGUMENTS: $ARGUMENTS
