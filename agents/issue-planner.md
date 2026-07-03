@@ -3,7 +3,8 @@ name: issue-planner
 description: Researches and outlines multi-step implementation plans with CE Gate coverage and adversarial review. Use when a GitHub issue is ready for implementation planning.
 tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
 user-invocable: false
-# model/effort intentionally omitted: inline /experience|/design|/plan inherit user-session default; subagent dispatch inherits dispatcher (see Documents/Design/agent-body-architecture.md "Per-agent model + reasoning routing").
+model: opus
+effort: high
 ---
 
 # Issue-Planner (Claude Code shell)

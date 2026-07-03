@@ -3,7 +3,7 @@ name: code-review-response
 description: Review judgment shell for Claude Code. Use when you need a single-shot ruling on prosecution and defense ledgers.
 tools: Read, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
 user-invocable: true
-model: opus
+model: fable
 effort: xhigh
 ---
 
