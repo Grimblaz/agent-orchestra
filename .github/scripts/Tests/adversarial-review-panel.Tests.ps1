@@ -198,3 +198,27 @@ Describe 'Adversarial review panel — generalist-B/judge fable re-tier prose li
             -Because 'the Pass 4 dispatch bullet must never assign fable to the spec-security specialist'
     }
 }
+
+Describe 'Adversarial review panel — generalist-B refusal reroute prose literals (CR3)' {
+
+    BeforeAll {
+        $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        $script:DispatcherPath = Join-Path $script:RepoRoot 'skills/adversarial-review/platforms/claude.md'
+        $script:DispatcherContent = Get-Content -Path $script:DispatcherPath -Raw -ErrorAction Stop
+    }
+
+    It 'platforms/claude.md documents the generalist-B refusal reroute retrying once on fable' {
+        $script:DispatcherContent | Should -Match '(?is)generalist-B refusal reroute.{0,400}retry that pass once on .fable.' `
+            -Because 'the refusal-reroute rule must retry the Pass 2 (generalist-B) dispatch once on fable before falling back'
+    }
+
+    It 'platforms/claude.md documents the generalist-B refusal reroute falling back to opus' {
+        $script:DispatcherContent | Should -Match '(?is)generalist-B refusal reroute.{0,600}re-dispatch Pass 2 on .model: opus.' `
+            -Because 'the refusal-reroute rule must fall back to model: opus after the fable retry also refuses'
+    }
+
+    It 'platforms/claude.md documents a degraded-tier note for the generalist-B refusal reroute' {
+        $script:DispatcherContent | Should -Match '(?is)generalist-B refusal reroute.{0,800}degraded tier.{0,120}Pass 2 \(generalist-B\) degraded to opus after refusal' `
+            -Because 'the refusal-reroute rule must visibly note the degraded tier when Pass 2 falls back to opus'
+    }
+}

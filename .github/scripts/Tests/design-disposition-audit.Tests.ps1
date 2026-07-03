@@ -8,6 +8,7 @@ BeforeAll {
     $script:FixtureRoot = Join-Path $PSScriptRoot 'fixtures/design-disposition-audit'
     $script:ValidFixtures = @(Get-ChildItem -Path $script:FixtureRoot -Filter 'valid-*.txt' | Sort-Object Name)
     $script:AllowedPasses = @(1, 2, 3, 4)
+    $script:AllowedSecondaryPasses = @(1, 2, 3)
     $script:AllowedDispositions = @('incorporate', 'dismiss', 'escalate')
     $script:AllowedClassifications = @('load-bearing', 'routine')
 
@@ -85,7 +86,7 @@ BeforeAll {
             (script:Test-YamlListValue -Value $Value) -and
             $alsoFlaggedPasses.Count -gt 0 -and
             -not $hasNonNumericPass -and
-            @($alsoFlaggedPasses | Where-Object { $_ -notin $script:AllowedPasses }).Count -eq 0 -and
+            @($alsoFlaggedPasses | Where-Object { $_ -notin $script:AllowedSecondaryPasses }).Count -eq 0 -and
             @($alsoFlaggedPasses | Where-Object { $_ -notin $PassesRun }).Count -eq 0 -and
             ($null -eq $EntryPass -or $EntryPass -notin $alsoFlaggedPasses) -and
             @($alsoFlaggedPasses | Sort-Object -Unique).Count -eq $alsoFlaggedPasses.Count
