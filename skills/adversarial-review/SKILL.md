@@ -36,7 +36,7 @@ The named adversarial review adapters are:
 | Adapter            | Adapter class                    | Port-filling           | Pipeline stages                   | Prosecution passes | Exempt | Notes                                                               |
 | ------------------ | -------------------------------- | ---------------------- | --------------------------------- | ------------------ | ------ | ------------------------------------------------------------------- |
 | `standard`         | multi-variant work adapter       | Yes, `review`          | `prosecution`, `defense`, `judge` | `1`, `2`, `3`, `4`, `5` | No | Full local adversarial review (five-pass two-layer panel)           |
-| `lite`             | multi-variant work adapter       | Yes, `review`          | `prosecution`                     | `1`                | No     | Compact local prosecution ledger                                    |
+| `lite`             | multi-variant work adapter       | Yes, `review`          | `prosecution`, `defense`, `judge` | `1`                | No     | Compact local prosecution pass feeding the full defense-judge pipeline |
 | `judge-only`       | multi-variant work adapter       | Yes, `review`          | `judge`                           | none               | Yes    | Terminal ruling over already-collected evidence                     |
 | `proxy-github`     | multi-variant work adapter       | Yes, `review`          | `proxy-prosecution`               | none               | Yes    | GitHub review intake represented as proxy prosecution               |
 | `post-fix`         | multi-variant work adapter       | Yes, `post-fix-review` | `prosecution`, `defense`          | `1`                | No     | Post-fix targeted prosecution and defense                           |
@@ -73,10 +73,10 @@ Every review item must include:
 
 - A specific citation or referenced artifact
 - A concrete failure mode or explicit uncertainty
-- A severity and confidence level that match the evidence quality
 - Enough context that a judge can independently verify the claim
+- A tagged confidence and severity level: every finding is tagged with an explicit confidence + severity pair, using the canonical enums in `skills/routing-tables/assets/routing-config.json`, so the ledger stays machine-readable regardless of how weak the finding is
 
-If the failure mode cannot be stated clearly, downgrade the item or omit it.
+Coverage is first: report every finding that has a concrete failure mode, even when it is low-severity or uncertain — a weak finding is not a reason to omit it. Omission is scoped narrowly to items with no statable failure mode at all — pure noise with nothing a judge could evaluate. A finding with any statable failure mode, however marginal, gets tagged and reported, not dropped.
 
 ### 3. Prefer Targeted Verification Over Broad Scanning
 
@@ -90,6 +90,8 @@ Use the smallest checks that can disconfirm or support a suspected defect:
 ### 4. Emit a Usable Ledger
 
 Write findings so a defense or judge pass can act on them without reconstructing your reasoning from scratch. Avoid vague summaries such as "looks risky" or "might break stuff."
+
+Coverage and economy are orthogonal axes, not a single dial: coverage governs whether a finding is reported at all — maximize it, reporting every finding with a statable failure mode regardless of severity or confidence — while economy governs how tersely a reported finding is written. Economy never justifies dropping a real finding; it only controls how much prose surrounds it.
 
 ## Code Prosecution Workflow
 
@@ -345,7 +347,7 @@ When representing an external review ledger:
 
 | Trigger                               | Gotcha                                                       | Fix                                                                 |
 | ------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------- |
-| A finding has a citation but no break | The judge cannot tell whether it is a defect or a preference | State the concrete failure mode or downgrade the item before output |
+| A finding has a citation but no break | The judge cannot tell whether it is a defect or a preference | State the concrete failure mode; if severity is uncertain, re-type and downgrade the item before output (e.g. Issue → Concern/Nit) rather than dropping it |
 
 ## Frame Ports Filled By This Skill
 
@@ -368,7 +370,7 @@ Required keys:
 | Adapter            | Pipeline stages                   | Atomic | Prosecution passes | Exempt | Reason                                                                   |
 | ------------------ | --------------------------------- | ------ | ------------------ | ------ | ------------------------------------------------------------------------ |
 | `standard`         | `prosecution`, `defense`, `judge` | `true` | `[1, 2, 3, 4, 5]`  | No     | Runs five-pass two-layer prosecution (2 generalist + 3 specialist) before defense and judge |
-| `lite`             | `prosecution`                     | `n/a`  | `[1]`              | No     | Runs one compact prosecution pass                                        |
+| `lite`             | `prosecution`, `defense`, `judge` | `true` | `[1]`              | No     | Runs one compact prosecution pass, then defense, then judge as one atomic pipeline |
 | `judge-only`       | `judge`                           | `n/a`  | `[]`               | Yes    | Re-review scope; prior prosecution and defense evidence already exists   |
 | `proxy-github`     | `proxy-prosecution`               | `n/a`  | `[]`               | Yes    | External review intake; proxy prosecution replaces numbered local passes |
 | `post-fix`         | `prosecution`, `defense`          | `true` | `[1]`              | No     | Runs one targeted prosecution pass and defense after fixes               |

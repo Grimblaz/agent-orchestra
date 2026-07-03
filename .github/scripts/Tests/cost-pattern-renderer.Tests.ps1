@@ -622,6 +622,24 @@ Describe 'Format-CostPatternYaml' {
         $result | Should -Match '(?m)^  cost_estimate_usd: null$'
     }
 
+    It 'emits phase_scope: branch-session-only disclosure field' {
+        $attribution = script:New-YamlAttribution
+        $completeness = script:New-YamlCompleteness
+        $result = Format-CostPatternYaml -Attribution $attribution -Completeness $completeness
+        $result | Should -Match '(?m)^phase_scope: branch-session-only$'
+    }
+
+    It 'emits phase_scope after generated_at and before pr' {
+        $attribution = script:New-YamlAttribution
+        $completeness = script:New-YamlCompleteness
+        $result = Format-CostPatternYaml -Attribution $attribution -Completeness $completeness -Pr 42 -Branch 'test'
+        $generatedAtPos = $result.IndexOf('generated_at:')
+        $phaseScopePos  = $result.IndexOf('phase_scope:')
+        $prPos          = $result.IndexOf("`npr: ")
+        $phaseScopePos | Should -BeGreaterThan $generatedAtPos
+        $phaseScopePos | Should -BeLessThan $prPos
+    }
+
     It 'emits anomaly_flags array' {
         $attribution = script:New-YamlAttribution
         $completeness = script:New-YamlCompleteness
@@ -680,7 +698,7 @@ Describe 'cost-pattern-data schema documentation' {
         $schemaPath | Should -Exist
         $schema = Get-Content -LiteralPath $schemaPath -Raw
 
-        foreach ($field in @('provider_support', 'coverage', 'install_status', 'providers', 'unmapped_session_count')) {
+        foreach ($field in @('provider_support', 'coverage', 'install_status', 'providers', 'unmapped_session_count', 'phase_scope')) {
             $schema | Should -Match "``$field``"
         }
     }

@@ -18,7 +18,7 @@ Keep the shared review methodology in [../SKILL.md](../SKILL.md). This platform 
 | Adapter | pipeline-stages | atomic | Prosecution pass count | Mode selector strings | Handshake requirement | Defense and judge inclusion | Marker emission | Review-state persistence shape |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `standard` | `prosecution`, `defense`, `judge` | `true` | 5 (2 generalist + 3 specialist) | `Review mode selector: "Use code review perspectives"`; `Review mode selector: "Use defense review perspectives"` | Required for every Code-Critic prosecution, defense, and retry dispatch; single capture allowed for the five-pass two-layer prosecution panel | Defense included; judge included | Emit `<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->` after terminal judge stage when the issue id is known | `/memories/session/review-state-{ISSUE_ID}.md`; `review_mode: full`; `prosecution_complete: true`; `defense_complete: true`; `judgment_complete: true`; `last_updated` UTC |
-| `lite` | `prosecution` | `n/a` | 1 | `Review mode selector: "Use lite code review perspectives"` | Required for the singleton Code-Critic prosecution dispatch | Defense omitted by adapter contract; judge omitted by adapter contract | Skip; prosecution-only and non-atomic | `/memories/session/review-state-{ISSUE_ID}.md` only when a consumer runs extra terminal stages; otherwise no terminal-state persistence is required by this adapter |
+| `lite` | `prosecution`, `defense`, `judge` | `true` | 1 | `Review mode selector: "Use lite code review perspectives"` | Required for the singleton Code-Critic prosecution dispatch | Defense included; judge included | Emit `<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->` after terminal judge stage when the issue id is known | `/memories/session/review-state-{ISSUE_ID}.md`; `review_mode: lite`; `prosecution_complete: true`; `defense_complete: true`; `judgment_complete: true`; `last_updated` UTC |
 | `judge-only` | `judge` | `n/a` | 0 | No Code-Critic selector; judge receives existing prosecution and defense ledgers | No Step 0 Code-Critic handshake; freshly captured repo context may be passed to Code-Review-Response as metadata only | Defense omitted; judge included | Skip; non-atomic and exempt | Read existing state when present; force only `judgment_complete: true`; preserve readable prior stage booleans; default `review_mode: full`; update `last_updated` UTC |
 | `proxy-github` | `proxy-prosecution` | `n/a` | 0 | `Score and represent GitHub review` when dispatching proxy prosecution through the intake flow | Construct fresh downstream handshakes for tree-dependent specialist dispatches; skip the block on live-capture failure | Defense omitted; judge omitted | Skip; proxy-only and exempt | GitHub intake persists through the PR or issue review-response path, not the local review-state file unless the caller explicitly bridges it |
 | `post-fix` | `prosecution`, `defense` | `true` | 1 | `Review mode selector: "Use post-fix code review perspectives"`; `Review mode selector: "Use defense review perspectives"` | Required for singleton Code-Critic prosecution and defense dispatches; recapture between stages | Defense included; judge omitted | Emit `<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->` after terminal defense stage when the issue id is known | `/memories/session/review-state-{ISSUE_ID}.md`; record `review_mode: post-fix` when supported by the caller; `prosecution_complete: true`; `defense_complete: true`; preserve or omit `judgment_complete` according to the caller contract; update `last_updated` UTC |
@@ -66,7 +66,7 @@ fallback order (when a tier is unavailable):
   fable → opus → sonnet → haiku
 ```
 
-- `lite`: dispatch one Code-Critic prosecution pass with `subagent_type: code-critic`. Prepend the fresh handshake block when constructed, then `Review mode selector: "Use lite code review perspectives"`, then the resolved review target context.
+- `lite`: dispatch one Code-Critic prosecution pass with `subagent_type: code-critic`. Prepend the fresh handshake block when constructed, then `Review mode selector: "Use lite code review perspectives"`, then the resolved review target context. This singleton prosecution pass feeds the Defense Dispatch and Judge Dispatch sections below — `lite` is no longer prosecution-only; see those sections for how the subsequent stages run.
 - `design-challenge`: emit the three-pass design challenge in one parallel tool-use block with `subagent_type: code-critic`. Passes 1 and 2 use `Review mode selector: "Use design review perspectives"`; pass 3 uses `Review mode selector: "Use product-alignment perspectives"`.
 - `post-fix`: dispatch one Code-Critic prosecution pass with `subagent_type: code-critic`. Prepend the fresh handshake block when constructed, then `Review mode selector: "Use post-fix code review perspectives"`, then the fix diff, sustained finding context, and validation evidence.
 - `proxy-github`: dispatch the proxy prosecution path through the GitHub review-intake flow. Use the canonical GitHub intake marker `Score and represent GitHub review`; use `subagent_type: code-critic` only when the caller needs a Code-Critic proxy prosecution pass over the ingested review payload.
@@ -92,8 +92,9 @@ For degraded prosecution, name the failed pass visibly (by role and tier) and me
 Run defense only when the adapter includes `defense` in `integrity-contract.pipeline-stages`.
 
 - `standard`: dispatch one Code-Critic defense pass with `subagent_type: code-critic`. Recapture state immediately before dispatch, prepend the fresh handshake block when constructed, then prepend `Review mode selector: "Use defense review perspectives"` before the merged prosecution ledger and target context.
+- `lite`: dispatch one Code-Critic defense pass with `subagent_type: code-critic`. Recapture state immediately before dispatch, prepend the fresh handshake block when constructed, then prepend `Review mode selector: "Use defense review perspectives"` before the singleton prosecution ledger and target context.
 - `post-fix`: dispatch one Code-Critic defense pass with `subagent_type: code-critic`. Recapture state immediately before dispatch, prepend the fresh handshake block when constructed, then prepend `Review mode selector: "Use defense review perspectives"` before the post-fix prosecution ledger, fix context, and validation evidence.
-- `lite`, `design-challenge`, `proxy-github`, and `judge-only`: skip defense unless the caller has explicitly selected a separate defense-only command outside this adapter contract.
+- `design-challenge`, `proxy-github`, and `judge-only`: skip defense unless the caller has explicitly selected a separate defense-only command outside this adapter contract.
 
 Return the defense report unchanged to the parent for judge dispatch, marker emission, persistence, or caller output.
 
@@ -126,9 +127,10 @@ After the terminal stage of an adapter completes successfully, inspect the selec
 
 - If `integrity-contract.atomic: true` and an issue id is available, emit the exact marker `<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->` after the terminal stage artifact is complete.
 - For `standard`, the terminal stage is judge.
+- For `lite`, the terminal stage is judge.
 - For `post-fix`, the terminal stage is defense unless the caller deliberately adds a judge stage under a future contract.
-- Skip marker emission for prosecution-only adapters, non-atomic adapters, exempt adapters, and any adapter whose terminal stage failed or halted.
-- Skip marker emission for `lite`, `judge-only`, `proxy-github`, and `design-challenge`.
+- Skip marker emission for non-atomic adapters, exempt adapters, and any adapter whose terminal stage failed or halted.
+- Skip marker emission for `judge-only`, `proxy-github`, and `design-challenge`.
 
 ## Atomic Discipline Guard
 

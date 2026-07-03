@@ -17,6 +17,7 @@ This document defines the schema for the `<!-- cost-pattern-data ... -->` YAML b
 | `session_completeness` | string | Completeness indicator for the session (e.g., `"complete"`, `"partial"`, `"unknown"`). |
 | `excluded_from_rolling_baseline` | boolean | When `true`, this PR's data is excluded from rolling-baseline calculations (e.g., partial sessions, anomalous runs). |
 | `generated_at` | string (ISO-8601) | UTC timestamp when the payload was generated (e.g., `"2026-04-30T12:00:00Z"`). |
+| `phase_scope` | string | Additive post-#777 disclosure field. Fixed value `branch-session-only` (v1). Indicates the telemetry scope for this block. Human-readable disclosure only; the aggregator does not partition on it. Pre-#777 readers treat unknown fields as null per the additive-only rule. |
 | `pr` | integer | GitHub pull request number this payload is attached to. |
 | `branch` | string | Git branch name associated with the PR. |
 | `provider_support` | array of strings | Additive post-#488 field listing telemetry providers represented by this payload (for example, `["claude", "copilot"]`). Pre-#488 readers default to Claude-only behavior. |

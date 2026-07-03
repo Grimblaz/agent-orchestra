@@ -20,6 +20,7 @@ Reusable entryway for deterministic tooling, committed assets, and pipeline-metr
 - Describe the calibration and review-aggregation domain
 - Provide the stable home for pipeline scripts under `scripts/`
 - Provide the stable home for committed pipeline data under `assets/`
+- Metric segmentation (sustain-rate by confidence tier) needed to make pre/post coverage-first `sustain_rate` readings comparable is deferred to umbrella #761 — see the `## Gotchas` entry below
 
 ## Contents
 
@@ -48,3 +49,4 @@ Reusable entryway for deterministic tooling, committed assets, and pipeline-metr
 | Trigger                        | Gotcha                                                        | Fix                                                                                 |
 | ------------------------------ | ------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
 | Adding review pipeline helpers | Tooling and orchestration responsibilities get mixed together | Keep scripts and assets here, but leave routing and judgment with the owning agents |
+| Reading sustain_rate trends across the #784 coverage-first prosecution change (dated 2026-07-02) | Coverage-first prosecution reports more low-confidence findings that were previously silently omitted, mechanically lowering sustain_rate even though prosecutor quality is unchanged | Treat sustain-rate readings from before vs. after the coverage-first epoch as non-comparable; do not trigger prosecution-depth auto-tuning on a low-confidence-driven sustain-rate dip. Metric segmentation (sustain-rate by confidence tier) is deferred to umbrella #761. |

@@ -1209,6 +1209,22 @@ function script:Get-FCLRemainingCostBudgetSeconds {
     return $remaining
 }
 
+# Sum the four token-count keys (input + output + cache_creation + cache_read)
+# from a single token bucket. Used by both the current-ports-fallback path and
+# the prior-side path (issue #777, R2). The internal $null check subsumes the
+# per-loop bucket null-guard (present key, null value).
+function script:Get-FCLTokenSumFromBucket {
+    param([hashtable]$Bucket)
+    [long]$sum = 0
+    if ($null -eq $Bucket) { return $sum }
+    foreach ($tk in @('input', 'output', 'cache_creation', 'cache_read')) {
+        if ($Bucket.ContainsKey($tk) -and $null -ne $Bucket[$tk]) {
+            $sum += [long]$Bucket[$tk]
+        }
+    }
+    return $sum
+}
+
 # ---------------------------------------------------------------------------
 # Invoke-FrameCreditLedger
 # ---------------------------------------------------------------------------
@@ -1749,7 +1765,42 @@ function Invoke-FrameCreditLedger {
 
             # Fix #760-D1-b: wire the Resolve-CostDataPreservation result instead of discarding it.
             # This drives the skip-when-absent gate below (AC1 + AC2).
-            $preservationResult = Resolve-CostDataPreservation -Current $completeness -Prior $priorCostData
+
+            # Compute current token sum from attribution (populated predicate, issue #777 s2).
+            # Use totals['tokens'] as the authoritative full-session sum (includes overhead +
+            # unattributed tokens that are never placed into any port bucket — CR2).
+            # Fall back to ports-only sum if totals is unavailable (e.g., old data format).
+            [long]$currentTokenSum = 0
+            $currentTotalsTokens = if ($null -ne $costAttribution -and $costAttribution.ContainsKey('totals') -and
+                                        $null -ne $costAttribution['totals'] -and $costAttribution['totals'].ContainsKey('tokens')) {
+                $costAttribution['totals']['tokens']
+            } else { $null }
+            if ($null -ne $currentTotalsTokens) {
+                $currentTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $currentTotalsTokens
+            } elseif ($null -ne $costAttribution -and $costAttribution.ContainsKey('ports')) {
+                foreach ($portBucket in $costAttribution['ports'].Values) {
+                    if ($null -ne $portBucket -and $portBucket.ContainsKey('tokens')) {
+                        $currentTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $portBucket['tokens']
+                    }
+                }
+            }
+
+            # Compute prior token sum from parsed prior YAML (if available).
+            # cost-rolling-history ConvertFrom-CostPatternYaml does not parse totals.tokens, so
+            # use ports-only sum for prior. This is consistent with what was stored.
+            [long]$priorTokenSum = 0
+            if ($null -ne $priorCostData -and $priorCostData.ContainsKey('ports')) {
+                $priorPorts = $priorCostData['ports']
+                # ports is a hashtable keyed by port name (ConvertFrom-CostPatternYaml line 327)
+                $priorPortValues = if ($priorPorts -is [hashtable]) { $priorPorts.Values } elseif ($priorPorts -is [array]) { $priorPorts } else { @() }
+                foreach ($portBucket in $priorPortValues) {
+                    if ($null -ne $portBucket -and $portBucket.ContainsKey('tokens')) {
+                        $priorTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $portBucket['tokens']
+                    }
+                }
+            }
+
+            $preservationResult = Resolve-CostDataPreservation -Current $completeness -Prior $priorCostData -CurrentTokenSum $currentTokenSum -PriorTokenSum $priorTokenSum
 
             # Fix #760-D1-a: skip-when-absent gate — if preservation says to use_prior, reuse the
             # prior comment's cost section verbatim.  This fires when the projects root is absent
