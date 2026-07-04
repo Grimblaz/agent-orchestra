@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.1.0] — 2026-07-03
+
+### Added
+
+Scope Classification Gate announces the pipeline tier (with a pre-dispatch standing override) when the rubric outcome is determined by evidence-backed criteria, and asks only when the outcome is genuinely indeterminate (#786). D9 Model-Switch Checkpoint removal is tracked separately in #483.
+
 ## [3.0.1] — 2026-07-02
 
 ### Added

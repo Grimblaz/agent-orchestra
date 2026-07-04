@@ -23,12 +23,12 @@
     "classification": {
       "type": "string",
       "enum": ["load-bearing", "routine", "not-applicable"],
-      "description": "The gate's classification of the decision. 'not-applicable' when outcome is gate-fails or greenfield-defer."
+      "description": "The gate's classification of the decision. 'not-applicable' covers some gate-fails/greenfield-defer cases (genuinely n/a decisions). 'routine' is also a valid pairing with outcome 'gate-fails': the announce path (#786) emits gate-fails + routine together for a determined-outcome scope-classification announcement — a deliberate, documented pairing, not a bug."
     },
     "window_position": {
       "type": "string",
       "enum": ["pre-ask", "disposition", "judge-merge", "unknown", "review-disposition"],
-      "description": "Which gate firing position this token belongs to. 'pre-ask' = upstream structured question. 'disposition' = adversarial finding disposition (#615 surface). 'judge-merge' = plan judge-merge disposition (#605 surface). 'review-disposition' = review-verdict disposition gate firing position."
+      "description": "Which gate firing position this token belongs to. 'pre-ask' = the classification-gate's pre-dispatch firing position — an upstream structured question when the outcome is indeterminate, or a determined-outcome announcement (no question) at the same firing position, e.g. the #786 scope-classification announce path. 'disposition' = adversarial finding disposition (#615 surface). 'judge-merge' = plan judge-merge disposition (#605 surface). 'review-disposition' = review-verdict disposition gate firing position."
     },
     "timestamp": {
       "type": "string",

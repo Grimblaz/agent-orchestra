@@ -98,6 +98,36 @@ load_bearing_decisions:
     articulation_text: ""
     articulation_status: pending
 ```'
+
+    # Announce-path (routine) Markdown Comment Body Mirror Example (v3) — issue #786 s3.
+    # The announce path (Code-Conductor announces the tier deterministically instead of
+    # asking) posts a ROUTINE conductor-scope-classification row, not load-bearing. This
+    # fixture mirrors $script:MarkdownMirrorCommentBody's shape exactly but swaps
+    # classification -> routine and reflects announce-path evidence/wording.
+    $script:AnnounceRoutineMarkdownMirrorCommentBody = '<!-- engagement-record-orchestration-786 -->
+### Named Decisions
+
+- **conductor-scope-classification**
+  - **Classification**: routine
+  - **Engineer choice**: abbreviated
+  - **Audit rationale**: "All 5 abbreviated-tier criteria evidence-backed true; announced without a question."
+  - **Decision brief excerpt**: "Deterministic rubric announce: all criteria hold."
+  - **Articulation text**: <!-- CE Gate articulation pending per #578 -->
+  - **Articulation status**: pending
+
+```yaml
+schema_version: 3
+phase: orchestration
+capture_session: "normal-orchestration-v3"
+load_bearing_decisions:
+  - decision_id: conductor-scope-classification
+    classification: routine
+    audit_rationale: "All 5 abbreviated-tier criteria evidence-backed true; announced without a question."
+    engineer_choice: "abbreviated"
+    teaching_paragraph_excerpt: "Deterministic rubric announce: all criteria hold."
+    articulation_text: ""
+    articulation_status: pending
+```'
 }
 
 # ---------------------------------------------------------------------------
@@ -391,6 +421,103 @@ Describe 'Read-EngagementRecords: byte-equivalence operational definition' {
         # 4. Documented divergence: YAML carries '' (empty string); Markdown carries the HTML-comment placeholder.
         $yamlDecision.articulation_text         | Should -Be '' -Because 'YAML payload must carry empty articulation_text per D10'
         $mirrorBullets['Articulation text']     | Should -Match 'CE Gate articulation pending per #578' -Because 'Markdown mirror must carry the HTML-comment pending placeholder'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# (i-bis) announce-path routine row — issue #786 s3 (AC4/AC7 slice)
+#
+# The announce path (Code-Conductor announces the pipeline tier deterministically
+# instead of asking a question) posts a ROUTINE conductor-scope-classification row,
+# not the load-bearing row every other fixture in this file uses. This block locks:
+#   1. Round-trip through Read-EngagementRecords without error/rejection.
+#   2. Mirror-bullet presence (Classification/Engineer choice/Audit rationale).
+#   3. Byte-equivalence between the Markdown mirror and the YAML payload, matching
+#      the operational definition established in block (i) above.
+# ---------------------------------------------------------------------------
+Describe 'Read-EngagementRecords: announce-path routine row' {
+    It 'round-trips a routine conductor-scope-classification row for the orchestration phase without error' {
+        if (-not (Get-Command Read-EngagementRecords -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Read-EngagementRecords not available'
+            return
+        }
+
+        $routineFixture = '<!-- engagement-record-orchestration-786 -->
+```yaml
+schema_version: 3
+phase: orchestration
+capture_session: "normal-orchestration-v3"
+load_bearing_decisions:
+  - decision_id: conductor-scope-classification
+    classification: routine
+    audit_rationale: "All 5 abbreviated-tier criteria evidence-backed true; announced without a question."
+    engineer_choice: "abbreviated"
+    teaching_paragraph_excerpt: "Deterministic rubric announce: all criteria hold."
+    articulation_text: ""
+    articulation_status: pending
+```'
+
+        $records = Read-EngagementRecords -IssueNumber 786 -InMemoryMarkers @($routineFixture) -Phase orchestration
+        $records | Should -Not -BeNullOrEmpty
+        $records.Count | Should -Be 1
+        $records[0].decision_id | Should -Be 'conductor-scope-classification'
+        $records[0].classification | Should -Be 'routine' -Because 'the announce path posts a routine row, not load-bearing'
+        $records[0].engineer_choice | Should -Be 'abbreviated'
+        $records[0].phase | Should -Be 'orchestration'
+        $records[0].schema_version | Should -Be 3
+    }
+
+    It 'renders the human-readable mirror bullets for the routine row' {
+        $body = $script:AnnounceRoutineMarkdownMirrorCommentBody
+
+        $body | Should -Match '\*\*Classification\*\*:\s*routine'
+        $body | Should -Match '\*\*Engineer choice\*\*:\s*abbreviated'
+        $body | Should -Match '\*\*Audit rationale\*\*:\s*"All 5 abbreviated-tier criteria evidence-backed true; announced without a question\."'
+    }
+
+    It 'asserts byte-equivalence between the routine-row Markdown mirror and YAML payload, mirroring block (i)''s operational definition' {
+        if (-not (Get-Command ConvertFrom-Yaml -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'ConvertFrom-Yaml not available'
+            return
+        }
+
+        $commentBody = $script:AnnounceRoutineMarkdownMirrorCommentBody
+
+        # 1. Parse YAML payload via ConvertFrom-Yaml (matches the production reader path).
+        $null = $commentBody -match '```yaml\s*([\s\S]*?)```'
+        $parsedYaml = ConvertFrom-Yaml -Yaml $Matches[1].Trim()
+        $yamlDecision = $parsedYaml.load_bearing_decisions[0]
+
+        # 2. Parse the Markdown mirror bullets independently (same extraction as block (i)).
+        $mirrorSection = [regex]::Match(
+            $commentBody,
+            '(?s)### Named Decisions(.+?)```yaml'
+        ).Groups[1].Value
+
+        $mirrorBullets = @{}
+        foreach ($match in [regex]::Matches($mirrorSection, '(?m)^\s*-\s*\*\*(?<key>[^*]+)\*\*:\s*(?<value>.+?)\s*$')) {
+            $mirrorBullets[$match.Groups['key'].Value.Trim()] = $match.Groups['value'].Value.Trim().Trim('"')
+        }
+
+        $mirrorBullets.Keys.Count | Should -BeGreaterThan 0 -Because 'Markdown mirror parser must extract at least one bullet — if zero, the regex or fixture has drifted'
+
+        # 3. Markdown bullet <-> YAML key map (per engagement-record-emission/SKILL.md § Markdown Bullet <-> YAML Key Map).
+        $mirrorBullets['Classification']           | Should -Be $yamlDecision.classification
+        $mirrorBullets['Engineer choice']          | Should -Be $yamlDecision.engineer_choice
+        $mirrorBullets['Audit rationale']          | Should -Be $yamlDecision.audit_rationale
+        $mirrorBullets['Decision brief excerpt']   | Should -Be $yamlDecision.teaching_paragraph_excerpt
+        $mirrorBullets['Articulation status']      | Should -Be $yamlDecision.articulation_status
+
+        # 4. Documented divergence (same as block (i)): YAML carries '' (empty string); Markdown
+        # carries the HTML-comment placeholder.
+        $yamlDecision.articulation_text         | Should -Be '' -Because 'YAML payload must carry empty articulation_text per D10'
+        $mirrorBullets['Articulation text']     | Should -Match 'CE Gate articulation pending per #578' -Because 'Markdown mirror must carry the HTML-comment pending placeholder'
+
+        # 5. Announce-path-specific invariant: the routine classification itself must byte-match
+        # across both surfaces, confirming the reader/mirror pair never silently upgrades a
+        # routine row to load-bearing (or vice versa).
+        $yamlDecision.classification | Should -Be 'routine' -Because 'YAML payload for the announce path must carry classification: routine'
+        $mirrorBullets['Classification'] | Should -Be 'routine' -Because 'Markdown mirror for the announce path must carry Classification: routine'
     }
 }
 
