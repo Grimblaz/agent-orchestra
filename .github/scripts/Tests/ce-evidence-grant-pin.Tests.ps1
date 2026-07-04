@@ -191,14 +191,14 @@ Describe 'CE Gate evidence-labeling browser grant pin (issue #791)' {
         It 'no mcp__claude.?in.?chrome__ tool-literal variant appears anywhere in the repo except the exact lowercase mcp__claude-in-chrome__ literal' {
             $violations = [System.Collections.Generic.List[string]]::new()
             foreach ($file in $script:AllRepoFiles) {
-                $lines = Get-Content -Path $file.FullName -ErrorAction SilentlyContinue
+                $lines = @(Get-Content -Path $file.FullName -ErrorAction SilentlyContinue)
                 if ($null -eq $lines) { continue }
                 for ($i = 0; $i -lt $lines.Count; $i++) {
                     $line = $lines[$i]
                     if ($line -notmatch $script:VariantPattern) { continue }
                     # Strip every occurrence of the one allowed exact literal, then re-test:
                     # any remaining match on this line is a disallowed variant (e.g. Title-case-hyphen).
-                    $stripped = $line -replace [regex]::Escape($script:AllowedLiteral), ''
+                    $stripped = $line -creplace [regex]::Escape($script:AllowedLiteral), ''
                     if ($stripped -match $script:VariantPattern) {
                         $relativePath = ConvertTo-CeEvidenceRelativePath -FullPath $file.FullName -BasePath $script:RepoRoot
                         $violations.Add("$($relativePath):$($i + 1)")
