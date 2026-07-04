@@ -1,7 +1,7 @@
 ---
 name: experience-owner
 description: Customer experience bookend — frames features as customer journeys upstream, captures CE Gate evidence downstream. Use for customer framing of a GitHub issue or for CE Gate evidence capture after implementation.
-tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
+tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion, mcp__Claude_Preview__*, mcp__claude-in-chrome__*
 user-invocable: false
 model: opus
 effort: high
@@ -32,7 +32,7 @@ When the shared body refers to a Copilot tool, use the Claude Code equivalent:
 | "the platform's structured-question tool"   | `AskUserQuestion`              |
 | `#tool:vscode/askQuestions`                 | `AskUserQuestion`              |
 | `github/*` MCP operations                   | `gh` CLI via `Bash`            |
-| Browser tools (`browser/*`)                 | **Upstream framing**: not required; use `WebFetch` only if an external page is needed. **Downstream CE Gate** may need interactive UI exercise (clicks, form fills, canvas, multi-step journeys) that `WebFetch` cannot cover — fall back to the Claude-in-Chrome tools (`mcp__Claude_in_Chrome__*`) or the computer-use tools (`mcp__computer-use__*`) for those flows; the evidence captured (screenshots, DOM reads, network logs) is what matters, not the automation surface |
+| Browser tools (`browser/*`)                 | **Upstream framing**: not required; use `WebFetch` only if an external page is needed. **Downstream CE Gate** may need interactive UI exercise (clicks, form fills, canvas, multi-step journeys) that `WebFetch` cannot cover — fall back to the Claude-in-Chrome tools (`mcp__claude-in-chrome__*`) for those flows; the evidence captured (screenshots, DOM reads, network logs) is what matters, not the automation surface. The computer-use tools (`mcp__computer-use__*`) are an additional fallback available **only for inline `/experience` invocation**; when Experience-Owner is dispatched as a subagent via the `Agent` tool, no computer-use grant is available and the shell relies on the Claude-in-Chrome tools or the manual-screenshot final fallback |
 | Subagent dispatch (`#tool:agent/runSubagent`) | `Agent` tool                   |
 | Session memory (`vscode/memory`)            | Per `SMC-08`, Claude Code uses GitHub issue body/comment markers for durable state |
 

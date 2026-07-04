@@ -43,6 +43,8 @@ When taking the follow-up issue path, still invoke Track 2 before PR creation an
 - For any surface type, if the designated tool cannot be invoked after one retry: emit `⚠️ CE Gate skipped - {surface} tool unavailable ({reason})` and continue
 - Skipped CE Gates must be noted in the PR body with the skip reason
 
+**Reason-vocabulary mapping (M16)**: Experience-Owner's per-scenario degradation reason enum (`tool-absent | server-unresolved | permission-unclear | surface-non-interactive | env-unreachable` — see the Experience-Owner shared body's Graceful Degradation methodology) is a finer-grained, narrative vocabulary distinct from `Build-CeGateCreditRow`'s `-BlockKind` parameter (`environment | tooling | runtime | orchestration`). When a credit row must be emitted for a degraded scenario, map as follows: `tool-absent` → `tooling`; `server-unresolved` → `environment`; `permission-unclear` → `environment`; `surface-non-interactive` → `tooling`; `env-unreachable` → `environment`. No code change to `Build-CeGateCreditRow` is required — this is a documentation-only reconciliation.
+
 ## CE and Proxy Prosecution Re-Activation
 
 When CE prosecution or GitHub proxy prosecution produces sustained findings:

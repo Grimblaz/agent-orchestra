@@ -1,7 +1,7 @@
 ---
 name: ui-iterator
 description: UI polish specialist shell for Claude Code. Use when Code-Conductor needs screenshot-driven iteration and visual refinement.
-tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
+tools: Read, Write, Edit, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion, mcp__Claude_Preview__*, mcp__claude-in-chrome__*
 user-invocable: false
 # model/effort intentionally omitted: inherits dispatcher per agent-orchestra routing convention (see Documents/Design/agent-body-architecture.md "Per-agent model + reasoning routing").
 ---
@@ -99,15 +99,15 @@ The Copilot-specific tool names in that file map to Claude Code equivalents belo
 | `edit` | `Edit`, `Write` |
 | `search` | `Grep`, `Glob` |
 | `vscode/askQuestions` | `AskUserQuestion` |
-| `browser/openBrowserPage` | Primary: `mcp__Claude_in_Chrome__*` page-open or navigation surface. Fallback: `mcp__Claude_Preview__preview_start` against the local dev server URL to create the preview session. Final fallback: user opens the target page manually, then pastes a screenshot. |
-| `browser/screenshotPage` | Primary: `mcp__Claude_in_Chrome__*` screenshot or capture surface. Fallback: `mcp__Claude_Preview__*` screenshot or capture surface after `preview_start`. Final fallback: user pastes the current screenshot into chat. |
-| `browser/clickElement` | Primary: `mcp__Claude_in_Chrome__*` click or DOM interaction surface. Fallback: `mcp__Claude_Preview__*` click or interaction surface after `preview_start`. Final fallback: user performs the interaction manually, then pastes an updated screenshot. |
-| `browser/typeInPage` | Primary: `mcp__Claude_in_Chrome__*` input or form-entry surface. Fallback: `mcp__Claude_Preview__*` input surface after `preview_start`. Final fallback: user performs the input manually, then pastes an updated screenshot. |
-| `browser/readPage` | Primary: `mcp__Claude_in_Chrome__*` page-read or DOM-inspection surface. Fallback: `mcp__Claude_Preview__*` page-read surface after `preview_start`. Final fallback: user supplies a screenshot and any needed visible text context manually. |
-| `browser/hoverElement` | Primary: `mcp__Claude_in_Chrome__*` hover-capable interaction surface. Fallback: `mcp__Claude_Preview__*` hover-capable interaction surface after `preview_start`. Final fallback: user triggers the hover state manually, then pastes a screenshot. |
-| `browser/dragElement` | Primary: `mcp__Claude_in_Chrome__*` drag or pointer-manipulation surface. Fallback: `mcp__Claude_Preview__*` drag-capable interaction surface after `preview_start`. Final fallback: user performs the drag interaction manually, then pastes a screenshot. |
-| `browser/handleDialog` | Primary: `mcp__Claude_in_Chrome__*` dialog-handling surface. Fallback: `mcp__Claude_Preview__*` dialog-handling surface after `preview_start`. Final fallback: user dismisses or accepts the dialog manually, then pastes a screenshot. |
-| `browser/runPlaywrightCode` | Primary: `mcp__Claude_in_Chrome__*` advanced browser-automation surface when direct interaction is needed. Fallback: `mcp__Claude_Preview__*` advanced preview automation surface after `preview_start`, where supported. Final fallback: manual screenshot paste with descriptive context; no verify-after-edit loop. |
+| `browser/openBrowserPage` | Primary: `mcp__claude-in-chrome__*` page-open or navigation surface. Fallback: `mcp__Claude_Preview__preview_start` against the local dev server URL to create the preview session. Final fallback: user opens the target page manually, then pastes a screenshot. |
+| `browser/screenshotPage` | Primary: `mcp__claude-in-chrome__*` screenshot or capture surface. Fallback: `mcp__Claude_Preview__*` screenshot or capture surface after `preview_start`. Final fallback: user pastes the current screenshot into chat. |
+| `browser/clickElement` | Primary: `mcp__claude-in-chrome__*` click or DOM interaction surface. Fallback: `mcp__Claude_Preview__*` click or interaction surface after `preview_start`. Final fallback: user performs the interaction manually, then pastes an updated screenshot. |
+| `browser/typeInPage` | Primary: `mcp__claude-in-chrome__*` input or form-entry surface. Fallback: `mcp__Claude_Preview__*` input surface after `preview_start`. Final fallback: user performs the input manually, then pastes an updated screenshot. |
+| `browser/readPage` | Primary: `mcp__claude-in-chrome__*` page-read or DOM-inspection surface. Fallback: `mcp__Claude_Preview__*` page-read surface after `preview_start`. Final fallback: user supplies a screenshot and any needed visible text context manually. |
+| `browser/hoverElement` | Primary: `mcp__claude-in-chrome__*` hover-capable interaction surface. Fallback: `mcp__Claude_Preview__*` hover-capable interaction surface after `preview_start`. Final fallback: user triggers the hover state manually, then pastes a screenshot. |
+| `browser/dragElement` | Primary: `mcp__claude-in-chrome__*` drag or pointer-manipulation surface. Fallback: `mcp__Claude_Preview__*` drag-capable interaction surface after `preview_start`. Final fallback: user performs the drag interaction manually, then pastes a screenshot. |
+| `browser/handleDialog` | Primary: `mcp__claude-in-chrome__*` dialog-handling surface. Fallback: `mcp__Claude_Preview__*` dialog-handling surface after `preview_start`. Final fallback: user dismisses or accepts the dialog manually, then pastes a screenshot. |
+| `browser/runPlaywrightCode` | Primary: `mcp__claude-in-chrome__*` advanced browser-automation surface when direct interaction is needed. Fallback: `mcp__Claude_Preview__*` advanced preview automation surface after `preview_start`, where supported. Final fallback: manual screenshot paste with descriptive context; no verify-after-edit loop. |
 
 ### Required graceful-degradation announcement (CE6)
 

@@ -2,11 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
-## [3.2.1] — 2026-07-04
+## [3.3.0] — 2026-07-04
 
-### Changed
+### Added
 
-- D9 Model-Switch Checkpoint cosmetic dewording: removed obsolete model-switch prompt wording from Code-Conductor's hub-mode checkpoint (model routing is automatic since #477); D9's name, pause, durable-handoff, and bundle-fan-out roles are unchanged (#483).
+- CE Gate evidence-type labeling: every delegated customer scenario is now labeled live-interaction, code-audit, or automated-runner so a maintainer is never misled about evidence strength (#791).
+- Browser MCP tool grants (mcp__Claude_Preview__*, mcp__claude-in-chrome__*) added to Experience-Owner, UI-Iterator, and Code-Critic (read-only) Claude shells (#791).
 
 ## [3.2.0] — 2026-07-03
 
