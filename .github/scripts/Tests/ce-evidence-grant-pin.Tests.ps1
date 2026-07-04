@@ -49,6 +49,15 @@ BeforeDiscovery {
             FullPath     = (Join-Path $script:CeEvidenceGrantRepoRoot $_)
         }
     }
+    $script:M4ReadOnlyTestCases = @(
+        'agents/code-critic.md',
+        'agents/Code-Critic.agent.md'
+    ) | ForEach-Object {
+        @{
+            RelativePath = $_
+            FullPath     = (Join-Path $script:CeEvidenceGrantRepoRoot $_)
+        }
+    }
 }
 
 Describe 'CE Gate evidence-labeling browser grant pin (issue #791)' {
@@ -61,6 +70,26 @@ Describe 'CE Gate evidence-labeling browser grant pin (issue #791)' {
             'agents/code-critic.md'
         )
         $script:SelfPath = (Resolve-Path $PSCommandPath).Path
+
+        # Version-portable replacement for `Resolve-Path -Relative -RelativeBasePath`,
+        # which requires PowerShell 7.4+. This file's #Requires floor is 7.0 (the
+        # repo-wide convention — see other .github/scripts/Tests/*.ps1 files), so
+        # this helper strips the base path as a string prefix instead. Defined here
+        # (inside BeforeAll) rather than at script top-level scope, because Pester
+        # v5 runs `It` scriptblocks in an isolated scope that does not see
+        # top-level script functions.
+        function script:ConvertTo-CeEvidenceRelativePath {
+            param(
+                [Parameter(Mandatory)] [string] $FullPath,
+                [Parameter(Mandatory)] [string] $BasePath
+            )
+            $normalizedFull = $FullPath -replace '\\', '/'
+            $normalizedBase = ($BasePath -replace '\\', '/').TrimEnd('/')
+            if ($normalizedFull.StartsWith("$normalizedBase/", [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $normalizedFull.Substring($normalizedBase.Length + 1)
+            }
+            return $normalizedFull
+        }
     }
 
     Context 'Byte-exact grant literals on the three CE-Gate-capable shells' {
@@ -80,15 +109,56 @@ Describe 'CE Gate evidence-labeling browser grant pin (issue #791)' {
         }
     }
 
+    Context 'M4 read-only constraint prose pin (owner decision M4, issue #791)' {
+
+        BeforeAll {
+            # Loose-but-meaningful: requires read-only/not-permitted language to
+            # co-occur (within a bounded window) with at least one of the named
+            # mutating browser verbs. Not a full-text pin, so it survives
+            # copyedits, but it still fails if the read-only constraint sentence
+            # is silently deleted while the byte-exact grant literal above stays
+            # untouched.
+            $script:M4MutatingVerbPattern = '(navigate|click|fill|preview_eval)'
+            $script:M4ConstraintPattern = '(read-only|not permitted)'
+        }
+
+        It '<RelativePath> constrains the browser grant to read-only/non-mutating use' -TestCases $script:M4ReadOnlyTestCases {
+            param($RelativePath, $FullPath)
+            $content = Get-Content -Path $FullPath -Raw
+            $content | Should -Not -BeNullOrEmpty -Because "$RelativePath must exist and be readable"
+
+            $verbMatches = [regex]::Matches($content, $script:M4MutatingVerbPattern, 'IgnoreCase')
+            $verbMatches.Count | Should -BeGreaterThan 0 -Because "issue #791 R4 requires $RelativePath to mention at least one mutating browser verb (navigate/click/fill/preview_eval) as part of the constraint sentence"
+
+            $foundCoOccurrence = $false
+            foreach ($verbMatch in $verbMatches) {
+                $windowStart = [Math]::Max(0, $verbMatch.Index - 400)
+                $windowLength = [Math]::Min(800, $content.Length - $windowStart)
+                $window = $content.Substring($windowStart, $windowLength)
+                if ($window -match $script:M4ConstraintPattern) {
+                    $foundCoOccurrence = $true
+                    break
+                }
+            }
+            $foundCoOccurrence | Should -Be $true -Because "issue #791 R4 requires $RelativePath to carry read-only/not-permitted language co-occurring with the mutating browser verbs (navigate/click/fill/preview_eval), so the M4 read-only constraint that makes the wildcard browser grant safe for this adversarial-reviewer role cannot be silently deleted while this test stays green"
+        }
+    }
+
     Context 'Repo-wide uppercase-Chrome spelling guard' {
 
         BeforeAll {
-            # Scope: every file in the repo except this test file itself (which must
-            # reference the literal below to assert its absence, so it would
-            # otherwise self-match). .git is excluded as non-source-controlled content.
-            $script:AllRepoFiles = Get-ChildItem -Path $script:RepoRoot -Recurse -File |
-                Where-Object { $_.FullName -notmatch '[/\\]\.git[/\\]' } |
-                Where-Object { $_.FullName -ne $script:SelfPath }
+            # Scope: every git-tracked file in the repo except this test file itself
+            # (which must reference the literal below to assert its absence, so it
+            # would otherwise self-match). Using `git ls-files` instead of
+            # `Get-ChildItem -Recurse` scopes the scan to tracked content only, so
+            # gitignored local scratch files (e.g. .tmp/) can never cause
+            # local-vs-CI divergence in this guard (issue #791 review R15). This
+            # also makes the `.git`-directory exclusion redundant-but-harmless,
+            # since `git ls-files` never returns `.git/` internals.
+            $trackedRelativePaths = git -C $script:RepoRoot ls-files
+            $script:AllRepoFiles = $trackedRelativePaths | ForEach-Object {
+                [PSCustomObject]@{ FullName = (Join-Path $script:RepoRoot $_) }
+            } | Where-Object { $_.FullName -ne $script:SelfPath }
         }
 
         It 'the retired uppercase-Chrome literal mcp__Claude_in_Chrome__ does not appear anywhere in the repo except this test file' {
@@ -98,7 +168,7 @@ Describe 'CE Gate evidence-labeling browser grant pin (issue #791)' {
                 $content = Get-Content -Path $file.FullName -Raw -ErrorAction SilentlyContinue
                 if ($null -eq $content) { continue }
                 if ($content.Contains($needle)) {
-                    $violations.Add((Resolve-Path -Path $file.FullName -Relative -RelativeBasePath $script:RepoRoot))
+                    $violations.Add((ConvertTo-CeEvidenceRelativePath -FullPath $file.FullName -BasePath $script:RepoRoot))
                 }
             }
             $violations | Should -HaveCount 0 -Because "issue #791 requires the retired uppercase-Chrome spelling mcp__Claude_in_Chrome__ to be corrected to mcp__claude-in-chrome__ everywhere in the repo (step 2 sweep); this pin fails RED until that sweep lands. Locations found: $($violations -join ', ')"
@@ -108,9 +178,12 @@ Describe 'CE Gate evidence-labeling browser grant pin (issue #791)' {
     Context 'Case-insensitive mcp__claude.?in.?chrome__ tool-literal variant guard (catches Title-case-hyphen regressions)' {
 
         BeforeAll {
-            $script:AllRepoFiles = Get-ChildItem -Path $script:RepoRoot -Recurse -File |
-                Where-Object { $_.FullName -notmatch '[/\\]\.git[/\\]' } |
-                Where-Object { $_.FullName -ne $script:SelfPath }
+            # See the "Repo-wide uppercase-Chrome spelling guard" Context above for
+            # the git-tracked-only rationale (issue #791 review R15).
+            $trackedRelativePaths = git -C $script:RepoRoot ls-files
+            $script:AllRepoFiles = $trackedRelativePaths | ForEach-Object {
+                [PSCustomObject]@{ FullName = (Join-Path $script:RepoRoot $_) }
+            } | Where-Object { $_.FullName -ne $script:SelfPath }
             $script:VariantPattern = '(?i)mcp__claude.?in.?chrome__'
             $script:AllowedLiteral = 'mcp__claude-in-chrome__'
         }
@@ -127,7 +200,7 @@ Describe 'CE Gate evidence-labeling browser grant pin (issue #791)' {
                     # any remaining match on this line is a disallowed variant (e.g. Title-case-hyphen).
                     $stripped = $line -replace [regex]::Escape($script:AllowedLiteral), ''
                     if ($stripped -match $script:VariantPattern) {
-                        $relativePath = Resolve-Path -Path $file.FullName -Relative -RelativeBasePath $script:RepoRoot
+                        $relativePath = ConvertTo-CeEvidenceRelativePath -FullPath $file.FullName -BasePath $script:RepoRoot
                         $violations.Add("$($relativePath):$($i + 1)")
                     }
                 }

@@ -137,7 +137,7 @@ When the selector line is `Review mode selector: "Use defense review perspective
 
 When the selector line is `Review mode selector: "Use CE review perspectives"`, activate CE Prosecution Mode.
 
-CE prosecution is **one pass only**. Experience-Owner exercises the CE scenarios first and captures evidence — Code-Conductor delegates CE Gate evidence capture to Experience-Owner, which returns a structured evidence summary. You then review that evidence adversarially and may run additional active tests.
+CE prosecution is **one pass only**. Experience-Owner exercises the CE scenarios first and captures evidence — Code-Conductor delegates CE Gate evidence capture to Experience-Owner, which returns a structured evidence summary. You then review that evidence adversarially and may run additional active tests within the read-only constraint below (on browser-interactive surfaces, this means read-only inspection, not mutating action).
 
 Load `skills/adversarial-review/SKILL.md` for the reusable CE evidence-handling method and output discipline. The mode-specific CE contract below stays in this agent because `.github/scripts/Tests/bdd-scenario-contract.Tests.ps1` matches this shared-body three-lens and BDD wording, and `agents/code-critic.md` enumerates the `## CE Prosecution Mode` heading for shell/body parity.
 
@@ -147,7 +147,7 @@ Load `skills/adversarial-review/SKILL.md` for the reusable CE evidence-handling 
 | ---------------- | ----------------------------------------------------------------- | ----------------------------------------------- |
 | **Functional**   | Do scenarios pass from the customer's perspective?                | Review Experience-Owner's captured evidence     |
 | **Intent**       | Does implementation match design intent? (strong/partial/weak)    | Compare evidence against the design-issue cache |
-| **Error states** | What happens with bad input, edge cases, or unexpected sequences? | Active adversarial testing via browser tools    |
+| **Error states** | What happens with bad input, edge cases, or unexpected sequences? | Active adversarial testing via browser tools; on interactive surfaces, exercise Error-states via read-only inspection instead — read console/network logs for error signals, inspect DOM state for error messaging, or request Experience-Owner capture an error-state screenshot; do not perform mutating actions to induce the error state yourself (see read-only clarification below) |
 
 **Intent match levels** (apply the existing rubric from Code-Conductor):
 

@@ -321,7 +321,7 @@ Code-Conductor dispatches the framework runner at CE Gate. Process:
 | `result`        | enum   | `pass` \| `fail` \| `conflict`        |
 | `detail`        | string | Summary or first stderr line          |
 | `raw_exit_code` | int    | Runner exit code (runner source only) |
-| `evidence_type` | enum   | `live-interaction` \| `code-audit` \| `automated-runner` (see totality rules below) |
+| `evidence_type` | enum   | `live-interaction` \| `code-audit` \| `automated-runner` (conflict rows: compound of two values, see totality rules below) |
 
 **Evidence merge rules**:
 
@@ -332,7 +332,7 @@ Code-Conductor dispatches the framework runner at CE Gate. Process:
 
 - `source: runner` rows: `evidence_type: automated-runner` (always — a runner dispatch is never a human/browser interaction).
 - `source: eo` rows: `evidence_type` is whatever Experience-Owner reports (`live-interaction` or `code-audit`) — EO's own methodology (see Experience-Owner shared body, out of scope for this file) determines which.
-- `source: runner+eo` (conflict) rows: `evidence_type: automated-runner+live-interaction` (compound literal — both provenances contributed and neither should be silently dropped).
+- `source: runner+eo` (conflict) rows: `evidence_type: automated-runner+{eo-reported-type}` — the compound reflects EO's ACTUAL reported half (`automated-runner+live-interaction` or `automated-runner+code-audit`), not an assumed-always-live value; EO's Pre-Labeling Resolution Protocol (`Experience-Owner.agent.md`) permits EO to report `code-audit` for a delegated scenario, including a failed-runner one that produces a conflict row (compound literal — both provenances contributed and neither should be silently dropped).
 - Scenarios that never entered the evidence record at all (INCONCLUSIVE from a failed service pre-check, waived, not-covered, or aborted) have no `evidence_type` value — render `—` (em-dash) wherever these rows surface downstream (e.g. the PR-body coverage table), since there is no record to derive a type from.
 
 **Result format examples**:
