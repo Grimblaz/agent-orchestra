@@ -59,7 +59,7 @@ Questioning and pausing are controlled actions, not casual conversation.
 
 ### Model-Switch Checkpoint (Authorized Hub-Mode Pause)
 
-> *(Heading retained for contract stability: this checkpoint was named for its original model-switch purpose, which #477's per-agent model routing made automatic; per #483 the checkpoint now serves only the pause and durable-handoff roles. Do not rename this heading — it is pinned verbatim by the issue #557 coverage list enforced in `code-conductor-responsibility-map.Tests.ps1`.)*
+> _(Heading retained for contract stability: this checkpoint was named for its original model-switch purpose, which #477's per-agent model routing made automatic; per #483 the checkpoint now serves only the pause and durable-handoff roles. Do not rename this heading — it is pinned verbatim by the issue #557 coverage list enforced in `code-conductor-responsibility-map.Tests.ps1`.)_
 
 When Code-Conductor orchestrates **hub mode** (any pipeline tier — full or abbreviated), one additional authorized pause exists — the **D9 checkpoint**. This pause is explicitly authorized and does NOT violate the zero-tolerance rule for plain-text questions because it uses `#tool:vscode/askQuestions`.
 
@@ -242,7 +242,7 @@ Before any editing delegation or file mutation in hub mode, run a pre-edit owner
 
 ### D9 Model-Switch Checkpoint (Hub Mode Only)
 
-> *(Heading retained for contract stability: this checkpoint was named for its original model-switch purpose, which #477's per-agent model routing made automatic; per #483 the checkpoint now serves only the pause and durable-handoff roles. Do not rename this heading — it is pinned verbatim by the issue #557 coverage list enforced in `code-conductor-responsibility-map.Tests.ps1`.)*
+> _(Heading retained for contract stability: this checkpoint was named for its original model-switch purpose, which #477's per-agent model routing made automatic; per #483 the checkpoint now serves only the pause and durable-handoff roles. Do not rename this heading — it is pinned verbatim by the issue #557 coverage list enforced in `code-conductor-responsibility-map.Tests.ps1`.)_
 
 After plan approval and before implementation begins, present this checkpoint — **ONLY** when Code-Conductor is in hub mode AND at least one upstream phase ran in this session, regardless of whether other phases were skipped by scope classification or prior-session completion:
 
