@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.1] — 2026-07-04
+
+### Changed
+
+- D9 Model-Switch Checkpoint cosmetic dewording: removed obsolete model-switch prompt wording from Code-Conductor's hub-mode checkpoint (model routing is automatic since #477); D9's name, pause, durable-handoff, and bundle-fan-out roles are unchanged (#483).
+
 ## [3.3.0] — 2026-07-04
 
 ### Added
