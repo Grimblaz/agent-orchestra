@@ -138,6 +138,8 @@ Describe 'execution handoff persistence contract' {
         $content | Should -Match $script:BundleD9SuppressionPattern -Because 'bundle D9 suppression must require per-issue durable handoff comments for every bundled issue'
         $content | Should -Match $script:LatestCommentWinsPattern -Because 'latest-comment-wins lookup must remain valid for persisted handoff comments'
         $content | Should -Match 'plan-bundle-\{primary\}-\{secondary1\}-\{secondaryN\}' -Because 'bundle plan naming must remain unchanged'
+        $content | Should -Not -Match 'recommended if staying on current model' -Because 'the D9 model-switch prompt wording is being removed per #483'
+        $content | Should -Not -Match 'so the user can switch models' -Because 'the D9 model-switch prompt wording is being removed per #483'
     }
 
     It 'requires shared docs to route cross-session durability through D9 instead of planner-time comment posting' {
