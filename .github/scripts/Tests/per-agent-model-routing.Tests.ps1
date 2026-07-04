@@ -32,15 +32,24 @@ Describe 'Per-agent model + effort routing contract' {
         $script:AgentBodyArchPath = Join-Path $script:RepoRoot 'Documents/Design/agent-body-architecture.md'
 
         # Routing-values oracle: hard-coded expected routing for explicitly-declared shells.
-        # code-conductor is D2 (redundant orchestrator guarantee); code-critic / code-review-response
-        # are D5 (adversarial-review quality justification); refactor-specialist / process-review are
-        # quality-justified Sonnet+high. All five use (Levenshtein on mismatch for diagnostics).
+        # code-conductor is D2 (redundant orchestrator guarantee); code-critic is D5 (adversarial-review
+        # quality justification); code-review-response is D5/DD4 (#785: re-tiered to fable, judge pass
+        # requires full synthesis depth on the monotonic ladder); refactor-specialist / process-review are
+        # quality-justified Sonnet+high; experience-owner / solution-designer / issue-planner /
+        # research-agent / specification are the #785 upstream-shell opus+high floor
+        # (f13-upstream-shell-floor) binding the subagent-delegation path. All use Levenshtein on
+        # mismatch for diagnostics.
         $script:ExpectedRouting = @{
             'agents/code-critic.md'          = @{ model = 'opus'; effort = 'high' }
-            'agents/code-review-response.md' = @{ model = 'opus'; effort = 'xhigh' }
+            'agents/code-review-response.md' = @{ model = 'fable'; effort = 'xhigh' }
             'agents/refactor-specialist.md'  = @{ model = 'sonnet'; effort = 'high' }
             'agents/process-review.md'       = @{ model = 'sonnet'; effort = 'high' }
             'agents/code-conductor.md'       = @{ model = 'sonnet'; effort = 'high' }
+            'agents/experience-owner.md'     = @{ model = 'opus'; effort = 'high' }
+            'agents/solution-designer.md'    = @{ model = 'opus'; effort = 'high' }
+            'agents/issue-planner.md'        = @{ model = 'opus'; effort = 'high' }
+            'agents/research-agent.md'       = @{ model = 'opus'; effort = 'high' }
+            'agents/specification.md'        = @{ model = 'opus'; effort = 'high' }
         }
 
         # D7: explicit inherit/inherit routing for the minimal frame walker.
@@ -169,7 +178,7 @@ Describe 'Per-agent model + effort routing contract' {
     }
 
     It 'enum membership: declared model and effort values are in the allowed sets' {
-        $validModels = @('sonnet', 'opus', 'haiku', 'inherit')
+        $validModels = @('sonnet', 'opus', 'haiku', 'inherit', 'fable')
         $validEfforts = @('low', 'medium', 'high', 'xhigh', 'max', 'inherit')
 
         foreach ($shellFile in $script:ShellFiles) {
@@ -183,7 +192,7 @@ Describe 'Per-agent model + effort routing contract' {
                     $hint = & $script:FindClosest -Value $norm -Candidates $validModels
                     $norm | Should -BeIn $validModels -Because (
                         "$($shellFile.Name): model '$norm' is not valid. " +
-                        "Expected one of {sonnet|opus|haiku|inherit}. Did you mean '$hint'?"
+                        "Expected one of {sonnet|opus|haiku|inherit|fable}. Did you mean '$hint'?"
                     )
                 }
             }

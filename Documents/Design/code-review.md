@@ -1138,3 +1138,40 @@ Current-tier models (Opus 4.7/4.8, Sonnet 5, Fable 5) follow conservative-report
 | `skills/calibration-pipeline/SKILL.md` | Dated coverage-first epoch note; sustain-rate comparability gotcha; umbrella #761 cross-link |
 | `agents/Process-Review.agent.md` | Matching epoch caveat where §4.7 reads `sustain_rate` |
 | `Documents/Design/code-review.md` | This section |
+
+---
+
+## Design-Challenge Convergence Filter
+
+**Issue**: #785 | **Companion**: #784 (coverage-first prosecution)
+
+### Summary
+
+The 3-pass design challenge (`skills/design-exploration/SKILL.md` § Design Challenge) previously ran as pure prosecution with no filter of record — the same structural gap #784 closed for `/orchestra:review-lite`. #785 replaces the prior generic design-review passes with three named specialist lenses and adds a single-dispatch convergence filter that plays the same role a judge plays elsewhere in the pipeline, without turning design-challenge into a fourth pipeline stage.
+
+### Three Specialist Lenses
+
+Per `skills/adversarial-review/platforms/claude.md`'s design-challenge dispatch section, each of the three prosecution passes now targets a distinct lens instead of a generic design-review sweep:
+
+- **Pass 1 — tree-grounding/feasibility**: whether the design rests on artifacts that actually exist in the live tree and whether the approach is technically achievable given current repository structure.
+- **Pass 2 — scope-fidelity/requirements-coverage**: whether the design fully addresses the stated requirement without narrowing or drifting from customer/owner intent, and whether all acceptance-relevant surfaces are covered.
+- **Pass 3 — failure-modes/durability**: what breaks under edge cases or maintenance pressure, and whether the design holds up beyond the happy path.
+
+The pipeline shape is unchanged: 3 passes, non-blocking, prosecution-only (`pipeline-stages: [prosecution]`, `atomic: n/a`). Only the focus each pass is asked to apply changed.
+
+### Convergence Filter
+
+Per `skills/design-exploration/SKILL.md` § Convergence Filter, after the 3 finders return and are merged into a pre-filter union, Solution-Designer dispatches the Fable-tier `agents/code-review-response.md` shell **once** — a single `Agent`-tool call carrying a two-part prompt, not two separate dispatches:
+
+- **Part (a) — cold-read**: the shell first cold-reads the design directly and records independent observations, before the prompt reveals the 3 finder ledgers.
+- **Part (b) — synthesis**: within the same dispatch, the shell opens the 3 finder ledgers, dedupes, ranks, and merges them against its own Part (a) observations, then emits a kept/filtered rulings block spanning the full pre-filter union — every finder finding plus every cold-read observation, each marked `kept` or `filtered` with rationale.
+
+The per-finding classification gate (`skills/solution-authoring/SKILL.md` § Applying the gate to adversarial-review dispositions) fires only on convergence-sustained (`kept`) findings; filtered findings stay visible in the rulings block and in the disposition summary's pre-filter accounting but do not enter the gate. Cold-read-originated findings are tagged `pass: 4` in the `finding_dispositions:` marker's origin-tracking fields. If the convergence dispatch returns a refusal, is malformed, or times out, it retries once on `fable`, then falls back to `opus` with a visible degraded-tier note; if that also fails, convergence halts rather than letting the classification gate see the raw unfiltered union.
+
+### Why Solution-Designer Methodology, Not an Adapter Stage
+
+The convergence filter is modeled as Solution-Designer Stage-3 methodology layered on top of prosecution, not as a fourth stage in the `design-challenge` adapter contract (`convergence-modeling`, owner-ruled). Folding it into the adapter would change `design-challenge`'s `[prosecution]`/`atomic: n/a` contract in `skills/adversarial-review/platforms/claude.md` — colliding with the atomic-adapter no-`AskUserQuestion`-after-prosecution-begins guard and with the judge stage's halt-strict degraded-recovery rule (adversarial judge dispatches do not get degraded-recovery; the convergence filter's retry-then-fallback-then-halt shape is deliberately its own methodology-level rule, not a reuse of that judge contract). Keeping the filter as Solution-Designer-owned methodology leaves the adapter untouched and keeps design-challenge's non-blocking, prosecution-only shape intact for every other caller.
+
+### Claude 5 Re-tier
+
+Alongside the convergence-filter methodology, #785 re-tiers two roles to Fable: the judge (`agents/code-review-response.md`) and the standard-panel generalist-B pass move to `model: fable`. Specialist prosecution passes — including spec-security (Pass 4 of the `standard` panel), which is durably pinned to `opus` and never mapped to `fable` regardless of future generalist or judge tier changes — stay on `opus`. See `Documents/Design/agent-body-architecture.md` § Per-agent model + reasoning routing for the full per-shell routing table and the monotonic-ladder rule governing judge-tier selection.

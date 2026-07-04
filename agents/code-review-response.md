@@ -3,7 +3,7 @@ name: code-review-response
 description: Review judgment shell for Claude Code. Use when you need a single-shot ruling on prosecution and defense ledgers.
 tools: Read, Glob, Grep, Bash, Agent, WebFetch, AskUserQuestion
 user-invocable: true
-model: opus
+model: fable
 effort: xhigh
 ---
 
@@ -20,6 +20,8 @@ The full tool-agnostic methodology for this role lives at `agents/Code-Review-Re
 After loading, follow everything under its `## Core Principles`, `## Overview`, `## Judgment Ownership`, `## Response Location Policy`, `## Enforcement Gates`, `## 🚨 CRITICAL: Review Intake Modes`, `## GitHub Comment Safety (No @-Mentions)`, `## Judgment Stance`, `## Operating Modes`, `## 🚨 CRITICAL: Structural Deferral Guidelines (→ G3)`, `## 🚨 CRITICAL: Line-Limit Lint Failures Require Real Refactors`, `## 🚨 CRITICAL: Acceptance Criteria Cross-Check (Before ANY Deferral or Rejection)`, `## 🚨 CRITICAL: Significant Improvements Auto-Track (→ G3)`, `## 🚨 CRITICAL: Judgment-Only Mode`, and `## Core Responsibilities` sections.
 
 The Copilot-specific tool names in that file map to Claude Code equivalents below.
+
+When dispatched by Solution-Designer for design-challenge convergence, the operating contract is defined in `skills/design-exploration/SKILL.md` § Convergence Filter — this is a different task shape than standard/lite/judge-only judgment (a single dispatch carrying a two-part cold-read-then-synthesis prompt); follow that skill's instructions for that dispatch shape.
 
 ## Claude Code tool mapping
 
