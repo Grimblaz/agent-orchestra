@@ -130,7 +130,7 @@ Issue #169 extended hub mode with three capabilities: a scope classification gat
 |----|----------|---------|
 | D10 | Scope Classification Gate | Before any upstream agent is called in hub mode, Code-Conductor classifies issue scope using a 5-criterion rubric. ALL five criteria must hold for abbreviated tier: (1) AC clearly defined or self-evident from issue title, (2) ≤3 files in a single domain, (3) no new user-facing behavior, (4) no cross-cutting architectural changes, (5) no CE Gate scenarios needed. Default is full pipeline when any criterion is absent or the issue is ambiguous. The user always sees both tiers as options with Code-Conductor's recommendation and may override. After Issue-Planner returns, if `escalation_recommended: true` is present in plan YAML frontmatter, Code-Conductor surfaces the `escalation_reason` via `#tool:vscode/askQuestions` and offers re-entry at the appropriate upstream phase before D9. |
 | D11 | Multi-Issue Bundling Protocol | When hub mode is invoked with multiple issues (e.g., `@code-conductor issues #163 #164 #165`), Code-Conductor applies per-issue smart resume checks first, classifies each issue independently using the Scope Classification Gate rubric, and adopts the highest-scope tier for the bundle (if any issue requires full pipeline, the bundle runs full pipeline). All issue classifications are presented in a single `#tool:vscode/askQuestions` call. Shared upstream phases execute once for the bundle. Issue-Planner creates a single bundled plan named `plan-bundle-{primary}-{secondary1}-{secondaryN}.md` in session memory. At bundle D9, Code-Conductor responds to Stop / Pause by persisting durable GitHub issue comments with individual `<!-- plan-issue-{ID} -->` markers for the bundled plan and `<!-- design-issue-{ID} -->` markers for per-issue design snapshots when the latest handoff is missing or changed. Continue uses session memory only for the bundle. |
-| D12 | D9 Model-Switch Checkpoint Refinement | D9 now fires for hub mode at any pipeline tier (abbreviated or full), not only full pipeline. Suppression semantics are tightened: D9 is suppressed only when the resume path already has all required prior-session upstream markers and any required durable handoff comments for the selected tier. In-session scope-based skips do not satisfy the prior-session suppression condition. For multi-issue bundles, every bundled issue must satisfy those marker and handoff-comment requirements before D9 may be suppressed. |
+| D12 | D9 Model-Switch Checkpoint Refinement | D9 now fires for hub mode at any pipeline tier (abbreviated or full), not only full pipeline. Suppression semantics are tightened: D9 is suppressed only when the resume path already has all required prior-session upstream markers and any required durable handoff comments for the selected tier. In-session scope-based skips do not satisfy the prior-session suppression condition. For multi-issue bundles, every bundled issue must satisfy those marker and handoff-comment requirements before D9 may be suppressed. Superseded by D30/#483 — model-switch rationale obsolete; pause/handoff roles remain. |
 
 ### Rationale
 
@@ -138,7 +138,7 @@ D10: Hub mode previously ran EO → SD → IP unconditionally for every issue, c
 
 D11: Multi-issue bundling reduces context-switching overhead when a batch of related issues is tackled in a single session. Highest-scope-wins for bundle tier is a conservative safety choice: it prevents abbreviated-tier phases from silently missing cross-issue design considerations. A single `#tool:vscode/askQuestions` for all classifications keeps the interaction proportionate — one prompt at session start, not one per issue. Keeping the bundle plan in session memory until an explicit D9 Stop / Pause preserves the fast path, while per-issue marker comments on the Stop path keep each issue independently resumable in subsequent sessions.
 
-D12: The original D9 wording implied full-pipeline-only, which meant abbreviated-tier hub sessions proceeded from plan approval to implementation without a model-switch opportunity. Firing D9 at any tier restores the user's ability to switch models before the expensive implementation phase regardless of how upstream was classified. The tightened suppression semantics close a subtle edge case: if only some issues in a bundle had prior-session markers or durable handoff comments, D9 could be suppressed even though the session was effectively a new partial-bundle requiring user awareness before implementation.
+D12: The original D9 wording implied full-pipeline-only, which meant abbreviated-tier hub sessions proceeded from plan approval to implementation without a model-switch opportunity. Firing D9 at any tier restores the user's ability to switch models before the expensive implementation phase regardless of how upstream was classified. The tightened suppression semantics close a subtle edge case: if only some issues in a bundle had prior-session markers or durable handoff comments, D9 could be suppressed even though the session was effectively a new partial-bundle requiring user awareness before implementation. (Superseded by D30/#483: model routing is automatic since #477, so the model-switch rationale above is historical — the checkpoint's pause and durable-handoff roles remain.)
 
 ### Files Changed (Issue #169)
 
@@ -252,3 +252,33 @@ D29: The original single stopping rule prevented false completion claims but not
 |------|--------|
 | `.github/agents/Code-Conductor.agent.md` | Added Continuation Contract inside `<critical_rules>` with 3-step escalation ladder and 5 key continuation checkpoints; expanded `<stopping_rules>` from 1 rule to 3 hard stop rules covering silent abandonment |
 | `.github/scripts/Tests/continuation-contract.Tests.ps1` | Added contract test validating continuation contract language exists inside `<critical_rules>`, key checkpoint coverage, and expanded stopping rules |
+
+---
+
+## Issue #483 Additions: D9 Checkpoint Cosmetic Dewording
+
+### Summary
+
+Issue #483 dewords the D9 checkpoint's remaining "model switch" language. Per-agent model routing (#477) made model selection automatic, so D9's original model-switch decision no longer exists; only its pause and durable-handoff roles remain live. This is a cosmetic prompt-wording correction, not a checkpoint removal.
+
+### Design Decisions
+
+| ID | Decision | Details |
+|----|----------|---------|
+| D30 | D9 Checkpoint Cosmetic Dewording | The D9 prompt no longer references "switching models." #477 made per-agent model routing automatic, obsoleting D9's original model-switch purpose. The checkpoint's pause, durable-handoff, and bundle-fan-out roles are unchanged. The heading name "D9" is retained for contract stability (pinned by the #557 coverage fixture). |
+
+### Rationale
+
+D30: Once #477 made model selection automatic, the D9 prompt's "confirm a model switch" wording described a decision that no longer occurs, misleading readers about what the checkpoint does. The fix is wording-only: Continue/Pause semantics, durable handoff persistence, and bundle fan-out behavior are all preserved unchanged. The "D9" name stays because #557's coverage fixture pins that heading for contract stability.
+
+### Files Changed (Issue #483)
+
+| File | Change |
+|------|--------|
+| `agents/Code-Conductor.agent.md` | Reworded D9 checkpoint prompt (dropped model-switch wording); added pinned historical notes under both headings |
+| `.github/scripts/Tests/handoff-persistence-contract.Tests.ps1` | Added 2 additive negative assertions guarding against the removed prompt phrases |
+| `HOW-IT-WORKS.md` | Corrected the D9 paragraph (was factually wrong about firing condition; now describes the pause/handoff mechanism) |
+| `skills/tracking-format/SKILL.md` | Dropped dead ", or switch models" from the durability-path enumeration |
+| `Documents/Design/hub-mode-ux.md` | This section (D30 decision row + D12 superseded annotation) |
+| `CHANGELOG.md` | Amended the #786 entry's #483 characterization; added the 3.2.1 release entry |
+| `plugin.json`, `.claude-plugin/plugin.json`, `.claude-plugin/marketplace.json`, `.github/plugin/marketplace.json`, `README.md` | Version bump 3.2.0 → 3.2.1 |

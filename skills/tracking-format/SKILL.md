@@ -175,7 +175,7 @@ Plans saved to session memory (`/memories/session/plan-issue-{ID}.md`) do not ne
 
 This section is retired as a plan/design/session-memory handoff source of truth and delegated to the canonical contract at `skills/session-memory-contract/SKILL.md` (`SMC-01`, `SMC-03`, `SMC-08`, `SMC-13`); that delegation retires the old cloud handoff table here. Tracking-format only governs `.copilot-tracking/` file frontmatter and local tracking-file structure.
 
-Code-Conductor/D9 owns durable handoff persistence. Continue implementation stays same-session and session-memory-only, with no redundant GitHub issue comments. Stop, Pause, resume later, or switch models paths persist or append durable GitHub issue comments for `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` when those artifacts are needed.
+Code-Conductor/D9 owns durable handoff persistence. Continue implementation stays same-session and session-memory-only, with no redundant GitHub issue comments. Stop, Pause, or resume later paths persist or append durable GitHub issue comments for `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` when those artifacts are needed.
 
 `.copilot-tracking/` files are local scaffolding for research notes, prompt output, archived tracking, and calibration artifacts in the same worktree. They are not suitable for durable cross-agent or cloud-agent handoffs where a new branch or fresh checkout is created. Use the session-memory contract for plan/design/session-memory handoff rules, and use GitHub issues, GitHub comments, or committed docs when a handoff must be durable.
 

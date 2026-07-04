@@ -131,7 +131,7 @@ Code-Conductor is the hub-mode orchestration agent that reads the persisted plan
 
 **Slice dispatch.** For each slice in the plan, Code-Conductor resolves the adapter path, selects the appropriate executor (Senior Engineer by default, or a specialist agent when the plan specifies one), and dispatches the work. The executor runs, validates, and returns evidence; Code-Conductor then advances to the next slice.
 
-**D9 model-switch checkpoint.** When a slice requires a capability beyond the current model's strengths, Code-Conductor may pause at the D9 checkpoint to confirm a model switch before proceeding.
+**D9 checkpoint** *(historically the model-switch checkpoint)*. After plan approval and before implementation begins, hub mode offers one structured pause: Continue (stay in this session; session memory remains the source of truth) or Pause (persist durable handoff comments so work can resume in a later session). Model selection is automatic via per-agent routing (#477), so this checkpoint no longer involves a model decision.
 
 **PR creation.** After all slices are complete and CE Gate passes, Code-Conductor creates or updates the pull request with the pipeline-metrics block (a machine-parseable summary of which frame ports were covered and by whom).
 

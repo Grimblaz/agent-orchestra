@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.1] — 2026-07-04
+
+### Changed
+
+- D9 Model-Switch Checkpoint cosmetic dewording: removed obsolete model-switch prompt wording from Code-Conductor's hub-mode checkpoint (model routing is automatic since #477); D9's name, pause, durable-handoff, and bundle-fan-out roles are unchanged (#483).
+
 ## [3.3.0] — 2026-07-04
 
 ### Added
@@ -13,7 +19,7 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ### Added
 
-- Scope Classification Gate announces the pipeline tier (with a pre-dispatch standing override) when the rubric outcome is determined by evidence-backed criteria, and asks only when the outcome is genuinely indeterminate (#786). D9 Model-Switch Checkpoint removal is tracked separately in #483.
+- Scope Classification Gate announces the pipeline tier (with a pre-dispatch standing override) when the rubric outcome is determined by evidence-backed criteria, and asks only when the outcome is genuinely indeterminate (#786). D9 Model-Switch Checkpoint cosmetic dewording (prompt wording only, not removal) is tracked separately in #483.
 
 ## [3.1.0] — 2026-07-03
 

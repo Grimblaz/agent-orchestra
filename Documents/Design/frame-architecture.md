@@ -99,7 +99,7 @@ The frame spine is a plan-routing and context-sharing block, not a replacement f
 6. **Exploratory coverage escape hatch**: `coverage: exploratory — {reason}` is allowed only when the reason is present. That reason is surfaced as a ledger row so reviewers can challenge incomplete routing coverage.
 7. **Plan-size threshold D8**: an implementation step means a step whose Execution Mode is `serial` or `parallel` and whose RC contains a GREEN code or test action. Adversarial review, CE Gate, and post-retrospective steps do not count toward the threshold.
 8. **Metrics version bump policy**: adding `spine-stale-fallback-count`, `dispatch-fallback-events[]`, and `dispatch-cost-samples[]` does not bump `metrics_version` because they are additive optional v4 fields. Likewise, the optional sixth key `provider:` on `dispatch-cost-samples[]` rows is additive and does not bump `metrics_version`; parsers accept 5-key and 6-key rows. Known values for `provider`: `claude` | `copilot`; additional values tolerated additively per #467 D12. See `frame/pipeline-metrics-v4-schema.md` for the authoritative `dispatch-cost-samples[]` row contract.
-9. **D9 normalized-diff `generated_at` elision**: for D9 model-switch diff comparison, hash-elide the `generated_at:` line inside frame-spine blocks so identical content does not append duplicate durable handoff comments.
+9. **D9 normalized-diff `generated_at` elision**: for D9 checkpoint diff comparison, hash-elide the `generated_at:` line inside frame-spine blocks so identical content does not append duplicate durable handoff comments.
 
 Example v2 canonical shape:
 
