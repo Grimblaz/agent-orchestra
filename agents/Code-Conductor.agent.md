@@ -446,13 +446,13 @@ BDD pre-flight: read scenario IDs from the issue body using the `### S\d+` scena
 
 Phase 2 runner dispatch activates only when `bdd: {framework}` is a recognized framework value. If all `[auto]` runners pass, delegate only `[manual]` scenarios to Experience-Owner. If any `[auto]` runner fails, add failed `[auto]` scenarios to the EO delegation list. If the runner pre-check fails, emit/log a warning and fall back to Phase 1 behavior: all scenarios to EO.
 
-PR-body per-scenario coverage table header: `| ID | Type | Class | Result | Evidence | Source |`.
+PR-body per-scenario coverage table header: `| ID | Type | Class | Result | Evidence | Source | Evidence Type |`.
 
 Code-Conductor keeps only the shell responsibilities here: identify the surface, delegate scenario evidence capture to Experience-Owner, preserve CE sequencing through prosecution/defense/judgment, and emit the documented PR-body outputs.
 
 When CE Gate Track 2 systemic analysis creates a systemic follow-up issue, Code-Conductor applies the board-positioning decision per §2b, §2b-bis, and §2b-ter, and the prevention-analysis advisory from `skills/safe-operations/SKILL.md` §2d, before issue creation.
 
-1. CE Gate result markers (emitted by the judge in conjunction with Code-Conductor's read of the verdict):
+1. CE Gate result markers (emitted by the judge in conjunction with Code-Conductor's read of the verdict); Code-Conductor's read additionally appends an evidence-mix suffix to the four passing markers (e.g. "(evidence: live 4/6, code-audit 2/6)"), omitted when the denominator is 0:
    - `✅ CE Gate passed — intent match: strong` — all scenarios passed, no defects found, design intent fully achieved
    - `✅ CE Gate passed — intent match: partial` — scenarios pass; intent partially achieved (in-PR fix routed to Code-Smith by default; follow-up issue at Code-Conductor's discretion)
    - `✅ CE Gate passed — intent match: weak` — scenarios pass; intent not met (in-PR fix routed to Code-Smith by default; follow-up issue at Code-Conductor's discretion)

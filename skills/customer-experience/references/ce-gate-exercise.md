@@ -7,7 +7,7 @@ Extracted downstream evidence-capture procedure and the per-surface terminal-ste
 ## Downstream Evidence Capture At A Glance
 
 1. Load the delegated scenarios, named decisions or design-intent statements, surface notes, and environment prerequisites.
-2. Exercise each delegated scenario with the right surface tool and record `PASS`, `FAIL`, or `INCONCLUSIVE` with evidence. Keep scenario IDs when BDD is enabled.
+2. Exercise each delegated scenario with the right surface tool and record `PASS`, `FAIL`, or `INCONCLUSIVE` with evidence. Keep scenario IDs when BDD is enabled. Each recorded result also carries an `evidence_type` (`live-interaction` | `code-audit`) reflecting how the evidence was obtained — see `skills/bdd-scenarios/SKILL.md`'s unified evidence record schema for the authoritative field definition.
 3. Verify named decisions as `VERIFIED`, `NOT VERIFIED`, or `VIOLATED`. For orchestration-phase decisions, evaluators read the Markdown mirror inside the `engagement-record-orchestration-{ID}` comment payload (staged behavior: the `orchestration` phase emitter shipped in #577. CE Gate dual-surface reads of orchestration-phase engagement records are gated on #571. Until #571 merges, CE Gate evaluators see orchestration markers in the issue comment thread but do not actively widen their reads to consume them). For experience, design, and plan phases, continue reading the issue-body `## Named Decisions` section.
 4. Do exploratory validation after scripted checks and treat it as discovery, not prosecution.
 5. Return an evidence-only summary with scenario results, named-decision verification, exploratory observations, and evidence references.

@@ -166,6 +166,8 @@ Load `skills/adversarial-review/SKILL.md` for the reusable CE evidence-handling 
 - `source: runner+eo`, `result: conflict` → classify as **Concern** (not Issue) — include both runner record and EO record in the finding; request clarification in finding text (do not treat conflict as definitive failure)
 - `source: eo` (Phase 1 behavior or runner fallback) → existing per-scenario evaluation unchanged
 
+`evidence_type` (informational this slice, not yet a prosecution input — see the declaration-only scope note in skills/bdd-scenarios/SKILL.md) may appear alongside `source` in the unified evidence record; Code-Critic's Phase 2 evaluation continues to key off `source`, not `evidence_type`, until a design-phase follow-up adds `evidence_type`-aware comparison.
+
 **Output**: Standard prosecution findings ledger with severity/points + CE intent match level (`pass: N` omitted — CE prosecution is not part of the 3-pass structure). This ledger is the input to the defense pass.
 
 ## Finding Categories
