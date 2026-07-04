@@ -58,6 +58,12 @@ Final fallback — manual screenshot paste:
 
 ---
 
+## CI-Untestable Waiver: Post-Merge Grant Liveness (issue #791)
+
+Runtime browser-grant liveness through an `Agent`-tool `subagent_type` dispatch cannot be verified pre-merge: a dispatched subagent's tool grant resolves from the **installed plugin cache**, not the working tree, so any smoke check run before the carrying version is installed will observe the old grant regardless of what the source files say. Issue #791 bumps the carrying version to 3.3.0; the dispatch-based smoke check performed during that PR's CE Gate correctly found the old (pre-3.3.0) grant because the installed cache was still pinned below that version. This is a documented, expected CI-untestable condition rather than a defect in the shipped mechanism, and it resolves naturally once the plugin cache is updated to >= 3.3.0.
+
+---
+
 ## Files Changed
 
 | File | Change |
