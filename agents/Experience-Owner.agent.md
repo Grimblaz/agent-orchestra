@@ -163,6 +163,28 @@ Load `skills/customer-experience/SKILL.md` for the downstream workflow. Exercise
 
 - Emit `⚠️ CE Gate evidence capture blocked — {reason}` and return control to Code-Conductor when dev environment is unavailable or browser tools fail.
 
+### Per-Scenario Degradation Signal
+
+Keep the existing full-block bullet (`⚠️ CE Gate evidence capture blocked — {reason}`) as-is — it still applies when the ENTIRE CE Gate delegation cannot proceed. When only SOME delegated scenarios cannot be exercised live (not the whole gate), emit a distinct **per-scenario** literal instead: `⚠️ evidence downgraded — S{N}: {reason}`. This literal is lexically and structurally distinct from the full-block literal and Code-Conductor's whole-gate skip detection must never mistake one for the other (owner-sustained finding M3/judge ruling — the full-block skip fires only on the exact full-block literal).
+
+Typed `{reason}` enum for the per-scenario literal: `tool-absent | server-unresolved | permission-unclear | surface-non-interactive | env-unreachable`. Note: `permission-unclear` intentionally folds together "tool call was denied by a silent permission/classifier block" and "tool is genuinely absent" into one honest literal, because Claude Code's contextual risk classifier can silently deny a tool call in a way indistinguishable from the tool being absent (see CLAUDE.md § Auto-mode boundary, known limitation L2) — do not attempt to guess which sub-case applies; use `permission-unclear` whenever a browser MCP tool call fails without an unambiguous "not found" signal.
+
+### Pre-Labeling Resolution Protocol
+
+Before labeling any delegated scenario `code-audit` on a surface where live interaction was expected, follow this resolution order: (1) resolve any deferred MCP browser tools via `ToolSearch` (MCP tools may be deferred at dispatch time and require an explicit load call before they appear usable); (2) probe whether a live session is actually reachable — e.g. call `preview_list` (or the equivalent live-session-discovery call for whichever browser MCP surface is granted) to check for an existing, reachable session; (3) only after both (1) and (2) fail to produce a usable live surface, label the scenario `code-audit` with the applicable typed reason from the enum above. Do not conclude "tool absent" before step (1) resolves — a tool that is merely deferred and unresolved is not the same as a tool that does not exist, and mislabeling one as the other defeats the honesty guarantee this whole mechanism exists to provide.
+
+### Shared Session Lifecycle
+
+When continuing a browser session established by the parent conductor (by-name MCP server references share the parent's connection and server-side state): reuse the existing session via the liveness probe above rather than starting a new one. Never tear down a session you did not start yourself. If you established your own session (the parent had none), report the session handle back to Code-Conductor in your returned summary rather than closing it mid-gate — the parent conductor owns session teardown.
+
+### Worktree Precondition
+
+Shared-session reuse assumes the dispatched shell operates against the same working-tree checkout as the parent conductor (matching CWD). If dispatched into a different worktree (e.g. a sibling worktree), do not assume the parent's live session is reachable — either establish your own session against your own CWD's dev server, or, if that is not possible, label the affected scenarios `code-audit` with reason `env-unreachable`.
+
+### Evidence Type in Returned Summary
+
+The structured evidence summary Experience-Owner returns to Code-Conductor (per the Downstream Phase: CE Gate Evidence Capture methodology above) MUST include a per-scenario `evidence_type` value (`live-interaction` | `code-audit`) alongside each scenario's PASS/FAIL/INCONCLUSIVE result — this is what ultimately flows into the unified evidence record (see `skills/bdd-scenarios/SKILL.md`'s schema) and the maintainer-facing PR-body coverage table. This is declaration-only this slice (owner decision M3, issue #791): the label is Experience-Owner's own honest self-report; no artifact-binding or adversarial verification of the label is required by this methodology yet (a design-phase follow-up may add that later).
+
 ## Boundaries
 
 **DO**: frame customer problems, draft scenarios, capture CE evidence, create GitHub issues (safe-ops §2), exploratory validation.
