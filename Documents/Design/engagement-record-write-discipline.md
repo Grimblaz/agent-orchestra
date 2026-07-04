@@ -28,7 +28,7 @@ Additionally, slug formats were loose, allowing arbitrary characters that broke 
 
 ## Why Option A Won
 
-Upstream agents operate via natural-language reasoning and markdown editing. Hardcoding the **Named Decisions write-discipline** block directly inside the agent system instructions (`.agent.md`) forces the LLM to follow the precise 3-comment burst ordering, size limits, and block-scalar rules. 
+Upstream agents operate via natural-language reasoning and markdown editing. Hardcoding the **Named Decisions write-discipline** block directly inside the agent system instructions (`.agent.md`) forces the LLM to follow the precise 3-comment burst ordering, size limits, and block-scalar rules.
 
 Centralized scripts (Option B) are excellent for parsing but fail to govern the LLM's raw cognitive formatting. Downstream inference (Option C) would introduce massive synchronization hazards, as Code-Conductor cannot reliably reconstruct the reasoning of a prior phase without the original agent's direct emission.
 
@@ -37,6 +37,7 @@ Centralized scripts (Option B) are excellent for parsing but fail to govern the 
 ### D1 - High-Integrity Dual Representation (Markdown Mirror & YAML Block)
 
 Every named decision is written in two places during completion:
+
 1. A human-readable Markdown section (`## Named Decisions` or within plan comments) enclosed in `<!-- named-decisions:begin -->` ... `<!-- named-decisions:end -->` sentinels.
 2. A machine-readable YAML engagement-record comment (`<!-- engagement-record-{phase}-{ID} -->`) containing exact duplicates of the decision fields.
 
@@ -154,6 +155,18 @@ The orchestration-phase guard at lines 210–212 is a soft reject by design — 
 **Capture-session literal**: Code-Conductor locks `capture_session: "normal-orchestration-v3"`. The version suffix mirrors the schema bump so the byte-equivalence diff for capture-session literals across agent bodies (Experience-Owner `normal-experience-v2`, Solution-Designer `normal-design-v2`, Issue-Planner `normal-plan-v2`, Code-Conductor `normal-orchestration-v3`) stays self-documenting.
 
 **Comment-mirror policy deviation**: Unlike upstream phases (Experience-Owner, Solution-Designer, Issue-Planner) that write the Markdown mirror to the issue body or plan comment, Code-Conductor does not edit the issue body. The Markdown mirror is co-located directly inside the comment carrying the `<!-- engagement-record-orchestration-{ID} -->` payload. This minimizes issue-body churn during orchestration dispatches and keeps each orchestration record self-contained as a single durable comment. To support this, the CE Gate evaluator scope is widened to a dual-surface read: issue body `## Named Decisions` H2 for upstream phases, comment-mirror inside `engagement-record-orchestration-{ID}` for orchestration. The widened evaluator behavior becomes live with #578; the writer-side mirror co-location ships in #577.
+
+### D17 — Announce-on-Determined-Outcome Extends `same-decision-resume` to Routine Decisions (#786)
+
+Issue #786 extends the Scope Classification Gate (Code-Conductor, `orchestration` phase) to *announce* the pipeline tier — naming the deciding criteria — instead of asking via `AskUserQuestion`/`#tool:vscode/askQuestions` whenever the rubric outcome is determined by evidence-backed criteria; the question still fires when the outcome is genuinely indeterminate. This decision documents three consequences for the write-discipline contract owned by this file, extending the mechanism beyond this doc's stated upstream-phase scope (`/experience`, `/design`, `/plan`) to `orchestration` — the underlying `same-decision-resume`/L0-token contract is shared infrastructure, not phase-specific, so the extension is a natural continuation of D16 rather than a new mechanism.
+
+**Routine decisions now resume-suppress.** Prior wording of `same-decision-resume` (D5, `skills/solution-authoring/SKILL.md`) only named `load-bearing` decisions as eligible for resume-suppression. The announce path persists a **routine** `conductor-scope-classification` row (tier in `engineer_choice`, rubric evidence in `audit_rationale`) — see `agents/Code-Conductor.agent.md` § Scope Classification Gate. On a later phase re-entry, this routine row must suppress the gate exactly like a load-bearing one, or every resume would silently re-announce (harmless but noisy) instead of reusing the cached tier. `skills/solution-authoring/SKILL.md`'s `same-decision-resume` rule now reads prior decisions "load-bearing or routine" for this reason.
+
+**`window_position: pre-ask` covers the announce firing point too.** The L0 gate-decision token's `window_position` enum was not extended — announce reuses `pre-ask` rather than adding a new value — because `pre-ask` names the classification gate's pre-dispatch firing *position* in the pipeline, not a literal claim that a question was asked. The announce path emits `{outcome: gate-fails, classification: routine, window_position: pre-ask}` at that same position with no question fired. `skills/solution-authoring/schemas/gate-decision-token.schema.json`'s `window_position` and `classification` field descriptions were both updated to state this positional (not literal) reading explicitly, and to document `gate-fails` + `routine` as a deliberate paired value for this path.
+
+**Superseding override markers are exempt from resume suppression.** When the maintainer honors the pre-dispatch standing override (a one-word `lite`/`full` reply before dispatch), Code-Conductor posts a NEW load-bearing `<!-- engagement-record-orchestration-{ID} -->` comment carrying the overridden tier. This marker must NOT be suppressed by the "do not emit a new marker on same-decision-resume" clause — if it were, a later resume would keep reverting to the originally-announced tier and the override would be invisible under latest-comment-wins. `agents/Code-Conductor.agent.md` § Scope Classification Gate names this the **Superseding override marker** and states the exemption explicitly; it is the same shape as D7's re-audit exception (an amended classification gets a fresh marker) applied to the override case instead of the re-audit case.
+
+Implementing artifacts: `agents/Code-Conductor.agent.md` § Scope Classification Gate (announce/ask branching, Superseding override marker); `skills/solution-authoring/SKILL.md` § `same-decision-resume` rule and § Firing-position rule (`window_position` bullet). See issue #786.
 
 ## Coordination History
 

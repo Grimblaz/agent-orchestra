@@ -134,6 +134,8 @@ Methodology checkpoints fire unconditionally per D3. The user's only in-band lev
 - `upstream-onboarding`: selecting an alternative option in the structured question
 - `plan-authoring`: the documented `Reject` or equivalent plan-approval option
 
+**The gate vs. the question (#786):** for Code-Conductor's `scope-classification` touchpoint, the *gate* — rubric evaluation plus the L0 gate-decision token — fires unconditionally on every run. The *question* (the `AskUserQuestion` call) is conditional: it fires only when the scope-classification outcome is genuinely indeterminate (every evidenced criterion holds so far, and at least one criterion still lacks an evidence-backed verdict that could flip the tier). When the outcome is determined by evidence-backed criteria, the gate announces the tier — naming the deciding criteria and carrying a standing pre-dispatch override — and records a lawful `{outcome: gate-fails, classification: routine}` token instead of asking. A `gate-fails` token is a documented, non-silent skip of the *question*, not a skip of the *gate*: the evaluation and token emission still happened. Pacing directives still cannot suppress a live (indeterminate-outcome) question — non-overridability governs the question whenever it actually fires.
+
 See: `skills/solution-authoring/SKILL.md` § Rule: Classification gate (the three-leg load-bearing test that defines an engagement-gate methodology checkpoint); `skills/solution-authoring/SKILL.md` § Rule: Non-overridability; `skills/upstream-onboarding/SKILL.md` § Rule: Non-overridability; `skills/plan-authoring/SKILL.md` § Rule: Non-overridability. Also see: #575 and #576 (engagement-record-{phase}-{ID} marker contract, active for experience/design/plan/orchestration phases) for the Segment-A maintainer-evidence path.
 
 <!-- engagement-gate-non-overridability:end -->
@@ -151,7 +153,6 @@ This section applies to Claude Code. Copilot uses a different permission model a
 <!-- auto-mode-boundary:end -->
 
 **Known limitation (L2 — platform-side classifier behavior):** The live evidence in [issue #546](https://github.com/Grimblaz/agent-orchestra/issues/546) (comments [4414368049](https://github.com/Grimblaz/agent-orchestra/issues/546#issuecomment-4414368049) and [4414376114](https://github.com/Grimblaz/agent-orchestra/issues/546#issuecomment-4414376114)) shows that Claude Code's contextual risk classifier can silently deny a tool call even after explicit same-turn user authorization, bypassing D2. The workaround is the opt-in allowlist in [skills/session-startup/SKILL.md](skills/session-startup/SKILL.md) § Permission allowlist (recommended) — apply those entries before the deny fires by editing `.claude/settings.local.json` directly, not by asking the agent to make the edit in the same turn you authorize it. If the gap proves materially worse than this workaround, file an upstream Claude Code issue referencing this evidence.
-
 
 ## Where things live
 
