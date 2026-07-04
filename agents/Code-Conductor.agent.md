@@ -59,7 +59,9 @@ Questioning and pausing are controlled actions, not casual conversation.
 
 ### Model-Switch Checkpoint (Authorized Hub-Mode Pause)
 
-When Code-Conductor orchestrates **hub mode** (any pipeline tier — full or abbreviated), one additional authorized pause exists — the **D9 model-switch checkpoint**. This pause is explicitly authorized and does NOT violate the zero-tolerance rule for plain-text questions because it uses `#tool:vscode/askQuestions`.
+> *(Heading retained for contract stability: this checkpoint was named for its original model-switch purpose, which #477's per-agent model routing made automatic; per #483 the checkpoint now serves only the pause and durable-handoff roles. Do not rename this heading — it is pinned verbatim by the issue #557 coverage list enforced in `code-conductor-responsibility-map.Tests.ps1`.)*
+
+When Code-Conductor orchestrates **hub mode** (any pipeline tier — full or abbreviated), one additional authorized pause exists — the **D9 checkpoint**. This pause is explicitly authorized and does NOT violate the zero-tolerance rule for plain-text questions because it uses `#tool:vscode/askQuestions`.
 
 - **When it fires**: After plan approval, before implementation begins — ONLY when at least one upstream phase ran in this session, regardless of whether other phases were skipped by scope classification or prior-session completion. Does NOT fire when the user invokes `/implement` directly.
 - **Options to present**: "Continue implementation" (recommended) / "Pause here — I'll resume with `/implement`"
@@ -240,12 +242,14 @@ Before any editing delegation or file mutation in hub mode, run a pre-edit owner
 
 ### D9 Model-Switch Checkpoint (Hub Mode Only)
 
+> *(Heading retained for contract stability: this checkpoint was named for its original model-switch purpose, which #477's per-agent model routing made automatic; per #483 the checkpoint now serves only the pause and durable-handoff roles. Do not rename this heading — it is pinned verbatim by the issue #557 coverage list enforced in `code-conductor-responsibility-map.Tests.ps1`.)*
+
 After plan approval and before implementation begins, present this checkpoint — **ONLY** when Code-Conductor is in hub mode AND at least one upstream phase ran in this session, regardless of whether other phases were skipped by scope classification or prior-session completion:
 
 ```text
 Use `#tool:vscode/askQuestions`:
-- "Continue implementation" (recommended if staying on current model) — proceed to Code-Smith in this session using session memory only as the source of truth; create no new `<!-- plan-issue-{ID} -->` or `<!-- design-issue-{ID} -->` comments on this path
-- "Pause here — I'll resume with `/implement`" — before stopping, compare the current session-memory plan and current issue-body design snapshot against the latest matching `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` comments after normalizing away transport-only formatting drift (for example line-ending normalization and trailing newlines/whitespace); append new GitHub issue comments only when the matching marker is missing or the normalized content changed, then stop cleanly so the user can switch models and resume
+- "Continue implementation" (recommended) — proceed to Code-Smith in this session using session memory only as the source of truth; create no new `<!-- plan-issue-{ID} -->` or `<!-- design-issue-{ID} -->` comments on this path
+- "Pause here — I'll resume with `/implement`" — before stopping, compare the current session-memory plan and current issue-body design snapshot against the latest matching `<!-- plan-issue-{ID} -->` and `<!-- design-issue-{ID} -->` comments after normalizing away transport-only formatting drift (for example line-ending normalization and trailing newlines/whitespace); append new GitHub issue comments only when the matching marker is missing or the normalized content changed, then stop cleanly so the user can resume later
 ```
 
 > **Note**: D9 fires even if some upstream phases were completed in prior sessions — suppression requires ALL applicable tier-required phase markers to have been completed before this session. If Issue-Planner ran in this session, D9 must fire unless the user already confirmed continuation.
