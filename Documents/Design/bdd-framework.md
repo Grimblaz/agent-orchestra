@@ -192,7 +192,7 @@ Phase 2 requires **both** conditions:
 
 1. **Pre-check**: run version check command from mapping table; fail → warning + Phase 1 fallback (all scenarios delegated to EO)
 2. **Per-scenario dispatch**: run runner with `@S{N}` tag filter for each `[auto]` scenario
-3. **Evidence capture**: record 5-field unified evidence record per scenario (`scenario_id`, `source`, `result`, `detail`, `raw_exit_code`)
+3. **Evidence capture**: record 6-field unified evidence record per scenario (`scenario_id`, `source`, `result`, `detail`, `raw_exit_code`, `evidence_type`)
 4. **Conditional EO delegation**: all `[auto]` passed → EO receives `[manual]` only; any `[auto]` failed → add failed scenarios; pre-check failed → all scenarios
 5. **Evidence merge**: after EO delegation returns, merge EO evidence for all delegated scenarios; runner primary for `[auto]`; EO primary for `[manual]`; divergence → `source: runner+eo`, `result: conflict`
 
@@ -263,7 +263,7 @@ Gherkin conversion and framework runner integration:
 - Test-Writer generates a single `.feature` file per issue with `@S{N}` tags for each `[auto]` scenario
 - Code-Conductor CE Gate runner dispatch: pre-check → per-scenario dispatch → evidence capture → conditional EO delegation → evidence merge
 - Code-Critic runner evidence evaluation keyed on `source` field in unified evidence record
-- Unified 5-field evidence record schema flows runner output through the full CE Gate pipeline
+- Unified 6-field evidence record schema flows runner output through the full CE Gate pipeline
 - Conditional EO delegation: EO receives `[manual]` only when all `[auto]` runners passed; all scenarios when pre-check failed; mixed list when some `[auto]` runners failed
 - PR body coverage table extended with `Source` column (`Runner` / `EO`)
 

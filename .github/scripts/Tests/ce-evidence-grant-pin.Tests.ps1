@@ -132,8 +132,8 @@ Describe 'CE Gate evidence-labeling browser grant pin (issue #791)' {
 
             $foundCoOccurrence = $false
             foreach ($verbMatch in $verbMatches) {
-                $windowStart = [Math]::Max(0, $verbMatch.Index - 400)
-                $windowLength = [Math]::Min(800, $content.Length - $windowStart)
+                $windowStart = [Math]::Max(0, $verbMatch.Index - 350)
+                $windowLength = [Math]::Min(700, $content.Length - $windowStart)
                 $window = $content.Substring($windowStart, $windowLength)
                 if ($window -match $script:M4ConstraintPattern) {
                     $foundCoOccurrence = $true
