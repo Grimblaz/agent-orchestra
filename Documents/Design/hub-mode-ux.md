@@ -140,6 +140,8 @@ D11: Multi-issue bundling reduces context-switching overhead when a batch of rel
 
 D12: The original D9 wording implied full-pipeline-only, which meant abbreviated-tier hub sessions proceeded from plan approval to implementation without a model-switch opportunity. Firing D9 at any tier restores the user's ability to switch models before the expensive implementation phase regardless of how upstream was classified. The tightened suppression semantics close a subtle edge case: if only some issues in a bundle had prior-session markers or durable handoff comments, D9 could be suppressed even though the session was effectively a new partial-bundle requiring user awareness before implementation.
 
+(Model-switch rationale superseded by D30/#483: model routing is automatic since #477; the checkpoint's pause and durable-handoff roles remain.)
+
 ### Files Changed (Issue #169)
 
 | File | Change |
@@ -252,3 +254,21 @@ D29: The original single stopping rule prevented false completion claims but not
 |------|--------|
 | `.github/agents/Code-Conductor.agent.md` | Added Continuation Contract inside `<critical_rules>` with 3-step escalation ladder and 5 key continuation checkpoints; expanded `<stopping_rules>` from 1 rule to 3 hard stop rules covering silent abandonment |
 | `.github/scripts/Tests/continuation-contract.Tests.ps1` | Added contract test validating continuation contract language exists inside `<critical_rules>`, key checkpoint coverage, and expanded stopping rules |
+
+---
+
+## Issue #483 Design Decisions
+
+### Summary
+
+Issue #483 dewords the D9 checkpoint's remaining "model switch" language. Per-agent model routing (#477) made model selection automatic, so D9's original model-switch decision no longer exists; only its pause and durable-handoff roles remain live. This is a cosmetic prompt-wording correction, not a checkpoint removal.
+
+### Design Decisions
+
+| ID | Decision | Details |
+|----|----------|---------|
+| D30 | D9 Checkpoint Cosmetic Dewording | The D9 prompt no longer references "switching models." #477 made per-agent model routing automatic, obsoleting D9's original model-switch purpose. The checkpoint's pause, durable-handoff, and bundle-fan-out roles are unchanged. The heading name "D9" is retained for contract stability (pinned by the #557 coverage fixture). |
+
+### Rationale
+
+D30: Once #477 made model selection automatic, the D9 prompt's "confirm a model switch" wording described a decision that no longer occurs, misleading readers about what the checkpoint does. The fix is wording-only: Continue/Pause semantics, durable handoff persistence, and bundle fan-out behavior are all preserved unchanged. The "D9" name stays because #557's coverage fixture pins that heading for contract stability.
