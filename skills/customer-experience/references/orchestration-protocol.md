@@ -3,7 +3,7 @@
 This reference owns the CE Gate orchestration details extracted for the customer-experience composite. Code-Conductor still owns when the gate runs and the PR body that records the outcome.
 
 > **Survival**: `SMC-03` covers the design cache split: durable issue body or design marker first, platform-local cache optional. `SMC-08` covers durable phase-completion markers; CE evidence artifacts and PR-body entries are outputs, not a separate resume store.
-
+>
 > **Layer note**: the evidence_type label defined here is DATA the agent layer (Code-Conductor) renders; this skill-layer content does not itself own CE Gate orchestration control flow (see .github/architecture-rules.md § Layer Model).
 
 See [defect-response.md](defect-response.md) for remediation, graceful-degradation, and CE or proxy prosecution re-activation details.

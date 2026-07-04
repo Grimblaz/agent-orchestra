@@ -111,13 +111,13 @@ When reading scenario IDs from an issue body:
 
 BDD configuration is discovered by scanning these three files in priority order:
 
-```
+```text
 AGENTS.md  ›  CLAUDE.md  ›  copilot-instructions.md
 ```
 
 The detector reads each file in this order and takes the **first file that contains a valid `## BDD Framework` heading at column 0** (a real level-2 Markdown heading, not a backticked mention or mid-line reference). This file becomes the **winning file** for the current detection pass. A higher-precedence file that lacks the heading is **skipped**, not treated as a disabling signal — detection continues to the next candidate. If no candidate file contains the heading, the result is the silent natural-language fallback (see **Silent fallback** below).
 
-**Precedence is BDD-config discovery order only.** This ordering does NOT modify or contradict instruction-merge precedence as documented in `skills/ai-first-documentation/rubric.md` E7. These are independent axes: E7 governs which instruction layers apply to agents; this section governs where BDD configuration lives. Do not conflate them. Note the orderings appear inverted (E7: `copilot-instructions.md` highest; BDD discovery: `AGENTS.md` first) — this is not a conflict: E7 answers *which instruction layer applies*, while BDD discovery answers *which file holds the opt-in config*; the two axes answer different questions.
+**Precedence is BDD-config discovery order only.** This ordering does NOT modify or contradict instruction-merge precedence as documented in `skills/ai-first-documentation/rubric.md` E7. These are independent axes: E7 governs which instruction layers apply to agents; this section governs where BDD configuration lives. Do not conflate them. Note the orderings appear inverted (E7: `copilot-instructions.md` highest; BDD discovery: `AGENTS.md` first) — this is not a conflict: E7 answers _which instruction layer applies_, while BDD discovery answers _which file holds the opt-in config_; the two axes answer different questions.
 
 **Widened enablement surface (AC8)**: A bare `## BDD Framework` heading in `AGENTS.md` or `CLAUDE.md` enables Phase 1 BDD for any repo that uses those files as its primary instruction source. Repos that previously relied on `copilot-instructions.md` continue to work — the file is still the third candidate. Maintainers adding BDD to a repo via `AGENTS.md` or `CLAUDE.md` should be aware that a bare heading without a `bdd: {framework}` line activates Phase 1 only; Phase 2 requires both (see **Phase 2 Detection** below).
 
@@ -125,7 +125,7 @@ The detector reads each file in this order and takes the **first file that conta
 
 For each candidate file (in `AGENTS.md › CLAUDE.md › copilot-instructions.md` order), the detector checks:
 
-```
+```bash
 grep -nE '^## BDD Framework' <candidate-file>
 ```
 
