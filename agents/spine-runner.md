@@ -36,7 +36,7 @@ After loading, follow everything under its `## Core Principles`, `## Role`, `## 
 | `github/*` | `gh` CLI via `Bash` |
 | `vscode/memory` | Parent dispatch context first; otherwise latest-comment-wins GitHub issue markers |
 | `todo` | No Claude shell tool is declared here; track progress in the parent conductor context or compact local notes |
-| Shared parent browser capability (`browser/*`) | Prefer `WebFetch` for remote pages or published artifacts; when interactive browser evidence is required, use the repo's documented Claude-in-Chrome/computer-use fallback if available, otherwise surface the limitation instead of inventing coverage |
+| Shared parent browser capability (`browser/*`) | Prefer `WebFetch` for remote pages or published artifacts; when interactive browser evidence is required, use the repo's documented `mcp__claude-in-chrome__*` fallback if available (no computer-use grant applies to subagent dispatch), otherwise surface the limitation instead of inventing coverage |
 
 ## Invocation
 

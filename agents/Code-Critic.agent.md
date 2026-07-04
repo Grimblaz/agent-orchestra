@@ -155,7 +155,7 @@ Load `skills/adversarial-review/SKILL.md` for the reusable CE evidence-handling 
 - `partial` — one or more articulable deviations; core intent still met
 - `weak` — core intent not met; user likely confused or frustrated
 
-**Read-only clarification**: CE Mode is observational only — no source or configuration file modifications. Browser interaction (filling forms, clicking buttons, navigating) is permitted — it is testing, not mutation. If testing mutates app state, note this for subsequent scenarios.
+**Read-only clarification**: CE Mode is observational only — no source or configuration file modifications. Browser interaction is scoped to **read-only operations**: reading page/DOM/console/network content and taking screenshots are permitted; navigate, click, fill, form input, `preview_eval`, or any other action that mutates the shared parent browser session are NOT permitted for this role (owner decision M4, issue #791) — the reviewer half of an adversarial workflow must not be able to mutate the evidence it reviews. Where a platform's browser grant predates this rule and still exposes mutating actions, treat this clause as controlling: do not exercise mutating browser actions even if the tool surface allows it.
 
 **BDD per-scenario evaluation** (conditional — activate when BDD scenario IDs are present in the unified evidence record): When the evidence summary contains BDD scenario IDs (e.g., S1, S2, S3), evaluate each scenario individually across all three lenses (Functional, Intent, Error States). Include the scenario ID in finding references — for example: `S2: Intent — partial match` or `S3: Error States — not covered`. When BDD IDs are absent from the evidence, apply the three lenses holistically as usual.
 
