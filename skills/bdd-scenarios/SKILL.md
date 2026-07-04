@@ -111,13 +111,13 @@ When reading scenario IDs from an issue body:
 
 BDD configuration is discovered by scanning these three files in priority order:
 
-```
+```text
 AGENTS.md  ›  CLAUDE.md  ›  copilot-instructions.md
 ```
 
 The detector reads each file in this order and takes the **first file that contains a valid `## BDD Framework` heading at column 0** (a real level-2 Markdown heading, not a backticked mention or mid-line reference). This file becomes the **winning file** for the current detection pass. A higher-precedence file that lacks the heading is **skipped**, not treated as a disabling signal — detection continues to the next candidate. If no candidate file contains the heading, the result is the silent natural-language fallback (see **Silent fallback** below).
 
-**Precedence is BDD-config discovery order only.** This ordering does NOT modify or contradict instruction-merge precedence as documented in `skills/ai-first-documentation/rubric.md` E7. These are independent axes: E7 governs which instruction layers apply to agents; this section governs where BDD configuration lives. Do not conflate them. Note the orderings appear inverted (E7: `copilot-instructions.md` highest; BDD discovery: `AGENTS.md` first) — this is not a conflict: E7 answers *which instruction layer applies*, while BDD discovery answers *which file holds the opt-in config*; the two axes answer different questions.
+**Precedence is BDD-config discovery order only.** This ordering does NOT modify or contradict instruction-merge precedence as documented in `skills/ai-first-documentation/rubric.md` E7. These are independent axes: E7 governs which instruction layers apply to agents; this section governs where BDD configuration lives. Do not conflate them. Note the orderings appear inverted (E7: `copilot-instructions.md` highest; BDD discovery: `AGENTS.md` first) — this is not a conflict: E7 answers _which instruction layer applies_, while BDD discovery answers _which file holds the opt-in config_; the two axes answer different questions.
 
 **Widened enablement surface (AC8)**: A bare `## BDD Framework` heading in `AGENTS.md` or `CLAUDE.md` enables Phase 1 BDD for any repo that uses those files as its primary instruction source. Repos that previously relied on `copilot-instructions.md` continue to work — the file is still the third candidate. Maintainers adding BDD to a repo via `AGENTS.md` or `CLAUDE.md` should be aware that a bare heading without a `bdd: {framework}` line activates Phase 1 only; Phase 2 requires both (see **Phase 2 Detection** below).
 
@@ -125,7 +125,7 @@ The detector reads each file in this order and takes the **first file that conta
 
 For each candidate file (in `AGENTS.md › CLAUDE.md › copilot-instructions.md` order), the detector checks:
 
-```
+```bash
 grep -nE '^## BDD Framework' <candidate-file>
 ```
 
@@ -312,7 +312,7 @@ Code-Conductor dispatches the framework runner at CE Gate. Process:
 
 > **Note on pending stubs**: Step definition stubs are generated as pending (e.g., `return 'pending'` in cucumber.js). **The consumer must implement the step definitions before runner dispatch produces per-scenario evidence at CE Gate time.** On the first CE Gate run after stub generation (before stubs are implemented), all `[auto]` scenarios will fail the runner dispatch — this is expected behavior. Code-Conductor will treat all `[auto]` failures as delegation triggers and fall back to EO exercising all scenarios (same as Phase 1).
 
-**Unified evidence record schema** (5 fields):
+**Unified evidence record schema** (6 fields):
 
 | Field           | Type   | Description                           |
 | --------------- | ------ | ------------------------------------- |
@@ -321,11 +321,19 @@ Code-Conductor dispatches the framework runner at CE Gate. Process:
 | `result`        | enum   | `pass` \| `fail` \| `conflict`        |
 | `detail`        | string | Summary or first stderr line          |
 | `raw_exit_code` | int    | Runner exit code (runner source only) |
+| `evidence_type` | enum   | `live-interaction` \| `code-audit` \| `automated-runner` (conflict rows: compound of two values, see totality rules below) |
 
 **Evidence merge rules**:
 
 - Runner evidence is primary for `[auto]` scenarios; EO evidence is primary for `[manual]`.
 - Same-scenario conflict (runner-fail + EO-pass — EO exercises a failed `[auto]` scenario and yields a different result) → set `source: runner+eo`, `result: conflict` — passed to Code-Critic with both records. (Note: runner-pass + EO-fail is unreachable — runner-passed `[auto]` scenarios are excluded from EO delegation.)
+
+**`evidence_type` totality rules**:
+
+- `source: runner` rows: `evidence_type: automated-runner` (always — a runner dispatch is never a human/browser interaction).
+- `source: eo` rows: `evidence_type` is whatever Experience-Owner reports (`live-interaction` or `code-audit`) — EO's own methodology (see Experience-Owner shared body, out of scope for this file) determines which.
+- `source: runner+eo` (conflict) rows: `evidence_type: automated-runner+{eo-reported-type}` — the compound reflects EO's ACTUAL reported half (`automated-runner+live-interaction` or `automated-runner+code-audit`), not an assumed-always-live value; EO's Pre-Labeling Resolution Protocol (`Experience-Owner.agent.md`) permits EO to report `code-audit` for a delegated scenario, including a failed-runner one that produces a conflict row (compound literal — both provenances contributed and neither should be silently dropped).
+- Scenarios that never entered the evidence record at all (INCONCLUSIVE from a failed service pre-check, waived, not-covered, or aborted) have no `evidence_type` value — render `—` (em-dash) wherever these rows surface downstream (e.g. the PR-body coverage table), since there is no record to derive a type from.
 
 **Result format examples**:
 
@@ -340,3 +348,5 @@ Code-Critic evaluates runner evidence using the `source` field from the unified 
 - `source: runner`, `result: fail` → classify as **Concern** with error context from `detail` field
 - `source: runner+eo`, `result: conflict` → **Concern** (not Issue) — include both records in findings, request clarification from Experience-Owner
 - `source: eo` (Phase 1 behavior or runner fallback) → existing per-scenario evaluation unchanged
+
+`source`-based CE prosecution guidance above is unchanged by the addition of `evidence_type` — `evidence_type` is a labeling/reporting field for the maintainer-facing surface, not a new prosecution input this slice (declaration-only, owner decision M3 — enforcement/artifact-binding is a design-phase follow-up, not this slice).

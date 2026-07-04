@@ -137,7 +137,7 @@ When the selector line is `Review mode selector: "Use defense review perspective
 
 When the selector line is `Review mode selector: "Use CE review perspectives"`, activate CE Prosecution Mode.
 
-CE prosecution is **one pass only**. Experience-Owner exercises the CE scenarios first and captures evidence — Code-Conductor delegates CE Gate evidence capture to Experience-Owner, which returns a structured evidence summary. You then review that evidence adversarially and may run additional active tests.
+CE prosecution is **one pass only**. Experience-Owner exercises the CE scenarios first and captures evidence — Code-Conductor delegates CE Gate evidence capture to Experience-Owner, which returns a structured evidence summary. You then review that evidence adversarially and may run additional active tests within the read-only constraint below (on browser-interactive surfaces, this means read-only inspection, not mutating action).
 
 Load `skills/adversarial-review/SKILL.md` for the reusable CE evidence-handling method and output discipline. The mode-specific CE contract below stays in this agent because `.github/scripts/Tests/bdd-scenario-contract.Tests.ps1` matches this shared-body three-lens and BDD wording, and `agents/code-critic.md` enumerates the `## CE Prosecution Mode` heading for shell/body parity.
 
@@ -147,7 +147,7 @@ Load `skills/adversarial-review/SKILL.md` for the reusable CE evidence-handling 
 | ---------------- | ----------------------------------------------------------------- | ----------------------------------------------- |
 | **Functional**   | Do scenarios pass from the customer's perspective?                | Review Experience-Owner's captured evidence     |
 | **Intent**       | Does implementation match design intent? (strong/partial/weak)    | Compare evidence against the design-issue cache |
-| **Error states** | What happens with bad input, edge cases, or unexpected sequences? | Active adversarial testing via browser tools    |
+| **Error states** | What happens with bad input, edge cases, or unexpected sequences? | Active adversarial testing via browser tools; on interactive surfaces, exercise Error-states via read-only inspection instead — read console/network logs for error signals, inspect DOM state for error messaging, or request Experience-Owner capture an error-state screenshot; do not perform mutating actions to induce the error state yourself (see read-only clarification below) |
 
 **Intent match levels** (apply the existing rubric from Code-Conductor):
 
@@ -155,7 +155,7 @@ Load `skills/adversarial-review/SKILL.md` for the reusable CE evidence-handling 
 - `partial` — one or more articulable deviations; core intent still met
 - `weak` — core intent not met; user likely confused or frustrated
 
-**Read-only clarification**: CE Mode is observational only — no source or configuration file modifications. Browser interaction (filling forms, clicking buttons, navigating) is permitted — it is testing, not mutation. If testing mutates app state, note this for subsequent scenarios.
+**Read-only clarification**: CE Mode is observational only — no source or configuration file modifications. Browser interaction is scoped to **read-only operations**: reading page/DOM/console/network content and taking screenshots are permitted; navigate, click, fill, form input, `preview_eval`, or any other action that mutates the shared parent browser session are NOT permitted for this role (owner decision M4, issue #791) — the reviewer half of an adversarial workflow must not be able to mutate the evidence it reviews. Where a platform's browser grant predates this rule and still exposes mutating actions, treat this clause as controlling: do not exercise mutating browser actions even if the tool surface allows it.
 
 **BDD per-scenario evaluation** (conditional — activate when BDD scenario IDs are present in the unified evidence record): When the evidence summary contains BDD scenario IDs (e.g., S1, S2, S3), evaluate each scenario individually across all three lenses (Functional, Intent, Error States). Include the scenario ID in finding references — for example: `S2: Intent — partial match` or `S3: Error States — not covered`. When BDD IDs are absent from the evidence, apply the three lenses holistically as usual.
 
@@ -165,6 +165,8 @@ Load `skills/adversarial-review/SKILL.md` for the reusable CE evidence-handling 
 - `source: runner`, `result: fail` → classify as **Concern** — include the runner's `detail` field and `raw_exit_code` as evidence; do not automatically escalate to Issue without additional corroboration
 - `source: runner+eo`, `result: conflict` → classify as **Concern** (not Issue) — include both runner record and EO record in the finding; request clarification in finding text (do not treat conflict as definitive failure)
 - `source: eo` (Phase 1 behavior or runner fallback) → existing per-scenario evaluation unchanged
+
+`evidence_type` (informational this slice, not yet a prosecution input — see the declaration-only scope note in skills/bdd-scenarios/SKILL.md) may appear alongside `source` in the unified evidence record; Code-Critic's Phase 2 evaluation continues to key off `source`, not `evidence_type`, until a design-phase follow-up adds `evidence_type`-aware comparison.
 
 **Output**: Standard prosecution findings ledger with severity/points + CE intent match level (`pass: N` omitted — CE prosecution is not part of the 3-pass structure). This ledger is the input to the defense pass.
 

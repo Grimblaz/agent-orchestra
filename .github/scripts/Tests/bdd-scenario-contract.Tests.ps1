@@ -163,6 +163,8 @@ Describe 'bdd-scenarios SKILL.md Phase 2 contract' {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $script:SkillFile = Join-Path $script:RepoRoot 'skills/bdd-scenarios/SKILL.md'
         $script:SkillContent = Get-Content -Path $script:SkillFile -Raw
+        $script:OrchestrationProtocolFile = Join-Path $script:RepoRoot 'skills/customer-experience/references/orchestration-protocol.md'
+        $script:OrchestrationProtocolContent = Get-Content -Path $script:OrchestrationProtocolFile -Raw
     }
 
     It 'SKILL.md Phase 2 section documents all four supported frameworks including JVM cucumber' {
@@ -171,6 +173,18 @@ Describe 'bdd-scenarios SKILL.md Phase 2 contract' {
 
     It 'SKILL.md documents unified evidence record with scenario_id, source, result, detail, and raw_exit_code fields' {
         $script:SkillContent | Should -Match '(?is)(scenario_id.{0,100}source.{0,100}result.{0,100}detail.{0,100}raw_exit_code)' -Because 'issue #227 requires the bdd-scenarios skill to document the unified evidence record schema with scenario_id, source, result, detail, and raw_exit_code fields'
+    }
+
+    It 'SKILL.md unified evidence record table places evidence_type immediately after the raw_exit_code row (issue #791 anchored field-order pin)' {
+        $script:SkillContent | Should -Match '(?m)^\|\s*`raw_exit_code`\s*\|[^\r\n]*\|\s*\r?\n\|\s*`evidence_type`\s*\|' -Because 'issue #791 AC3/AC9 requires evidence_type to be added as a real schema table row immediately following raw_exit_code in skills/bdd-scenarios/SKILL.md — a loose "occurs somewhere within N chars" gap regex would pass without the field genuinely existing as an added row, so this pin anchors row-adjacency instead'
+    }
+
+    It 'SKILL.md unified evidence record heading states (6 fields), not the stale (5 fields) count (issue #791)' {
+        $script:SkillContent | Should -Match '\*\*Unified evidence record schema\*\*\s*\(6 fields\):' -Because 'issue #791 AC3 requires the schema heading literal to read (6 fields) once evidence_type is added as the sixth field; the stale (5 fields) count would silently under-describe the schema'
+    }
+
+    It 'orchestration-protocol.md inline evidence record copy places evidence_type immediately after raw_exit_code (issue #791 anchored field-order pin, second schema home)' {
+        $script:OrchestrationProtocolContent | Should -Match '(?s)`raw_exit_code:\s*\{int\}`\.?\s*,?\s*`evidence_type:' -Because 'issue #791 AC3/AC9 requires the inline schema copy in skills/customer-experience/references/orchestration-protocol.md (previously unpinned — only the SKILL.md copy was pinned) to also carry evidence_type immediately after raw_exit_code, anchored to the real inline record rather than a loose proximity match'
     }
 
     It 'SKILL.md documents runner dispatch protocol with pre-check step' {

@@ -21,7 +21,7 @@ Consumer repos opt in via a `## BDD Framework` line-start heading (column 0) in 
 | D5 | Opt-in detection | Presence of a `## BDD Framework` line-start heading (column 0) in the first of `AGENTS.md › CLAUDE.md › copilot-instructions.md` that contains it; template ships BDD-disabled. See `skills/bdd-scenarios/SKILL.md § BDD Detection Mechanism` for the canonical three-file precedence rule. | Heading-based detection requires no tooling config and is grep-stable **because enablement is a line-start `^## BDD Framework` heading, not a substring** — so a prose mention does not false-positive; template stays BDD-disabled so downstream repos that are not code repos are not forced into G/W/T workflow |
 | D6 | Phase 2 activation mechanism | Both `## BDD Framework` **line-start heading** (column 0) AND `bdd: {framework}` line required; `bdd: true` / unrecognized → warning + Phase 1 fallback | Requiring both conditions prevents accidental activation; sentinel `bdd: true` had a documented Phase 2 placeholder role in Phase 1 that must be preserved as a graceful upgrade path rather than silent failure |
 | D7 | Supported framework mapping | Four entries: `cucumber.js`, `behave`, `jest-cucumber`, `cucumber` (JVM); each maps to a runner command, version check, and default feature directory | Explicit mapping table allows exact, testable dispatch commands and predictable output locations; unrecognized values fall back to Phase 1 to limit blast radius of misconfiguration |
-| D8 | Unified evidence record schema | 5-field record: `scenario_id`, `source` (`runner \| eo \| runner+eo`), `result` (`pass \| fail \| conflict`), `detail`, `raw_exit_code` (runner only) | Unified schema flows from runner → merge → EO evidence → Code-Critic without format negotiation; `source` field enables per-source evaluation rules in prosecution |
+| D8 | Unified evidence record schema | 6-field record: `scenario_id`, `source` (`runner \| eo \| runner+eo`), `result` (`pass \| fail \| conflict`), `detail`, `raw_exit_code` (runner only), `evidence_type` (`live-interaction \| code-audit \| automated-runner`, runner+eo conflict rows use a compound of two of these values) | Unified schema flows from runner → merge → EO evidence → Code-Critic without format negotiation; `source` field enables per-source evaluation rules in prosecution; `evidence_type` labels the provenance of each record for the maintainer-facing PR-body coverage table |
 | D9 | Runner dispatch and EO conditional delegation | Runner dispatches per scenario using `@S{N}` tag filter; EO receives only scenarios CC delegates (Phase 1: all; Phase 2: conditional on runner pass/fail); conflict = Concern, not Issue | Conditional delegation avoids redundant EO exercise of runner-verified [auto] scenarios; classifying conflict as Concern prevents false automation failures when runner and EO disagree |
 
 ---
@@ -192,7 +192,7 @@ Phase 2 requires **both** conditions:
 
 1. **Pre-check**: run version check command from mapping table; fail → warning + Phase 1 fallback (all scenarios delegated to EO)
 2. **Per-scenario dispatch**: run runner with `@S{N}` tag filter for each `[auto]` scenario
-3. **Evidence capture**: record 5-field unified evidence record per scenario (`scenario_id`, `source`, `result`, `detail`, `raw_exit_code`)
+3. **Evidence capture**: record 6-field unified evidence record per scenario (`scenario_id`, `source`, `result`, `detail`, `raw_exit_code`, `evidence_type`)
 4. **Conditional EO delegation**: all `[auto]` passed → EO receives `[manual]` only; any `[auto]` failed → add failed scenarios; pre-check failed → all scenarios
 5. **Evidence merge**: after EO delegation returns, merge EO evidence for all delegated scenarios; runner primary for `[auto]`; EO primary for `[manual]`; divergence → `source: runner+eo`, `result: conflict`
 
@@ -205,6 +205,7 @@ Phase 2 requires **both** conditions:
 | `result` | `pass \| fail \| conflict` | Outcome |
 | `detail` | string | Summary or first stderr line |
 | `raw_exit_code` | int | Runner source only |
+| `evidence_type` | `live-interaction \| code-audit \| automated-runner` | `source: runner` rows always use `automated-runner`; `source: eo` rows use whatever Experience-Owner reports; `source: runner+eo` (conflict) rows use a compound of two values (`automated-runner+{eo-reported-type}`); scenarios that never entered the evidence record have no value (render `—`) |
 
 ### Code-Critic Runner Evidence Evaluation
 
@@ -220,10 +221,10 @@ When the unified evidence record contains a `source` field, Code-Critic applies 
 ### PR Body Coverage Table (Phase 2 extension)
 
 ```text
-| ID  | Type       | Class    | Result    | Evidence            | Source |
-| --- | ---------- | -------- | --------- | ------------------- | ------ |
-| S1  | Functional | [auto]   | ✅ Passed | exit 0, 1 assertion | Runner |
-| S2  | Intent     | [manual] | ✅ Passed | {observation note}  | EO     |
+| ID  | Type       | Class    | Result    | Evidence            | Source | Evidence Type    |
+| --- | ---------- | -------- | --------- | ------------------- | ------ | ----------------- |
+| S1  | Functional | [auto]   | ✅ Passed | exit 0, 1 assertion | Runner | automated-runner  |
+| S2  | Intent     | [manual] | ✅ Passed | {observation note}  | EO     | live-interaction  |
 ```
 
 ---
@@ -262,7 +263,7 @@ Gherkin conversion and framework runner integration:
 - Test-Writer generates a single `.feature` file per issue with `@S{N}` tags for each `[auto]` scenario
 - Code-Conductor CE Gate runner dispatch: pre-check → per-scenario dispatch → evidence capture → conditional EO delegation → evidence merge
 - Code-Critic runner evidence evaluation keyed on `source` field in unified evidence record
-- Unified 5-field evidence record schema flows runner output through the full CE Gate pipeline
+- Unified 6-field evidence record schema flows runner output through the full CE Gate pipeline
 - Conditional EO delegation: EO receives `[manual]` only when all `[auto]` runners passed; all scenarios when pre-check failed; mixed list when some `[auto]` runners failed
 - PR body coverage table extended with `Source` column (`Runner` / `EO`)
 

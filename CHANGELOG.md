@@ -2,6 +2,13 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.0] — 2026-07-04
+
+### Added
+
+- CE Gate evidence-type labeling: every delegated customer scenario is now labeled live-interaction, code-audit, or automated-runner so a maintainer is never misled about evidence strength (#791).
+- Browser MCP tool grants (mcp__Claude_Preview__*, mcp__claude-in-chrome__*) added to Experience-Owner, UI-Iterator, and Code-Critic (read-only) Claude shells (#791).
+
 ## [3.2.0] — 2026-07-03
 
 ### Added
