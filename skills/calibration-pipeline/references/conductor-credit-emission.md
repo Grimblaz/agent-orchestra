@@ -9,11 +9,13 @@ Extracted from `agents/Code-Conductor.agent.md` § Pipeline Metrics. These are t
 As of issue #794 step s2, this harvest runs automatically **inside** the emit script's own logic — `Invoke-PipelineMetricsV4Emit` (`.github/scripts/lib/emit-pipeline-metrics-v4-core.ps1`) — rather than as a separate step Code-Conductor orchestrates before invoking the emit script. Code-Conductor's existing call to the emit script already passes `-IssueNumber`, so the harvest triggers with zero additional wiring needed on the conductor's part:
 
 1. When `Invoke-PipelineMetricsV4Emit` is called with `-IssueNumber {ID}` greater than 0 and `-SkipMarkerHarvest` is **not** set, it internally resolves the repo (`-Repo`, or derived via `Resolve-EmitV4Repo`) and calls `Invoke-CreditInputHarvest -IssueNumber {ID} -Repo {owner/name} -GhCliPath {gh path} -MaxRetries 0` on Code-Conductor's behalf.
-2. The harvester scans `<!-- credit-input-experience-{ID} -->`, `<!-- credit-input-design-{ID} -->`, and `<!-- credit-input-plan-{ID} -->` comments, parses their YAML payloads, and calls `Build-ExperienceCreditRow`, `Build-DesignCreditRow`, or `Build-PlanCreditRow` with the evidence from the payload.
+2. The harvester scans `<!-- credit-input-experience-{ID} -->`, `<!-- credit-input-design-{ID} -->`, `<!-- credit-input-plan-{ID} -->`, and `<!-- credit-input-orchestration-{ID} -->` comments, parses their YAML payloads, and calls `Build-ExperienceCreditRow`, `Build-DesignCreditRow`, `Build-PlanCreditRow`, or `Build-OrchestrationCreditRow` with the evidence from the payload.
 3. The emit core merges the returned credit rows into the `credits[]` array alongside the review, release-hygiene, and other credits already composed. Deduplicate by port: if a credit row for a port is already present in the array (port-only dedup — harvested rows never carry a positive `terminal-step-id`), the harvested row for that port is skipped (additive-merge rule, D9).
 4. Tests that exercise only the pre-existing accumulator/sentinel path should pass `-SkipMarkerHarvest` to bypass this branch entirely and avoid any `gh` involvement.
 
 Code-Conductor's only remaining responsibility is to keep passing `-IssueNumber` on its existing emit-script call; no separate pre-emit harvest call is needed.
+
+Note: the new emit-core auto-harvest path does not use the `-InMemoryMarkers` same-conversation bypass the old conductor-orchestrated harvest had — it always fetches fresh via `gh`, with `-MaxRetries 0` (a deliberate, already-adjudicated design choice).
 
 ## Deferred Port Credit Rows
 

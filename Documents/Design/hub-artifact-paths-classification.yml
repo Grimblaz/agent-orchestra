@@ -226,6 +226,16 @@ families:
       Copilot's perspective. Missing or malformed plugin.json = Claude cannot load the
       plugin at all."
 
+  ".github/workflows/*.yml":
+    claude_resolves: source-tree
+    copilot_resolves: source-tree
+    requires_version_bump: false
+    experience: visible-warning
+    examples:
+      - .github/workflows/cost-pattern-presence-check.yml
+    notes: "GitHub Actions workflow definitions. Hub-repo CI only; not distributed to consumer
+      repos. Missing workflow means the corresponding CI gate does not run."
+
   ".github/scripts/*.ps1":
     claude_resolves: plugin-cache
     copilot_resolves: source-tree

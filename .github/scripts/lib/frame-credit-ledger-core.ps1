@@ -1365,13 +1365,23 @@ function Build-ReviewCreditRow {
     # Fold the former judge-score and integrity-check nested fields into
     # human-readable prose on the flat evidence string (scalar-safe shape —
     # see the Build-ReviewCreditRow header comment for rationale).
-    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) {
-        $Evidence
+    #
+    # De-duplication (issue #794 review M15a): when $Evidence is not supplied,
+    # the auto-generated base string already states the judge ruling status and
+    # sustained-finding count, so the appended integrity clause only adds the
+    # integrity-specific details (prosecution passes, integrity status) instead
+    # of repeating "N finding(s) sustained, status: X" a second time. Custom
+    # $Evidence (caller-supplied) still gets the full judge-ruling + integrity
+    # clause appended, since the caller's text is not guaranteed to already
+    # carry that information.
+    if (-not [string]::IsNullOrWhiteSpace($Evidence)) {
+        $resolvedEvidence = $Evidence
+        $resolvedEvidence += "; judge ruling: $status, $sustainedCount finding(s) sustained; integrity: $prosecutionPassesText passes, status $($integrityContract.IntegrityStatus)"
     }
     else {
-        "Review completed; $sustainedCount finding(s) sustained, status: $status."
+        $resolvedEvidence = "Review completed; $sustainedCount finding(s) sustained, status: $status."
+        $resolvedEvidence += " integrity: $prosecutionPassesText passes, status $($integrityContract.IntegrityStatus)"
     }
-    $resolvedEvidence += "; judge ruling: $status, $sustainedCount finding(s) sustained; integrity: $prosecutionPassesText passes, status $($integrityContract.IntegrityStatus)"
 
     $row = [pscustomobject]@{
         port      = 'review'

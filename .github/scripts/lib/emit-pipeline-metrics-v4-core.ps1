@@ -53,7 +53,9 @@ function script:Resolve-EmitV4Repo {
     try {
         $viewed = & $GhCliPath repo view --json nameWithOwner --jq '.nameWithOwner' 2>$null
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($viewed)) {
-            return $viewed.Trim()
+            $candidate = $viewed.Trim()
+            if ($candidate -notmatch '^[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+$') { return $null }
+            return $candidate
         }
     } catch {
         # fall through to git-remote parse
@@ -64,7 +66,9 @@ function script:Resolve-EmitV4Repo {
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($remoteUrl)) {
             $match = [regex]::Match($remoteUrl, 'github\.com[:/](.+?)(?:\.git)?$')
             if ($match.Success) {
-                return $match.Groups[1].Value.Trim()
+                $candidate = $match.Groups[1].Value.Trim()
+                if ($candidate -notmatch '^[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+$') { return $null }
+                return $candidate
             }
         }
     } catch {
@@ -161,19 +165,29 @@ function Invoke-PipelineMetricsV4Emit {
         # harvested rows never carry a positive terminal-step-id, so they cannot
         # usefully collide on (port, terminal-step-id) with a real row).
         if ($IssueNumber -gt 0 -and -not $SkipMarkerHarvest) {
-            $resolvedRepo = if (-not [string]::IsNullOrWhiteSpace($Repo)) { $Repo } else { script:Resolve-EmitV4Repo -GhCliPath $GhCliPath }
+            # Fold-in (issue #794 review M3): isolate the harvest/merge logic in its
+            # own try/catch so a harvest failure degrades gracefully -- it skips the
+            # harvested rows and keeps whatever $Credits already had from the
+            # accumulator/explicit param, rather than propagating into the outer
+            # try/catch and discarding already-composed $Credits into the
+            # cost-capture-failed sentinel path.
+            try {
+                $resolvedRepo = if (-not [string]::IsNullOrWhiteSpace($Repo)) { $Repo } else { script:Resolve-EmitV4Repo -GhCliPath $GhCliPath }
 
-            if ([string]::IsNullOrWhiteSpace($resolvedRepo)) {
-                Write-Warning "Credits harvest skipped -- could not resolve repo for marker harvest; cost-pattern-presence-check.yml will likely fail on this PR if credits remain empty."
-            } else {
-                $existingPorts = @($Credits | ForEach-Object { $_.port })
-                $harvested = @(Invoke-CreditInputHarvest -IssueNumber ([string]$IssueNumber) -Repo $resolvedRepo -GhCliPath $GhCliPath -MaxRetries 0)
-                foreach ($harvestedRow in $harvested) {
-                    if ($existingPorts -notcontains $harvestedRow.port) {
-                        $Credits += $harvestedRow
-                        $existingPorts += $harvestedRow.port
+                if ([string]::IsNullOrWhiteSpace($resolvedRepo)) {
+                    Write-Warning "Credits harvest skipped -- could not resolve repo for marker harvest; cost-pattern-presence-check.yml will likely fail on this PR if credits remain empty."
+                } else {
+                    $existingPorts = @($Credits | ForEach-Object { $_.port })
+                    $harvested = @(Invoke-CreditInputHarvest -IssueNumber ([string]$IssueNumber) -Repo $resolvedRepo -GhCliPath $GhCliPath -MaxRetries 0)
+                    foreach ($harvestedRow in $harvested) {
+                        if ($existingPorts -notcontains $harvestedRow.port) {
+                            $Credits += $harvestedRow
+                            $existingPorts += $harvestedRow.port
+                        }
                     }
                 }
+            } catch {
+                Write-Warning "Credits harvest failed -- proceeding without harvested rows; existing Credits are preserved. Error: $($_.Exception.Message)"
             }
         }
 
