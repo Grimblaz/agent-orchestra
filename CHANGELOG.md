@@ -2,7 +2,7 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
-## [3.3.1] — 2026-07-05
+## [3.3.2] — 2026-07-05
 
 ### Fixed
 
@@ -13,6 +13,12 @@ All notable changes to agent-orchestra will be documented in this file.
 - Fixed nested-field YAML corruption in review credit rows by emitting scalar-safe fields only (issue #794 Bug 2).
 - Corrected frame-credit-ledger SKILL.md gotcha to describe all three cost-pattern-presence-check.yml trigger arms instead of only the cost-reduction label (issue #794).
 - Reconciled conductor-credit-emission.md to describe SMC-17 pipeline-entry credit harvest as running automatically inside the emit core rather than as a separate Code-Conductor-orchestrated step (issue #794).
+
+## [3.3.1] — 2026-07-04
+
+### Changed
+
+- D9 Model-Switch Checkpoint cosmetic dewording: removed obsolete model-switch prompt wording from Code-Conductor's hub-mode checkpoint (model routing is automatic since #477); D9's name, pause, durable-handoff, and bundle-fan-out roles are unchanged (#483).
 
 ## [3.3.0] — 2026-07-04
 
@@ -25,7 +31,7 @@ All notable changes to agent-orchestra will be documented in this file.
 
 ### Added
 
-- Scope Classification Gate announces the pipeline tier (with a pre-dispatch standing override) when the rubric outcome is determined by evidence-backed criteria, and asks only when the outcome is genuinely indeterminate (#786). D9 Model-Switch Checkpoint removal is tracked separately in #483.
+- Scope Classification Gate announces the pipeline tier (with a pre-dispatch standing override) when the rubric outcome is determined by evidence-backed criteria, and asks only when the outcome is genuinely indeterminate (#786). D9 Model-Switch Checkpoint cosmetic dewording (prompt wording only, not removal) is tracked separately in #483.
 
 ## [3.1.0] — 2026-07-03
 
