@@ -4,7 +4,8 @@
     Frame credit-ledger orchestrator (issue #429).
 
 .DESCRIPTION
-    Pre-PR warn hook that:
+    Post-PR-creation warn hook (driven by the `frame-enforce.yml` GitHub Actions
+    workflow after `gh pr create`) that:
       1. Resolves the PR baseRefOid (with bounded retry).
       2. Fetches the PR body.
       3. Detects the pipeline-metrics block and short-circuits on pre-v4.
@@ -1284,12 +1285,34 @@ function Invoke-FrameCreditLedger {
 
     # 3a. Compute orchestrated-origin context using the CI-safe predicate (s1).
     # PRIMARY: $env:GITHUB_HEAD_REF (populated on pull_request events; never 'HEAD').
+    # FALLBACK (s3, issue #794 sub-observation 2): when GITHUB_HEAD_REF is empty
+    # or the literal 'HEAD' (local/manual runs never populate it), resolve the
+    # head ref via `gh pr view` before falling back further to the PR-body
+    # signal fallback inside Get-FCLOriginContext itself. This call site is the
+    # only place that talks to `gh` for this purpose — Get-FCLOriginContext
+    # stays a pure, no-gh predicate. Fail-quiet: if `gh pr view` errors or
+    # returns nothing usable, leave $_prHeadRef exactly as it was and fall
+    # through to Get-FCLOriginContext's existing body-signal fallback, exactly
+    # as today. Never throw — this whole hook is warn-only.
     # FALLBACK: PR body linked-issue signals.
     # If Get-FCLOriginContext is unavailable (predicate not dot-sourced), default
     # to $false — safe: fails quiet, never produces false-FAILED posts.
     $_isOrchestrated = $false
     if (Get-Command 'Get-FCLOriginContext' -ErrorAction SilentlyContinue) {
         $_prHeadRef = $env:GITHUB_HEAD_REF
+        if ([string]::IsNullOrWhiteSpace($_prHeadRef) -or $_prHeadRef -eq 'HEAD') {
+            try {
+                $_resolvedHeadRefJson = & gh pr view $Pr --json headRefName --jq '.headRefName' 2>$null
+                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($_resolvedHeadRefJson)) {
+                    $_prHeadRef = ([string]$_resolvedHeadRefJson).Trim()
+                }
+            }
+            catch {
+                $null = $_
+                # fail quiet — leave $_prHeadRef as-is and fall through to the
+                # body-signal fallback inside Get-FCLOriginContext.
+            }
+        }
         $_originCtx = Get-FCLOriginContext -HeadRef $_prHeadRef -PrBody $prBody
         $_isOrchestrated = [bool]$_originCtx.IsOrchestratedOrigin
     }
