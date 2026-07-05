@@ -620,4 +620,3 @@ families:
     notes: "Bare-relative workflow recipe references from within skill bodies. These
       provide step-by-step execution guides. Missing = agent falls back to inline
       methodology in the skill body (visible-warning, not hard-failure)."
-
