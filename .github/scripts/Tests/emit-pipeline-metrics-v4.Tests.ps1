@@ -570,6 +570,33 @@ evidence: "harvested plan evidence"
             }
         }
 
+        It 'zero conductor-accumulated credits (-Credits @()) plus marker-harvest alone populates a non-empty credits[]' {
+            # Arrange: the exact #790/#793/#804 failure shape -- an orchestrated PR
+            # with ZERO conductor-accumulated credits (-Credits @()). Unlike the
+            # sibling Case 9 tests above, no accumulator/-Credits row is seeded here.
+            # This directly proves harvest-alone (no accumulator input) produces a
+            # populated credits[], rather than relying on composing that property
+            # from the separately-tested merge logic and harvest function.
+            $bodyFile = & $script:TempBodyFile
+            try {
+                $result = & $script:InvokeScript `
+                    -BodyFile    $bodyFile `
+                    -V3BaseYaml  $script:ValidV3Base `
+                    -Credits     @() `
+                    -IssueNumber 88888 `
+                    -GhCliPath   $script:FakeGhCliPath
+
+                $result.ExitCode | Should -Be 0
+
+                $parsed = Read-PRMetricsBlock -PrBody $result.BodyContent
+                @($parsed.Credits).Count | Should -BeGreaterThan 0
+                ($parsed.Credits | Where-Object { $_.Port -eq 'design' -and $_.Evidence -match 'harvested design evidence' }) | Should -Not -BeNullOrEmpty
+                ($parsed.Credits | Where-Object { $_.Port -eq 'plan' -and $_.Evidence -match 'harvested plan evidence' }) | Should -Not -BeNullOrEmpty
+            } finally {
+                Remove-Item -LiteralPath $bodyFile -ErrorAction SilentlyContinue
+            }
+        }
+
         It 're-running the emit twice with identical inputs produces an identical credits[] block' {
             $bodyFileA = & $script:TempBodyFile
             $bodyFileB = & $script:TempBodyFile
