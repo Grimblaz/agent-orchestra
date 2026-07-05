@@ -2,6 +2,9 @@
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
 # Integration tests for Invoke-CreditInputHarvest (issue #442, Step 9).
+# Redesigned for issue #794 Step s1 (Bug 1 harvest fetch fix + fetch-once + roundtrip mock redesign):
+# the mock now serves the 'gh api .../comments --paginate --slurp' array-of-page-arrays shape and
+# rejects the old invalid 'gh issue view ... --paginate' call shape as a regression guard.
 #
 # (a) All three pipeline-entry ports: post fixture marker, run harvester, assert credit row.
 # (b) Cross-tool fixture parity: Copilot-style and Claude-style YAML both produce byte-equal rows.
@@ -9,6 +12,11 @@
 # (d) Retry path: first gh call returns stale list missing marker; second returns full list.
 # (e) -InMemoryMarkers fallback: bypass gh and produce row from supplied text.
 # (f) Absent-marker case: harvester emits nothing when no credit-input comment present.
+# (h) Reachable=$false on fetch failure (including non-zero exit mid-pagination).
+# (i) Regression guard: the old invalid 'gh issue view ... --paginate' form is rejected.
+# (j) Two-page fixture: >100-comment issues still paginate correctly under '--slurp' flatten.
+# (k) Fetch-count assertion: exactly one thread fetch per Invoke-CreditInputHarvest invocation.
+# (l) $payloadFromInMemory fail-open branch still exercised correctly under the reshaped fetch.
 
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
@@ -18,47 +26,100 @@ BeforeAll {
     $script:TempDir = Join-Path ([System.IO.Path]::GetTempPath()) "pester-harvest-roundtrip-$([Guid]::NewGuid().ToString('N'))"
     New-Item -ItemType Directory -Path $script:TempDir -Force | Out-Null
 
-    # Helper: write a mock gh script that returns a JSON comments payload.
-    # Each element of $CommentBodies is a comment body string.
-    # When $StaleBodies is non-null, the first call returns that list; subsequent calls return $CommentBodies.
+    # Helper: write a mock gh script that serves the new 'gh api repos/{owner}/{repo}/issues/{n}/comments
+    # --paginate --slurp' shape: an array of one-or-more page arrays, each page an array of comment
+    # objects with a '.body' field (NOT the old '{"comments":[...]}' wrapper).
+    #
+    # $Pages is an array of arrays of comment-body strings; each inner array is one simulated page.
+    # When $StalePages is non-null, the first invocation returns $StalePages; subsequent invocations
+    # return $Pages (models the read-after-write retry path).
+    #
+    # Regression guard (Bug 1): if this mock ever receives an 'issue view ... --paginate' invocation
+    # (the pre-fix invalid call shape), it fails loudly — this is what would have caught Bug 1.
+    # Narrowly modeled on the sibling mock in engagement-record-marker-roundtrip.Tests.ps1 (~line 38);
+    # only the rejection-guard pattern is copied — the response shape is fresh (valid 'gh api --slurp'
+    # array-of-page-arrays), not the sibling's '{"comments":[...]}' wrapper.
     function script:Write-MockGh {
         param(
+            [array]$Pages,
             [string]$ScriptPath,
-            [string[]]$CommentBodies,
-            [string[]]$StaleBodies = $null
+            [array]$StalePages = $null,
+            [int]$ExitCode = 0
         )
 
-        # Encode the comment arrays as JSON escape-safe strings
-        $mainJson = ($CommentBodies | ForEach-Object {
-            '{"body": ' + ($_ | ConvertTo-Json -Compress) + '}'
-        }) -join ','
+        function local:ConvertPagesToJson {
+            param([array]$PageSet)
+            $pageJsonList = $PageSet | ForEach-Object {
+                $page = $_
+                $commentsJson = ($page | ForEach-Object {
+                    '{"body": ' + ($_ | ConvertTo-Json -Compress) + '}'
+                }) -join ','
+                "[$commentsJson]"
+            }
+            return '[' + ($pageJsonList -join ',') + ']'
+        }
 
-        if ($null -ne $StaleBodies) {
-            $staleJson = ($StaleBodies | ForEach-Object {
-                '{"body": ' + ($_ | ConvertTo-Json -Compress) + '}'
-            }) -join ','
+        $mainJson = ConvertPagesToJson -PageSet $Pages
+        $exitLine = "exit $ExitCode"
+
+        if ($null -ne $StalePages) {
+            $staleJson = ConvertPagesToJson -PageSet $StalePages
 
             $stateFile = $ScriptPath -replace '\.ps1$', '.state'
             $escaped = $stateFile -replace "'", "''"
 
             @"
 param()
+if (`$args -contains 'view') { Write-Error 'unknown flag: --paginate'; exit 1 }
 `$state = if (Test-Path '$escaped') { Get-Content '$escaped' -Raw } else { 'first' }
 if (`$state -eq 'first') {
     Set-Content '$escaped' 'done'
-    Write-Output '{"comments": [$staleJson]}'
+    Write-Output '$staleJson'
 } else {
-    Write-Output '{"comments": [$mainJson]}'
+    Write-Output '$mainJson'
 }
-exit 0
+$exitLine
 "@ | Set-Content $ScriptPath -Encoding UTF8
         } else {
             @"
 param()
-Write-Output '{"comments": [$mainJson]}'
-exit 0
+# Guard: fail immediately if this is the OLD invalid call shape ('gh issue view ... --paginate').
+# --paginate is a 'gh api'-only flag; 'gh issue view' never supports it (Bug 1, issue #794).
+if (`$args -contains 'view') { Write-Error 'unknown flag: --paginate'; exit 1 }
+Write-Output '$mainJson'
+$exitLine
 "@ | Set-Content $ScriptPath -Encoding UTF8
         }
+    }
+
+    # Helper: write a mock gh script that counts invocations to a shared counter file, so tests
+    # can assert exactly-one-fetch-per-harvest-invocation (fetch-once refactor, issue #794 s1).
+    function script:Write-CountingMockGh {
+        param(
+            [array]$Pages,
+            [string]$ScriptPath,
+            [string]$CounterPath
+        )
+
+        $pageJsonList = $Pages | ForEach-Object {
+            $page = $_
+            $commentsJson = ($page | ForEach-Object {
+                '{"body": ' + ($_ | ConvertTo-Json -Compress) + '}'
+            }) -join ','
+            "[$commentsJson]"
+        }
+        $mainJson = '[' + ($pageJsonList -join ',') + ']'
+        $escapedCounter = $CounterPath -replace "'", "''"
+
+        @"
+param()
+if (`$args -contains 'view') { Write-Error 'unknown flag: --paginate'; exit 1 }
+`$count = if (Test-Path '$escapedCounter') { [int](Get-Content '$escapedCounter' -Raw) } else { 0 }
+`$count++
+Set-Content '$escapedCounter' `$count
+Write-Output '$mainJson'
+exit 0
+"@ | Set-Content $ScriptPath -Encoding UTF8
     }
 
     $script:IssueId = '442'
@@ -104,7 +165,7 @@ evidence: "$Evidence"
         }
         $completionMarkerText = $completionMarkerMap[$Port]
         $mockPath = Join-Path $script:TempDir "gh-port-$Port.ps1"
-        script:Write-MockGh -ScriptPath $mockPath -CommentBodies @($completionMarkerText, $markerComment)
+        script:Write-MockGh -ScriptPath $mockPath -Pages @(, @($completionMarkerText, $markerComment))
 
         $script:HarvestResult = Invoke-CreditInputHarvest `
             -IssueNumber $script:IssueId `
@@ -166,8 +227,8 @@ Describe 'Invoke-CreditInputHarvest: cross-tool YAML parity (Step 9b)' {
         $experienceComplete = "<!-- experience-owner-complete-$script:IssueId -->"
         $mockCopilot = Join-Path $script:TempDir 'gh-copilot.ps1'
         $mockClaude  = Join-Path $script:TempDir 'gh-claude.ps1'
-        script:Write-MockGh -ScriptPath $mockCopilot -CommentBodies @($experienceComplete, $copilotMarker)
-        script:Write-MockGh -ScriptPath $mockClaude  -CommentBodies @($experienceComplete, $claudeMarker)
+        script:Write-MockGh -ScriptPath $mockCopilot -Pages @(, @($experienceComplete, $copilotMarker))
+        script:Write-MockGh -ScriptPath $mockClaude  -Pages @(, @($experienceComplete, $claudeMarker))
 
         $copilotResult = Invoke-CreditInputHarvest -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath $mockCopilot -MaxRetries 0
         $claudeResult  = Invoke-CreditInputHarvest -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath $mockClaude  -MaxRetries 0
@@ -194,12 +255,13 @@ Describe 'Invoke-CreditInputHarvest: cross-tool YAML parity (Step 9b)' {
 }
 
 # ---------------------------------------------------------------------------
-# (c) Paginated comment list: marker on simulated second page
+# (c) Paginated comment list: marker on simulated second page (real two-page fixture,
+#     requirement (j) — >100-comment issues still paginate correctly under '--slurp' flatten)
 # ---------------------------------------------------------------------------
 
 Describe 'Invoke-CreditInputHarvest: marker in large comment list (Step 9c)' {
 
-    It 'finds marker when it is among many comments' {
+    It 'finds marker when it is among many comments split across two real API pages' {
         if (-not (Get-Command Invoke-CreditInputHarvest -ErrorAction SilentlyContinue)) {
             Set-ItResult -Skipped -Because 'Invoke-CreditInputHarvest not available'
             return
@@ -213,14 +275,13 @@ adapter: work-adapter
 evidence: "issue #442; plan-issue"
 ``````
 "@
-        # 111 comment bodies with the completion marker at position 105 and credit-input at 106
-        $comments = @(1..104 | ForEach-Object { "Generic comment $_." })
-        $comments += "<!-- plan-issue-$script:IssueId -->"
-        $comments += $targetMarker
-        $comments += @(1..5 | ForEach-Object { "Trailing comment $_." })
+        # Page 1: 100 generic comments (a full GitHub API page).
+        $page1 = @(1..100 | ForEach-Object { "Generic comment $_." })
+        # Page 2: completion marker, then the target credit-input marker, then trailing comments.
+        $page2 = @("<!-- plan-issue-$script:IssueId -->", $targetMarker) + @(1..5 | ForEach-Object { "Trailing comment $_." })
 
         $mockPath = Join-Path $script:TempDir 'gh-paginated.ps1'
-        script:Write-MockGh -ScriptPath $mockPath -CommentBodies $comments
+        script:Write-MockGh -ScriptPath $mockPath -Pages @($page1, $page2)
 
         $result = Invoke-CreditInputHarvest -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath $mockPath -MaxRetries 0
         $row = @($result | Where-Object { [string]$_.port -eq 'plan' })[0]
@@ -257,7 +318,7 @@ evidence: "issue #442; retry test"
         $full  = @($completionMarker, $creditInputMarker)
 
         $mockPath = Join-Path $script:TempDir 'gh-retry.ps1'
-        script:Write-MockGh -ScriptPath $mockPath -CommentBodies $full -StaleBodies $stale
+        script:Write-MockGh -ScriptPath $mockPath -Pages @(, $full) -StalePages @(, $stale)
 
         $result = Invoke-CreditInputHarvest `
             -IssueNumber       $script:IssueId `
@@ -331,7 +392,7 @@ evidence: "issue #442; experience-owner-complete marker posted"
 "@
 
         $mockPath = Join-Path $script:TempDir 'gh-no-completion.ps1'
-        script:Write-MockGh -ScriptPath $mockPath -CommentBodies @($creditInputOnly)
+        script:Write-MockGh -ScriptPath $mockPath -Pages @(, @($creditInputOnly))
 
         $result = Invoke-CreditInputHarvest -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath $mockPath -MaxRetries 0
         $result.Count | Should -Be 0 -Because 'credit-input without its completion marker must not be harvested'
@@ -352,9 +413,207 @@ Describe 'Invoke-CreditInputHarvest: absent marker emits nothing (Step 9g)' {
 
         # Comments list has no credit-input markers (and no completion markers either)
         $mockPath = Join-Path $script:TempDir 'gh-absent.ps1'
-        script:Write-MockGh -ScriptPath $mockPath -CommentBodies @('Just a regular comment.', 'Another comment.')
+        script:Write-MockGh -ScriptPath $mockPath -Pages @(, @('Just a regular comment.', 'Another comment.'))
 
         $result = Invoke-CreditInputHarvest -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath $mockPath -MaxRetries 0
         $result.Count | Should -Be 0
+    }
+}
+
+# ---------------------------------------------------------------------------
+# (h) Reachable=$false on fetch failure, including a non-zero exit mid-pagination
+#     (RED-first: exercises the reshaped Get-IssueComments directly)
+# ---------------------------------------------------------------------------
+
+Describe 'Get-IssueComments: Reachable=$false on fetch failure (Step 9h)' {
+
+    BeforeAll {
+        # Get-IssueComments is defined script:-scoped inside Invoke-CreditInputHarvest; a prior
+        # invocation in this run (Describe 9a) has already published it to script scope. Guard
+        # defensively in case test execution order changes.
+        if (-not (Get-Command Invoke-CreditInputHarvest -ErrorAction SilentlyContinue)) {
+            $script:SkipDirectTests = $true
+            return
+        }
+        if (-not (Get-Command Get-IssueComments -ErrorAction SilentlyContinue)) {
+            Invoke-CreditInputHarvest -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath 'gh-does-not-exist-sentinel' -MaxRetries 0 | Out-Null
+        }
+        $script:SkipDirectTests = -not (Get-Command Get-IssueComments -ErrorAction SilentlyContinue)
+    }
+
+    It 'returns Reachable=$false and empty Comments when the gh call throws (missing executable)' {
+        if ($script:SkipDirectTests) {
+            Set-ItResult -Skipped -Because 'Get-IssueComments not available'
+            return
+        }
+        $r = Get-IssueComments -IssueNum $script:IssueId -RepoArg $script:Repo -Gh 'gh-does-not-exist-sentinel'
+        $r.Reachable | Should -Be $false
+        @($r.Comments).Count | Should -Be 0
+    }
+
+    It 'returns Reachable=$false and empty Comments on a non-zero exit mid-pagination' {
+        if ($script:SkipDirectTests) {
+            Set-ItResult -Skipped -Because 'Get-IssueComments not available'
+            return
+        }
+        $mockPath = Join-Path $script:TempDir 'gh-fail-midpagination.ps1'
+        @'
+param()
+Write-Error 'simulated pagination failure'
+exit 1
+'@ | Set-Content $mockPath -Encoding UTF8
+
+        $r = Get-IssueComments -IssueNum $script:IssueId -RepoArg $script:Repo -Gh $mockPath
+        $r.Reachable | Should -Be $false
+        @($r.Comments).Count | Should -Be 0
+    }
+
+    It 'returns Reachable=$true and empty Comments on confirmed-zero comments (re-verify under new parse path)' {
+        if ($script:SkipDirectTests) {
+            Set-ItResult -Skipped -Because 'Get-IssueComments not available'
+            return
+        }
+        $mockPath = Join-Path $script:TempDir 'gh-zero-comments.ps1'
+        script:Write-MockGh -ScriptPath $mockPath -Pages @(, @())
+
+        $r = Get-IssueComments -IssueNum $script:IssueId -RepoArg $script:Repo -Gh $mockPath
+        $r.Reachable | Should -Be $true
+        @($r.Comments).Count | Should -Be 0
+    }
+}
+
+# ---------------------------------------------------------------------------
+# (i) Regression guard: the old invalid 'gh issue view ... --paginate' form is rejected
+#     by the mock (RED-first — this is what would have caught Bug 1 originally).
+# ---------------------------------------------------------------------------
+
+Describe 'Get-IssueComments: rejects the old invalid gh issue view --paginate call shape (Step 9i)' {
+
+    It 'the mock fails loudly if invoked with the old issue-view --paginate form' {
+        if (-not (Get-Command Invoke-CreditInputHarvest -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Invoke-CreditInputHarvest not available'
+            return
+        }
+
+        $mockPath = Join-Path $script:TempDir 'gh-reject-old-form.ps1'
+        script:Write-MockGh -ScriptPath $mockPath -Pages @(, @('some comment'))
+
+        # Directly invoke the mock the OLD way to prove the regression guard fires.
+        & $mockPath issue view 442 --repo $script:Repo --json comments --paginate 2>$null
+        $LASTEXITCODE | Should -Not -Be 0
+    }
+
+    It 'Get-IssueComments (fixed implementation) never triggers the old-form rejection' {
+        if (-not (Get-Command Invoke-CreditInputHarvest -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Invoke-CreditInputHarvest not available'
+            return
+        }
+        if (-not (Get-Command Get-IssueComments -ErrorAction SilentlyContinue)) {
+            Invoke-CreditInputHarvest -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath 'gh-does-not-exist-sentinel' -MaxRetries 0 | Out-Null
+        }
+
+        $mockPath = Join-Path $script:TempDir 'gh-reject-old-form-2.ps1'
+        script:Write-MockGh -ScriptPath $mockPath -Pages @(, @('some comment'))
+
+        $r = Get-IssueComments -IssueNum $script:IssueId -RepoArg $script:Repo -Gh $mockPath
+        $r.Reachable | Should -Be $true
+        @($r.Comments).Count | Should -Be 1
+    }
+}
+
+# ---------------------------------------------------------------------------
+# (k) Fetch-count assertion: exactly ONE thread fetch per Invoke-CreditInputHarvest
+#     invocation, reused across all four ports (proves the fetch-once refactor).
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-CreditInputHarvest: fetches the comment thread exactly once per invocation (Step 9k)' {
+
+    It 'calls gh exactly once even though four ports are evaluated' {
+        if (-not (Get-Command Invoke-CreditInputHarvest -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Invoke-CreditInputHarvest not available'
+            return
+        }
+
+        $counterPath = Join-Path $script:TempDir 'gh-call-counter.txt'
+        if (Test-Path $counterPath) { Remove-Item $counterPath -Force }
+        $mockPath = Join-Path $script:TempDir 'gh-counting.ps1'
+
+        # No markers posted at all for any port — every port falls through to the gh-fetch
+        # path (none are satisfied by in-memory bypass), maximizing the chance of redundant
+        # fetches if the fetch-once refactor were not in place.
+        script:Write-CountingMockGh -ScriptPath $mockPath -Pages @(, @('Just a regular comment.')) -CounterPath $counterPath
+
+        Invoke-CreditInputHarvest -IssueNumber $script:IssueId -Repo $script:Repo -GhCliPath $mockPath -MaxRetries 0 | Out-Null
+
+        $callCount = [int](Get-Content $counterPath -Raw)
+        $callCount | Should -Be 1 -Because 'the comment thread should be fetched once and shared across all four ports, not re-fetched per port'
+    }
+}
+
+# ---------------------------------------------------------------------------
+# (l) $payloadFromInMemory fail-open branch still exercised correctly under the
+#     reshaped fetch (gh unreachable + in-memory payload present -> fail-open emit).
+# ---------------------------------------------------------------------------
+
+Describe 'Invoke-CreditInputHarvest: payloadFromInMemory fail-open branch under reshaped fetch (Step 9l)' {
+
+    It 'emits the row when gh is unreachable but the payload was supplied in-memory (fail-open)' {
+        if (-not (Get-Command Invoke-CreditInputHarvest -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Invoke-CreditInputHarvest not available'
+            return
+        }
+
+        # In-memory credit-input marker for 'design', but NO in-memory completion marker —
+        # this forces the code down the gh-fetch path (payloadFromInMemory=$true) rather
+        # than the immediate in-memory-bypass branch. gh is unreachable (nonexistent path),
+        # so the fail-open branch (payloadFromInMemory -and -not $ghReachable) must fire.
+        $inMemory = @"
+<!-- credit-input-design-$script:IssueId -->
+``````yaml
+port: design
+adapter: work-adapter
+evidence: "issue #442; fail-open under reshaped fetch"
+``````
+"@
+
+        $result = Invoke-CreditInputHarvest `
+            -IssueNumber     $script:IssueId `
+            -Repo            $script:Repo `
+            -GhCliPath       'gh-does-not-exist-sentinel' `
+            -InMemoryMarkers @($inMemory) `
+            -MaxRetries      0
+
+        $row = @($result | Where-Object { [string]$_.port -eq 'design' })[0]
+        $row | Should -Not -BeNullOrEmpty -Because 'gh unreachable must not silently drop an in-session credit (fail-open)'
+        $row.port | Should -Be 'design'
+    }
+
+    It 'suppresses the row when gh IS reachable but returns no completion marker (burst-halt still enforced)' {
+        if (-not (Get-Command Invoke-CreditInputHarvest -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Invoke-CreditInputHarvest not available'
+            return
+        }
+
+        $inMemory = @"
+<!-- credit-input-design-$script:IssueId -->
+``````yaml
+port: design
+adapter: work-adapter
+evidence: "issue #442; reachable-but-no-completion"
+``````
+"@
+
+        $mockPath = Join-Path $script:TempDir 'gh-reachable-no-completion.ps1'
+        script:Write-MockGh -ScriptPath $mockPath -Pages @(, @('Just a regular comment.'))
+
+        $result = Invoke-CreditInputHarvest `
+            -IssueNumber     $script:IssueId `
+            -Repo            $script:Repo `
+            -GhCliPath       $mockPath `
+            -InMemoryMarkers @($inMemory) `
+            -MaxRetries      0
+
+        $row = @($result | Where-Object { [string]$_.port -eq 'design' })[0]
+        $row | Should -BeNullOrEmpty -Because 'gh reachable with no completion marker must suppress the row (burst-halt invariant)'
     }
 }

@@ -2658,8 +2658,13 @@ function Invoke-CreditInputHarvest {
         # Reachable=$true with Comments=@() means gh confirmed zero comments on the issue.
         # Reachable=$false means the fetch failed (CLI error, non-zero exit, empty raw, or parse fail).
         # The fail-open emission path in Invoke-CreditInputHarvest depends on this disambiguation.
+        #
+        # Note: 'gh issue view --json comments --paginate' is invalid — --paginate is a 'gh api'-only
+        # flag, not valid for 'gh issue view' (Bug 1, issue #794). Use 'gh api .../comments --paginate
+        # --slurp' instead, which returns an array-of-page-arrays (no '.comments' wrapper), mirroring
+        # the exemplar at gate-reconciliation-core.ps1 lines ~144-151.
         try {
-            $raw = & $Gh issue view $IssueNum --repo $RepoArg --json comments --paginate 2>$null
+            $raw = & $Gh api "repos/$RepoArg/issues/$IssueNum/comments" --paginate --slurp 2>$null
         } catch {
             return @{ Reachable = $false; Comments = @() }
         }
@@ -2668,8 +2673,13 @@ function Invoke-CreditInputHarvest {
         }
 
         try {
-            $parsed = $raw | ConvertFrom-Json
-            return @{ Reachable = $true; Comments = @($parsed.comments | ForEach-Object { $_.body }) }
+            $comments = $raw | ConvertFrom-Json
+            # Flatten the array-of-page-arrays shape returned by '--paginate --slurp' into a flat
+            # array of comment objects before reading '.body' directly (no '.comments' wrapper here).
+            if ($comments -is [array] -and $comments.Count -gt 0 -and $comments[0] -is [array]) {
+                $comments = $comments | ForEach-Object { $_ }
+            }
+            return @{ Reachable = $true; Comments = @($comments | ForEach-Object { $_.body }) }
         } catch {
             return @{ Reachable = $false; Comments = @() }
         }
@@ -2696,6 +2706,13 @@ function Invoke-CreditInputHarvest {
     }
 
     $results = @()
+
+    # Fetch-once-and-share (issue #794 Bug 1, fetch-once fix): fetch the comment thread a single
+    # time up front and reuse it as the initial state for every port's iteration below, instead of
+    # each of the 4 ports independently calling Get-IssueComments for the same thread. Each port's
+    # own read-after-write retry loop may still re-fetch on subsequent attempts (attempt > 0) — the
+    # shared fetch only replaces the redundant *first* fetch per port.
+    $script:InitialFetchResult = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
 
     foreach ($port in $script:PipelineEntryPorts) {
         # Use in-memory marker when available (bypasses gh for this port).
@@ -2738,7 +2755,9 @@ function Invoke-CreditInputHarvest {
         $ghFetchSucceeded = $false
 
         while ($attempt -le $MaxRetries) {
-            $fetchResult = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
+            # Reuse the shared up-front fetch on the first attempt for every port (fetch-once);
+            # only re-fetch fresh on subsequent retry attempts (read-after-write polling).
+            $fetchResult = if ($attempt -eq 0) { $script:InitialFetchResult } else { script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath }
             $comments = @($fetchResult.Comments)
             $ghFetchSucceeded = [bool]$fetchResult.Reachable
             $completionPresent = $comments | Where-Object { $_ -like "*$completionMarker*" }
