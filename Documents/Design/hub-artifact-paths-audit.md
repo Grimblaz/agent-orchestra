@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: d697759568a3d534015de7a8cc00eef1234092c3
-generated-at: 2026-07-05T16:09:13Z
+last-verified: cc027b0284f98c6f81b0ca3e1a15231819201341
+generated-at: 2026-07-05T17:28:30Z
 -->
 
 ## Purpose
@@ -20,7 +20,6 @@ This audit document is produced and kept current by the following pipeline:
 (b) **Classification YAML** (`Documents/Design/hub-artifact-paths-classification.yml`): maps each normalized path family to its resolution behavior for Claude and Copilot, the consumer experience when a path is absent, and whether modifying files in that family requires a plugin version bump.
 
 (c) **D2a placeholder normalization**: before family clustering, all eight template placeholder tokens are normalized to `*`:
-
 - `{ID}`
 - `{PR}`
 - `{NUMBER}`
