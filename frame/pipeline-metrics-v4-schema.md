@@ -46,6 +46,15 @@ credits:
     status: passed
     run_index: 1
     evidence: "Full prosecution × 5 → defense → judge completed; judge ruling passed."
+    # NOTE (aspirational/deferred, issue #794 Bug 2): the nested judge-score and
+    # integrity-check fields below do not currently round-trip through
+    # Render-FCLCreditEntry, which only serializes scalar values. As of the
+    # #794 fix, Build-ReviewCreditRow emits ONLY the scalar fields above
+    # (port, adapter, status, run_index, evidence, terminal-step-id) and
+    # folds the judge-ruling and integrity-check details into human-readable
+    # prose inside the flat `evidence` string instead. The nested shape shown
+    # here is deferred pending a future recursive-serialization fix to
+    # Render-FCLCreditEntry.
     judge-score:
       ruling: passed
       findings: []
@@ -115,8 +124,8 @@ Field notes:
 - `credits[].adapter` (optional on non-review ports) names the specific adapter that produced this credit row.
 - `credits[].run_index` is a monotonically increasing integer per `(port, adapter)` pair. Multiple entries for the same port and adapter are appended; the latest by `run_index` is the authoritative summary value. There is no `timestamp` field on credit rows — `run_index` provides re-run ordering without violating the audit-only framing.
 - `credits[].terminal-step-id` (optional) records the positive terminal implementation step that emitted a spine-backed credit. Omitted or `0` preserves the legacy/spine-omitted identity for plans without a terminal slice.
-- `credits[].judge-score` (review port only) carries the judge ruling and findings list used to produce the credit.
-- `credits[].integrity-check` (review port, standard/lite/post-fix adapters) records the prosecution passes verified during prosecution. It is emitted by `Build-ReviewCreditRow` and does not carry the atomic pipeline marker result.
+- `credits[].judge-score` (review port only) carries the judge ruling and findings list used to produce the credit. **Aspirational/deferred (issue #794 Bug 2):** `Build-ReviewCreditRow` does not currently emit this nested field — it folds the judge ruling into prose inside `evidence` instead, since `Render-FCLCreditEntry` only serializes scalar values.
+- `credits[].integrity-check` (review port, standard/lite/post-fix adapters) records the prosecution passes verified during prosecution. **Aspirational/deferred (issue #794 Bug 2):** `Build-ReviewCreditRow` does not currently emit this nested field either — the prosecution-passes and status details are folded into prose inside `evidence` instead. Neither nested field currently round-trips through `Render-FCLCreditEntry`, which does not carry the atomic pipeline marker result.
 - `adversarial_pipeline_atomic_marker_present` is computed and returned by the frame-credit-ledger orchestration when it checks for the completion marker `<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->`; it is a warn-only ledger result field, not a `credits[]` row field. String enum values are `"true"`, `"false-warn-only"`, or `"not-applicable"`.
 - `credits[].version-bump` (release-hygiene port) records the version range for which the bump was verified.
 - `credits[].symmetric-bump-verification` (release-hygiene port) records the symmetric-bump verifier result and file set checked.

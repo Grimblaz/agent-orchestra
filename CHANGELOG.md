@@ -2,6 +2,13 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.1] — 2026-07-05
+
+### Fixed
+
+- Corrected frame-credit-ledger SKILL.md gotcha to describe all three cost-pattern-presence-check.yml trigger arms instead of only the cost-reduction label (issue #794).
+- Reconciled conductor-credit-emission.md to describe SMC-17 pipeline-entry credit harvest as running automatically inside the emit core rather than as a separate Code-Conductor-orchestrated step (issue #794).
+
 ## [3.3.0] — 2026-07-04
 
 ### Added
