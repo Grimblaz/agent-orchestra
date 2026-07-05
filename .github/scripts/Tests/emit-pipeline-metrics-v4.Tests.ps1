@@ -60,48 +60,18 @@ BeforeAll {
         )
     }
 
-    # Helper: invoke the emit core in-process and return @{ ExitCode; BodyContent }.
-    # Dot-source + in-process call pattern (#257) — Invoke-PipelineMetricsV4Emit
-    # returns an ExitCode object instead of calling exit, so no child pwsh is spawned.
-    $script:InvokeScript = {
-        param(
-            [string]$BodyFile,
-            [string]$V3BaseYaml = '',
-            [pscustomobject[]]$Credits = @(),
-            [pscustomobject[]]$DispatchCostSamples = @(),
-            [int]$IssueNumber = 0,
-            [string]$RichBody = '',
-            [string]$Repo = '',
-            [string]$GhCliPath = 'gh',
-            [switch]$SkipMarkerHarvest
-        )
-
-        $emitResult = Invoke-PipelineMetricsV4Emit `
-            -BodyFile            $BodyFile `
-            -V3BaseYaml          $V3BaseYaml `
-            -Credits             $Credits `
-            -DispatchCostSamples $DispatchCostSamples `
-            -IssueNumber         $IssueNumber `
-            -RichBody            $RichBody `
-            -Repo                $Repo `
-            -GhCliPath           $GhCliPath `
-            -SkipMarkerHarvest:  $SkipMarkerHarvest `
-            -WarningAction       SilentlyContinue
-
-        $bodyContent = ''
-        if (Test-Path -LiteralPath $BodyFile) {
-            $bodyContent = Get-Content -LiteralPath $BodyFile -Raw
-        }
-
-        return [pscustomobject]@{
-            ExitCode    = $emitResult.ExitCode
-            BodyContent = $bodyContent
-        }
-    }
-
     # Helper: invoke the emit core in-process and CAPTURE warning records, for
     # tests that assert on Write-Warning text (repo-derivation failure, pre-PR
     # warn). Does not silence warnings -- collects them into -WarningVariable.
+    #
+    # Single source of truth (issue #794 Fix G — consolidated from a near-byte-
+    # identical sibling, InvokeScript, which differed only in NOT capturing
+    # -WarningVariable and NOT returning a Warnings field). InvokeScript below
+    # is now a thin wrapper that calls this helper and discards Warnings, since
+    # this helper is a strict superset of InvokeScript's behavior: the same
+    # Invoke-PipelineMetricsV4Emit call with the same parameters, plus warning
+    # capture, which has no observable effect on ExitCode or BodyContent for
+    # callers that never look at $warnings.
     $script:InvokeScriptCapturingWarnings = {
         param(
             [string]$BodyFile,
@@ -138,6 +108,44 @@ BeforeAll {
             ExitCode    = $emitResult.ExitCode
             BodyContent = $bodyContent
             Warnings    = @($warnings | ForEach-Object { $_.ToString() })
+        }
+    }
+
+    # Helper: invoke the emit core in-process and return @{ ExitCode; BodyContent }.
+    # Dot-source + in-process call pattern (#257) — Invoke-PipelineMetricsV4Emit
+    # returns an ExitCode object instead of calling exit, so no child pwsh is spawned.
+    #
+    # Thin wrapper over InvokeScriptCapturingWarnings (issue #794 Fix G): forwards
+    # all parameters unchanged and returns the same ExitCode/BodyContent shape as
+    # before the consolidation, dropping only the Warnings field that none of this
+    # helper's 17 call sites ever read.
+    $script:InvokeScript = {
+        param(
+            [string]$BodyFile,
+            [string]$V3BaseYaml = '',
+            [pscustomobject[]]$Credits = @(),
+            [pscustomobject[]]$DispatchCostSamples = @(),
+            [int]$IssueNumber = 0,
+            [string]$RichBody = '',
+            [string]$Repo = '',
+            [string]$GhCliPath = 'gh',
+            [switch]$SkipMarkerHarvest
+        )
+
+        $captured = & $script:InvokeScriptCapturingWarnings `
+            -BodyFile            $BodyFile `
+            -V3BaseYaml          $V3BaseYaml `
+            -Credits             $Credits `
+            -DispatchCostSamples $DispatchCostSamples `
+            -IssueNumber         $IssueNumber `
+            -RichBody            $RichBody `
+            -Repo                $Repo `
+            -GhCliPath           $GhCliPath `
+            -SkipMarkerHarvest:  $SkipMarkerHarvest
+
+        return [pscustomobject]@{
+            ExitCode    = $captured.ExitCode
+            BodyContent = $captured.BodyContent
         }
     }
 

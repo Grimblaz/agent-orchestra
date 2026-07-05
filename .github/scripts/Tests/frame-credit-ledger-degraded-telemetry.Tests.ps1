@@ -68,7 +68,7 @@ A PR body with no pipeline-metrics marker block and no body orchestration signal
         param(
             [int]$Pr = 794,
             [string]$Mode = 'warn',
-            [ValidateSet('ok', 'throw', 'timeout', 'empty')][string]$ClaudeMode = 'empty',
+            [ValidateSet('ok', 'partial', 'throw', 'timeout', 'empty')][string]$ClaudeMode = 'empty',
             [ValidateSet('ok', 'throw', 'timeout', 'empty')][string]$CopilotMode = 'empty',
             [bool]$ProjectsRootAbsent = $false,
             [string]$PrBody = $script:V4AllCoveredBody,
@@ -191,6 +191,25 @@ A PR body with no pipeline-metrics marker block and no body orchestration signal
                     'throw' { throw 'simulated Claude walker failure' }
                     'timeout' { Start-Sleep -Seconds 5; return @() }
                     'empty' { return @() }
+                    'partial' {
+                        # Real (populated) events whose last assistant stop_reason is a
+                        # partial-session marker (max_tokens), so Get-SessionCompleteness
+                        # classifies this run 'partial' while @($costEvents).Count -gt 0 —
+                        # the combination the use_prior + real-events retraction interplay
+                        # (issue #794 review fix H) needs to be tested against.
+                        return @(@{
+                            type      = 'assistant'
+                            provider  = 'claude'
+                            cwd       = $ParentCwd
+                            gitBranch = $Branch
+                            message   = @{
+                                model       = 'claude-sonnet-4-x'
+                                stop_reason = 'max_tokens'
+                                usage       = @{ input_tokens = 100; output_tokens = 20; cache_creation_input_tokens = 0; cache_read_input_tokens = 0 }
+                                content     = @()
+                            }
+                        })
+                    }
                     default {
                         return @(@{
                             type      = 'assistant'
@@ -443,6 +462,159 @@ Describe 'frame-credit-ledger degraded telemetry (issue #794 s4)' {
 
             $degraded = @($ip.PostedComments | Where-Object { $_ -match 'cost-pattern-data-degraded-794' })
             $degraded.Count | Should -Be 0
+        }
+
+        It 'retracts a prior standalone degraded comment once a later run finds real cost events (recovery transition, issue #794 Fix H)' {
+            # Two-step scenario mirroring frame-credit-ledger.ps1's retraction guard
+            # (~lines 1991-2011): $_isOrchestrated -and $priorDegradedComment -and
+            # @($costEvents).Count -gt 0 upserts the SAME degraded marker to a short
+            # "Telemetry recovered" tombstone body via Find-OrUpsertComment.
+
+            # Step 1: a degraded run (no cost events, orchestrated origin) posts the
+            # standalone degraded comment — reuses the Part 2 degraded-post setup.
+            $step1 = & $script:InvokeDegradedTelemetryInProcess `
+                -ClaudeMode 'empty' -CopilotMode 'empty' -ProjectsRootAbsent $false `
+                -HeadRefName 'feature/issue-794-orchestrate-credit-harvest'
+
+            $step1Degraded = @($step1.PostedComments | Where-Object { $_ -match 'cost-pattern-data-degraded-794' })
+            $step1Degraded.Count | Should -Be 1 -Because 'the setup step must produce the standalone degraded comment before recovery can be observed'
+
+            # Step 2: a second run on the same PR where the mocked comment-fetch now
+            # returns that prior degraded comment (via -Comments, consumed as
+            # $script:PrComments) AND the walker finds real cost events this time
+            # (-ClaudeMode 'ok'). Find-OrUpsertComment's Type 'pr' path issues
+            # 'gh pr comment $Number --body $Body', which this file's gh mock
+            # captures into PostedComments via the '(issue|pr) comment \d+ --body'
+            # regex — the same capture path the Part 2 degraded-post tests already
+            # rely on for observing comment writes.
+            $priorDegradedBody = $step1Degraded[0]
+            $priorComments = @([pscustomobject]@{
+                    body       = $priorDegradedBody
+                    databaseId = 4001
+                    url        = 'https://github.com/example/example/issues/794#issuecomment-4001'
+                })
+
+            $step2 = & $script:InvokeDegradedTelemetryInProcess `
+                -ClaudeMode 'ok' -CopilotMode 'empty' -ProjectsRootAbsent $false `
+                -HeadRefName 'feature/issue-794-orchestrate-credit-harvest' `
+                -Comments $priorComments
+
+            $recovery = @($step2.PostedComments | Where-Object { $_ -match 'cost-pattern-data-degraded-794' })
+            $recovery.Count | Should -Be 1 -Because 'the retraction guard must upsert the SAME degraded marker once real cost events appear'
+            $recovery[0] | Should -Match 'Telemetry recovered' -Because 'the retraction body must read as recovered, not the original no-cost-events degraded body'
+            $recovery[0] | Should -Not -Match 'excluded_from_rolling_baseline: true' -Because 'the recovery tombstone is a short notice, not a re-post of the original degraded schema body'
+        }
+
+        It 'retracts a prior standalone degraded comment even when the current run falls back to the prior populated cost section (use_prior=true, post-fix hoist F1)' {
+            # Regression guard for the post-fix adversarial-review finding F1: the
+            # retraction block (frame-credit-ledger.ps1 ~lines 1936-1964) was hoisted
+            # above the `if ($usePriorCostSection -and $null -ne $priorComment)` split
+            # so it fires unconditionally with respect to that branch, gated only on
+            # `$_isOrchestrated -and $null -ne $priorDegradedComment -and
+            # @($costEvents).Count -gt 0`. Before the hoist, the retraction lived
+            # inside the branch that only runs when $usePriorCostSection is FALSE
+            # (the 'else' / fresh-render path), so a run that both (a) found real
+            # cost events and (b) fell back to reusing the prior comment's rendered
+            # section (use_prior=true) would silently skip the retraction — the
+            # degraded tombstone would never get posted even though real telemetry
+            # had recovered.
+            #
+            # use_prior=true via the completeness fallback (not the populated
+            # predicate) requires, per Resolve-CostDataPreservation:
+            #   - both current and prior token sums > 0 (both "populated")
+            #   - current completeness = 'partial'
+            #   - prior completeness = 'complete'
+            # This is deliberately NOT the populated-predicate shortcut (current
+            # empty + prior populated), which would trivially force use_prior=true
+            # without ever reaching the completeness comparison this fix targets.
+
+            # Step 1: same standalone-degraded setup as the recovery-transition test
+            # above — an orchestrated-origin PR with a genuinely degraded walk posts
+            # the standalone <!-- cost-pattern-data-degraded-794 --> tombstone.
+            $step1 = & $script:InvokeDegradedTelemetryInProcess `
+                -ClaudeMode 'empty' -CopilotMode 'empty' -ProjectsRootAbsent $false `
+                -HeadRefName 'feature/issue-794-orchestrate-credit-harvest'
+
+            $step1Degraded = @($step1.PostedComments | Where-Object { $_ -match 'cost-pattern-data-degraded-794' })
+            $step1Degraded.Count | Should -Be 1 -Because 'the setup step must produce the standalone degraded comment before recovery can be observed'
+            $priorDegradedBody = $step1Degraded[0]
+
+            # Step 2: a second run where $script:PrComments now contains BOTH the
+            # prior degraded tombstone AND a prior MAIN cost-pattern-data comment
+            # with a 'complete' classification and a populated (non-zero token)
+            # render — the same populated-prior body shape the sibling
+            # 'does not clobber an existing populated cost-pattern-data comment'
+            # test above uses. The main comment is listed LAST so frame-credit-
+            # ledger.ps1's `Select-Object -Last 1` (line ~1864, matching the loose
+            # '<!-- cost-pattern-data' substring against ALL prior comments,
+            # including the degraded tombstone whose body also contains that
+            # substring) resolves $priorComment to this populated/complete render,
+            # not the degraded one.
+            $priorMainCostBody = "## Cost Pattern`n<!-- cost-pattern-data`nversion: 1`nsession_completeness: complete`nexcluded_from_rolling_baseline: false`ngenerated_at: 2026-04-01T00:00:00Z`nports:`n  - name: implement-code`n    tokens:`n      input: 500`n      output: 200`n      cache_creation: 0`n      cache_read: 0`nanomaly_flags: []`npr: 794`n-->"
+            $priorComments = @(
+                [pscustomobject]@{
+                    body       = $priorDegradedBody
+                    databaseId = 4001
+                    url        = 'https://github.com/example/example/issues/794#issuecomment-4001'
+                },
+                [pscustomobject]@{
+                    body       = $priorMainCostBody
+                    databaseId = 4002
+                    url        = 'https://github.com/example/example/issues/794#issuecomment-4002'
+                }
+            )
+
+            # -ClaudeMode 'partial' yields real, populated events (input:100/output:20
+            # tokens > 0) whose last assistant stop_reason is 'max_tokens', so
+            # Get-SessionCompleteness classifies the CURRENT run 'partial' while
+            # @($costEvents).Count -gt 0. Combined with the prior's 'complete'
+            # classification and populated tokens, Resolve-CostDataPreservation's
+            # completeness-fallback branch resolves use_prior=true (NOT the
+            # populated-predicate shortcut, since both sides are populated here).
+            $step2 = & $script:InvokeDegradedTelemetryInProcess `
+                -ClaudeMode 'partial' -CopilotMode 'empty' -ProjectsRootAbsent $false `
+                -HeadRefName 'feature/issue-794-orchestrate-credit-harvest' `
+                -Comments $priorComments
+
+            # The main ledger comment must show the prior's preserved render (proves
+            # use_prior actually resolved true for this scenario, not false).
+            $step2.Result.Comment | Should -Match '2026-04-01T00:00:00Z' -Because 'use_prior=true must reuse the prior populated render verbatim in the main ledger comment'
+
+            # The retraction must STILL fire even though the branch below it took the
+            # use_prior=true path — this is the exact case the pre-hoist code (nested
+            # inside the use_prior=false branch) would have missed.
+            $recovery = @($step2.PostedComments | Where-Object { $_ -match 'cost-pattern-data-degraded-794' })
+            $recovery.Count | Should -Be 1 -Because 'the retraction guard must fire whenever real cost events are found and a prior degraded comment exists, independent of which cost-section-rendering branch (use_prior true or false) the run takes'
+            $recovery[0] | Should -Match 'Telemetry recovered' -Because 'the retraction body must read as recovered even on the use_prior=true path'
+            $recovery[0] | Should -Not -Match 'excluded_from_rolling_baseline: true' -Because 'the recovery tombstone is a short notice, not a re-post of the original degraded schema body'
+        }
+
+        It 'still fails open to a complete run (no crash, no false auto-post) when the Claude walker throws (ClaudeMode=throw)' {
+            # No sibling test in this file exercises the walker's hard-failure path
+            # (ClaudeMode 'throw') even though the ValidateSet declares it. Read
+            # frame-credit-ledger.ps1 ~lines 1817-1822: when the Claude walker's
+            # Failed flag is true AND Copilot produced zero fallback events, the
+            # cost-composition block deliberately `throw`s
+            # ('Claude cost walker failed and no Copilot events were available for
+            # fallback attribution'), which is caught by the outer try/catch at
+            # ~line 2038 — that catch sets $costSection = '' and logs to stderr,
+            # WITHOUT reaching the AC6 auto-post block (lines 2015-2035), because
+            # that block lives inside the same aborted try. So the correct
+            # fail-open assertion here is: the run completes and returns a comment
+            # (no uncaught exception escapes Invoke-FrameCreditLedger), while NO
+            # standalone degraded comment is posted for this specific combination
+            # — the inverse of the 'timeout'/'empty' cases, which fail open by
+            # completing $costSection=''s sibling branch differently (they do not
+            # hit the same hard throw, since Failed stays false there).
+            $ip = & $script:InvokeDegradedTelemetryInProcess `
+                -ClaudeMode 'throw' -CopilotMode 'empty' -ProjectsRootAbsent $false `
+                -HeadRefName 'feature/issue-794-orchestrate-credit-harvest'
+
+            $ip.Result | Should -Not -BeNullOrEmpty -Because 'a hard walker failure must still fail open to a completed run rather than an uncaught exception escaping Invoke-FrameCreditLedger'
+            $ip.Result.Comment | Should -Not -BeNullOrEmpty -Because 'the main frame-credit-ledger comment must still be composed even though the cost section itself is dropped'
+
+            $degraded = @($ip.PostedComments | Where-Object { $_ -match 'cost-pattern-data-degraded-794' })
+            $degraded.Count | Should -Be 0 -Because 'the hard-throw path never reaches the AC6 auto-post block — it is caught by the outer composition try/catch before that code runs'
         }
     }
 }

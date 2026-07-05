@@ -1932,6 +1932,37 @@ function Invoke-FrameCreditLedger {
             # an empty walk from overwriting a populated cost-pattern-data block.  Invariant: a
             # populated block is NEVER replaced by an empty one.
             $usePriorCostSection = $preservationResult['use_prior'] -eq $true
+
+            # Issue #794 review fix H (post-fix review F1): retract a stale standalone
+            # degraded-telemetry comment once real cost events show up on a later run of the
+            # same orchestrated-origin PR. Without this, the degraded comment posted elsewhere
+            # (AC6, below) persists indefinitely, misleadingly asserting "no cost events" beside
+            # real data. This check is branch-independent: it must fire whenever real events are
+            # found and a prior degraded comment exists, regardless of which cost-data-rendering
+            # path ($usePriorCostSection true or false) the rest of this function takes below --
+            # a current run can find real events while still using the prior comment's rendered
+            # section verbatim (e.g. current completeness is 'partial' while the prior comment is
+            # 'complete'), so gating this solely on the use_prior branch would miss that case.
+            # Guard mirrors the degraded-post guard's $_isOrchestrated check, but keys off real
+            # events being present rather than absent. An explicit existence check against
+            # $script:PrComments (already fetched earlier this run) avoids posting a brand-new
+            # tombstone comment when no prior degraded comment ever existed for this PR --
+            # Find-OrUpsertComment itself always posts on a zero-match lookup, so it cannot be
+            # relied on to no-op that case.
+            $degradedMarker = "<!-- cost-pattern-data-degraded-$Pr -->"
+            $priorDegradedComment = if ($null -ne $script:PrComments) {
+                @($script:PrComments | Where-Object { $_.body -like "*$degradedMarker*" }) | Select-Object -First 1
+            } else { $null }
+            if ($_isOrchestrated -and $null -ne $priorDegradedComment -and @($costEvents).Count -gt 0) {
+                try {
+                    $recoveredComment = "$degradedMarker`n_Telemetry recovered — see the main cost-pattern-data comment above for current data._"
+                    $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $degradedMarker -Body $recoveredComment
+                }
+                catch {
+                    [Console]::Error.WriteLine("frame-credit-ledger: degraded cost-pattern-data retraction failed: $($_.Exception.Message)")
+                }
+            }
+
             if ($usePriorCostSection -and $null -ne $priorComment) {
                 $priorYamlForSection = script:Get-CostPatternDataFromComment -Body $priorComment.body
                 $preservationNotice = $preservationResult['notice']

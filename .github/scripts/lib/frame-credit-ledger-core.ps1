@@ -2723,12 +2723,15 @@ function Invoke-CreditInputHarvest {
 
     $results = @()
 
-    # Fetch-once-and-share (issue #794 Bug 1, fetch-once fix): fetch the comment thread a single
-    # time up front and reuse it as the initial state for every port's iteration below, instead of
-    # each of the 4 ports independently calling Get-IssueComments for the same thread. Each port's
+    # Fetch-once-and-share (issue #794 Bug 1, fetch-once fix): rather than eagerly fetching the
+    # comment thread before the loop even starts (which wastes a gh call when every port is
+    # satisfied by an in-memory marker and never reaches the gh-fetch branch below), the fetch is
+    # lazily computed via $initialFetchResult on first entry into the gh-fetch branch, then reused
+    # as the initial state for every port's first attempt from that point on — instead of each of
+    # the remaining ports independently calling Get-IssueComments for the same thread. Each port's
     # own read-after-write retry loop may still re-fetch on subsequent attempts (attempt > 0) — the
     # shared fetch only replaces the redundant *first* fetch per port.
-    $script:InitialFetchResult = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
+    $initialFetchResult = $null
 
     foreach ($port in $script:PipelineEntryPorts) {
         # Use in-memory marker when available (bypasses gh for this port).
@@ -2770,10 +2773,17 @@ function Invoke-CreditInputHarvest {
         $comments = @()
         $ghFetchSucceeded = $false
 
+        # Lazily compute the shared fetch on first need (this is the first port to actually reach
+        # the gh-fetch branch); subsequent ports reuse it below on their own first attempt instead
+        # of each independently calling Get-IssueComments for the same thread.
+        if ($null -eq $initialFetchResult) {
+            $initialFetchResult = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
+        }
+
         while ($attempt -le $MaxRetries) {
-            # Reuse the shared up-front fetch on the first attempt for every port (fetch-once);
+            # Reuse the shared fetch on the first attempt for every port (fetch-once);
             # only re-fetch fresh on subsequent retry attempts (read-after-write polling).
-            $fetchResult = if ($attempt -eq 0) { $script:InitialFetchResult } else { script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath }
+            $fetchResult = if ($attempt -eq 0) { $initialFetchResult } else { script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath }
             $comments = @($fetchResult.Comments)
             $ghFetchSucceeded = [bool]$fetchResult.Reachable
             $completionPresent = $comments | Where-Object { $_ -like "*$completionMarker*" }

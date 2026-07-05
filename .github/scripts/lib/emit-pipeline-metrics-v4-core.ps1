@@ -58,13 +58,13 @@ function script:Resolve-EmitV4Repo {
             return $candidate
         }
     } catch {
-        # fall through to git-remote parse
+        Write-Verbose "Resolve-EmitV4Repo: gh repo view failed -- $($_.Exception.Message); falling through to git-remote parse."
     }
 
     try {
         $remoteUrl = git remote get-url origin 2>$null
         if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($remoteUrl)) {
-            $match = [regex]::Match($remoteUrl, 'github\.com[:/](.+?)(?:\.git)?$')
+            $match = [regex]::Match($remoteUrl, 'github\.com[:/](.+?)(?:\.git)?/?$')
             if ($match.Success) {
                 $candidate = $match.Groups[1].Value.Trim()
                 if ($candidate -notmatch '^[A-Za-z0-9_.\-]+/[A-Za-z0-9_.\-]+$') { return $null }
@@ -72,7 +72,7 @@ function script:Resolve-EmitV4Repo {
             }
         }
     } catch {
-        # both paths failed -- return $null, caller warns and skips.
+        Write-Verbose "Resolve-EmitV4Repo: git-remote parse failed -- $($_.Exception.Message); returning null (caller warns and skips)."
     }
 
     return $null

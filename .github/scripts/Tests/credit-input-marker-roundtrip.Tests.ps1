@@ -366,6 +366,63 @@ evidence: "issue #442; in-memory path"
         $row | Should -Not -BeNullOrEmpty
         $row.port | Should -Be 'design'
     }
+
+    It 'never calls gh when every port is satisfied in-memory (lazy-fetch regression lock, issue #794 Fix A)' {
+        if (-not (Get-Command Invoke-CreditInputHarvest -ErrorAction SilentlyContinue)) {
+            Set-ItResult -Skipped -Because 'Invoke-CreditInputHarvest not available'
+            return
+        }
+
+        # Build both a credit-input marker AND its completion marker, in-memory, for ALL FOUR
+        # pipeline-entry ports (experience, design, plan, orchestration) — this is required to hit
+        # the line-2747 in-memory `continue` branch for every port and never fall through to the
+        # gh-fetch path (frame-credit-ledger-core.ps1's $inMemoryByPort + $inMemoryCompletionByPort
+        # guard). If even one port lacked an in-memory completion marker, it would fall through to
+        # Get-IssueComments and this test would (correctly) start failing again.
+        $completionMarkerMap = @{
+            'experience'    = "<!-- experience-owner-complete-$script:IssueId -->"
+            'design'        = "<!-- design-phase-complete-$script:IssueId -->"
+            'plan'          = "<!-- plan-issue-$script:IssueId -->"
+            'orchestration' = "<!-- engagement-record-orchestration-$script:IssueId -->"
+        }
+
+        $inMemoryMarkers = @()
+        foreach ($port in @('experience', 'design', 'plan', 'orchestration')) {
+            $inMemoryMarkers += @"
+<!-- credit-input-$port-$script:IssueId -->
+``````yaml
+port: $port
+adapter: work-adapter
+evidence: "issue #442; fully in-memory path"
+``````
+"@
+            $inMemoryMarkers += $completionMarkerMap[$port]
+        }
+
+        # Observable counting mock (same helper used by the Step 9k fetch-once test) instead of a
+        # nonexistent-path sentinel, so the assertion is a positive proof of zero invocations rather
+        # than an incidental crash-on-missing-executable. Under the pre-fix EAGER behavior (Bug/CR3:
+        # the shared comment-thread fetch always ran once before the port loop, regardless of whether
+        # any port actually needed gh), this counter would be >= 1. Under Code-Smith's lazy-fetch fix,
+        # the fetch is only triggered on first entry into the gh-fetch branch — which never happens
+        # here because every port is satisfied in-memory — so the counter must stay 0.
+        $counterPath = Join-Path $script:TempDir 'gh-call-counter-step9e.txt'
+        if (Test-Path $counterPath) { Remove-Item $counterPath -Force }
+        $mockPath = Join-Path $script:TempDir 'gh-counting-step9e.ps1'
+        script:Write-CountingMockGh -ScriptPath $mockPath -Pages @(, @('Just a regular comment.')) -CounterPath $counterPath
+
+        $result = Invoke-CreditInputHarvest `
+            -IssueNumber     $script:IssueId `
+            -Repo            $script:Repo `
+            -GhCliPath       $mockPath `
+            -InMemoryMarkers $inMemoryMarkers `
+            -MaxRetries      0
+
+        @($result).Count | Should -Be 4 -Because 'all four ports should have produced a credit row from in-memory data alone'
+
+        $callCount = if (Test-Path $counterPath) { [int](Get-Content $counterPath -Raw) } else { 0 }
+        $callCount | Should -Be 0 -Because 'every port is satisfied in-memory, so the lazy shared fetch must never trigger — the pre-fix eager fetch would have made this >= 1'
+    }
 }
 
 # ---------------------------------------------------------------------------
