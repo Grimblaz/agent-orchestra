@@ -143,7 +143,11 @@ function script:Get-FCLScalar {
         $last = $value[$value.Length - 1]
         if ($first -eq '"' -and $last -eq '"') {
             $value = $value.Substring(1, $value.Length - 2)
-            $value = $value -replace '""', '"'  # YAML double-quoted scalar: "" is a literal "
+            # YAML double-quoted scalar: unescape \\ to a literal backslash first,
+            # then \" to a literal " (reverse of the writer's escape order in
+            # Escape-FCLScalar, which escapes \ before " — see issue #812).
+            $value = $value -replace '\\\\', '\'
+            $value = $value -replace '\\"', '"'
         } elseif ($first -eq "'" -and $last -eq "'") {
             $value = $value.Substring(1, $value.Length - 2)
         }
@@ -259,7 +263,11 @@ function script:ConvertFrom-FCLListSection {
                         $first = $val[0]; $last = $val[$val.Length - 1]
                         if ($first -eq '"' -and $last -eq '"') {
                             $val = $val.Substring(1, $val.Length - 2)
-                            $val = $val -replace '""', '"'
+                            # YAML double-quoted scalar: unescape \\ to a literal
+                            # backslash first, then \" to a literal " (reverse of
+                            # the writer's escape order — see issue #812).
+                            $val = $val -replace '\\\\', '\'
+                            $val = $val -replace '\\"', '"'
                         } elseif ($first -eq "'" -and $last -eq "'") {
                             $val = $val.Substring(1, $val.Length - 2)
                         }
@@ -282,7 +290,11 @@ function script:ConvertFrom-FCLListSection {
                     $first = $val[0]; $last = $val[$val.Length - 1]
                     if ($first -eq '"' -and $last -eq '"') {
                         $val = $val.Substring(1, $val.Length - 2)
-                        $val = $val -replace '""', '"'
+                        # YAML double-quoted scalar: unescape \\ to a literal
+                        # backslash first, then \" to a literal " (reverse of
+                        # the writer's escape order — see issue #812).
+                        $val = $val -replace '\\\\', '\'
+                        $val = $val -replace '\\"', '"'
                     } elseif ($first -eq "'" -and $last -eq "'") {
                         $val = $val.Substring(1, $val.Length - 2)
                     }
@@ -2966,8 +2978,14 @@ function New-PipelineMetricsV4Block {
 
         if ($needsQuoting) {
             if ($v.Contains("'")) {
-                # Use double-quote wrapping; YAML double-quoted scalars use "" (not \") for literal "
-                $v = $v -replace '"', '""'
+                # Use double-quote wrapping; YAML double-quoted scalars escape a
+                # literal backslash as \\ and a literal " as \" (escape the
+                # backslash first so the \" introduced below isn't re-escaped).
+                # Note: in PowerShell's -replace, a replacement string of '\\'
+                # (two backslash chars) already emits a literal \\ — '\\\\'
+                # (four chars) would double-escape and emit four backslashes.
+                $v = $v -replace '\\', '\\'
+                $v = $v -replace '"', '\"'
                 return '"' + $v + '"'
             }
             return "'" + $v + "'"
