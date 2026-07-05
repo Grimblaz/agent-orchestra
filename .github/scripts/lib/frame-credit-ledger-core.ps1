@@ -1179,7 +1179,15 @@ function ConvertFrom-JudgeRulingsComment {
 #   Evidence            — custom evidence string; auto-generated when absent
 #
 # Returns a pscustomobject shaped for direct emission into credits[]:
-#   port, adapter, status, run_index, evidence, judge-score, integrity-check
+#   port, adapter, status, run_index, evidence, terminal-step-id (conditional)
+#
+# Scalar-safe shape (issue #794 Step s5 — Bug 2 fix (b)): the judge-score and
+# integrity-check fields used to be nested pscustomobjects, but
+# Render-FCLCreditEntry only handles scalar values for unrecognized fields —
+# nested objects were being stringified into corrupted YAML (e.g.
+# "judge-score: @{ruling=passed; findings=System.Object[]}"). Both nested
+# fields are folded into the flat `evidence` string as human-readable prose
+# instead of being emitted as structured (and reader-incompatible) keys.
 
 function script:Add-FCLTerminalStepId {
     param(
@@ -1342,37 +1350,35 @@ function Build-ReviewCreditRow {
 
     # Evidence string.
     $sustainedCount = @($findings | Where-Object { [string]$_.judge_ruling -eq 'sustained' }).Count
+
+    # Integrity contract from adapter frontmatter (optional live lookup).
+    # No legacy compatibility shim for pass-blocks is needed here because this
+    # builder reads current-tree adapter frontmatter, not historical PR bodies.
+    $integrityContract = script:Resolve-FCLReviewIntegrityContract -AdapterName $AdapterName -AdaptersDir $AdaptersDir
+    $prosecutionPassesText = if (@($integrityContract.ProsecutionPasses).Count -gt 0) {
+        (@($integrityContract.ProsecutionPasses) -join ',')
+    }
+    else {
+        'none'
+    }
+
+    # Fold the former judge-score and integrity-check nested fields into
+    # human-readable prose on the flat evidence string (scalar-safe shape —
+    # see the Build-ReviewCreditRow header comment for rationale).
     $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) {
         $Evidence
     }
     else {
         "Review completed; $sustainedCount finding(s) sustained, status: $status."
     }
-
-    # Integrity contract from adapter frontmatter (optional live lookup).
-    # No legacy compatibility shim for pass-blocks is needed here because this
-    # builder reads current-tree adapter frontmatter, not historical PR bodies.
-    $integrityContract = script:Resolve-FCLReviewIntegrityContract -AdapterName $AdapterName -AdaptersDir $AdaptersDir
+    $resolvedEvidence += "; judge ruling: $status, $sustainedCount finding(s) sustained; integrity: $prosecutionPassesText passes, status $($integrityContract.IntegrityStatus)"
 
     $row = [pscustomobject]@{
-        port             = 'review'
-        adapter          = $AdapterName
-        status           = $status
-        run_index        = $RunIndex
-        evidence         = $resolvedEvidence
-        'judge-score'    = [pscustomobject]@{
-            ruling   = $status
-            findings = @($findings | ForEach-Object {
-                [pscustomobject]@{
-                    id     = [string]$_.id
-                    ruling = [string]$_.judge_ruling
-                }
-            })
-        }
-        'integrity-check' = [pscustomobject]@{
-            'prosecution-passes' = $integrityContract.ProsecutionPasses
-            status               = $integrityContract.IntegrityStatus
-        }
+        port      = 'review'
+        adapter   = $AdapterName
+        status    = $status
+        run_index = $RunIndex
+        evidence  = $resolvedEvidence
     }
 
     return script:Add-FCLTerminalStepId -Row $row -Step $Step
