@@ -36,6 +36,18 @@
     appended to it so the final file contains both the human-readable PR content
     AND the metrics block. On failure the rich body is still written followed by
     the sentinel so Closes #N always survives in the shipped PR body.
+
+.PARAMETER Repo
+    Repository in 'owner/name' form, used for the marker-harvest branch's gh
+    calls (issue #794 s2). When not supplied, derived via 'gh repo view' then
+    via 'git remote get-url origin' parsing.
+
+.PARAMETER GhCliPath
+    Path to the gh CLI executable. Defaults to 'gh'. Overridable for test
+    injection.
+
+.PARAMETER SkipMarkerHarvest
+    Bypasses the SMC-17 marker-harvest branch entirely.
 #>
 [CmdletBinding()]
 param(
@@ -44,7 +56,10 @@ param(
     [pscustomobject[]]$Credits = @(),
     [pscustomobject[]]$DispatchCostSamples = @(),
     [int]$IssueNumber = 0,
-    [string]$RichBody = ''
+    [string]$RichBody = '',
+    [string]$Repo = '',
+    [string]$GhCliPath = 'gh',
+    [switch]$SkipMarkerHarvest
 )
 
 . (Join-Path $PSScriptRoot 'lib/emit-pipeline-metrics-v4-core.ps1')
@@ -55,6 +70,9 @@ $result = Invoke-PipelineMetricsV4Emit `
     -Credits $Credits `
     -DispatchCostSamples $DispatchCostSamples `
     -IssueNumber $IssueNumber `
-    -RichBody $RichBody
+    -RichBody $RichBody `
+    -Repo $Repo `
+    -GhCliPath $GhCliPath `
+    -SkipMarkerHarvest:$SkipMarkerHarvest
 
 exit $result.ExitCode

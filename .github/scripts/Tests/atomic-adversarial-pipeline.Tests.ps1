@@ -368,8 +368,13 @@ Describe 'Atomic adversarial pipeline structural contract' {
             $integrityBlock | Should -Match "AdapterName\s+-in\s+@\([^\)]*'post-fix'"
             $integrityBlock | Should -Match "post-fix(?s).*@\(1\)|@\(1\)(?s).*post-fix"
             $functionBlock | Should -Not -BeNullOrEmpty
-            $functionBlock | Should -Match 'prosecution-passes'
-            $functionBlock | Should -Match "'prosecution-passes'\s*="
+            # Scalar-safe shape (issue #794 Step s5): Build-ReviewCreditRow no longer emits a
+            # nested 'integrity-check' = @{ 'prosecution-passes' = ... } hashtable literal
+            # (Render-FCLCreditEntry stringifies unrecognized nested objects into corrupted
+            # YAML). The prosecution-passes value is still read from the integrity contract
+            # and folded into the flat evidence string as human-readable prose instead.
+            $functionBlock | Should -Match 'ProsecutionPasses'
+            $functionBlock | Should -Match 'prosecutionPassesText'
             $functionBlock | Should -Match 'Resolve-FCLReviewIntegrityContract'
         }
 

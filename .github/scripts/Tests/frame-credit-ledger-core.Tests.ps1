@@ -2385,3 +2385,39 @@ Describe 'Test-PipelineMetricsV4Block' {
         $result.Valid | Should -Be $false
     }
 }
+
+Describe 'Test-FCLYamlSane (issue #813 finding N2 regression)' {
+
+    # N2 bug: the old greedy `\"`-strip scanner consumed a genuine trailing
+    # escaped backslash (`\\`) immediately before the real closing quote and
+    # lost track of where the double-quoted scalar actually ended, causing a
+    # validly Escape-FCLScalar-escaped value to be misclassified as malformed.
+    # The fix replaced the greedy strip with the scanner regex
+    # '^"(?:[^\\"]|\\.)*"', which correctly walks escaped-pair vs. literal-char
+    # runs instead of blindly consuming trailing backslash-quote sequences.
+
+    It 'accepts a real Escape-FCLScalar-produced value containing an apostrophe and a trailing literal backslash' {
+        # Build the exact escaped line the way production code does: run the
+        # value through the real builder (which calls Escape-FCLScalar
+        # internally) rather than hand-crafting the escaped YAML text, so this
+        # test proves the fix against the actual escaping contract.
+        $credit = @{ port = 'review'; adapter = 'standard'; evidence = "it's C:\a\" }
+        $block = New-PipelineMetricsV4Block -V3BaseYaml 'pr_number: 1' -Credits @($credit)
+
+        $match = [regex]::Match($block, '(?ms)<!--\s*pipeline-metrics\s*\r?\n(?<yaml>.*?)\r?\n-->')
+        $match.Success | Should -BeTrue -Because 'the rendered block must contain a pipeline-metrics YAML payload'
+
+        # Sanity: confirm the escaped line looks like the N2 bug trigger
+        # (apostrophe present, and the value ends in an escaped backslash
+        # immediately before the closing quote).
+        $match.Groups['yaml'].Value | Should -Match 'evidence: "it''s C:\\\\a\\\\"'
+
+        Test-FCLYamlSane -Text $match.Groups['yaml'].Value | Should -Be $true
+    }
+
+    It 'rejects a genuinely unterminated double-quoted scalar (proves the scanner regex did not become a rubber stamp)' {
+        $text = "port: review`nevidence: `"this value never closes its quote"
+
+        Test-FCLYamlSane -Text $text | Should -Be $false
+    }
+}

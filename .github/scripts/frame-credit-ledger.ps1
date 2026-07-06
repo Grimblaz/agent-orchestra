@@ -4,7 +4,8 @@
     Frame credit-ledger orchestrator (issue #429).
 
 .DESCRIPTION
-    Pre-PR warn hook that:
+    Post-PR-creation warn hook (driven by the `frame-enforce.yml` GitHub Actions
+    workflow after `gh pr create`) that:
       1. Resolves the PR baseRefOid (with bounded retry).
       2. Fetches the PR body.
       3. Detects the pipeline-metrics block and short-circuits on pre-v4.
@@ -1077,6 +1078,29 @@ function script:Get-FCLCostWalkerTimeoutSeconds {
     return $DefaultSeconds
 }
 
+# Issue #794 s4 (sub-observation 4): detects the `frame-enforce.yml` CI landmine
+# case (documented at that workflow's "Run frame credit enforce" step) where
+# ~/.claude/projects — the Claude cost-transcript root Invoke-CostTranscriptWalk
+# defaults to — does not exist on ubuntu-latest. This is the SAME root
+# Invoke-CostTranscriptWalk resolves internally when no -ProjectsRoot is
+# supplied (cost-walker.ps1 line ~374); we re-resolve it here rather than
+# threading a new return value through the walker, so the walker's own
+# multi-turn traversal logic (out of scope; re-homed to #491) is untouched.
+# Test-only override mirrors the existing FRAME_CREDIT_LEDGER_TEST_* convention
+# so Pester can simulate both the present-and-empty and absent-root cases
+# deterministically without touching the real user profile.
+function script:Test-FCLClaudeProjectsRootAbsent {
+    $testOverride = [Environment]::GetEnvironmentVariable('FRAME_CREDIT_LEDGER_TEST_CLAUDE_PROJECTS_ROOT', 'Process')
+    $projectsRoot = if (-not [string]::IsNullOrWhiteSpace($testOverride)) {
+        $testOverride
+    }
+    else {
+        Join-Path ([System.Environment]::GetFolderPath('UserProfile')) '.claude' 'projects'
+    }
+
+    return -not (Test-Path -LiteralPath $projectsRoot -PathType Container)
+}
+
 function script:Get-FCLCostEventProviderSet {
     param([AllowEmptyCollection()][object[]]$Events)
 
@@ -1179,6 +1203,11 @@ function script:Set-FCLCostCoverageMetadata {
     $unmappedSessionCount = script:Get-FCLCostUnmappedSessionCount -Warnings $copilotWarnings
     $copilotTimedOut = ($null -ne $CopilotWalk -and $CopilotWalk.TimedOut -eq $true)
     $copilotFailed = ($null -ne $CopilotWalk -and $CopilotWalk.Failed -eq $true)
+    # Issue #794 s4 (sub-observation 4): the #790 recurrence was specifically a
+    # CLAUDE walker timeout — read Claude's own TimedOut/Failed flags too, not
+    # only Copilot's, so degraded_reason below can be derived from EITHER walker.
+    $claudeTimedOut = ($null -ne $ClaudeWalk -and $ClaudeWalk.TimedOut -eq $true)
+    $claudeFailed = ($null -ne $ClaudeWalk -and $ClaudeWalk.Failed -eq $true)
 
     $installStatus = 'ok'
     if ([string]::IsNullOrWhiteSpace($CopilotOtelJsonlPath) -or -not (Test-Path -LiteralPath $CopilotOtelJsonlPath -PathType Leaf)) {
@@ -1192,10 +1221,83 @@ function script:Set-FCLCostCoverageMetadata {
 
     if ($providers.Count -eq 0) { $providers = @('claude') }
 
+    # Issue #794 s4: typed degraded_reason, populated ONLY when coverage is
+    # actually degraded (no events attributed at all). Priority order:
+    #   1. env-absent          — the CI landmine (root literally absent); this
+    #                            is expected/routine, not a genuine anomaly.
+    #   2. budget-exceeded     — either walker genuinely timed out.
+    #   3. no-transcript-found — root exists, walk completed, found nothing.
+    $degradedReason = $null
+    if ($Events.Count -eq 0) {
+        if (script:Test-FCLClaudeProjectsRootAbsent) {
+            $degradedReason = 'env-absent'
+        }
+        elseif ($claudeTimedOut -or $copilotTimedOut) {
+            $degradedReason = 'budget-exceeded'
+        }
+        elseif ($claudeFailed -or $copilotFailed) {
+            $degradedReason = 'budget-exceeded'
+        }
+        else {
+            $degradedReason = 'no-transcript-found'
+        }
+    }
+
     $Attribution['coverage'] = $coverage
     $Attribution['install_status'] = $installStatus
     $Attribution['unmapped_session_count'] = $unmappedSessionCount
     $Attribution['provider_support'] = [string[]]$providers
+    $Attribution['degraded_reason'] = $degradedReason
+}
+
+# Issue #794 s4 (Part 2 / AC6): composes a schema-valid degraded-honest
+# cost-pattern-data comment for orchestrated-origin PRs where the walker
+# genuinely found no telemetry. Reuses the existing 'claude-only' coverage
+# value (the value Set-FCLCostCoverageMetadata already assigns for a fully
+# empty walk) rather than inventing a new enum member — see
+# lib/cost-pattern-data-schema.md `coverage` field for the authoritative enum.
+function script:Compose-FCLDegradedCostComment {
+    param(
+        [Parameter(Mandatory)][string]$DegradedReason,
+        [Parameter(Mandatory)][int]$Pr,
+        [Parameter(Mandatory)][string]$Branch
+    )
+
+    $inv = [System.Globalization.CultureInfo]::InvariantCulture
+    $generatedAt = [System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', $inv)
+
+    # Distinct discovery marker (own hidden comment line) so Find-OrUpsertComment's
+    # substring lookup identifies THIS standalone degraded comment across re-runs
+    # without colliding with the bare '<!-- cost-pattern-data' substring that is
+    # always embedded inside the main frame-credit-ledger-{Pr} comment (Format-
+    # CostPatternYaml unconditionally emits that literal, even for empty walks).
+    # Kept on its own line (not appended to the YAML open tag) because
+    # Get-CostPatternDataFromComment's extraction regex requires a newline
+    # directly after 'cost-pattern-data' with nothing else on that line.
+    $discoveryMarker = "<!-- cost-pattern-data-degraded-$Pr -->"
+
+    $markdown = @(
+        '## Cost Pattern',
+        '',
+        "coverage: claude-only",
+        "⚠ degraded telemetry: $DegradedReason — no cost events were attributed to this PR."
+    ) -join "`n"
+
+    $yaml = @(
+        '<!-- cost-pattern-data',
+        'version: 1',
+        'coverage: claude-only',
+        'session_completeness: unknown',
+        'excluded_from_rolling_baseline: true',
+        "degraded_reason: $DegradedReason",
+        "generated_at: $generatedAt",
+        'phase_scope: branch-session-only',
+        "pr: $Pr",
+        "branch: $Branch",
+        '-->'
+    ) -join "`n"
+
+    return $discoveryMarker + "`n`n" + $markdown + "`n`n" + $yaml
 }
 
 function script:Get-FCLRemainingCostBudgetSeconds {
@@ -1284,12 +1386,34 @@ function Invoke-FrameCreditLedger {
 
     # 3a. Compute orchestrated-origin context using the CI-safe predicate (s1).
     # PRIMARY: $env:GITHUB_HEAD_REF (populated on pull_request events; never 'HEAD').
+    # FALLBACK (s3, issue #794 sub-observation 2): when GITHUB_HEAD_REF is empty
+    # or the literal 'HEAD' (local/manual runs never populate it), resolve the
+    # head ref via `gh pr view` before falling back further to the PR-body
+    # signal fallback inside Get-FCLOriginContext itself. This call site is the
+    # only place that talks to `gh` for this purpose — Get-FCLOriginContext
+    # stays a pure, no-gh predicate. Fail-quiet: if `gh pr view` errors or
+    # returns nothing usable, leave $_prHeadRef exactly as it was and fall
+    # through to Get-FCLOriginContext's existing body-signal fallback, exactly
+    # as today. Never throw — this whole hook is warn-only.
     # FALLBACK: PR body linked-issue signals.
     # If Get-FCLOriginContext is unavailable (predicate not dot-sourced), default
     # to $false — safe: fails quiet, never produces false-FAILED posts.
     $_isOrchestrated = $false
     if (Get-Command 'Get-FCLOriginContext' -ErrorAction SilentlyContinue) {
         $_prHeadRef = $env:GITHUB_HEAD_REF
+        if ([string]::IsNullOrWhiteSpace($_prHeadRef) -or $_prHeadRef -eq 'HEAD') {
+            try {
+                $_resolvedHeadRefJson = & gh pr view $Pr --json headRefName --jq '.headRefName' 2>$null
+                if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($_resolvedHeadRefJson)) {
+                    $_prHeadRef = ([string]$_resolvedHeadRefJson).Trim()
+                }
+            }
+            catch {
+                $null = $_
+                # fail quiet — leave $_prHeadRef as-is and fall through to the
+                # body-signal fallback inside Get-FCLOriginContext.
+            }
+        }
         $_originCtx = Get-FCLOriginContext -HeadRef $_prHeadRef -PrBody $prBody
         $_isOrchestrated = [bool]$_originCtx.IsOrchestratedOrigin
     }
@@ -1808,6 +1932,37 @@ function Invoke-FrameCreditLedger {
             # an empty walk from overwriting a populated cost-pattern-data block.  Invariant: a
             # populated block is NEVER replaced by an empty one.
             $usePriorCostSection = $preservationResult['use_prior'] -eq $true
+
+            # Issue #794 review fix H (post-fix review F1): retract a stale standalone
+            # degraded-telemetry comment once real cost events show up on a later run of the
+            # same orchestrated-origin PR. Without this, the degraded comment posted elsewhere
+            # (AC6, below) persists indefinitely, misleadingly asserting "no cost events" beside
+            # real data. This check is branch-independent: it must fire whenever real events are
+            # found and a prior degraded comment exists, regardless of which cost-data-rendering
+            # path ($usePriorCostSection true or false) the rest of this function takes below --
+            # a current run can find real events while still using the prior comment's rendered
+            # section verbatim (e.g. current completeness is 'partial' while the prior comment is
+            # 'complete'), so gating this solely on the use_prior branch would miss that case.
+            # Guard mirrors the degraded-post guard's $_isOrchestrated check, but keys off real
+            # events being present rather than absent. An explicit existence check against
+            # $script:PrComments (already fetched earlier this run) avoids posting a brand-new
+            # tombstone comment when no prior degraded comment ever existed for this PR --
+            # Find-OrUpsertComment itself always posts on a zero-match lookup, so it cannot be
+            # relied on to no-op that case.
+            $degradedMarker = "<!-- cost-pattern-data-degraded-$Pr -->"
+            $priorDegradedComment = if ($null -ne $script:PrComments) {
+                @($script:PrComments | Where-Object { $_.body -like "*$degradedMarker*" }) | Select-Object -First 1
+            } else { $null }
+            if ($_isOrchestrated -and $null -ne $priorDegradedComment -and @($costEvents).Count -gt 0) {
+                try {
+                    $recoveredComment = "$degradedMarker`n_Telemetry recovered — see the main cost-pattern-data comment above for current data._"
+                    $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker $degradedMarker -Body $recoveredComment
+                }
+                catch {
+                    [Console]::Error.WriteLine("frame-credit-ledger: degraded cost-pattern-data retraction failed: $($_.Exception.Message)")
+                }
+            }
+
             if ($usePriorCostSection -and $null -ne $priorComment) {
                 $priorYamlForSection = script:Get-CostPatternDataFromComment -Body $priorComment.body
                 $preservationNotice = $preservationResult['notice']
@@ -1862,6 +2017,28 @@ function Invoke-FrameCreditLedger {
                     $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$costBranch)
                     $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$costBranch)
                     $costSection = $costMarkdown + "`n" + $costYaml
+                }
+
+                # Issue #794 s4 (Part 2 / AC6): auto-post a degraded-honest cost-pattern-data
+                # comment when the walker genuinely found no telemetry for an orchestrated-origin
+                # PR. Sits downstream of the non-clobber guard above ($usePriorCostSection is
+                # $false here, meaning either there is no prior comment, or the current data is
+                # allowed to win) — a real walk with events, or a populated prior comment, always
+                # wins and this branch never fires for those cases (6f/6g only run at all when
+                # $costEvents is non-empty OR there is no populated prior to protect).
+                # env-absent is intentionally EXCLUDED — it is the expected/routine CI shape
+                # (frame-enforce.yml on ubuntu-latest, see workflow's landmine comment), not a
+                # genuine anomaly worth an auto-posted comment.
+                $degradedReasonForPost = [string]$costAttribution['degraded_reason']
+                $genuineDegradation = $degradedReasonForPost -in @('budget-exceeded', 'no-transcript-found')
+                if ($_isOrchestrated -and $genuineDegradation -and @($costEvents).Count -eq 0) {
+                    try {
+                        $degradedComment = script:Compose-FCLDegradedCostComment -DegradedReason $degradedReasonForPost -Pr $Pr -Branch ([string]$costBranch)
+                        $null = Find-OrUpsertComment -Type 'pr' -Number $Pr -Marker "<!-- cost-pattern-data-degraded-$Pr -->" -Body $degradedComment
+                    }
+                    catch {
+                        [Console]::Error.WriteLine("frame-credit-ledger: degraded cost-pattern-data post failed: $($_.Exception.Message)")
+                    }
                 }
             }
         }
