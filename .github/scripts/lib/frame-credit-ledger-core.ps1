@@ -143,7 +143,11 @@ function script:Get-FCLScalar {
         $last = $value[$value.Length - 1]
         if ($first -eq '"' -and $last -eq '"') {
             $value = $value.Substring(1, $value.Length - 2)
-            $value = $value -replace '""', '"'  # YAML double-quoted scalar: "" is a literal "
+            # YAML double-quoted scalar: unescape \\ to a literal backslash first,
+            # then \" to a literal " (reverse of the writer's escape order in
+            # Escape-FCLScalar, which escapes \ before " — see issue #812).
+            $value = $value -replace '\\\\', '\'
+            $value = $value -replace '\\"', '"'
         } elseif ($first -eq "'" -and $last -eq "'") {
             $value = $value.Substring(1, $value.Length - 2)
         }
@@ -181,10 +185,13 @@ function script:Test-FCLYamlSane {
 
         $afterColon = $stripped.Substring($colonIdx + 1).Trim()
         if ($afterColon.StartsWith('"')) {
-            # Must close the double quote (not counting an escaped \").
-            $rest = $afterColon.Substring(1)
-            $unescaped = $rest -replace '\\"', ''
-            if ($unescaped -notmatch '"') {
+            # Must be a well-formed double-quoted scalar: opening quote, a run of
+            # (any char that isn't backslash or quote) or (a backslash-escaped
+            # pair), then a closing quote. A naive greedy strip-then-check of
+            # `\"` occurrences misclassifies values whose real closing quote is
+            # preceded by an even number of backslashes (e.g. a genuine escaped
+            # trailing backslash) — see issue #813 finding N2.
+            if ($afterColon -notmatch '^"(?:[^\\"]|\\.)*"') {
                 return $false
             }
         }
@@ -259,7 +266,11 @@ function script:ConvertFrom-FCLListSection {
                         $first = $val[0]; $last = $val[$val.Length - 1]
                         if ($first -eq '"' -and $last -eq '"') {
                             $val = $val.Substring(1, $val.Length - 2)
-                            $val = $val -replace '""', '"'
+                            # YAML double-quoted scalar: unescape \\ to a literal
+                            # backslash first, then \" to a literal " (reverse of
+                            # the writer's escape order — see issue #812).
+                            $val = $val -replace '\\\\', '\'
+                            $val = $val -replace '\\"', '"'
                         } elseif ($first -eq "'" -and $last -eq "'") {
                             $val = $val.Substring(1, $val.Length - 2)
                         }
@@ -282,7 +293,11 @@ function script:ConvertFrom-FCLListSection {
                     $first = $val[0]; $last = $val[$val.Length - 1]
                     if ($first -eq '"' -and $last -eq '"') {
                         $val = $val.Substring(1, $val.Length - 2)
-                        $val = $val -replace '""', '"'
+                        # YAML double-quoted scalar: unescape \\ to a literal
+                        # backslash first, then \" to a literal " (reverse of
+                        # the writer's escape order — see issue #812).
+                        $val = $val -replace '\\\\', '\'
+                        $val = $val -replace '\\"', '"'
                     } elseif ($first -eq "'" -and $last -eq "'") {
                         $val = $val.Substring(1, $val.Length - 2)
                     }
@@ -413,7 +428,19 @@ function script:Get-FCLChunkKeyMap {
 
         if ($val.Length -ge 2) {
             $first = $val[0]; $last = $val[$val.Length - 1]
-            if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+            if ($first -eq '"' -and $last -eq '"') {
+                $val = $val.Substring(1, $val.Length - 2)
+                # YAML double-quoted scalar: unescape \\ to a literal backslash
+                # first, then \" to a literal " (reverse of the writer's escape
+                # order — see issue #812). One of now 4 duplicated double-quoted-
+                # scalar decode sites in this file (Get-FCLScalar,
+                # ConvertFrom-FCLListSection x2 internal sites,
+                # ConvertTo-FCLScalarValue, Get-FCLChunkKeyMap) — candidate for a
+                # future shared Expand-FCLDoubleQuotedScalar helper (issue #813
+                # finding N1; deferred by judge ruling).
+                $val = $val -replace '\\\\', '\'
+                $val = $val -replace '\\"', '"'
+            } elseif ($first -eq "'" -and $last -eq "'") {
                 $val = $val.Substring(1, $val.Length - 2)
             }
         }
@@ -447,7 +474,19 @@ function script:ConvertTo-FCLScalarValue {
     if ($normalizedValue.Length -ge 2) {
         $first = $normalizedValue[0]
         $last = $normalizedValue[$normalizedValue.Length - 1]
-        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+        if ($first -eq '"' -and $last -eq '"') {
+            $normalizedValue = $normalizedValue.Substring(1, $normalizedValue.Length - 2)
+            # YAML double-quoted scalar: unescape \\ to a literal backslash
+            # first, then \" to a literal " (reverse of the writer's escape
+            # order — see issue #812). One of now 4 duplicated double-quoted-
+            # scalar decode sites in this file (Get-FCLScalar,
+            # ConvertFrom-FCLListSection x2 internal sites,
+            # ConvertTo-FCLScalarValue, Get-FCLChunkKeyMap) — candidate for a
+            # future shared Expand-FCLDoubleQuotedScalar helper (issue #813
+            # finding N1; deferred by judge ruling).
+            $normalizedValue = $normalizedValue -replace '\\\\', '\'
+            $normalizedValue = $normalizedValue -replace '\\"', '"'
+        } elseif ($first -eq "'" -and $last -eq "'") {
             $normalizedValue = $normalizedValue.Substring(1, $normalizedValue.Length - 2)
         }
     }
@@ -1179,7 +1218,15 @@ function ConvertFrom-JudgeRulingsComment {
 #   Evidence            — custom evidence string; auto-generated when absent
 #
 # Returns a pscustomobject shaped for direct emission into credits[]:
-#   port, adapter, status, run_index, evidence, judge-score, integrity-check
+#   port, adapter, status, run_index, evidence, terminal-step-id (conditional)
+#
+# Scalar-safe shape (issue #794 Step s5 — Bug 2 fix (b)): the judge-score and
+# integrity-check fields used to be nested pscustomobjects, but
+# Render-FCLCreditEntry only handles scalar values for unrecognized fields —
+# nested objects were being stringified into corrupted YAML (e.g.
+# "judge-score: @{ruling=passed; findings=System.Object[]}"). Both nested
+# fields are folded into the flat `evidence` string as human-readable prose
+# instead of being emitted as structured (and reader-incompatible) keys.
 
 function script:Add-FCLTerminalStepId {
     param(
@@ -1342,37 +1389,45 @@ function Build-ReviewCreditRow {
 
     # Evidence string.
     $sustainedCount = @($findings | Where-Object { [string]$_.judge_ruling -eq 'sustained' }).Count
-    $resolvedEvidence = if (-not [string]::IsNullOrWhiteSpace($Evidence)) {
-        $Evidence
-    }
-    else {
-        "Review completed; $sustainedCount finding(s) sustained, status: $status."
-    }
 
     # Integrity contract from adapter frontmatter (optional live lookup).
     # No legacy compatibility shim for pass-blocks is needed here because this
     # builder reads current-tree adapter frontmatter, not historical PR bodies.
     $integrityContract = script:Resolve-FCLReviewIntegrityContract -AdapterName $AdapterName -AdaptersDir $AdaptersDir
+    $prosecutionPassesText = if (@($integrityContract.ProsecutionPasses).Count -gt 0) {
+        (@($integrityContract.ProsecutionPasses) -join ',')
+    }
+    else {
+        'none'
+    }
+
+    # Fold the former judge-score and integrity-check nested fields into
+    # human-readable prose on the flat evidence string (scalar-safe shape —
+    # see the Build-ReviewCreditRow header comment for rationale).
+    #
+    # De-duplication (issue #794 review M15a): when $Evidence is not supplied,
+    # the auto-generated base string already states the judge ruling status and
+    # sustained-finding count, so the appended integrity clause only adds the
+    # integrity-specific details (prosecution passes, integrity status) instead
+    # of repeating "N finding(s) sustained, status: X" a second time. Custom
+    # $Evidence (caller-supplied) still gets the full judge-ruling + integrity
+    # clause appended, since the caller's text is not guaranteed to already
+    # carry that information.
+    if (-not [string]::IsNullOrWhiteSpace($Evidence)) {
+        $resolvedEvidence = $Evidence
+        $resolvedEvidence += "; judge ruling: $status, $sustainedCount finding(s) sustained; integrity: $prosecutionPassesText passes, status $($integrityContract.IntegrityStatus)"
+    }
+    else {
+        $resolvedEvidence = "Review completed; $sustainedCount finding(s) sustained, status: $status."
+        $resolvedEvidence += " integrity: $prosecutionPassesText passes, status $($integrityContract.IntegrityStatus)"
+    }
 
     $row = [pscustomobject]@{
-        port             = 'review'
-        adapter          = $AdapterName
-        status           = $status
-        run_index        = $RunIndex
-        evidence         = $resolvedEvidence
-        'judge-score'    = [pscustomobject]@{
-            ruling   = $status
-            findings = @($findings | ForEach-Object {
-                [pscustomobject]@{
-                    id     = [string]$_.id
-                    ruling = [string]$_.judge_ruling
-                }
-            })
-        }
-        'integrity-check' = [pscustomobject]@{
-            'prosecution-passes' = $integrityContract.ProsecutionPasses
-            status               = $integrityContract.IntegrityStatus
-        }
+        port      = 'review'
+        adapter   = $AdapterName
+        status    = $status
+        run_index = $RunIndex
+        evidence  = $resolvedEvidence
     }
 
     return script:Add-FCLTerminalStepId -Row $row -Step $Step
@@ -2658,8 +2713,13 @@ function Invoke-CreditInputHarvest {
         # Reachable=$true with Comments=@() means gh confirmed zero comments on the issue.
         # Reachable=$false means the fetch failed (CLI error, non-zero exit, empty raw, or parse fail).
         # The fail-open emission path in Invoke-CreditInputHarvest depends on this disambiguation.
+        #
+        # Note: 'gh issue view --json comments --paginate' is invalid — --paginate is a 'gh api'-only
+        # flag, not valid for 'gh issue view' (Bug 1, issue #794). Use 'gh api .../comments --paginate
+        # --slurp' instead, which returns an array-of-page-arrays (no '.comments' wrapper), mirroring
+        # the exemplar at gate-reconciliation-core.ps1 lines ~144-151.
         try {
-            $raw = & $Gh issue view $IssueNum --repo $RepoArg --json comments --paginate 2>$null
+            $raw = & $Gh api "repos/$RepoArg/issues/$IssueNum/comments" --paginate --slurp 2>$null
         } catch {
             return @{ Reachable = $false; Comments = @() }
         }
@@ -2668,8 +2728,13 @@ function Invoke-CreditInputHarvest {
         }
 
         try {
-            $parsed = $raw | ConvertFrom-Json
-            return @{ Reachable = $true; Comments = @($parsed.comments | ForEach-Object { $_.body }) }
+            $comments = $raw | ConvertFrom-Json
+            # Flatten the array-of-page-arrays shape returned by '--paginate --slurp' into a flat
+            # array of comment objects before reading '.body' directly (no '.comments' wrapper here).
+            if ($comments -is [array] -and $comments.Count -gt 0 -and $comments[0] -is [array]) {
+                $comments = $comments | ForEach-Object { $_ }
+            }
+            return @{ Reachable = $true; Comments = @($comments | ForEach-Object { $_.body }) }
         } catch {
             return @{ Reachable = $false; Comments = @() }
         }
@@ -2696,6 +2761,16 @@ function Invoke-CreditInputHarvest {
     }
 
     $results = @()
+
+    # Fetch-once-and-share (issue #794 Bug 1, fetch-once fix): rather than eagerly fetching the
+    # comment thread before the loop even starts (which wastes a gh call when every port is
+    # satisfied by an in-memory marker and never reaches the gh-fetch branch below), the fetch is
+    # lazily computed via $initialFetchResult on first entry into the gh-fetch branch, then reused
+    # as the initial state for every port's first attempt from that point on — instead of each of
+    # the remaining ports independently calling Get-IssueComments for the same thread. Each port's
+    # own read-after-write retry loop may still re-fetch on subsequent attempts (attempt > 0) — the
+    # shared fetch only replaces the redundant *first* fetch per port.
+    $initialFetchResult = $null
 
     foreach ($port in $script:PipelineEntryPorts) {
         # Use in-memory marker when available (bypasses gh for this port).
@@ -2737,8 +2812,17 @@ function Invoke-CreditInputHarvest {
         $comments = @()
         $ghFetchSucceeded = $false
 
+        # Lazily compute the shared fetch on first need (this is the first port to actually reach
+        # the gh-fetch branch); subsequent ports reuse it below on their own first attempt instead
+        # of each independently calling Get-IssueComments for the same thread.
+        if ($null -eq $initialFetchResult) {
+            $initialFetchResult = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
+        }
+
         while ($attempt -le $MaxRetries) {
-            $fetchResult = script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath
+            # Reuse the shared fetch on the first attempt for every port (fetch-once);
+            # only re-fetch fresh on subsequent retry attempts (read-after-write polling).
+            $fetchResult = if ($attempt -eq 0) { $initialFetchResult } else { script:Get-IssueComments -IssueNum $IssueNumber -RepoArg $Repo -Gh $GhCliPath }
             $comments = @($fetchResult.Comments)
             $ghFetchSucceeded = [bool]$fetchResult.Reachable
             $completionPresent = $comments | Where-Object { $_ -like "*$completionMarker*" }
@@ -2921,8 +3005,14 @@ function New-PipelineMetricsV4Block {
 
         if ($needsQuoting) {
             if ($v.Contains("'")) {
-                # Use double-quote wrapping; YAML double-quoted scalars use "" (not \") for literal "
-                $v = $v -replace '"', '""'
+                # Use double-quote wrapping; YAML double-quoted scalars escape a
+                # literal backslash as \\ and a literal " as \" (escape the
+                # backslash first so the \" introduced below isn't re-escaped).
+                # Note: in PowerShell's -replace, a replacement string of '\\'
+                # (two backslash chars) already emits a literal \\ — '\\\\'
+                # (four chars) would double-escape and emit four backslashes.
+                $v = $v -replace '\\', '\\'
+                $v = $v -replace '"', '\"'
                 return '"' + $v + '"'
             }
             return "'" + $v + "'"

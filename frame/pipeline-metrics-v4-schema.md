@@ -46,6 +46,15 @@ credits:
     status: passed
     run_index: 1
     evidence: "Full prosecution × 5 → defense → judge completed; judge ruling passed."
+    # NOTE (aspirational/deferred, issue #794 Bug 2): the nested judge-score and
+    # integrity-check fields below do not currently round-trip through
+    # Render-FCLCreditEntry, which only serializes scalar values. As of the
+    # #794 fix, Build-ReviewCreditRow emits ONLY the scalar fields above
+    # (port, adapter, status, run_index, evidence, terminal-step-id) and
+    # folds the judge-ruling and integrity-check details into human-readable
+    # prose inside the flat `evidence` string instead. The nested shape shown
+    # here is deferred pending a future recursive-serialization fix to
+    # Render-FCLCreditEntry.
     judge-score:
       ruling: passed
       findings: []
@@ -60,6 +69,13 @@ credits:
     version-bump:
       from: "1.2.0"
       to: "1.3.0"
+    # NOTE (issue #794): no current script/builder in the codebase emits this
+    # nested shape — no Build-*CreditRow function sets a symmetric-bump-verification
+    # or trigger key. Unlike judge-score/integrity-check above, this nested shape
+    # IS reader-supported (frame-credit-ledger-core.ps1:819-821 parses both the
+    # flat `symmetric-bump-verification` scalar and the nested `.status` leaf), so
+    # it remains a valid target shape for a future writer to emit — it is just
+    # currently unpopulated by any existing builder.
     symmetric-bump-verification:
       status: passed
       files-checked: ["plugin.json", ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", ".github/plugin/marketplace.json", "README.md"]
@@ -115,11 +131,11 @@ Field notes:
 - `credits[].adapter` (optional on non-review ports) names the specific adapter that produced this credit row.
 - `credits[].run_index` is a monotonically increasing integer per `(port, adapter)` pair. Multiple entries for the same port and adapter are appended; the latest by `run_index` is the authoritative summary value. There is no `timestamp` field on credit rows — `run_index` provides re-run ordering without violating the audit-only framing.
 - `credits[].terminal-step-id` (optional) records the positive terminal implementation step that emitted a spine-backed credit. Omitted or `0` preserves the legacy/spine-omitted identity for plans without a terminal slice.
-- `credits[].judge-score` (review port only) carries the judge ruling and findings list used to produce the credit.
-- `credits[].integrity-check` (review port, standard/lite/post-fix adapters) records the prosecution passes verified during prosecution. It is emitted by `Build-ReviewCreditRow` and does not carry the atomic pipeline marker result.
+- `credits[].judge-score` (review port only) carries the judge ruling and findings list used to produce the credit. **Aspirational/deferred (issue #794 Bug 2):** `Build-ReviewCreditRow` does not currently emit this nested field — it folds the judge ruling into prose inside `evidence` instead, since `Render-FCLCreditEntry` only serializes scalar values.
+- `credits[].integrity-check` (review port, standard/lite/post-fix adapters) records the prosecution passes verified during prosecution. **Aspirational/deferred (issue #794 Bug 2):** `Build-ReviewCreditRow` does not currently emit this nested field either — the prosecution-passes and status details are folded into prose inside `evidence` instead. Neither nested field currently round-trips through `Render-FCLCreditEntry`'s scalar-safe serialization.
 - `adversarial_pipeline_atomic_marker_present` is computed and returned by the frame-credit-ledger orchestration when it checks for the completion marker `<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->`; it is a warn-only ledger result field, not a `credits[]` row field. String enum values are `"true"`, `"false-warn-only"`, or `"not-applicable"`.
 - `credits[].version-bump` (release-hygiene port) records the version range for which the bump was verified.
-- `credits[].symmetric-bump-verification` (release-hygiene port) records the symmetric-bump verifier result and file set checked.
+- `credits[].symmetric-bump-verification` (release-hygiene port) records the symmetric-bump verifier result and file set checked. **Currently unpopulated (issue #794):** no `Build-*CreditRow` function in `frame-credit-ledger-core.ps1` currently emits this nested field. This is not the same situation as `judge-score`/`integrity-check` above — the reader (`frame-credit-ledger-core.ps1:819-821`) does parse this nested shape (both the flat scalar and the `.status` leaf), so it remains a valid, reader-supported target shape for a future writer; it is simply not yet emitted by any existing builder.
 - `credits[].trigger` (post-fix-review port) records the predicate and its evaluated result.
 - `credits[].mode.synthetic-backfill` is present on rows produced by historical reconstruction (backfill). It is a **nested object** (not a boolean) carrying two ISO-8601 UTC timestamps: `backfilled_at` (when the row was written to the PR body) and `original_pr_merged_at` (when the PR originally merged). Audit consumers use these to distinguish reconstructions from real-time emissions.
 - `credits[].block_kind` (CE Gate ports only) is present on rows with `status: inconclusive` that were blocked by an environmental or tooling constraint. Enum: `environment | tooling | runtime | orchestration`. This field is absent on `not-applicable`, `passed`, `failed`, and `skipped` rows, and on non-CE-Gate ports. Forward-emitted CE Gate `inconclusive` rows carry `block_kind`; back-derived `inconclusive` rows (from the synthetic back-deriver) do not, since the original blockage reason cannot be reconstructed.

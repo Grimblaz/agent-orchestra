@@ -24,6 +24,7 @@ This document defines the schema for the `<!-- cost-pattern-data ... -->` YAML b
 | `coverage` | string | Additive post-#488 coverage tag: `claude+copilot`, `claude-only`, `copilot-only`, or `claude-only-with-copilot-fallback-warning`. Missing v1 values default to `claude-only`. |
 | `install_status` | string | Additive post-#488 Copilot collection status, such as `ok` or `missing-or-fallback`. Missing v1 values default to `ok`. |
 | `unmapped_session_count` | integer | Additive post-#488 count of Copilot sessions found but not mapped to the current PR branch. Missing v1 values default to `0`. |
+| `degraded_reason` | string (optional) | Additive post-#794 field, present only when telemetry coverage is genuinely degraded (no cost events attributed). One of `env-absent` (the Claude transcript root does not exist — the expected/routine `frame-enforce.yml` CI shape, not an anomaly), `budget-exceeded` (a walker's timeout budget was exceeded), or `no-transcript-found` (the transcript root exists but the walk legitimately found nothing for this session). Absent/`null` for a normal, populated render. |
 
 ## `ports` — Per-Port Token and Cost Breakdown
 

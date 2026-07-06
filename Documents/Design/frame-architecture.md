@@ -720,6 +720,9 @@ One `Build-{Port}CreditRow` function per port in `.github/scripts/lib/frame-cred
 - Accepts port-specific evidence inputs (not a generic bag).
 - Returns an ordered hashtable conforming to the v4 `credits[]` schema (`port`, `status`, `evidence`; optionally `block_kind`, `mode`).
 - Is unit-tested by a dedicated Pester contract in `Tests/{port}-credit-emission.Tests.ps1`.
+- **Emits scalar-safe fields only** (issue #794): `Render-FCLCreditEntry` serializes credit-entry values as scalars and does not recurse into nested objects. `Build-ReviewCreditRow` emits `port`/`adapter`/`status`/`run_index`/`evidence`/`terminal-step-id` — richer structured data (e.g., a judge score breakdown or an integrity-check result) is folded into human-readable prose in `evidence` rather than attached as a nested `judge-score` or `integrity-check` object, which previously corrupted the rendered YAML. This scalar-only constraint applies to every builder, not just `Build-ReviewCreditRow`.
+
+**Rejected alternative (#794): dotted-key-flatten.** Flattening nested fields to dotted-key scalars (e.g., `judge-score.total: 21`) was tried during design review and falsified — the accumulator reader only reconstructs dotted keys from YAML indentation nesting, not from flat dotted key names, so a flatten-to-dotted-scalar-keys approach would not round-trip through the existing reader. Folding nested data into `evidence` prose was chosen instead.
 
 Schema-conformance contract (`Tests/credit-row-schema-conformance.Tests.ps1`) iterates all `Build-*CreditRow` functions and validates their output against `frame/pipeline-metrics-v4-schema.md` to prevent drift across ports over time.
 
@@ -742,7 +745,7 @@ Two distinct emission paths with structurally distinguishable row shapes:
 | Category | Ports | When credit is written | Who writes it |
 |---|---|---|---|
 | 1 — Agent-owned, post-PR | `implement-code`, `implement-test`‡, `implement-refactor`†, `implement-docs`§ | Specialist's terminal step, after PR creation | Specialist agent for hub flow; resolved work-adapter executor for `/spine-run`, directly into PR-body pipeline-metrics block |
-| 2 — Agent-owned, pre-PR (deferred emission) | `experience`, `design`, `plan` | Stage A: agent posts `<!-- credit-input-{port}-{ID} -->` YAML comment alongside its completion marker. Stage B: Code-Conductor harvests at `gh pr create` time | Pipeline-entry agent (stage A); Code-Conductor (stage B) |
+| 2 — Agent-owned, pre-PR (deferred emission) | `experience`, `design`, `plan` | Stage A: agent posts `<!-- credit-input-{port}-{ID} -->` YAML comment alongside its completion marker. Stage B: harvested automatically inside `Invoke-PipelineMetricsV4Emit` (`emit-pipeline-metrics-v4-core.ps1`) whenever `-IssueNumber > 0`, independent of the file-accumulator gate | Pipeline-entry agent (stage A); emit-core auto-harvest (stage B, as of #794 — previously a separate Code-Conductor-orchestrated call) |
 | 3 — Skill-only | `post-pr` | Post-merge cleanup phase | Code-Conductor, after reading `frame/ports/post-pr.yaml` and invoking the post-pr-review skill |
 | 4 — CE Gate surface | `ce-gate-{cli,browser,canvas,api}` | Per-surface terminal step; missing-surface credits emitted by orchestration wrapper on crash | Experience-Owner / CE Gate orchestration |
 

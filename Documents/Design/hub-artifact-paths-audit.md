@@ -1,6 +1,6 @@
 <!-- audit-meta
-last-verified: a12842a5a11c1f20e535e45d440bb9bdd2c645c4
-generated-at: 2026-06-30T15:32:43Z
+last-verified: cc027b0284f98c6f81b0ca3e1a15231819201341
+generated-at: 2026-07-05T17:28:30Z
 -->
 
 ## Purpose
@@ -290,6 +290,16 @@ Copilot always reads from the source tree in the hub repo. This dual-resolved be
 - **examples**:
   - `.github/scripts/Tests/fixtures/subagent-env-handshake-verifier.ps1`
 - **notes**: Test fixture scripts. Missing fixture causes the referencing Pester test to fail with a visible error rather than hard-blocking a pipeline run.
+
+### `.github/workflows/*.yml`
+
+- **claude_resolves**: source-tree
+- **copilot_resolves**: source-tree
+- **requires_version_bump**: false
+- **experience**: visible-warning
+- **examples**:
+  - `.github/workflows/cost-pattern-presence-check.yml`
+- **notes**: GitHub Actions workflow definitions. Hub-repo CI only; not distributed to consumer repos. Missing workflow means the corresponding CI gate does not run.
 
 ### `.references/index.json`
 

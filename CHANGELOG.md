@@ -2,6 +2,18 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.2] — 2026-07-05
+
+### Fixed
+
+- Fixed the invalid `gh issue view --paginate` flag (switched to `gh api --paginate --slurp` with array-flattening) plus a fetch-once refactor in the credit-input harvester (issue #794 Bug 1).
+- Added automatic credit-input marker harvest inside the pipeline-metrics emit core, so `/orchestrate` PRs get complete cost credits with zero manual steps (issue #794).
+- Fixed orchestrated-origin detection to resolve the PR head ref via `gh pr view` when `$env:GITHUB_HEAD_REF` is empty (issue #794 sub-observation 2).
+- Added a typed degraded-telemetry reason and an auto-posted honest `cost-pattern-data` comment when cost walker telemetry is genuinely unavailable (issue #794 sub-observation 4 / AC6).
+- Fixed nested-field YAML corruption in review credit rows by emitting scalar-safe fields only (issue #794 Bug 2).
+- Corrected frame-credit-ledger SKILL.md gotcha to describe all three cost-pattern-presence-check.yml trigger arms instead of only the cost-reduction label (issue #794).
+- Reconciled conductor-credit-emission.md to describe SMC-17 pipeline-entry credit harvest as running automatically inside the emit core rather than as a separate Code-Conductor-orchestrated step (issue #794).
+
 ## [3.3.1] — 2026-07-04
 
 ### Changed

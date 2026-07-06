@@ -265,8 +265,63 @@ Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)'
         $row.PSObject.Properties.Name | Should -Contain 'status'
         $row.PSObject.Properties.Name | Should -Contain 'run_index'
         $row.PSObject.Properties.Name | Should -Contain 'evidence'
-        $row.PSObject.Properties.Name | Should -Contain 'judge-score'
-        $row.PSObject.Properties.Name | Should -Contain 'integrity-check'
+    }
+
+    # ---------------------------------------------------------------------
+    # Scalar-safe shape (issue #794 Step s5 — Bug 2 fix (b)): judge-score and
+    # integrity-check used to be nested pscustomobjects. Render-FCLCreditEntry
+    # stringifies unrecognized fields with a naive [string] cast, so nested
+    # objects produced corrupted YAML (e.g. "judge-score: @{ruling=passed;
+    # findings=System.Object[]}"). Both fields are now folded into the flat
+    # evidence string as human-readable prose instead.
+    # ---------------------------------------------------------------------
+
+    It 'row contains no pscustomobject or hashtable typed property values (scalar-safe shape)' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'standard'
+
+        foreach ($prop in $row.PSObject.Properties) {
+            $prop.Value | Should -Not -BeOfType [System.Management.Automation.PSCustomObject] `
+                -Because "property '$($prop.Name)' must be a scalar value, not a nested object"
+            $prop.Value | Should -Not -BeOfType [System.Collections.Hashtable] `
+                -Because "property '$($prop.Name)' must be a scalar value, not a nested hashtable"
+        }
+    }
+
+    It 'row does not expose judge-score or integrity-check as separate properties' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'standard'
+
+        $row.PSObject.Properties.Name | Should -Not -Contain 'judge-score'
+        $row.PSObject.Properties.Name | Should -Not -Contain 'integrity-check'
+    }
+
+    It 'rendered YAML contains no stringified-object markers (@{) after piping through Render-FCLCreditEntry' {
+        # Render-FCLCreditEntry is a private nested function inside
+        # New-PipelineMetricsV4Block, so we exercise it through that public
+        # entry point rather than reaching into its closure directly.
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'standard' -AdaptersDir $script:AdaptersPath
+
+        $block = New-PipelineMetricsV4Block -V3BaseYaml 'pr_number: 1' -Credits @($row)
+        $block | Should -Not -BeNullOrEmpty
+        $block | Should -Not -Match '@\{' -Because 'nested objects must never be stringified into the rendered YAML'
+    }
+
+    It 'evidence carries the judge ruling status and sustained-finding count' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'standard'
+
+        $row.evidence | Should -Match 'passed' -Because 'evidence must retain the former judge-score.ruling text'
+        $row.evidence | Should -Match '1' -Because 'evidence must retain the former judge-score sustained-finding count (one sustained finding in this fixture)'
+    }
+
+    It 'evidence carries the integrity-check prosecution-passes count and status' {
+        $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
+            -AdapterName 'standard' -AdaptersDir $script:AdaptersPath
+
+        $row.evidence | Should -Match '1,2,3,4,5|1, ?2, ?3, ?4, ?5' -Because 'evidence must retain the former integrity-check.prosecution-passes list'
+        $row.evidence | Should -Match 'passed' -Because 'evidence must retain the former integrity-check.status text'
     }
 
     It 'port is always review' {
@@ -305,42 +360,42 @@ Describe 'Build-ReviewCreditRow (Step 8b — v4 review credit row construction)'
         $row.status | Should -Be 'passed'
     }
 
-    It 'judge-score.findings list contains one entry per judge-rulings row' {
+    It 'evidence carries the sustained-finding count (formerly judge-score.findings count)' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed
-        @($row.'judge-score'.findings).Count | Should -Be 2
+        # Fixture has 2 findings total, 1 sustained (F2) and 1 defense-sustained (F1).
+        # The scalar-safe evidence string carries the sustained count, not a per-finding list.
+        $row.evidence | Should -Match '1 finding' -Because 'evidence must retain the former judge-score sustained-finding count'
     }
 
-    It 'judge-score.findings entries carry id and ruling fields' {
+    It 'evidence carries the judge ruling status text (formerly judge-score.ruling)' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed
-        $f1 = $row.'judge-score'.findings | Where-Object { $_.id -eq 'F1' }
-        $f1 | Should -Not -BeNullOrEmpty
-        $f1.ruling | Should -Be 'defense-sustained'
+        $row.evidence | Should -Match 'passed' -Because 'evidence must retain the former judge-score.ruling text'
     }
 
-    It 'integrity-check.prosecution-passes is [1,2,3,4,5] for standard adapter' {
+    It 'evidence carries prosecution-passes [1,2,3,4,5] for standard adapter (formerly integrity-check.prosecution-passes)' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
             -AdapterName 'standard' -AdaptersDir $script:AdaptersPath
 
-        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1, 2, 3, 4, 5)
+        $row.evidence | Should -Match '1,2,3,4,5' -Because 'evidence must retain the former integrity-check.prosecution-passes list for the standard adapter'
         $legacyFieldName = 'pass' + '-blocks'
-        $row.'integrity-check'.PSObject.Properties.Name | Should -Not -Contain $legacyFieldName
+        $row.evidence | Should -Not -Match $legacyFieldName
     }
 
-    It 'integrity-check.prosecution-passes is [1] for lite adapter' {
+    It 'evidence carries prosecution-passes [1] for lite adapter' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
             -AdapterName 'lite' -AdaptersDir $script:AdaptersPath
 
-        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1)
+        $row.evidence | Should -Match 'integrity: 1 passes' -Because 'evidence must retain the former integrity-check.prosecution-passes list for the lite adapter'
     }
 
-    It 'integrity-check.prosecution-passes is [1] for post-fix adapter without live adapter lookup' {
+    It 'evidence carries prosecution-passes [1] for post-fix adapter without live adapter lookup' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
             -AdapterName 'post-fix'
 
-        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1)
+        $row.evidence | Should -Match 'integrity: 1 passes'
     }
 
-    It 'integrity-check.prosecution-passes is read when live adapter omits exempt' {
+    It 'evidence carries prosecution-passes [1] when live adapter omits exempt' {
         $adapterDir = Join-Path $TestDrive 'adapters-no-exempt'
         New-Item -ItemType Directory -Path $adapterDir -Force | Out-Null
         @'
@@ -358,8 +413,8 @@ integrity-contract:
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
             -AdapterName 'lite' -AdaptersDir $adapterDir
 
-        @($row.'integrity-check'.'prosecution-passes') | Should -Be @(1)
-        $row.'integrity-check'.status | Should -Be 'passed'
+        $row.evidence | Should -Match 'integrity: 1 passes'
+        $row.evidence | Should -Match 'status passed'
     }
 
     It 'falls back to adapter-name defaults when supplied adapter file is missing or unparsable' {
@@ -369,7 +424,7 @@ integrity-contract:
         $missingRow = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
             -AdapterName 'post-fix' -AdaptersDir $missingAdapterDir
 
-        @($missingRow.'integrity-check'.'prosecution-passes') | Should -Be @(1)
+        $missingRow.evidence | Should -Match 'integrity: 1 passes'
 
         $unparsableAdapterDir = Join-Path $TestDrive 'unparsable-adapters'
         New-Item -ItemType Directory -Path $unparsableAdapterDir -Force | Out-Null
@@ -378,15 +433,15 @@ integrity-contract:
         $unparsableRow = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllDefense `
             -AdapterName 'judge-only' -AdaptersDir $unparsableAdapterDir
 
-        @($unparsableRow.'integrity-check'.'prosecution-passes').Count | Should -Be 0
-        $unparsableRow.'integrity-check'.status | Should -Be 'not-applicable'
+        $unparsableRow.evidence | Should -Match 'integrity: none passes'
+        $unparsableRow.evidence | Should -Match 'status not-applicable'
     }
 
-    It 'integrity-check.status is not-applicable for exempt adapters (judge-only)' {
+    It 'evidence carries not-applicable status for exempt adapters (judge-only) (formerly integrity-check.status)' {
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllDefense `
             -AdapterName 'judge-only' -AdaptersDir $script:AdaptersPath
 
-        $row.'integrity-check'.status | Should -Be 'not-applicable'
+        $row.evidence | Should -Match 'status not-applicable'
     }
 
     It 'evidence is a non-empty string' {
@@ -394,11 +449,15 @@ integrity-contract:
         [string]::IsNullOrWhiteSpace($row.evidence) | Should -Be $false
     }
 
-    It 'custom evidence string is used when provided' {
+    It 'custom evidence string is used as the base when provided, with judge/integrity prose appended' {
+        # Scalar-safe shape (issue #794 Step s5): the former judge-score/integrity-check
+        # nested fields are now folded into evidence as appended prose, so a caller-supplied
+        # Evidence string is preserved as a prefix rather than replaced wholesale.
         $customEvidence = 'judge ruling: keep — all findings minor or disproved'
         $row = Build-ReviewCreditRow -JudgeRulingsComment $script:JudgeRulingsAllPassed `
             -Evidence $customEvidence
-        $row.evidence | Should -Be $customEvidence
+        $row.evidence | Should -Match ([regex]::Escape($customEvidence)) -Because 'the caller-supplied evidence text must still be present'
+        $row.evidence | Should -Match 'judge ruling: passed' -Because 'the judge-score prose must still be appended even with custom evidence'
     }
 
     It 'RunIndex=0 is preserved as-is and does not default to 1 (L5 fix — issue #441)' {
