@@ -185,10 +185,13 @@ function script:Test-FCLYamlSane {
 
         $afterColon = $stripped.Substring($colonIdx + 1).Trim()
         if ($afterColon.StartsWith('"')) {
-            # Must close the double quote (not counting an escaped \").
-            $rest = $afterColon.Substring(1)
-            $unescaped = $rest -replace '\\"', ''
-            if ($unescaped -notmatch '"') {
+            # Must be a well-formed double-quoted scalar: opening quote, a run of
+            # (any char that isn't backslash or quote) or (a backslash-escaped
+            # pair), then a closing quote. A naive greedy strip-then-check of
+            # `\"` occurrences misclassifies values whose real closing quote is
+            # preceded by an even number of backslashes (e.g. a genuine escaped
+            # trailing backslash) — see issue #813 finding N2.
+            if ($afterColon -notmatch '^"(?:[^\\"]|\\.)*"') {
                 return $false
             }
         }
@@ -425,7 +428,19 @@ function script:Get-FCLChunkKeyMap {
 
         if ($val.Length -ge 2) {
             $first = $val[0]; $last = $val[$val.Length - 1]
-            if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+            if ($first -eq '"' -and $last -eq '"') {
+                $val = $val.Substring(1, $val.Length - 2)
+                # YAML double-quoted scalar: unescape \\ to a literal backslash
+                # first, then \" to a literal " (reverse of the writer's escape
+                # order — see issue #812). One of now 4 duplicated double-quoted-
+                # scalar decode sites in this file (Get-FCLScalar,
+                # ConvertFrom-FCLListSection x2 internal sites,
+                # ConvertTo-FCLScalarValue, Get-FCLChunkKeyMap) — candidate for a
+                # future shared Expand-FCLDoubleQuotedScalar helper (issue #813
+                # finding N1; deferred by judge ruling).
+                $val = $val -replace '\\\\', '\'
+                $val = $val -replace '\\"', '"'
+            } elseif ($first -eq "'" -and $last -eq "'") {
                 $val = $val.Substring(1, $val.Length - 2)
             }
         }
@@ -459,7 +474,19 @@ function script:ConvertTo-FCLScalarValue {
     if ($normalizedValue.Length -ge 2) {
         $first = $normalizedValue[0]
         $last = $normalizedValue[$normalizedValue.Length - 1]
-        if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+        if ($first -eq '"' -and $last -eq '"') {
+            $normalizedValue = $normalizedValue.Substring(1, $normalizedValue.Length - 2)
+            # YAML double-quoted scalar: unescape \\ to a literal backslash
+            # first, then \" to a literal " (reverse of the writer's escape
+            # order — see issue #812). One of now 4 duplicated double-quoted-
+            # scalar decode sites in this file (Get-FCLScalar,
+            # ConvertFrom-FCLListSection x2 internal sites,
+            # ConvertTo-FCLScalarValue, Get-FCLChunkKeyMap) — candidate for a
+            # future shared Expand-FCLDoubleQuotedScalar helper (issue #813
+            # finding N1; deferred by judge ruling).
+            $normalizedValue = $normalizedValue -replace '\\\\', '\'
+            $normalizedValue = $normalizedValue -replace '\\"', '"'
+        } elseif ($first -eq "'" -and $last -eq "'") {
             $normalizedValue = $normalizedValue.Substring(1, $normalizedValue.Length - 2)
         }
     }

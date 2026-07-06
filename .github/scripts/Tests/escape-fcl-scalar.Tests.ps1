@@ -52,7 +52,13 @@ BeforeAll {
 Describe 'Escape-FCLScalar (via New-PipelineMetricsV4Block, issue #812)' {
 
     It 'round-trips a value containing both a single quote and a double quote' {
-        $original = 'it''s a "quote" test'
+        # Note: this fixture also carries a ':' (issue #813 finding N3) so it
+        # actually triggers $needsQuoting and is routed through the
+        # double-quote-wrap branch (any embedded ' always selects that
+        # branch) — without a quoting trigger the value would pass through
+        # Escape-FCLScalar completely unmodified and this test would not
+        # exercise the escaping logic its name claims to cover.
+        $original = 'it''s a "quote": test'
 
         script:Get-RoundTrippedEvidence -Value $original | Should -Be $original
     }
@@ -63,8 +69,17 @@ Describe 'Escape-FCLScalar (via New-PipelineMetricsV4Block, issue #812)' {
         script:Get-RoundTrippedEvidence -Value $original | Should -Be $original
     }
 
-    It 'round-trips a value containing only a single quote (regression check, single-quote branch)' {
-        $original = "it's a simple test"
+    It 'round-trips a value requiring quoting but containing no quote characters (single-quote branch)' {
+        # issue #813 finding N3: the original fixture ("it's a simple test")
+        # contains an apostrophe, which per Escape-FCLScalar's logic ALWAYS
+        # routes to the double-quote branch — it never reached the
+        # single-quote-wrap branch this test's name claimed to cover, and
+        # (having no ':', '#', or leading/trailing space/quote either) it
+        # didn't trigger $needsQuoting at all, so it passed through
+        # Escape-FCLScalar completely unmodified. A fixture that actually
+        # exercises the single-quote-wrap branch must contain a quoting
+        # trigger (here, ':') and no apostrophe.
+        $original = 'plain: value with a colon'
 
         script:Get-RoundTrippedEvidence -Value $original | Should -Be $original
     }
