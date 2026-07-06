@@ -24,7 +24,7 @@ Defense and judge stages are intentionally absent to preserve Solution-Designer 
 
 ## Pass Lenses
 
-Each pass investigates a distinct lens (DD3); only the focus each pass is asked to apply changes — the selector string and pipeline shape (3 passes, non-blocking, prosecution-only) are shared across all three.
+Each pass investigates a distinct lens (DD3); only the investigative focus varies from pass to pass — the selector string and pipeline shape (3 passes, non-blocking, prosecution-only) are shared across all three.
 
 Each lens operates *within* the fixed 3-perspective report skeleton defined in `skills/adversarial-review/SKILL.md`'s `### Design Review` section (§D1 Feasibility & Risk / §D2 Scope & Completeness / §D3 Integration & Impact): the lens is the investigative focus, the §D headings are the report shape, and pass 3's failure-modes/durability lens reports under §D3 Integration & Impact.
 
