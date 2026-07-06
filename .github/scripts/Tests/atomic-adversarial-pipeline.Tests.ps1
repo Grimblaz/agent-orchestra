@@ -251,6 +251,86 @@ Describe 'Atomic adversarial pipeline structural contract' {
             script:Test-YamlKey -Map $frontMatter -Key 'applies-when' | Should -BeFalse
             $designChallengeSection | Should -Match 'skills/adversarial-review/adapters/design-challenge\.md'
         }
+
+        It 'pins the design-challenge adapter pass-lenses to exactly the three named lens tokens in pass order' {
+            $path = 'skills/adversarial-review/adapters/design-challenge.md'
+            $frontMatter = script:Read-FrontMatter -Path $path
+            $passLenses = @(script:ConvertTo-ValueArray -Value (script:Get-YamlValue -Map $frontMatter -Key 'pass-lenses'))
+
+            script:Test-YamlKey -Map $frontMatter -Key 'pass-lenses' | Should -BeTrue -Because 'design-challenge must declare a top-level pass-lenses key'
+            $passLenses.Count | Should -Be 3 -Because 'a future fourth lens must consciously touch this pin, quorum logic, and dispatch prose together'
+
+            $expectedLensByPass = @(
+                [pscustomobject]@{ Pass = 1; Lens = 'tree-grounding/feasibility' }
+                [pscustomobject]@{ Pass = 2; Lens = 'scope-fidelity/requirements-coverage' }
+                [pscustomobject]@{ Pass = 3; Lens = 'failure-modes/durability' }
+            )
+
+            foreach ($expected in $expectedLensByPass) {
+                $entry = $passLenses | Where-Object { (script:Get-YamlValue -Map $_ -Key 'pass') -eq $expected.Pass }
+                $entry | Should -Not -BeNullOrEmpty -Because "pass-lenses must declare an entry for pass $($expected.Pass)"
+                (script:Get-YamlValue -Map $entry -Key 'lens') | Should -Be $expected.Lens
+            }
+        }
+
+        It 'keeps the enumerated adversarial-review surface set free of retired product-alignment terminology' {
+            $surfaces = @(
+                'skills/adversarial-review/platforms/claude.md',
+                'skills/adversarial-review/SKILL.md',
+                'skills/adversarial-review/adapters/design-challenge.md',
+                'agents/Code-Critic.agent.md',
+                'skills/routing-tables/assets/routing-config.json',
+                'skills/routing-tables/SKILL.md'
+            )
+
+            foreach ($surface in $surfaces) {
+                $text = script:Read-RepoText -Path $surface
+                $text | Should -Not -Match '(?i)product-alignment' -Because "$surface must not carry the retired product-alignment token"
+                $text | Should -Not -Match 'product_alignment_prosecution' -Because "$surface must not carry the retired product_alignment_prosecution mode token"
+            }
+        }
+
+        It 'does not let the enumerated surface set contradict the adapter pass-lenses lens-to-pass mapping' {
+            $surfaces = @(
+                'skills/adversarial-review/platforms/claude.md',
+                'skills/adversarial-review/SKILL.md',
+                'skills/adversarial-review/adapters/design-challenge.md',
+                'agents/Code-Critic.agent.md',
+                'skills/routing-tables/assets/routing-config.json',
+                'skills/routing-tables/SKILL.md'
+            )
+            $lensTokens = @('tree-grounding/feasibility', 'scope-fidelity/requirements-coverage', 'failure-modes/durability')
+            $correctPassByLens = @{
+                'tree-grounding/feasibility' = 1
+                'scope-fidelity/requirements-coverage' = 2
+                'failure-modes/durability' = 3
+            }
+
+            foreach ($surface in $surfaces) {
+                $text = script:Read-RepoText -Path $surface
+
+                foreach ($lensToken in $lensTokens) {
+                    $correctPass = $correctPassByLens[$lensToken]
+                    $wrongPasses = @(1, 2, 3) | Where-Object { $_ -ne $correctPass }
+                    foreach ($wrongPass in $wrongPasses) {
+                        $contradiction = [regex]::Escape("Pass $wrongPass") + '\s*[—\-:]*\s*\*{0,2}' + [regex]::Escape($lensToken)
+                        $text | Should -Not -Match $contradiction -Because "$surface must not claim pass $wrongPass is $lensToken when the adapter declares pass $correctPass"
+                    }
+                }
+            }
+        }
+
+        It 'documents each pass-lenses token in the design-challenge adapter body so YAML and prose cannot drift apart' {
+            $path = 'skills/adversarial-review/adapters/design-challenge.md'
+            $content = script:Read-RepoText -Path $path
+            $bodyMatch = [regex]::Match($content, '(?ms)^---\s*\r?\n.*?\r?\n---\s*\r?\n(?<body>.*)\z')
+            $bodyMatch.Success | Should -BeTrue -Because 'design-challenge.md must have frontmatter followed by a body'
+            $body = $bodyMatch.Groups['body'].Value
+
+            @('tree-grounding/feasibility', 'scope-fidelity/requirements-coverage', 'failure-modes/durability') | ForEach-Object {
+                $body | Should -Match ([regex]::Escape($_)) -Because "the adapter body must describe the pass-lenses token $_ so YAML and prose stay in sync"
+            }
+        }
     }
 
     Context 'Claude dispatcher checklist' {
