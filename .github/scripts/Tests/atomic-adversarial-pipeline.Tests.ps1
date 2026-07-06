@@ -10,6 +10,14 @@ BeforeAll {
     $script:DispatcherMarker = '<!-- adversarial-pipeline-atomic-{ISSUE_ID} -->'
     $script:PauseReasons = @('artifact-missing', 'runtime-output-required', 'user-input-required-by-decision-class')
     $script:ExpectedAdapterNames = @('standard', 'lite', 'judge-only', 'proxy-github', 'post-fix', 'design-challenge')
+    $script:AdversarialReviewSurfaces = @(
+        'skills/adversarial-review/platforms/claude.md',
+        'skills/adversarial-review/SKILL.md',
+        'skills/adversarial-review/adapters/design-challenge.md',
+        'agents/Code-Critic.agent.md',
+        'skills/routing-tables/assets/routing-config.json',
+        'skills/routing-tables/SKILL.md'
+    )
 
     function script:Resolve-RepoPath {
         param([Parameter(Mandatory)][string]$Path)
@@ -274,31 +282,15 @@ Describe 'Atomic adversarial pipeline structural contract' {
         }
 
         It 'keeps the enumerated adversarial-review surface set free of retired product-alignment terminology' {
-            $surfaces = @(
-                'skills/adversarial-review/platforms/claude.md',
-                'skills/adversarial-review/SKILL.md',
-                'skills/adversarial-review/adapters/design-challenge.md',
-                'agents/Code-Critic.agent.md',
-                'skills/routing-tables/assets/routing-config.json',
-                'skills/routing-tables/SKILL.md'
-            )
-
-            foreach ($surface in $surfaces) {
+            foreach ($surface in $script:AdversarialReviewSurfaces) {
                 $text = script:Read-RepoText -Path $surface
                 $text | Should -Not -Match '(?i)product-alignment' -Because "$surface must not carry the retired product-alignment token"
                 $text | Should -Not -Match 'product_alignment_prosecution' -Because "$surface must not carry the retired product_alignment_prosecution mode token"
+                $text | Should -Not -Match '(?i)product_alignment' -Because "$surface must not carry the retired product_alignment (underscore) token"
             }
         }
 
         It 'does not let the enumerated surface set contradict the adapter pass-lenses lens-to-pass mapping' {
-            $surfaces = @(
-                'skills/adversarial-review/platforms/claude.md',
-                'skills/adversarial-review/SKILL.md',
-                'skills/adversarial-review/adapters/design-challenge.md',
-                'agents/Code-Critic.agent.md',
-                'skills/routing-tables/assets/routing-config.json',
-                'skills/routing-tables/SKILL.md'
-            )
             $lensTokens = @('tree-grounding/feasibility', 'scope-fidelity/requirements-coverage', 'failure-modes/durability')
             $correctPassByLens = @{
                 'tree-grounding/feasibility' = 1
@@ -306,14 +298,19 @@ Describe 'Atomic adversarial pipeline structural contract' {
                 'failure-modes/durability' = 3
             }
 
-            foreach ($surface in $surfaces) {
+            foreach ($surface in $script:AdversarialReviewSurfaces) {
                 $text = script:Read-RepoText -Path $surface
 
                 foreach ($lensToken in $lensTokens) {
                     $correctPass = $correctPassByLens[$lensToken]
                     $wrongPasses = @(1, 2, 3) | Where-Object { $_ -ne $correctPass }
                     foreach ($wrongPass in $wrongPasses) {
-                        $contradiction = [regex]::Escape("Pass $wrongPass") + '\s*[—\-:]*\s*\*{0,2}' + [regex]::Escape($lensToken)
+                        # Connector tolerates: bold markers around "Pass N", pipe-table cell
+                        # boundaries, dash/colon/em-dash punctuation, backtick-wrapped lens
+                        # tokens, and short prose runs (e.g. "investigates the") — all at
+                        # token-level granularity per the pin-key-granularity decision.
+                        $connector = '\s*(?:[|—\-:]|\*{0,2}|`|\s+[a-z]+){0,4}\s*\*{0,2}`?'
+                        $contradiction = '\*{0,2}' + [regex]::Escape("Pass $wrongPass") + '\*{0,2}' + $connector + [regex]::Escape($lensToken) + '`?'
                         $text | Should -Not -Match $contradiction -Because "$surface must not claim pass $wrongPass is $lensToken when the adapter declares pass $correctPass"
                     }
                 }

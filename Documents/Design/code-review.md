@@ -80,7 +80,7 @@ Added in issue #73. Code-Critic gains a second operating mode triggered by the s
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
 | D7 | Activation mechanism | Explicit top-level selector line | Avoids runtime ambiguity; callers always know which mode they're requesting |
-| D8 | Pass count for design review | 3-pass parallel (three specialist passes under one design selector) | Matches the coverage-variance rationale for code review; adds an explicit product/experience/planned-work alignment lens per issue #131 |
+| D8 | Pass count for design review | 3-pass parallel (three specialist passes under one design selector) | Matches the coverage-variance rationale for code review; the third pass's failure-modes/durability lens absorbs the product-alignment concern per #797 |
 | D9 | Review perspectives | 3 (Feasibility & Risk, Scope & Completeness, Integration & Impact) | Covers the three most common plan failure modes without overlap |
 | D10 | Blocking behavior | Non-blocking (caller decides) | Code-Critic has no veto over design decisions; findings inform, not gate |
 | D11 | Callers | Solution-Designer, Issue-Planner | Both entry points to the planning phase need the same quality gate |

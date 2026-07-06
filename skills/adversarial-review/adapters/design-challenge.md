@@ -26,6 +26,8 @@ Defense and judge stages are intentionally absent to preserve Solution-Designer 
 
 Each pass investigates a distinct lens (DD3); only the focus each pass is asked to apply changes — the selector string and pipeline shape (3 passes, non-blocking, prosecution-only) are shared across all three.
 
+Each lens operates *within* the fixed 3-perspective report skeleton defined in `skills/adversarial-review/SKILL.md`'s `### Design Review` section (§D1 Feasibility & Risk / §D2 Scope & Completeness / §D3 Integration & Impact): the lens is the investigative focus, the §D headings are the report shape, and pass 3's failure-modes/durability lens reports under §D3 Integration & Impact.
+
 - Pass 1 — **tree-grounding/feasibility**: does the design rest on artifacts that actually exist in the live tree, and is the proposed approach technically achievable given current repository structure and constraints?
 - Pass 2 — **scope-fidelity/requirements-coverage**: does the design fully address the stated requirement without silently narrowing or drifting from the customer/owner intent, and are all acceptance-relevant surfaces covered?
 - Pass 3 — **failure-modes/durability**: what breaks under edge cases, degraded conditions, or future maintenance pressure, and does the design hold up over time rather than only for the happy path?
