@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.3] — 2026-07-06
+
+### Changed
+
+- Retired the `product_alignment_prosecution`` review mode; the design-challenge adapter's new `pass-lenses`` key is now the sole source of pass identity, with no-fork Pester pins guarding the pairing (issue #797).
+
 ## [3.3.2] — 2026-07-05
 
 ### Fixed
