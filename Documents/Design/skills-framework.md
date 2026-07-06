@@ -41,7 +41,7 @@ Issue #344 changes the skills boundary from "skills are reference material" to "
 
 | Skill | Directory | Purpose |
 |-------|-----------|---------|
-| `adversarial-review` | `.github/skills/adversarial-review/` | Reusable adversarial review methodology for prosecution, defense, design challenge, product-alignment, and proxy review passes |
+| `adversarial-review` | `.github/skills/adversarial-review/` | Reusable adversarial review methodology for prosecution, defense, design challenge, and proxy review passes |
 | `bdd-scenarios` | `.github/skills/bdd-scenarios/` | Structured Given/When/Then scenario authoring with ID traceability and CE Gate coverage gap detection |
 | `brainstorming` | `.github/skills/brainstorming/` | Structured Socratic questioning for exploring ideas and solutions |
 | `browser-canvas-testing` | `.github/skills/browser-canvas-testing/` | VS Code native browser tool behavior for canvas-based games (Phaser 3, etc.) |

@@ -1,6 +1,6 @@
 ---
 name: adversarial-review
-description: "Reusable adversarial review methodology for prosecution, defense, design challenge, product-alignment, and proxy review passes. Use when reviewing code, plans, designs, or external review ledgers with evidence-first rigor. DO NOT USE FOR: final judgment ownership, GitHub intake routing, or fix execution decisions (use review-judgment or code-review-intake)."
+description: "Reusable adversarial review methodology for prosecution, defense, design challenge, and proxy review passes. Use when reviewing code, plans, designs, or external review ledgers with evidence-first rigor. DO NOT USE FOR: final judgment ownership, GitHub intake routing, or fix execution decisions (use review-judgment or code-review-intake)."
 ---
 
 <!-- platform-assumptions: markdown skill guidance for VS Code custom agents in Agent Orchestra; assumes the calling agent retains read-only boundaries, mode routing, and finding-schema ownership. -->
@@ -221,11 +221,9 @@ When a perspective gate is not triggered, replace the full section with:
 {overall verdict and key actions}
 ```
 
-## Design And Plan Prosecution
+## Design Review
 
-Use when the caller requests design-review or product-alignment markers.
-
-### Design Review
+Use when the caller requests the design-review marker.
 
 Review with these perspectives:
 
@@ -255,44 +253,6 @@ Output format:
 ### Summary
 
 {highest-risk items and overall confidence}
-```
-
-### Product-Alignment Review
-
-Use this evidence order:
-
-1. Draft design or plan content passed in the prompt
-2. Issue body when present
-3. `Documents/Design/` and `Documents/Decisions/`
-4. Project guidance files such as `README.md`, `CUSTOMIZATION.md`, and `copilot-instructions.md`
-5. Planned-work artifacts when present
-
-Review with these perspectives:
-
-- Product Direction Fit
-- Customer Experience Coherence
-- Planned-Work Alignment
-
-Output format:
-
-```markdown
-## Product-Alignment Challenge Report
-
-### §P1 — Product Direction Fit
-
-{findings or checked-no-issues summary}
-
-### §P2 — Customer Experience Coherence
-
-{findings or checked-no-issues summary}
-
-### §P3 — Planned-Work Alignment
-
-{findings or checked-no-issues summary}
-
-### Summary
-
-{most important alignment risks and confidence}
 ```
 
 ## Defense Workflow
@@ -376,8 +336,4 @@ Required keys:
 | `post-fix`         | `prosecution`, `defense`          | `true` | `[1]`              | No     | Runs one targeted prosecution pass and defense after fixes               |
 | `design-challenge` | `prosecution`                     | `n/a`  | `[1, 2, 3]`        | No     | Methodology-variant design challenge; no frame port ownership            |
 
-For the `design-challenge` methodology variant only, prosecution pass IDs correspond to these design/product-alignment Code-Critic prosecution modes. This mapping is not global and does not override the `standard`, `lite`, or `post-fix` code-review adapter contracts listed above.
-
-- **Pass 1**: design review perspectives (`Review mode selector: "Use design review perspectives"`)
-- **Pass 2**: implementation prerequisites, CE Gate, persistence, cross-tool (`Review mode selector: "Use design review perspectives"` second pass)
-- **Pass 3**: product-alignment perspectives (`Review mode selector: "Use product-alignment perspectives"`)
+For the `design-challenge` methodology variant, pass identity is declared in the design-challenge adapter's `pass-lenses` key, not in this mapping. All three passes emit `"Use design review perspectives"`.

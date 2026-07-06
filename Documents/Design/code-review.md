@@ -80,7 +80,7 @@ Added in issue #73. Code-Critic gains a second operating mode triggered by the s
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
 | D7 | Activation mechanism | Explicit top-level selector line | Avoids runtime ambiguity; callers always know which mode they're requesting |
-| D8 | Pass count for design review | 3-pass parallel (2 standard design + 1 product-alignment) | Matches the coverage-variance rationale for code review; adds an explicit product/experience/planned-work alignment lens per issue #131 |
+| D8 | Pass count for design review | 3-pass parallel (three specialist passes under one design selector) | Matches the coverage-variance rationale for code review; the third pass's failure-modes/durability lens absorbs the product-alignment concern per #797 |
 | D9 | Review perspectives | 3 (Feasibility & Risk, Scope & Completeness, Integration & Impact) | Covers the three most common plan failure modes without overlap |
 | D10 | Blocking behavior | Non-blocking (caller decides) | Code-Critic has no veto over design decisions; findings inform, not gate |
 | D11 | Callers | Solution-Designer, Issue-Planner | Both entry points to the planning phase need the same quality gate |
@@ -139,7 +139,7 @@ Replaced the rebuttal-based adversarial review pipeline with a structured Prosec
 | D15 | Judge convergence | Single-shot; user scoring (+1/-1) provides async correction | Sample sizes too small for mid-cycle calibration; visibility first, then build learning pipeline |
 | D16 | Opt-out for lightweight issues | Not supported | Quality is non-negotiable — full pipeline always runs |
 | D17 | `review_loop_budget` | Removed from plan format | No longer needed; pipeline stages are fixed (3 prosecution + 1 defense + 1 judge) |
-| D18 | Mode conflict resolution | Priority order: defense > CE > proxy > product-alignment > design > lite > code | Most-specific mode wins; avoids ambiguous multi-marker prompts |
+| D18 | Mode conflict resolution | Priority order: defense > CE > proxy > design > lite > code | Most-specific mode wins; avoids ambiguous multi-marker prompts |
 | D19 | Judge-only CRR separation | Code-Review-Response stops at judgment — no fix delegation | Conductor is the orchestrator; CRR doing delegation created conflicting responsibility chains |
 | D20 | Post-judgment routing in Conductor | All post-judgment fix routing logic lives in Code-Conductor | Single responsibility: CRR judges, Conductor executes. Gaps addressed: AC cross-check, effort estimation, auto-tracking, GitHub response posting |
 | D21 | Post-fix prosecution pass | Full pipeline (3 prosecution + defense + judge), diff-scoped, triggered by Critical/High or control-flow fix, loop budget 1 | Catches fix-introduced defects missed by one-shot review; full pipeline maintains adversarial principle; tight scope keeps cost proportionate. **Superseded by D36** (1+1 post-fix prosecution). |
@@ -172,8 +172,7 @@ Prosecutor assigns severity; judge may override.
 |-----------------|------|--------|-------------|
 | *(none / default)* | Code prosecution | 5 (parallel) | 6 code perspectives |
 | `Review mode selector: "Use lite code review perspectives"` | Lite code prosecution | 1 | All 6 standard code-review perspectives in one compact pass |
-| `Review mode selector: "Use design review perspectives"` | Design/plan prosecution | 2 (parallel) | 3 design perspectives (passes 1–2) |
-| `Review mode selector: "Use product-alignment perspectives"` | Product-alignment prosecution | 1 | 3 product-alignment perspectives (pass 3) |
+| `Review mode selector: "Use design review perspectives"` | Design/plan prosecution | 3 (parallel) | 3 design perspectives (passes 1–3) |
 | `Review mode selector: "Use defense review perspectives"` | Defense | 1 | Presume innocent; disprove each finding |
 | `Review mode selector: "Use CE review perspectives"` | CE prosecution | 1 | Functional + Intent + Error States |
 | `Review mode selector: "Score and represent GitHub review"` | Proxy prosecution | 1 | Validate/score external findings |
@@ -231,7 +230,7 @@ Code-Conductor invokes →
 Issue-Planner (or start-issue.md) invokes →
   Code-Critic (prosecution, design perspectives, pass 1) ─┐
   Code-Critic (prosecution, design perspectives, pass 2) ─┼→ Merge into deduplicated ledger
-  Code-Critic (prosecution, product-alignment, pass 3)  ─┘
+  Code-Critic (prosecution, design perspectives, pass 3) ─┘
     → Code-Critic (defense, 1 pass over merged ledger)
       → Code-Review-Response (judge)
         → Score summary returned
@@ -243,7 +242,7 @@ Issue-Planner (or start-issue.md) invokes →
 Solution-Designer invokes →
   Code-Critic (prosecution, design perspectives, pass 1) ─┐
   Code-Critic (prosecution, design perspectives, pass 2) ─┼→ Merge into deduplicated ledger
-  Code-Critic (prosecution, product-alignment, pass 3)  ─┘
+  Code-Critic (prosecution, design perspectives, pass 3) ─┘
     → (stops here — no defense or judge step)
 ```
 

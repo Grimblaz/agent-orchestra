@@ -85,14 +85,8 @@
       {
         "marker": "Use design review perspectives",
         "mode": "design_plan_prosecution",
-        "passes": 2,
+        "passes": 3,
         "parallel": true
-      },
-      {
-        "marker": "Use product-alignment perspectives",
-        "mode": "product_alignment_prosecution",
-        "passes": 1,
-        "parallel": false
       },
       {
         "marker": "Use code review perspectives",
@@ -130,7 +124,6 @@
         "defense",
         "ce_prosecution",
         "proxy_prosecution",
-        "product_alignment_prosecution",
         "design_plan_prosecution",
         "code_prosecution_lite",
         "code_prosecution"
