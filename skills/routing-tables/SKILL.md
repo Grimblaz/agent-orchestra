@@ -43,9 +43,9 @@ Planning artifacts and plan markers route to Issue-Planner. CE Gate evidence cap
 
 ## Review Mode Routing
 
-Review mode routing is driven by explicit top-level selector lines of the form `Review mode selector: "{marker}"`. No selector line means normal code prosecution with three parallel passes. Design review perspectives switch to design or plan prosecution with two parallel passes. Product-alignment, defense, CE prosecution, and GitHub proxy prosecution each run as single-pass modes.
+Review mode routing is driven by explicit top-level selector lines of the form `Review mode selector: "{marker}"`. No selector line means normal code prosecution with five parallel passes. Design review perspectives switch to design or plan prosecution with three parallel passes. Defense, CE prosecution, and GitHub proxy prosecution each run as single-pass modes.
 
-When multiple selector lines appear, the conflict rule applies in strict priority order: defense, then CE, then proxy, then product-alignment, then design, then lite code prosecution, then standard code prosecution. One explicit override exists: `Review mode selector: "Use code review perspectives"` beats `Review mode selector: "Use design review perspectives"` and forces normal code prosecution.
+When multiple selector lines appear, the conflict rule applies in strict priority order: defense, then CE, then proxy, then design, then lite code prosecution, then standard code prosecution. One explicit override exists: `Review mode selector: "Use code review perspectives"` beats `Review mode selector: "Use design review perspectives"` and forces normal code prosecution.
 
 ## Surface Identification
 
