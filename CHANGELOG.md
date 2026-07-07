@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.5] — 2026-07-07
+
+### Added
+
+Add a Quality-first, shift-left governing-principle section to CLAUDE.md: quality ahead of speed/cost, catch defects as early in the pipeline as possible, and relax later review stages only on phase-containment escape-rate data (never a cost argument). Links the phase-containment ledger instrument and umbrella #761.
+
 ## [3.3.4] — 2026-07-07
 
 ### Fixed
