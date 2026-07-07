@@ -358,6 +358,162 @@ Describe 'Could-not-verify rendering' {
 }
 
 # ---------------------------------------------------------------------------
+# 6b. 811-D1 s2: negative-gap-loud + differentiated could-not-verify render
+# ---------------------------------------------------------------------------
+
+Describe 'Format-EmissionGapLine — negative-gap-loud (811-D1 s2)' {
+    It 'never renders clean when Gap.Gap is negative (more blocks than sustained)' {
+        $gap = [PSCustomObject]@{
+            SustainedCount = 1
+            BlockCount     = 3
+            Gap            = -2
+            ParseStatus    = 'ok'
+            Reason         = 'ok'
+        }
+
+        $line = Format-EmissionGapLine -Surface 'code-review' -Id 775 -Gap $gap
+
+        $line | Should -Not -Match 'clean'
+        $line | Should -Match 'GAP'
+        $line | Should -Match 'sustained=1'
+        $line | Should -Match 'blocks=3'
+        $line | Should -Match 'excess=2'
+    }
+
+    It 'still renders clean when Gap.Gap is exactly zero' {
+        $gap = [PSCustomObject]@{
+            SustainedCount = 2
+            BlockCount     = 2
+            Gap            = 0
+            ParseStatus    = 'ok'
+            Reason         = 'ok'
+        }
+
+        $line = Format-EmissionGapLine -Surface 'code-review' -Id 775 -Gap $gap
+
+        $line | Should -Match 'clean -- sustained=2 blocks=2'
+    }
+
+    It 'still renders GAP for a positive gap (unchanged behavior)' {
+        $gap = [PSCustomObject]@{
+            SustainedCount = 3
+            BlockCount     = 0
+            Gap            = 3
+            ParseStatus    = 'ok'
+            Reason         = 'ok'
+        }
+
+        $line = Format-EmissionGapLine -Surface 'code-review' -Id 778 -Gap $gap
+
+        $line | Should -Match 'GAP -- sustained=3 blocks=0 missing=3'
+    }
+}
+
+Describe 'Format-EmissionGapLine — differentiated could-not-verify render (811-D1 s2)' {
+    It 'renders the head-missing variant when Reason is head-missing' {
+        $gap = [PSCustomObject]@{
+            SustainedCount = 0
+            BlockCount     = 5
+            Gap            = -5
+            ParseStatus    = 'could-not-verify'
+            Reason         = 'head-missing'
+        }
+
+        $line = Format-EmissionGapLine -Surface 'plan-stress-test' -Id 811 -Gap $gap
+
+        $line | Should -Match 'COULD NOT VERIFY -- treat as gap'
+        $line | Should -Match 'blocks=5 present, machine-head missing'
+        $line | Should -Not -Match 'unparseable'
+    }
+
+    It 'renders the head-corrupt variant when Reason is head-corrupt' {
+        $gap = [PSCustomObject]@{
+            SustainedCount = 0
+            BlockCount     = 0
+            Gap            = 0
+            ParseStatus    = 'could-not-verify'
+            Reason         = 'head-corrupt'
+        }
+
+        $line = Format-EmissionGapLine -Surface 'plan-stress-test' -Id 811 -Gap $gap
+
+        $line | Should -Match 'COULD NOT VERIFY -- treat as gap'
+        $line | Should -Match 'machine block present but unparseable'
+        $line | Should -Not -Match 'machine-head missing'
+    }
+
+    It 'falls back to the generic M13 wording when Reason is absent from the Gap object' {
+        $gap = [PSCustomObject]@{
+            SustainedCount = 1
+            BlockCount     = 0
+            Gap            = 1
+            ParseStatus    = 'could-not-verify'
+        }
+
+        $line = Format-EmissionGapLine -Surface 'code-review' -Id 1 -Gap $gap
+
+        $line | Should -Match 'COULD NOT VERIFY -- treat as gap \(partial, do not trust: sustained=1, blocks=0\)'
+    }
+
+    It 'end-to-end: a compliant-but-headless plan-stress-test body renders the head-missing variant via the live orchestrator' {
+        $issueBody = @'
+<!-- plan-issue-811 -->
+
+**Plan Stress-Test** (5-pass standard adapter)
+
+- Challenge M1 -- Post-judge ruling: sustained -- Maintainer disposition: incorporate.
+'@
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            return (@{ comments = @(@{ body = $issueBody }) } | ConvertTo-Json -Depth 6)
+        }
+        Mock Find-OrUpsertComment { return 'https://example.invalid/comment' }
+
+        try {
+            $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -IssueNumber '811'
+
+            $report | Should -Match 'plan-stress-test #811: COULD NOT VERIFY -- treat as gap \(blocks=0 present, machine-head missing'
+        }
+        finally {
+            if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+                Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    It 'end-to-end: a plan-stress-test body with a real-but-unparseable judge-rulings head renders the head-corrupt variant via the live orchestrator' {
+        $issueBody = @'
+<!-- plan-issue-812 -->
+
+**Plan Stress-Test** (5-pass standard adapter)
+
+<!-- judge-rulings
+- id: Z1
+  judge_ruling: maybe-sustained-ish
+-->
+'@
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            return (@{ comments = @(@{ body = $issueBody }) } | ConvertTo-Json -Depth 6)
+        }
+        Mock Find-OrUpsertComment { return 'https://example.invalid/comment' }
+
+        try {
+            $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -IssueNumber '812'
+
+            $report | Should -Match 'plan-stress-test #812: COULD NOT VERIFY -- treat as gap \(machine block present but unparseable'
+        }
+        finally {
+            if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+                Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
 # 7. -ScaffoldBackfill — emits open+close tags and escape_distance: -1
 # ---------------------------------------------------------------------------
 
