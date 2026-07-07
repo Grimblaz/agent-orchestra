@@ -1229,6 +1229,219 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
     }
 }
 
+Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level positive-proof (811-D1 s3, M17)' {
+    BeforeEach {
+        $script:lastGetPath = $null
+        $script:lastPatchArgs = $null
+        $script:getCallCount = 0
+        # 'get' | 'patch' | 'verify-truncated' | 'verify-marker-missing' |
+        # 'verify-truncated-entries' | ''
+        $script:simulateFailure = ''
+
+        $script:mockOriginalBody = "<!-- plan-issue-811 -->`n`nSome long-form prose summary of the plan mirroring a real plan-issue comment body in size."
+
+        # Full 11-entry judge-rulings append (mirrors the #794 backfill shape
+        # described in the 811 plan's s6 step, trimmed to a representative
+        # subset of field names — id/judge_ruling/judge_confidence).
+        $script:mockFullNewContent = @"
+`n<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+- finding_id: M2
+  judge_ruling: sustained
+- finding_id: M3
+  judge_ruling: sustained
+- finding_id: M4
+  judge_ruling: defense-sustained
+- finding_id: M5
+  judge_ruling: sustained
+- finding_id: M6
+  judge_ruling: defense-sustained
+- finding_id: M7
+  judge_ruling: sustained
+- finding_id: M8
+  judge_ruling: defense-sustained
+- finding_id: M9
+  judge_ruling: defense-sustained
+- finding_id: M10
+  judge_ruling: sustained
+- finding_id: M11
+  judge_ruling: sustained
+-->
+"@
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+
+            if ($joined -match '^api repos/[^/]+/[^/]+/issues/comments/(\d+)$') {
+                $script:getCallCount++
+                $script:lastGetPath = $joined
+                if ($script:simulateFailure -eq 'get') {
+                    $global:LASTEXITCODE = 1
+                    return ''
+                }
+                $global:LASTEXITCODE = 0
+
+                if ($script:getCallCount -ge 2) {
+                    # Post-write verify GET (2nd call onward).
+                    switch ($script:simulateFailure) {
+                        'verify-truncated' {
+                            # Gross truncation: only a sliver of the combined
+                            # body comes back.
+                            return (@{ body = $script:mockOriginalBody.Substring(0, 5) } | ConvertTo-Json)
+                        }
+                        'verify-marker-missing' {
+                            # New entries present, body length comparable,
+                            # but the original plan-issue marker is gone.
+                            $corrupted = "## Plan (marker stripped)`n`nSome long-form prose summary of the plan mirroring a real plan-issue comment body in size, but without the marker.$($script:mockFullNewContent)"
+                            return (@{ body = $corrupted } | ConvertTo-Json)
+                        }
+                        'verify-truncated-entries' {
+                            # Simulates a partial/truncated append: head plus
+                            # only 3 of the 11 entries actually landed. This
+                            # must be detected by entry-level positive-proof,
+                            # not just by the head substring '<!-- judge-rulings'
+                            # reappearing (which it does, here). Padded with
+                            # harmless filler prose so the overall body length
+                            # stays comparable to what was written — isolating
+                            # the entry-level check from the separate
+                            # gross-truncation-guard check (5a), which is
+                            # covered by its own dedicated test above.
+                            $truncatedNewContent = @"
+`n<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+- finding_id: M2
+  judge_ruling: sustained
+- finding_id: M3
+  judge_ruling: sustained
+-->
+"@
+                            $filler = 'x' * ($script:mockFullNewContent.Length - $truncatedNewContent.Length)
+                            return (@{ body = ($script:mockOriginalBody + $truncatedNewContent + "`n<!-- filler -->`n$filler") } | ConvertTo-Json)
+                        }
+                        default {
+                            # Happy path: simulate GitHub's benign whitespace
+                            # normalization rather than an exact byte-identical
+                            # echo.
+                            $normalized = ($script:mockOriginalBody + $script:mockFullNewContent) `
+                                -replace '[ \t]+\r?\n', "`n" `
+                                -replace '\n{3,}', "`n`n"
+                            return (@{ body = $normalized } | ConvertTo-Json)
+                        }
+                    }
+                }
+                return (@{ body = $script:mockOriginalBody } | ConvertTo-Json)
+            }
+
+            if ($joined -match '^api -X PATCH repos/[^/]+/[^/]+/issues/comments/(\d+) --input') {
+                $script:lastPatchArgs = $Args
+                if ($script:simulateFailure -eq 'patch') {
+                    $global:LASTEXITCODE = 1
+                    return ''
+                }
+                $global:LASTEXITCODE = 0
+                return (@{ id = 999 } | ConvertTo-Json)
+            }
+
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+    }
+
+    AfterEach {
+        Remove-Item Function:gh -ErrorAction SilentlyContinue
+    }
+
+    It 'succeeds on a full 11-entry append and verifies every entry landed' {
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $true
+        $result.Reason | Should -BeNullOrEmpty
+        $script:lastPatchArgs | Should -Not -BeNullOrEmpty
+    }
+
+    It 'fails without patching when the expected marker is not found in the fetched body' {
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-999' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'not found'
+        $script:lastPatchArgs | Should -BeNullOrEmpty
+    }
+
+    It 'fails when the GET call fails' {
+        $script:simulateFailure = 'get'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'GET failed'
+    }
+
+    It 'fails when the PATCH call fails' {
+        $script:simulateFailure = 'patch'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'PATCH failed'
+    }
+
+    It 'fails loud when the post-write verify body is dramatically shorter than what was written (truncation/data-loss)' {
+        $script:simulateFailure = 'verify-truncated'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'shorter than expected'
+    }
+
+    It 'fails loud when the original marker is missing from the post-write verify body (genuine corruption)' {
+        $script:simulateFailure = 'verify-marker-missing'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'missing from verify body'
+    }
+
+    It 'detects a truncated append (head + 3 of 11 entries landed) as a failure, not a silent success' {
+        $script:simulateFailure = 'verify-truncated-entries'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'judge_ruling'
+    }
+
+    It 'rejects a zero-entry judge-rulings head payload as a no-op, without writing' {
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent "`n<!-- judge-rulings`n-->`n"
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'no-op'
+        $script:lastPatchArgs | Should -BeNullOrEmpty
+        $script:getCallCount | Should -Be 0
+    }
+
+    It 'does not call Add-CommentBlocks (independent sibling function, prose mentions of the name are fine)' {
+        $srcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
+        $src = Get-Content -LiteralPath $srcPath -Raw
+        $funcStart = $src.IndexOf('function Add-JudgeRulingsBlock')
+        $funcStart | Should -BeGreaterThan -1
+        $funcBody = $src.Substring($funcStart)
+        # A CALL to Add-CommentBlocks (bare invocation syntax) would be the
+        # real independence violation; the docstring legitimately mentions
+        # the sibling's name in prose explaining the design relationship.
+        $funcBody | Should -Not -Match '(?<!\.SYNOPSIS[\s\S]{0,2000})\bAdd-CommentBlocks\s+-Owner'
+        $funcBody | Should -Not -Match '\(\s*Add-CommentBlocks\b'
+    }
+
+    It 'does not call ConvertFrom-Yaml or import powershell-yaml (hand-rolled regex only; the SECURITY note is prose, not code)' {
+        $srcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
+        $src = Get-Content -LiteralPath $srcPath -Raw
+        $funcStart = $src.IndexOf('function Add-JudgeRulingsBlock')
+        $funcBody = $src.Substring($funcStart)
+
+        # Strip the <# ... #> comment-based help block and line comments
+        # first, so prose mentions of these forbidden names (e.g. the
+        # .DESCRIPTION explaining what NOT to use) don't false-positive this
+        # executable-usage check.
+        $codeOnly = [regex]::Replace($funcBody, '(?s)<#.*?#>', '')
+        $codeOnly = ($codeOnly -split "`n" | ForEach-Object { [regex]::Replace($_, '#.*$', '') }) -join "`n"
+
+        $codeOnly | Should -Not -Match 'ConvertFrom-Yaml'
+        $codeOnly | Should -Not -Match 'powershell-yaml'
+    }
+}
+
 # ---------------------------------------------------------------------------
 # PF2-F1 (issue #782 post-fix prosecution pass): drift-catching meta-test.
 # The GH-5 fix added a fourth literal copy of the key-anchor regex

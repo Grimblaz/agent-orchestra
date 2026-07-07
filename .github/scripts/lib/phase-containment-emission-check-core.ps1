@@ -912,3 +912,223 @@ function Add-CommentBlocks {
 }
 
 #endregion
+
+#region Add-JudgeRulingsBlock
+
+function Add-JudgeRulingsBlock {
+    <#
+    .SYNOPSIS
+        Appends a new <!-- judge-rulings ... --> machine block to an existing
+        GitHub comment via read-modify-write, with entry-level fail-loud
+        positive-proof (811-D1 s3 — sibling to Add-CommentBlocks, M17).
+    .DESCRIPTION
+        Sequence — the SAME read-modify-write append core as Add-CommentBlocks
+        (GET -> verify expected marker present -> concatenate -> PATCH ->
+        re-fetch and verify), but with its OWN entry-level verification tuned
+        to the judge-rulings payload shape rather than phase-containment
+        blocks:
+          1. gh api GET the comment body by REST comment id.
+          2. Verify the expected marker is present in the fetched body.
+          3. Preflight no-op guard (M8/D5): NewContent must carry at least
+             one `judge_ruling:` entry. A judge-rulings HEAD with zero
+             entries is refused before any write is attempted, so an empty
+             append can never defeat the zero-findings placeholder contract
+             (which always carries at least one `- finding_id: none` /
+             `judge_ruling: defense-sustained` entry).
+          4. Concatenate NewContent after the existing body.
+          5. gh api PATCH the full combined body.
+          6. Post-write verify: GET again and apply positive-proof
+             verification — critically, ENTRY-LEVEL, not merely a check that
+             the literal head string `<!-- judge-rulings` reappears. Every
+             individual `judge_ruling:` line present in NewContent must also
+             be present, in matching multiplicity, in the re-fetched body.
+             A truncated append (e.g. head + 3 of 11 entries landing) fails
+             this count comparison and is reported as failure — the same
+             failure mode Add-CommentBlocks' phase-containment loop guards
+             against, adapted to a payload shape that has no per-entry ID
+             marker pair to parse structurally.
+
+        Any mismatch at any step is fail-loud: the function returns
+        Success=$false with a Reason describing the failure, and performs no
+        further action. This function never truncates or overwrites existing
+        comment content.
+
+        Hand-rolled regex only (file-level SECURITY note at the top of this
+        file applies here too — no ConvertFrom-Yaml / powershell-yaml).
+
+        This function is independent of Add-CommentBlocks: it does not call
+        it, and Add-CommentBlocks is not modified by this addition. The two
+        functions intentionally duplicate the outer GET/PATCH/verify shell
+        rather than share a risky extracted helper, per the 811 plan's
+        owner decision (M17) to protect Add-CommentBlocks' ~15 existing
+        callers and its already-hardened preflight/positive-proof path.
+    .PARAMETER Owner
+        Repository owner (e.g. from the git remote).
+    .PARAMETER Repo
+        Repository name.
+    .PARAMETER CommentId
+        The numeric REST comment id (not the GraphQL node id).
+    .PARAMETER ExpectedMarker
+        A substring that MUST be present in the fetched body before
+        appending (e.g. '<!-- plan-issue-811' or '<!-- judge-rulings').
+        Guards against appending to the wrong comment.
+    .PARAMETER NewContent
+        The new content to append after the existing body. Must contain at
+        least one `judge_ruling:` entry (see the no-op guard above).
+    .OUTPUTS
+        [PSCustomObject] with:
+          Success [bool]
+          Reason  [string] — populated only when Success=$false
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][long]$CommentId,
+        [Parameter(Mandatory)][string]$ExpectedMarker,
+        [Parameter(Mandatory)][string]$NewContent
+    )
+
+    # Entry-level anchor: one match per `judge_ruling:` field occurrence.
+    # Deliberately independent of any per-entry ID field name (the writer
+    # side, s4, is not yet implemented and different callers may key entries
+    # as `id:` or `finding_id:`) — the judge_ruling field itself is the one
+    # value both the review-judgment SKILL template and the 811 plan's
+    # writer contract agree is present on every entry, sustained or
+    # defense-sustained, including the zero-findings placeholder.
+    $judgeRulingEntryPattern = '(?m)^\s*(?:-\s+)?judge_ruling\s*:\s*\S+'
+
+    # --- 2b (preflight, ahead of any network call): refuse a zero-entry
+    # judge-rulings head up front (M8/D5). Without this, a caller could
+    # append a bare `<!-- judge-rulings -->` head with no entries at all,
+    # and the entry-level positive-proof loop below would vacuously pass
+    # (zero entries to verify => zero iterations => trivially "success"),
+    # exactly the same no-op hazard Add-CommentBlocks' M10 fix closed for
+    # phase-containment blocks — but worse here, since a silently-accepted
+    # empty judge-rulings append could defeat the D5 zero-findings
+    # placeholder contract, which must always carry at least one entry.
+    $preflightEntryMatches = [regex]::Matches($NewContent, $judgeRulingEntryPattern)
+    if ($preflightEntryMatches.Count -eq 0) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: NewContent carries zero judge_ruling: entries for comment $CommentId; refusing as a no-op.")
+        return [PSCustomObject]@{ Success = $false; Reason = 'no-op: NewContent carries zero judge_ruling: entries' }
+    }
+
+    $getPath = "repos/$Owner/$Repo/issues/comments/$CommentId"
+
+    # --- 1. GET the current comment body. ---
+    $getOutput = & gh api $getPath 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: gh api GET $getPath failed (exit $LASTEXITCODE)")
+        return [PSCustomObject]@{ Success = $false; Reason = "GET failed (exit $LASTEXITCODE)" }
+    }
+
+    try {
+        $getObj = $getOutput | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: failed to parse GET response JSON: $($_.Exception.Message)")
+        return [PSCustomObject]@{ Success = $false; Reason = "GET response is not valid JSON: $($_.Exception.Message)" }
+    }
+
+    $originalBody = [string]$getObj.body
+
+    # --- 2. Verify the expected marker is present. ---
+    if (-not $originalBody.Contains($ExpectedMarker)) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: expected marker '$ExpectedMarker' not found in comment $CommentId; refusing to append.")
+        return [PSCustomObject]@{ Success = $false; Reason = "Expected marker '$ExpectedMarker' not found in comment body" }
+    }
+
+    # --- 3. Concatenate. ---
+    $combinedBody = $originalBody + $NewContent
+
+    # --- 4. PATCH the full combined body. ---
+    $patchPath = "repos/$Owner/$Repo/issues/comments/$CommentId"
+    $patchTempFile = $null
+    try {
+        $patchTempFile = [System.IO.Path]::GetTempFileName()
+        $patchPayload = @{ body = $combinedBody } | ConvertTo-Json -Depth 4 -Compress
+        Set-Content -LiteralPath $patchTempFile -Value $patchPayload -Encoding UTF8 -NoNewline
+        $null = & gh api -X PATCH $patchPath --input $patchTempFile 2>$null
+    }
+    finally {
+        if ($null -ne $patchTempFile -and (Test-Path -LiteralPath $patchTempFile)) {
+            Remove-Item -LiteralPath $patchTempFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: gh api PATCH $patchPath failed (exit $LASTEXITCODE)")
+        return [PSCustomObject]@{ Success = $false; Reason = "PATCH failed (exit $LASTEXITCODE)" }
+    }
+
+    # --- 5. Post-write verify: GET again and apply positive-proof checks. ---
+    $verifyOutput = & gh api $getPath 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: post-write verify GET $getPath failed (exit $LASTEXITCODE)")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify GET failed (exit $LASTEXITCODE)" }
+    }
+
+    try {
+        $verifyObj = $verifyOutput | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: failed to parse post-write verify JSON: $($_.Exception.Message)")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify response is not valid JSON: $($_.Exception.Message)" }
+    }
+
+    $verifyBody = [string]$verifyObj.body
+
+    # --- 5a. Gross-truncation guard (same rationale as Add-CommentBlocks:
+    # GitHub's API benignly normalizes some whitespace on write/read, but a
+    # body that shrank dramatically relative to what was just written is
+    # corruption/data-loss regardless of what the entry-level check below
+    # finds). ---
+    $expectedMinLength = [int]($combinedBody.Length * 0.5)
+    if ($verifyBody.Length -lt $expectedMinLength) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: post-write verify FAILED — verify body ($($verifyBody.Length) chars) is dramatically shorter than the written body ($($combinedBody.Length) chars) for comment $CommentId.")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: verify body ($($verifyBody.Length) chars) is dramatically shorter than expected ($($combinedBody.Length) chars written)" }
+    }
+
+    # --- 5b. Positive proof #1: original content survived. ---
+    if (-not $verifyBody.Contains($ExpectedMarker)) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: post-write verify FAILED — expected marker '$ExpectedMarker' missing from verify body for comment $CommentId.")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: expected marker '$ExpectedMarker' missing from verify body" }
+    }
+
+    # --- 5c. Positive proof #2 (entry-level, per this function's contract):
+    # EVERY judge_ruling: entry appended in NewContent must land in the
+    # verify body — checked both by count AND by individual entry-value
+    # content identity, not merely by the head string '<!-- judge-rulings'
+    # reappearing. This is what distinguishes this function's positive-proof
+    # from a head-only check: a truncated append (e.g. head + 3 of 11
+    # entries) has a matching head substring but a short count, and must
+    # fail loud here rather than reporting success because "the marker
+    # reappeared". Content identity (not just count) also catches the case
+    # where the RIGHT NUMBER of entries landed but one was corrupted into a
+    # different value.
+    $appendedEntryValues = [System.Collections.Generic.List[string]]::new()
+    foreach ($m in $preflightEntryMatches) { $appendedEntryValues.Add($m.Value.Trim()) }
+
+    $verifyEntryMatches = [regex]::Matches($verifyBody, $judgeRulingEntryPattern)
+    $verifyEntryCounts = @{}
+    foreach ($m in $verifyEntryMatches) {
+        $val = $m.Value.Trim()
+        if ($verifyEntryCounts.ContainsKey($val)) { $verifyEntryCounts[$val]++ } else { $verifyEntryCounts[$val] = 1 }
+    }
+
+    $appendedEntryCounts = @{}
+    foreach ($val in $appendedEntryValues) {
+        if ($appendedEntryCounts.ContainsKey($val)) { $appendedEntryCounts[$val]++ } else { $appendedEntryCounts[$val] = 1 }
+    }
+
+    foreach ($val in $appendedEntryCounts.Keys) {
+        $neededCount = $appendedEntryCounts[$val]
+        $foundCount = if ($verifyEntryCounts.ContainsKey($val)) { $verifyEntryCounts[$val] } else { 0 }
+        if ($foundCount -lt $neededCount) {
+            [Console]::Error.WriteLine("Add-JudgeRulingsBlock: post-write verify FAILED — appended entry '$val' expected at least $neededCount occurrence(s), found $foundCount in verify body for comment $CommentId.")
+            return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: appended judge_ruling entry '$val' expected at least $neededCount occurrence(s), found $foundCount" }
+        }
+    }
+
+    return [PSCustomObject]@{ Success = $true; Reason = $null }
+}
+
+#endregion
