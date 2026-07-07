@@ -147,8 +147,8 @@ function script:Format-InertMarkerLabel {
 
 # ---------------------------------------------------------------------------
 # Render a single gap row. $Gap is the PSCustomObject from Get-EmissionGap
-# (SustainedCount, BlockCount, Gap, ParseStatus) plus the caller-supplied
-# Surface/Id for the label.
+# (SustainedCount, BlockCount, Gap, ParseStatus, Reason) plus the
+# caller-supplied Surface/Id for the label.
 # ---------------------------------------------------------------------------
 function script:Format-EmissionGapLine {
     param(
@@ -157,7 +157,34 @@ function script:Format-EmissionGapLine {
         [Parameter(Mandatory)][PSCustomObject]$Gap
     )
 
+    # 811-D1 s2: Reason is an optional detail on the Gap object (only
+    # Get-EmissionGap's real output carries it) — read it defensively so a
+    # Gap-shaped object without the field still falls back to the generic
+    # M13 could-not-verify wording rather than throwing under StrictMode.
+    $reason = if ($Gap.PSObject.Properties.Match('Reason').Count -gt 0) { $Gap.Reason } else { 'ok' }
+
     if ($Gap.ParseStatus -eq 'could-not-verify') {
+        # 811-D1 (M5): differentiate WHY this surface could not be verified
+        # when the Reason detail says so. 'head-missing' means the
+        # plan-stress-test honest fallback fired — blocks may already exist,
+        # there is simply no machine judge-rulings head backing them, which
+        # is a one-line backfill candidate distinct from a genuinely
+        # unparseable plan. 'head-corrupt' means a real judge-rulings head
+        # WAS present but its content failed to parse, so a maintainer must
+        # not mistake it for "missing" and append a redundant second block.
+        # Matches the existing M13 "partial, do not trust" tone/style.
+        # Scoped to plan-stress-test only (Reason is a plan-stress-test-
+        # relevant detail per Get-EmissionGap's docstring) so code-review and
+        # design-challenge rendering is byte-for-byte unchanged (hard
+        # invariant — those surfaces keep the generic M13 wording below).
+        if ($Surface -eq 'plan-stress-test') {
+            if ($reason -eq 'head-missing') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (machine-head missing, blocks=$($Gap.BlockCount) present: sustained=$($Gap.SustainedCount))"
+            }
+            if ($reason -eq 'head-corrupt') {
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (machine block present but unparseable: sustained=$($Gap.SustainedCount), blocks=$($Gap.BlockCount))"
+            }
+        }
         # M13 fix (issue #782 post-review): could-not-verify means the
         # sustained/blocks numbers reflect only the bodies that DID parse —
         # a skimming maintainer could otherwise mistake a small-looking
@@ -167,6 +194,14 @@ function script:Format-EmissionGapLine {
     }
     if ($Gap.Gap -gt 0) {
         return "  ${Surface} #${Id}: GAP -- sustained=$($Gap.SustainedCount) blocks=$($Gap.BlockCount) missing=$($Gap.Gap)"
+    }
+    if ($Gap.Gap -lt 0) {
+        # 811-D1 (M5/O5): negative gap means MORE blocks than sustained
+        # findings — never render 'clean' for this, since that would read
+        # as a reassuring, trustworthy result when the counts actually
+        # disagree in the other direction. Loud GAP-style wording, distinct
+        # unit label so it is never confused with the positive-gap case.
+        return "  ${Surface} #${Id}: GAP -- sustained=$($Gap.SustainedCount) blocks=$($Gap.BlockCount) excess=$(-$Gap.Gap)"
     }
     return "  ${Surface} #${Id}: clean -- sustained=$($Gap.SustainedCount) blocks=$($Gap.BlockCount)"
 }

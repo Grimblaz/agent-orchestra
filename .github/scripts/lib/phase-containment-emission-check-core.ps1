@@ -23,6 +23,30 @@ Set-StrictMode -Version Latest
 # re-implementing the block regex (delegation-instead-of-duplication).
 . (Join-Path $PSScriptRoot 'phase-containment-core.ps1')
 
+# Single source of truth for the general judge-rulings HEAD pattern (bare
+# `<!-- judge-rulings` or attributed `<!-- judge-rulings pr=N -->` — the
+# attributed form's `pr=N` prefix satisfies this pattern's `\s` alternative,
+# so it matches both head shapes without a separate attributed-specific
+# check). Four sites in this file need "does a real judge-rulings head exist
+# here" (Test-EmissionMarkerPresent's vocab gate, the duplicate-head count in
+# Get-JudgeRulingsSustainedCountInternal, its bare-head fallback match, and
+# Get-EmissionGap's real-vs-fallback classification); a single named constant
+# means a future change to the head shape touches one place instead of
+# silently drifting across four inline copies (refactor 811-D1-refactor-1).
+$script:JudgeRulingsHeadPattern = '<!--\s*judge-rulings(?:\s|-->|$)'
+
+# Bounded lookahead window after a matched head, within which real marker
+# content is expected to appear (shared by every vocab-gate scan in this
+# file — Test-EmissionMarkerPresent, Get-JudgeRulingsSustainedCountInternal's
+# duplicate-head guard and region-isolation, and Get-EmissionGap's
+# hasRealHead classification).
+$script:JudgeRulingsLookaheadWindow = 400
+
+# Vocab-gate field-token pattern: a head match is only "real" (as opposed to
+# a bare prose mention of the marker convention) when at least one of these
+# tokens appears at a real YAML key position within the lookahead window.
+$script:JudgeRulingsVocabGatePattern = '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:'
+
 #region Valid surfaces / id-domain mapping
 
 # -Surface uses the core's stage names exactly (StageProjections keys):
@@ -39,6 +63,50 @@ Set-StrictMode -Version Latest
 #   design-challenge            -> Id = issue number, blocks live on issue comments (design-phase-complete-{ID})
 #   plan-stress-test            -> Id = issue number, blocks live on issue comments (plan-issue-{ID})
 # Callers must pass the matching domain; this module does not verify it.
+
+#endregion
+
+#region Get-RealJudgeRulingsHeadMatches (private)
+
+function script:Get-RealJudgeRulingsHeadMatches {
+    <#
+    .SYNOPSIS
+        Scans a body for ALL judge-rulings head candidates and returns only
+        those that pass the vocab gate (real heads), preserving encounter
+        order.
+    .DESCRIPTION
+        GH-3 fix (PR #815 review): every prior head-detection site in this
+        file used a standalone first-match `[regex]::Match` call, which lets
+        a vocab-gate-FAILING decoy head positioned textually before a real,
+        vocab-gate-PASSING block suppress detection of the real block
+        entirely (both a false could-not-verify on plan-stress-test and a
+        silent false-clean on code-review). This helper is the single scan
+        every head-detection call site now reuses: it walks every raw head
+        match (not just the first) and keeps only the ones whose bounded
+        lookahead window contains real field vocabulary, so callers can
+        select "the first REAL head" instead of "the first RAW match."
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .OUTPUTS
+        [System.Text.RegularExpressions.Match[]] — the subset of
+        $script:JudgeRulingsHeadPattern matches that pass the vocab gate, in
+        original encounter order. Empty array when none pass.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+
+    $allHeadMatches = [regex]::Matches($Body, $script:JudgeRulingsHeadPattern)
+    $realHeadMatches = [System.Collections.Generic.List[System.Text.RegularExpressions.Match]]::new()
+    foreach ($candidateHead in $allHeadMatches) {
+        $windowEnd = [Math]::Min($Body.Length, $candidateHead.Index + $candidateHead.Length + $script:JudgeRulingsLookaheadWindow)
+        $window = $Body.Substring($candidateHead.Index, $windowEnd - $candidateHead.Index)
+        if ([regex]::IsMatch($window, $script:JudgeRulingsVocabGatePattern)) {
+            $realHeadMatches.Add($candidateHead)
+        }
+    }
+    return , $realHeadMatches.ToArray()
+}
 
 #endregion
 
@@ -65,11 +133,40 @@ function Test-EmissionMarkerPresent {
              vocabulary is still could-not-verify, never silently zero).
 
         Matches the SAME marker-head patterns Get-SustainedFindingCount's
-        internal parsers use for each surface, so head detection here can
-        never diverge from head detection there:
+        internal parsers use for each surface:
           code-review / plan-stress-test: bare `<!-- judge-rulings` or
             attributed `<!-- judge-rulings pr=N -->`
           design-challenge: `finding_dispositions:` YAML key
+
+        811-D1 INTENTIONAL DIVERGENCE (plan-stress-test surface only): head
+        detection here can no longer be claimed to "never diverge" from
+        Get-SustainedFindingCount's own head detection, and that is now
+        deliberate rather than a bug. A plan comment can legitimately carry
+        a prose-only "Plan Stress-Test" section (heading + narrative
+        bullets) with no machine-readable judge-rulings block at all — every
+        plan persisted before the 811 writer change is exactly this shape.
+        Treating that as "no marker at all" (ordinary chatter, contributes
+        0 per case 1 above) rendered a false `clean -- sustained=0 blocks=0`,
+        indistinguishable from an issue with no stress-test history
+        whatsoever. For plan-stress-test only, when the vocab-gated
+        judge-rulings check above returns false, a second fallback check
+        fires: if the body ALSO carries both a `<!-- plan-issue-` marker and
+        a line-start `**Plan Stress-Test**` heading, this function reports
+        the marker as present anyway, so Get-EmissionGap's caller renders an
+        honest could-not-verify instead of a reassuring clean. This gate/
+        counter divergence is surfaced downstream via Get-EmissionGap's
+        `Reason` field: 'head-missing' when this fallback is what made the
+        marker read as present (no real judge-rulings head exists at all);
+        'head-corrupt' when a real head IS present elsewhere but failed to
+        parse; 'ok' otherwise. code-review is unaffected by this
+        plan-stress-test-specific fallback/Reason logic specifically — it
+        never reaches the fallback branch above. The duplicate-head guard in
+        Get-JudgeRulingsSustainedCountInternal (M1 fix) is vocab-gated and
+        shared by BOTH surfaces, so a genuine duplicate real head on either
+        surface still correctly fails loud; only a bare prose mention of the
+        marker convention (no real vocabulary) is excluded from the count.
+        design-challenge's marker-head detection and counting logic is
+        entirely separate and cannot diverge from either surface.
 
         M6 fix (issue #782 post-review): a bare head-substring match alone
         used to be sufficient, which meant a maintainer describing the
@@ -124,22 +221,52 @@ function Test-EmissionMarkerPresent {
     # whitespace (the real marker's normal continuation), the closing
     # '-->' (immediate self-close), or end-of-string — never an unrelated
     # identifier character run like '-report'.
-    $headMatch = [regex]::Match($Body, '<!--\s*judge-rulings(?:\s|-->|$)')
-    if (-not $headMatch.Success) { return $false }
-    $windowEnd = [Math]::Min($Body.Length, $headMatch.Index + $headMatch.Length + $lookaheadWindow)
-    $window = $Body.Substring($headMatch.Index, $windowEnd - $headMatch.Index)
-    # PF-F2 fix (issue #782 post-fix defense pass): the key-position anchor
-    # must also recognize a YAML block-sequence item whose key is the first
-    # token after a `- ` dash-space list marker (e.g. `- disposition:
-    # Fix-now`), not just true line-start or flow-mapping `{`/`,` position.
-    # Without this, a body whose ONLY vocabulary tokens are dash-space
-    # `- disposition:` items (no plain line-start field, no flow-mapping)
-    # fails this vocab gate entirely, so Get-EmissionGap treats the whole
-    # body as ordinary chatter and silently contributes 0 — a false-clean
-    # (Gap=0/ok) despite real sustained findings. See the identical anchor
-    # in Get-JudgeRulingsSustainedCountInternal ($keyAnchor) for the
-    # counting-side counterpart; this window-gate copy must stay in sync.
-    return [regex]::IsMatch($window, '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')
+    #
+    # GH-3 fix (PR #815 review): this used to be a standalone first-match
+    # `[regex]::Match` + single vocab-gate check, which meant a vocab-gate-
+    # FAILING decoy head positioned before a real, vocab-gate-PASSING block
+    # made this function return $false without ever looking past the decoy
+    # — a silent false-clean, since Get-EmissionGap then treats the whole
+    # body as ordinary chatter and contributes 0. Reusing
+    # Get-RealJudgeRulingsHeadMatches (the same scan-all-candidates helper
+    # the M1 duplicate-head guard below uses) means ANY vocab-gate-passing
+    # head anywhere in the body — not just the first raw match — is enough
+    # to report the marker as present.
+    # PF-F2 fix (issue #782 post-fix defense pass) note preserved: the vocab
+    # gate's key-position anchor recognizes true line-start, a `- `
+    # dash-space list-item prefix, and flow-mapping `{`/`,` position (see
+    # $script:JudgeRulingsVocabGatePattern and Get-JudgeRulingsSustainedCountInternal's
+    # $keyAnchor for the counting-side counterpart).
+    $vocabGateResult = (Get-RealJudgeRulingsHeadMatches -Body $Body).Count -gt 0
+
+    if ($vocabGateResult) {
+        return $true
+    }
+
+    # 811-D1 plan-stress-test-surface-only fallback (M3/GB-F1): the vocab
+    # gate above just said "no real judge-rulings marker here" — either no
+    # head at all, or a head present but failing the vocab window (a
+    # malformed/foreign head must NOT suppress this fallback; it keys off
+    # the vocab gate's own boolean result, never a separate raw
+    # head-substring re-test, so a present-but-broken head is still
+    # correctly routed here rather than silently passing as "real"). For
+    # plan-stress-test specifically, a body carrying BOTH a durable
+    # `<!-- plan-issue-` marker (any issue number) AND a line-start
+    # `**Plan Stress-Test**` heading is recognizably a plan's persisted
+    # stress-test section, prose-only or otherwise, and must not collapse
+    # into "ordinary chatter, contributes 0." Both conditions are required
+    # together: a chatter comment that merely discusses the heading in
+    # prose, with no `<!-- plan-issue-` marker, does not qualify (it truly
+    # is ordinary discussion, not a plan's own persisted surface).
+    if ($Surface -eq 'plan-stress-test') {
+        $hasPlanIssueMarker = [regex]::IsMatch($Body, '<!--\s*plan-issue-')
+        $hasPlanStressTestHeading = [regex]::IsMatch($Body, '(?m)^\*\*Plan Stress-Test\*\*')
+        if ($hasPlanIssueMarker -and $hasPlanStressTestHeading) {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 #endregion
@@ -217,31 +344,83 @@ function script:Get-JudgeRulingsSustainedCountInternal {
         [Parameter(Mandatory)][string]$Body
     )
 
-    # Isolate the authoritative marker region first. Match both marker-head
-    # forms observed live:
-    #   - attributed, self-closing: `<!-- judge-rulings pr=N -->` (PR #778) —
-    #     the tag closes immediately; YAML content follows the tag.
-    #   - bare, unclosed on the head line: `<!-- judge-rulings` (PRs #775/#781)
-    #     — the tag's `-->` closes only at the END of the YAML content.
-    $attributedHeadMatch = [regex]::Match($Body, '<!--\s*judge-rulings\s+pr=\d+\s*-->')
-    # M9 fix: see Test-EmissionMarkerPresent's identical fix for the
-    # superstring-marker-name rationale (e.g. '<!-- judge-rulings-report -->'
-    # must never match this real judge-rulings head).
-    $bareHeadMatch = [regex]::Match($Body, '<!--\s*judge-rulings(?:\s|-->|$)')
-
-    $headMatch = $null
-    if ($attributedHeadMatch.Success) {
-        $headMatch = $attributedHeadMatch
-    }
-    elseif ($bareHeadMatch.Success) {
-        $headMatch = $bareHeadMatch
-    }
-
-    if (-not $headMatch -or -not $headMatch.Success) {
+    # 811-D1 owner decision (M1): fail loud when two or more judge-rulings
+    # heads exist in one body, rather than silently picking one (latest-wins
+    # was explicitly considered and rejected during plan stress-test — the
+    # writer's replace-own-block already guarantees a single head on the
+    # normal persist path, so a duplicate here signals a genuine anomaly
+    # (e.g. a double-run backfill) that should be surfaced, not quietly
+    # resolved). Count ALL head occurrences with the single general pattern
+    # below: the attributed form `<!-- judge-rulings pr=N -->` is itself
+    # matched by this same general pattern (its `pr=N` prefix satisfies the
+    # `\s` alternative), so counting matches of the general pattern alone
+    # gives the true head count without double-counting the same head under
+    # both the attributed-specific and bare-general patterns.
+    #
+    # M1 fix (issue #811 post-fix adversarial pass): a raw head-pattern match
+    # alone is not sufficient here, same as it is not sufficient for
+    # Test-EmissionMarkerPresent's own head detection above. A prose sentence
+    # that merely MENTIONS the marker convention (e.g. "this PR uses the
+    # standard <!-- judge-rulings pr=778 --> marker for tracking") has no
+    # real field vocabulary following it, yet still counted toward this
+    # duplicate threshold when it co-occurred with one genuinely real block —
+    # a false could-not-verify. Each candidate head is now vocab-gated via
+    # Get-RealJudgeRulingsHeadMatches (the same scan-all-candidates helper
+    # Test-EmissionMarkerPresent uses); only heads that pass this gate count
+    # as "a real head" toward the 2+ duplicate threshold. Two genuinely real
+    # blocks still correctly fail loud; a bare prose mention no longer does.
+    $realHeadMatches = Get-RealJudgeRulingsHeadMatches -Body $Body
+    if ($realHeadMatches.Count -ge 2) {
         return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
     }
 
-    $regionStart = $headMatch.Index + $headMatch.Length
+    # GH-3 fix (PR #815 review): region-isolation used to re-run its OWN
+    # standalone first-match `[regex]::Match` calls here, independent of the
+    # M1 guard's vocab-gated scan above. That let a vocab-gate-FAILING decoy
+    # head positioned before a real, vocab-gate-PASSING block win the
+    # first-match race, isolate an empty/prose-only region at the decoy's
+    # position, and return could-not-verify — even though the real block,
+    # unexamined, would have parsed cleanly. Select the head to isolate from
+    # $realHeadMatches (the SAME vocab-gated set the M1 guard just computed)
+    # instead of a fresh raw scan, while still preferring the attributed form
+    # `<!-- judge-rulings pr=N -->` over a bare form when BOTH are present
+    # among the real (vocab-gate-passing) candidates — attributed-vs-bare
+    # preference is now applied only among real heads, never used to
+    # resurrect a vocab-gate-failing raw match.
+    # NOTE: $script:JudgeRulingsHeadPattern's own match value stops at the
+    # first whitespace/`-->`/end-of-string after "judge-rulings" (e.g. just
+    # `<!-- judge-rulings ` for the attributed form), so it never spans
+    # through the closing `-->` of an attributed head. Anchor the attributed
+    # pattern (`\G` = "must match starting exactly here") at each
+    # candidate's own start position within the full body, so a
+    # vocab-gate-passing candidate that IS attributed is correctly detected
+    # without resurrecting a match at some unrelated, possibly-earlier
+    # occurrence of the same literal text elsewhere in a pathological body.
+    # $regionIndex/$regionHeadLength (not a swapped-in Match object) are what
+    # $regionStart below actually needs — the attributed match's full length
+    # when a candidate is attributed, else the candidate's own head-pattern
+    # length for a bare head.
+    $attributedPattern = '\G<!--\s*judge-rulings\s+pr=\d+\s*-->'
+    $regionIndex = -1
+    $regionHeadLength = 0
+    foreach ($candidate in $realHeadMatches) {
+        $attributedAtCandidate = [regex]::Match($Body.Substring($candidate.Index), $attributedPattern)
+        if ($attributedAtCandidate.Success) {
+            $regionIndex = $candidate.Index
+            $regionHeadLength = $attributedAtCandidate.Length
+            break
+        }
+    }
+    if ($regionIndex -lt 0 -and $realHeadMatches.Count -gt 0) {
+        $regionIndex = $realHeadMatches[0].Index
+        $regionHeadLength = $realHeadMatches[0].Length
+    }
+
+    if ($regionIndex -lt 0) {
+        return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+    }
+
+    $regionStart = $regionIndex + $regionHeadLength
     # The YAML region ends at the next `-->` (closing the HTML comment) or, for
     # the fenced-code-block variant (PR #778), at the closing ``` fence.
     $closeCommentIdx = $Body.IndexOf('-->', $regionStart, [System.StringComparison]::Ordinal)
@@ -386,7 +565,7 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     if ($hasJudgeRuling) {
         # Canonical judge-rulings variant: sustained iff judge_ruling: sustained
         # (NOT defense-sustained). judge_ruling is a closed 2-value enum per
-        # skills/review-judgment/SKILL.md:150 ('sustained' or 'defense-sustained');
+        # skills/review-judgment/SKILL.md:156 ('sustained' or 'defense-sustained');
         # any other value is unrecognized vocabulary -> could-not-verify (DD3),
         # never silently treated as "not sustained".
         $rulingMatches = [regex]::Matches($region, '(?m)judge_ruling\s*:\s*(\S+)')
@@ -494,6 +673,9 @@ function Get-EmissionGap {
           BlockCount     [int]
           Gap            [int]
           ParseStatus    [string] — 'ok' or 'could-not-verify'
+          Reason         [string] — 'ok', 'head-missing', or 'head-corrupt'
+                          (811-D1, plan-stress-test-relevant detail consumed
+                          by the s2 wrapper render; see below)
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
@@ -504,14 +686,58 @@ function Get-EmissionGap {
     $totalSustained = 0
     $totalBlocks = 0
     $anyCouldNotVerify = $false
+    # 811-D1 (M5): distinguishes WHY the aggregate went could-not-verify, for
+    # s2's differentiated render. 'head-missing' means the 811 plan-stress-test
+    # fallback fired for at least one body (a real machine judge-rulings head
+    # was never present — the honest fallback is the only reason
+    # Test-EmissionMarkerPresent returned true). 'head-corrupt' means a real
+    # judge-rulings head WAS present somewhere but its content failed to parse
+    # (DD3 fail-loud). head-corrupt takes priority when both occur across
+    # different bodies in the same aggregation, since "a machine head exists
+    # but is broken" is the more actionable/specific diagnosis.
+    $sawFallbackFired = $false
+    $sawRealHeadCorrupt = $false
 
     foreach ($body in $Bodies) {
         $bodyHasMarker = Test-EmissionMarkerPresent -Surface $Surface -Body $body
 
         if ($bodyHasMarker) {
+            # 811-D1: determine whether this body's marker presence came from
+            # a REAL judge-rulings/finding_dispositions head, or only from the
+            # plan-stress-test honest fallback (no real head at all).
+            #
+            # GH-1 fix (PR #815 review, rider on GH-3): the non-design-challenge
+            # branch used to be a bare, ungated [regex]::IsMatch against
+            # $script:JudgeRulingsHeadPattern, so a vocab-gate-FAILING decoy
+            # head alone could make this report $true, mislabeling the
+            # could-not-verify Reason as 'head-corrupt' ("a real head exists
+            # but its content failed to parse") when the accurate diagnosis is
+            # "the parser was misled by a decoy, not by real-head corruption."
+            # The prior comment claiming this "can never drift from what
+            # Get-SustainedFindingCount considers a real head" was false for
+            # exactly that reason — an ungated check can disagree with the
+            # vocab-gated selection Get-SustainedFindingCount actually uses.
+            # Now reuses Get-RealJudgeRulingsHeadMatches, the SAME vocab-gated
+            # scan Test-EmissionMarkerPresent and
+            # Get-JudgeRulingsSustainedCountInternal both use, so this
+            # classification is now actually unable to drift from what a real
+            # head means elsewhere in this file.
+            $hasRealHead = if ($Surface -eq 'design-challenge') {
+                [regex]::IsMatch($body, '(?m)^finding_dispositions\s*:\s*$')
+            }
+            else {
+                (Get-RealJudgeRulingsHeadMatches -Body $body).Count -gt 0
+            }
+
             $sustainedResult = Get-SustainedFindingCount -Surface $Surface -Body $body
             if ($sustainedResult.ParseStatus -eq 'could-not-verify') {
                 $anyCouldNotVerify = $true
+                if ($hasRealHead) {
+                    $sawRealHeadCorrupt = $true
+                }
+                else {
+                    $sawFallbackFired = $true
+                }
             }
             $totalSustained += $sustainedResult.SustainedCount
         }
@@ -562,11 +788,45 @@ function Get-EmissionGap {
     $parseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
     $gap = $totalSustained - $totalBlocks
 
+    # 811-D1 (M5): head-corrupt takes priority over head-missing when both
+    # occurred across different bodies (see field notes above); 'ok' when
+    # ParseStatus is 'ok' (no could-not-verify body at all).
+    $reason = if (-not $anyCouldNotVerify) {
+        'ok'
+    }
+    elseif ($sawRealHeadCorrupt) {
+        'head-corrupt'
+    }
+    elseif ($sawFallbackFired) {
+        'head-missing'
+    }
+    else {
+        # M8 fix (issue #811 post-fix adversarial pass): this branch is
+        # defensive and, as of the current code path, unreachable in
+        # practice. $anyCouldNotVerify is only ever set to $true at the one
+        # site above (inside `if ($bodyHasMarker)`, immediately after
+        # Get-SustainedFindingCount returns 'could-not-verify'), and that
+        # same site always also sets exactly one of $sawRealHeadCorrupt /
+        # $sawFallbackFired based on $hasRealHead — so by the time this
+        # `else` is reached, at least one of the two preceding `elseif`
+        # branches has already matched. (The previously cited "empty-body
+        # AllowEmptyString could-not-verify" example cannot occur here:
+        # Test-EmissionMarkerPresent returns $false for whitespace/empty
+        # bodies, so $bodyHasMarker gates such a body out of this loop
+        # entirely before Get-SustainedFindingCount is ever called.) This
+        # `else` remains as a safety net against a future code change that
+        # sets $anyCouldNotVerify from a new call site without also setting
+        # one of the two flags; it falls back to the generic 'head-corrupt'
+        # label rather than guessing a plan-stress-test-specific reason.
+        'head-corrupt'
+    }
+
     return [PSCustomObject]@{
         SustainedCount = $totalSustained
         BlockCount     = $totalBlocks
         Gap            = $gap
         ParseStatus    = $parseStatus
+        Reason         = $reason
     }
 }
 
@@ -780,6 +1040,249 @@ function Add-CommentBlocks {
                 [Console]::Error.WriteLine("Add-CommentBlocks: post-write verify FAILED — a phase-containment-$id block from NewContent does not match any parsed block in the verify body for comment $CommentId.")
                 return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: a phase-containment-$id block's content does not match the verify body" }
             }
+        }
+    }
+
+    return [PSCustomObject]@{ Success = $true; Reason = $null }
+}
+
+#endregion
+
+#region Add-JudgeRulingsBlock
+
+function Add-JudgeRulingsBlock {
+    <#
+    .SYNOPSIS
+        Appends a new <!-- judge-rulings ... --> machine block to an existing
+        GitHub comment via read-modify-write, with entry-level fail-loud
+        positive-proof (811-D1 s3 — sibling to Add-CommentBlocks, M17).
+    .DESCRIPTION
+        Sequence — the SAME read-modify-write append core as Add-CommentBlocks
+        (preflight -> GET -> verify expected marker present -> concatenate ->
+        PATCH -> re-fetch and verify), but with its OWN entry-level
+        verification tuned to the judge-rulings payload shape rather than
+        phase-containment blocks:
+          1. Preflight no-op guard (M8/D5), run FIRST and before any network
+             call: NewContent must carry at least one `judge_ruling:` entry.
+             A judge-rulings HEAD with zero entries is refused before any
+             write is attempted, so an empty append can never defeat the
+             zero-findings placeholder contract (which always carries at
+             least one `- finding_id: none` / `judge_ruling: defense-sustained`
+             entry).
+          2. gh api GET the comment body by REST comment id.
+          3. Verify the expected marker is present in the fetched body.
+          4. Concatenate NewContent after the existing body.
+          5. gh api PATCH the full combined body.
+          6. Post-write verify: GET again and apply positive-proof
+             verification — critically, ENTRY-LEVEL, not merely a check that
+             the literal head string `<!-- judge-rulings` reappears. Every
+             individual `judge_ruling:` line present in NewContent must also
+             be present, in matching multiplicity, in the re-fetched body.
+             A truncated append (e.g. head + 3 of 11 entries landing) fails
+             this count comparison and is reported as failure — the same
+             failure mode Add-CommentBlocks' phase-containment loop guards
+             against, adapted to a payload shape that has no per-entry ID
+             marker pair to parse structurally.
+
+        Any mismatch at any step is fail-loud: the function returns
+        Success=$false with a Reason describing the failure, and performs no
+        further action. This function never truncates or overwrites existing
+        comment content.
+
+        Hand-rolled regex only (file-level SECURITY note at the top of this
+        file applies here too — no ConvertFrom-Yaml / powershell-yaml).
+
+        This function is independent of Add-CommentBlocks: it does not call
+        it, and Add-CommentBlocks is not modified by this addition. The two
+        functions intentionally duplicate the outer GET/PATCH/verify shell
+        rather than share a risky extracted helper, per the 811 plan's
+        owner decision (M17) to protect Add-CommentBlocks' ~15 existing
+        callers and its already-hardened preflight/positive-proof path.
+    .PARAMETER Owner
+        Repository owner (e.g. from the git remote).
+    .PARAMETER Repo
+        Repository name.
+    .PARAMETER CommentId
+        The numeric REST comment id (not the GraphQL node id).
+    .PARAMETER ExpectedMarker
+        A substring that MUST be present in the fetched body before
+        appending (e.g. '<!-- plan-issue-811' or '<!-- judge-rulings').
+        Guards against appending to the wrong comment.
+    .PARAMETER NewContent
+        The new content to append after the existing body. Must contain at
+        least one `judge_ruling:` entry (see the no-op guard above).
+    .OUTPUTS
+        [PSCustomObject] with:
+          Success [bool]
+          Reason  [string] — populated only when Success=$false
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Owner,
+        [Parameter(Mandatory)][string]$Repo,
+        [Parameter(Mandatory)][long]$CommentId,
+        [Parameter(Mandatory)][string]$ExpectedMarker,
+        [Parameter(Mandatory)][string]$NewContent
+    )
+
+    # Entry-level anchor: one match per `judge_ruling:` field occurrence.
+    # Deliberately independent of any per-entry ID field name (the writer
+    # side, s4, is not yet implemented and different callers may key entries
+    # as `id:` or `finding_id:`) — the judge_ruling field itself is the one
+    # value both the review-judgment SKILL template and the 811 plan's
+    # writer contract agree is present on every entry, sustained or
+    # defense-sustained, including the zero-findings placeholder.
+    $judgeRulingEntryPattern = '(?m)^\s*(?:-\s+)?judge_ruling\s*:\s*\S+'
+
+    # --- 2b (preflight, ahead of any network call): refuse a zero-entry
+    # judge-rulings head up front (M8/D5). Without this, a caller could
+    # append a bare `<!-- judge-rulings -->` head with no entries at all,
+    # and the entry-level positive-proof loop below would vacuously pass
+    # (zero entries to verify => zero iterations => trivially "success"),
+    # exactly the same no-op hazard Add-CommentBlocks' M10 fix closed for
+    # phase-containment blocks — but worse here, since a silently-accepted
+    # empty judge-rulings append could defeat the D5 zero-findings
+    # placeholder contract, which must always carry at least one entry.
+    $preflightEntryMatches = [regex]::Matches($NewContent, $judgeRulingEntryPattern)
+    if ($preflightEntryMatches.Count -eq 0) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: NewContent carries zero judge_ruling: entries for comment $CommentId; refusing as a no-op.")
+        return [PSCustomObject]@{ Success = $false; Reason = 'no-op: NewContent carries zero judge_ruling: entries' }
+    }
+
+    $getPath = "repos/$Owner/$Repo/issues/comments/$CommentId"
+
+    # --- 1. GET the current comment body. ---
+    $getOutput = & gh api $getPath 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: gh api GET $getPath failed (exit $LASTEXITCODE)")
+        return [PSCustomObject]@{ Success = $false; Reason = "GET failed (exit $LASTEXITCODE)" }
+    }
+
+    try {
+        $getObj = $getOutput | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: failed to parse GET response JSON: $($_.Exception.Message)")
+        return [PSCustomObject]@{ Success = $false; Reason = "GET response is not valid JSON: $($_.Exception.Message)" }
+    }
+
+    $originalBody = [string]$getObj.body
+
+    # --- 2. Verify the expected marker is present. ---
+    if (-not $originalBody.Contains($ExpectedMarker)) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: expected marker '$ExpectedMarker' not found in comment $CommentId; refusing to append.")
+        return [PSCustomObject]@{ Success = $false; Reason = "Expected marker '$ExpectedMarker' not found in comment body" }
+    }
+
+    # --- 3. Concatenate. ---
+    $combinedBody = $originalBody + $NewContent
+
+    # --- 4. PATCH the full combined body. ---
+    $patchPath = "repos/$Owner/$Repo/issues/comments/$CommentId"
+    $patchTempFile = $null
+    try {
+        $patchTempFile = [System.IO.Path]::GetTempFileName()
+        $patchPayload = @{ body = $combinedBody } | ConvertTo-Json -Depth 4 -Compress
+        Set-Content -LiteralPath $patchTempFile -Value $patchPayload -Encoding UTF8 -NoNewline
+        $null = & gh api -X PATCH $patchPath --input $patchTempFile 2>$null
+    }
+    finally {
+        if ($null -ne $patchTempFile -and (Test-Path -LiteralPath $patchTempFile)) {
+            Remove-Item -LiteralPath $patchTempFile -Force -ErrorAction SilentlyContinue
+        }
+    }
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: gh api PATCH $patchPath failed (exit $LASTEXITCODE)")
+        return [PSCustomObject]@{ Success = $false; Reason = "PATCH failed (exit $LASTEXITCODE)" }
+    }
+
+    # --- 5. Post-write verify: GET again and apply positive-proof checks. ---
+    $verifyOutput = & gh api $getPath 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: post-write verify GET $getPath failed (exit $LASTEXITCODE)")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify GET failed (exit $LASTEXITCODE)" }
+    }
+
+    try {
+        $verifyObj = $verifyOutput | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: failed to parse post-write verify JSON: $($_.Exception.Message)")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify response is not valid JSON: $($_.Exception.Message)" }
+    }
+
+    $verifyBody = [string]$verifyObj.body
+
+    # --- 5a. Gross-truncation guard (same rationale as Add-CommentBlocks:
+    # GitHub's API benignly normalizes some whitespace on write/read, but a
+    # body that shrank dramatically relative to what was just written is
+    # corruption/data-loss regardless of what the entry-level check below
+    # finds). ---
+    $expectedMinLength = [int]($combinedBody.Length * 0.5)
+    if ($verifyBody.Length -lt $expectedMinLength) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: post-write verify FAILED — verify body ($($verifyBody.Length) chars) is dramatically shorter than the written body ($($combinedBody.Length) chars) for comment $CommentId.")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: verify body ($($verifyBody.Length) chars) is dramatically shorter than expected ($($combinedBody.Length) chars written)" }
+    }
+
+    # --- 5b. Positive proof #1: original content survived. ---
+    if (-not $verifyBody.Contains($ExpectedMarker)) {
+        [Console]::Error.WriteLine("Add-JudgeRulingsBlock: post-write verify FAILED — expected marker '$ExpectedMarker' missing from verify body for comment $CommentId.")
+        return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: expected marker '$ExpectedMarker' missing from verify body" }
+    }
+
+    # --- 5c. Positive proof #2 (entry-level, per this function's contract):
+    # EVERY judge_ruling: entry appended in NewContent must land in the
+    # verify body — checked both by count AND by individual entry-value
+    # content identity, not merely by the head string '<!-- judge-rulings'
+    # reappearing. This is what distinguishes this function's positive-proof
+    # from a head-only check: a truncated append (e.g. head + 3 of 11
+    # entries) has a matching head substring but a short count, and must
+    # fail loud here rather than reporting success because "the marker
+    # reappeared". Content identity (not just count) also catches the case
+    # where the RIGHT NUMBER of entries landed but one was corrupted into a
+    # different value.
+    #
+    # M3 fix (issue #811 post-fix adversarial pass): the check below used to
+    # compare the verify body's TOTAL occurrence count of each value against
+    # only the newly-appended count, with no baseline subtraction. If
+    # $originalBody already carried an identical block (e.g. left over from a
+    # prior partial/failed run) and the PATCH silently no-op'd (verify body
+    # == original body, unchanged — the new append never actually landed),
+    # the pre-existing entries alone could satisfy $neededCount and this
+    # function would report Success=$true despite nothing new having been
+    # written. Establish a baseline count of each value's occurrences in
+    # $originalBody BEFORE the append, and require the verify body to contain
+    # at least baseline + needed — i.e. the pre-existing entries PLUS the
+    # newly-appended ones, not just "enough total occurrences somewhere."
+    $appendedEntryValues = [System.Collections.Generic.List[string]]::new()
+    foreach ($m in $preflightEntryMatches) { $appendedEntryValues.Add($m.Value.Trim()) }
+
+    $baselineEntryMatches = [regex]::Matches($originalBody, $judgeRulingEntryPattern)
+    $baselineEntryCounts = @{}
+    foreach ($m in $baselineEntryMatches) {
+        $val = $m.Value.Trim()
+        if ($baselineEntryCounts.ContainsKey($val)) { $baselineEntryCounts[$val]++ } else { $baselineEntryCounts[$val] = 1 }
+    }
+
+    $verifyEntryMatches = [regex]::Matches($verifyBody, $judgeRulingEntryPattern)
+    $verifyEntryCounts = @{}
+    foreach ($m in $verifyEntryMatches) {
+        $val = $m.Value.Trim()
+        if ($verifyEntryCounts.ContainsKey($val)) { $verifyEntryCounts[$val]++ } else { $verifyEntryCounts[$val] = 1 }
+    }
+
+    $appendedEntryCounts = @{}
+    foreach ($val in $appendedEntryValues) {
+        if ($appendedEntryCounts.ContainsKey($val)) { $appendedEntryCounts[$val]++ } else { $appendedEntryCounts[$val] = 1 }
+    }
+
+    foreach ($val in $appendedEntryCounts.Keys) {
+        $neededCount = $appendedEntryCounts[$val]
+        $baselineCount = if ($baselineEntryCounts.ContainsKey($val)) { $baselineEntryCounts[$val] } else { 0 }
+        $requiredCount = $baselineCount + $neededCount
+        $foundCount = if ($verifyEntryCounts.ContainsKey($val)) { $verifyEntryCounts[$val] } else { 0 }
+        if ($foundCount -lt $requiredCount) {
+            [Console]::Error.WriteLine("Add-JudgeRulingsBlock: post-write verify FAILED — appended entry '$val' expected at least $requiredCount occurrence(s) (baseline $baselineCount + appended $neededCount), found $foundCount in verify body for comment $CommentId.")
+            return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: appended judge_ruling entry '$val' expected at least $requiredCount occurrence(s) (baseline $baselineCount + appended $neededCount), found $foundCount" }
         }
     }
 

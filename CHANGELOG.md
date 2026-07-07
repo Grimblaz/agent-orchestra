@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.4] — 2026-07-07
+
+### Fixed
+
+- Fix plan-stress-test surface silently reporting sustained=0 blocks=0 (false-clean) by adding a machine-readable judge-rulings block emission contract to the plan-authoring writer and an honest could-not-verify fallback to the emission-check reader (#811).
+
 ## [3.3.3] — 2026-07-06
 
 ### Changed

@@ -426,6 +426,305 @@ review_mode: github-intake-proxy-prosecution
 
 #endregion
 
+#region 811-D1: plan-stress-test honest fallback fixtures
+
+# Prose-only historic plan shape (every plan persisted before the 811 writer
+# change): a `<!-- plan-issue-{N} -->` marker and a line-start
+# `**Plan Stress-Test**` heading with narrative bullets, but NO machine-
+# readable judge-rulings block at all.
+$script:ProseOnlyPlanStressTestBody = @'
+<!-- plan-issue-700 -->
+
+## Plan: Some historic plan (#700)
+
+**Plan Stress-Test** (3-pass `standard` adapter: 2 generalist + 1 specialist -> defense -> judge)
+
+- Challenge M1 (some finding) - Prosecution: GA high - Post-judge ruling: **sustained** - Disposition: **incorporate**.
+- Challenge M2 (another finding) - Prosecution: SS med - Post-judge: **defense-sustained** - Disposition: **dismiss**.
+'@
+
+# Chatter that merely discusses the "Plan Stress-Test" heading in prose
+# (e.g. explaining the convention) with NO `<!-- plan-issue-` marker at all.
+# Must NOT trigger the fallback (both conditions are required together).
+$script:ChatterMentioningHeadingNoMarkerBody = @'
+Just a note: our plans use a **Plan Stress-Test** section to record the
+adversarial pipeline results before persisting. This comment is not itself
+a plan and carries no plan-issue marker.
+'@
+
+# Duplicate judge-rulings heads in one body (e.g. a double-run backfill).
+# Both heads parse individually as valid canonical judge-rulings shapes, but
+# the reader must fail loud rather than pick one (latest-wins dropped, M1).
+$script:DuplicateJudgeRulingsHeadsBody = @'
+<!-- plan-issue-701 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+```yaml
+<!-- judge-rulings
+- id: M1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+-->
+```
+
+```yaml
+<!-- judge-rulings
+- id: M1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+-->
+```
+'@
+
+# M1 fix regression fixture (issue #811 post-fix adversarial pass): a prose
+# sentence merely MENTIONING the judge-rulings marker convention (no real
+# field vocabulary following it within the lookahead window) co-occurring
+# with exactly ONE genuinely real judge-rulings block. Before the M1 fix,
+# the duplicate-head count treated the raw head-pattern match count (2) as
+# "2+ duplicate heads" and returned could-not-verify — a false positive,
+# since the prose mention is not a real head. After the fix, only the real
+# head should count, so this must parse ok with SustainedCount=1.
+#
+# The real block comes FIRST and the prose mention is separated from it by
+# more than the 400-char lookahead window (padding filler text below), so
+# the prose head's own vocab-gate window cannot accidentally spill into the
+# real block's vocabulary and produce a false vocab-gate pass for the prose
+# mention itself — this fixture must genuinely exercise "prose head has NO
+# real vocabulary in its own window," not merely rely on window overlap.
+# The prose mention deliberately uses the BARE head form (not the
+# `pr=N`-attributed form): Get-JudgeRulingsSustainedCountInternal's
+# subsequent region-isolation step independently prefers ANY attributed-form
+# match found anywhere in the body when selecting the authoritative region,
+# which is a separate, pre-existing (main-branch) behavior outside this M1
+# fix's scope — using the bare form here isolates this fixture to the
+# duplicate-head vocab-gate behavior this test targets.
+$script:ProseMentionPlusOneRealHeadBody = @'
+<!-- plan-issue-703 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+-->
+
+Padding prose to push the next mention well past the 400-character
+lookahead window, so the two head matches cannot see into each other's
+vocabulary windows. This paragraph exists purely as filler text with no
+judge-rulings vocabulary of its own, repeated a few times to guarantee
+sufficient distance between the real head above and the prose-only
+mention below. Padding prose to push the next mention well past the
+400-character lookahead window, so the two head matches cannot see into
+each other's vocabulary windows. This paragraph exists purely as filler
+text with no judge-rulings vocabulary of its own, repeated a few times to
+guarantee sufficient distance between the real head above and the
+prose-only mention below. Padding prose to push the next mention well
+past the 400-character lookahead window so the two heads cannot overlap.
+
+This PR uses the standard <!-- judge-rulings --> marker convention for
+tracking review history, mentioned here only as ordinary narrative text
+with nothing field-shaped following it before the paragraph ends.
+'@
+
+# A malformed/foreign judge-rulings head (fails the vocab gate) co-located
+# with the plan-issue marker and heading. The fallback must still fire here
+# (a present-but-broken head must not suppress the honest fallback) and
+# Get-SustainedFindingCount must independently fail loud on this body too.
+$script:CorruptHeadWithPlanIssueMarkerBody = @'
+<!-- plan-issue-702 -->
+
+**Plan Stress-Test** (2-pass `lite` adapter)
+
+<!-- judge-rulings-report -->
+Some unrelated report content, not real judge-rulings vocabulary.
+-->
+'@
+
+#endregion
+
+#region GH-3 (PR #815 review): decoy-before-real-block fixtures
+
+# GH-3 scenario 1 (plan-stress-test surface): a BARE decoy head (fails the
+# vocab gate — no real field vocabulary in its lookahead window) appears
+# textually BEFORE a real, vocab-gate-passing bare block with a KNOWN
+# sustained count (2). Pre-fix, region-isolation's standalone first-match
+# scan picked the decoy's position, isolated an empty/prose-only region
+# there, and returned could-not-verify — even though the real block,
+# unexamined, would have parsed to SustainedCount=2. Both heads use the
+# BARE form deliberately (the reachable shape per the review: this bug only
+# fires on the bare head, not the attributed form).
+$script:DecoyBeforeRealPlanStressTestBody = @'
+<!-- plan-issue-704 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for
+tracking review history, mentioned here only as ordinary narrative text
+with nothing field-shaped following it before the paragraph ends.
+
+Padding prose to push the real head well past the 400-character lookahead
+window, so the decoy's own vocab-gate window cannot accidentally see into
+the real block's vocabulary below. This paragraph exists purely as filler
+text with no judge-rulings vocabulary of its own, repeated a few times to
+guarantee sufficient distance between the decoy above and the real block
+below. Padding prose to push the real head well past the 400-character
+lookahead window, so the two head matches cannot see into each other's
+vocabulary windows. Padding prose to push the real head well past the
+400-character lookahead window so the two heads cannot overlap at all.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+- finding_id: M2
+  judge_ruling: sustained
+-->
+'@
+
+# GH-3 scenario 2 (code-review surface — the more serious silent
+# false-clean): the SAME decoy-before-real-block shape, but exercised
+# against Test-EmissionMarkerPresent directly on the code-review surface
+# (which has no plan-stress-test fallback to mask the bug). Pre-fix,
+# Test-EmissionMarkerPresent's own standalone first-match scan evaluated
+# only the decoy, failed its vocab gate, and returned $false — marker not
+# present — without ever checking for the later real head. Get-EmissionGap
+# would then treat the whole body as ordinary chatter and silently
+# contribute SustainedCount=0.
+$script:DecoyBeforeRealCodeReviewBody = @'
+This PR uses the standard <!-- judge-rulings --> marker convention for
+tracking review dispositions, mentioned here only as ordinary narrative
+text with nothing field-shaped following it before the paragraph ends.
+
+Padding prose to push the real head well past the 400-character lookahead
+window, so the decoy's own vocab-gate window cannot accidentally see into
+the real block's vocabulary below. This paragraph exists purely as filler
+text with no judge-rulings vocabulary of its own, repeated a few times to
+guarantee sufficient distance between the decoy above and the real block
+below. Padding prose to push the real head well past the 400-character
+lookahead window, so the two head matches cannot see into each other's
+vocabulary windows. Padding prose to push the real head well past the
+400-character lookahead window so the two heads cannot overlap at all.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+- finding_id: M2
+  judge_ruling: sustained
+-->
+'@
+
+# GH-3 M1-must-not-regress fixture: BOTH the decoy and the "real" block are
+# vocab-gate-passing (i.e. genuinely 2+ real heads), so the M1 duplicate-head
+# guard must still fail loud. This is NOT the GH-3 bug shape (the first head
+# here is real, not a decoy) — it proves the GH-3 fix (scan-all-and-select-
+# first-real) did not accidentally weaken M1's scan-all-and-count logic.
+$script:TwoRealHeadsBothVocabGatePassingBody = @'
+<!-- plan-issue-705 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+<!-- judge-rulings
+- finding_id: A1
+  judge_ruling: sustained
+-->
+
+Padding prose to push the next real head well past the 400-character
+lookahead window, so the two real heads' vocab-gate windows cannot overlap
+each other. This paragraph exists purely as filler text with no
+judge-rulings vocabulary of its own, repeated a few times to guarantee
+sufficient distance between the two real heads. Padding prose to push the
+next real head well past the 400-character lookahead window so the two
+heads cannot overlap at all, guaranteeing this is a genuine two-real-head
+duplicate rather than a vocab-window collision artifact.
+
+<!-- judge-rulings
+- finding_id: B1
+  judge_ruling: sustained
+-->
+'@
+
+#endregion
+
+#region 811-D1 s4: writer-contract round-trip fixtures (skills/plan-authoring/SKILL.md)
+
+# Round-trip fixture: exercises the SKILL's "one entry per merged finding_id"
+# writer rule directly — an aggregate prose bullet "M10-M13, M16 - sustained"
+# must expand into 5 separate judge_ruling: sustained entries, plus one
+# defense-sustained entry (M17) covering "everything else" per the binary
+# projection rule. Proves the writer contract's expansion + projection is
+# actually parseable by the live reader, not merely asserted in prose.
+$script:WriterContractExpandedBody = @'
+<!-- plan-issue-9101 -->
+
+## Plan: Writer-contract round-trip fixture (#9101)
+
+**Plan Stress-Test** (5-pass `standard` adapter: 2 generalist + 3 specialist -> defense -> judge)
+
+- Challenge M10-M13, M16 (aggregate prose bullet) - Post-judge ruling: **sustained** - Maintainer disposition: **incorporate**.
+- Challenge M17 (defense-sustained) - Post-judge ruling: **defense-sustained** - Maintainer disposition: **dismiss**.
+- Overall confidence: **medium** - fixture only.
+
+<!-- judge-rulings
+- finding_id: M10
+  judge_ruling: sustained
+- finding_id: M11
+  judge_ruling: sustained
+- finding_id: M12
+  judge_ruling: sustained
+- finding_id: M13
+  judge_ruling: sustained
+- finding_id: M16
+  judge_ruling: sustained
+- finding_id: M17
+  judge_ruling: defense-sustained
+-->
+'@
+
+# Zero-findings placeholder fixture: the exact pinned two-line shape from the
+# SKILL's writer rule 7. Must parse to SustainedCount=0, ParseStatus=ok (a
+# true clean result), never could-not-verify.
+$script:WriterContractZeroFindingsBody = @'
+<!-- plan-issue-9102 -->
+
+## Plan: Writer-contract zero-findings fixture (#9102)
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+- Overall confidence: **high** - no findings survived prosecution.
+
+<!-- judge-rulings
+- finding_id: none
+  judge_ruling: defense-sustained
+-->
+'@
+
+# Prose-mention fixture: a plan-authoring-shaped body whose narrative mentions
+# the judge-rulings marker convention using the SKILL's inert-rendering
+# guidance (rule 5 — inside a code span, not a live, parser-visible head).
+# The real block (with its own short, vocab-free in-block comment, rule 6)
+# must still parse correctly; the prose mention must not hijack the region
+# isolation or get miscounted as a second head.
+$script:WriterContractProseMentionBody = @'
+<!-- plan-issue-9103 -->
+
+## Plan: Writer-contract prose-mention fixture (#9103)
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+- Note: this plan persists its rulings using the `<!-- judge-rulings` marker convention (mentioned here only as inert text inside a code span).
+- Challenge A1 (fixture finding) - Post-judge ruling: **sustained** - Maintainer disposition: **incorporate**.
+- Overall confidence: **high** - fixture only.
+
+<!-- judge-rulings
+- finding_id: A1
+  judge_ruling: sustained
+-->
+'@
+
+#endregion
+
 }
 
 Describe 'Get-SustainedFindingCount - code-review surface (live fixtures)' {
@@ -683,6 +982,135 @@ judge_ruling: sustained
     It 'still matches the real bare head shape (no regression on live fixtures)' {
         Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:Pr781Body | Should -Be $true
         Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:Pr778Body | Should -Be $true
+    }
+}
+
+Describe '811-D1: Test-EmissionMarkerPresent plan-stress-test honest fallback' {
+    It 'returns true for a prose-only plan-issue comment (marker + heading, no judge-rulings head at all)' {
+        Test-EmissionMarkerPresent -Surface 'plan-stress-test' -Body $script:ProseOnlyPlanStressTestBody | Should -Be $true
+    }
+
+    It 'returns false for chatter mentioning the heading in prose with no plan-issue marker (both conditions required together)' {
+        Test-EmissionMarkerPresent -Surface 'plan-stress-test' -Body $script:ChatterMentioningHeadingNoMarkerBody | Should -Be $false
+    }
+
+    It 'does not fire the fallback for the code-review surface even with the same prose-only shape (surface-scoped only)' {
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:ProseOnlyPlanStressTestBody | Should -Be $false
+    }
+
+    It 'still returns true for the real machine judge-rulings shape (vocab gate satisfied directly, fallback not needed)' {
+        Test-EmissionMarkerPresent -Surface 'plan-stress-test' -Body $script:PlanStressTestBody | Should -Be $true
+    }
+
+    It 'returns true when a present-but-malformed head co-occurs with the plan-issue marker and heading (fallback keys off the vocab gate, not a raw head re-test)' {
+        Test-EmissionMarkerPresent -Surface 'plan-stress-test' -Body $script:CorruptHeadWithPlanIssueMarkerBody | Should -Be $true
+    }
+
+    # GH-4 (PR #815 review): this fixture's own in-code comment promises
+    # "Get-SustainedFindingCount must independently fail loud on this body
+    # too," but only the Test-EmissionMarkerPresent assertion above ever
+    # existed. Adding the missing assertion here, directly alongside it.
+    It 'Get-SustainedFindingCount independently fails loud (could-not-verify) on the same present-but-malformed-head body' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:CorruptHeadWithPlanIssueMarkerBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe '811-D1: Get-SustainedFindingCount fail-loud on duplicate judge-rulings heads (M1)' {
+    It 'returns could-not-verify (not a count) when two judge-rulings heads exist in one body' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:DuplicateJudgeRulingsHeadsBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'still returns ok for a single-head body (no false-positive duplicate detection)' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:PlanStressTestBody
+        $result.ParseStatus | Should -Be 'ok'
+    }
+
+    It 'returns could-not-verify for a prose-only plan-issue body (no real head at all)' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:ProseOnlyPlanStressTestBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'M1 fix regression: a bare prose mention of the marker convention co-occurring with one real head still parses ok, not could-not-verify' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:ProseMentionPlusOneRealHeadBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 1
+    }
+
+    It 'M1 still fails loud when BOTH heads are vocab-gate-passing (genuine 2+ real heads, no regression from the GH-3 fix)' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:TwoRealHeadsBothVocabGatePassingBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'GH-3 (PR #815 review): decoy-before-real-block no longer suppresses the real block' {
+    It 'plan-stress-test: a vocab-gate-failing decoy head before a real bare block now parses to the TRUE sustained count, not could-not-verify' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:DecoyBeforeRealPlanStressTestBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+    }
+
+    It 'code-review: Test-EmissionMarkerPresent returns true for the same decoy-before-real-block shape (no longer a silent skip-as-chatter)' {
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:DecoyBeforeRealCodeReviewBody | Should -Be $true
+    }
+
+    It 'code-review: the resulting sustained count is the TRUE count, not a silent 0' {
+        $result = Get-SustainedFindingCount -Surface 'code-review' -Body $script:DecoyBeforeRealCodeReviewBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+    }
+
+    It 'code-review: Get-EmissionGap no longer silently reports Gap=0/ok for a body carrying a real sustained block behind a decoy head' {
+        $result = Get-EmissionGap -Bodies @($script:DecoyBeforeRealCodeReviewBody) -Id 815 -Surface 'code-review'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+    }
+
+    It 'existing attributed-vs-bare preference is preserved when an attributed real head is present (no decoy interaction, regression check)' {
+        $result = Get-SustainedFindingCount -Surface 'code-review' -Body $script:Pr778Body
+        $result.ParseStatus | Should -Be 'ok'
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:Pr778Body | Should -Be $true
+    }
+}
+
+Describe 'GH-1 (PR #815 review, rider on GH-3): hasRealHead no longer misclassifies a decoy as a real head' {
+    It 'reports Reason head-missing (not head-corrupt) for a plan-stress-test body whose ONLY head is a vocab-gate-failing decoy (honest fallback fired, no real head at all)' {
+        $result = Get-EmissionGap -Bodies @($script:CorruptHeadWithPlanIssueMarkerBody) -Id 702 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-missing'
+    }
+}
+
+Describe '811-D1: Get-EmissionGap Reason field (head-missing vs head-corrupt vs ok)' {
+    It 'reports Reason head-missing for a prose-only plan-issue comment (fallback fired, no real head)' {
+        $result = Get-EmissionGap -Bodies @($script:ProseOnlyPlanStressTestBody) -Id 700 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-missing'
+    }
+
+    It 'reports Reason head-corrupt for a body with a real judge-rulings head that fails to parse' {
+        $result = Get-EmissionGap -Bodies @($script:UnknownVocabularyBody) -Id 999 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+    }
+
+    It 'reports Reason head-corrupt for duplicate judge-rulings heads (a real head is present, just ambiguous)' {
+        $result = Get-EmissionGap -Bodies @($script:DuplicateJudgeRulingsHeadsBody) -Id 701 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+    }
+
+    It 'reports Reason ok when the aggregate parses cleanly' {
+        $result = Get-EmissionGap -Bodies @($script:PlanStressTestBody) -Id 811 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
+    }
+
+    It 'reports Reason ok for the code-review surface aggregation (Reason field is additive, existing surfaces unaffected)' {
+        $result = Get-EmissionGap -Bodies @($script:Pr775Body) -Id 775 -Surface 'code-review'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
     }
 }
 
@@ -1089,6 +1517,250 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
     }
 }
 
+Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level positive-proof (811-D1 s3, M17)' {
+    BeforeEach {
+        $script:lastGetPath = $null
+        $script:lastPatchArgs = $null
+        $script:getCallCount = 0
+        # 'get' | 'patch' | 'verify-truncated' | 'verify-marker-missing' |
+        # 'verify-truncated-entries' | ''
+        $script:simulateFailure = ''
+
+        $script:mockOriginalBody = "<!-- plan-issue-811 -->`n`nSome long-form prose summary of the plan mirroring a real plan-issue comment body in size."
+
+        # Full 11-entry judge-rulings append (mirrors the #794 backfill shape
+        # described in the 811 plan's s6 step, trimmed to a representative
+        # subset of field names — id/judge_ruling/judge_confidence).
+        $script:mockFullNewContent = @"
+`n<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+- finding_id: M2
+  judge_ruling: sustained
+- finding_id: M3
+  judge_ruling: sustained
+- finding_id: M4
+  judge_ruling: defense-sustained
+- finding_id: M5
+  judge_ruling: sustained
+- finding_id: M6
+  judge_ruling: defense-sustained
+- finding_id: M7
+  judge_ruling: sustained
+- finding_id: M8
+  judge_ruling: defense-sustained
+- finding_id: M9
+  judge_ruling: defense-sustained
+- finding_id: M10
+  judge_ruling: sustained
+- finding_id: M11
+  judge_ruling: sustained
+-->
+"@
+
+        # M3 fix regression fixture: an original body that ALREADY carries a
+        # judge-rulings block identical to $script:mockFullNewContent's
+        # entries (e.g. left over from a prior partial/failed run), used only
+        # by the 'verify-baseline-blind-noop' simulateFailure mode below.
+        $script:mockOriginalBodyWithPriorBlock = $script:mockOriginalBody + $script:mockFullNewContent
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+
+            if ($joined -match '^api repos/[^/]+/[^/]+/issues/comments/(\d+)$') {
+                $script:getCallCount++
+                $script:lastGetPath = $joined
+                if ($script:simulateFailure -eq 'get') {
+                    $global:LASTEXITCODE = 1
+                    return ''
+                }
+                $global:LASTEXITCODE = 0
+
+                if ($script:getCallCount -ge 2) {
+                    # Post-write verify GET (2nd call onward).
+                    switch ($script:simulateFailure) {
+                        'verify-truncated' {
+                            # Gross truncation: only a sliver of the combined
+                            # body comes back.
+                            return (@{ body = $script:mockOriginalBody.Substring(0, 5) } | ConvertTo-Json)
+                        }
+                        'verify-marker-missing' {
+                            # New entries present, body length comparable,
+                            # but the original plan-issue marker is gone.
+                            $corrupted = "## Plan (marker stripped)`n`nSome long-form prose summary of the plan mirroring a real plan-issue comment body in size, but without the marker.$($script:mockFullNewContent)"
+                            return (@{ body = $corrupted } | ConvertTo-Json)
+                        }
+                        'verify-truncated-entries' {
+                            # Simulates a partial/truncated append: head plus
+                            # only 3 of the 11 entries actually landed. This
+                            # must be detected by entry-level positive-proof,
+                            # not just by the head substring '<!-- judge-rulings'
+                            # reappearing (which it does, here). Padded with
+                            # harmless filler prose so the overall body length
+                            # stays comparable to what was written — isolating
+                            # the entry-level check from the separate
+                            # gross-truncation-guard check (5a), which is
+                            # covered by its own dedicated test above.
+                            $truncatedNewContent = @"
+`n<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+- finding_id: M2
+  judge_ruling: sustained
+- finding_id: M3
+  judge_ruling: sustained
+-->
+"@
+                            $filler = 'x' * ($script:mockFullNewContent.Length - $truncatedNewContent.Length)
+                            return (@{ body = ($script:mockOriginalBody + $truncatedNewContent + "`n<!-- filler -->`n$filler") } | ConvertTo-Json)
+                        }
+                        'verify-baseline-blind-noop' {
+                            # M3 fix regression fixture: the PATCH silently
+                            # no-ops (e.g. a transient GitHub write failure
+                            # that still returns success) and the re-fetched
+                            # verify body is IDENTICAL to the original body —
+                            # the new append never actually landed. The
+                            # original body here (set per-test below via
+                            # $script:mockOriginalBodyWithPriorBlock) already
+                            # carries an identical judge-rulings block from a
+                            # prior partial/failed run, so a baseline-blind
+                            # count comparison would find "enough" occurrences
+                            # of each value already present and falsely report
+                            # success.
+                            return (@{ body = $script:mockOriginalBodyWithPriorBlock } | ConvertTo-Json)
+                        }
+                        default {
+                            # Happy path: simulate GitHub's benign whitespace
+                            # normalization rather than an exact byte-identical
+                            # echo.
+                            $normalized = ($script:mockOriginalBody + $script:mockFullNewContent) `
+                                -replace '[ \t]+\r?\n', "`n" `
+                                -replace '\n{3,}', "`n`n"
+                            return (@{ body = $normalized } | ConvertTo-Json)
+                        }
+                    }
+                }
+                if ($script:simulateFailure -eq 'verify-baseline-blind-noop') {
+                    return (@{ body = $script:mockOriginalBodyWithPriorBlock } | ConvertTo-Json)
+                }
+                return (@{ body = $script:mockOriginalBody } | ConvertTo-Json)
+            }
+
+            if ($joined -match '^api -X PATCH repos/[^/]+/[^/]+/issues/comments/(\d+) --input') {
+                $script:lastPatchArgs = $Args
+                if ($script:simulateFailure -eq 'patch') {
+                    $global:LASTEXITCODE = 1
+                    return ''
+                }
+                $global:LASTEXITCODE = 0
+                return (@{ id = 999 } | ConvertTo-Json)
+            }
+
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+    }
+
+    AfterEach {
+        Remove-Item Function:gh -ErrorAction SilentlyContinue
+    }
+
+    It 'succeeds on a full 11-entry append and verifies every entry landed' {
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $true
+        $result.Reason | Should -BeNullOrEmpty
+        $script:lastPatchArgs | Should -Not -BeNullOrEmpty
+    }
+
+    It 'fails without patching when the expected marker is not found in the fetched body' {
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-999' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'not found'
+        $script:lastPatchArgs | Should -BeNullOrEmpty
+    }
+
+    It 'fails when the GET call fails' {
+        $script:simulateFailure = 'get'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'GET failed'
+    }
+
+    It 'fails when the PATCH call fails' {
+        $script:simulateFailure = 'patch'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'PATCH failed'
+    }
+
+    It 'fails loud when the post-write verify body is dramatically shorter than what was written (truncation/data-loss)' {
+        $script:simulateFailure = 'verify-truncated'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'shorter than expected'
+    }
+
+    It 'fails loud when the original marker is missing from the post-write verify body (genuine corruption)' {
+        $script:simulateFailure = 'verify-marker-missing'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'missing from verify body'
+    }
+
+    It 'detects a truncated append (head + 3 of 11 entries landed) as a failure, not a silent success' {
+        $script:simulateFailure = 'verify-truncated-entries'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'judge_ruling'
+    }
+
+    It 'M3 fix regression: a baseline-blind false-pass (PATCH silently no-ops, verify body unchanged from an original that already carries an identical block) is now caught as a failure' {
+        $script:simulateFailure = 'verify-baseline-blind-noop'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'judge_ruling'
+    }
+
+    It 'rejects a zero-entry judge-rulings head payload as a no-op, without writing' {
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent "`n<!-- judge-rulings`n-->`n"
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'no-op'
+        $script:lastPatchArgs | Should -BeNullOrEmpty
+        $script:getCallCount | Should -Be 0
+    }
+
+    It 'does not call Add-CommentBlocks (independent sibling function, prose mentions of the name are fine)' {
+        $srcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
+        $src = Get-Content -LiteralPath $srcPath -Raw
+        $funcStart = $src.IndexOf('function Add-JudgeRulingsBlock')
+        $funcStart | Should -BeGreaterThan -1
+        $funcBody = $src.Substring($funcStart)
+        # A CALL to Add-CommentBlocks (bare invocation syntax) would be the
+        # real independence violation; the docstring legitimately mentions
+        # the sibling's name in prose explaining the design relationship.
+        $funcBody | Should -Not -Match '(?<!\.SYNOPSIS[\s\S]{0,2000})\bAdd-CommentBlocks\s+-Owner'
+        $funcBody | Should -Not -Match '\(\s*Add-CommentBlocks\b'
+    }
+
+    It 'does not call ConvertFrom-Yaml or import powershell-yaml (hand-rolled regex only; the SECURITY note is prose, not code)' {
+        $srcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
+        $src = Get-Content -LiteralPath $srcPath -Raw
+        $funcStart = $src.IndexOf('function Add-JudgeRulingsBlock')
+        $funcBody = $src.Substring($funcStart)
+
+        # Strip the <# ... #> comment-based help block and line comments
+        # first, so prose mentions of these forbidden names (e.g. the
+        # .DESCRIPTION explaining what NOT to use) don't false-positive this
+        # executable-usage check.
+        $codeOnly = [regex]::Replace($funcBody, '(?s)<#.*?#>', '')
+        $codeOnly = ($codeOnly -split "`n" | ForEach-Object { [regex]::Replace($_, '#.*$', '') }) -join "`n"
+
+        $codeOnly | Should -Not -Match 'ConvertFrom-Yaml'
+        $codeOnly | Should -Not -Match 'powershell-yaml'
+    }
+}
+
 # ---------------------------------------------------------------------------
 # PF2-F1 (issue #782 post-fix prosecution pass): drift-catching meta-test.
 # The GH-5 fix added a fourth literal copy of the key-anchor regex
@@ -1099,6 +1771,28 @@ Describe 'Add-CommentBlocks - read-modify-write append primitive' {
 # claimed only three copies existed and must be kept in sync; this test is
 # the tripwire so a future edit to one copy that is not propagated to the
 # others fails CI instead of silently drifting.
+#
+# 811 M1 fix (post-fix adversarial pass) added a fifth literal copy: the
+# duplicate-head vocab gate in Get-JudgeRulingsSustainedCountInternal now
+# vocab-gates each candidate head match before counting it toward the 2+
+# duplicate threshold, using this same byte-identical anchor, so a bare
+# prose mention of the marker convention no longer counts as a real head.
+#
+# GH-3 fix (PR #815 review, post-#811 review pass): the count intentionally
+# drops from five to four literal copies. Test-EmissionMarkerPresent's
+# standalone vocab-window check and Get-JudgeRulingsSustainedCountInternal's
+# duplicate-head vocab-gate check (the two copies added by the M6 and 811 M1
+# fixes referenced above) were both first-match-only scans, which let a
+# vocab-gate-failing decoy head positioned before a real head suppress
+# detection of the real one (false could-not-verify on plan-stress-test,
+# silent false-clean on code-review). Both call sites now delegate to the
+# single shared helper Get-RealJudgeRulingsHeadMatches, which scans ALL
+# head candidates and applies the vocab gate via one shared constant,
+# $script:JudgeRulingsVocabGatePattern — collapsing those two standalone
+# copies into one. The remaining four copies (the shared constant itself,
+# the ambiguity-walk detector, and the two $keyAnchor counting-side copies
+# in Get-JudgeRulingsSustainedCountInternal / Get-DesignChallengeSustainedCountInternal)
+# are unaffected by this consolidation and must still stay byte-identical.
 # ---------------------------------------------------------------------------
 
 Describe 'Key-anchor pattern — all literal copies stay byte-identical (PF2-F1 drift guard)' {
@@ -1108,5 +1802,136 @@ Describe 'Key-anchor pattern — all literal copies stay byte-identical (PF2-F1 
         $copies = [regex]::Matches($src, [regex]::Escape('(?:^\s*(?:-\s+)?|[{,]\s*)'))
         $copies.Count | Should -Be 4
         @($copies.Value | Select-Object -Unique).Count | Should -Be 1
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 811-D1 s4: writer-contract verification (skills/plan-authoring/SKILL.md).
+#
+# These tests prove the writer contract just documented in
+# skills/plan-authoring/SKILL.md § Judge-rulings machine block (811-D1) is
+# actually parseable by the live reader in this file, not merely asserted in
+# prose. They do not modify Test-EmissionMarkerPresent, Get-EmissionGap,
+# Get-SustainedFindingCount, Add-CommentBlocks, or Add-JudgeRulingsBlock.
+# ---------------------------------------------------------------------------
+
+Describe '811-D1 s4: heading literal-parity (SKILL template vs s1 fallback regex)' {
+    It 'the plan-markdown template heading in the SKILL matches the exact line-start literal Test-EmissionMarkerPresent''s fallback matches on' {
+        $skillPath = Join-Path $PSScriptRoot '..' '..' '..' 'skills' 'plan-authoring' 'SKILL.md'
+        $skillText = Get-Content -LiteralPath $skillPath -Raw
+        # Same literal the fallback in Test-EmissionMarkerPresent tests against.
+        $fallbackHeadingRegex = '(?m)^\*\*Plan Stress-Test\*\*'
+        $skillText | Should -Match $fallbackHeadingRegex
+
+        # Directly prove the pinned regex literal, read live from source
+        # rather than retyped here, actually appears verbatim (as PowerShell
+        # source text) in the core library — so this test fails loud if the
+        # reader's own literal ever drifts, not just if the SKILL's copy
+        # drifts. This is a literal substring check (Contains), not a regex
+        # match: the source text itself already contains the regex
+        # metacharacters we are looking for.
+        $corePath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
+        $coreText = Get-Content -LiteralPath $corePath -Raw
+        $coreText.Contains('(?m)^\*\*Plan Stress-Test\*\*') | Should -Be $true
+    }
+}
+
+Describe '811-D1 s4: writer/reader round-trip — block-shape literal-parity (M7)' {
+    It 'an aggregate prose bullet (M10-M13, M16) expanded per-finding_id parses to 5 sustained, plus 1 defense-sustained (M17) excluded' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:WriterContractExpandedBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 5
+    }
+
+    It 'the same fixture is reachable end-to-end through Get-EmissionGap (marker detected, no blocks posted yet -> Gap = SustainedCount)' {
+        $result = Get-EmissionGap -Bodies @($script:WriterContractExpandedBody) -Id 9101 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 5
+        $result.BlockCount | Should -Be 0
+        $result.Gap | Should -Be 5
+        $result.Reason | Should -Be 'ok'
+    }
+
+    It 'M4 fix: the pinned zero-findings placeholder literal actually extracted from skills/plan-authoring/SKILL.md''s live source text matches the hand-authored $script:WriterContractZeroFindingsBody fixture''s two-line shape, so a silent SKILL.md drift breaks this test rather than passing unnoticed' {
+        # Genuine cross-file check (issue #811 post-fix adversarial pass, M4):
+        # unlike the other tests in this Describe block, which only round-trip
+        # hand-authored fixture strings through the reader, this test reads
+        # SKILL.md's actual text and extracts writer rule 7's pinned
+        # zero-findings placeholder block directly from the live file, rather
+        # than re-typing it. If SKILL.md's pinned literal (field order,
+        # indentation, or the exact `- finding_id: none` /
+        # `  judge_ruling: defense-sustained` two-line shape) ever drifts
+        # without a matching fixture update, this test fails loud instead of
+        # the suite passing against a stale copy.
+        $skillPath = Join-Path $PSScriptRoot '..' '..' '..' 'skills' 'plan-authoring' 'SKILL.md'
+        $skillText = Get-Content -LiteralPath $skillPath -Raw
+
+        # Extract the fenced ```markdown ... ``` code block that immediately
+        # follows writer rule 7's "Zero-findings placeholder" heading text.
+        $ruleMatch = [regex]::Match(
+            $skillText,
+            '(?s)Zero-findings placeholder.*?```markdown\r?\n(.*?)```'
+        )
+        $ruleMatch.Success | Should -Be $true
+
+        $fencedBlock = $ruleMatch.Groups[1].Value
+
+        # The fenced block is indented (nested under a numbered list item);
+        # strip the common leading whitespace per line before comparing, so
+        # this test is robust to Markdown list-nesting indentation without
+        # being robust to an actual content/shape drift.
+        $dedentedLines = ($fencedBlock -split "`r?`n") | ForEach-Object { $_ -replace '^\s{0,3}', '' }
+        $dedented = ($dedentedLines -join "`n").Trim()
+
+        $expectedLiveShape = @"
+<!-- judge-rulings
+- finding_id: none
+  judge_ruling: defense-sustained
+-->
+"@
+        $dedented | Should -Be $expectedLiveShape
+
+        # Now prove the hand-authored fixture used throughout this suite
+        # carries the SAME two-line entry shape (the part the reader
+        # actually parses), byte-for-byte.
+        $fixtureEntryMatch = [regex]::Match(
+            $script:WriterContractZeroFindingsBody,
+            '(?s)- finding_id: none\r?\n\s*judge_ruling: defense-sustained'
+        )
+        $fixtureEntryMatch.Success | Should -Be $true
+
+        $liveEntryMatch = [regex]::Match($dedented, '(?s)- finding_id: none\r?\n\s*judge_ruling: defense-sustained')
+        $liveEntryMatch.Success | Should -Be $true
+        $fixtureEntryMatch.Value | Should -Be $liveEntryMatch.Value
+    }
+}
+
+Describe '811-D1 s4: writer/reader round-trip — zero-findings placeholder (M11/SC-F6)' {
+    It 'the pinned "- finding_id: none / judge_ruling: defense-sustained" placeholder parses to SustainedCount=0, ParseStatus=ok (true clean, not could-not-verify)' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:WriterContractZeroFindingsBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 0
+    }
+
+    It 'Get-EmissionGap reports a clean Reason (ok) for the placeholder body, never head-missing or head-corrupt' {
+        $result = Get-EmissionGap -Bodies @($script:WriterContractZeroFindingsBody) -Id 9102 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
+        $result.Gap | Should -Be 0
+    }
+}
+
+Describe '811-D1 s4: writer/reader round-trip — prose-marker-mention fixture (M10)' {
+    It 'a plan body narrating the judge-rulings marker convention inertly (inside a code span) still parses the real block correctly' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:WriterContractProseMentionBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 1
+    }
+
+    It 'the prose mention does not create a second detected head (no duplicate-head could-not-verify false-positive)' {
+        $result = Get-EmissionGap -Bodies @($script:WriterContractProseMentionBody) -Id 9103 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 1
     }
 }
