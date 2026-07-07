@@ -495,6 +495,84 @@ Some unrelated report content, not real judge-rulings vocabulary.
 
 #endregion
 
+#region 811-D1 s4: writer-contract round-trip fixtures (skills/plan-authoring/SKILL.md)
+
+# Round-trip fixture: exercises the SKILL's "one entry per merged finding_id"
+# writer rule directly — an aggregate prose bullet "M10-M13, M16 - sustained"
+# must expand into 5 separate judge_ruling: sustained entries, plus one
+# defense-sustained entry (M17) covering "everything else" per the binary
+# projection rule. Proves the writer contract's expansion + projection is
+# actually parseable by the live reader, not merely asserted in prose.
+$script:WriterContractExpandedBody = @'
+<!-- plan-issue-9101 -->
+
+## Plan: Writer-contract round-trip fixture (#9101)
+
+**Plan Stress-Test** (5-pass `standard` adapter: 2 generalist + 3 specialist -> defense -> judge)
+
+- Challenge M10-M13, M16 (aggregate prose bullet) - Post-judge ruling: **sustained** - Maintainer disposition: **incorporate**.
+- Challenge M17 (defense-sustained) - Post-judge ruling: **defense-sustained** - Maintainer disposition: **dismiss**.
+- Overall confidence: **medium** - fixture only.
+
+<!-- judge-rulings
+- finding_id: M10
+  judge_ruling: sustained
+- finding_id: M11
+  judge_ruling: sustained
+- finding_id: M12
+  judge_ruling: sustained
+- finding_id: M13
+  judge_ruling: sustained
+- finding_id: M16
+  judge_ruling: sustained
+- finding_id: M17
+  judge_ruling: defense-sustained
+-->
+'@
+
+# Zero-findings placeholder fixture: the exact pinned two-line shape from the
+# SKILL's writer rule 7. Must parse to SustainedCount=0, ParseStatus=ok (a
+# true clean result), never could-not-verify.
+$script:WriterContractZeroFindingsBody = @'
+<!-- plan-issue-9102 -->
+
+## Plan: Writer-contract zero-findings fixture (#9102)
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+- Overall confidence: **high** - no findings survived prosecution.
+
+<!-- judge-rulings
+- finding_id: none
+  judge_ruling: defense-sustained
+-->
+'@
+
+# Prose-mention fixture: a plan-authoring-shaped body whose narrative mentions
+# the judge-rulings marker convention using the SKILL's inert-rendering
+# guidance (rule 5 — inside a code span, not a live, parser-visible head).
+# The real block (with its own short, vocab-free in-block comment, rule 6)
+# must still parse correctly; the prose mention must not hijack the region
+# isolation or get miscounted as a second head.
+$script:WriterContractProseMentionBody = @'
+<!-- plan-issue-9103 -->
+
+## Plan: Writer-contract prose-mention fixture (#9103)
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+- Note: this plan persists its rulings using the `<!-- judge-rulings` marker convention (mentioned here only as inert text inside a code span).
+- Challenge A1 (fixture finding) - Post-judge ruling: **sustained** - Maintainer disposition: **incorporate**.
+- Overall confidence: **high** - fixture only.
+
+<!-- judge-rulings
+- finding_id: A1
+  judge_ruling: sustained
+-->
+'@
+
+#endregion
+
 }
 
 Describe 'Get-SustainedFindingCount - code-review surface (live fixtures)' {
@@ -1461,5 +1539,83 @@ Describe 'Key-anchor pattern — all literal copies stay byte-identical (PF2-F1 
         $copies = [regex]::Matches($src, [regex]::Escape('(?:^\s*(?:-\s+)?|[{,]\s*)'))
         $copies.Count | Should -Be 4
         @($copies.Value | Select-Object -Unique).Count | Should -Be 1
+    }
+}
+
+# ---------------------------------------------------------------------------
+# 811-D1 s4: writer-contract verification (skills/plan-authoring/SKILL.md).
+#
+# These tests prove the writer contract just documented in
+# skills/plan-authoring/SKILL.md § Judge-rulings machine block (811-D1) is
+# actually parseable by the live reader in this file, not merely asserted in
+# prose. They do not modify Test-EmissionMarkerPresent, Get-EmissionGap,
+# Get-SustainedFindingCount, Add-CommentBlocks, or Add-JudgeRulingsBlock.
+# ---------------------------------------------------------------------------
+
+Describe '811-D1 s4: heading literal-parity (SKILL template vs s1 fallback regex)' {
+    It 'the plan-markdown template heading in the SKILL matches the exact line-start literal Test-EmissionMarkerPresent''s fallback matches on' {
+        $skillPath = Join-Path $PSScriptRoot '..' '..' '..' 'skills' 'plan-authoring' 'SKILL.md'
+        $skillText = Get-Content -LiteralPath $skillPath -Raw
+        # Same literal the fallback in Test-EmissionMarkerPresent tests against.
+        $fallbackHeadingRegex = '(?m)^\*\*Plan Stress-Test\*\*'
+        $skillText | Should -Match $fallbackHeadingRegex
+
+        # Directly prove the pinned regex literal, read live from source
+        # rather than retyped here, actually appears verbatim (as PowerShell
+        # source text) in the core library — so this test fails loud if the
+        # reader's own literal ever drifts, not just if the SKILL's copy
+        # drifts. This is a literal substring check (Contains), not a regex
+        # match: the source text itself already contains the regex
+        # metacharacters we are looking for.
+        $corePath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
+        $coreText = Get-Content -LiteralPath $corePath -Raw
+        $coreText.Contains('(?m)^\*\*Plan Stress-Test\*\*') | Should -Be $true
+    }
+}
+
+Describe '811-D1 s4: writer/reader round-trip — block-shape literal-parity (M7)' {
+    It 'an aggregate prose bullet (M10-M13, M16) expanded per-finding_id parses to 5 sustained, plus 1 defense-sustained (M17) excluded' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:WriterContractExpandedBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 5
+    }
+
+    It 'the same fixture is reachable end-to-end through Get-EmissionGap (marker detected, no blocks posted yet -> Gap = SustainedCount)' {
+        $result = Get-EmissionGap -Bodies @($script:WriterContractExpandedBody) -Id 9101 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 5
+        $result.BlockCount | Should -Be 0
+        $result.Gap | Should -Be 5
+        $result.Reason | Should -Be 'ok'
+    }
+}
+
+Describe '811-D1 s4: writer/reader round-trip — zero-findings placeholder (M11/SC-F6)' {
+    It 'the pinned "- finding_id: none / judge_ruling: defense-sustained" placeholder parses to SustainedCount=0, ParseStatus=ok (true clean, not could-not-verify)' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:WriterContractZeroFindingsBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 0
+    }
+
+    It 'Get-EmissionGap reports a clean Reason (ok) for the placeholder body, never head-missing or head-corrupt' {
+        $result = Get-EmissionGap -Bodies @($script:WriterContractZeroFindingsBody) -Id 9102 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
+        $result.Gap | Should -Be 0
+    }
+}
+
+Describe '811-D1 s4: writer/reader round-trip — prose-marker-mention fixture (M10)' {
+    It 'a plan body narrating the judge-rulings marker convention inertly (inside a code span) still parses the real block correctly' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:WriterContractProseMentionBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 1
+    }
+
+    It 'the prose mention does not create a second detected head (no duplicate-head could-not-verify false-positive)' {
+        $result = Get-EmissionGap -Bodies @($script:WriterContractProseMentionBody) -Id 9103 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 1
     }
 }

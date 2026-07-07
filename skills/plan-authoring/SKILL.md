@@ -209,6 +209,40 @@ After Post-Judge Reconciliation is complete and the `Plan Stress-Test` summary i
 
 **Emission check (hub maintainers only)**: after posting the blocks onto the `plan-issue-{ID}` comment, run `pwsh ./.github/scripts/phase-containment-emission-check.ps1 -Issue {N}` and treat its output as advisory — warn-only, never blocking. The repo-relative script path does not resolve from a consumer repo's CWD, so this nudge applies only when working in the Agent Orchestra hub repo itself; see the script header for the full contract.
 
+### Judge-rulings machine block (811-D1)
+
+At Post-Judge Reconciliation, in addition to the phase-containment blocks above, append a machine-readable `<!-- judge-rulings` block at the END of the `<!-- plan-issue-{ID} -->` comment — the same read where humans keep the prose `**Plan Stress-Test**` bullets. This block exists because prose bullets alone are not reachable by `phase-containment-emission-check.ps1`'s plan-stress-test surface; the machine block is what makes the emission check's `sustained=N` count honest instead of a false `clean -- sustained=0 blocks=0`.
+
+Use the bare unclosed head form on its own line, matching the shape `Add-JudgeRulingsBlock` and `Get-SustainedFindingCount` already parse (`.github/scripts/lib/phase-containment-emission-check-core.ps1`):
+
+```markdown
+<!-- judge-rulings
+- finding_id: {finding_id}
+  judge_ruling: {sustained | defense-sustained}
+-->
+```
+
+Writer rules, in order:
+
+1. **One entry per merged finding_id, never one per prose bullet.** An aggregate prose bullet such as "Challenge M10–M13, M16 — sustained" must expand into 5 separate `judge_ruling:` entries (`M10`, `M11`, `M12`, `M13`, `M16`), one per finding_id. Never emit a single entry representing a range or a comma-joined list of IDs.
+2. **Binary projection — exactly two lowercase values.** The reader's `judge_ruling` vocabulary is a closed two-value enum: `sustained` and `defense-sustained` (`.github/scripts/lib/phase-containment-emission-check-core.ps1`, `Get-JudgeRulingsSustainedCountInternal`, citing `skills/review-judgment/SKILL.md:156`). Project every finding's actual post-judge disposition onto exactly one of these two literal, lowercase values: a disposition that requires a `<!-- phase-containment-{ID} -->` block (prose "sustained") → `judge_ruling: sustained`. Every other disposition — `partial`, `defense-sustained`, `judge-rejected`, `judge-rejected/user-confirmed`, not-judge-ruled, or any future disposition value not yet invented — → `judge_ruling: defense-sustained`. Do not invent additional enum values for this field; the projection is intentionally binary so the machine-sustained set is always exactly equal to the set of findings that receive a phase-containment block.
+3. **Atomic single write.** Write the entire block — head, every entry, and the closing `-->` — as one edit. Never stage the head first and append entries later; never leave the block half-written between tool calls.
+4. **Replace-own-block on re-persist, never append a second block.** If the plan comment is re-persisted (a plan revision after the first persist), replace the prior judge-rulings block with the new one rather than appending a second block after it. The reader fails loud (`could-not-verify`) whenever two or more judge-rulings heads exist in one body (811-D1 owner decision: latest-wins was rejected), so a stale duplicate left in place would poison the emission check on every subsequent run. Replace only the judge-rulings block portion of the comment — never perform a body-replacing upsert of the whole comment (that path is reserved for `Add-CommentBlocks`/`Find-OrUpsertComment` callers that are not this block).
+5. **Render marker literals inertly in prose.** If the plan's human-readable "Plan Stress-Test" narrative ever needs to mention the marker convention itself (for example, explaining that the plan carries a machine block), render it inertly — inside a code span or otherwise escaped — so it cannot be mistaken for a real head by the reader's head-detection regex.
+6. **Keep any in-block comment short and vocabulary-free.** If a short explanatory comment is placed inside the judge-rulings block (for example, noting the projection rule), it must be a single line under roughly 100 characters and must not contain the words `judge_ruling`, `disposition`, `verdict`, or `finding_key` — these are the exact vocabulary tokens the reader's parser keys on (`Test-EmissionMarkerPresent`'s vocab gate and `Get-JudgeRulingsSustainedCountInternal`'s `$keyAnchor` scan), and a comment containing one could itself be miscounted as a real entry or push the first real entry outside the reader's 400-character lookahead window.
+7. **Zero-findings placeholder — pinned shape, never omit the block.** When a plan's merged stress-test produces zero findings, still emit the block (never skip it) with exactly one placeholder entry:
+
+   ```markdown
+   <!-- judge-rulings
+   - finding_id: none
+     judge_ruling: defense-sustained
+   -->
+   ```
+
+   This exact two-line entry shape parses to `SustainedCount=0`, `ParseStatus=ok` (a true clean result, not `could-not-verify`).
+8. **The `**Plan Stress-Test**` heading literal is load-bearing — do not let it drift.** The plan-stress-test-surface honest fallback in `Test-EmissionMarkerPresent` matches the exact line-start literal `^\*\*Plan Stress-Test\*\*`. Keep the heading in the plan-markdown template byte-identical to this literal; a reworded heading (even a synonym) silently breaks the fallback for any plan that has not yet adopted the machine block.
+9. **Two separate `<!-- judge-rulings` schemas exist — do not conflate them.** The `<!-- judge-rulings` head now has two independent homes with two independent schemas: the PR-review adversarial-pipeline shape (consumed by Code-Conductor's credits-harvest machinery) and this plan-surface shape (consumed by `phase-containment-emission-check.ps1`'s plan-stress-test surface). Both use the same `judge_ruling: sustained | defense-sustained` field and the same bare-head convention, but they are not the same document and are not interchangeable. Do not assume a reader or writer built for one schema is safe to reuse verbatim for the other.
+
 ## Plan Style Guide
 
 ### Spine and Slice Discipline
@@ -333,7 +367,14 @@ slices:
 
 - Challenge: {finding} - Prosecution: {pass/source summary} - Post-judge ruling: {sustained|defense-sustained|judge-rejected/user-confirmed} - Maintainer disposition: {incorporate|dismiss|escalate}
 - Overall confidence: {high | medium | low} - {one-sentence rationale}
+
+<!-- judge-rulings
+- finding_id: {finding_id}
+  judge_ruling: {sustained | defense-sustained}
+-->
 ```
+
+The `<!-- judge-rulings` block above is the machine-readable counterpart to the prose bullets: one entry per merged finding_id, projected per `### Judge-rulings machine block (811-D1)`. When the merged stress-test produces zero findings, emit the pinned placeholder instead: `- finding_id: none` / `judge_ruling: defense-sustained`.
 
 ### Base rules
 
