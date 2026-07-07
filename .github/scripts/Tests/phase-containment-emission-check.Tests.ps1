@@ -422,7 +422,12 @@ Describe 'Format-EmissionGapLine — differentiated could-not-verify render (811
         $line = Format-EmissionGapLine -Surface 'plan-stress-test' -Id 811 -Gap $gap
 
         $line | Should -Match 'COULD NOT VERIFY -- treat as gap'
-        $line | Should -Match 'blocks=5 present, machine-head missing'
+        # M7 fix (issue #811 post-fix adversarial pass): the render used to
+        # repeat 'blocks=' twice ("blocks=5 present ... blocks=5"); the
+        # corrected render mentions blocks=N once, alongside sustained=N.
+        $line | Should -Match 'machine-head missing, blocks=5 present'
+        $line | Should -Match 'sustained=0'
+        $line | Should -Not -Match 'blocks=5.*blocks=5'
         $line | Should -Not -Match 'unparseable'
     }
 
@@ -473,7 +478,10 @@ Describe 'Format-EmissionGapLine — differentiated could-not-verify render (811
         try {
             $report = Invoke-PhaseContainmentEmissionCheckSingleTarget -IssueNumber '811'
 
-            $report | Should -Match 'plan-stress-test #811: COULD NOT VERIFY -- treat as gap \(blocks=0 present, machine-head missing'
+            # M7 fix (issue #811 post-fix adversarial pass): corrected render
+            # mentions blocks=N once (machine-head missing, blocks=N present),
+            # not twice.
+            $report | Should -Match 'plan-stress-test #811: COULD NOT VERIFY -- treat as gap \(machine-head missing, blocks=0 present'
         }
         finally {
             if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {

@@ -179,7 +179,7 @@ function script:Format-EmissionGapLine {
         # invariant — those surfaces keep the generic M13 wording below).
         if ($Surface -eq 'plan-stress-test') {
             if ($reason -eq 'head-missing') {
-                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (blocks=$($Gap.BlockCount) present, machine-head missing: sustained=$($Gap.SustainedCount), blocks=$($Gap.BlockCount))"
+                return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (machine-head missing, blocks=$($Gap.BlockCount) present: sustained=$($Gap.SustainedCount))"
             }
             if ($reason -eq 'head-corrupt') {
                 return "  ${Surface} #${Id}: COULD NOT VERIFY -- treat as gap (machine block present but unparseable: sustained=$($Gap.SustainedCount), blocks=$($Gap.BlockCount))"

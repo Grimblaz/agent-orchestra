@@ -479,6 +479,56 @@ $script:DuplicateJudgeRulingsHeadsBody = @'
 ```
 '@
 
+# M1 fix regression fixture (issue #811 post-fix adversarial pass): a prose
+# sentence merely MENTIONING the judge-rulings marker convention (no real
+# field vocabulary following it within the lookahead window) co-occurring
+# with exactly ONE genuinely real judge-rulings block. Before the M1 fix,
+# the duplicate-head count treated the raw head-pattern match count (2) as
+# "2+ duplicate heads" and returned could-not-verify — a false positive,
+# since the prose mention is not a real head. After the fix, only the real
+# head should count, so this must parse ok with SustainedCount=1.
+#
+# The real block comes FIRST and the prose mention is separated from it by
+# more than the 400-char lookahead window (padding filler text below), so
+# the prose head's own vocab-gate window cannot accidentally spill into the
+# real block's vocabulary and produce a false vocab-gate pass for the prose
+# mention itself — this fixture must genuinely exercise "prose head has NO
+# real vocabulary in its own window," not merely rely on window overlap.
+# The prose mention deliberately uses the BARE head form (not the
+# `pr=N`-attributed form): Get-JudgeRulingsSustainedCountInternal's
+# subsequent region-isolation step independently prefers ANY attributed-form
+# match found anywhere in the body when selecting the authoritative region,
+# which is a separate, pre-existing (main-branch) behavior outside this M1
+# fix's scope — using the bare form here isolates this fixture to the
+# duplicate-head vocab-gate behavior this test targets.
+$script:ProseMentionPlusOneRealHeadBody = @'
+<!-- plan-issue-703 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+-->
+
+Padding prose to push the next mention well past the 400-character
+lookahead window, so the two head matches cannot see into each other's
+vocabulary windows. This paragraph exists purely as filler text with no
+judge-rulings vocabulary of its own, repeated a few times to guarantee
+sufficient distance between the real head above and the prose-only
+mention below. Padding prose to push the next mention well past the
+400-character lookahead window, so the two head matches cannot see into
+each other's vocabulary windows. This paragraph exists purely as filler
+text with no judge-rulings vocabulary of its own, repeated a few times to
+guarantee sufficient distance between the real head above and the
+prose-only mention below. Padding prose to push the next mention well
+past the 400-character lookahead window so the two heads cannot overlap.
+
+This PR uses the standard <!-- judge-rulings --> marker convention for
+tracking review history, mentioned here only as ordinary narrative text
+with nothing field-shaped following it before the paragraph ends.
+'@
+
 # A malformed/foreign judge-rulings head (fails the vocab gate) co-located
 # with the plan-issue marker and heading. The fallback must still fire here
 # (a present-but-broken head must not suppress the honest fallback) and
@@ -869,6 +919,12 @@ Describe '811-D1: Get-SustainedFindingCount fail-loud on duplicate judge-rulings
     It 'returns could-not-verify for a prose-only plan-issue body (no real head at all)' {
         $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:ProseOnlyPlanStressTestBody
         $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'M1 fix regression: a bare prose mention of the marker convention co-occurring with one real head still parses ok, not could-not-verify' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:ProseMentionPlusOneRealHeadBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 1
     }
 }
 
@@ -1348,6 +1404,12 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
 -->
 "@
 
+        # M3 fix regression fixture: an original body that ALREADY carries a
+        # judge-rulings block identical to $script:mockFullNewContent's
+        # entries (e.g. left over from a prior partial/failed run), used only
+        # by the 'verify-baseline-blind-noop' simulateFailure mode below.
+        $script:mockOriginalBodyWithPriorBlock = $script:mockOriginalBody + $script:mockFullNewContent
+
         function global:gh {
             param([Parameter(ValueFromRemainingArguments = $true)]$Args)
             $joined = $Args -join ' '
@@ -1399,6 +1461,21 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
                             $filler = 'x' * ($script:mockFullNewContent.Length - $truncatedNewContent.Length)
                             return (@{ body = ($script:mockOriginalBody + $truncatedNewContent + "`n<!-- filler -->`n$filler") } | ConvertTo-Json)
                         }
+                        'verify-baseline-blind-noop' {
+                            # M3 fix regression fixture: the PATCH silently
+                            # no-ops (e.g. a transient GitHub write failure
+                            # that still returns success) and the re-fetched
+                            # verify body is IDENTICAL to the original body —
+                            # the new append never actually landed. The
+                            # original body here (set per-test below via
+                            # $script:mockOriginalBodyWithPriorBlock) already
+                            # carries an identical judge-rulings block from a
+                            # prior partial/failed run, so a baseline-blind
+                            # count comparison would find "enough" occurrences
+                            # of each value already present and falsely report
+                            # success.
+                            return (@{ body = $script:mockOriginalBodyWithPriorBlock } | ConvertTo-Json)
+                        }
                         default {
                             # Happy path: simulate GitHub's benign whitespace
                             # normalization rather than an exact byte-identical
@@ -1409,6 +1486,9 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
                             return (@{ body = $normalized } | ConvertTo-Json)
                         }
                     }
+                }
+                if ($script:simulateFailure -eq 'verify-baseline-blind-noop') {
+                    return (@{ body = $script:mockOriginalBodyWithPriorBlock } | ConvertTo-Json)
                 }
                 return (@{ body = $script:mockOriginalBody } | ConvertTo-Json)
             }
@@ -1481,6 +1561,13 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
         $result.Reason | Should -Match 'judge_ruling'
     }
 
+    It 'M3 fix regression: a baseline-blind false-pass (PATCH silently no-ops, verify body unchanged from an original that already carries an identical block) is now caught as a failure' {
+        $script:simulateFailure = 'verify-baseline-blind-noop'
+        $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent $script:mockFullNewContent
+        $result.Success | Should -Be $false
+        $result.Reason | Should -Match 'judge_ruling'
+    }
+
     It 'rejects a zero-entry judge-rulings head payload as a no-op, without writing' {
         $result = Add-JudgeRulingsBlock -Owner 'Grimblaz' -Repo 'agent-orchestra' -CommentId 794 -ExpectedMarker '<!-- plan-issue-811' -NewContent "`n<!-- judge-rulings`n-->`n"
         $result.Success | Should -Be $false
@@ -1530,14 +1617,20 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
 # claimed only three copies existed and must be kept in sync; this test is
 # the tripwire so a future edit to one copy that is not propagated to the
 # others fails CI instead of silently drifting.
+#
+# 811 M1 fix (post-fix adversarial pass) added a fifth literal copy: the
+# duplicate-head vocab gate in Get-JudgeRulingsSustainedCountInternal now
+# vocab-gates each candidate head match before counting it toward the 2+
+# duplicate threshold, using this same byte-identical anchor, so a bare
+# prose mention of the marker convention no longer counts as a real head.
 # ---------------------------------------------------------------------------
 
 Describe 'Key-anchor pattern — all literal copies stay byte-identical (PF2-F1 drift guard)' {
-    It 'finds exactly four literal copies of the key-anchor pattern, all byte-identical' {
+    It 'finds exactly five literal copies of the key-anchor pattern, all byte-identical' {
         $srcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
         $src = Get-Content -LiteralPath $srcPath -Raw
         $copies = [regex]::Matches($src, [regex]::Escape('(?:^\s*(?:-\s+)?|[{,]\s*)'))
-        $copies.Count | Should -Be 4
+        $copies.Count | Should -Be 5
         @($copies.Value | Select-Object -Unique).Count | Should -Be 1
     }
 }
@@ -1587,6 +1680,59 @@ Describe '811-D1 s4: writer/reader round-trip — block-shape literal-parity (M7
         $result.BlockCount | Should -Be 0
         $result.Gap | Should -Be 5
         $result.Reason | Should -Be 'ok'
+    }
+
+    It 'M4 fix: the pinned zero-findings placeholder literal actually extracted from skills/plan-authoring/SKILL.md''s live source text matches the hand-authored $script:WriterContractZeroFindingsBody fixture''s two-line shape, so a silent SKILL.md drift breaks this test rather than passing unnoticed' {
+        # Genuine cross-file check (issue #811 post-fix adversarial pass, M4):
+        # unlike the other tests in this Describe block, which only round-trip
+        # hand-authored fixture strings through the reader, this test reads
+        # SKILL.md's actual text and extracts writer rule 7's pinned
+        # zero-findings placeholder block directly from the live file, rather
+        # than re-typing it. If SKILL.md's pinned literal (field order,
+        # indentation, or the exact `- finding_id: none` /
+        # `  judge_ruling: defense-sustained` two-line shape) ever drifts
+        # without a matching fixture update, this test fails loud instead of
+        # the suite passing against a stale copy.
+        $skillPath = Join-Path $PSScriptRoot '..' '..' '..' 'skills' 'plan-authoring' 'SKILL.md'
+        $skillText = Get-Content -LiteralPath $skillPath -Raw
+
+        # Extract the fenced ```markdown ... ``` code block that immediately
+        # follows writer rule 7's "Zero-findings placeholder" heading text.
+        $ruleMatch = [regex]::Match(
+            $skillText,
+            '(?s)Zero-findings placeholder.*?```markdown\r?\n(.*?)```'
+        )
+        $ruleMatch.Success | Should -Be $true
+
+        $fencedBlock = $ruleMatch.Groups[1].Value
+
+        # The fenced block is indented (nested under a numbered list item);
+        # strip the common leading whitespace per line before comparing, so
+        # this test is robust to Markdown list-nesting indentation without
+        # being robust to an actual content/shape drift.
+        $dedentedLines = ($fencedBlock -split "`r?`n") | ForEach-Object { $_ -replace '^\s{0,3}', '' }
+        $dedented = ($dedentedLines -join "`n").Trim()
+
+        $expectedLiveShape = @"
+<!-- judge-rulings
+- finding_id: none
+  judge_ruling: defense-sustained
+-->
+"@
+        $dedented | Should -Be $expectedLiveShape
+
+        # Now prove the hand-authored fixture used throughout this suite
+        # carries the SAME two-line entry shape (the part the reader
+        # actually parses), byte-for-byte.
+        $fixtureEntryMatch = [regex]::Match(
+            $script:WriterContractZeroFindingsBody,
+            '(?s)- finding_id: none\r?\n\s*judge_ruling: defense-sustained'
+        )
+        $fixtureEntryMatch.Success | Should -Be $true
+
+        $liveEntryMatch = [regex]::Match($dedented, '(?s)- finding_id: none\r?\n\s*judge_ruling: defense-sustained')
+        $liveEntryMatch.Success | Should -Be $true
+        $fixtureEntryMatch.Value | Should -Be $liveEntryMatch.Value
     }
 }
 

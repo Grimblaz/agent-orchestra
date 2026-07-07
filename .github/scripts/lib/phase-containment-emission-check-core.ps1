@@ -102,9 +102,15 @@ function Test-EmissionMarkerPresent {
         `Reason` field: 'head-missing' when this fallback is what made the
         marker read as present (no real judge-rulings head exists at all);
         'head-corrupt' when a real head IS present elsewhere but failed to
-        parse; 'ok' otherwise. code-review and design-challenge are
-        completely unaffected — their marker-head detection and counting
-        logic is unchanged and still cannot diverge from each other.
+        parse; 'ok' otherwise. code-review is unaffected by this
+        plan-stress-test-specific fallback/Reason logic specifically — it
+        never reaches the fallback branch above. The duplicate-head guard in
+        Get-JudgeRulingsSustainedCountInternal (M1 fix) is vocab-gated and
+        shared by BOTH surfaces, so a genuine duplicate real head on either
+        surface still correctly fails loud; only a bare prose mention of the
+        marker convention (no real vocabulary) is excluded from the count.
+        design-challenge's marker-head detection and counting logic is
+        entirely separate and cannot diverge from either surface.
 
         M6 fix (issue #782 post-review): a bare head-substring match alone
         used to be sufficient, which meant a maintainer describing the
@@ -295,8 +301,31 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     # `\s` alternative), so counting matches of the general pattern alone
     # gives the true head count without double-counting the same head under
     # both the attributed-specific and bare-general patterns.
+    #
+    # M1 fix (issue #811 post-fix adversarial pass): a raw head-pattern match
+    # alone is not sufficient here, same as it is not sufficient for
+    # Test-EmissionMarkerPresent's own head detection above. A prose sentence
+    # that merely MENTIONS the marker convention (e.g. "this PR uses the
+    # standard <!-- judge-rulings pr=778 --> marker for tracking") has no
+    # real field vocabulary following it, yet still counted toward this
+    # duplicate threshold when it co-occurred with one genuinely real block —
+    # a false could-not-verify. Each candidate head is now vocab-gated with
+    # the SAME bounded-lookahead-window check Test-EmissionMarkerPresent uses
+    # (disposition/judge_ruling/verdict/finding_key within $lookaheadWindow
+    # characters after the head); only heads that pass this gate count as "a
+    # real head" toward the 2+ duplicate threshold. Two genuinely real blocks
+    # still correctly fail loud; a bare prose mention no longer does.
+    $lookaheadWindow = 400
     $allHeadMatches = [regex]::Matches($Body, $script:JudgeRulingsHeadPattern)
-    if ($allHeadMatches.Count -ge 2) {
+    $realHeadCount = 0
+    foreach ($candidateHead in $allHeadMatches) {
+        $windowEnd = [Math]::Min($Body.Length, $candidateHead.Index + $candidateHead.Length + $lookaheadWindow)
+        $window = $Body.Substring($candidateHead.Index, $windowEnd - $candidateHead.Index)
+        if ([regex]::IsMatch($window, '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')) {
+            $realHeadCount++
+        }
+    }
+    if ($realHeadCount -ge 2) {
         return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
     }
 
@@ -691,10 +720,23 @@ function Get-EmissionGap {
         'head-missing'
     }
     else {
-        # could-not-verify with neither flag set (e.g. an empty-body
-        # AllowEmptyString could-not-verify from Get-SustainedFindingCount on
-        # a non-plan-stress-test surface) — fall back to the generic label
-        # rather than guessing a plan-stress-test-specific reason.
+        # M8 fix (issue #811 post-fix adversarial pass): this branch is
+        # defensive and, as of the current code path, unreachable in
+        # practice. $anyCouldNotVerify is only ever set to $true at the one
+        # site above (inside `if ($bodyHasMarker)`, immediately after
+        # Get-SustainedFindingCount returns 'could-not-verify'), and that
+        # same site always also sets exactly one of $sawRealHeadCorrupt /
+        # $sawFallbackFired based on $hasRealHead — so by the time this
+        # `else` is reached, at least one of the two preceding `elseif`
+        # branches has already matched. (The previously cited "empty-body
+        # AllowEmptyString could-not-verify" example cannot occur here:
+        # Test-EmissionMarkerPresent returns $false for whitespace/empty
+        # bodies, so $bodyHasMarker gates such a body out of this loop
+        # entirely before Get-SustainedFindingCount is ever called.) This
+        # `else` remains as a safety net against a future code change that
+        # sets $anyCouldNotVerify from a new call site without also setting
+        # one of the two flags; it falls back to the generic 'head-corrupt'
+        # label rather than guessing a plan-stress-test-specific reason.
         'head-corrupt'
     }
 
@@ -935,18 +977,19 @@ function Add-JudgeRulingsBlock {
         positive-proof (811-D1 s3 — sibling to Add-CommentBlocks, M17).
     .DESCRIPTION
         Sequence — the SAME read-modify-write append core as Add-CommentBlocks
-        (GET -> verify expected marker present -> concatenate -> PATCH ->
-        re-fetch and verify), but with its OWN entry-level verification tuned
-        to the judge-rulings payload shape rather than phase-containment
-        blocks:
-          1. gh api GET the comment body by REST comment id.
-          2. Verify the expected marker is present in the fetched body.
-          3. Preflight no-op guard (M8/D5): NewContent must carry at least
-             one `judge_ruling:` entry. A judge-rulings HEAD with zero
-             entries is refused before any write is attempted, so an empty
-             append can never defeat the zero-findings placeholder contract
-             (which always carries at least one `- finding_id: none` /
-             `judge_ruling: defense-sustained` entry).
+        (preflight -> GET -> verify expected marker present -> concatenate ->
+        PATCH -> re-fetch and verify), but with its OWN entry-level
+        verification tuned to the judge-rulings payload shape rather than
+        phase-containment blocks:
+          1. Preflight no-op guard (M8/D5), run FIRST and before any network
+             call: NewContent must carry at least one `judge_ruling:` entry.
+             A judge-rulings HEAD with zero entries is refused before any
+             write is attempted, so an empty append can never defeat the
+             zero-findings placeholder contract (which always carries at
+             least one `- finding_id: none` / `judge_ruling: defense-sustained`
+             entry).
+          2. gh api GET the comment body by REST comment id.
+          3. Verify the expected marker is present in the fetched body.
           4. Concatenate NewContent after the existing body.
           5. gh api PATCH the full combined body.
           6. Post-write verify: GET again and apply positive-proof
@@ -1116,8 +1159,28 @@ function Add-JudgeRulingsBlock {
     # reappeared". Content identity (not just count) also catches the case
     # where the RIGHT NUMBER of entries landed but one was corrupted into a
     # different value.
+    #
+    # M3 fix (issue #811 post-fix adversarial pass): the check below used to
+    # compare the verify body's TOTAL occurrence count of each value against
+    # only the newly-appended count, with no baseline subtraction. If
+    # $originalBody already carried an identical block (e.g. left over from a
+    # prior partial/failed run) and the PATCH silently no-op'd (verify body
+    # == original body, unchanged — the new append never actually landed),
+    # the pre-existing entries alone could satisfy $neededCount and this
+    # function would report Success=$true despite nothing new having been
+    # written. Establish a baseline count of each value's occurrences in
+    # $originalBody BEFORE the append, and require the verify body to contain
+    # at least baseline + needed — i.e. the pre-existing entries PLUS the
+    # newly-appended ones, not just "enough total occurrences somewhere."
     $appendedEntryValues = [System.Collections.Generic.List[string]]::new()
     foreach ($m in $preflightEntryMatches) { $appendedEntryValues.Add($m.Value.Trim()) }
+
+    $baselineEntryMatches = [regex]::Matches($originalBody, $judgeRulingEntryPattern)
+    $baselineEntryCounts = @{}
+    foreach ($m in $baselineEntryMatches) {
+        $val = $m.Value.Trim()
+        if ($baselineEntryCounts.ContainsKey($val)) { $baselineEntryCounts[$val]++ } else { $baselineEntryCounts[$val] = 1 }
+    }
 
     $verifyEntryMatches = [regex]::Matches($verifyBody, $judgeRulingEntryPattern)
     $verifyEntryCounts = @{}
@@ -1133,10 +1196,12 @@ function Add-JudgeRulingsBlock {
 
     foreach ($val in $appendedEntryCounts.Keys) {
         $neededCount = $appendedEntryCounts[$val]
+        $baselineCount = if ($baselineEntryCounts.ContainsKey($val)) { $baselineEntryCounts[$val] } else { 0 }
+        $requiredCount = $baselineCount + $neededCount
         $foundCount = if ($verifyEntryCounts.ContainsKey($val)) { $verifyEntryCounts[$val] } else { 0 }
-        if ($foundCount -lt $neededCount) {
-            [Console]::Error.WriteLine("Add-JudgeRulingsBlock: post-write verify FAILED — appended entry '$val' expected at least $neededCount occurrence(s), found $foundCount in verify body for comment $CommentId.")
-            return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: appended judge_ruling entry '$val' expected at least $neededCount occurrence(s), found $foundCount" }
+        if ($foundCount -lt $requiredCount) {
+            [Console]::Error.WriteLine("Add-JudgeRulingsBlock: post-write verify FAILED — appended entry '$val' expected at least $requiredCount occurrence(s) (baseline $baselineCount + appended $neededCount), found $foundCount in verify body for comment $CommentId.")
+            return [PSCustomObject]@{ Success = $false; Reason = "Post-write verify failed: appended judge_ruling entry '$val' expected at least $requiredCount occurrence(s) (baseline $baselineCount + appended $neededCount), found $foundCount" }
         }
     }
 
