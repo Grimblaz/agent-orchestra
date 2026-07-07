@@ -23,6 +23,18 @@ Set-StrictMode -Version Latest
 # re-implementing the block regex (delegation-instead-of-duplication).
 . (Join-Path $PSScriptRoot 'phase-containment-core.ps1')
 
+# Single source of truth for the general judge-rulings HEAD pattern (bare
+# `<!-- judge-rulings` or attributed `<!-- judge-rulings pr=N -->` — the
+# attributed form's `pr=N` prefix satisfies this pattern's `\s` alternative,
+# so it matches both head shapes without a separate attributed-specific
+# check). Four sites in this file need "does a real judge-rulings head exist
+# here" (Test-EmissionMarkerPresent's vocab gate, the duplicate-head count in
+# Get-JudgeRulingsSustainedCountInternal, its bare-head fallback match, and
+# Get-EmissionGap's real-vs-fallback classification); a single named constant
+# means a future change to the head shape touches one place instead of
+# silently drifting across four inline copies (refactor 811-D1-refactor-1).
+$script:JudgeRulingsHeadPattern = '<!--\s*judge-rulings(?:\s|-->|$)'
+
 #region Valid surfaces / id-domain mapping
 
 # -Surface uses the core's stage names exactly (StageProjections keys):
@@ -147,7 +159,7 @@ function Test-EmissionMarkerPresent {
     # whitespace (the real marker's normal continuation), the closing
     # '-->' (immediate self-close), or end-of-string — never an unrelated
     # identifier character run like '-report'.
-    $headMatch = [regex]::Match($Body, '<!--\s*judge-rulings(?:\s|-->|$)')
+    $headMatch = [regex]::Match($Body, $script:JudgeRulingsHeadPattern)
     $vocabGateResult = $false
     if ($headMatch.Success) {
         $windowEnd = [Math]::Min($Body.Length, $headMatch.Index + $headMatch.Length + $lookaheadWindow)
@@ -283,7 +295,7 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     # `\s` alternative), so counting matches of the general pattern alone
     # gives the true head count without double-counting the same head under
     # both the attributed-specific and bare-general patterns.
-    $allHeadMatches = [regex]::Matches($Body, '<!--\s*judge-rulings(?:\s|-->|$)')
+    $allHeadMatches = [regex]::Matches($Body, $script:JudgeRulingsHeadPattern)
     if ($allHeadMatches.Count -ge 2) {
         return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
     }
@@ -298,7 +310,7 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     # M9 fix: see Test-EmissionMarkerPresent's identical fix for the
     # superstring-marker-name rationale (e.g. '<!-- judge-rulings-report -->'
     # must never match this real judge-rulings head).
-    $bareHeadMatch = [regex]::Match($Body, '<!--\s*judge-rulings(?:\s|-->|$)')
+    $bareHeadMatch = [regex]::Match($Body, $script:JudgeRulingsHeadPattern)
 
     $headMatch = $null
     if ($attributedHeadMatch.Success) {
@@ -604,7 +616,7 @@ function Get-EmissionGap {
                 [regex]::IsMatch($body, '(?m)^finding_dispositions\s*:\s*$')
             }
             else {
-                [regex]::IsMatch($body, '<!--\s*judge-rulings(?:\s|-->|$)')
+                [regex]::IsMatch($body, $script:JudgeRulingsHeadPattern)
             }
 
             $sustainedResult = Get-SustainedFindingCount -Surface $Surface -Body $body
