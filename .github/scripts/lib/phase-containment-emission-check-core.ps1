@@ -65,11 +65,34 @@ function Test-EmissionMarkerPresent {
              vocabulary is still could-not-verify, never silently zero).
 
         Matches the SAME marker-head patterns Get-SustainedFindingCount's
-        internal parsers use for each surface, so head detection here can
-        never diverge from head detection there:
+        internal parsers use for each surface:
           code-review / plan-stress-test: bare `<!-- judge-rulings` or
             attributed `<!-- judge-rulings pr=N -->`
           design-challenge: `finding_dispositions:` YAML key
+
+        811-D1 INTENTIONAL DIVERGENCE (plan-stress-test surface only): head
+        detection here can no longer be claimed to "never diverge" from
+        Get-SustainedFindingCount's own head detection, and that is now
+        deliberate rather than a bug. A plan comment can legitimately carry
+        a prose-only "Plan Stress-Test" section (heading + narrative
+        bullets) with no machine-readable judge-rulings block at all — every
+        plan persisted before the 811 writer change is exactly this shape.
+        Treating that as "no marker at all" (ordinary chatter, contributes
+        0 per case 1 above) rendered a false `clean -- sustained=0 blocks=0`,
+        indistinguishable from an issue with no stress-test history
+        whatsoever. For plan-stress-test only, when the vocab-gated
+        judge-rulings check above returns false, a second fallback check
+        fires: if the body ALSO carries both a `<!-- plan-issue-` marker and
+        a line-start `**Plan Stress-Test**` heading, this function reports
+        the marker as present anyway, so Get-EmissionGap's caller renders an
+        honest could-not-verify instead of a reassuring clean. This gate/
+        counter divergence is surfaced downstream via Get-EmissionGap's
+        `Reason` field: 'head-missing' when this fallback is what made the
+        marker read as present (no real judge-rulings head exists at all);
+        'head-corrupt' when a real head IS present elsewhere but failed to
+        parse; 'ok' otherwise. code-review and design-challenge are
+        completely unaffected — their marker-head detection and counting
+        logic is unchanged and still cannot diverge from each other.
 
         M6 fix (issue #782 post-review): a bare head-substring match alone
         used to be sufficient, which meant a maintainer describing the
@@ -125,21 +148,52 @@ function Test-EmissionMarkerPresent {
     # '-->' (immediate self-close), or end-of-string — never an unrelated
     # identifier character run like '-report'.
     $headMatch = [regex]::Match($Body, '<!--\s*judge-rulings(?:\s|-->|$)')
-    if (-not $headMatch.Success) { return $false }
-    $windowEnd = [Math]::Min($Body.Length, $headMatch.Index + $headMatch.Length + $lookaheadWindow)
-    $window = $Body.Substring($headMatch.Index, $windowEnd - $headMatch.Index)
-    # PF-F2 fix (issue #782 post-fix defense pass): the key-position anchor
-    # must also recognize a YAML block-sequence item whose key is the first
-    # token after a `- ` dash-space list marker (e.g. `- disposition:
-    # Fix-now`), not just true line-start or flow-mapping `{`/`,` position.
-    # Without this, a body whose ONLY vocabulary tokens are dash-space
-    # `- disposition:` items (no plain line-start field, no flow-mapping)
-    # fails this vocab gate entirely, so Get-EmissionGap treats the whole
-    # body as ordinary chatter and silently contributes 0 — a false-clean
-    # (Gap=0/ok) despite real sustained findings. See the identical anchor
-    # in Get-JudgeRulingsSustainedCountInternal ($keyAnchor) for the
-    # counting-side counterpart; this window-gate copy must stay in sync.
-    return [regex]::IsMatch($window, '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')
+    $vocabGateResult = $false
+    if ($headMatch.Success) {
+        $windowEnd = [Math]::Min($Body.Length, $headMatch.Index + $headMatch.Length + $lookaheadWindow)
+        $window = $Body.Substring($headMatch.Index, $windowEnd - $headMatch.Index)
+        # PF-F2 fix (issue #782 post-fix defense pass): the key-position anchor
+        # must also recognize a YAML block-sequence item whose key is the first
+        # token after a `- ` dash-space list marker (e.g. `- disposition:
+        # Fix-now`), not just true line-start or flow-mapping `{`/`,` position.
+        # Without this, a body whose ONLY vocabulary tokens are dash-space
+        # `- disposition:` items (no plain line-start field, no flow-mapping)
+        # fails this vocab gate entirely, so Get-EmissionGap treats the whole
+        # body as ordinary chatter and silently contributes 0 — a false-clean
+        # (Gap=0/ok) despite real sustained findings. See the identical anchor
+        # in Get-JudgeRulingsSustainedCountInternal ($keyAnchor) for the
+        # counting-side counterpart; this window-gate copy must stay in sync.
+        $vocabGateResult = [regex]::IsMatch($window, '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')
+    }
+
+    if ($vocabGateResult) {
+        return $true
+    }
+
+    # 811-D1 plan-stress-test-surface-only fallback (M3/GB-F1): the vocab
+    # gate above just said "no real judge-rulings marker here" — either no
+    # head at all, or a head present but failing the vocab window (a
+    # malformed/foreign head must NOT suppress this fallback; it keys off
+    # the vocab gate's own boolean result, never a separate raw
+    # head-substring re-test, so a present-but-broken head is still
+    # correctly routed here rather than silently passing as "real"). For
+    # plan-stress-test specifically, a body carrying BOTH a durable
+    # `<!-- plan-issue-` marker (any issue number) AND a line-start
+    # `**Plan Stress-Test**` heading is recognizably a plan's persisted
+    # stress-test section, prose-only or otherwise, and must not collapse
+    # into "ordinary chatter, contributes 0." Both conditions are required
+    # together: a chatter comment that merely discusses the heading in
+    # prose, with no `<!-- plan-issue-` marker, does not qualify (it truly
+    # is ordinary discussion, not a plan's own persisted surface).
+    if ($Surface -eq 'plan-stress-test') {
+        $hasPlanIssueMarker = [regex]::IsMatch($Body, '<!--\s*plan-issue-')
+        $hasPlanStressTestHeading = [regex]::IsMatch($Body, '(?m)^\*\*Plan Stress-Test\*\*')
+        if ($hasPlanIssueMarker -and $hasPlanStressTestHeading) {
+            return $true
+        }
+    }
+
+    return $false
 }
 
 #endregion
@@ -216,6 +270,23 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     param(
         [Parameter(Mandatory)][string]$Body
     )
+
+    # 811-D1 owner decision (M1): fail loud when two or more judge-rulings
+    # heads exist in one body, rather than silently picking one (latest-wins
+    # was explicitly considered and rejected during plan stress-test — the
+    # writer's replace-own-block already guarantees a single head on the
+    # normal persist path, so a duplicate here signals a genuine anomaly
+    # (e.g. a double-run backfill) that should be surfaced, not quietly
+    # resolved). Count ALL head occurrences with the single general pattern
+    # below: the attributed form `<!-- judge-rulings pr=N -->` is itself
+    # matched by this same general pattern (its `pr=N` prefix satisfies the
+    # `\s` alternative), so counting matches of the general pattern alone
+    # gives the true head count without double-counting the same head under
+    # both the attributed-specific and bare-general patterns.
+    $allHeadMatches = [regex]::Matches($Body, '<!--\s*judge-rulings(?:\s|-->|$)')
+    if ($allHeadMatches.Count -ge 2) {
+        return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+    }
 
     # Isolate the authoritative marker region first. Match both marker-head
     # forms observed live:
@@ -386,7 +457,7 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     if ($hasJudgeRuling) {
         # Canonical judge-rulings variant: sustained iff judge_ruling: sustained
         # (NOT defense-sustained). judge_ruling is a closed 2-value enum per
-        # skills/review-judgment/SKILL.md:150 ('sustained' or 'defense-sustained');
+        # skills/review-judgment/SKILL.md:156 ('sustained' or 'defense-sustained');
         # any other value is unrecognized vocabulary -> could-not-verify (DD3),
         # never silently treated as "not sustained".
         $rulingMatches = [regex]::Matches($region, '(?m)judge_ruling\s*:\s*(\S+)')
@@ -494,6 +565,9 @@ function Get-EmissionGap {
           BlockCount     [int]
           Gap            [int]
           ParseStatus    [string] — 'ok' or 'could-not-verify'
+          Reason         [string] — 'ok', 'head-missing', or 'head-corrupt'
+                          (811-D1, plan-stress-test-relevant detail consumed
+                          by the s2 wrapper render; see below)
     #>
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Bodies,
@@ -504,14 +578,44 @@ function Get-EmissionGap {
     $totalSustained = 0
     $totalBlocks = 0
     $anyCouldNotVerify = $false
+    # 811-D1 (M5): distinguishes WHY the aggregate went could-not-verify, for
+    # s2's differentiated render. 'head-missing' means the 811 plan-stress-test
+    # fallback fired for at least one body (a real machine judge-rulings head
+    # was never present — the honest fallback is the only reason
+    # Test-EmissionMarkerPresent returned true). 'head-corrupt' means a real
+    # judge-rulings head WAS present somewhere but its content failed to parse
+    # (DD3 fail-loud). head-corrupt takes priority when both occur across
+    # different bodies in the same aggregation, since "a machine head exists
+    # but is broken" is the more actionable/specific diagnosis.
+    $sawFallbackFired = $false
+    $sawRealHeadCorrupt = $false
 
     foreach ($body in $Bodies) {
         $bodyHasMarker = Test-EmissionMarkerPresent -Surface $Surface -Body $body
 
         if ($bodyHasMarker) {
+            # 811-D1: determine whether this body's marker presence came from
+            # a REAL judge-rulings/finding_dispositions head, or only from the
+            # plan-stress-test honest fallback (no real head at all). Reuses
+            # the same head patterns as the internal parsers rather than a
+            # new one, so this classification can never drift from what
+            # Get-SustainedFindingCount itself considers a real head.
+            $hasRealHead = if ($Surface -eq 'design-challenge') {
+                [regex]::IsMatch($body, '(?m)^finding_dispositions\s*:\s*$')
+            }
+            else {
+                [regex]::IsMatch($body, '<!--\s*judge-rulings(?:\s|-->|$)')
+            }
+
             $sustainedResult = Get-SustainedFindingCount -Surface $Surface -Body $body
             if ($sustainedResult.ParseStatus -eq 'could-not-verify') {
                 $anyCouldNotVerify = $true
+                if ($hasRealHead) {
+                    $sawRealHeadCorrupt = $true
+                }
+                else {
+                    $sawFallbackFired = $true
+                }
             }
             $totalSustained += $sustainedResult.SustainedCount
         }
@@ -562,11 +666,32 @@ function Get-EmissionGap {
     $parseStatus = if ($anyCouldNotVerify) { 'could-not-verify' } else { 'ok' }
     $gap = $totalSustained - $totalBlocks
 
+    # 811-D1 (M5): head-corrupt takes priority over head-missing when both
+    # occurred across different bodies (see field notes above); 'ok' when
+    # ParseStatus is 'ok' (no could-not-verify body at all).
+    $reason = if (-not $anyCouldNotVerify) {
+        'ok'
+    }
+    elseif ($sawRealHeadCorrupt) {
+        'head-corrupt'
+    }
+    elseif ($sawFallbackFired) {
+        'head-missing'
+    }
+    else {
+        # could-not-verify with neither flag set (e.g. an empty-body
+        # AllowEmptyString could-not-verify from Get-SustainedFindingCount on
+        # a non-plan-stress-test surface) — fall back to the generic label
+        # rather than guessing a plan-stress-test-specific reason.
+        'head-corrupt'
+    }
+
     return [PSCustomObject]@{
         SustainedCount = $totalSustained
         BlockCount     = $totalBlocks
         Gap            = $gap
         ParseStatus    = $parseStatus
+        Reason         = $reason
     }
 }
 

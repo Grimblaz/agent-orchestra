@@ -426,6 +426,75 @@ review_mode: github-intake-proxy-prosecution
 
 #endregion
 
+#region 811-D1: plan-stress-test honest fallback fixtures
+
+# Prose-only historic plan shape (every plan persisted before the 811 writer
+# change): a `<!-- plan-issue-{N} -->` marker and a line-start
+# `**Plan Stress-Test**` heading with narrative bullets, but NO machine-
+# readable judge-rulings block at all.
+$script:ProseOnlyPlanStressTestBody = @'
+<!-- plan-issue-700 -->
+
+## Plan: Some historic plan (#700)
+
+**Plan Stress-Test** (3-pass `standard` adapter: 2 generalist + 1 specialist -> defense -> judge)
+
+- Challenge M1 (some finding) - Prosecution: GA high - Post-judge ruling: **sustained** - Disposition: **incorporate**.
+- Challenge M2 (another finding) - Prosecution: SS med - Post-judge: **defense-sustained** - Disposition: **dismiss**.
+'@
+
+# Chatter that merely discusses the "Plan Stress-Test" heading in prose
+# (e.g. explaining the convention) with NO `<!-- plan-issue-` marker at all.
+# Must NOT trigger the fallback (both conditions are required together).
+$script:ChatterMentioningHeadingNoMarkerBody = @'
+Just a note: our plans use a **Plan Stress-Test** section to record the
+adversarial pipeline results before persisting. This comment is not itself
+a plan and carries no plan-issue marker.
+'@
+
+# Duplicate judge-rulings heads in one body (e.g. a double-run backfill).
+# Both heads parse individually as valid canonical judge-rulings shapes, but
+# the reader must fail loud rather than pick one (latest-wins dropped, M1).
+$script:DuplicateJudgeRulingsHeadsBody = @'
+<!-- plan-issue-701 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+```yaml
+<!-- judge-rulings
+- id: M1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+-->
+```
+
+```yaml
+<!-- judge-rulings
+- id: M1
+  judge_ruling: sustained
+  judge_confidence: high
+  points_awarded: P+5
+-->
+```
+'@
+
+# A malformed/foreign judge-rulings head (fails the vocab gate) co-located
+# with the plan-issue marker and heading. The fallback must still fire here
+# (a present-but-broken head must not suppress the honest fallback) and
+# Get-SustainedFindingCount must independently fail loud on this body too.
+$script:CorruptHeadWithPlanIssueMarkerBody = @'
+<!-- plan-issue-702 -->
+
+**Plan Stress-Test** (2-pass `lite` adapter)
+
+<!-- judge-rulings-report -->
+Some unrelated report content, not real judge-rulings vocabulary.
+-->
+'@
+
+#endregion
+
 }
 
 Describe 'Get-SustainedFindingCount - code-review surface (live fixtures)' {
@@ -683,6 +752,77 @@ judge_ruling: sustained
     It 'still matches the real bare head shape (no regression on live fixtures)' {
         Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:Pr781Body | Should -Be $true
         Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:Pr778Body | Should -Be $true
+    }
+}
+
+Describe '811-D1: Test-EmissionMarkerPresent plan-stress-test honest fallback' {
+    It 'returns true for a prose-only plan-issue comment (marker + heading, no judge-rulings head at all)' {
+        Test-EmissionMarkerPresent -Surface 'plan-stress-test' -Body $script:ProseOnlyPlanStressTestBody | Should -Be $true
+    }
+
+    It 'returns false for chatter mentioning the heading in prose with no plan-issue marker (both conditions required together)' {
+        Test-EmissionMarkerPresent -Surface 'plan-stress-test' -Body $script:ChatterMentioningHeadingNoMarkerBody | Should -Be $false
+    }
+
+    It 'does not fire the fallback for the code-review surface even with the same prose-only shape (surface-scoped only)' {
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:ProseOnlyPlanStressTestBody | Should -Be $false
+    }
+
+    It 'still returns true for the real machine judge-rulings shape (vocab gate satisfied directly, fallback not needed)' {
+        Test-EmissionMarkerPresent -Surface 'plan-stress-test' -Body $script:PlanStressTestBody | Should -Be $true
+    }
+
+    It 'returns true when a present-but-malformed head co-occurs with the plan-issue marker and heading (fallback keys off the vocab gate, not a raw head re-test)' {
+        Test-EmissionMarkerPresent -Surface 'plan-stress-test' -Body $script:CorruptHeadWithPlanIssueMarkerBody | Should -Be $true
+    }
+}
+
+Describe '811-D1: Get-SustainedFindingCount fail-loud on duplicate judge-rulings heads (M1)' {
+    It 'returns could-not-verify (not a count) when two judge-rulings heads exist in one body' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:DuplicateJudgeRulingsHeadsBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'still returns ok for a single-head body (no false-positive duplicate detection)' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:PlanStressTestBody
+        $result.ParseStatus | Should -Be 'ok'
+    }
+
+    It 'returns could-not-verify for a prose-only plan-issue body (no real head at all)' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:ProseOnlyPlanStressTestBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe '811-D1: Get-EmissionGap Reason field (head-missing vs head-corrupt vs ok)' {
+    It 'reports Reason head-missing for a prose-only plan-issue comment (fallback fired, no real head)' {
+        $result = Get-EmissionGap -Bodies @($script:ProseOnlyPlanStressTestBody) -Id 700 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-missing'
+    }
+
+    It 'reports Reason head-corrupt for a body with a real judge-rulings head that fails to parse' {
+        $result = Get-EmissionGap -Bodies @($script:UnknownVocabularyBody) -Id 999 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+    }
+
+    It 'reports Reason head-corrupt for duplicate judge-rulings heads (a real head is present, just ambiguous)' {
+        $result = Get-EmissionGap -Bodies @($script:DuplicateJudgeRulingsHeadsBody) -Id 701 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-corrupt'
+    }
+
+    It 'reports Reason ok when the aggregate parses cleanly' {
+        $result = Get-EmissionGap -Bodies @($script:PlanStressTestBody) -Id 811 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
+    }
+
+    It 'reports Reason ok for the code-review surface aggregation (Reason field is additive, existing surfaces unaffected)' {
+        $result = Get-EmissionGap -Bodies @($script:Pr775Body) -Id 775 -Surface 'code-review'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Reason | Should -Be 'ok'
     }
 }
 
