@@ -545,6 +545,108 @@ Some unrelated report content, not real judge-rulings vocabulary.
 
 #endregion
 
+#region GH-3 (PR #815 review): decoy-before-real-block fixtures
+
+# GH-3 scenario 1 (plan-stress-test surface): a BARE decoy head (fails the
+# vocab gate — no real field vocabulary in its lookahead window) appears
+# textually BEFORE a real, vocab-gate-passing bare block with a KNOWN
+# sustained count (2). Pre-fix, region-isolation's standalone first-match
+# scan picked the decoy's position, isolated an empty/prose-only region
+# there, and returned could-not-verify — even though the real block,
+# unexamined, would have parsed to SustainedCount=2. Both heads use the
+# BARE form deliberately (the reachable shape per the review: this bug only
+# fires on the bare head, not the attributed form).
+$script:DecoyBeforeRealPlanStressTestBody = @'
+<!-- plan-issue-704 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+This PR uses the standard <!-- judge-rulings --> marker convention for
+tracking review history, mentioned here only as ordinary narrative text
+with nothing field-shaped following it before the paragraph ends.
+
+Padding prose to push the real head well past the 400-character lookahead
+window, so the decoy's own vocab-gate window cannot accidentally see into
+the real block's vocabulary below. This paragraph exists purely as filler
+text with no judge-rulings vocabulary of its own, repeated a few times to
+guarantee sufficient distance between the decoy above and the real block
+below. Padding prose to push the real head well past the 400-character
+lookahead window, so the two head matches cannot see into each other's
+vocabulary windows. Padding prose to push the real head well past the
+400-character lookahead window so the two heads cannot overlap at all.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+- finding_id: M2
+  judge_ruling: sustained
+-->
+'@
+
+# GH-3 scenario 2 (code-review surface — the more serious silent
+# false-clean): the SAME decoy-before-real-block shape, but exercised
+# against Test-EmissionMarkerPresent directly on the code-review surface
+# (which has no plan-stress-test fallback to mask the bug). Pre-fix,
+# Test-EmissionMarkerPresent's own standalone first-match scan evaluated
+# only the decoy, failed its vocab gate, and returned $false — marker not
+# present — without ever checking for the later real head. Get-EmissionGap
+# would then treat the whole body as ordinary chatter and silently
+# contribute SustainedCount=0.
+$script:DecoyBeforeRealCodeReviewBody = @'
+This PR uses the standard <!-- judge-rulings --> marker convention for
+tracking review dispositions, mentioned here only as ordinary narrative
+text with nothing field-shaped following it before the paragraph ends.
+
+Padding prose to push the real head well past the 400-character lookahead
+window, so the decoy's own vocab-gate window cannot accidentally see into
+the real block's vocabulary below. This paragraph exists purely as filler
+text with no judge-rulings vocabulary of its own, repeated a few times to
+guarantee sufficient distance between the decoy above and the real block
+below. Padding prose to push the real head well past the 400-character
+lookahead window, so the two head matches cannot see into each other's
+vocabulary windows. Padding prose to push the real head well past the
+400-character lookahead window so the two heads cannot overlap at all.
+
+<!-- judge-rulings
+- finding_id: M1
+  judge_ruling: sustained
+- finding_id: M2
+  judge_ruling: sustained
+-->
+'@
+
+# GH-3 M1-must-not-regress fixture: BOTH the decoy and the "real" block are
+# vocab-gate-passing (i.e. genuinely 2+ real heads), so the M1 duplicate-head
+# guard must still fail loud. This is NOT the GH-3 bug shape (the first head
+# here is real, not a decoy) — it proves the GH-3 fix (scan-all-and-select-
+# first-real) did not accidentally weaken M1's scan-all-and-count logic.
+$script:TwoRealHeadsBothVocabGatePassingBody = @'
+<!-- plan-issue-705 -->
+
+**Plan Stress-Test** (5-pass `standard` adapter)
+
+<!-- judge-rulings
+- finding_id: A1
+  judge_ruling: sustained
+-->
+
+Padding prose to push the next real head well past the 400-character
+lookahead window, so the two real heads' vocab-gate windows cannot overlap
+each other. This paragraph exists purely as filler text with no
+judge-rulings vocabulary of its own, repeated a few times to guarantee
+sufficient distance between the two real heads. Padding prose to push the
+next real head well past the 400-character lookahead window so the two
+heads cannot overlap at all, guaranteeing this is a genuine two-real-head
+duplicate rather than a vocab-window collision artifact.
+
+<!-- judge-rulings
+- finding_id: B1
+  judge_ruling: sustained
+-->
+'@
+
+#endregion
+
 #region 811-D1 s4: writer-contract round-trip fixtures (skills/plan-authoring/SKILL.md)
 
 # Round-trip fixture: exercises the SKILL's "one entry per merged finding_id"
@@ -903,6 +1005,15 @@ Describe '811-D1: Test-EmissionMarkerPresent plan-stress-test honest fallback' {
     It 'returns true when a present-but-malformed head co-occurs with the plan-issue marker and heading (fallback keys off the vocab gate, not a raw head re-test)' {
         Test-EmissionMarkerPresent -Surface 'plan-stress-test' -Body $script:CorruptHeadWithPlanIssueMarkerBody | Should -Be $true
     }
+
+    # GH-4 (PR #815 review): this fixture's own in-code comment promises
+    # "Get-SustainedFindingCount must independently fail loud on this body
+    # too," but only the Test-EmissionMarkerPresent assertion above ever
+    # existed. Adding the missing assertion here, directly alongside it.
+    It 'Get-SustainedFindingCount independently fails loud (could-not-verify) on the same present-but-malformed-head body' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:CorruptHeadWithPlanIssueMarkerBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
 }
 
 Describe '811-D1: Get-SustainedFindingCount fail-loud on duplicate judge-rulings heads (M1)' {
@@ -925,6 +1036,49 @@ Describe '811-D1: Get-SustainedFindingCount fail-loud on duplicate judge-rulings
         $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:ProseMentionPlusOneRealHeadBody
         $result.ParseStatus | Should -Be 'ok'
         $result.SustainedCount | Should -Be 1
+    }
+
+    It 'M1 still fails loud when BOTH heads are vocab-gate-passing (genuine 2+ real heads, no regression from the GH-3 fix)' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:TwoRealHeadsBothVocabGatePassingBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'GH-3 (PR #815 review): decoy-before-real-block no longer suppresses the real block' {
+    It 'plan-stress-test: a vocab-gate-failing decoy head before a real bare block now parses to the TRUE sustained count, not could-not-verify' {
+        $result = Get-SustainedFindingCount -Surface 'plan-stress-test' -Body $script:DecoyBeforeRealPlanStressTestBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+    }
+
+    It 'code-review: Test-EmissionMarkerPresent returns true for the same decoy-before-real-block shape (no longer a silent skip-as-chatter)' {
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:DecoyBeforeRealCodeReviewBody | Should -Be $true
+    }
+
+    It 'code-review: the resulting sustained count is the TRUE count, not a silent 0' {
+        $result = Get-SustainedFindingCount -Surface 'code-review' -Body $script:DecoyBeforeRealCodeReviewBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+    }
+
+    It 'code-review: Get-EmissionGap no longer silently reports Gap=0/ok for a body carrying a real sustained block behind a decoy head' {
+        $result = Get-EmissionGap -Bodies @($script:DecoyBeforeRealCodeReviewBody) -Id 815 -Surface 'code-review'
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+    }
+
+    It 'existing attributed-vs-bare preference is preserved when an attributed real head is present (no decoy interaction, regression check)' {
+        $result = Get-SustainedFindingCount -Surface 'code-review' -Body $script:Pr778Body
+        $result.ParseStatus | Should -Be 'ok'
+        Test-EmissionMarkerPresent -Surface 'code-review' -Body $script:Pr778Body | Should -Be $true
+    }
+}
+
+Describe 'GH-1 (PR #815 review, rider on GH-3): hasRealHead no longer misclassifies a decoy as a real head' {
+    It 'reports Reason head-missing (not head-corrupt) for a plan-stress-test body whose ONLY head is a vocab-gate-failing decoy (honest fallback fired, no real head at all)' {
+        $result = Get-EmissionGap -Bodies @($script:CorruptHeadWithPlanIssueMarkerBody) -Id 702 -Surface 'plan-stress-test'
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Reason | Should -Be 'head-missing'
     }
 }
 
@@ -1623,14 +1777,30 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
 # vocab-gates each candidate head match before counting it toward the 2+
 # duplicate threshold, using this same byte-identical anchor, so a bare
 # prose mention of the marker convention no longer counts as a real head.
+#
+# GH-3 fix (PR #815 review, post-#811 review pass): the count intentionally
+# drops from five to four literal copies. Test-EmissionMarkerPresent's
+# standalone vocab-window check and Get-JudgeRulingsSustainedCountInternal's
+# duplicate-head vocab-gate check (the two copies added by the M6 and 811 M1
+# fixes referenced above) were both first-match-only scans, which let a
+# vocab-gate-failing decoy head positioned before a real head suppress
+# detection of the real one (false could-not-verify on plan-stress-test,
+# silent false-clean on code-review). Both call sites now delegate to the
+# single shared helper Get-RealJudgeRulingsHeadMatches, which scans ALL
+# head candidates and applies the vocab gate via one shared constant,
+# $script:JudgeRulingsVocabGatePattern — collapsing those two standalone
+# copies into one. The remaining four copies (the shared constant itself,
+# the ambiguity-walk detector, and the two $keyAnchor counting-side copies
+# in Get-JudgeRulingsSustainedCountInternal / Get-DesignChallengeSustainedCountInternal)
+# are unaffected by this consolidation and must still stay byte-identical.
 # ---------------------------------------------------------------------------
 
 Describe 'Key-anchor pattern — all literal copies stay byte-identical (PF2-F1 drift guard)' {
-    It 'finds exactly five literal copies of the key-anchor pattern, all byte-identical' {
+    It 'finds exactly four literal copies of the key-anchor pattern, all byte-identical' {
         $srcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
         $src = Get-Content -LiteralPath $srcPath -Raw
         $copies = [regex]::Matches($src, [regex]::Escape('(?:^\s*(?:-\s+)?|[{,]\s*)'))
-        $copies.Count | Should -Be 5
+        $copies.Count | Should -Be 4
         @($copies.Value | Select-Object -Unique).Count | Should -Be 1
     }
 }

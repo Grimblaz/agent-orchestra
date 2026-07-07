@@ -35,6 +35,18 @@ Set-StrictMode -Version Latest
 # silently drifting across four inline copies (refactor 811-D1-refactor-1).
 $script:JudgeRulingsHeadPattern = '<!--\s*judge-rulings(?:\s|-->|$)'
 
+# Bounded lookahead window after a matched head, within which real marker
+# content is expected to appear (shared by every vocab-gate scan in this
+# file — Test-EmissionMarkerPresent, Get-JudgeRulingsSustainedCountInternal's
+# duplicate-head guard and region-isolation, and Get-EmissionGap's
+# hasRealHead classification).
+$script:JudgeRulingsLookaheadWindow = 400
+
+# Vocab-gate field-token pattern: a head match is only "real" (as opposed to
+# a bare prose mention of the marker convention) when at least one of these
+# tokens appears at a real YAML key position within the lookahead window.
+$script:JudgeRulingsVocabGatePattern = '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:'
+
 #region Valid surfaces / id-domain mapping
 
 # -Surface uses the core's stage names exactly (StageProjections keys):
@@ -51,6 +63,50 @@ $script:JudgeRulingsHeadPattern = '<!--\s*judge-rulings(?:\s|-->|$)'
 #   design-challenge            -> Id = issue number, blocks live on issue comments (design-phase-complete-{ID})
 #   plan-stress-test            -> Id = issue number, blocks live on issue comments (plan-issue-{ID})
 # Callers must pass the matching domain; this module does not verify it.
+
+#endregion
+
+#region Get-RealJudgeRulingsHeadMatches (private)
+
+function script:Get-RealJudgeRulingsHeadMatches {
+    <#
+    .SYNOPSIS
+        Scans a body for ALL judge-rulings head candidates and returns only
+        those that pass the vocab gate (real heads), preserving encounter
+        order.
+    .DESCRIPTION
+        GH-3 fix (PR #815 review): every prior head-detection site in this
+        file used a standalone first-match `[regex]::Match` call, which lets
+        a vocab-gate-FAILING decoy head positioned textually before a real,
+        vocab-gate-PASSING block suppress detection of the real block
+        entirely (both a false could-not-verify on plan-stress-test and a
+        silent false-clean on code-review). This helper is the single scan
+        every head-detection call site now reuses: it walks every raw head
+        match (not just the first) and keeps only the ones whose bounded
+        lookahead window contains real field vocabulary, so callers can
+        select "the first REAL head" instead of "the first RAW match."
+    .PARAMETER Body
+        The raw comment body text to scan.
+    .OUTPUTS
+        [System.Text.RegularExpressions.Match[]] — the subset of
+        $script:JudgeRulingsHeadPattern matches that pass the vocab gate, in
+        original encounter order. Empty array when none pass.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Body
+    )
+
+    $allHeadMatches = [regex]::Matches($Body, $script:JudgeRulingsHeadPattern)
+    $realHeadMatches = [System.Collections.Generic.List[System.Text.RegularExpressions.Match]]::new()
+    foreach ($candidateHead in $allHeadMatches) {
+        $windowEnd = [Math]::Min($Body.Length, $candidateHead.Index + $candidateHead.Length + $script:JudgeRulingsLookaheadWindow)
+        $window = $Body.Substring($candidateHead.Index, $windowEnd - $candidateHead.Index)
+        if ([regex]::IsMatch($window, $script:JudgeRulingsVocabGatePattern)) {
+            $realHeadMatches.Add($candidateHead)
+        }
+    }
+    return , $realHeadMatches.ToArray()
+}
 
 #endregion
 
@@ -165,24 +221,23 @@ function Test-EmissionMarkerPresent {
     # whitespace (the real marker's normal continuation), the closing
     # '-->' (immediate self-close), or end-of-string — never an unrelated
     # identifier character run like '-report'.
-    $headMatch = [regex]::Match($Body, $script:JudgeRulingsHeadPattern)
-    $vocabGateResult = $false
-    if ($headMatch.Success) {
-        $windowEnd = [Math]::Min($Body.Length, $headMatch.Index + $headMatch.Length + $lookaheadWindow)
-        $window = $Body.Substring($headMatch.Index, $windowEnd - $headMatch.Index)
-        # PF-F2 fix (issue #782 post-fix defense pass): the key-position anchor
-        # must also recognize a YAML block-sequence item whose key is the first
-        # token after a `- ` dash-space list marker (e.g. `- disposition:
-        # Fix-now`), not just true line-start or flow-mapping `{`/`,` position.
-        # Without this, a body whose ONLY vocabulary tokens are dash-space
-        # `- disposition:` items (no plain line-start field, no flow-mapping)
-        # fails this vocab gate entirely, so Get-EmissionGap treats the whole
-        # body as ordinary chatter and silently contributes 0 — a false-clean
-        # (Gap=0/ok) despite real sustained findings. See the identical anchor
-        # in Get-JudgeRulingsSustainedCountInternal ($keyAnchor) for the
-        # counting-side counterpart; this window-gate copy must stay in sync.
-        $vocabGateResult = [regex]::IsMatch($window, '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')
-    }
+    #
+    # GH-3 fix (PR #815 review): this used to be a standalone first-match
+    # `[regex]::Match` + single vocab-gate check, which meant a vocab-gate-
+    # FAILING decoy head positioned before a real, vocab-gate-PASSING block
+    # made this function return $false without ever looking past the decoy
+    # — a silent false-clean, since Get-EmissionGap then treats the whole
+    # body as ordinary chatter and contributes 0. Reusing
+    # Get-RealJudgeRulingsHeadMatches (the same scan-all-candidates helper
+    # the M1 duplicate-head guard below uses) means ANY vocab-gate-passing
+    # head anywhere in the body — not just the first raw match — is enough
+    # to report the marker as present.
+    # PF-F2 fix (issue #782 post-fix defense pass) note preserved: the vocab
+    # gate's key-position anchor recognizes true line-start, a `- `
+    # dash-space list-item prefix, and flow-mapping `{`/`,` position (see
+    # $script:JudgeRulingsVocabGatePattern and Get-JudgeRulingsSustainedCountInternal's
+    # $keyAnchor for the counting-side counterpart).
+    $vocabGateResult = (Get-RealJudgeRulingsHeadMatches -Body $Body).Count -gt 0
 
     if ($vocabGateResult) {
         return $true
@@ -309,51 +364,63 @@ function script:Get-JudgeRulingsSustainedCountInternal {
     # standard <!-- judge-rulings pr=778 --> marker for tracking") has no
     # real field vocabulary following it, yet still counted toward this
     # duplicate threshold when it co-occurred with one genuinely real block —
-    # a false could-not-verify. Each candidate head is now vocab-gated with
-    # the SAME bounded-lookahead-window check Test-EmissionMarkerPresent uses
-    # (disposition/judge_ruling/verdict/finding_key within $lookaheadWindow
-    # characters after the head); only heads that pass this gate count as "a
-    # real head" toward the 2+ duplicate threshold. Two genuinely real blocks
-    # still correctly fail loud; a bare prose mention no longer does.
-    $lookaheadWindow = 400
-    $allHeadMatches = [regex]::Matches($Body, $script:JudgeRulingsHeadPattern)
-    $realHeadCount = 0
-    foreach ($candidateHead in $allHeadMatches) {
-        $windowEnd = [Math]::Min($Body.Length, $candidateHead.Index + $candidateHead.Length + $lookaheadWindow)
-        $window = $Body.Substring($candidateHead.Index, $windowEnd - $candidateHead.Index)
-        if ([regex]::IsMatch($window, '(?m)(?:^\s*(?:-\s+)?|[{,]\s*)(disposition|judge_ruling|verdict|finding_key)\s*:')) {
-            $realHeadCount++
+    # a false could-not-verify. Each candidate head is now vocab-gated via
+    # Get-RealJudgeRulingsHeadMatches (the same scan-all-candidates helper
+    # Test-EmissionMarkerPresent uses); only heads that pass this gate count
+    # as "a real head" toward the 2+ duplicate threshold. Two genuinely real
+    # blocks still correctly fail loud; a bare prose mention no longer does.
+    $realHeadMatches = Get-RealJudgeRulingsHeadMatches -Body $Body
+    if ($realHeadMatches.Count -ge 2) {
+        return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
+    }
+
+    # GH-3 fix (PR #815 review): region-isolation used to re-run its OWN
+    # standalone first-match `[regex]::Match` calls here, independent of the
+    # M1 guard's vocab-gated scan above. That let a vocab-gate-FAILING decoy
+    # head positioned before a real, vocab-gate-PASSING block win the
+    # first-match race, isolate an empty/prose-only region at the decoy's
+    # position, and return could-not-verify — even though the real block,
+    # unexamined, would have parsed cleanly. Select the head to isolate from
+    # $realHeadMatches (the SAME vocab-gated set the M1 guard just computed)
+    # instead of a fresh raw scan, while still preferring the attributed form
+    # `<!-- judge-rulings pr=N -->` over a bare form when BOTH are present
+    # among the real (vocab-gate-passing) candidates — attributed-vs-bare
+    # preference is now applied only among real heads, never used to
+    # resurrect a vocab-gate-failing raw match.
+    # NOTE: $script:JudgeRulingsHeadPattern's own match value stops at the
+    # first whitespace/`-->`/end-of-string after "judge-rulings" (e.g. just
+    # `<!-- judge-rulings ` for the attributed form), so it never spans
+    # through the closing `-->` of an attributed head. Anchor the attributed
+    # pattern (`\G` = "must match starting exactly here") at each
+    # candidate's own start position within the full body, so a
+    # vocab-gate-passing candidate that IS attributed is correctly detected
+    # without resurrecting a match at some unrelated, possibly-earlier
+    # occurrence of the same literal text elsewhere in a pathological body.
+    # $regionIndex/$regionHeadLength (not a swapped-in Match object) are what
+    # $regionStart below actually needs — the attributed match's full length
+    # when a candidate is attributed, else the candidate's own head-pattern
+    # length for a bare head.
+    $attributedPattern = '\G<!--\s*judge-rulings\s+pr=\d+\s*-->'
+    $regionIndex = -1
+    $regionHeadLength = 0
+    foreach ($candidate in $realHeadMatches) {
+        $attributedAtCandidate = [regex]::Match($Body.Substring($candidate.Index), $attributedPattern)
+        if ($attributedAtCandidate.Success) {
+            $regionIndex = $candidate.Index
+            $regionHeadLength = $attributedAtCandidate.Length
+            break
         }
     }
-    if ($realHeadCount -ge 2) {
+    if ($regionIndex -lt 0 -and $realHeadMatches.Count -gt 0) {
+        $regionIndex = $realHeadMatches[0].Index
+        $regionHeadLength = $realHeadMatches[0].Length
+    }
+
+    if ($regionIndex -lt 0) {
         return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
     }
 
-    # Isolate the authoritative marker region first. Match both marker-head
-    # forms observed live:
-    #   - attributed, self-closing: `<!-- judge-rulings pr=N -->` (PR #778) —
-    #     the tag closes immediately; YAML content follows the tag.
-    #   - bare, unclosed on the head line: `<!-- judge-rulings` (PRs #775/#781)
-    #     — the tag's `-->` closes only at the END of the YAML content.
-    $attributedHeadMatch = [regex]::Match($Body, '<!--\s*judge-rulings\s+pr=\d+\s*-->')
-    # M9 fix: see Test-EmissionMarkerPresent's identical fix for the
-    # superstring-marker-name rationale (e.g. '<!-- judge-rulings-report -->'
-    # must never match this real judge-rulings head).
-    $bareHeadMatch = [regex]::Match($Body, $script:JudgeRulingsHeadPattern)
-
-    $headMatch = $null
-    if ($attributedHeadMatch.Success) {
-        $headMatch = $attributedHeadMatch
-    }
-    elseif ($bareHeadMatch.Success) {
-        $headMatch = $bareHeadMatch
-    }
-
-    if (-not $headMatch -or -not $headMatch.Success) {
-        return [PSCustomObject]@{ SustainedCount = 0; ParseStatus = 'could-not-verify' }
-    }
-
-    $regionStart = $headMatch.Index + $headMatch.Length
+    $regionStart = $regionIndex + $regionHeadLength
     # The YAML region ends at the next `-->` (closing the HTML comment) or, for
     # the fenced-code-block variant (PR #778), at the closing ``` fence.
     $closeCommentIdx = $Body.IndexOf('-->', $regionStart, [System.StringComparison]::Ordinal)
@@ -637,15 +704,29 @@ function Get-EmissionGap {
         if ($bodyHasMarker) {
             # 811-D1: determine whether this body's marker presence came from
             # a REAL judge-rulings/finding_dispositions head, or only from the
-            # plan-stress-test honest fallback (no real head at all). Reuses
-            # the same head patterns as the internal parsers rather than a
-            # new one, so this classification can never drift from what
-            # Get-SustainedFindingCount itself considers a real head.
+            # plan-stress-test honest fallback (no real head at all).
+            #
+            # GH-1 fix (PR #815 review, rider on GH-3): the non-design-challenge
+            # branch used to be a bare, ungated [regex]::IsMatch against
+            # $script:JudgeRulingsHeadPattern, so a vocab-gate-FAILING decoy
+            # head alone could make this report $true, mislabeling the
+            # could-not-verify Reason as 'head-corrupt' ("a real head exists
+            # but its content failed to parse") when the accurate diagnosis is
+            # "the parser was misled by a decoy, not by real-head corruption."
+            # The prior comment claiming this "can never drift from what
+            # Get-SustainedFindingCount considers a real head" was false for
+            # exactly that reason — an ungated check can disagree with the
+            # vocab-gated selection Get-SustainedFindingCount actually uses.
+            # Now reuses Get-RealJudgeRulingsHeadMatches, the SAME vocab-gated
+            # scan Test-EmissionMarkerPresent and
+            # Get-JudgeRulingsSustainedCountInternal both use, so this
+            # classification is now actually unable to drift from what a real
+            # head means elsewhere in this file.
             $hasRealHead = if ($Surface -eq 'design-challenge') {
                 [regex]::IsMatch($body, '(?m)^finding_dispositions\s*:\s*$')
             }
             else {
-                [regex]::IsMatch($body, $script:JudgeRulingsHeadPattern)
+                (Get-RealJudgeRulingsHeadMatches -Body $body).Count -gt 0
             }
 
             $sustainedResult = Get-SustainedFindingCount -Surface $Surface -Body $body
