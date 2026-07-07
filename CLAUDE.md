@@ -117,6 +117,12 @@ claude plugin install <plugin@marketplace>
 claude plugin uninstall <plugin@marketplace>
 ```
 
+## Quality-first, shift-left
+
+Quality is the first constraint — ahead of speed and token cost; when they conflict, the methodology checkpoint wins (hence engagement gates and adversarial review are non-overridable by pacing directives). We shift defects **left**: the earlier in the pipeline (experience → design → plan → implementation) a defect is caught, the cheaper it is to fix, so every phase and review stage exists to catch a class before it reaches the next. Run the full methodology now — do not pre-emptively skip a stage because it "probably won't find anything."
+
+We remove later checks **only with evidence, never on a cost argument**: a stage earns relaxation only when its *irreducible-catch rate* (defects catchable **only** at that stage) trends to ~0 over a large-enough sample. The instrument is the **phase-containment ledger** — the per-finding record of where a defect was introduced, the earliest phase it was catchable, and where it was caught ([Documents/Design/phase-containment-ledger.md](Documents/Design/phase-containment-ledger.md)); governance lives in umbrella #761. So annotate every sustained finding, and retire later steps once they demonstrably catch nothing new.
+
 ## Engagement-gate non-overridability
 
 <!-- engagement-gate-non-overridability:begin -->
