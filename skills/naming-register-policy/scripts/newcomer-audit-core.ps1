@@ -249,7 +249,13 @@ function Get-NewcomerAuditBoundaryPattern {
         [string]$Pattern
     )
 
-    return "(?<![\w-])$Pattern(?![\w-])"
+    # $Pattern is wrapped in a non-capturing group so a top-level alternation
+    # (e.g. an instance_pattern like '\bstep_id\b|(?<![\w-])s\d+(?![\w-])')
+    # gets the hyphen-boundary applied across the WHOLE pattern -- regex
+    # alternation precedence otherwise binds the boundary only to the
+    # first/last alternative. This is a no-op for any single-alternative
+    # pattern (adding a non-capturing group around it changes nothing).
+    return "(?<![\w-])(?:$Pattern)(?![\w-])"
 }
 
 function Test-NewcomerAuditFirstUseExpanded {
@@ -350,6 +356,53 @@ function Test-NewcomerAuditRepoFileSuppressed {
     return Test-NewcomerAuditFirstUseExpanded -Content $Content -BoundaryPattern $BoundaryPattern
 }
 
+function Get-NewcomerAuditLineDedupedOccurrences {
+    <#
+    .SYNOPSIS
+        Reduces a match collection to the occurrences that should actually be
+        emitted, honoring -AllOccurrences semantics without multiplying
+        same-line findings.
+
+    .DESCRIPTION
+        Without -AllOccurrences: only the first match in the whole collection
+        (unchanged legacy behavior for -Path mode).
+
+        With -AllOccurrences: one match per distinct line (the first match on
+        each line), not every raw regex match -- a token/term repeated
+        multiple times on the SAME line is the same finding, not new
+        information, so it collapses to a single occurrence for that line.
+        Distinct lines each still surface their own occurrence.
+    #>
+    [CmdletBinding()]
+    [OutputType([object[]])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Content,
+
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [array]$Matches,
+
+        [Parameter(Mandatory)]
+        [bool]$AllOccurrences
+    )
+
+    if (-not $AllOccurrences) {
+        return @($Matches[0])
+    }
+
+    $seenLines = New-Object System.Collections.Generic.HashSet[int]
+    $result = @()
+    foreach ($occurrence in $Matches) {
+        $line = Get-NewcomerAuditLineNumber -Content $Content -Index $occurrence.Index
+        if ($seenLines.Add($line)) {
+            $result += $occurrence
+        }
+    }
+
+    return $result
+}
+
 function Get-NewcomerAuditKnownTermFindings {
     [CmdletBinding()]
     [OutputType([object[]])]
@@ -425,7 +478,7 @@ function Get-NewcomerAuditKnownTermFindings {
             }
 
             if ($row.register -eq 'rename-candidate') {
-                $occurrences = if ($AllOccurrences) { $regexMatches } else { @($regexMatches[0]) }
+                $occurrences = Get-NewcomerAuditLineDedupedOccurrences -Content $Content -Matches $regexMatches -AllOccurrences $AllOccurrences.IsPresent
                 foreach ($occurrence in $occurrences) {
                     $findings += [pscustomobject]@{
                         token          = $occurrence.Value
@@ -449,7 +502,7 @@ function Get-NewcomerAuditKnownTermFindings {
                 continue
             }
 
-            $occurrences = if ($AllOccurrences) { $regexMatches } else { @($regexMatches[0]) }
+            $occurrences = Get-NewcomerAuditLineDedupedOccurrences -Content $Content -Matches $regexMatches -AllOccurrences $AllOccurrences.IsPresent
             foreach ($occurrence in $occurrences) {
                 $findings += [pscustomobject]@{
                     token          = $occurrence.Value
@@ -481,7 +534,14 @@ function Test-NewcomerAuditKnownToken {
             # matching the known-term pass's case sensitivity so a mis-cased
             # token (e.g. 'smc-05') correctly surfaces as 'unknown' instead
             # of silently vanishing between the two passes.
-            $regex = [regex]::new("^$($matcher.Pattern)$", [System.Text.RegularExpressions.RegexOptions]::None, $script:NewcomerAuditRegexTimeout)
+            #
+            # $matcher.Pattern is wrapped in a non-capturing group so a
+            # top-level alternation (e.g. an instance_pattern combining a
+            # \b-bounded literal with a hyphen-boundary numeric form) is
+            # anchored as a whole -- otherwise '^' / '$' bind only to the
+            # first/last alternative and a token like 'step_id-x' can be
+            # wrongly classified as known via the trailing alternative alone.
+            $regex = [regex]::new("^(?:$($matcher.Pattern))$", [System.Text.RegularExpressions.RegexOptions]::None, $script:NewcomerAuditRegexTimeout)
             if ($regex.IsMatch($Token)) {
                 return $true
             }
@@ -543,13 +603,24 @@ function Get-NewcomerAuditUnknownTokenFindings {
             continue
         }
 
-        if (-not $AllOccurrences -and -not $seenTokens.Add($token)) {
+        # Dedup key is computed BEFORE the seen-set check (not the token
+        # alone) so -AllOccurrences relaxes dedup across distinct lines
+        # without disabling it entirely: a token repeated multiple times on
+        # the SAME line is still collapsed to one finding (no new
+        # information), while the same token on a DIFFERENT line still gets
+        # its own finding. Without -AllOccurrences the key is the token
+        # alone, preserving the original first-occurrence-only behavior
+        # exactly.
+        $line = Get-NewcomerAuditLineNumber -Content $Content -Index $tokenMatch.Index
+        $dedupKey = if ($AllOccurrences) { "$token|$line" } else { $token }
+
+        if (-not $seenTokens.Add($dedupKey)) {
             continue
         }
 
         $findings += [pscustomobject]@{
             token          = $token
-            line           = Get-NewcomerAuditLineNumber -Content $Content -Index $tokenMatch.Index
+            line           = $line
             register_state = 'unknown'
             suggestion     = 'expand on first use (preferred), rename to a self-describing form, or add to the register (heavier path)'
         }
