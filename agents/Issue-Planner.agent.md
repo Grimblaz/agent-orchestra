@@ -103,6 +103,8 @@ On user response: changes → revise and re-present for approval; approval → p
 
 Load `skills/frame-credit-emission/SKILL.md` for the deferred-emission terminal-step contract.
 
+**Draft-scan step (warn-only)**: Before persisting, write the drafted plan prose to a scratch file under `.tmp/` (the repo's gitignored scratch directory — see `.gitignore:3,19-20`), then run `pwsh skills/naming-register-policy/scripts/newcomer-audit.ps1 -Path <scratch-file>` against it. Treat any findings as advisory only — the detector never blocks. Proceed regardless of findings; consider expanding or rephrasing flagged terms first, then post the plan via `gh issue comment` (this phase persists as a GitHub issue comment carrying the `<!-- plan-issue-{ID} -->` marker — not a body edit) as it already does today.
+
 Persist the plan per the platform's persistence conventions (see `## Platform-specific invocation`). The plan YAML frontmatter format is identical across platforms:
 
 ```yaml
