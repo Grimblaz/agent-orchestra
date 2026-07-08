@@ -149,6 +149,13 @@ This skill — and issue #732 as a whole — **does not** by itself close the S1
 
 Without #750 and #751 landing, a GitHub reader hitting an issue will still encounter opaque codes. The policy and register are prerequisites, not sufficient conditions. S1 remains on-issue until #750 and #751 close.
 
+## Gotchas
+
+| Trigger | Gotcha | Fix |
+| --- | --- | --- |
+| Matching a compound/slash `term` value (e.g. `"credits[] / pipeline-metrics block"`) literally against prose | The `term` field is a display label, not a matcher — the literal string never appears verbatim in real prose, so a naive literal match never fires and a registered component (`credits[]`) can misfire as an unregistered coinage | Tokenize compound terms on ` / ` and strip trailing parentheticals so each component matches independently |
+| Detecting the vocab-pointer escape hatch on a repo-file surface | Machine-citation zone stripping (fenced code, HTML comments, YAML) removes the `<!-- vocab-pointer -->` sentinel before matching runs | Key detection on the surviving link text (`HOW-IT-WORKS.md#vocab`), not the stripped HTML comment |
+
 ## Frame Ports
 
 This skill is **supporting methodology** — it is loaded by authoring agents (#750's sweep, #751's newcomer-audit detector, any agent producing human-facing prose) to resolve term classifications and apply the two-register rules. It does **not** declare `provides:` because it does not fill a Frame Port directly.
