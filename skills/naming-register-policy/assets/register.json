@@ -88,19 +88,22 @@
     "register": "stable-code",
     "kind": "family",
     "expansion": "Session Memory Contract rule NN (e.g. SMC-01, SMC-08)",
-    "decode": "SMC-NN = Session Memory Contract rule NN; the full numbered list is in skills/session-memory-contract/SKILL.md"
+    "decode": "SMC-NN = Session Memory Contract rule NN; the full numbered list is in skills/session-memory-contract/SKILL.md",
+    "instance_pattern": "\\bSMC-\\d+\\b"
   },
   {
     "term": "plan-issue-{ID}",
     "register": "stable-code",
     "kind": "atomic",
-    "expansion": "plan-issue-{ID} (the <!-- plan-issue-{ID} --> durable HTML comment posted on the GitHub issue carrying the approved implementation plan)"
+    "expansion": "plan-issue-{ID} (the <!-- plan-issue-{ID} --> durable HTML comment posted on the GitHub issue carrying the approved implementation plan)",
+    "instance_pattern": "\\bplan-issue-\\d+\\b"
   },
   {
     "term": "engagement-record-{phase}-{ID}",
     "register": "stable-code",
     "kind": "atomic",
-    "expansion": "engagement-record-{phase}-{ID} (the durable decision-record comment, e.g. <!-- engagement-record-plan-732 -->, recording load-bearing decisions for a pipeline phase)"
+    "expansion": "engagement-record-{phase}-{ID} (the durable decision-record comment, e.g. <!-- engagement-record-plan-732 -->, recording load-bearing decisions for a pipeline phase)",
+    "instance_pattern": "\\bengagement-record-[a-z]+-\\d+\\b"
   },
   {
     "term": "named decision",
@@ -185,7 +188,8 @@
     "term": "review-judge-produced-{PR}",
     "register": "stable-code",
     "kind": "atomic",
-    "expansion": "review-judge-produced-{PR} (the <!-- review-judge-produced-{PR} --> sentinel comment marking that a judge verdict exists for the given PR number)"
+    "expansion": "review-judge-produced-{PR} (the <!-- review-judge-produced-{PR} --> sentinel comment marking that a judge verdict exists for the given PR number)",
+    "instance_pattern": "\\breview-judge-produced-\\d+\\b"
   },
   {
     "term": "BDD / behavioral scenario",
