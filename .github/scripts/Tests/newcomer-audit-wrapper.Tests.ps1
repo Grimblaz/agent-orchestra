@@ -242,3 +242,87 @@ Describe 'newcomer-audit wrapper: -Path mode CLI integration (issue-body semanti
         $LASTEXITCODE | Should -Be 2
     }
 }
+
+Describe 'newcomer-audit wrapper: real end-to-end -Changed pipeline (regression lock-in)' {
+    # Every other wrapper test above either mocks the diff or reimplements the
+    # added-line filter inline -- none of them invoke the real wrapper binary
+    # against a real git repo in -Changed mode. That gap is exactly why the
+    # rename-exclusion (fix #9) and diff-header-spoof (fix #12) defects
+    # shipped invisibly through 66 "passing" tests. This test builds a real
+    # temporary git repo, runs the actual wrapper script as a subprocess with
+    # -Changed -Json, and pins both regressions against real findings and a
+    # real exit code.
+    It 'finds a renamed-and-edited doc and survives a diff-syntax-spoofing added line' {
+        $tempRepo = Join-Path ([System.IO.Path]::GetTempPath()) "newcomer-audit-e2e-$([guid]::NewGuid())"
+        New-Item -ItemType Directory -Path $tempRepo -Force | Out-Null
+
+        Push-Location $tempRepo
+        try {
+            & git init -q -b main . 2>&1 | Out-Null
+            & git config user.email 'newcomer-audit-e2e@example.com' 2>&1 | Out-Null
+            & git config user.name 'newcomer-audit-e2e' 2>&1 | Out-Null
+
+            $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+
+            # Seed 'main' with a CLAUDE.md-shaped file and a Documents/Design/
+            # doc long enough to preserve a high rename-similarity score once
+            # it is renamed AND edited on the feature branch.
+            [System.IO.File]::WriteAllText((Join-Path $tempRepo 'CLAUDE.md'), "# Root doc`n`nOrdinary prose, no jargon here.`n", $utf8NoBom)
+
+            New-Item -ItemType Directory -Path (Join-Path $tempRepo 'Documents/Design') -Force | Out-Null
+            $originalDocContent = @'
+# Design Doc
+
+This document is long enough and distinctive enough that renaming it
+while making a small edit still preserves a high content-similarity
+score for git's rename detector.
+
+Filler line one.
+Filler line two.
+Filler line three.
+Filler line four.
+'@
+            [System.IO.File]::WriteAllText((Join-Path $tempRepo 'Documents/Design/original-doc.md'), $originalDocContent, $utf8NoBom)
+
+            & git add -A 2>&1 | Out-Null
+            & git commit -q -m 'seed main' 2>&1 | Out-Null
+
+            & git checkout -q -b feature/e2e-test 2>&1 | Out-Null
+
+            # (a) Rename-and-edit case (pins fix #9): rename the design doc AND
+            # add an unexpanded stable-code term in the same commit.
+            & git mv 'Documents/Design/original-doc.md' 'Documents/Design/renamed-doc.md' 2>&1 | Out-Null
+            Add-Content -Path (Join-Path $tempRepo 'Documents/Design/renamed-doc.md') -Value "`nSee SMC-08 for the specific rule." -Encoding utf8NoBOM
+
+            # (b) Diff-header-spoof case (pins fix #12): the added file content
+            # line is exactly '++ b/fake-spoof.md' -- git's own '+' diff marker
+            # turns this into a raw diff line of '+++ b/fake-spoof.md', which
+            # is textually indistinguishable from a genuine file header. The
+            # very next added line carries a real unexpanded stable-code term
+            # ('CE Gate'); if the spoof line wrongly resets the parser's
+            # current-file state, that finding is silently dropped.
+            Add-Content -Path (Join-Path $tempRepo 'CLAUDE.md') -Value '++ b/fake-spoof.md' -Encoding utf8NoBOM
+            Add-Content -Path (Join-Path $tempRepo 'CLAUDE.md') -Value 'See CE Gate for details.' -Encoding utf8NoBOM
+
+            & git add -A 2>&1 | Out-Null
+            & git commit -q -m 'feature: rename+edit doc, add spoof + real term to CLAUDE.md' 2>&1 | Out-Null
+
+            $output = & pwsh -NoLogo -NoProfile -File $script:WrapperPath -Changed -Json 2>&1
+            $exitCode = $LASTEXITCODE
+
+            $exitCode | Should -Be 1 -Because "output was: $($output -join "`n")"
+
+            $findings = ($output -join "`n") | ConvertFrom-Json
+
+            ($findings | Where-Object { $_.file -eq 'Documents/Design/renamed-doc.md' -and $_.token -eq 'SMC-08' }) |
+                Should -Not -BeNullOrEmpty -Because 'the renamed-and-edited doc must still be scanned under --diff-filter=ACMR (fix #9)'
+
+            ($findings | Where-Object { $_.file -eq 'CLAUDE.md' -and $_.token -eq 'CE Gate' }) |
+                Should -Not -BeNullOrEmpty -Because 'the real added-line finding after the spoofed +++ b/ line must survive (fix #12)'
+        }
+        finally {
+            Pop-Location
+            Remove-Item -Path $tempRepo -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}

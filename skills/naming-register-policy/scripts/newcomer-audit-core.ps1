@@ -50,7 +50,45 @@
          set an exit code; that is the wrapper's (s3) job.
 #>
 
-$script:NewcomerAuditAllowlist = @('ISO-8601', 'UTF-8', 'draft-07')
+# Register rows carry author-supplied regex text (instance_pattern) that can
+# be pathological (e.g. nested quantifiers). Every regex match against
+# register-derived pattern text is executed with this timeout, and a timeout
+# is treated as a no-match (fail open, warn loudly) rather than hanging the
+# process indefinitely.
+$script:NewcomerAuditRegexTimeout = [timespan]::FromSeconds(2)
+
+$script:NewcomerAuditAllowlist = @('ISO-8601', 'UTF-8', 'draft-07', '^v\d+$')
+
+function Test-NewcomerAuditAllowlisted {
+    <#
+    .SYNOPSIS
+        True when a candidate unknown token is exempted by the inline
+        allowlist. Entries shaped like a full-string regex (start with '^'
+        and end with '$') are matched as a pattern; all other entries are
+        matched as an exact literal string.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)]
+        [string]$Token
+    )
+
+    foreach ($entry in $script:NewcomerAuditAllowlist) {
+        if ($entry -match '^\^.*\$$') {
+            if ($Token -cmatch $entry) {
+                return $true
+            }
+            continue
+        }
+
+        if ($Token -ceq $entry) {
+            return $true
+        }
+    }
+
+    return $false
+}
 
 function Get-NewcomerAuditNormalizedContent {
     [CmdletBinding()]
@@ -155,25 +193,48 @@ function ConvertTo-NewcomerAuditMatcher {
 
         if ($hasInstancePattern) {
             $matchers += [pscustomobject]@{
-                Pattern = $row.instance_pattern
-                Row     = $row
+                Pattern     = $row.instance_pattern
+                Row         = $row
+                EmitFinding = $true
             }
             continue
         }
 
         if ($row.term -match '\s/\s') {
+            # component_matchers: false (e.g. the D1/D2/D3 family) means the
+            # tokenizer must still recognize each component as a KNOWN token
+            # (so it never falls through to the unknown-token pass) but must
+            # not generate a known-term FINDING for it -- that would recreate
+            # the exact local-decision-ID collision the register schema
+            # deliberately withheld an instance_pattern to avoid.
+            $emitFinding = -not (
+                ($row.PSObject.Properties.Name -contains 'component_matchers') -and
+                ($row.component_matchers -eq $false)
+            )
+
             foreach ($component in (ConvertTo-NewcomerAuditComponents -Term $row.term)) {
+                # Skip standalone-matcher generation for a component that is a
+                # single all-lowercase word with no internal punctuation (e.g.
+                # 'frame', 'adapter') -- ordinary prose would otherwise get
+                # flagged. Components with internal punctuation (hyphens,
+                # underscores, brackets) or more than one word are unaffected.
+                if ($component -cmatch '^[a-z]+$') {
+                    continue
+                }
+
                 $matchers += [pscustomobject]@{
-                    Pattern = [regex]::Escape($component)
-                    Row     = $row
+                    Pattern     = [regex]::Escape($component)
+                    Row         = $row
+                    EmitFinding = $emitFinding
                 }
             }
             continue
         }
 
         $matchers += [pscustomobject]@{
-            Pattern = [regex]::Escape($row.term)
-            Row     = $row
+            Pattern     = [regex]::Escape($row.term)
+            Row         = $row
+            EmitFinding = $true
         }
     }
 
@@ -188,7 +249,7 @@ function Get-NewcomerAuditBoundaryPattern {
         [string]$Pattern
     )
 
-    return "(?<!\w)$Pattern(?!\w)"
+    return "(?<![\w-])$Pattern(?![\w-])"
 }
 
 function Test-NewcomerAuditFirstUseExpanded {
@@ -202,13 +263,30 @@ function Test-NewcomerAuditFirstUseExpanded {
         [string]$BoundaryPattern
     )
 
-    $match = [regex]::Match($Content, $BoundaryPattern)
+    try {
+        $regex = [regex]::new($BoundaryPattern, [System.Text.RegularExpressions.RegexOptions]::None, $script:NewcomerAuditRegexTimeout)
+        $match = $regex.Match($Content)
+    }
+    catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
+        Write-Warning "newcomer-audit: regex match timed out evaluating first-use expansion for pattern '$BoundaryPattern' -- treating as not expanded."
+        return $false
+    }
+
     if (-not $match.Success) {
         return $false
     }
 
     $afterText = $Content.Substring($match.Index + $match.Length)
-    $parenMatch = [regex]::Match($afterText, '^\s*\(([^)]+)\)')
+
+    try {
+        $parenRegex = [regex]::new('^\s*\(([^)]+)\)', [System.Text.RegularExpressions.RegexOptions]::None, $script:NewcomerAuditRegexTimeout)
+        $parenMatch = $parenRegex.Match($afterText)
+    }
+    catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
+        Write-Warning "newcomer-audit: regex match timed out checking the first-use parenthetical -- treating as not expanded."
+        return $false
+    }
+
     return $parenMatch.Success -and -not [string]::IsNullOrWhiteSpace($parenMatch.Groups[1].Value)
 }
 
@@ -284,7 +362,15 @@ function Get-NewcomerAuditKnownTermFindings {
         [string]$Surface,
 
         [Parameter(Mandatory)]
-        [array]$Matchers
+        [array]$Matchers,
+
+        # Emit one finding per occurrence of a matcher instead of only the
+        # first. Used only by the wrapper's -Changed path (immediately before
+        # its added-lines filter) so a genuinely new occurrence on an added
+        # line is not silently dropped just because an earlier, unchanged
+        # occurrence of the same term exists elsewhere in the file. -Path
+        # mode's single-finding-per-term behavior is unchanged by default.
+        [switch]$AllOccurrences
     )
 
     $findings = @()
@@ -309,19 +395,44 @@ function Get-NewcomerAuditKnownTermFindings {
         }
 
         foreach ($matcher in $group) {
+            # component_matchers: false rows (e.g. D1/D2/D3) still need their
+            # components resolved as known tokens elsewhere (see
+            # Test-NewcomerAuditKnownToken, which receives the full $Matchers
+            # array independent of this filter) but must never surface a
+            # known-term finding of their own.
+            if (-not $matcher.EmitFinding) {
+                continue
+            }
+
             $boundaryPattern = Get-NewcomerAuditBoundaryPattern -Pattern $matcher.Pattern
-            $regexMatches = [regex]::Matches($Content, $boundaryPattern)
+
+            try {
+                $regex = [regex]::new($boundaryPattern, [System.Text.RegularExpressions.RegexOptions]::None, $script:NewcomerAuditRegexTimeout)
+                # [regex]::Matches() returns a lazily-evaluated MatchCollection --
+                # the timeout is only actually enforced once the collection is
+                # enumerated, not at the .Matches() call itself. Force eager
+                # materialization with @() here so a timeout surfaces inside
+                # this try block instead of later, unguarded, at .Count access.
+                $regexMatches = @($regex.Matches($Content))
+            }
+            catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
+                Write-Warning "newcomer-audit: regex match timed out for register row '$($row.term)' pattern '$boundaryPattern' -- treating as no-match."
+                continue
+            }
+
             if ($regexMatches.Count -eq 0) {
                 continue
             }
 
             if ($row.register -eq 'rename-candidate') {
-                $first = $regexMatches[0]
-                $findings += [pscustomobject]@{
-                    token          = $first.Value
-                    line           = Get-NewcomerAuditLineNumber -Content $Content -Index $first.Index
-                    register_state = 'rename-candidate'
-                    suggestion     = $row.replacement
+                $occurrences = if ($AllOccurrences) { $regexMatches } else { @($regexMatches[0]) }
+                foreach ($occurrence in $occurrences) {
+                    $findings += [pscustomobject]@{
+                        token          = $occurrence.Value
+                        line           = Get-NewcomerAuditLineNumber -Content $Content -Index $occurrence.Index
+                        register_state = 'rename-candidate'
+                        suggestion     = $row.replacement
+                    }
                 }
                 continue
             }
@@ -338,12 +449,14 @@ function Get-NewcomerAuditKnownTermFindings {
                 continue
             }
 
-            $first = $regexMatches[0]
-            $findings += [pscustomobject]@{
-                token          = $first.Value
-                line           = Get-NewcomerAuditLineNumber -Content $Content -Index $first.Index
-                register_state = 'stable-code'
-                suggestion     = "expand on first use (preferred): $($row.expansion)"
+            $occurrences = if ($AllOccurrences) { $regexMatches } else { @($regexMatches[0]) }
+            foreach ($occurrence in $occurrences) {
+                $findings += [pscustomobject]@{
+                    token          = $occurrence.Value
+                    line           = Get-NewcomerAuditLineNumber -Content $Content -Index $occurrence.Index
+                    register_state = 'stable-code'
+                    suggestion     = "expand on first use (preferred): $($row.expansion)"
+                }
             }
         }
     }
@@ -363,8 +476,19 @@ function Test-NewcomerAuditKnownToken {
     )
 
     foreach ($matcher in $Matchers) {
-        if ($Token -match "^$($matcher.Pattern)$") {
-            return $true
+        try {
+            # RegexOptions.None (no IgnoreCase) makes this case-sensitive,
+            # matching the known-term pass's case sensitivity so a mis-cased
+            # token (e.g. 'smc-05') correctly surfaces as 'unknown' instead
+            # of silently vanishing between the two passes.
+            $regex = [regex]::new("^$($matcher.Pattern)$", [System.Text.RegularExpressions.RegexOptions]::None, $script:NewcomerAuditRegexTimeout)
+            if ($regex.IsMatch($Token)) {
+                return $true
+            }
+        }
+        catch [System.Text.RegularExpressions.RegexMatchTimeoutException] {
+            Write-Warning "newcomer-audit: regex match timed out for known-token pattern '$($matcher.Pattern)' -- treating as no-match."
+            continue
         }
     }
 
@@ -379,14 +503,19 @@ function Get-NewcomerAuditUnknownTokenFindings {
         [string]$Content,
 
         [Parameter(Mandatory)]
-        [array]$Matchers
+        [array]$Matchers,
+
+        # See Get-NewcomerAuditKnownTermFindings -AllOccurrences: when set,
+        # every occurrence of a repeat unknown coinage is emitted instead of
+        # only the first (deduped) occurrence.
+        [switch]$AllOccurrences
     )
 
     # Token shape: an alphanumeric run, optionally chained with '_'/'-' segments,
     # optionally suffixed with a literal '[]'. Boundaries use lookaround (not \b)
     # so a trailing '[]' -- whose ']' is a non-word char -- does not break the
     # match the way a trailing \b would.
-    $tokenPattern = '(?<!\w)[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)*(?:\[\])?(?!\w)'
+    $tokenPattern = '(?<![\w.])[A-Za-z0-9]+(?:[_-][A-Za-z0-9]+)*(?:\[\])?(?!\w)'
 
     $findings = @()
     $seenTokens = New-Object System.Collections.Generic.HashSet[string]
@@ -406,7 +535,7 @@ function Get-NewcomerAuditUnknownTokenFindings {
         # Bare ALL-CAPS-only acronyms (no digit/underscore/bracket) are already
         # excluded by the check above; nothing further needed for that case.
 
-        if ($script:NewcomerAuditAllowlist -contains $token) {
+        if (Test-NewcomerAuditAllowlisted -Token $token) {
             continue
         }
 
@@ -414,7 +543,7 @@ function Get-NewcomerAuditUnknownTokenFindings {
             continue
         }
 
-        if (-not $seenTokens.Add($token)) {
+        if (-not $AllOccurrences -and -not $seenTokens.Add($token)) {
             continue
         }
 
@@ -442,7 +571,12 @@ function Get-NewcomerAuditFindings {
         [string]$Surface,
 
         [Parameter(Mandatory)]
-        [array]$Register
+        [array]$Register,
+
+        # See Get-NewcomerAuditKnownTermFindings -AllOccurrences. Default
+        # ($false) preserves the original first-occurrence-only behavior
+        # relied on by -Path mode.
+        [switch]$AllOccurrences
     )
 
     $normalized = ConvertTo-NewcomerAuditNormalizedText -Text $Content
@@ -450,8 +584,8 @@ function Get-NewcomerAuditFindings {
     $matchers = ConvertTo-NewcomerAuditMatcher -Register $Register
 
     $findings = @()
-    $findings += Get-NewcomerAuditKnownTermFindings -Content $stripped -Surface $Surface -Matchers $matchers
-    $findings += Get-NewcomerAuditUnknownTokenFindings -Content $stripped -Matchers $matchers
+    $findings += Get-NewcomerAuditKnownTermFindings -Content $stripped -Surface $Surface -Matchers $matchers -AllOccurrences:$AllOccurrences
+    $findings += Get-NewcomerAuditUnknownTokenFindings -Content $stripped -Matchers $matchers -AllOccurrences:$AllOccurrences
 
     $sorted = @($findings | Sort-Object line, token)
     return , $sorted

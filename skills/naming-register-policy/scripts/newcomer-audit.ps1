@@ -15,10 +15,11 @@
 
       -Changed        Repo-file scan over the files this branch changed, carrying
                        repo-file escape-hatch semantics. Runs
-                       `git diff --diff-filter=ACM $(git merge-base main HEAD)..HEAD`
+                       `git diff --diff-filter=ACMR $(git merge-base main HEAD)..HEAD`
                        (merge-base, NOT two-dot `main..HEAD` against the branch tip
-                       -- so an advanced `main` does not misreport), filtered to the
-                       human-facing surface class list from
+                       -- so an advanced `main` does not misreport; ACMR, not ACM,
+                       so a renamed-and-edited file is still included in the diff),
+                       filtered to the human-facing surface class list from
                        skills/naming-register-policy/SKILL.md (CLAUDE.md, READMEs,
                        skill SKILL.md files carrying `description:` frontmatter,
                        Documents/Design/ orientation docs, issue/PR templates,
@@ -141,7 +142,16 @@ function ConvertTo-NewcomerAuditParsedDiff {
             continue
         }
 
-        if ($line -match '^\+\+\+ b/(.+)$') {
+        # Only treat '+++ b/...' as a genuine file header when it immediately
+        # follows a 'diff --git' reset (i.e. $current is still null/freshly
+        # reset here). An ADDED PROSE LINE that happens to quote diff syntax
+        # verbatim (e.g. a design-doc example showing '+++ b/foo.md') is
+        # otherwise indistinguishable from a real header by text alone, and
+        # would wrongly reset the parser's current-file state and discard
+        # the real file's already-accumulated added-line record. When
+        # $current is already established, such a line falls through to the
+        # normal '+' added-line handling below instead.
+        if ((-not $current) -and ($line -match '^\+\+\+ b/(.+)$')) {
             $current = [pscustomobject]@{
                 Path       = $Matches[1].TrimEnd("`t")
                 AddedLines = [System.Collections.Generic.HashSet[int]]::new()
@@ -209,8 +219,10 @@ function Get-NewcomerAuditMergeBase {
 function Get-NewcomerAuditRawDiff {
     <#
     .SYNOPSIS
-        Runs `git diff --diff-filter=ACM <MergeBase>..HEAD` and returns the raw
-        unified-diff text as a line array.
+        Runs `git diff --diff-filter=ACMR <MergeBase>..HEAD` and returns the raw
+        unified-diff text as a line array. ACMR (not ACM) so a renamed-and-edited
+        file (high-similarity rename+edit) is still included -- ACM alone
+        silently excludes renames from the diff output entirely.
 
     .DESCRIPTION
         Takes the already-resolved merge-base commit as an explicit parameter
@@ -230,7 +242,7 @@ function Get-NewcomerAuditRawDiff {
     Push-Location $RepoRoot
     try {
         $range = "$MergeBase..HEAD"
-        $diffLines = & git diff --diff-filter=ACM $range 2>$null
+        $diffLines = & git diff --diff-filter=ACMR $range 2>$null
         if ($LASTEXITCODE -ne 0) {
             throw "newcomer-audit: git diff failed for range '$range'."
         }
@@ -366,7 +378,35 @@ if ($MyInvocation.InvocationName -ne '.') {
         Write-Error "newcomer-audit: register asset not found at '$registerPath'."
         exit 2
     }
-    $register = Get-Content -Path $registerPath -Raw | ConvertFrom-Json
+
+    try {
+        $register = Get-Content -Path $registerPath -Raw | ConvertFrom-Json -ErrorAction Stop
+    }
+    catch {
+        Write-Error "newcomer-audit: register asset at '$registerPath' failed to parse as JSON -- $($_.Exception.Message)"
+        exit 2
+    }
+
+    if ($null -eq $register -or @($register).Count -eq 0) {
+        Write-Error "newcomer-audit: register asset at '$registerPath' parsed to empty or null content."
+        exit 2
+    }
+
+    foreach ($row in $register) {
+        $hasInstancePattern = ($row.PSObject.Properties.Name -contains 'instance_pattern') -and `
+            -not [string]::IsNullOrWhiteSpace($row.instance_pattern)
+        if (-not $hasInstancePattern) {
+            continue
+        }
+
+        try {
+            [regex]::new($row.instance_pattern) | Out-Null
+        }
+        catch {
+            Write-Error "newcomer-audit: register row '$($row.term)' has an invalid instance_pattern -- $($_.Exception.Message)"
+            exit 2
+        }
+    }
 
     $allFindings = @()
 
@@ -417,7 +457,12 @@ if ($MyInvocation.InvocationName -ne '.') {
             $content = Get-NewcomerAuditGitShowContent -RepoRoot $repoRoot -Ref 'HEAD' -RelativePath $changedFile.Path
             if ($null -eq $content) { continue }
 
-            $fileFindings = Get-NewcomerAuditFindings -Content $content -Surface 'repo-file' -Register $register
+            # -AllOccurrences: a genuinely new occurrence of a term on an
+            # ADDED line must not be silently dropped just because an
+            # earlier, unchanged occurrence of the same term exists
+            # elsewhere in the file (first-occurrence-only would otherwise
+            # filter it out before the added-lines check below ever runs).
+            $fileFindings = Get-NewcomerAuditFindings -Content $content -Surface 'repo-file' -Register $register -AllOccurrences
             foreach ($f in $fileFindings) {
                 if ($changedFile.AddedLines.Contains([int]$f.line)) {
                     $allFindings += [pscustomobject]@{

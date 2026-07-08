@@ -68,7 +68,8 @@
     "term": "frame slice (step_id: sN)",
     "register": "stable-code",
     "kind": "atomic",
-    "expansion": "frame slice (a single executable plan step identified as sN, carrying the <!-- frame-slice --> HTML comment block with step_id: s{N} as a YAML field inside)"
+    "expansion": "frame slice (a single executable plan step identified as sN, carrying the <!-- frame-slice --> HTML comment block with step_id: s{N} as a YAML field inside)",
+    "instance_pattern": "\\bstep_id\\b|(?<![\\w-])s\\d+(?![\\w-])"
   },
   {
     "term": "frame port",
@@ -223,7 +224,8 @@
     "register": "stable-code",
     "kind": "family",
     "expansion": "D1 / D2 / D3 (auto-mode boundary rules governing which tool calls auto-approve, which prompt the user, and when AskUserQuestion is unconditional)",
-    "decode": "D1 / D2 / D3 = auto-mode boundary rules; see CLAUDE.md § Auto-mode boundary for the full definitions"
+    "decode": "D1 / D2 / D3 = auto-mode boundary rules; see CLAUDE.md § Auto-mode boundary for the full definitions",
+    "component_matchers": false
   },
   {
     "term": "session-startup",
