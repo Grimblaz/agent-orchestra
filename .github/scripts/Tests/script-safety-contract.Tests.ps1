@@ -91,6 +91,7 @@ Describe 'script safety contract' {
                 'frame-spine-core.Tests.ps1',                       # IRREDUCIBLE: 1 spawn tests -CommentBodyStdin CLI switch (stdin-pipe contract; cannot simulate in-process without production code changes)
                 'get-issue-drift.Tests.ps1',                        # IRREDUCIBLE: 1 spawn tests get-issue-drift.ps1 wrapper CLI surface (JSON output shape of the wrapper script)
                 'hub-artifact-paths-coverage.Tests.ps1',            # CLI integration tests: exercises -Diff mode against live repo; requires sub-process invocation
+                'newcomer-audit-wrapper.Tests.ps1',                 # CLI integration tests (issue #751): 4 spawns exercise newcomer-audit.ps1's real argument-parsing entry point and exit-code contract (-Json/-Changed switches, no-args usage error) — dot-sourcing skips the top-level param block and exit codes, same class as audit-hub-artifact-paths.Tests.ps1
                 'orchestra-spine-command.Tests.ps1',                # IRREDUCIBLE: exit-code-contract tests require real subprocess
                 'plan-tree-state-verification-fail-open.Tests.ps1', # IRREDUCIBLE: exit-code-contract tests require real subprocess
                 'post-merge-cleanup.Tests.ps1',                     # executor integration tests: post-merge-cleanup.ps1 is a top-level executable (no -core.ps1 library); the #656 AC6 failsafe test must spawn a subprocess to exercise the load-time exit 1, which dot-sourcing cannot test without terminating the Pester host
