@@ -7,7 +7,7 @@ description: "Two-register naming policy for agent-orchestra: rules for when mac
 
 # Naming Register Policy
 
-Two-register naming policy for agent-orchestra. Classifies the 48 v1 vocab-seed terms and defines rules for when machine codes stay as-is versus when they require human names or first-use expansion.
+Two-register naming policy for agent-orchestra. Classifies the 50 v1 vocab-seed terms and defines rules for when machine codes stay as-is versus when they require human names or first-use expansion.
 
 ## When to Use
 
@@ -22,7 +22,7 @@ Load this skill when:
 
 - **Creating new vocabulary or naming new concepts** — use `skills/design-exploration/SKILL.md` for decisions about whether a new term is needed
 - **General readability auditing of agent-facing docs** — use `skills/ai-first-documentation/SKILL.md`
-- **Auditing or rewriting human-facing docs** — this is the scope of #750 (closed worklist sweep) and #751 (growth enforcement), not this skill
+- **Auditing or rewriting human-facing docs** — #750's closed worklist sweep already did the one-time backfill; ongoing growth enforcement is now handled by the shipped newcomer-audit detector (see `## Outsider-first authoring default` below), not this skill
 
 ## Two-Register Rules
 
@@ -82,12 +82,34 @@ Machine-citation contexts (where stable codes are preserved): HTML comment marke
 
 ## Child Boundary Contract
 
-The register's v1 scope is the 48 vocab-seed rows from `HOW-IT-WORKS.md` §5. This creates two distinct worklists:
+The register's v1 scope is the 50 vocab-seed rows from `HOW-IT-WORKS.md` §5. This creates two distinct worklists:
 
 - **#750's closed worklist** — The `rename-candidate` rows in this register. #750 backtracks through the living reader surface (`CLAUDE.md`, READMEs, templates) and replaces each `rename-candidate` with its `replacement` field value. The set is bounded: #750 works only from this register, not from a broader survey.
-- **#751's open set** — New codes introduced after this register ships. #751's newcomer-audit detector enforces "grow on introduction": any new system term introduced in human-facing prose must be either self-describing or expanded on first use. Growth enforcement is #751's responsibility, not this skill's.
+- **#751's open set** — New codes introduced after this register ships. The shipped newcomer-audit detector enforces "grow on introduction" at authoring time: any new system term introduced in human-facing prose must be either self-describing or expanded on first use. See `## Outsider-first authoring default` below for the full convention and its v1 coverage boundary.
 
-Terms not in the v1 register that appear in human-facing prose are in #751's domain.
+Terms not in the v1 register that appear in human-facing prose are covered by that same convention and detector, not by this skill's classification work.
+
+## Outsider-first authoring default
+
+This section defines the authoring-time convention that keeps human-facing prose approachable to a reader without prior context on the project's shorthand.
+
+**Expand-on-first-use default.** New human-facing prose expands insider terms on first use, or uses a name that is already self-describing and needs no expansion. A reader should never have to leave the surface they are reading to decode a term the first time they meet it.
+
+**Grow-on-introduction rule.** A term that is not yet in the register is introduced *with* its expansion attached, not left bare for a later pass to fix. This is "grow on introduction": new vocabulary earns its expansion the moment it is coined, the same way an established term earns a register row.
+
+A newcomer-audit detector (`skills/naming-register-policy/scripts/newcomer-audit.ps1`) now enforces this convention at authoring time. Its v1 coverage is intentionally bounded — an honest scope statement, not a claim of blanket coverage:
+
+| Surface class | v1 coverage |
+| --- | --- |
+| Agent-authored issue bodies | Detector (draft-scan seam) + convention |
+| Repo docs / READMEs / templates / CLAUDE.md when committed through the PR-creation gate | Detector (added-lines grain) + convention |
+| Same files edited + committed outside the gate | Convention only |
+| Issues/docs authored directly on github.com by a human | Convention only (no executable seam in v1) |
+| Skill `description:` frontmatter | Convention only (stripped as YAML by the detector) |
+
+**Detection without enforcement.** Every v1 seam above is warn-only: the detector emits findings, but nothing consumes its exit code yet, so it never blocks authoring, a commit, or PR creation.
+
+**Spin-out promotion trigger.** The detector is a candidate for graduation into CI wiring, PR-annotation tooling, or an allowlist-backed lane once either of these is observed: maintainers see warn-only findings repeatedly ignored on merged work, or allowlist/pattern-maintenance churn grows past what inline edits can absorb.
 
 ## #693 Coordination
 
@@ -113,7 +135,7 @@ To read the register for a term: load `skills/naming-register-policy/assets/regi
 **What this skill does:**
 
 - Defines the two-register policy rules
-- Classifies the 48 v1 vocab-seed terms
+- Classifies the 50 v1 vocab-seed terms
 - Provides the decode rule for numbered-family tokens
 - Defines the #750 closed worklist (rename-candidate rows) and the #751 open-set boundary
 

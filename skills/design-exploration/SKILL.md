@@ -88,6 +88,8 @@ Name the specific integration and E2E scenarios that should exist, not just the 
 
 ### 8. Prepare the Durable Design Payload
 
+When authoring the design decisions and rationale below, apply the outsider-first authoring convention in `skills/naming-register-policy/SKILL.md` § Outsider-first authoring default.
+
 Once decisions are settled, prepare the material the agent will persist:
 
 - Design decisions with rationale

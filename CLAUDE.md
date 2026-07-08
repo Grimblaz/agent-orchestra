@@ -168,6 +168,7 @@ This section applies to Claude Code. Copilot uses a different permission model a
 - `skills/` — reusable methodology loaded by both platforms; each skill has `platforms/claude.md` for Claude-specific invocation details
 - `platforms/` (at skill root) — platform-specific routing notes
 - `skills/persist-changes/` — git-portable commit+push primitive: caller-parameterized, no Code-Conductor session flags, Pester-tested guard decision helper (`Resolve-PersistDecision.ps1`). Inherited by #678's spine-runner review loop after the #677 Code-Conductor body deletion.
+- `skills/naming-register-policy/SKILL.md` § Outsider-first authoring default — new human-facing prose expands insider terms on first use or uses self-describing names, enforced at authoring time by a warn-only newcomer-audit detector.
 
 ## Per-agent model + reasoning routing
 

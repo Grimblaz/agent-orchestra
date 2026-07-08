@@ -64,6 +64,8 @@ These PowerShell commands silently corrupt files through encoding issues (e.g., 
 
 ## Section 2: Issue Creation Rules
 
+When authoring new issues under these rules, apply the outsider-first authoring convention in `skills/naming-register-policy/SKILL.md` § Outsider-first authoring default.
+
 ### 2a. Improvement-First Decision Rule
 
 When any agent discovers an out-of-scope or non-blocking improvement during its work, classify it against the structural-criteria gate (canonical taxonomy in `skills/review-judgment/scripts/Test-DeferralCriteria.ps1`):

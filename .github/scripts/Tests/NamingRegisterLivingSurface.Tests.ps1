@@ -2,7 +2,11 @@
 # Bounded living-surface guard for issue #750 (parent: #732 naming-register-policy).
 # LIMITATIONS (not silent caps):
 #   - Surface list is hardcoded (not auto-discovered). New surfaces must be added here manually.
-#     Growth-enforcement for new surfaces is #751's scope, not this guard.
+#     #751's newcomer-audit detector has shipped, but it deliberately does NOT do surface
+#     auto-discovery in v1 — the changed-files filter it consumes is this same kind of
+#     documented, hand-maintained class list, not an automatic one. If auto-discovery
+#     tooling is ever built, it would live behind the spin-out promotion trigger documented
+#     in skills/naming-register-policy/SKILL.md § Outsider-first authoring default.
 #   - "now-coupled / wall-clock dependent" term-absence assertions are FORWARD GUARDS:
 #     zero current in-scope occurrences; the assertion prevents future regressions.
 #   - Term-absence assertions use hardcoded string literals (static decision). The register
@@ -14,7 +18,9 @@
 BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
 
-    # The enumerated in-scope surface list (hardcoded per design; #751 owns auto-discovery)
+    # The enumerated in-scope surface list (hardcoded per design; #751's shipped detector
+    # deliberately does not auto-discover surfaces in v1 — see the spin-out promotion
+    # trigger in skills/naming-register-policy/SKILL.md § Outsider-first authoring default)
     $script:AllSurfaces = @(
         'CLAUDE.md'
         'skills/README.md'
