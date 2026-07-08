@@ -155,10 +155,8 @@ function ConvertTo-NewcomerAuditMatcher {
 
         if ($hasInstancePattern) {
             $matchers += [pscustomobject]@{
-                Component = $row.term
-                Pattern   = $row.instance_pattern
-                MatchType = 'instance'
-                Row       = $row
+                Pattern = $row.instance_pattern
+                Row     = $row
             }
             continue
         }
@@ -166,20 +164,16 @@ function ConvertTo-NewcomerAuditMatcher {
         if ($row.term -match '\s/\s') {
             foreach ($component in (ConvertTo-NewcomerAuditComponents -Term $row.term)) {
                 $matchers += [pscustomobject]@{
-                    Component = $component
-                    Pattern   = [regex]::Escape($component)
-                    MatchType = 'component'
-                    Row       = $row
+                    Pattern = [regex]::Escape($component)
+                    Row     = $row
                 }
             }
             continue
         }
 
         $matchers += [pscustomobject]@{
-            Component = $row.term
-            Pattern   = [regex]::Escape($row.term)
-            MatchType = 'literal'
-            Row       = $row
+            Pattern = [regex]::Escape($row.term)
+            Row     = $row
         }
     }
 
