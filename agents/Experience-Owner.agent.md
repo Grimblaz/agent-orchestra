@@ -92,6 +92,8 @@ When a `## BDD Framework` **line-start heading** (column 0) is found in a candid
 
 Load `skills/frame-credit-emission/SKILL.md` for the deferred-emission terminal-step contract.
 
+**Draft-scan step (warn-only)**: Before updating the issue, write the drafted customer-framing prose to a scratch file under `.tmp/` (the repo's gitignored scratch directory — see `.gitignore:3,19-20`), then run `pwsh skills/naming-register-policy/scripts/newcomer-audit.ps1 -Path <scratch-file>` against it. Treat any findings as advisory only — the detector never blocks. Proceed to post regardless of findings; consider expanding or rephrasing flagged terms first.
+
 Update the GitHub issue body per `skills/customer-experience/SKILL.md` (use `## Scenarios` (H2) for the scenario section — Code-Conductor's pre-flight extraction anchors to it), then post:
 
 ```markdown

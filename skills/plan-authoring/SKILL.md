@@ -107,6 +107,8 @@ A Grounding Pass factual correction — correcting a misnamed path, schema, or a
 
 ## Draft Workflow
 
+When authoring plan prose in this workflow, apply the outsider-first authoring convention in `skills/naming-register-policy/SKILL.md` § Outsider-first authoring default.
+
 ### 1. Build the Execution Skeleton
 
 Prepare a plan that ties every step to an acceptance-criteria slice and names the expected execution mode. The draft should include the implementation steps, validation approach, review pipeline, CE Gate handling when applicable, deferred-significant follow-up behavior, and a short retrospective checkpoint.

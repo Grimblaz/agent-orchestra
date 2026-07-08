@@ -85,6 +85,8 @@ Run the 3-pass Design Challenge per `skills/design-exploration/SKILL.md` after d
 
 Load `skills/frame-credit-emission/SKILL.md` for the deferred-emission terminal-step contract.
 
+**Draft-scan step (warn-only)**: Before updating the issue, write the drafted design prose to a scratch file under `.tmp/` (the repo's gitignored scratch directory — see `.gitignore:3,19-20`), then run `pwsh skills/naming-register-policy/scripts/newcomer-audit.ps1 -Path <scratch-file>` against it. Treat any findings as advisory only — the detector never blocks. Proceed to post regardless of findings; consider expanding or rephrasing flagged terms first.
+
 Update the GitHub issue body with full design details per `skills/design-exploration/SKILL.md` (decisions, acceptance criteria, testing scope, rejected alternatives).
 
 ### Pre-post YAML integrity check

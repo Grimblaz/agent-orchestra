@@ -85,6 +85,25 @@ If `markdownlint-cli2` is not available in PATH, or if `pwsh` is not available: 
 
 ---
 
+## Newcomer-Audit Lane (Warn-Only, Findings-Only)
+
+During the same Code-Conductor PR-creation step, run the newcomer-audit detector over the branch's changed files:
+
+```powershell
+pwsh skills/naming-register-policy/scripts/newcomer-audit.ps1 -Changed
+```
+
+This lane is not a formatting lane and does not behave like the two lanes above:
+
+- It never stages or commits anything — unlike Step 2 and Step 3, there is no `git add` / `git commit` step for this lane.
+- It emits findings only; findings are surfaced as a warning in the PR body / conversation, never as a blocking condition.
+- PR creation proceeds regardless of the lane's exit code (0 = clean, 1 = findings, 2 = usage/operational error).
+- **Exit code 2 is an operational failure, not a clean pass — surface it distinctly.** Exit 1 (findings) and exit 2 (the audit failed to run) must never look the same to the operator. On exit 2, post a distinctly-worded warning in the PR body / conversation — for example: "⚠️ newcomer-audit lane FAILED TO RUN — findings unknown, treat as unaudited." The lane stays fail-open either way (exit 2 never blocks PR creation), but silence on exit 2 would make a broken audit indistinguishable from a genuinely clean one.
+
+**This lane does not inherit FG-D6.** FG-D6 (`## Non-Blocking Behavior` above) covers a narrower case — the formatting tools (`markdownlint-cli2`, `pwsh`) being unavailable in PATH. This lane's non-blocking behavior is a separate, explicit rule: the tool runs successfully and returns real findings, and those findings still never block PR creation. Do not describe this lane as "inheriting" or "covered by" FG-D6 — its warn-only semantics are stated here explicitly.
+
+---
+
 ## Portability Assumptions
 
 This gate assumes:

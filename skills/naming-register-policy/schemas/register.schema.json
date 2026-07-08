@@ -32,6 +32,14 @@
       "decode": {
         "type": "string",
         "description": "For family rows: pattern describing how to resolve a specific instance (e.g. SMC-20) to its definition home"
+      },
+      "instance_pattern": {
+        "type": "string",
+        "description": "Optional regex a detector can use to match a live instance of this row's term in prose (e.g. SMC-NN's instance_pattern matches SMC-08, SMC-20, etc). Deliberately excluded from the 'D1 / D2 / D3 (auto-mode rules)' row: a bare D\\d+ pattern would collide with the 500+ local design-doc decision IDs (also written as D<number>) scattered across Documents/Design/, producing false-positive matches unrelated to the auto-mode rules family. That row is left without an instance_pattern for this reason."
+      },
+      "component_matchers": {
+        "type": "boolean",
+        "description": "Optional, defaults to true when absent. When false, a family row's split components (e.g. D1/D2/D3) are still recognized as known tokens by the detector's unknown-token guard, but never generate their own known-term finding -- used for rows the schema deliberately withholds an instance_pattern from to avoid collisions with unrelated local conventions."
       }
     },
     "additionalProperties": false,

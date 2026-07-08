@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.6] — 2026-07-08
+
+### Added
+
+Add the outsider-first authoring convention plus a minimal, deterministic newcomer-audit detector (skills/naming-register-policy/scripts/newcomer-audit.ps1 + newcomer-audit-core.ps1) that flags undefined insider terms in new human-facing prose before it lands, closing umbrella #732's S1. Wired into Experience-Owner, Solution-Designer, and Issue-Planner draft-scan steps plus a warn-only lane in the PR-creation formatting gate. Detection without enforcement in v1 (no CI, no allowlist tooling) per settled scope.
+
 ## [3.3.5] — 2026-07-07
 
 ### Added
