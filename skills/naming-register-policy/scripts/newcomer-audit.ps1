@@ -417,6 +417,11 @@ if ($MyInvocation.InvocationName -ne '.') {
                 exit 2
             }
 
+            if (Test-Path -Path $p -PathType Container) {
+                Write-Error "newcomer-audit: path is a directory, expected a file -- $p"
+                exit 2
+            }
+
             $resolved = (Resolve-Path -Path $p).Path
             $fileFindings = Get-NewcomerAuditFindingsFromFile -Path $resolved -Surface 'issue-body' -Register $register
             foreach ($f in $fileFindings) {

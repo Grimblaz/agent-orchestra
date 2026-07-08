@@ -381,19 +381,19 @@ function Get-NewcomerAuditLineDedupedOccurrences {
 
         [Parameter(Mandatory)]
         [AllowEmptyCollection()]
-        [array]$Matches,
+        [array]$MatchList,
 
         [Parameter(Mandatory)]
         [bool]$AllOccurrences
     )
 
     if (-not $AllOccurrences) {
-        return @($Matches[0])
+        return @($MatchList[0])
     }
 
     $seenLines = New-Object System.Collections.Generic.HashSet[int]
     $result = @()
-    foreach ($occurrence in $Matches) {
+    foreach ($occurrence in $MatchList) {
         $line = Get-NewcomerAuditLineNumber -Content $Content -Index $occurrence.Index
         if ($seenLines.Add($line)) {
             $result += $occurrence
@@ -478,7 +478,7 @@ function Get-NewcomerAuditKnownTermFindings {
             }
 
             if ($row.register -eq 'rename-candidate') {
-                $occurrences = Get-NewcomerAuditLineDedupedOccurrences -Content $Content -Matches $regexMatches -AllOccurrences $AllOccurrences.IsPresent
+                $occurrences = Get-NewcomerAuditLineDedupedOccurrences -Content $Content -MatchList $regexMatches -AllOccurrences $AllOccurrences.IsPresent
                 foreach ($occurrence in $occurrences) {
                     $findings += [pscustomobject]@{
                         token          = $occurrence.Value
@@ -502,7 +502,7 @@ function Get-NewcomerAuditKnownTermFindings {
                 continue
             }
 
-            $occurrences = Get-NewcomerAuditLineDedupedOccurrences -Content $Content -Matches $regexMatches -AllOccurrences $AllOccurrences.IsPresent
+            $occurrences = Get-NewcomerAuditLineDedupedOccurrences -Content $Content -MatchList $regexMatches -AllOccurrences $AllOccurrences.IsPresent
             foreach ($occurrence in $occurrences) {
                 $findings += [pscustomobject]@{
                     token          = $occurrence.Value

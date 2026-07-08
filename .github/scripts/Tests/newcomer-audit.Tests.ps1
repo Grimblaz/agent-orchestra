@@ -213,6 +213,52 @@ Describe 'newcomer-audit-core: file-based entry point' {
     }
 }
 
+Describe 'newcomer-audit-core: -AllOccurrences multi-occurrence behavior (CR-D)' {
+    It 'without -AllOccurrences, a later occurrence of the same term is suppressed by an earlier occurrence' {
+        $content = @'
+# Doc
+
+The CE Gate must pass here.
+
+Unrelated line.
+
+The CE Gate must pass again here on a later line.
+'@
+        $findings = Get-NewcomerAuditFindings -Content $content -Surface 'repo-file' -Register $script:Register
+
+        $ceGateFindings = @($findings | Where-Object { $_.token -eq 'CE Gate' })
+        $ceGateFindings | Should -HaveCount 1 -Because 'default behavior is first-occurrence-only'
+        $ceGateFindings[0].line | Should -Be 3
+        ($ceGateFindings | Where-Object { $_.line -eq 7 }) | Should -BeNullOrEmpty -Because 'the later occurrence must not surface without -AllOccurrences'
+    }
+
+    It 'with -AllOccurrences, a genuinely new occurrence on a later line is not suppressed by an earlier occurrence' {
+        $content = @'
+# Doc
+
+The CE Gate must pass here.
+
+Unrelated line.
+
+The CE Gate must pass again here on a later line.
+'@
+        $findings = Get-NewcomerAuditFindings -Content $content -Surface 'repo-file' -Register $script:Register -AllOccurrences
+
+        $ceGateFindings = @($findings | Where-Object { $_.token -eq 'CE Gate' })
+        ($ceGateFindings | Where-Object { $_.line -eq 3 }) | Should -Not -BeNullOrEmpty -Because 'the earlier occurrence must still surface'
+        ($ceGateFindings | Where-Object { $_.line -eq 7 }) | Should -Not -BeNullOrEmpty -Because 'the later occurrence must not be suppressed by the earlier one'
+    }
+
+    It 'with -AllOccurrences, the same term repeated twice on the SAME line produces exactly one finding for that (token, line) pair' {
+        $content = 'The CE Gate and the CE Gate again must both pass.'
+        $findings = Get-NewcomerAuditFindings -Content $content -Surface 'repo-file' -Register $script:Register -AllOccurrences
+
+        $ceGateFindings = @($findings | Where-Object { $_.token -eq 'CE Gate' })
+        $ceGateFindings | Should -HaveCount 1 -Because 'a term repeated on the same line is the same finding, not new information -- no duplicate (token, line) rows'
+        $ceGateFindings[0].line | Should -Be 1
+    }
+}
+
 Describe 'newcomer-audit-core: determinism' {
     It 'returns the same findings for the same input across repeated calls' {
         $content = 'See SMC-20 and the credits[] array. We should retire Value Reflex.'
