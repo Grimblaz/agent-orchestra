@@ -6,7 +6,7 @@
 .DESCRIPTION
     Implements the Renderer Contract:
       - ConvertFrom-SequenceSpec  : parse flat YAML sequence spec (no ConvertFrom-Yaml)
-      - Get-PortfolioBuckets      : classify issues into ActiveUmbrella/ActiveChildren/RankedUmbrellas/Triage/RecentlyClosed/DriftWarnings/IntegrityWarnings
+      - Get-PortfolioBuckets      : classify issues into ActiveUmbrella/ActiveChildren/RankedUmbrellas/Triage/RecentlyClosed/DriftWarnings/IntegrityWarnings/OrphanClaimWarnings
       - Format-PortfolioMarkdown  : render bucket model to Markdown
       - Get-SplicedBody           : idempotent splice into issue body
       - Invoke-PortfolioRender    : full pipeline end-to-end
@@ -195,12 +195,13 @@ function Get-SubIssueNodes {
 # Get-PortfolioBuckets v2
 # Classifies issueStateObjects into the v2 model:
 #   ActiveUmbrella, ActiveChildren, RankedUmbrellas, Triage, TriageResidualCount,
-#   DriftWarnings, IntegrityWarnings, RecentlyClosed
+#   DriftWarnings, IntegrityWarnings, OrphanClaimWarnings, RecentlyClosed
 #
 # issueStateObjects fields (v2):
 #   .number (int), .state ('OPEN'/'CLOSED'), .title (string), .labels (string[])
 #   .blockedBy (int[]), .closedAt (string ISO or $null), .createdAt (string ISO)
 #   .parent (hashtable {number} | $null), .subIssues (hashtable {totalCount, nodes[{number,state}]} | $null)
+#   .body (string or $null) — used only by OrphanClaimWarnings detection
 # ---------------------------------------------------------------------------
 function Get-PortfolioBuckets {
     param(
@@ -217,9 +218,10 @@ function Get-PortfolioBuckets {
     $umbrellaSet     = [System.Collections.Generic.HashSet[int]]::new()
     foreach ($u in $umbrellaList) { $null = $umbrellaSet.Add([int]$u) }
 
-    $driftWarnings     = [System.Collections.Generic.List[string]]::new()
-    $integrityWarnings = [System.Collections.Generic.List[string]]::new()
-    $driftWarnedNums   = [System.Collections.Generic.HashSet[int]]::new()
+    $driftWarnings       = [System.Collections.Generic.List[string]]::new()
+    $integrityWarnings   = [System.Collections.Generic.List[string]]::new()
+    $driftWarnedNums     = [System.Collections.Generic.HashSet[int]]::new()
+    $orphanClaimWarnings = [System.Collections.Generic.List[string]]::new()
 
     # Build lookup: number → issue state object
     $issueByNumber = @{}
@@ -280,6 +282,61 @@ function Get-PortfolioBuckets {
                 $integrityWarnings.Add("⚠️ umbrella #${umbNum}: subIssues.totalCount=$tc but only $($nodes.Count) nodes returned (possible truncation)")
             }
         }
+    }
+
+    # ---------------------------------------------------------------------------
+    # OrphanClaimWarnings (B1 / #800): warn-only detector for OPEN issues whose
+    # body claims a parent but have no actual sub-issue edge (.parent is $null).
+    #
+    # Per-producer regex discipline (design-challenge PF1 / plan-stress-test PF1
+    # — a 5-pass adversarial plan stress-test caught this as a CRITICAL defect
+    # in the original uniformly-anchored design):
+    #   - `Parent: #N` is FIRST-LINE-ANCHORED: the Add-FollowUpIssue.ps1 /
+    #     Set-IssueParent.ps1 text-fallback producer writes it as the body's
+    #     literal first line, so anchoring here avoids false positives from
+    #     prose mentions elsewhere in the body.
+    #   - `placement=parent #N` is INTENTIONALLY UNANCHORED: the §2b-ter
+    #     creation-time positioning-residue producer (skills/safe-operations/
+    #     SKILL.md:163, format "Board positioning: priority=<h|m|l>;
+    #     placement=parent #N; rationale=<one line>") writes it mid-line,
+    #     never at column 0. Anchoring this pattern would silently miss the
+    #     exact real-world Class-B incidents (#816/#817/#818) that motivated
+    #     this detector.
+    #   - The `<!-- parent-link-mode: text-fallback -->` marker is the primary,
+    #     false-positive-free signal and is checked independently of both
+    #     regexes.
+    #
+    # Interpolation safety: only the captured digit group is ever interpolated
+    # into the warning message (never raw Match.Value, which could carry a
+    # newline or other characters) — this guards against forging additional
+    # workflow-command text into the CI ::warning:: output emitted downstream.
+    # ---------------------------------------------------------------------------
+    $firstLineParentPattern = '(?m)^Parent: #(\d+)'
+    $placementParentPattern = 'placement=parent #(\d+)'
+    $textFallbackMarker     = '<!-- parent-link-mode: text-fallback -->'
+
+    foreach ($issue in $issueStateObjects) {
+        if ($issue.state -ne 'OPEN') { continue }
+        if ($null -ne $issue.parent) { continue }
+
+        $body = $issue.body
+        if ([string]::IsNullOrEmpty($body)) { continue }
+
+        $hasMarker    = $body.Contains($textFallbackMarker)
+        $firstLineHit = [regex]::Match($body, $firstLineParentPattern)
+        $placementHit = [regex]::Match($body, $placementParentPattern)
+
+        if (-not $hasMarker -and -not $firstLineHit.Success -and -not $placementHit.Success) { continue }
+
+        # Digit-only interpolation: prefer the first-line producer's captured
+        # group, then the placement-residue producer's; fall back to a safe
+        # literal in the edge case where only the marker fired without either
+        # regex matching (never interpolate raw match/body text).
+        $claimedParent = if ($firstLineHit.Success) { $firstLineHit.Groups[1].Value }
+                          elseif ($placementHit.Success) { $placementHit.Groups[1].Value }
+                          else { 'unknown' }
+
+        $orphanClaimWarnings.Add("⚠️ open issue #$($issue.number) claims a parent (#$claimedParent) but has no sub-issue link")
     }
 
     # ---------------------------------------------------------------------------
@@ -414,6 +471,7 @@ function Get-PortfolioBuckets {
         TriageResidualCount = $residualCount
         DriftWarnings       = $driftWarnings.ToArray()
         IntegrityWarnings   = $integrityWarnings.ToArray()
+        OrphanClaimWarnings = $orphanClaimWarnings.ToArray()
         RecentlyClosed      = $recentlyClosed.ToArray()
     }
 }
@@ -422,7 +480,8 @@ function Get-PortfolioBuckets {
 # Format-PortfolioMarkdown v2
 # Renders v2 bucket model to Markdown string.
 # Three-zone layout: Active / Umbrellas (ranked) / Triage / Recently closed
-# Warnings (DriftWarnings + IntegrityWarnings) appear after zones, before footer.
+# Warnings (DriftWarnings + IntegrityWarnings + OrphanClaimWarnings) appear
+# after zones, before footer.
 # Footer: "portfolio content unchanged since {timestamp} — rendered by render-portfolio.ps1"
 # Get-SplicedBody strips the footer line for idempotency comparison — do not move it.
 # ---------------------------------------------------------------------------
@@ -510,6 +569,11 @@ function Format-PortfolioMarkdown {
     }
     if ($bucketModel.IntegrityWarnings) {
         foreach ($warn in $bucketModel.IntegrityWarnings) {
+            $null = $sb.AppendLine($warn)
+        }
+    }
+    if ($bucketModel.OrphanClaimWarnings) {
+        foreach ($warn in $bucketModel.OrphanClaimWarnings) {
             $null = $sb.AppendLine($warn)
         }
     }
@@ -722,6 +786,7 @@ query {
       state
       closedAt
       createdAt
+      body
       labels(first: 50) { totalCount nodes { name } }
       blockedBy(first: 50) {
         totalCount
@@ -821,6 +886,7 @@ query {
             state               = $issueData.state
             closedAt            = $issueData.closedAt
             createdAt           = $issueData.createdAt
+            body                = $issueData.body
             labels              = $labels
             blockedBy           = $openBlockers
             blockerInPlan       = $blockerInPlan
@@ -857,6 +923,7 @@ query {
       state
       closedAt
       createdAt
+      body
       labels(first: 50) { totalCount nodes { name } }
       blockedBy(first: 50) {
         totalCount
@@ -917,6 +984,7 @@ query {
             state               = $issueData.state
             closedAt            = $issueData.closedAt
             createdAt           = $issueData.createdAt
+            body                = $issueData.body
             labels              = $labels
             blockedBy           = $openBlockers
             blockerInPlan       = $blockerInPlan
@@ -974,6 +1042,16 @@ query {
     $buckets = Get-PortfolioBuckets `
         -spec $spec `
         -issueStateObjects $issueStates.ToArray()
+
+    # 5b. CI ::warning:: per OrphanClaimWarnings entry (B1 / #800). Get-PortfolioBuckets
+    # stays pure (no I/O) — the warning strings it returns already interpolate only the
+    # captured digit group (never raw body/match text), so it is safe to echo them
+    # verbatim here as CI annotations.
+    if ($env:GITHUB_ACTIONS -eq 'true' -and $buckets.OrphanClaimWarnings) {
+        foreach ($warn in $buckets.OrphanClaimWarnings) {
+            Write-Host "::warning::$warn"
+        }
+    }
 
     # 6. Format content block
     $timestamp    = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -1038,7 +1116,8 @@ function New-IssueState {
         [string]    $ClosedAt     = $null,
         [string]    $CreatedAt    = '2025-01-01T00:00:00Z',
         [hashtable] $Parent       = $null,
-        [hashtable] $SubIssues    = $null
+        [hashtable] $SubIssues    = $null,
+        [string]    $Body         = $null
     )
     return [PSCustomObject]@{
         number        = $Number
@@ -1052,6 +1131,7 @@ function New-IssueState {
         totalCount    = 1  # default rendered count = totalCount (no overflow)
         parent        = $Parent
         subIssues     = $SubIssues
+        body          = $Body
     }
 }
 
