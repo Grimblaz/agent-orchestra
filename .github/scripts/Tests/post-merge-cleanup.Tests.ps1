@@ -890,7 +890,7 @@ exit $LASTEXITCODE
             $deleteCalls.Count | Should -Be 0 -Because 'when gh is unavailable, branch must be treated as unmerged (safe default: do not delete)'
         }
 
-        It 'TC-Cherry-OrgRef: git cherry is called with origin/<defaultBranch> as the base ref (not bare <defaultBranch>)' {
+        It 'TC-Cherry-OrgRef: git cherry is called with the origin/ prefixed default-branch ref as the base ref (not the bare default-branch name)' {
             # Regression test for M1: Test-BranchMergedIntoDefault must use origin/$DefaultBranch
             # so it compares against the fetched remote tip, not a potentially stale local ref.
             $workDir = Join-Path $TestDrive 'cherry-org-ref'

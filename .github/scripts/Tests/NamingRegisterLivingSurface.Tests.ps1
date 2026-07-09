@@ -118,7 +118,7 @@ Describe "File existence" {
 }
 
 Describe "Vocab anchor" {
-    It 'vocab anchor (<a id="vocab">) appears exactly once in HOW-IT-WORKS.md' {
+    It 'vocab anchor (anchor tag with id="vocab") appears exactly once in HOW-IT-WORKS.md' {
         $content = Get-Content $script:HowItWorksPath -Raw
         $anchorMatches = [regex]::Matches($content, '<a\s+id="vocab">')
         $anchorMatches.Count | Should -Be 1 -Because "exactly one vocab anchor is required for unambiguous fragment routing"

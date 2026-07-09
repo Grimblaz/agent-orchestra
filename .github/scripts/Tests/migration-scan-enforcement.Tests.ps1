@@ -400,7 +400,7 @@ Describe 'Migration-scan enforcement' -Tag 'unit' {
             $script:ConductorBody | Should -Match 'planner-omitted-scan'
         }
 
-        It 'contains no <plan_style_guide> reference' {
+        It 'contains no plan_style_guide token reference' {
             $script:ConductorBody | Should -Not -Match 'plan_style_guide'
         }
 

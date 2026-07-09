@@ -63,6 +63,10 @@ BeforeDiscovery {
     # Store counts for the count-guard test
     $script:DiscoveryInScopeCount  = $InScopeBodies.Count
     $script:DiscoveryExcludedCount = @($allBodies | Where-Object { ($_.BaseName -replace '\.agent$', '') -in $ExcludedBaseNames }).Count
+
+    if (@($script:DiscoveryInScopeRows).Count -eq 0) {
+        throw "no in-scope agent bodies found in $AgentsDirectory — coverage would silently vanish"
+    }
 }
 
 Describe 'Reporting-economy directive in specialist agent bodies' {

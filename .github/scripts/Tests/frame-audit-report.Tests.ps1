@@ -1,7 +1,32 @@
 #Requires -Version 7.0
 #Requires -Modules @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 
+function script:Get-FrameAuditReportVersionFixtures {
+    # Single source of truth for the metrics-version fixture window, called
+    # from BOTH the discovery-time declaration below and BeforeAll (Run
+    # phase). Pester 6 isolates the Describe body's own top-level statements
+    # and BeforeDiscovery blocks to the DISCOVERY pass only — neither
+    # persists into Run phase (confirmed empirically: a script-scope
+    # variable set outside BeforeAll reads back as $null once Run-phase It
+    # bodies execute, and `@($null).Count` deceptively equals 1 rather than
+    # 0 or throwing, which is what originally masked this). -ForEach (below)
+    # needs the data at discovery time; the "replays the judged historical
+    # fixture window" test needs the same data again at Run time via
+    # $script:VersionFixtures, so it must be (re-)assigned in BeforeAll too.
+    return @(
+        @{ MetricsVersion = '1'; PrNumber = 286; FixtureFile = 'frame-pr-286-v1.json' }
+        @{ MetricsVersion = '2'; PrNumber = 338; FixtureFile = 'frame-pr-338-v2.json' }
+        @{ MetricsVersion = '3'; PrNumber = 415; FixtureFile = 'frame-pr-415-v3.json' }
+        @{ MetricsVersion = '4'; PrNumber = 411; FixtureFile = 'frame-pr-411-v4.json' }
+    )
+}
+
 Describe 'Invoke-FrameAuditReport' {
+
+    # Discovery-time population so -ForEach (below) never sees a null/empty
+    # collection under Pester 6. See Get-FrameAuditReportVersionFixtures for
+    # why this must be re-populated again inside BeforeAll.
+    $script:VersionFixtures = Get-FrameAuditReportVersionFixtures
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
@@ -14,12 +39,8 @@ Describe 'Invoke-FrameAuditReport' {
             . $script:LibFile
         }
 
-        $script:VersionFixtures = @(
-            @{ MetricsVersion = '1'; PrNumber = 286; FixtureFile = 'frame-pr-286-v1.json' }
-            @{ MetricsVersion = '2'; PrNumber = 338; FixtureFile = 'frame-pr-338-v2.json' }
-            @{ MetricsVersion = '3'; PrNumber = 415; FixtureFile = 'frame-pr-415-v3.json' }
-            @{ MetricsVersion = '4'; PrNumber = 411; FixtureFile = 'frame-pr-411-v4.json' }
-        )
+        # Run-phase re-population — see Get-FrameAuditReportVersionFixtures.
+        $script:VersionFixtures = Get-FrameAuditReportVersionFixtures
 
         $script:TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "pester-frame-audit-report-$([System.Guid]::NewGuid().ToString('N'))"
         New-Item -ItemType Directory -Path $script:TempRoot -Force | Out-Null

@@ -155,6 +155,7 @@ Describe 'Invoke-CostCopilotWalk' {
             $capturedReflogLines = $ReflogLines
 
             try {
+                Mock Get-CostCopilotReflog { }
                 Mock Get-CostCopilotReflog { return $capturedReflogLines } -ParameterFilter { $RepoRoot -eq $script:RepoRoot }
 
                 $result = @(Invoke-CostCopilotWalk `
@@ -163,6 +164,10 @@ Describe 'Invoke-CostCopilotWalk' {
                     -OtelJsonlPath $otelPath `
                     -WorkspaceFolderBasename $WorkspaceBasename `
                     -WarningVariable localWarnings)
+
+                # Sound invoke-pairing (d-dead-filter-tripwire-v2): assertion filter is textually
+                # identical to the narrow Mock's -ParameterFilter above.
+                Should -Invoke Get-CostCopilotReflog -Times 1 -ParameterFilter { $RepoRoot -eq $script:RepoRoot }
 
                 if ($null -ne $Warnings) {
                     $Warnings.Value = @($localWarnings)
@@ -179,6 +184,7 @@ Describe 'Invoke-CostCopilotWalk' {
     Context 'sanitized fixture contract' {
         It 'joins the S1 OTel fixture to the synthetic reflog and emits a normalized Copilot cost event' -Skip { # TODO(#651-option1-remove): Copilot sunset 2026-08-31 — frozen, no forward Copilot work
             $reflogLines = Get-Content -Path $script:SyntheticReflog -Encoding utf8
+            Mock Get-CostCopilotReflog { }
             Mock Get-CostCopilotReflog { return $reflogLines } -ParameterFilter { $RepoRoot -eq $script:RepoRoot }
 
             $walkOutput = @(Invoke-CostCopilotWalk `
