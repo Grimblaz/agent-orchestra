@@ -296,4 +296,15 @@ Describe 'pester6-baseline-delta-core — Invoke-Pester6BaselineDelta (JSON arti
         $result.ExitCode | Should -Be 1
         $result.Result | Should -BeNullOrEmpty
     }
+
+    It 'T8c: a BaselinePath file that EXISTS but contains malformed JSON fails gracefully via the try/catch, not the missing-file guard (PR #828 G1 regression coverage, distinct from T8b)' {
+        $malformedPath = Join-Path $script:FixtureDir 'malformed-baseline.json'
+        Set-Content -LiteralPath $malformedPath -Value '{ "requiredVersion": "5.7.1", "records": [ this is not valid json' -Encoding UTF8
+
+        { $script:MalformedDeltaResult = Invoke-Pester6BaselineDelta -BaselinePath $malformedPath -CandidatePath $script:CandidateJsonPath } |
+            Should -Not -Throw -Because 'Get-Content -ErrorAction Stop feeding ConvertFrom-Json on malformed JSON must be caught by the try/catch, not propagate uncaught (G1)'
+
+        $script:MalformedDeltaResult.ExitCode | Should -Be 1 -Because 'the file exists (passes both Test-Path guards) so this exercises the -ErrorAction Stop + catch path, not the earlier missing-file short-circuit T8b covers'
+        $script:MalformedDeltaResult.Result | Should -BeNullOrEmpty
+    }
 }

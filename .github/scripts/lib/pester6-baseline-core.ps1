@@ -288,7 +288,7 @@ function Invoke-Pester6BaselineCapture {
             return [pscustomobject]@{ ExitCode = 1; Result = $null }
         }
 
-        $parsed = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
+        $parsed = Get-Content -LiteralPath $resultFile -Raw -ErrorAction Stop | ConvertFrom-Json
 
         if ($exitCode -ne 0 -or $null -ne $parsed.error) {
             $msg = if ($null -ne $parsed.error) { $parsed.error } else { "child process exit code $exitCode" }
@@ -301,10 +301,14 @@ function Invoke-Pester6BaselineCapture {
             if ($outDir -and -not (Test-Path -LiteralPath $outDir)) {
                 New-Item -ItemType Directory -Path $outDir -Force | Out-Null
             }
-            ($parsed | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+            ($parsed | ConvertTo-Json -Depth 6) | Set-Content -LiteralPath $OutputPath -Encoding UTF8 -ErrorAction Stop
         }
 
         return [pscustomobject]@{ ExitCode = 0; Result = $parsed }
+    }
+    catch {
+        Write-Error "Failed to read, parse, or write the baseline result: $($_.Exception.Message)"
+        return [pscustomobject]@{ ExitCode = 1; Result = $null }
     }
     finally {
         if (Test-Path -LiteralPath $tempDir) {

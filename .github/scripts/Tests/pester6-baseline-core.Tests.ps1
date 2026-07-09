@@ -217,3 +217,44 @@ Describe 'pester6-baseline-core — discovery-time throw handling' {
         $script:CaptureResult2.Result.summary.discoveryErrors | Should -Be 1
     }
 }
+
+Describe 'pester6-baseline-core — malformed result-file handling (PR #828 G4 regression coverage)' {
+
+    BeforeAll {
+        if ($script:InstalledVersions.Count -eq 0) {
+            throw 'No Pester version is installed; cannot exercise the capture tool.'
+        }
+        $script:ProbeVersion3 = $script:InstalledVersions[0]
+    }
+
+    It 'T8: returns a graceful ExitCode=1 (not an uncaught throw) when the child process writes a malformed-JSON result file' {
+        # The child pwsh process is never actually spawned here: Start-Process is
+        # mocked so the test stays fast/deterministic while still exercising the
+        # real Invoke-Pester6BaselineCapture parse/catch path. The mock derives
+        # the result-file path the same way the function does (sibling of the
+        # launcher file inside the function's own temp dir) and writes malformed
+        # JSON there instead of running Pester.
+        #
+        # d-dead-filter-tripwire-v2 (pester-mock-fallthrough-guard.Tests.ps1):
+        # a same-file default (unfiltered) Mock is required alongside the
+        # filtered one, and the filtered Mock's -ParameterFilter must pair with
+        # an identical-filter `Should -Invoke -Times>=1` below. Invoke-
+        # Pester6BaselineCapture only ever calls Start-Process with 'pwsh', so
+        # the default here is an intentionally-unreachable guard.
+        Mock Start-Process { throw 'unexpected unfiltered Start-Process call in the malformed-result-file test' }
+        Mock Start-Process {
+            $fileIndex = [Array]::IndexOf($ArgumentList, '-File')
+            $launchFilePath = $ArgumentList[$fileIndex + 1].Trim('"')
+            $resultFilePath = Join-Path (Split-Path -Parent $launchFilePath) 'result.json'
+            Set-Content -LiteralPath $resultFilePath -Value '{ this is not valid json ][' -Encoding UTF8
+            return [pscustomobject]@{ ExitCode = 0 }
+        } -ParameterFilter { $FilePath -eq 'pwsh' }
+
+        { $script:MalformedCaptureResult = Invoke-Pester6BaselineCapture -TestsPath $script:RepoRoot -RequiredVersion $script:ProbeVersion3 } |
+            Should -Not -Throw -Because 'a malformed result file must be caught, not propagate as an uncaught exception (G4)'
+
+        $script:MalformedCaptureResult.ExitCode | Should -Be 1 -Because 'ConvertFrom-Json failing on malformed JSON must surface as a graceful ExitCode=1, exercising the catch block around pester6-baseline-core.ps1:309'
+        $script:MalformedCaptureResult.Result | Should -BeNullOrEmpty
+        Should -Invoke Start-Process -Times 1 -ParameterFilter { $FilePath -eq 'pwsh' }
+    }
+}

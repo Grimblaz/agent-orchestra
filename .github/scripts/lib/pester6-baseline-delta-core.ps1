@@ -64,8 +64,9 @@ function ConvertTo-Pester6NormalizedReason {
 
     $normalized = $Reason
 
-    # ISO8601-ish timestamps, e.g. 2026-07-09T01:38:10.7318036Z or with offsets.
-    $normalized = [regex]::Replace($normalized, '\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?', '<timestamp>')
+    # ISO8601-ish timestamps, e.g. 2026-07-09T01:38:10.7318036Z, with offsets,
+    # or the space-separated variant (2026-07-09 01:38:10).
+    $normalized = [regex]::Replace($normalized, '\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})?', '<timestamp>')
 
     # GUIDs (with or without dashes, case-insensitive).
     $normalized = [regex]::Replace($normalized, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', '<guid>')
@@ -291,8 +292,8 @@ function Invoke-Pester6BaselineDelta {
     }
 
     try {
-        $baselineArtifact = Get-Content -LiteralPath $BaselinePath -Raw | ConvertFrom-Json
-        $candidateArtifact = Get-Content -LiteralPath $CandidatePath -Raw | ConvertFrom-Json
+        $baselineArtifact = Get-Content -LiteralPath $BaselinePath -Raw -ErrorAction Stop | ConvertFrom-Json
+        $candidateArtifact = Get-Content -LiteralPath $CandidatePath -Raw -ErrorAction Stop | ConvertFrom-Json
     }
     catch {
         Write-Error "Failed to parse baseline/candidate JSON: $($_.Exception.Message)"
@@ -325,7 +326,7 @@ function Invoke-Pester6BaselineDelta {
         if ($outDir -and -not (Test-Path -LiteralPath $outDir)) {
             New-Item -ItemType Directory -Path $outDir -Force | Out-Null
         }
-        ($result | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $OutputJsonPath -Encoding UTF8
+        ($result | ConvertTo-Json -Depth 8) | Set-Content -LiteralPath $OutputJsonPath -Encoding UTF8 -ErrorAction Stop
     }
 
     if ($OutputMarkdownPath) {
@@ -334,7 +335,7 @@ function Invoke-Pester6BaselineDelta {
             New-Item -ItemType Directory -Path $outDir -Force | Out-Null
         }
         $md = Get-Pester6BaselineDeltaMarkdown -Result $result
-        Set-Content -LiteralPath $OutputMarkdownPath -Value $md -Encoding UTF8
+        Set-Content -LiteralPath $OutputMarkdownPath -Value $md -Encoding UTF8 -ErrorAction Stop
     }
 
     $exitCode = if ($delta.verdict -eq 'Pass') { 0 } else { 1 }
