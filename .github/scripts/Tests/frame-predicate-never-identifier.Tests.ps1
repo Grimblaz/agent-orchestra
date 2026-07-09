@@ -30,7 +30,7 @@ BeforeAll {
 }
 
 Describe 'never identifier' {
-    It 'resolves bare <never> to Result=false' {
+    It 'resolves bare never identifier to Result=false' {
         $result = script:Parse-And-Eval -Predicate 'never'
         $result.Result | Should -Be 'false'
     }

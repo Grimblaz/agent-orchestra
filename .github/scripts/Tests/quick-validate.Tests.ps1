@@ -435,6 +435,7 @@ No gotchas section here.
 
         It 'reports SKIP when PSScriptAnalyzer not installed' {
             # Mock Get-Module to simulate PSScriptAnalyzer not being available
+            Mock Get-Module { }
             Mock Get-Module { return $null } -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
 
             $root = & $script:NewFixture
@@ -445,6 +446,9 @@ No gotchas section here.
                 -GuidanceComplexityScriptPath $mockScript `
                 -ScriptsPath (Join-Path $root '.github/scripts')
 
+            # Sound invoke-pairing (d-dead-filter-tripwire-v2): assertion filter is textually
+            # identical to the narrow Mock's -ParameterFilter above.
+            Should -Invoke Get-Module -Times 1 -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
             $check = $result.Results | Where-Object { $_.Name -eq 'PSScriptAnalyzer' }
             $check.Passed | Should -Be 'SKIP' -Because 'PSScriptAnalyzer is not installed; check should be skipped, not passed or failed'
             $result.ExitCode | Should -Be 0 -Because 'SKIP should not poison the exit code when all other checks pass'
@@ -453,6 +457,7 @@ No gotchas section here.
 
         It 'reports PASS when PSScriptAnalyzer finds no issues' {
             # Mock Get-Module to simulate PSScriptAnalyzer being available
+            Mock Get-Module { }
             Mock Get-Module { return @{ Name = 'PSScriptAnalyzer'; Version = '1.22.0' } } -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
             Mock Invoke-ScriptAnalyzer { return @() }
 
@@ -466,12 +471,16 @@ No gotchas section here.
                 -PSScriptAnalyzerSettingsPath $mockSettings `
                 -ScriptsPath (Join-Path $root '.github/scripts')
 
+            # Sound invoke-pairing (d-dead-filter-tripwire-v2): assertion filter is textually
+            # identical to the narrow Mock's -ParameterFilter above.
+            Should -Invoke Get-Module -Times 1 -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
             $check = $result.Results | Where-Object { $_.Name -eq 'PSScriptAnalyzer' }
             $check.Passed | Should -BeTrue -Because 'PSScriptAnalyzer found no issues'
         }
 
         It 'reports FAIL when PSScriptAnalyzer finds issues' {
             # Mock Get-Module to simulate PSScriptAnalyzer being available
+            Mock Get-Module { }
             Mock Get-Module { return @{ Name = 'PSScriptAnalyzer'; Version = '1.22.0' } } -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
             Mock Invoke-ScriptAnalyzer {
                 return @(
@@ -490,6 +499,9 @@ No gotchas section here.
                 -PSScriptAnalyzerSettingsPath $mockSettings `
                 -ScriptsPath (Join-Path $root '.github/scripts')
 
+            # Sound invoke-pairing (d-dead-filter-tripwire-v2): assertion filter is textually
+            # identical to the narrow Mock's -ParameterFilter above.
+            Should -Invoke Get-Module -Times 1 -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
             $check = $result.Results | Where-Object { $_.Name -eq 'PSScriptAnalyzer' }
             $check.Passed | Should -BeFalse -Because 'PSScriptAnalyzer found 2 issues'
             $check.Detail | Should -Match '2' -Because 'detail should indicate the number of issues found'
@@ -685,6 +697,7 @@ None.
             $mockScript = & $script:NewMockComplexityScript -Dir $root -AgentsOverCeiling @()
 
             # Mock PSScriptAnalyzer as installed with no issues
+            Mock Get-Module { }
             Mock Get-Module { return @{ Name = 'PSScriptAnalyzer'; Version = '1.22.0' } } -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
             Mock Invoke-ScriptAnalyzer { return @() }
 
@@ -696,6 +709,9 @@ None.
                 -PSScriptAnalyzerSettingsPath $mockSettings `
                 -ScriptsPath (Join-Path $root '.github/scripts')
 
+            # Sound invoke-pairing (d-dead-filter-tripwire-v2): assertion filter is textually
+            # identical to the narrow Mock's -ParameterFilter above.
+            Should -Invoke Get-Module -Times 1 -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
             $result.ExitCode | Should -Be 0 -Because 'all checks pass in a clean fixture'
         }
 

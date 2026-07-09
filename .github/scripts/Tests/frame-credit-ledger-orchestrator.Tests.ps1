@@ -849,7 +849,7 @@ Describe 'frame-credit-ledger.ps1 orchestrator' {
 
     Context 'Parameter parsing + outer fail-open wrapper' {
 
-        It 'accepts -Pr <int> -Mode warn and exits 0 on the all-covered v4 fixture' {
+        It 'accepts a -Pr int-argument flag with -Mode warn and exits 0 on the all-covered v4 fixture' {
             $bodyJson = (@{ body = $script:V4AllCoveredBody } | ConvertTo-Json -Compress)
 
             $ip = & $script:InvokeOrchestratorInProcess `
@@ -859,7 +859,7 @@ Describe 'frame-credit-ledger.ps1 orchestrator' {
             $ip.Result.ExitCode | Should -Be 0
         }
 
-        It 'accepts -Pr <int> -Mode enforce and exits 0 on the all-covered v4 fixture' {
+        It 'accepts a -Pr int-argument flag with -Mode enforce and exits 0 on the all-covered v4 fixture' {
             $bodyJson = (@{ body = $script:V4AllCoveredBody } | ConvertTo-Json -Compress)
 
             $ip = & $script:InvokeOrchestratorInProcess `

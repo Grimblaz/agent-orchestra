@@ -169,6 +169,9 @@ Describe 'Code-Review-Deferral-Integration' {
                 $data
             }
         }
+        if (@($Fixtures).Count -eq 0) {
+            throw "no fixtures found in $FixturesDir — coverage would silently vanish"
+        }
 
         It 'correctly executes all synthetic corpus cases and matches expected verdicts' -ForEach $Fixtures {
             $Fixture = $_
@@ -536,18 +539,60 @@ Describe 'Code-Review-Deferral-Integration' {
         }
 
         It 'integrated routed:defer path: Get-StructuralVerdict no-match + Add-FollowUpIssue with ac_cross_check guard (F7/AC7)' {
-            # Mock gh to return issue body WITH AC section but no terms that match the finding
+            # Default gh mock: replicates the Describe-level global:gh catch-all (create/edit/
+            # view-bare/graphql) so Add-FollowUpIssue's internal node-lookup and mutation calls
+            # below still resolve once the narrow filter below claims the `issue view --json body`
+            # shape. Pester 6 throws on unmatched Mock calls instead of falling through, so this
+            # default is required as soon as any filtered Mock is registered for `gh` in this scope.
+            Mock gh {
+                $joined = $RemainingArgs -join ' '
+                if ($joined -match 'issue\s+create') {
+                    $idx = [array]::IndexOf($RemainingArgs, '--body')
+                    if ($idx -ge 0 -and $idx + 1 -lt $RemainingArgs.Count) {
+                        $script:CapturedCreateBody = $RemainingArgs[$idx + 1]
+                    }
+                    $global:LASTEXITCODE = 0
+                    return 'https://github.com/Grimblaz/agent-orchestra/issues/999'
+                }
+                if ($joined -match 'issue\s+edit') {
+                    $idx = [array]::IndexOf($RemainingArgs, '--body')
+                    if ($idx -ge 0 -and $idx + 1 -lt $RemainingArgs.Count) {
+                        $script:CapturedEditBody = $RemainingArgs[$idx + 1]
+                    }
+                    $global:LASTEXITCODE = 0
+                    return ''
+                }
+                if ($joined -match 'issue\s+view') {
+                    $global:LASTEXITCODE = 0
+                    return 'I_node_id'
+                }
+                if ($joined -match 'api\s+graphql') {
+                    $global:LASTEXITCODE = 0
+                    return '{"data":{"addSubIssue":{"issue":{"title":"Child"}}}}'
+                }
+                return ''
+            }
+
+            # Mock gh to return issue body WITH AC section but no terms that match the finding.
+            # Narrowed to `issue view` + `--json body` specifically (not bare `issue view`, which
+            # also matches Add-FollowUpIssue's `--json id` node-lookup calls below) and rebound to
+            # $RemainingArgs (the mocked global:gh function binds via
+            # [Parameter(ValueFromRemainingArguments=$true)]$RemainingArgs, not the automatic $args).
             Mock gh {
                 return @'
 ## Acceptance Criteria
 
 - the `portfolio-tracker` label is applied unconditionally to all new portfolio issues
 '@
-            } -ParameterFilter { $args[0] -eq 'issue' }
+            } -ParameterFilter { ($RemainingArgs -join ' ') -match 'issue\s+view' -and ($RemainingArgs -join ' ') -match '--json\s+body' }
 
             # Step 1: extract AC terms — 'portfolio-tracker' is present
             $acTerms = Get-AcTermsFromIssue -IssueNumber '709'
             $acTerms | Should -Not -BeNullOrEmpty
+            # Sound invoke-pairing (d-dead-filter-tripwire-v2): assertion filter is textually
+            # identical to the narrow Mock's -ParameterFilter above, so a future dead filter on
+            # either side fails loudly instead of silently falling through to the default mock.
+            Should -Invoke gh -Times 1 -ParameterFilter { ($RemainingArgs -join ' ') -match 'issue\s+view' -and ($RemainingArgs -join ' ') -match '--json\s+body' }
 
             # Step 2: Get-StructuralVerdict for a finding that does NOT mention portfolio-tracker
             $Finding = @{

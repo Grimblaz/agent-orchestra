@@ -1021,6 +1021,7 @@ applies-when: port ==
     Context 'Invoke-QuickValidate integration' {
 
         It 'surfaces frame validator failure through quick-validate aggregation' {
+            Mock Get-Module { }
             Mock Get-Module { return @{ Name = 'PSScriptAnalyzer'; Version = '1.22.0' } } -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
 
             $root = & $script:NewFrameValidateFixture -Ports @('experience')
@@ -1032,6 +1033,10 @@ applies-when: port ==
                 -GuidanceComplexityScriptPath $support.GuidanceComplexityScriptPath `
                 -PSScriptAnalyzerSettingsPath $support.PSScriptAnalyzerSettingsPath `
                 -ScriptsPath $support.ScriptsPath
+
+            # Sound invoke-pairing (d-dead-filter-tripwire-v2): assertion filter is textually
+            # identical to the narrow Mock's -ParameterFilter above.
+            Should -Invoke Get-Module -Times 1 -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
 
             $frameValidator = @($result.Results | Where-Object { $_.Name -eq 'FrameValidator' })
             $frameValidator | Should -HaveCount 1
@@ -1052,6 +1057,7 @@ applies-when: port ==
         }
 
         It 'prints detail for a passing frame validator check when adapter symmetry is skipped' {
+            Mock Get-Module { }
             Mock Get-Module { return @{ Name = 'PSScriptAnalyzer'; Version = '1.22.0' } } -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
 
             $root = & $script:NewFrameValidateFixture -WithoutPortCatalog
@@ -1063,6 +1069,10 @@ applies-when: port ==
                 -PSScriptAnalyzerSettingsPath $support.PSScriptAnalyzerSettingsPath `
                 -ScriptsPath $support.ScriptsPath `
                 -InformationVariable infoOutput
+
+            # Sound invoke-pairing (d-dead-filter-tripwire-v2): assertion filter is textually
+            # identical to the narrow Mock's -ParameterFilter above.
+            Should -Invoke Get-Module -Times 1 -ParameterFilter { $Name -eq 'PSScriptAnalyzer' -and $ListAvailable }
 
             $frameValidator = @($result.Results | Where-Object { $_.Name -eq 'FrameValidator' })
             $frameValidator | Should -HaveCount 1

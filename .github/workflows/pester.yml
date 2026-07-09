@@ -12,15 +12,18 @@ jobs:
       - name: Install Pester
         shell: pwsh
         run: |
-          # Pin to the 5.x line. `-Force -MinimumVersion 5.0.0` alone pulls the
-          # newest available major, which as of 2026-07 is Pester 6.0.0 — a
-          # breaking major (unmatched Mocks throw instead of falling through to
-          # the underlying command) that this suite, authored against Pester 5's
-          # mock model, is not migrated to. The `-MaximumVersion` cap keeps CI on
-          # the framework version the suite is validated against. Pester 6
-          # migration is tracked separately in issue #818.
-          Install-Module -Name Pester -Force -SkipPublisherCheck -MinimumVersion 5.0.0 -MaximumVersion 5.999.999
-          Import-Module Pester -MaximumVersion 5.999.999
+          # This suite is validated against Pester 6.0.0. The window below
+          # (`-MinimumVersion 6.0.0 -MaximumVersion 6.999.999`) holds CI on
+          # that major while floating patches/minors within it, so routine
+          # releases never require a workflow edit. `-Force -MinimumVersion`
+          # alone pulls the newest available major, which is a breaking-change
+          # risk (Pester 6 itself broke unmatched-Mock fall-through behavior
+          # relative to 5.x); the `-MaximumVersion` ceiling prevents CI from
+          # silently jumping majors again. Both the floor and the ceiling are
+          # bumped together, deliberately, on the next major migration — issue
+          # #818 is the precedent for how that migration is done.
+          Install-Module -Name Pester -Force -SkipPublisherCheck -MinimumVersion 6.0.0 -MaximumVersion 6.999.999
+          Import-Module Pester -MinimumVersion 6.0.0 -MaximumVersion 6.999.999
           Install-Module -Name powershell-yaml -Force -SkipPublisherCheck
       - name: Run Pester tests (issue #243 audit-paths drift gate + grammar + safety)
         shell: pwsh
@@ -58,7 +61,11 @@ jobs:
             '.github/scripts/Tests/naming-register-policy.Tests.ps1',
             # reporting-economy directive gate — registered per d-ci-gate-registration (#471)
             '.github/scripts/Tests/reporting-economy.Tests.ps1',
-            '.github/scripts/Tests/reporting-economy-spotcheck.Tests.ps1'
+            '.github/scripts/Tests/reporting-economy-spotcheck.Tests.ps1',
+            # Pester mock fall-through guard — issue #818 s6 (d-dead-filter-tripwire-v2)
+            '.github/scripts/Tests/pester-mock-fallthrough-guard.Tests.ps1',
+            # Post-port acceptance delta-gate core — issue #818 s7
+            '.github/scripts/Tests/pester6-baseline-delta-core.Tests.ps1'
           )
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'

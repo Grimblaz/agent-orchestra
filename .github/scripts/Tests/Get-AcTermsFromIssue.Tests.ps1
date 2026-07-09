@@ -70,11 +70,13 @@ Describe 'Basic extraction' {
 
 - Not in AC.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
     }
 
     It 'returns entries for each non-stop-list backtick term' {
         $result = Get-AcTermsFromIssue -IssueNumber '123'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $result | Should -Not -BeNullOrEmpty
         $terms = $result | Select-Object -ExpandProperty term
         $terms | Should -Contain 'MyFeature'
@@ -83,6 +85,7 @@ Describe 'Basic extraction' {
 
     It 'each entry has term, source_ac_line, and is_behavioral fields' {
         $result = Get-AcTermsFromIssue -IssueNumber '123'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         foreach ($entry in $result) {
             $entry.PSObject.Properties.Name | Should -Contain 'term'
             $entry.PSObject.Properties.Name | Should -Contain 'source_ac_line'
@@ -92,12 +95,14 @@ Describe 'Basic extraction' {
 
     It 'source_ac_line is the trimmed full AC line for each term' {
         $result = Get-AcTermsFromIssue -IssueNumber '123'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $myFeatureEntry = $result | Where-Object { $_.term -eq 'MyFeature' }
         $myFeatureEntry.source_ac_line | Should -Be '- The `MyFeature` identifier must be supported.'
     }
 
     It 'does not include terms from sections after the next H2' {
         $result = Get-AcTermsFromIssue -IssueNumber '123'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $terms = $result | Select-Object -ExpandProperty term
         $terms | Should -Not -Contain 'Not'
     }
@@ -111,9 +116,11 @@ Describe 'Behavioral keyword detection' {
 
 - The renderer must fetch `TargetIdentifier` before proceeding.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '1'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $entry = $result | Where-Object { $_.term -eq 'TargetIdentifier' }
         $entry | Should -Not -BeNullOrEmpty
         $entry.is_behavioral | Should -Be $true
@@ -125,9 +132,11 @@ Describe 'Behavioral keyword detection' {
 
 - The `NeutralThing` is returned as a plain object.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '2'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $entry = $result | Where-Object { $_.term -eq 'NeutralThing' }
         $entry | Should -Not -BeNullOrEmpty
         $entry.is_behavioral | Should -Be $false
@@ -139,9 +148,11 @@ Describe 'Behavioral keyword detection' {
 
 - The `CasedTerm` MUST be enforced.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '3'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $entry = $result | Where-Object { $_.term -eq 'CasedTerm' }
         $entry.is_behavioral | Should -Be $true
     }
@@ -153,9 +164,11 @@ Describe 'Behavioral keyword detection' {
 
 - The `MustyIdentifier` is a musty old value.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '4'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $entry = $result | Where-Object { $_.term -eq 'MustyIdentifier' }
         $entry | Should -Not -BeNullOrEmpty
         $entry.is_behavioral | Should -Be $false
@@ -171,9 +184,11 @@ Describe 'Stop-list rejection' {
 - The flag is `true` or `false` and never `null`.
 - The `RealIdentifier` is always present.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '10'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $terms = $result | Select-Object -ExpandProperty term
         $terms | Should -Not -Contain 'true'
         $terms | Should -Not -Contain 'false'
@@ -188,9 +203,11 @@ Describe 'Stop-list rejection' {
 - The result is `TRUE` when configured, `False` otherwise.
 - The `ActualTerm` is defined.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '11'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $terms = $result | Select-Object -ExpandProperty term
         $terms | Should -Not -Contain 'TRUE'
         $terms | Should -Not -Contain 'False'
@@ -204,9 +221,11 @@ Describe 'Stop-list rejection' {
 - The `ac_cross_check` field must be set; behavior is `dismiss` or `defer`.
 - The `SemanticTarget` is the load-bearing output.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '12'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $terms = $result | Select-Object -ExpandProperty term
         $terms | Should -Not -Contain 'ac_cross_check'
         $terms | Should -Not -Contain 'dismiss'
@@ -231,9 +250,11 @@ Describe 'H3-resilient AC section' {
 
 - `NotIncluded` is outside AC.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '20'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $terms = $result | Select-Object -ExpandProperty term
         $terms | Should -Contain 'TopLevelTerm'
         $terms | Should -Contain 'SubSectionTerm'
@@ -248,9 +269,11 @@ Describe 'H3-resilient AC section' {
 
 - `RealTerm` is required.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '21'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $terms = $result | Select-Object -ExpandProperty term
         # HeaderToken appears in an ### line — it is still parseable as a term
         # (H3 lines are AC content); the key invariant is RealTerm is also present.
@@ -274,9 +297,11 @@ Describe 'H2 boundary' {
 
 - `ImplNoteTerm` is only in Implementation Notes.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '30'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $terms = $result | Select-Object -ExpandProperty term
         $terms | Should -Contain 'AcTerm'
         $terms | Should -Not -Contain 'TestingScopeTerm'
@@ -294,10 +319,12 @@ This issue has no AC section.
 
 - `SomeToken` is here but not in AC.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $warnings = @()
         $result = Get-AcTermsFromIssue -IssueNumber '40' -WarningVariable warnings
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         @($result).Count | Should -Be 0
         $warnMessages = @($warnings) | ForEach-Object {
             if ($_ -is [System.Management.Automation.WarningRecord]) { $_.Message } else { "$_" }
@@ -312,10 +339,12 @@ This issue has no AC section.
 - The system works correctly.
 - No backtick identifiers are present here.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         { Get-AcTermsFromIssue -IssueNumber '41' -WarningAction Stop } | Should -Not -Throw
         $result = Get-AcTermsFromIssue -IssueNumber '41'
+        Should -Invoke gh -Times 2 -ParameterFilter { $args[0] -eq 'issue' }
         $result | Should -BeNullOrEmpty
     }
 }
@@ -331,9 +360,11 @@ Describe 'CR8/CR9-style behavioral AC (originating incident pattern)' {
 - the renderer is specified to fetch `triage`-labeled issues repo-wide; must query repo-wide not just sequenced issues
 - the `portfolio-tracker` label is applied unconditionally to all new portfolio issues
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '709'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $terms = $result | Select-Object -ExpandProperty term
 
         # triage must be extracted
@@ -357,9 +388,11 @@ Describe 'CR8/CR9-style behavioral AC (originating incident pattern)' {
 
 - the renderer must not `get` or `set` values; use `FetchEngine` instead
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '709b'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $terms = $result | Select-Object -ExpandProperty term
 
         $terms | Should -Not -Contain 'get'
@@ -378,9 +411,11 @@ Describe 'Deduplication' {
 - The `SharedTerm` should also be validated on output.
 - The `OtherTerm` is independent.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '50'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $terms = $result | Select-Object -ExpandProperty term
         ($terms | Where-Object { $_ -eq 'SharedTerm' }).Count | Should -Be 1
         $terms | Should -Contain 'OtherTerm'
@@ -393,9 +428,11 @@ Describe 'Deduplication' {
 - First line: `DupTerm` must be checked.
 - Second line: `DupTerm` should also be checked.
 '@
+        Mock gh { return '' }
         Mock gh { return $issueBody } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = Get-AcTermsFromIssue -IssueNumber '51'
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $dupEntry = $result | Where-Object { $_.term -eq 'DupTerm' }
         $dupEntry.source_ac_line | Should -Be '- First line: `DupTerm` must be checked.'
     }
@@ -404,23 +441,29 @@ Describe 'Deduplication' {
 Describe 'Failure path' {
 
     It 'returns zero entries when gh returns empty output' {
+        Mock gh { return '' }
         Mock gh { return '' } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = @(Get-AcTermsFromIssue -IssueNumber '99')
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         # @() is the canonical empty-array return; Count 0 is the observable guarantee.
         $result.Count | Should -Be 0
     }
 
     It 'does not throw when gh returns empty output' {
+        Mock gh { return '' }
         Mock gh { return '' } -ParameterFilter { $args[0] -eq 'issue' }
 
         { Get-AcTermsFromIssue -IssueNumber '99' } | Should -Not -Throw
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
     }
 
     It 'returns zero entries when gh returns null' {
+        Mock gh { return '' }
         Mock gh { return $null } -ParameterFilter { $args[0] -eq 'issue' }
 
         $result = @(Get-AcTermsFromIssue -IssueNumber '100')
+        Should -Invoke gh -Times 1 -ParameterFilter { $args[0] -eq 'issue' }
         $result.Count | Should -Be 0
     }
 }

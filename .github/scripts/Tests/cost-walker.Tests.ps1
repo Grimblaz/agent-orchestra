@@ -115,12 +115,32 @@ Describe 'Invoke-CostTranscriptWalk' {
             )
 
             $exactLowercasePath = Join-Path $tmp $slug
+
+            # Default gh-cmdlet call-through: this It creates a REAL uppercase-named directory
+            # on disk and asserts the code discovers it via real filesystem fallback
+            # (Resolve-CostWalkerPrimarySlugDir's case-insensitive Get-ChildItem match at
+            # cost-walker.ps1:214-216). Only the exact lowercase path this It is simulating as
+            # absent should be intercepted; every other Test-Path call (directory-discovery,
+            # subagent-file probes, etc.) must hit the real filesystem so that fallback works.
+            # A captured CommandInfo reference is required to call through without recursing
+            # back into this same Mock (a module-qualified call still resolves to the mock).
+            $realTestPath = Get-Command Test-Path -CommandType Cmdlet
+            Mock Test-Path {
+                if ($LiteralPath) {
+                    & $realTestPath -LiteralPath $LiteralPath
+                } else {
+                    & $realTestPath -Path $Path
+                }
+            }
             Mock Test-Path { return $false } -ParameterFilter { $LiteralPath -eq $exactLowercasePath }
 
             $result = @(Invoke-CostTranscriptWalk -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp)
             $result.Count | Should -Be 1
             $result[0].uuid | Should -Be $eventId
             $result[0].type | Should -Be 'assistant'
+            # Sound invoke-pairing (d-dead-filter-tripwire-v2): assertion filter is textually
+            # identical to the narrow Mock's -ParameterFilter above.
+            Should -Invoke Test-Path -Times 1 -ParameterFilter { $LiteralPath -eq $exactLowercasePath }
             Remove-Item -Recurse -Force $tmp
         }
 
@@ -402,8 +422,7 @@ Describe 'Invoke-CostTranscriptWalk' {
         ) {
             param([string]$Cwd)
 
-            Mock Get-NormalizedPath { throw 'Get-NormalizedPath must not run for Copilot OTel sentinel cwd values' } `
-                -ParameterFilter { $Path -like 'copilot-otel://*' }
+            Mock Get-NormalizedPath { throw 'Get-NormalizedPath must not run for Copilot OTel sentinel cwd values' } -ParameterFilter { $Path -like 'copilot-otel://*' }
 
             $matchesParent = script:Test-CostWalkerEventCwdMatchesParent `
                 -TranscriptEvent @{ cwd = $Cwd } `

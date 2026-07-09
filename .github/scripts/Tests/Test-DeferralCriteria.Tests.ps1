@@ -13,6 +13,9 @@ Describe 'Test-DeferralCriteria' {
             $data
         }
     }
+    if (@($Fixtures).Count -eq 0) {
+        throw "no fixtures found in $FixturesDir — coverage would silently vanish"
+    }
 
     BeforeAll {
         $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
@@ -118,7 +121,7 @@ Describe 'Test-DeferralCriteria' {
     Context 'M8 / M9 module-mapping invariants (root and infra)' {
         # M8: root-level files become a virtual <root> module.
         # M9: dotfile-prefixed top-level dirs collapse into a virtual <infra> module.
-        It 'M8 + M9: 4 distinct modules across <root>, <infra>, agents, and skills trips S-cross-cutting' {
+        It 'M8 + M9: 4 distinct modules across root, infra, agents, and skills trips S-cross-cutting' {
             $Finding = @{
                 id    = "F_m8_m9"
                 text  = "Touches root file, dotfile-dir, agents, and skills."

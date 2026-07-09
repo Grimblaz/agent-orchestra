@@ -1934,7 +1934,7 @@ credits:
     # Markdown table newline escape (Gemini Finding 4)
     # -------------------------------------------------------------------------
 
-    It 'Compose-Comment escapes literal newlines in evidence to <br> so table rows survive' {
+    It 'Compose-Comment escapes literal newlines in evidence to a br tag so table rows survive' {
         $reports = @(
             [pscustomobject]@{
                 PortName          = 'review'
