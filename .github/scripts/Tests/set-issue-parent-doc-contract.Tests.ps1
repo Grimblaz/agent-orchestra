@@ -23,14 +23,12 @@
     regex to avoid the brittleness the existing 2b-bis contract test
     demonstrates").
 
-    EXPECTED RED STATE: skills/safe-operations/SKILL.md has NOT been fixed
-    yet at the time this test is authored (plan-issue-800 step s5 - doc
-    fixes at all five drift sites - is dispatched AFTER this step, s2). The
-    §2b-bis fenced example still invokes `Add-FollowUpIssue.ps1
-    -ParentIssueNumber ...`, so the "invokes Set-IssueParent.ps1 by
-    filename" test below is EXPECTED TO FAIL until s5 lands. This is the
-    correct, intended red state for this step - do not weaken the
-    assertion to pass prematurely against the unfixed doc.
+    STATUS: plan-issue-800 step s5 (the doc-fix step that repoints the
+    §2b-bis fenced example at Set-IssueParent.ps1) has landed. This suite
+    is GREEN: the "invokes Set-IssueParent.ps1 by filename" test below now
+    passes against the fixed doc. Kept as a standing regression guard - a
+    future revert to `Add-FollowUpIssue.ps1 -ParentIssueNumber ...` in the
+    §2b-bis example, or any parameter-token drift, must fail this test.
 #>
 
 Describe 'Set-IssueParent doc-to-script contract (SKILL.md §2b-bis)' -Tag 'contract' {
@@ -100,7 +98,7 @@ Describe 'Set-IssueParent doc-to-script contract (SKILL.md §2b-bis)' -Tag 'cont
 
     It 'the §2b-bis fenced example invokes Set-IssueParent.ps1 by filename (regression guard: a revert to Add-FollowUpIssue.ps1 must fail this test)' {
         $script:DocScriptFileName | Should -Be 'Set-IssueParent.ps1' `
-            -Because 'plan-issue-800 step s5 must repoint the §2b-bis attach-existing example at the new standalone Set-IssueParent.ps1 script; EXPECTED RED until s5 lands'
+            -Because 'plan-issue-800 step s5 repointed the §2b-bis attach-existing example at the standalone Set-IssueParent.ps1 script; this guards against a future revert'
     }
 
     It 'the documented flag tokens match exactly the actual Set-IssueParent.ps1 parameter set' {

@@ -61,12 +61,11 @@ Describe 'safe-operations §2b-bis / §2b-ter board-positioning contract' -Tag '
         # literal leading cell text and requires the Mechanism cell to name
         # Set-IssueParent, not Add-FollowUpIssue.
         #
-        # EXPECTED RED right now: #800 s5 (the doc-fix step that rewrites this row) has
-        # NOT landed yet — s4 (this test) runs before s5 per the plan's frame-spine
-        # depends_on graph. This is the same documented pre-landing red-state pattern as
-        # the #774 s2 contract test; do not weaken this assertion to pass prematurely.
+        # STATUS: #800 s5 (the doc-fix step that rewrote this row) has landed and this
+        # suite is GREEN. Kept as a standing regression guard against reverting the
+        # Parent-edge row back to Add-FollowUpIssue.
         $script:Content | Should -Match '(?m)^\|\s*\*\*Parent edge\*\*\s*\(`Set-IssueParent -ParentIssueNumber N`\)' `
-            -Because '§2b-ter lever-mapping table Parent-edge row must name Set-IssueParent as the attach-existing mechanism (#800 A2 — expected RED until s5 lands)'
+            -Because '§2b-ter lever-mapping table Parent-edge row must name Set-IssueParent as the attach-existing mechanism (#800 A2)'
 
         $script:Content | Should -Not -Match '(?m)^\|\s*\*\*Parent edge\*\*.*Add-FollowUpIssue' `
             -Because 'the Parent-edge row must not still reference Add-FollowUpIssue once #800 s5 lands (regression guard against reverting to the stale mechanism)'

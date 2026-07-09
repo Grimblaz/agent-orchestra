@@ -294,7 +294,12 @@ function Get-PortfolioBuckets {
     #   - `Parent: #N` is FIRST-LINE-ANCHORED: the Add-FollowUpIssue.ps1 /
     #     Set-IssueParent.ps1 text-fallback producer writes it as the body's
     #     literal first line, so anchoring here avoids false positives from
-    #     prose mentions elsewhere in the body.
+    #     prose mentions elsewhere in the body. The pattern intentionally has
+    #     no `(?m)` flag (M3 fix): `^` must anchor to the true start of the
+    #     string only, matching the writer's LeadingClaimPattern semantics —
+    #     `(?m)` would make `^` match the start of every line, so a
+    #     `Parent: #N` line anywhere in the body (not just the first line)
+    #     would be treated as a first-line claim.
     #   - `placement=parent #N` is INTENTIONALLY UNANCHORED: the §2b-ter
     #     creation-time positioning-residue producer (skills/safe-operations/
     #     SKILL.md:163, format "Board positioning: priority=<h|m|l>;
@@ -311,7 +316,7 @@ function Get-PortfolioBuckets {
     # newline or other characters) — this guards against forging additional
     # workflow-command text into the CI ::warning:: output emitted downstream.
     # ---------------------------------------------------------------------------
-    $firstLineParentPattern = '(?m)^Parent: #(\d+)'
+    $firstLineParentPattern = '^Parent: #(\d+)'
     $placementParentPattern = 'placement=parent #(\d+)'
     $textFallbackMarker     = '<!-- parent-link-mode: text-fallback -->'
 
@@ -332,11 +337,20 @@ function Get-PortfolioBuckets {
         # group, then the placement-residue producer's; fall back to a safe
         # literal in the edge case where only the marker fired without either
         # regex matching (never interpolate raw match/body text).
-        $claimedParent = if ($firstLineHit.Success) { $firstLineHit.Groups[1].Value }
-                          elseif ($placementHit.Success) { $placementHit.Groups[1].Value }
-                          else { 'unknown' }
+        #
+        # M6: when BOTH patterns match with DIFFERENT captured numbers, that
+        # is a genuine conflicting-claim signal (not just a preference
+        # ordering) — report both numbers rather than silently dropping one.
+        if ($firstLineHit.Success -and $placementHit.Success -and
+                $firstLineHit.Groups[1].Value -ne $placementHit.Groups[1].Value) {
+            $orphanClaimWarnings.Add("⚠️ open issue #$($issue.number) claims a parent (#$($firstLineHit.Groups[1].Value), #$($placementHit.Groups[1].Value) — conflicting claims) but has no sub-issue link")
+        } else {
+            $claimedParent = if ($firstLineHit.Success) { $firstLineHit.Groups[1].Value }
+                              elseif ($placementHit.Success) { $placementHit.Groups[1].Value }
+                              else { 'unknown' }
 
-        $orphanClaimWarnings.Add("⚠️ open issue #$($issue.number) claims a parent (#$claimedParent) but has no sub-issue link")
+            $orphanClaimWarnings.Add("⚠️ open issue #$($issue.number) claims a parent (#$claimedParent) but has no sub-issue link")
+        }
     }
 
     # ---------------------------------------------------------------------------

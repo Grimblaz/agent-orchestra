@@ -68,10 +68,21 @@ function Remove-StaleParentClaim {
         Marker hygiene: idempotently strip a leading "Parent: #N" claim line
         and a trailing text-fallback marker left by a prior failed run.
         Safe to call on a body with no stale claim/marker (no-op).
+
+    .DESCRIPTION
+        Gated on the text-fallback marker's presence (M2 fix): the leading
+        claim line is only ever stripped together with the marker, never on
+        its own. This preserves a permanent "Parent: #N" first line written
+        by Add-FollowUpIssue.ps1 on a successful attach (which never carries
+        the text-fallback marker) and, as a side effect, avoids a
+        functionless TrimEnd()-only body diff when there is nothing stale to
+        remove (M5 fix): when the marker is absent this function returns the
+        body unchanged instead of reaching the TrimEnd() call.
     #>
     param([string]$Body)
 
     if ([string]::IsNullOrEmpty($Body)) { return $Body }
+    if ($Body -notmatch [regex]::Escape($script:TextFallbackMarker)) { return $Body }
 
     $result = $Body -replace $script:LeadingClaimPattern, ''
     $result = $result -replace $script:TrailingMarkerPattern, ''
@@ -108,6 +119,29 @@ if ($ParentIssueNumber -eq $ChildIssueNumber) {
     exit 1
 }
 
+# --- 1b. Resolve the ambient gh repo once (M1) -------------------------
+# `gh issue view` (used for the parent read) and every `gh issue edit`
+# call already resolve against `gh`'s ambient cwd-repo. Resolving the same
+# repo here, once, and reusing it in the pre-check GraphQL query keeps the
+# read and write paths pinned to the same repo instead of a hardcoded
+# owner/name literal that can silently drift in a fork or renamed repo.
+$repoViewStderr = $null
+$repoNwo = $null
+try {
+    $repoNwo = gh repo view --json owner,name -q '.owner.login + "/" + .name' 2>$repoViewStderr
+} catch {
+    $repoNwo = $null
+}
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($repoNwo)) {
+    $stderrText = if ($repoViewStderr) { (($repoViewStderr | Out-String).Trim()) } else { '' }
+    $suffix = if ($stderrText) { " stderr: $stderrText" } else { '' }
+    Write-Error "Could not resolve the current repository via 'gh repo view' (owner/name).$suffix"
+    exit 1
+}
+$repoParts = $repoNwo.Trim() -split '/', 2
+$repoOwner = $repoParts[0]
+$repoName = $repoParts[1]
+
 # --- 2 & 3. Verify the child exists and pre-check its current parent. ---
 # Combined into one GraphQL query: `gh issue view --json` has no `parent`
 # field (PF3), so the parent read must go through `gh api graphql`
@@ -115,7 +149,7 @@ if ($ParentIssueNumber -eq $ChildIssueNumber) {
 # same round trip avoids three separate `gh` calls.
 $childQuery = @"
 query {
-  repository(owner: "Grimblaz", name: "agent-orchestra") {
+  repository(owner: "$repoOwner", name: "$repoName") {
     issue(number: $ChildIssueNumber) {
       id
       body
@@ -128,27 +162,48 @@ query {
 $childId = $null
 $childBody = $null
 $currentParentNumber = $null
-try {
-    $childRawJson = gh api graphql -f "query=$childQuery" 2>$null
-    if ($LASTEXITCODE -eq 0 -and $childRawJson) {
-        $childResponse = $childRawJson | ConvertFrom-Json -ErrorAction SilentlyContinue
-        $childIssueData = $childResponse.data.repository.issue
-        if ($childIssueData) {
-            $childId = $childIssueData.id
-            $childBody = $childIssueData.body
-            if ($childIssueData.parent) {
-                $currentParentNumber = $childIssueData.parent.number
+$precheckSuccess = $false
+$precheckAttempts = 0
+$childPrecheckStderr = $null
+# M7: mirror the addSubIssue mutation's 2-attempt retry loop below instead
+# of a single unretried try/catch.
+while (-not $precheckSuccess -and $precheckAttempts -lt 2) {
+    $precheckAttempts++
+    $childPrecheckStderr = $null
+    try {
+        # M4: carry the same GraphQL-Features header as the mutation, since
+        # this query also reads the feature-gated `parent { number }` field.
+        $childRawJson = gh api graphql -H "GraphQL-Features: sub_issues" -f "query=$childQuery" 2>$childPrecheckStderr
+        if ($LASTEXITCODE -eq 0 -and $childRawJson) {
+            $childResponse = $childRawJson | ConvertFrom-Json -ErrorAction SilentlyContinue
+            # M4: check for GraphQL-level errors returned with exit code 0,
+            # mirroring the mutation's existing error-check pattern. Treat
+            # this the same as an unresolved child (retry, then fail loud).
+            if ($childResponse -and $childResponse.errors) {
+                Write-Warning "GraphQL child pre-check returned errors: $($childResponse.errors | ConvertTo-Json -Compress)"
+            } else {
+                $childIssueData = $childResponse.data.repository.issue
+                if ($childIssueData) {
+                    $childId = $childIssueData.id
+                    $childBody = $childIssueData.body
+                    if ($childIssueData.parent) {
+                        $currentParentNumber = $childIssueData.parent.number
+                    }
+                    $precheckSuccess = $true
+                }
             }
         }
+    } catch {
+        # Try again
     }
-} catch {
-    $childId = $null
 }
 
 # PF9: verify the child issue resolves to a real issue before writing
 # anything to its body.
 if (-not $childId) {
-    Write-Error "Child issue #$ChildIssueNumber could not be resolved (missing or inaccessible)."
+    $stderrText = if ($childPrecheckStderr) { (($childPrecheckStderr | Out-String).Trim()) } else { '' }
+    $suffix = if ($stderrText) { " stderr: $stderrText" } else { '' }
+    Write-Error "Child issue #$ChildIssueNumber could not be resolved (missing or inaccessible).$suffix"
     exit 1
 }
 
@@ -158,9 +213,12 @@ if ($null -ne $currentParentNumber) {
         # Marker hygiene: strip any stale claim/marker a prior failed run left.
         $strippedBody = Remove-StaleParentClaim -Body $childBody
         if ($strippedBody -ne $childBody) {
-            gh issue edit $ChildIssueNumber --body $strippedBody 2>$null | Out-Null
+            $editStderr = $null
+            gh issue edit $ChildIssueNumber --body $strippedBody 2>$editStderr | Out-Null
             if ($LASTEXITCODE -ne 0) {
-                Write-Warning "Failed to strip stale parent-link-mode marker from issue #$ChildIssueNumber body."
+                $stderrText = if ($editStderr) { (($editStderr | Out-String).Trim()) } else { '' }
+                $suffix = if ($stderrText) { " stderr: $stderrText" } else { '' }
+                Write-Warning "Failed to strip stale parent-link-mode marker from issue #$ChildIssueNumber body.$suffix"
             }
         }
         exit 0
@@ -178,8 +236,9 @@ if ($null -ne $currentParentNumber) {
 # addSubIssue mutation + 2-attempt retry). Divergence: on failure this
 # script exits non-zero instead of only Write-Warning-ing.
 $parentId = $null
+$parentViewStderr = $null
 try {
-    $parentId = gh issue view $ParentIssueNumber --json id --jq .id 2>$null
+    $parentId = gh issue view $ParentIssueNumber --json id --jq .id 2>$parentViewStderr
 } catch {
     $parentId = $null
 }
@@ -198,10 +257,12 @@ mutation {
 }
 "@
     $attempts = 0
+    $mutationStderr = $null
     while (-not $graphqlSuccess -and $attempts -lt 2) {
         $attempts++
+        $mutationStderr = $null
         try {
-            $result = gh api graphql -H "GraphQL-Features: sub_issues" -f "query=$mutation" 2>$null
+            $result = gh api graphql -H "GraphQL-Features: sub_issues" -f "query=$mutation" 2>$mutationStderr
             if ($LASTEXITCODE -eq 0 -and $result) {
                 # Check for GraphQL-level errors returned with exit code 0.
                 $parsed = $result | ConvertFrom-Json -ErrorAction SilentlyContinue
@@ -217,29 +278,39 @@ mutation {
     }
 
     if (-not $graphqlSuccess) {
-        Write-Warning "Failed to link issue #$ChildIssueNumber to parent issue #$ParentIssueNumber via GitHub GraphQL sub-issues after 2 attempts."
+        $stderrText = if ($mutationStderr) { (($mutationStderr | Out-String).Trim()) } else { '' }
+        $suffix = if ($stderrText) { " stderr: $stderrText" } else { '' }
+        Write-Warning "Failed to link issue #$ChildIssueNumber to parent issue #$ParentIssueNumber via GitHub GraphQL sub-issues after 2 attempts.$suffix"
     }
 } else {
+    $stderrText = if ($parentViewStderr) { (($parentViewStderr | Out-String).Trim()) } else { '' }
+    $suffix = if ($stderrText) { " stderr: $stderrText" } else { '' }
     Write-Error "addSubIssue prerequisite failed: childId=$childId parentId=$parentId" -ErrorAction Continue
-    Write-Warning "Could not retrieve GraphQL Node IDs for parent #$ParentIssueNumber or child #$ChildIssueNumber."
+    Write-Warning "Could not retrieve GraphQL Node IDs for parent #$ParentIssueNumber or child #$ChildIssueNumber.$suffix"
 }
 
 # --- 5 / 6. Success: strip stale marker. Failure: splice fallback claim. -
 if ($graphqlSuccess) {
     $strippedBody = Remove-StaleParentClaim -Body $childBody
     if ($strippedBody -ne $childBody) {
-        gh issue edit $ChildIssueNumber --body $strippedBody 2>$null | Out-Null
+        $editStderr = $null
+        gh issue edit $ChildIssueNumber --body $strippedBody 2>$editStderr | Out-Null
         if ($LASTEXITCODE -ne 0) {
-            Write-Warning "Failed to strip stale parent-link-mode marker from issue #$ChildIssueNumber body."
+            $stderrText = if ($editStderr) { (($editStderr | Out-String).Trim()) } else { '' }
+            $suffix = if ($stderrText) { " stderr: $stderrText" } else { '' }
+            Write-Warning "Failed to strip stale parent-link-mode marker from issue #$ChildIssueNumber body.$suffix"
         }
     }
     exit 0
 } else {
     Write-Error "Failed to attach issue #$ChildIssueNumber to parent issue #$ParentIssueNumber."
     $fallbackBody = Add-ParentClaimFallback -Body $childBody -ParentIssueNumber $ParentIssueNumber
-    gh issue edit $ChildIssueNumber --body $fallbackBody 2>$null | Out-Null
+    $editStderr = $null
+    gh issue edit $ChildIssueNumber --body $fallbackBody 2>$editStderr | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Failed to write parent-link-mode text-fallback claim to issue #$ChildIssueNumber body."
+        $stderrText = if ($editStderr) { (($editStderr | Out-String).Trim()) } else { '' }
+        $suffix = if ($stderrText) { " stderr: $stderrText" } else { '' }
+        Write-Warning "Failed to write parent-link-mode text-fallback claim to issue #$ChildIssueNumber body.$suffix"
     }
     exit 1
 }

@@ -70,6 +70,10 @@ Describe 'Set-IssueParent' {
             $joined | Out-File -FilePath $global:SipLogFile -Append -Encoding UTF8
             $global:SipGhCallCount++
 
+            if ($joined -match 'repo\s+view') {
+                $global:LASTEXITCODE = 0
+                return 'Grimblaz/agent-orchestra'
+            }
             if ($joined -match 'api\s+graphql') {
                 $fIdx = [array]::IndexOf($RemainingArgs, '-f')
                 $queryArg = if ($fIdx -ge 0 -and $fIdx + 1 -lt $RemainingArgs.Count) { $RemainingArgs[$fIdx + 1] } else { '' }
@@ -101,6 +105,10 @@ Describe 'Set-IssueParent' {
                 }
             }
             if ($joined -match 'issue\s+view\s+\d+\s+--json\s+id\s+--jq\s+\.id') {
+                if ($global:SipParentViewFail) {
+                    $global:LASTEXITCODE = 1
+                    return $null
+                }
                 $global:LASTEXITCODE = 0
                 return "I_parent_$($global:SipTestParent)"
             }
@@ -131,6 +139,7 @@ Describe 'Set-IssueParent' {
         $global:SipCapturedEditBody = $null
         $global:SipMockChildBody = 'Some existing body text.'
         $global:SipMockChildParentNumber = $null
+        $global:SipParentViewFail = $false
         $global:LASTEXITCODE = 0
     }
 
@@ -233,6 +242,19 @@ Describe 'Set-IssueParent' {
             $global:SipCapturedEditBody | Should -Not -BeNullOrEmpty
             $global:SipCapturedEditBody | Should -Not -Match ([regex]::Escape('<!-- parent-link-mode: text-fallback -->'))
             $global:SipCapturedEditBody | Should -Not -Match "(?m)^Parent: #$($global:SipTestParent)$"
+        }
+    }
+
+    Context 'Parent-resolution failure (M13)' {
+        It 'exits non-zero via the "addSubIssue prerequisite failed" path when the parent pre-check (gh issue view) fails and parentId resolves to null' {
+            $global:SipParentViewFail = $true
+
+            $output = & $script:ScriptFile -ParentIssueNumber $global:SipTestParent -ChildIssueNumber $global:SipTestChild 2>&1
+
+            $LASTEXITCODE | Should -Not -Be 0
+            $global:SipAddSubIssueCallCount | Should -Be 0
+            ($output | Out-String) | Should -Match 'addSubIssue prerequisite failed' `
+                -Because 'a failed gh issue view parent pre-check must resolve parentId to null and hit the addSubIssue prerequisite failed error path, not the GraphQL mutation retry path'
         }
     }
 

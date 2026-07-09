@@ -690,6 +690,37 @@ Describe 'Get-PortfolioBuckets v2 — OrphanClaimWarnings (#800 B1)' {
         $warning | Should -Not -Match "`n" -Because 'interpolation must never carry a newline (log-injection guard, consistent with M9 elsewhere in this renderer)'
         $warning | Should -Not -Match '\(\?' -Because 'no raw regex syntax may leak into the interpolated message'
     }
+
+    It 'M11: an OrphanClaimWarnings entry renders into Format-PortfolioMarkdown output' {
+        # Render-surface coverage gap (M11): prior tests only asserted the bucket
+        # computation and the CI ::warning:: emission; nothing asserted the warning
+        # text actually reaches the rendered Markdown board via Format-PortfolioMarkdown.
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        $orphan = New-IssueState -Number 907 -State 'OPEN' -Parent $null `
+            -SubIssues @{ totalCount = 0; nodes = @() } `
+            -Body "Parent: #762`n`nSome other body content."
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $orphan)
+        $output  = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-06-25T00:00:00Z'
+
+        $output | Should -Match '⚠️ open issue #907 claims a parent \(#762\) but has no sub-issue link' `
+            -Because 'M11: OrphanClaimWarnings entries must actually appear in the rendered Markdown output, not only in the bucket model'
+    }
+
+    It 'M12: the marker-only #unknown fallback fires when the text-fallback marker is present but neither claim regex captures a digit' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        $orphan = New-IssueState -Number 908 -State 'OPEN' -Parent $null `
+            -SubIssues @{ totalCount = 0; nodes = @() } `
+            -Body "<!-- parent-link-mode: text-fallback -->`nNo parseable claim text here at all."
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $orphan)
+
+        $warning = @($buckets.OrphanClaimWarnings | Where-Object { $_ -match '#908' })[0]
+        $warning | Should -Not -BeNullOrEmpty -Because 'the text-fallback marker alone must still fire the detector'
+        $warning | Should -Match '#unknown' -Because 'M12: neither claim regex captured a digit, so the message must fall back to the literal #unknown token'
+    }
 }
 
 # ===========================================================================
@@ -2380,7 +2411,7 @@ umbrellas: [101]
             # claim). Get-PortfolioBuckets stays pure; the CI ::warning:: emission lives
             # at render-portfolio.ps1:1050-1054, gated on $env:GITHUB_ACTIONS -eq 'true'.
             $previousGithubActions = $env:GITHUB_ACTIONS
-            $orphanJson = '{"data":{"repository":{"issue":{"number":900,"title":"Orphan claim umbrella","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","body":"<!-- parent-link-mode: text-fallback -->\nParent: #761","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"parent":null,"subIssues":{"totalCount":0,"nodes":[]}}}}}'
+            $orphanJson = '{"data":{"repository":{"issue":{"number":900,"title":"Orphan claim umbrella","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","body":"Parent: #761\n<!-- parent-link-mode: text-fallback -->","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"parent":null,"subIssues":{"totalCount":0,"nodes":[]}}}}}'
             $probeJson  = '{"data":{"repository":{"issue":{"parent":null,"subIssues":{"totalCount":0}}}}}'
 
             function global:gh {
@@ -2437,7 +2468,7 @@ umbrellas: [900]
         It 'OrphanClaimWarnings ::warning:: is NOT emitted when GITHUB_ACTIONS is unset, even though the board still warns (#800 B1)' {
             # Same orphan-claim fixture as above; only the environment differs.
             $previousGithubActions = $env:GITHUB_ACTIONS
-            $orphanJson = '{"data":{"repository":{"issue":{"number":900,"title":"Orphan claim umbrella","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","body":"<!-- parent-link-mode: text-fallback -->\nParent: #761","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"parent":null,"subIssues":{"totalCount":0,"nodes":[]}}}}}'
+            $orphanJson = '{"data":{"repository":{"issue":{"number":900,"title":"Orphan claim umbrella","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","body":"Parent: #761\n<!-- parent-link-mode: text-fallback -->","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"parent":null,"subIssues":{"totalCount":0,"nodes":[]}}}}}'
             $probeJson  = '{"data":{"repository":{"issue":{"parent":null,"subIssues":{"totalCount":0}}}}}'
 
             function global:gh {
