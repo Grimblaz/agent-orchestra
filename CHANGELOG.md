@@ -2,6 +2,15 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.7] — 2026-07-09
+
+### Fixed
+
+- `Set-IssueParent.ps1` (new): attach-existing sub-issue primitive with loud (non-zero exit) failure and a detectable `Parent: #N` + `text-fallback` body-marker splice, extracted from `Add-FollowUpIssue.ps1`'s embedded GraphQL linking, so the documented umbrella-attach command is no longer a silent no-op (#800).
+- `render-portfolio.ps1`: added a warn-only `OrphanClaimWarnings` bucket (tracker body + CI `::warning::`) flagging open issues that claim a parent with no real sub-issue link, using per-producer regex anchoring so the mid-line `placement=parent #N` residue format is caught (#800).
+- `safe-operations/SKILL.md`: corrected five 2b-bis/2b-ter drift sites that referenced a nonexistent `Add-FollowUpIssue` attach-existing capability, pointing them at `Set-IssueParent.ps1` (#800).
+- `Set-IssueParent.ps1`: fixed PowerShell stderr capture — `2>$variable` does not capture stderr (it is a file-redirect operator); replaced with `2>&1` stream separation by ErrorRecord type so failure diagnostics are surfaced without corrupting JSON/GraphQL parsing on successful gh calls (#800, PR review).
+
 ## [3.3.6] — 2026-07-08
 
 ### Added
