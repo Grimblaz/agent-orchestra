@@ -118,16 +118,16 @@ gh issue create --title "..." --body "..."
 
 Every new issue created by any agent **MUST** be placed under a tracked umbrella **or** left as an ungrouped open issue that the portfolio renderer auto-derives into Triage — this rule is additive to the §2b priority mandate and does not replace it. The intent is unchanged: **a new issue must not silently disappear from the control-tower tracker.** Under Control Tower v2 the mechanism changed (see [Documents/Design/control-tower-v2.md](../../Documents/Design/control-tower-v2.md)).
 
-- **Parent umbrella (child issue)** — if the work is scoped to a tracked initiative, attach the new issue as a native sub-issue of an existing sequenced umbrella. Use `Add-FollowUpIssue` (canonical sub-issue attach) immediately after `gh issue create`.
-- **New umbrella → insert at rank** — if you are creating a *new umbrella* (an issue that will own sub-issues), you **MUST** also insert its number into `Documents/Planning/sequence.yaml`'s `umbrellas:` inline list at the correct priority rank. `sequence.yaml` is the **canonical home** for umbrella ranking — do **not** add a routing-tables JSON entry. Then attach the umbrella's own children as native sub-issues with `Add-FollowUpIssue`, exactly as for any other umbrella.
+- **Parent umbrella (child issue)** — if the work is scoped to a tracked initiative, attach the new issue as a native sub-issue of an existing sequenced umbrella. Either create-and-attach in one step with `Add-FollowUpIssue` (canonical create-and-attach helper), or run `gh issue create` first and then attach the already-created issue with `Set-IssueParent` (canonical attach-existing helper).
+- **New umbrella → insert at rank** — if you are creating a *new umbrella* (an issue that will own sub-issues), you **MUST** also insert its number into `Documents/Planning/sequence.yaml`'s `umbrellas:` inline list at the correct priority rank. `sequence.yaml` is the **canonical home** for umbrella ranking — do **not** add a routing-tables JSON entry. Then attach the umbrella's own children as native sub-issues with `Set-IssueParent`, exactly as for any other umbrella.
 - **Triage (ungrouped open issue)** — if no umbrella applies, just create the issue. Under v2 the renderer **derives** Triage from parent-edge data (open ∧ no parent ∧ no sub-issues ∧ not listed in `umbrellas:`), so an ungrouped open issue is always a Triage **candidate** under the v2 derivation rules — it is never silently excluded from the board count, though it may fall below the cap-5 rendering fold (see Caveat below). The `--label triage` flag is now **optional/advisory** (a human-readable hint only); it is **no longer load-bearing** for Triage placement, because v2 removed the triage-label query entirely. **Caveat**: Triage is capped at 5 issues and sorted priority-first (`Get-PriorityKey` order). An unlabeled issue resolves to `Get-PriorityKey = 3` (lowest rank tier) and may fall below the fold if the Triage bucket is already full. See [Documents/Design/control-tower-v2.md](../../Documents/Design/control-tower-v2.md) for cap and ranking mechanics.
 
 ```powershell
-# CORRECT — umbrella child (use the canonical Add-FollowUpIssue helper):
+# CORRECT — umbrella child (create the issue, then attach it as an existing child with Set-IssueParent):
 $url = gh issue create --title "..." --body "..." --label "priority: medium"
-# Extract number and attach to umbrella using the canonical helper:
+# Extract number and attach the already-created issue to the umbrella with Set-IssueParent:
 $issueNum = $url -replace '.*/', ''
-pwsh skills/safe-operations/scripts/Add-FollowUpIssue.ps1 -ParentIssueNumber 425 -ChildIssueNumber $issueNum
+pwsh skills/safe-operations/scripts/Set-IssueParent.ps1 -ParentIssueNumber 425 -ChildIssueNumber $issueNum
 
 # CORRECT — new umbrella: create it, insert its number into sequence.yaml umbrellas: at
 # the right rank, then attach its children as sub-issues. The sequence.yaml edit is
@@ -145,14 +145,14 @@ Before every `gh issue create` or `Add-FollowUpIssue` call, the agent **must** m
 
 **(a) What priority label to apply** — the label controls `Get-PriorityKey` rank within Triage and umbrella children. A deliberate choice of `priority: low` (or no label, which resolves to the lowest rank tier) is a valid and acceptable outcome when the issue genuinely represents low-urgency work.
 
-**(b) Parent-or-standalone** — attach to an active umbrella via `Add-FollowUpIssue`, or leave as a standalone issue that auto-derives into Triage. A deliberate "low priority / standalone / may not stay on board" decision is a valid and acceptable outcome.
+**(b) Parent-or-standalone** — attach to an active umbrella via `Set-IssueParent`, or leave as a standalone issue that auto-derives into Triage. A deliberate "low priority / standalone / may not stay on board" decision is a valid and acceptable outcome.
 
 **Lever mapping — what the filer controls and its board effect**:
 
 | Lever | Mechanism | Board effect |
 | --- | --- | --- |
 | **Priority label** (`--label priority:h/m/l`) | Sets `Get-PriorityKey` = 0 (high), 1 (medium), or 2 (low) | Affects rank/sort order within Triage or umbrella children; no label → `Get-PriorityKey = 3` (lowest tier, may fall below Triage fold if bucket is full) |
-| **Parent edge** (`Add-FollowUpIssue -ParentIssueNumber N`) | Attaches issue as ActiveChildren of a tracked umbrella | Places issue in the umbrella's children section; requires a spec-listed active umbrella |
+| **Parent edge** (`Set-IssueParent -ParentIssueNumber N`) | Attaches issue as ActiveChildren of a tracked umbrella | Places issue in the umbrella's children section; requires a spec-listed active umbrella |
 | **Standalone** (bare `gh issue create`) | No parent edge set | Auto-derives into Triage under v2 derivation rules |
 
 > **Render-derived buckets (NOT filer-controllable)**: RecentlyClosed, DriftWarnings, and IntegrityWarnings are computed by the renderer from issue state and relationship data — the filer cannot directly place an issue in these zones. See [Documents/Design/control-tower-v2.md](../../Documents/Design/control-tower-v2.md) for cap-5 and priority-ranking mechanics; do not copy those numbers or formulas here.
