@@ -736,7 +736,25 @@ function script:Get-PhaseContainmentCorpusRest {
                     try {
                         $data     = ($viewOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
                         $comments = @($data['comments'])
-                        $bodies   = @($comments | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_['body'] })
+                        # #772 D3: single aligned pass — extract body and
+                        # createdAt together for every surviving (non-null)
+                        # comment, mirroring the GraphQL comment loop
+                        # (Get-SurfaceACorpusGraphQL above). Building the two
+                        # arrays via independent pipelines was the desync
+                        # risk this replaces: a comment dropped by one
+                        # pipeline's filter but not the other would shift the
+                        # index pairing between Bodies and CreatedAtValues.
+                        $commentBodies    = [System.Collections.Generic.List[string]]::new()
+                        $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+                        foreach ($c in $comments) {
+                            if ($null -ne $c) {
+                                $commentBodies.Add([string]$c['body'])
+                                $cCreatedAt = if ($c.ContainsKey('createdAt')) { [string]$c['createdAt'] } else { '' }
+                                $commentCreatedAt.Add($cCreatedAt)
+                            }
+                        }
+                        $bodies          = $commentBodies.ToArray()
+                        $createdAtValues = $commentCreatedAt.ToArray()
                         # GH-8 fix: apply the same marker-presence gate the
                         # GraphQL path uses (Get-SurfaceACorpusGraphQL) before
                         # including this issue's tuple in the returned
@@ -749,7 +767,7 @@ function script:Get-PhaseContainmentCorpusRest {
                         $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$num\s*-->") -or
                                      ($allBodiesText -match "<!--\s*plan-issue-$num\s*-->")
                         if (-not $hasMarker) { continue }
-                        $tuples.Add(@{ Number = $num; Surface = 'issue'; Bodies = $bodies; CreatedAtValues = @() })
+                        $tuples.Add(@{ Number = $num; Surface = 'issue'; Bodies = $bodies; CreatedAtValues = $createdAtValues })
                     }
                     catch {
                         Write-Warning "phase-containment-rolling-history-core: REST failed to parse issue #$num comments: $_"
@@ -780,11 +798,22 @@ function script:Get-PhaseContainmentCorpusRest {
                     try {
                         $data     = ($viewOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
                         $comments = @($data['comments'])
+                        # #772 D3: single aligned pass — see the Surface A
+                        # rationale above (identical desync risk applies here).
+                        $commentBodies    = [System.Collections.Generic.List[string]]::new()
+                        $commentCreatedAt = [System.Collections.Generic.List[string]]::new()
+                        foreach ($c in $comments) {
+                            if ($null -ne $c) {
+                                $commentBodies.Add([string]$c['body'])
+                                $cCreatedAt = if ($c.ContainsKey('createdAt')) { [string]$c['createdAt'] } else { '' }
+                                $commentCreatedAt.Add($cCreatedAt)
+                            }
+                        }
+                        $bodies          = $commentBodies.ToArray()
+                        $createdAtValues = $commentCreatedAt.ToArray()
                         # Only scan PRs that have judge-rulings
-                        $allText  = $comments | Where-Object { $null -ne $_ } | ForEach-Object { [string]$_['body'] }
-                        if (-not (($allText -join "`n") -match '<!--\s*judge-rulings')) { continue }
-                        $bodies = @($allText)
-                        $tuples.Add(@{ Number = $num; Surface = 'pr'; Bodies = $bodies; CreatedAtValues = @() })
+                        if (-not (($bodies -join "`n") -match '<!--\s*judge-rulings')) { continue }
+                        $tuples.Add(@{ Number = $num; Surface = 'pr'; Bodies = $bodies; CreatedAtValues = $createdAtValues })
                     }
                     catch {
                         Write-Warning "phase-containment-rolling-history-core: REST failed to parse PR #$num comments: $_"
@@ -867,17 +896,23 @@ function Get-PhaseContainmentCommentCorpus {
         Get-PhaseContainmentHistory's fallback behavior. Does not use the
         1-hour cache (that cache stores parsed Entries, not raw bodies).
 
-        M12 note (issue #782 post-review, informational only — no behavior
-        change): under the REST fallback path (Source = 'rest'), every
-        tuple's CreatedAtValues is always an empty array. The REST discovery
-        helper (script:Get-PhaseContainmentCorpusRest) uses `gh issue/pr
-        view --json comments`, whose comment objects do not carry a
-        createdAt field the way the GraphQL path's `comments(first: 100) {
-        nodes { body createdAt } }` query does, so REST-sourced tuples
-        cannot populate per-comment timestamps. Callers that rely on
+        M12 note (issue #782 post-review; corrected by issue #772 D3 — the
+        original note below was factually wrong and is kept here, reworded,
+        so a future maintainer has the real history): under the REST
+        fallback path (Source = 'rest'), tuples now carry real per-comment
+        CreatedAtValues. `gh issue/pr view --json comments` DOES return a
+        createdAt field on every comment object — the pre-#772 REST
+        discovery helper (script:Get-PhaseContainmentCorpusRest) simply
+        never asked for/extracted it: it built each tuple's Bodies from the
+        comment list and hardcoded CreatedAtValues = @(), unlike the GraphQL
+        path's `comments(first: 100) { nodes { body createdAt } }` query,
+        which always extracted both. #772 D3 closed that gap with a single
+        aligned pass over the surviving (non-null) comments for both REST
+        surfaces — mirroring the GraphQL comment loop — so body[] and
+        createdAt[] stay index-paired and callers that rely on
         CreatedAtValues (e.g. Invoke-PhaseContainmentDedup's latest-wins
-        comparison) degrade gracefully under REST (empty string per entry),
-        but should not expect real timestamps when Source = 'rest'.
+        comparison) now get real timestamps under REST fallback too, not
+        just under GraphQL.
     .PARAMETER RepoOwner
         GitHub repository owner (e.g., 'Grimblaz'). Resolved via 'gh repo view' if not supplied.
     .PARAMETER RepoName

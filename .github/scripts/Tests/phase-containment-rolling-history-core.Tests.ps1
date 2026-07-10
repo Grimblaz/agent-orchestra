@@ -1391,3 +1391,250 @@ Describe 'Get-PhaseContainmentCommentCorpus REST fallback — PF2-F2 regression:
         $result.Source | Should -Be 'rest'
     }
 }
+
+# ---------------------------------------------------------------------------
+# Get-PhaseContainmentCorpusRest / Get-PhaseContainmentEntriesRest — aligned
+# createdAt extraction (issue #772 D3). Before the fix, both REST surfaces
+# extracted only comment `body` and hardcoded CreatedAtValues = @(), so a
+# REST-sourced entry's createdAt was always ''. The M12 docstring above
+# Get-PhaseContainmentCommentCorpus falsely claimed `gh issue/pr view --json
+# comments` does not carry a createdAt field — it does; the code simply never
+# extracted it.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentEntriesRest — aligned createdAt extraction (#772 D3)' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'a REST-sourced entry (issue surface) carries a real, non-empty createdAt value' {
+        $issueBody = @"
+<!-- plan-issue-980 -->
+<!-- phase-containment-980 -->
+finding_key: plan-stress-test:980:F1
+introduced_phase: plan
+catchable_phase: plan
+caught_stage: plan-stress-test
+escape_distance: 0
+severity: low
+systemic_fix_type: plan-template
+category: pattern
+apparatus_meta: false
+<!-- /phase-containment-980 -->
+"@
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') {
+                return (@(@{ number = 980 }) | ConvertTo-Json)
+            }
+            if ($joined -match 'issue view 980') {
+                return (@{ comments = @(@{ body = $issueBody; createdAt = '2024-03-01T11:30:00Z' }) } | ConvertTo-Json -Depth 6)
+            }
+            if ($joined -match 'pr list') { return '[]' }
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-PhaseContainmentEntriesRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $entry = $result | Where-Object { $_['finding_key'] -eq 'plan-stress-test:980:F1' }
+        $entry | Should -Not -BeNullOrEmpty
+        # "Real" createdAt: non-empty and actually parses as a date. Not
+        # asserting byte-exact string equality against the mock literal —
+        # ConvertFrom-Json -AsHashtable auto-parses ISO-8601-looking JSON
+        # string values into [datetime] before the code casts them back to
+        # [string], so the round-tripped literal format is locale-dependent;
+        # only "real, parseable timestamp" is the D3 requirement, which is
+        # what Invoke-PhaseContainmentDedup's latest-wins comparison needs.
+        $entry['createdAt'] | Should -Not -BeNullOrEmpty
+        { [datetime]::Parse($entry['createdAt']) } | Should -Not -Throw
+    }
+
+    It 'a REST-sourced entry (PR surface) carries a real, non-empty createdAt value' {
+        $prBody = @"
+<!-- judge-rulings pr=981 -->
+<!-- phase-containment-981 -->
+finding_key: code-review:981:F1
+introduced_phase: plan
+catchable_phase: plan
+caught_stage: code-review
+escape_distance: 1
+severity: low
+systemic_fix_type: plan-template
+category: pattern
+apparatus_meta: false
+<!-- /phase-containment-981 -->
+"@
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') { return '[]' }
+            if ($joined -match 'pr list') {
+                return (@(@{ number = 981 }) | ConvertTo-Json)
+            }
+            if ($joined -match 'pr view 981') {
+                return (@{ comments = @(@{ body = $prBody; createdAt = '2024-03-02T09:15:00Z' }) } | ConvertTo-Json -Depth 6)
+            }
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-PhaseContainmentEntriesRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $entry = $result | Where-Object { $_['finding_key'] -eq 'code-review:981:F1' }
+        $entry | Should -Not -BeNullOrEmpty
+        $entry['createdAt'] | Should -Not -BeNullOrEmpty
+        { [datetime]::Parse($entry['createdAt']) } | Should -Not -Throw
+    }
+}
+
+Describe 'Invoke-PhaseContainmentDedup — REST latest-wins (#772 D3)' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'picks the later-createdAt REST entry for the same finding_key, not just the first-seen entry' {
+        # Two comments on the same issue re-annotate the SAME finding_key —
+        # the second (later createdAt) must win, matching Invoke-
+        # PhaseContainmentDedup's documented latest-wins contract. Before the
+        # D3 fix, both REST entries would carry createdAt = '' (indistinguishable),
+        # so dedup fell back to whichever entry happened to be inserted last
+        # in $best (a first/last-seen artifact, not a real latest-wins compare).
+        $olderBlock = @"
+<!-- plan-issue-982 -->
+<!-- phase-containment-982 -->
+finding_key: plan-stress-test:982:F1
+introduced_phase: plan
+catchable_phase: plan
+caught_stage: plan-stress-test
+escape_distance: 0
+severity: low
+systemic_fix_type: plan-template
+category: pattern
+apparatus_meta: false
+<!-- /phase-containment-982 -->
+"@
+        $newerBlock = @"
+<!-- phase-containment-982 -->
+finding_key: plan-stress-test:982:F1
+introduced_phase: plan
+catchable_phase: plan
+caught_stage: plan-stress-test
+escape_distance: 0
+severity: high
+systemic_fix_type: plan-template
+category: pattern
+apparatus_meta: false
+<!-- /phase-containment-982 -->
+"@
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') {
+                return (@(@{ number = 982 }) | ConvertTo-Json)
+            }
+            if ($joined -match 'issue view 982') {
+                return (@{
+                    comments = @(
+                        @{ body = $newerBlock; createdAt = '2024-04-05T08:00:00Z' },
+                        @{ body = $olderBlock; createdAt = '2024-04-01T08:00:00Z' }
+                    )
+                } | ConvertTo-Json -Depth 6)
+            }
+            if ($joined -match 'pr list') { return '[]' }
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $rawEntries = script:Get-PhaseContainmentEntriesRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $deduped = Invoke-PhaseContainmentDedup -RawEntries $rawEntries
+        $winner = $deduped | Where-Object { $_['finding_key'] -eq 'plan-stress-test:982:F1' }
+
+        $winner | Should -Not -BeNullOrEmpty
+        # The newer-createdAt entry (severity high) must win over the
+        # older-createdAt entry (severity low), regardless of array order.
+        # This is the load-bearing assertion: before the D3 fix, both REST
+        # entries carried createdAt = '' (indistinguishable), so Invoke-
+        # PhaseContainmentDedup's Parse-based comparison always failed
+        # (caught, warned) and dedup fell back to whichever entry happened
+        # to already occupy $best — a first/last-seen artifact, not a real
+        # latest-wins compare.
+        $winner['severity'] | Should -Be 'high'
+        $winner['createdAt'] | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-PhaseContainmentCorpusRest — null-comment alignment (#772 D3)' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'keeps Bodies and CreatedAtValues correctly paired by index when a null comment entry is filtered' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue list') {
+                return (@(@{ number = 983 }) | ConvertTo-Json)
+            }
+            if ($joined -match 'issue view 983') {
+                # A $null comment entry sits between two real comments. If the
+                # aligned pass desyncs (e.g. two independent Where-Object/
+                # ForEach-Object pipelines), Bodies[i] and CreatedAtValues[i]
+                # would no longer describe the same surviving comment.
+                return (@{
+                    comments = @(
+                        @{ body = '<!-- plan-issue-983 -->'; createdAt = '2024-05-01T00:00:00Z' },
+                        $null,
+                        @{ body = 'second surviving comment'; createdAt = '2024-05-02T00:00:00Z' }
+                    )
+                } | ConvertTo-Json -Depth 6)
+            }
+            if ($joined -match 'pr list') { return '[]' }
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $tuples = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $tuple = $tuples | Where-Object { $_['Number'] -eq 983 }
+        $tuple | Should -Not -BeNullOrEmpty
+
+        $bodies = @($tuple['Bodies'])
+        $createdAtValues = @($tuple['CreatedAtValues'])
+
+        # The null entry must be dropped, not left as a gap — both arrays
+        # must have exactly the 2 surviving comments, index-aligned.
+        $bodies.Count | Should -Be 2
+        $createdAtValues.Count | Should -Be 2
+        $bodies[0] | Should -Be '<!-- plan-issue-983 -->'
+        $bodies[1] | Should -Be 'second surviving comment'
+        # Alignment check: createdAtValues[i] must describe the SAME
+        # surviving comment as bodies[i]. Not asserting byte-exact string
+        # equality against the mock literal — ConvertFrom-Json -AsHashtable
+        # auto-parses ISO-8601-looking JSON string values into [datetime]
+        # before the code casts them back to [string], so the round-tripped
+        # literal format is locale-dependent. Both values must be real,
+        # parseable timestamps and preserve the mock's chronological order
+        # (comment 1 before comment 2) — a desynced pairing (e.g. two
+        # independent filter pipelines dropping the null at different
+        # positions) would break this ordering or leave an empty string.
+        $createdAtValues[0] | Should -Not -BeNullOrEmpty
+        $createdAtValues[1] | Should -Not -BeNullOrEmpty
+        [datetime]::Parse($createdAtValues[0]) | Should -BeLessThan ([datetime]::Parse($createdAtValues[1]))
+    }
+}
