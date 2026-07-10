@@ -77,6 +77,35 @@ _end of comment_
     }
 }
 
+Describe 'Get-CostBaselineHarvestPersistedTokenSum (M4 post-review fix)' {
+    It 'prefers the parsed totals.tokens bucket when present' {
+        $entry = @{
+            totals = @{ tokens = @{ input = 1000; output = 500; cache_creation = 0; cache_read = 0 } }
+            ports  = @{ 'implement-code' = @{ tokens = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 } } }
+        }
+        script:Get-CostBaselineHarvestPersistedTokenSum -Entry $entry | Should -Be 1500
+    }
+
+    It 'falls back to the ports-only sum when totals.tokens is absent (pre-M4 persisted entries)' {
+        $entry = @{
+            ports = @{ 'implement-code' = @{ tokens = @{ input = 100; output = 50; cache_creation = 0; cache_read = 0 } } }
+        }
+        script:Get-CostBaselineHarvestPersistedTokenSum -Entry $entry | Should -Be 150
+    }
+
+    It 'falls back to the ports-only sum when totals exists but has no tokens key' {
+        $entry = @{
+            totals = @{ cost_estimate_usd = 0.05 }
+            ports  = @{ 'implement-code' = @{ tokens = @{ input = 20; output = 10; cache_creation = 0; cache_read = 0 } } }
+        }
+        script:Get-CostBaselineHarvestPersistedTokenSum -Entry $entry | Should -Be 30
+    }
+
+    It 'returns 0 for a null entry' {
+        script:Get-CostBaselineHarvestPersistedTokenSum -Entry $null | Should -Be 0
+    }
+}
+
 Describe 'Invoke-CostBaselineHarvest' {
 
     Context 'selection filter' {
@@ -290,7 +319,7 @@ Describe 'Invoke-CostBaselineHarvest' {
                 }
                 if ($joined -match 'pr view \d+ --json comments') {
                     $body = New-HarvestCompositeCommentBody -Pr 910
-                    return (@{ comments = @(@{ body = $body }) } | ConvertTo-Json -Depth 6 -Compress)
+                    return (@{ comments = @(@{ body = $body; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
                 }
                 return ''
             }
@@ -380,7 +409,7 @@ Describe 'Invoke-CostBaselineHarvest' {
                     return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/splice"}'
                 }
                 if ($joined -match "pr view $pr --json comments") {
-                    return (@{ comments = @(@{ body = $originalBody }) } | ConvertTo-Json -Depth 6 -Compress)
+                    return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
                 }
                 return ''
             }
@@ -426,7 +455,7 @@ Describe 'Invoke-CostBaselineHarvest' {
                     return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/stamp"}'
                 }
                 if ($joined -match "pr view $pr --json comments") {
-                    return (@{ comments = @(@{ body = $originalBody }) } | ConvertTo-Json -Depth 6 -Compress)
+                    return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
                 }
                 return ''
             }
@@ -458,8 +487,15 @@ Describe 'Invoke-CostBaselineHarvest' {
             $script:UpsertedBody | Should -Match 'capture_point: pr-creation-mid-session'
         }
 
-        It 'leaves the row completely untouched when the re-walk finds nothing usable' {
+        It 'stamps upgrade_attempted_at when the re-walk finds nothing usable, so it exits future scans (M11)' {
+            # Issue #824 post-review fix (M11): an empty re-walk used to leave
+            # the row completely untouched, which meant it permanently
+            # re-consumed the one-per-startup budget and starved every
+            # candidate behind it. It must now reach the SAME terminal-state
+            # stamp mechanism used for "still partial"/"lower token count".
             $pr = 922
+            $originalBody = New-HarvestCompositeCommentBody -Pr $pr -PortReportsMarker '### Port Reports (must survive empty-rewalk stamp)'
+
             function global:Get-CostRollingHistory {
                 return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
             }
@@ -467,21 +503,35 @@ Describe 'Invoke-CostBaselineHarvest' {
             function global:Test-CostWalkerSessionTranscriptExists { return $true }
             function global:gh {
                 param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
                 $global:LASTEXITCODE = 0
-                return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/nothing"}'
+                if ($joined -match "pr view $pr --json state") {
+                    return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/nothing"}'
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                return ''
             }
             function global:Invoke-CostSessionRender {
                 param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
                 return @{ CostSection = ''; Completeness = @{}; TokenSum = 0 }
             }
-            $script:UpsertCalled = $false
-            function global:Find-OrUpsertComment { $script:UpsertCalled = $true; return $null }
+            $script:UpsertedBody = $null
+            function global:Find-OrUpsertComment {
+                param($Type, $Number, $Marker, $Body)
+                $script:UpsertedBody = $Body
+                return $null
+            }
 
             $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
 
             $result.Promoted | Should -Be $false
             $result.Signal | Should -Be "upgrade expected for #$pr — transcript unavailable"
-            $script:UpsertCalled | Should -Be $false
+            $script:UpsertedBody | Should -Not -BeNullOrEmpty
+            $script:UpsertedBody | Should -Match '### Port Reports \(must survive empty-rewalk stamp\)'
+            $script:UpsertedBody | Should -Match 'upgrade_attempted_at: \d{4}-\d{2}-\d{2}T'
+            (@([regex]::Matches($script:UpsertedBody, '<!--\s*cost-pattern-data')).Count) | Should -Be 1
         }
     }
 
@@ -546,6 +596,265 @@ Describe 'Invoke-CostBaselineHarvest' {
 
             $script:RenderCallCount | Should -Be 1
             $result.Pr | Should -Be 941
+        }
+    }
+
+    Context 'post-review fix (M2/M6/M8/M15/M19)' {
+        It 'sets Console.OutputEncoding to UTF-8 before fetching the composite comment body (M2 mojibake guard)' {
+            $originalEncoding = [Console]::OutputEncoding
+            try {
+                [Console]::OutputEncoding = [System.Text.Encoding]::ASCII
+
+                $pr = 950
+                function global:Get-CostRollingHistory {
+                    return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+                }
+                function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+                function global:Test-CostWalkerSessionTranscriptExists { return $true }
+                $script:ObservedEncoding = $null
+                function global:gh {
+                    param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                    $joined = $Args -join ' '
+                    $global:LASTEXITCODE = 0
+                    if ($joined -match "pr view $pr --json state") {
+                        return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/enc"}'
+                    }
+                    if ($joined -match "pr view $pr --json comments") {
+                        $script:ObservedEncoding = [Console]::OutputEncoding
+                        $body = New-HarvestCompositeCommentBody -Pr $pr
+                        return (@{ comments = @(@{ body = $body; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+                    }
+                    return ''
+                }
+                function global:Invoke-CostSessionRender {
+                    param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                    return @{ CostSection = ''; Completeness = @{}; TokenSum = 0 }
+                }
+
+                $null = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+                $script:ObservedEncoding | Should -Not -BeNullOrEmpty
+                $script:ObservedEncoding.WebName | Should -Be 'utf-8'
+            }
+            finally {
+                [Console]::OutputEncoding = $originalEncoding
+            }
+        }
+
+        It 'selects the earliest (lowest REST id) marker match, matching what Find-OrUpsertComment will PATCH, not the last chronological match (M6)' {
+            $pr = 960
+            $earliestBody = New-HarvestCompositeCommentBody -Pr $pr -PortReportsMarker '### EARLIEST (must be the splice target)'
+            $latestBody = New-HarvestCompositeCommentBody -Pr $pr -PortReportsMarker '### LATEST (duplicate, must NOT be spliced)'
+
+            function global:Get-CostRollingHistory {
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/dup"}'
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{
+                            comments = @(
+                                @{ id = 'IC_1'; url = "https://github.com/o/r/pull/$pr#issuecomment-1001"; body = $earliestBody; authorAssociation = 'OWNER' },
+                                @{ id = 'IC_2'; url = "https://github.com/o/r/pull/$pr#issuecomment-2002"; body = $latestBody; authorAssociation = 'OWNER' }
+                            )
+                        } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                return @{
+                    CostSection  = "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: end-of-session`nports:`n  - name: implement-code`n-->"
+                    Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
+                    TokenSum     = 999
+                }
+            }
+            $script:UpsertedBody = $null
+            function global:Find-OrUpsertComment {
+                param($Type, $Number, $Marker, $Body)
+                $script:UpsertedBody = $Body
+                return $null
+            }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            $result.Promoted | Should -Be $true
+            $script:UpsertedBody | Should -Match '### EARLIEST \(must be the splice target\)'
+            $script:UpsertedBody | Should -Not -Match '### LATEST'
+        }
+
+        It 'refreshes the rolling-history cache after a successful STAMP write too, not only after promotion (M8 part a)' {
+            $pr = 980
+            $originalBody = New-HarvestCompositeCommentBody -Pr $pr -PortReportsMarker '### Port Reports (stamp-refresh)'
+
+            function global:Get-CostRollingHistory {
+                param([switch]$ForceRefresh)
+                if ($ForceRefresh) { $script:ForceRefreshCallCount++ }
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            $script:ForceRefreshCallCount = 0
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/stamp-refresh"}'
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                return @{
+                    CostSection  = "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: pr-creation-mid-session`nports:`n  - name: implement-code`n-->"
+                    Completeness = @{ completeness = 'partial'; capture_point = 'pr-creation-mid-session' }
+                    TokenSum     = 1
+                }
+            }
+            function global:Find-OrUpsertComment { return $null }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            $result.Signal | Should -Be "upgrade expected for #$pr — still partial"
+            $script:ForceRefreshCallCount | Should -Be 1
+        }
+
+        It 'replaces an existing upgrade_attempted_at line instead of appending a duplicate (M8 part b idempotent stamp)' {
+            $pr = 981
+            $sectionWithExistingStamp = "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: pr-creation-mid-session`nupgrade_attempted_at: 2026-06-01T00:00:00Z`nports:`n  - name: implement-code`n-->"
+            $originalBody = New-HarvestCompositeCommentBody -Pr $pr -PortReportsMarker '### Port Reports (idempotent stamp)' -CostSection $sectionWithExistingStamp
+
+            function global:Get-CostRollingHistory {
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/idempotent"}'
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                return @{
+                    CostSection  = "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: pr-creation-mid-session`nports:`n  - name: implement-code`n-->"
+                    Completeness = @{ completeness = 'partial'; capture_point = 'pr-creation-mid-session' }
+                    TokenSum     = 1
+                }
+            }
+            $script:UpsertedBody = $null
+            function global:Find-OrUpsertComment {
+                param($Type, $Number, $Marker, $Body)
+                $script:UpsertedBody = $Body
+                return $null
+            }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            $result.Signal | Should -Be "upgrade expected for #$pr — still partial"
+            $script:UpsertedBody | Should -Match '### Port Reports \(idempotent stamp\)'
+            (@([regex]::Matches($script:UpsertedBody, 'upgrade_attempted_at:'))).Count | Should -Be 1
+            $script:UpsertedBody | Should -Not -Match '2026-06-01T00:00:00Z'
+        }
+
+        It 'skips the write and signals composite comment write failed when the section changed since the earlier read (M15 concurrency guard)' {
+            $pr = 990
+            $originalBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: pr-creation-mid-session`nports:`n  - name: implement-code`n-->"
+            $changedBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: end-of-session`nports:`n  - name: implement-code`n  - name: someone-else-raced-us`n-->"
+
+            function global:Get-CostRollingHistory {
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            $script:FetchCallCount = 0
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/race"}'
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    $script:FetchCallCount++
+                    $body = if ($script:FetchCallCount -eq 1) { $originalBody } else { $changedBody }
+                    return (@{ comments = @(@{ body = $body; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                return @{
+                    CostSection  = "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: end-of-session`nports:`n  - name: implement-code`n-->"
+                    Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
+                    TokenSum     = 999
+                }
+            }
+            $script:UpsertCalled = $false
+            function global:Find-OrUpsertComment { $script:UpsertCalled = $true; return $null }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            $result.Promoted | Should -Be $false
+            $result.Signal | Should -Be "upgrade expected for #$pr — composite comment write failed"
+            $script:UpsertCalled | Should -Be $false
+        }
+
+        It 'treats a composite comment from a non-authorized author association as not found (M19 fail-closed authorship check)' {
+            $pr = 970
+            $body = New-HarvestCompositeCommentBody -Pr $pr
+
+            function global:Get-CostRollingHistory {
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/forged"}'
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{ comments = @(@{ body = $body; authorAssociation = 'NONE' }) } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                return @{
+                    CostSection  = "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: end-of-session`nports:`n  - name: implement-code`n-->"
+                    Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
+                    TokenSum     = 999
+                }
+            }
+            $script:UpsertCalled = $false
+            function global:Find-OrUpsertComment { $script:UpsertCalled = $true; return $null }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            $result.Promoted | Should -Be $false
+            $result.Signal | Should -Be "upgrade expected for #$pr — composite comment unavailable"
+            $script:UpsertCalled | Should -Be $false
         }
     }
 

@@ -35,6 +35,19 @@
                                        Invoke-CostSessionRender's own
                                        transitive need for the rest of that
                                        lib file's contents)
+
+    NOTE (issue #824 post-review fix M6): this file's own private
+    script:Get-CostBaselineHarvestRestCommentId deliberately MIRRORS (rather
+    than dot-source-depends-on) find-or-upsert-comment.ps1's file-scope
+    Get-RestCommentId — same two-line REST-id extraction algorithm, kept in
+    sync by comment cross-reference. A hard dependency on that name was
+    rejected: find-or-upsert-comment.ps1 also defines the real
+    Find-OrUpsertComment, and pulling that definition into the same
+    dot-source scope as this file's own functions silently shadows Pester's
+    per-test `Find-OrUpsertComment` mocks (a nearer-scope function
+    definition wins over a same-named `function global:` override). See
+    Get-CostBaselineHarvestCompositeComment's own doc comment for why the
+    selection rule must still match Find-OrUpsertComment's exactly.
 #>
 
 # ---------------------------------------------------------------------------
@@ -46,19 +59,12 @@ function script:Get-CostBaselineHarvestPortsTokenSum {
     .SYNOPSIS
         Sums token counts across a parsed rolling-history entry's `ports` dict.
     .DESCRIPTION
-        Mirrors the ports-only $priorTokenSum derivation in
-        cost-session-render.ps1 (issue #824 s3): a rolling-history entry parsed
-        via ConvertFrom-CostPatternYaml has no `totals.tokens` (the parser never
-        extracts it — see cost-session-render.ps1's own comment on this), so the
-        comparable token sum for a PERSISTED candidate is the sum across its
-        per-port `tokens` buckets. This is the "persisted" side of the token
-        no-downgrade guard; the "re-walk" side comes straight from
-        Invoke-CostSessionRender's totals-first TokenSum.
-
-        M13 (issue #824 post-review fix): delegates the per-bucket token-field
-        summation to the relocated, shared script:Get-FCLTokenSumFromBucket
-        (lib/cost-fcl-helpers.ps1) instead of hardcoding its own copy of the
-        token-field list, so the two sums cannot drift out of sync.
+        Ports-only sum. Used as the fallback leg of
+        script:Get-CostBaselineHarvestPersistedTokenSum below when a persisted
+        entry predates the totals.tokens parser field (M4 fix) or never
+        recorded one. Delegates per-bucket summation to the relocated shared
+        script:Get-FCLTokenSumFromBucket (lib/cost-fcl-helpers.ps1, M13) so
+        this sum and the totals-side sum cannot drift out of sync.
     #>
     param([AllowNull()]$Ports)
 
@@ -73,6 +79,40 @@ function script:Get-CostBaselineHarvestPortsTokenSum {
         $sum += script:Get-FCLTokenSumFromBucket -Bucket $tokens
     }
     return $sum
+}
+
+function script:Get-CostBaselineHarvestPersistedTokenSum {
+    <#
+    .SYNOPSIS
+        Totals-first-with-ports-fallback token sum for a persisted rolling-history entry.
+    .DESCRIPTION
+        M4 fix (issue #824 post-review): the token no-downgrade guard originally
+        compared a totals-first re-walk sum (Invoke-CostSessionRender's TokenSum,
+        which includes orchestrator overhead + unattributed tokens outside any
+        port bucket) against a ports-only persisted sum — a structural mismatch
+        that made the guard pass almost unconditionally, defeating its purpose.
+
+        cost-rolling-history.ps1's ConvertFrom-CostPatternYaml now parses
+        totals.tokens (M4, same fix set), so this function mirrors the exact
+        totals-first-with-ports-fallback derivation already used at the capture
+        site (cost-session-render.ps1's own $currentTokenSum/$priorTokenSum
+        pattern): prefer the parsed totals.tokens bucket; fall back to the
+        ports-only sum only for entries that predate the parser fix or never
+        recorded a totals block.
+    #>
+    param([AllowNull()][hashtable]$Entry)
+
+    if ($null -eq $Entry) { return [long]0 }
+
+    $totals = $Entry['totals']
+    if ($null -ne $totals -and $totals -is [hashtable] -and $totals.ContainsKey('tokens')) {
+        $totalsTokens = $totals['tokens']
+        if ($null -ne $totalsTokens -and $totalsTokens -is [hashtable]) {
+            return [long](script:Get-FCLTokenSumFromBucket -Bucket $totalsTokens)
+        }
+    }
+
+    return [long](script:Get-CostBaselineHarvestPortsTokenSum -Ports $Entry['ports'])
 }
 
 function script:ConvertTo-CostBaselineHarvestUtcDate {
@@ -143,10 +183,54 @@ function script:Select-CostBaselineHarvestCandidates {
     return , $candidates.ToArray()
 }
 
+function script:Get-CostBaselineHarvestRestCommentId {
+    <#
+    .SYNOPSIS
+        Extracts the numeric REST comment id from a `gh ... --json comments`
+        comment object (issue #824 post-review fix M6).
+    .DESCRIPTION
+        Deliberately mirrors find-or-upsert-comment.ps1's file-scope
+        Get-RestCommentId — see this file's own top .NOTES for why this is a
+        local mirror rather than a dot-source dependency on that name. Keep
+        the two in sync: both extract the numeric id from the `#issuecomment-
+        <id>` suffix of the comment's `url`, falling back to a direct [long]
+        cast of `id` for callers that already supply a resolved numeric id.
+    #>
+    param([object]$Comment)
+
+    if ($Comment.url -and ([string]$Comment.url -match '#issuecomment-(\d+)$')) { return [long]$Matches[1] }
+    try { return [long]$Comment.id } catch { return $null }
+}
+
 function script:Get-CostBaselineHarvestCompositeComment {
     <#
     .SYNOPSIS
         Fetches the composite `<!-- frame-credit-ledger-$Pr -->` comment body for a PR.
+    .DESCRIPTION
+        M2 (issue #824 post-review fix): sets [Console]::OutputEncoding to
+        UTF-8 before reading gh's stdout — the established repo-wide guard
+        (see orchestra-spine.ps1:15) against Windows silently decoding a
+        `gh` child process's UTF-8 stdout via the OEM code page, which
+        corrupts non-ASCII characters (—, ⚠, etc.) in the composite
+        comment's untouched sections on every write-back.
+
+        M6 (issue #824 post-review fix): on a marker-matching duplicate,
+        selects the SAME comment Find-OrUpsertComment will actually PATCH —
+        the earliest (lowest REST id) match — via the same REST-id
+        extraction algorithm Find-OrUpsertComment itself uses (see
+        script:Get-CostBaselineHarvestRestCommentId above), so the two
+        selection rules cannot drift apart. Falls back to the first raw
+        (encounter-order) match only in the same no-resolvable-id edge case
+        where Find-OrUpsertComment itself gives up on patching and posts a
+        new comment instead.
+
+        M19 (issue #824 post-review fix): fail-closed authorship check,
+        mirroring the existing authorAssociation gate in
+        Resolve-FCLOverrideMarker (frame-credit-ledger-core.ps1) — a
+        matching comment from a non-OWNER/MEMBER/COLLABORATOR author (or one
+        with no resolvable authorAssociation) is treated as not-found, so an
+        arbitrary PR commenter cannot forge a capture_point/pr pair to steer
+        the harvest's one-per-startup budget at an arbitrary PR.
     .OUTPUTS
         [hashtable] @{ Found = [bool]; Body = [string]; Marker = [string] }
     #>
@@ -154,6 +238,8 @@ function script:Get-CostBaselineHarvestCompositeComment {
 
     $marker = "<!-- frame-credit-ledger-$Pr -->"
     $notFound = @{ Found = $false; Body = ''; Marker = $marker }
+
+    [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 
     $commentsJson = $null
     try { $commentsJson = & gh pr view $Pr --json comments 2>$null }
@@ -167,10 +253,27 @@ function script:Get-CostBaselineHarvestCompositeComment {
 
     if ($null -eq $parsed -or $null -eq $parsed.comments) { return $notFound }
 
-    $matching = @($parsed.comments | Where-Object { $null -ne $_ -and [string]$_.body -like "*$marker*" }) | Select-Object -Last 1
-    if ($null -eq $matching) { return $notFound }
+    $matching = @($parsed.comments | Where-Object { $null -ne $_ -and [string]$_.body -like "*$marker*" })
+    if ($matching.Count -eq 0) { return $notFound }
 
-    return @{ Found = $true; Body = [string]$matching.body; Marker = $marker }
+    $withIds = @($matching |
+        ForEach-Object { [PSCustomObject]@{ Comment = $_; RestId = script:Get-CostBaselineHarvestRestCommentId -Comment $_ } } |
+        Where-Object { $null -ne $_.RestId })
+    $selected = if ($withIds.Count -gt 0) {
+        (@($withIds | Sort-Object -Property RestId))[0].Comment
+    }
+    else {
+        $matching[0]
+    }
+
+    $authorizedAssociations = @('OWNER', 'MEMBER', 'COLLABORATOR')
+    $authorAssociation = if ($selected.PSObject.Properties['authorAssociation']) { [string]$selected.authorAssociation } else { '' }
+    if ([string]::IsNullOrWhiteSpace($authorAssociation) -or $authorAssociation.ToUpperInvariant() -notin $authorizedAssociations) {
+        [Console]::Error.WriteLine("cost-baseline-harvest: composite comment for PR $Pr matched marker but author association is '$authorAssociation' (not OWNER/MEMBER/COLLABORATOR) — treated as not found (fail-closed)")
+        return $notFound
+    }
+
+    return @{ Found = $true; Body = [string]$selected.body; Marker = $marker }
 }
 
 function script:Test-CostBaselineHarvestCandidateGate {
@@ -293,11 +396,24 @@ function script:Add-CostBaselineHarvestUpgradeAttemptedStamp {
         re-render the section — it stamps the row's EXISTING (persisted) section
         verbatim, since a stably-incomplete re-walk must not overwrite the
         visible content, only mark the row so future scans skip it.
+
+        M8 (issue #824 post-review fix, part b): idempotent stamp — replace
+        an existing `upgrade_attempted_at` line in place instead of
+        inserting a second one. A stale local rolling-history cache entry
+        (pre-refresh) can re-surface a candidate whose composite-comment
+        section was ALREADY stamped by an earlier write — this function's
+        caller always re-fetches the composite comment fresh via `gh pr
+        view` (live GitHub state, not the stale cache), so the section it
+        receives here may already carry the line.
     #>
     param(
         [Parameter(Mandatory)][string]$Section,
         [Parameter(Mandatory)][string]$TimestampIso
     )
+
+    if ($Section -match '(?m)^upgrade_attempted_at\s*:\s*.*$') {
+        return ($Section -replace '(?m)^upgrade_attempted_at\s*:\s*.*$', "upgrade_attempted_at: $TimestampIso")
+    }
 
     if ($Section -match '(?m)^ports\s*:\s*$') {
         return ($Section -replace '(?m)^ports\s*:\s*$', "upgrade_attempted_at: $TimestampIso`nports:")
@@ -305,6 +421,31 @@ function script:Add-CostBaselineHarvestUpgradeAttemptedStamp {
 
     # Fallback: no ports: line found (unexpected shape) — stamp just before the closing '-->'.
     return ($Section -replace '-->\s*$', "upgrade_attempted_at: $TimestampIso`n-->")
+}
+
+function script:Test-CostBaselineHarvestSectionStillCurrent {
+    <#
+    .SYNOPSIS
+        M15 (issue #824 post-review fix): cheap concurrency mitigation.
+    .DESCRIPTION
+        A single re-check immediately before the final write — not a lock or
+        retry loop. Re-fetches the composite comment one more time and
+        confirms it still contains the exact section text matched earlier;
+        if it does not (someone/something else already changed it since our
+        read), the caller treats this the same as a failed write: skip the
+        write, signal, do not retry, do not corrupt.
+    .OUTPUTS
+        [bool]
+    #>
+    param(
+        [Parameter(Mandatory)][int]$Pr,
+        [Parameter(Mandatory)][string]$ExpectedSectionText
+    )
+
+    $refetch = script:Get-CostBaselineHarvestCompositeComment -Pr $Pr
+    if ($null -eq $refetch -or -not $refetch['Found']) { return $false }
+
+    return $refetch['Body'].Contains($ExpectedSectionText)
 }
 
 # ---------------------------------------------------------------------------
@@ -333,11 +474,21 @@ function Invoke-CostBaselineHarvest {
         5. Promotes (section-splices the composite ledger comment in place)
            only when the re-walk classifies capture_point == 'end-of-session'
            AND its TokenSum >= the persisted candidate's ports-derived token
-           sum. Otherwise, a re-walk that produced real (non-empty) data is
-           stamped `upgrade_attempted_at` so it exits future scans instead of
-           re-consuming the one-re-walk-per-startup budget forever; a re-walk
-           that found nothing usable leaves the row completely untouched.
-        6. Refreshes the rolling-history cache after a successful promotion.
+           sum. Otherwise — whether the re-walk produced real (non-empty)
+           data that just didn't qualify, or found nothing usable at all
+           (issue #824 post-review fix M11) — the row is stamped
+           `upgrade_attempted_at` (idempotently; a pre-existing stamp line is
+           replaced, not duplicated — M8 part b) so it exits future scans
+           instead of re-consuming the one-re-walk-per-startup budget
+           forever.
+        6. Refreshes the rolling-history cache after a successful promotion
+           AND after a successful stamp write (issue #824 post-review fix
+           M8 part a — a stamped candidate must not re-qualify within the
+           cache's TTL). Immediately before either write, re-confirms the
+           composite comment still contains the exact section matched
+           earlier; a changed section is treated as a failed write and
+           skipped rather than risking a last-write-wins clobber of a
+           concurrent change (issue #824 post-review fix M15).
 
         Every failure path is fail-open: this function never throws to its
         caller and never leaves a partial/corrupt write.
@@ -427,12 +578,16 @@ function Invoke-CostBaselineHarvest {
             catch { $renderResult = $null }
 
             $reWalkCostSection = if ($null -ne $renderResult) { [string]$renderResult['CostSection'] } else { '' }
-            if ([string]::IsNullOrWhiteSpace($reWalkCostSection)) {
-                # Re-walk itself failed or found nothing usable — fail-open,
-                # leave the persisted row completely untouched (no write).
-                $result.Signal = "upgrade expected for #$candidatePr — transcript unavailable"
-                return $result
-            }
+            # M11 (issue #824 post-review fix): an empty re-walk (transcript
+            # unavailable / re-walk found nothing usable) can never promote —
+            # there is no rendered section to splice in — but it must still
+            # reach the SAME terminal-state stamp path below as "still
+            # partial" / "lower token count", so the candidate exits future
+            # scans. Previously this returned early with only a Signal set
+            # and no write, permanently re-consuming the
+            # one-re-walk-per-startup budget on a candidate that had
+            # genuinely been tried and starving every candidate behind it.
+            $reWalkIsEmpty = [string]::IsNullOrWhiteSpace($reWalkCostSection)
 
             $reWalkCompleteness = $renderResult['Completeness']
             $reWalkCapturePoint = if ($null -ne $reWalkCompleteness -and $reWalkCompleteness -is [hashtable] -and $reWalkCompleteness.ContainsKey('capture_point')) {
@@ -440,13 +595,13 @@ function Invoke-CostBaselineHarvest {
             }
             else { 'n/a' }
 
-            [long]$persistedTokenSum = script:Get-CostBaselineHarvestPortsTokenSum -Ports $candidate['ports']
+            [long]$persistedTokenSum = script:Get-CostBaselineHarvestPersistedTokenSum -Entry $candidate
             [long]$reWalkTokenSum = 0
             if ($null -ne $renderResult -and $renderResult.ContainsKey('TokenSum') -and $null -ne $renderResult['TokenSum']) {
                 $reWalkTokenSum = [long]$renderResult['TokenSum']
             }
 
-            $shouldPromote = ($reWalkCapturePoint -eq 'end-of-session') -and ($reWalkTokenSum -ge $persistedTokenSum)
+            $shouldPromote = (-not $reWalkIsEmpty) -and ($reWalkCapturePoint -eq 'end-of-session') -and ($reWalkTokenSum -ge $persistedTokenSum)
 
             $fetchResult = script:Get-CostBaselineHarvestCompositeComment -Pr $candidatePr
             if ($null -eq $fetchResult -or -not $fetchResult['Found']) {
@@ -469,6 +624,18 @@ function Invoke-CostBaselineHarvest {
                 # Get-CostRollingHistory's one-entry-per-block-bearing-body scan).
                 $newBody = script:Merge-CostBaselineHarvestSection -Body $compositeBody -SectionMatch $sectionMatch -Replacement $reWalkCostSection.TrimEnd()
 
+                # M15 (issue #824 post-review fix): cheap concurrency
+                # mitigation — a single re-check immediately before the
+                # write. If the composite comment no longer contains the
+                # exact section we matched, someone/something else already
+                # changed it since our read; skip the write and treat it the
+                # same as a failed write rather than risk a last-write-wins
+                # clobber of that concurrent change.
+                if (-not (script:Test-CostBaselineHarvestSectionStillCurrent -Pr $candidatePr -ExpectedSectionText $sectionMatch.Value)) {
+                    $result.Signal = "upgrade expected for #$candidatePr — composite comment write failed"
+                    return $result
+                }
+
                 $upserted = $false
                 try {
                     $null = Find-OrUpsertComment -Type 'pr' -Number $candidatePr -Marker $fetchResult['Marker'] -Body $newBody
@@ -486,19 +653,46 @@ function Invoke-CostBaselineHarvest {
                 }
             }
             else {
-                # Terminal-state handling (M3): a re-walk that produced real
-                # data but did not qualify for promotion (still partial, OR
-                # complete-but-lower-token) is stamped so it exits future scans
-                # instead of re-consuming the one-re-walk-per-startup budget on
-                # a row that may never promote (e.g. a null-tail/cross-tool row).
-                $reason = if ($reWalkCapturePoint -ne 'end-of-session') { 'still partial' } else { 'token count lower than persisted' }
+                # Terminal-state handling (M3, extended by M11): a re-walk
+                # that produced real data but did not qualify for promotion
+                # (still partial, OR complete-but-lower-token), OR an empty
+                # re-walk that found nothing usable at all, is stamped so it
+                # exits future scans instead of re-consuming the
+                # one-re-walk-per-startup budget on a row that may never
+                # promote (e.g. a null-tail/cross-tool row, or a transcript
+                # that has genuinely gone missing).
+                $reason =
+                if ($reWalkIsEmpty) { 'transcript unavailable' }
+                elseif ($reWalkCapturePoint -ne 'end-of-session') { 'still partial' }
+                else { 'token count lower than persisted' }
+
                 $timestampIso = [System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
                 $stampedSection = script:Add-CostBaselineHarvestUpgradeAttemptedStamp -Section $sectionMatch.Groups['section'].Value -TimestampIso $timestampIso
 
                 $newBody = script:Merge-CostBaselineHarvestSection -Body $compositeBody -SectionMatch $sectionMatch -Replacement $stampedSection
 
-                try { $null = Find-OrUpsertComment -Type 'pr' -Number $candidatePr -Marker $fetchResult['Marker'] -Body $newBody }
-                catch { }
+                # M15: same pre-write staleness re-check as the promote path.
+                if (-not (script:Test-CostBaselineHarvestSectionStillCurrent -Pr $candidatePr -ExpectedSectionText $sectionMatch.Value)) {
+                    $result.Signal = "upgrade expected for #$candidatePr — composite comment write failed"
+                    return $result
+                }
+
+                $stampUpserted = $false
+                try {
+                    $null = Find-OrUpsertComment -Type 'pr' -Number $candidatePr -Marker $fetchResult['Marker'] -Body $newBody
+                    $stampUpserted = $true
+                }
+                catch { $stampUpserted = $false }
+
+                # M8 (issue #824 post-review fix, part a): refresh the
+                # rolling-history cache after a successful STAMP write too,
+                # not only after promotion — otherwise a stamped candidate
+                # can re-qualify within the 1-hour TTL, re-spending the
+                # harvest budget and appending duplicate stamps (mitigated
+                # further by the idempotent-stamp fix, part b, above).
+                if ($stampUpserted) {
+                    try { $null = Get-CostRollingHistory -ForceRefresh } catch { }
+                }
 
                 $result.Signal = "upgrade expected for #$candidatePr — $reason"
             }
