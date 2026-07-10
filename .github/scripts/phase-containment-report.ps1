@@ -46,20 +46,27 @@ if ($NoCache) {
 
 $history = Get-PhaseContainmentHistory @fetchParams
 
-$entries   = @($history.Entries)
-$fetchedAt = $history.FetchedAt
-$source    = $history.Source
+$entries           = @($history.Entries)
+$fetchedAt         = $history.FetchedAt
+$source            = $history.Source
+$truncated         = $history.Truncated
+$invalidEntryCount = $history.InvalidEntryCount
 
 # ---- Compute rollup ----
 
-$rollup = Get-PhaseContainmentRollup -Entries $entries -WindowLabel "${WindowDays}d"
+$rollup = Get-PhaseContainmentRollup -Entries $entries -WindowLabel "${WindowDays}d" -Truncated:$truncated
 
 # ---- Render header ----
 
+$headerSuffix = if ($truncated) { ' (TRUNCATED — results incomplete)' } else { '' }
+
 Write-Output ''
 Write-Output 'Phase-Containment Escape-Rate Ledger'
-Write-Output "Window: ${WindowDays}d | Fetched: $($fetchedAt.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')) UTC | Source: $source"
+Write-Output "Window: ${WindowDays}d | Fetched: $($fetchedAt.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')) UTC | Source: $source$headerSuffix"
 Write-Output "Total entries processed: $($rollup.WindowEntryCount) | Apparatus-meta entries: $($rollup.ApparatusMetaCount)"
+if ($invalidEntryCount -gt 0) {
+    Write-Output "WARNING: $invalidEntryCount phase-containment block(s) dropped as invalid/unparseable during this fetch — see gh Action run logs for details."
+}
 Write-Output ''
 
 # ---- Render per-stage results ----
@@ -118,6 +125,12 @@ foreach ($stageName in $stageOrder) {
         }
         elseif ($stage.RelaxationEligible -eq $true) {
             Write-Output "  Relaxation signal:  ELIGIBLE (escape_rate ~0, no critical findings)"
+        }
+        elseif ($stage.RelaxationEligibleReason -eq 'fetch truncated') {
+            # P9: checked BEFORE the EscapeRate reason-guess below so a
+            # truncated run never falls through to the misleading
+            # "NOT ELIGIBLE (escape_rate > 0)" text.
+            Write-Output "  Relaxation signal:  WITHHELD (fetch truncated)"
         }
         else {
             # Determine reason

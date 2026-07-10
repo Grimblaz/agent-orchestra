@@ -408,6 +408,15 @@ function Invoke-PhaseContainmentEmissionCheckCorpus {
         return $reportBody
     }
 
+    if ($corpus.Truncated) {
+        # Unlike the timeout early-return above (which scans nothing), a
+        # Truncated corpus still carries partial tuples and must still be
+        # scanned -- render an incomplete banner and fall through instead of
+        # returning early.
+        $lines.Add("INCOMPLETE: corpus fetch truncated (source=$($corpus.Source)) -- results below are partial, not exhaustive. This is NOT a clean-run signal.")
+        $lines.Add('')
+    }
+
     $scannedCount = 0
     $sustainedGrandTotal = 0
     $blocksGrandTotal = 0

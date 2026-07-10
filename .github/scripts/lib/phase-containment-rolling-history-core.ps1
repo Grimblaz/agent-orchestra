@@ -146,8 +146,10 @@ function Invoke-PhaseContainmentCommentScan {
         For each body, calls Get-PhaseContainmentBlock with the given ID.
         Valid blocks are parsed via ConvertFrom-PhaseContainmentYaml and
         validated via Test-PhaseContainmentEntry. Invalid entries emit a
-        warning and are skipped. Returns array of entry hashtables with
-        additional metadata fields appended.
+        warning and are skipped. Returns a carrier object with the parsed
+        entry hashtables plus a count of every dropped block (issue #772
+        D1/P8 — both the parse-failure drop and every validation-failure
+        drop, Rules 1-12, count toward InvalidEntryCount, not just Rule 12).
     .PARAMETER CommentBodies
         Array of comment body strings to scan.
     .PARAMETER IssueOrPrNumber
@@ -158,10 +160,12 @@ function Invoke-PhaseContainmentCommentScan {
         Optional parallel array of createdAt strings (ISO 8601), one per body.
         If not supplied, entries get an empty string for createdAt.
     .OUTPUTS
-        [array] Parsed, validated entry hashtables with appended metadata.
+        [PSCustomObject] with:
+          Entries           [array] — parsed, validated entry hashtables with appended metadata.
+          InvalidEntryCount [int]   — count of blocks dropped (parse failure + every validation failure).
     #>
     [CmdletBinding()]
-    [OutputType([array])]
+    [OutputType([PSCustomObject])]
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$CommentBodies,
         [Parameter(Mandatory)][int]$IssueOrPrNumber,
@@ -171,6 +175,7 @@ function Invoke-PhaseContainmentCommentScan {
 
     $results = [System.Collections.Generic.List[hashtable]]::new()
     $id      = [string]$IssueOrPrNumber
+    $invalidEntryCount = 0
 
     for ($i = 0; $i -lt $CommentBodies.Count; $i++) {
         $body = $CommentBodies[$i]
@@ -183,12 +188,14 @@ function Invoke-PhaseContainmentCommentScan {
             $parsed = ConvertFrom-PhaseContainmentYaml -Yaml $yamlText
             if ($null -eq $parsed) {
                 Write-Warning "phase-containment-rolling-history-core: failed to parse block in comment $i for ID $id"
+                $invalidEntryCount++
                 continue
             }
 
             $validation = Test-PhaseContainmentEntry -Entry $parsed
             if (-not $validation.IsValid) {
                 Write-Warning "phase-containment-rolling-history-core: invalid phase-containment block in comment $i for ID $id — $($validation.Errors -join '; ')"
+                $invalidEntryCount++
                 continue
             }
 
@@ -207,7 +214,37 @@ function Invoke-PhaseContainmentCommentScan {
         }
     }
 
-    return , $results.ToArray()
+    return [PSCustomObject]@{
+        Entries           = $results.ToArray()
+        InvalidEntryCount = $invalidEntryCount
+    }
+}
+
+# -------------------------------------------------------------------------
+# Private: normalize a cache-payload timestamp field back to a round-
+# trippable ISO 8601 string.
+#
+# Bug fix (discovered while implementing #772 P7 cache-survival coverage):
+# ConvertFrom-Json -AsHashtable auto-parses an ISO-8601-looking JSON string
+# value (like the cache's `generated_at`) into a [datetime] with the correct
+# Kind (Utc, for a 'Z'-suffixed literal). A naive [string] cast on THAT
+# [datetime] uses the current-culture default format, which drops both the
+# Kind marker and the timezone offset (e.g. "2026-07-10T15:11:00Z" becomes
+# "07/10/2026 15:11:00"). Re-parsing that lossy string with
+# DateTimeStyles.RoundtripKind then yields Kind=Unspecified, and every
+# downstream `.ToUniversalTime()` call silently misinterprets it as LOCAL
+# time — corrupting the value by the local UTC offset. On a non-UTC machine
+# this makes a freshly-written cache read back as "future-dated" (or wildly
+# stale, depending on offset direction) and rejected every time, silently
+# defeating the entire 1-hour cache. Formatting an already-parsed [datetime]
+# with the 'o' (round-trip) specifier preserves Kind/offset through the
+# string round-trip.
+# -------------------------------------------------------------------------
+
+function script:ConvertTo-PhaseContainmentIsoString {
+    param([AllowNull()]$Value)
+    if ($Value -is [datetime]) { return $Value.ToString('o') }
+    return [string]$Value
 }
 
 # -------------------------------------------------------------------------
@@ -224,7 +261,7 @@ function script:Read-PhaseContainmentCache {
         $data = $raw | ConvertFrom-Json -AsHashtable -ErrorAction Stop
         if ($null -eq $data -or -not $data.ContainsKey('generated_at')) { return $null }
 
-        $isFresh = Test-PhaseContainmentCacheFresh -GeneratedAtUtcString ([string]$data['generated_at'])
+        $isFresh = Test-PhaseContainmentCacheFresh -GeneratedAtUtcString (script:ConvertTo-PhaseContainmentIsoString -Value $data['generated_at'])
         if (-not $isFresh) { return $null }
 
         return $data
@@ -242,7 +279,8 @@ function script:Read-PhaseContainmentCache {
 function script:Write-PhaseContainmentCache {
     param(
         [Parameter(Mandatory)][string]$CachePath,
-        [Parameter(Mandatory)][array]$Entries
+        [Parameter(Mandatory)][array]$Entries,
+        [int]$InvalidEntryCount = 0
     )
     try {
         $cacheDir = Split-Path -Parent $CachePath
@@ -250,8 +288,9 @@ function script:Write-PhaseContainmentCache {
             New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
         }
         $payload = @{
-            generated_at = (Get-Date).ToUniversalTime().ToString('o')
-            entries      = $Entries
+            generated_at        = (Get-Date).ToUniversalTime().ToString('o')
+            entries             = $Entries
+            invalid_entry_count = $InvalidEntryCount
         }
         $payload | ConvertTo-Json -Depth 20 | Set-Content -Path $CachePath -Encoding UTF8
     }
@@ -281,6 +320,7 @@ function script:Get-SurfaceACorpusGraphQL {
 
     # Each tuple: @{ Number = <int>; Surface = 'issue'; Bodies = <string[]>; CreatedAtValues = <string[]> }
     $tuples = [System.Collections.Generic.List[hashtable]]::new()
+    $truncated = $false
 
     # Search for recently-closed issues in the window
     $since = (Get-Date).ToUniversalTime().AddDays(-$WindowDays).ToString('yyyy-MM-dd')
@@ -293,6 +333,7 @@ function script:Get-SurfaceACorpusGraphQL {
         while ($searchHasNext) {
             if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
                 Write-Warning "phase-containment-rolling-history-core: timed out paginating Surface A search"
+                $truncated = $true
                 break
             }
 
@@ -326,13 +367,13 @@ function script:Get-SurfaceACorpusGraphQL {
             $output = & gh api graphql -f "query=$query" 2>$null
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "phase-containment-rolling-history-core: Surface A GraphQL search failed (exit $LASTEXITCODE)"
-                return $null   # signal error for fallback
+                return [PSCustomObject]@{ Tuples = @(); Truncated = $false; IsError = $true }   # signal error for fallback
             }
 
             $parsed = ($output | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
             if ($parsed.ContainsKey('errors') -and $null -ne $parsed['errors'] -and @($parsed['errors']).Count -gt 0) {
                 Write-Warning "phase-containment-rolling-history-core: Surface A GraphQL returned errors"
-                return $null
+                return [PSCustomObject]@{ Tuples = @(); Truncated = $false; IsError = $true }
             }
 
             $searchBlock = $parsed['data']['search']
@@ -370,6 +411,7 @@ function script:Get-SurfaceACorpusGraphQL {
                 while ($null -ne $cursor) {
                     if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
                         Write-Warning "phase-containment-rolling-history-core: timed out paginating issue #$issueNum"
+                        $truncated = $true
                         break
                     }
 
@@ -434,10 +476,10 @@ function script:Get-SurfaceACorpusGraphQL {
     }
     catch {
         Write-Warning "phase-containment-rolling-history-core: failed to parse Surface A GraphQL response: $_"
-        return $null
+        return [PSCustomObject]@{ Tuples = @(); Truncated = $false; IsError = $true }
     }
 
-    return , $tuples.ToArray()
+    return [PSCustomObject]@{ Tuples = $tuples.ToArray(); Truncated = $truncated; IsError = $false }
 }
 
 # -------------------------------------------------------------------------
@@ -456,14 +498,17 @@ function script:Get-SurfaceAEntriesGraphQL {
         [Parameter(Mandatory)][int]$TimeoutSeconds
     )
 
-    $tuples = script:Get-SurfaceACorpusGraphQL `
+    $corpusResult = script:Get-SurfaceACorpusGraphQL `
         -Owner $Owner -Repo $Repo -WindowDays $WindowDays `
         -Stopwatch $Stopwatch -TimeoutSeconds $TimeoutSeconds
 
-    if ($null -eq $tuples) { return $null }
+    if ($corpusResult.IsError) {
+        return [PSCustomObject]@{ Entries = @(); Truncated = $false; InvalidEntryCount = 0; IsError = $true }
+    }
 
     $entries = [System.Collections.Generic.List[hashtable]]::new()
-    foreach ($tuple in $tuples) {
+    $invalidEntryCount = 0
+    foreach ($tuple in $corpusResult.Tuples) {
         # M7 fix (issue #782 post-review): restore per-item isolation. A
         # single malformed tuple (e.g. Number/Bodies/CreatedAtValues that
         # cannot bind to Invoke-PhaseContainmentCommentScan's typed
@@ -471,20 +516,26 @@ function script:Get-SurfaceAEntriesGraphQL {
         # tuple in this loop — the original per-item try/catch this
         # extraction moved away from.
         try {
-            $scanned = Invoke-PhaseContainmentCommentScan `
+            $scanResult = Invoke-PhaseContainmentCommentScan `
                 -CommentBodies $tuple['Bodies'] `
                 -IssueOrPrNumber $tuple['Number'] `
                 -Surface $tuple['Surface'] `
                 -CreatedAtValues $tuple['CreatedAtValues']
 
-            foreach ($e in $scanned) { $entries.Add($e) }
+            foreach ($e in $scanResult.Entries) { $entries.Add($e) }
+            $invalidEntryCount += $scanResult.InvalidEntryCount
         }
         catch {
             Write-Warning "phase-containment-rolling-history-core: Surface A tuple scan failed for Number='$($tuple['Number'])': $_"
         }
     }
 
-    return , $entries.ToArray()
+    return [PSCustomObject]@{
+        Entries           = $entries.ToArray()
+        Truncated         = $corpusResult.Truncated
+        InvalidEntryCount = $invalidEntryCount
+        IsError           = $false
+    }
 }
 
 # -------------------------------------------------------------------------
@@ -503,6 +554,7 @@ function script:Get-SurfaceBCorpusGraphQL {
 
     # Each tuple: @{ Number = <int>; Surface = 'pr'; Bodies = <string[]>; CreatedAtValues = <string[]> }
     $tuples = [System.Collections.Generic.List[hashtable]]::new()
+    $truncated = $false
 
     $since = (Get-Date).ToUniversalTime().AddDays(-$WindowDays).ToString('yyyy-MM-dd')
 
@@ -514,6 +566,7 @@ function script:Get-SurfaceBCorpusGraphQL {
         while ($searchHasNext) {
             if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
                 Write-Warning "phase-containment-rolling-history-core: timed out paginating Surface B search"
+                $truncated = $true
                 break
             }
 
@@ -540,13 +593,13 @@ function script:Get-SurfaceBCorpusGraphQL {
             $output = & gh api graphql -f "query=$query" 2>$null
             if ($LASTEXITCODE -ne 0) {
                 Write-Warning "phase-containment-rolling-history-core: Surface B GraphQL search failed (exit $LASTEXITCODE)"
-                return $null
+                return [PSCustomObject]@{ Tuples = @(); Truncated = $false; IsError = $true }
             }
 
             $parsed = ($output | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
             if ($parsed.ContainsKey('errors') -and $null -ne $parsed['errors'] -and @($parsed['errors']).Count -gt 0) {
                 Write-Warning "phase-containment-rolling-history-core: Surface B GraphQL returned errors"
-                return $null
+                return [PSCustomObject]@{ Tuples = @(); Truncated = $false; IsError = $true }
             }
 
             $searchBlock = $parsed['data']['search']
@@ -582,6 +635,7 @@ function script:Get-SurfaceBCorpusGraphQL {
                 while ($null -ne $cursor) {
                     if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
                         Write-Warning "phase-containment-rolling-history-core: timed out paginating PR #$prNum"
+                        $truncated = $true
                         break
                     }
 
@@ -646,10 +700,10 @@ function script:Get-SurfaceBCorpusGraphQL {
     }
     catch {
         Write-Warning "phase-containment-rolling-history-core: failed to parse Surface B GraphQL response: $_"
-        return $null
+        return [PSCustomObject]@{ Tuples = @(); Truncated = $false; IsError = $true }
     }
 
-    return , $tuples.ToArray()
+    return [PSCustomObject]@{ Tuples = $tuples.ToArray(); Truncated = $truncated; IsError = $false }
 }
 
 # -------------------------------------------------------------------------
@@ -668,31 +722,40 @@ function script:Get-SurfaceBEntriesGraphQL {
         [Parameter(Mandatory)][int]$TimeoutSeconds
     )
 
-    $tuples = script:Get-SurfaceBCorpusGraphQL `
+    $corpusResult = script:Get-SurfaceBCorpusGraphQL `
         -Owner $Owner -Repo $Repo -WindowDays $WindowDays `
         -Stopwatch $Stopwatch -TimeoutSeconds $TimeoutSeconds
 
-    if ($null -eq $tuples) { return $null }
+    if ($corpusResult.IsError) {
+        return [PSCustomObject]@{ Entries = @(); Truncated = $false; InvalidEntryCount = 0; IsError = $true }
+    }
 
     $entries = [System.Collections.Generic.List[hashtable]]::new()
-    foreach ($tuple in $tuples) {
+    $invalidEntryCount = 0
+    foreach ($tuple in $corpusResult.Tuples) {
         # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
         # identical per-item try/catch for the rationale.
         try {
-            $scanned = Invoke-PhaseContainmentCommentScan `
+            $scanResult = Invoke-PhaseContainmentCommentScan `
                 -CommentBodies $tuple['Bodies'] `
                 -IssueOrPrNumber $tuple['Number'] `
                 -Surface $tuple['Surface'] `
                 -CreatedAtValues $tuple['CreatedAtValues']
 
-            foreach ($e in $scanned) { $entries.Add($e) }
+            foreach ($e in $scanResult.Entries) { $entries.Add($e) }
+            $invalidEntryCount += $scanResult.InvalidEntryCount
         }
         catch {
             Write-Warning "phase-containment-rolling-history-core: Surface B tuple scan failed for Number='$($tuple['Number'])': $_"
         }
     }
 
-    return , $entries.ToArray()
+    return [PSCustomObject]@{
+        Entries           = $entries.ToArray()
+        Truncated         = $corpusResult.Truncated
+        InvalidEntryCount = $invalidEntryCount
+        IsError           = $false
+    }
 }
 
 # -------------------------------------------------------------------------
@@ -710,6 +773,7 @@ function script:Get-PhaseContainmentCorpusRest {
     # Each tuple: @{ Number = <int>; Surface = 'issue'|'pr'; Bodies = <string[]>; CreatedAtValues = <string[]> }
     $tuples = [System.Collections.Generic.List[hashtable]]::new()
     $limit  = 20
+    $truncated = $false
 
     # GH-8 fix (issue #782 GitHub-review response loop, PR #789): compute
     # $since from $WindowDays the same way the GraphQL path does
@@ -726,8 +790,17 @@ function script:Get-PhaseContainmentCorpusRest {
         if ($LASTEXITCODE -eq 0) {
             try {
                 $issueList = @(($issueListOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop)
+                # C5: discovery-cap hit — a list returning exactly $limit rows
+                # is a possible-undercount signal (more items may exist beyond
+                # the cap the REST fallback cannot see).
+                if ($issueList.Count -eq $limit) {
+                    $truncated = $true
+                }
                 foreach ($issue in $issueList) {
-                    if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { break }
+                    if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+                        $truncated = $true
+                        break
+                    }
                     $num = [int]$issue['number']
                     # PF2-F2 fix: see Get-SurfaceACorpusGraphQL identical
                     # stderr/ConvertFrom-Json rationale.
@@ -779,6 +852,11 @@ function script:Get-PhaseContainmentCorpusRest {
             }
         }
     }
+    else {
+        # REST surface-budget skip: Surface A was skipped entirely because
+        # the timeout budget was already exhausted before this block ran.
+        $truncated = $true
+    }
 
     # Surface B: recent merged PRs
     if ($Stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
@@ -788,8 +866,15 @@ function script:Get-PhaseContainmentCorpusRest {
         if ($LASTEXITCODE -eq 0) {
             try {
                 $prList = @(($prListOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop)
+                # C5: discovery-cap hit — see the Surface A rationale above.
+                if ($prList.Count -eq $limit) {
+                    $truncated = $true
+                }
                 foreach ($pr in $prList) {
-                    if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { break }
+                    if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+                        $truncated = $true
+                        break
+                    }
                     $num = [int]$pr['number']
                     # PF2-F2 fix: see Get-SurfaceACorpusGraphQL identical
                     # stderr/ConvertFrom-Json rationale.
@@ -825,8 +910,13 @@ function script:Get-PhaseContainmentCorpusRest {
             }
         }
     }
+    else {
+        # REST surface-budget skip: Surface B was skipped entirely because
+        # the timeout budget was already exhausted before this block ran.
+        $truncated = $true
+    }
 
-    return , $tuples.ToArray()
+    return [PSCustomObject]@{ Tuples = $tuples.ToArray(); Truncated = $truncated; IsError = $false }
 }
 
 # -------------------------------------------------------------------------
@@ -842,28 +932,35 @@ function script:Get-PhaseContainmentEntriesRest {
         [Parameter(Mandatory)][int]$TimeoutSeconds
     )
 
-    $tuples = script:Get-PhaseContainmentCorpusRest `
+    $corpusResult = script:Get-PhaseContainmentCorpusRest `
         -WindowDays $WindowDays -Stopwatch $Stopwatch -TimeoutSeconds $TimeoutSeconds
 
     $entries = [System.Collections.Generic.List[hashtable]]::new()
-    foreach ($tuple in $tuples) {
+    $invalidEntryCount = 0
+    foreach ($tuple in $corpusResult.Tuples) {
         # M7 fix (issue #782 post-review): see Get-SurfaceAEntriesGraphQL's
         # identical per-item try/catch for the rationale.
         try {
-            $scanned = Invoke-PhaseContainmentCommentScan `
+            $scanResult = Invoke-PhaseContainmentCommentScan `
                 -CommentBodies $tuple['Bodies'] `
                 -IssueOrPrNumber $tuple['Number'] `
                 -Surface $tuple['Surface'] `
                 -CreatedAtValues $tuple['CreatedAtValues']
 
-            foreach ($e in $scanned) { $entries.Add($e) }
+            foreach ($e in $scanResult.Entries) { $entries.Add($e) }
+            $invalidEntryCount += $scanResult.InvalidEntryCount
         }
         catch {
             Write-Warning "phase-containment-rolling-history-core: REST tuple scan failed for Number='$($tuple['Number'])': $_"
         }
     }
 
-    return , $entries.ToArray()
+    return [PSCustomObject]@{
+        Entries           = $entries.ToArray()
+        Truncated         = $corpusResult.Truncated
+        InvalidEntryCount = $invalidEntryCount
+        IsError           = $false
+    }
 }
 
 # -------------------------------------------------------------------------
@@ -928,6 +1025,11 @@ function Get-PhaseContainmentCommentCorpus {
           Tuples    [array]  — each entry: @{ Number; Surface ('issue'|'pr'); Bodies [string[]]; CreatedAtValues [string[]] }
           FetchedAt [datetime]
           Source    [string] — 'graphql' | 'rest' | 'timeout' | 'repo-resolution-failed'
+          Truncated [bool]   — issue #772 D1: true when any silent-truncation
+                               site fired (pagination timeout, REST per-item
+                               timeout, REST surface-budget skip, REST
+                               discovery-cap hit). Always present so
+                               StrictMode consumers never throw reading it.
     #>
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
@@ -945,7 +1047,7 @@ function Get-PhaseContainmentCommentCorpus {
     if (-not $RepoOwner -or -not $RepoName) {
         if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
             Write-Warning "phase-containment-rolling-history-core: timed out before repo resolution"
-            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout' }
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout'; Truncated = $false }
         }
         # PF2-F2 fix: use 2>$null, not 2>&1 — see Get-SurfaceACorpusGraphQL
         # stderr/ConvertFrom-Json rationale. The failure-path warning below no
@@ -955,7 +1057,7 @@ function Get-PhaseContainmentCommentCorpus {
         $repoViewJson = & gh repo view --json 'owner,name' 2>$null
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "phase-containment-rolling-history-core: gh repo view failed (exit $LASTEXITCODE)"
-            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'repo-resolution-failed' }
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'repo-resolution-failed'; Truncated = $false }
         }
         try {
             $repoInfo = ($repoViewJson | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
@@ -964,46 +1066,59 @@ function Get-PhaseContainmentCommentCorpus {
         }
         catch {
             Write-Warning "phase-containment-rolling-history-core: failed to parse repo view: $_"
-            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'repo-resolution-failed' }
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'repo-resolution-failed'; Truncated = $false }
         }
     }
 
     # ---- GraphQL fetch ----
     if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
         Write-Warning "phase-containment-rolling-history-core: timed out before corpus GraphQL fetch"
-        return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout' }
+        return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout'; Truncated = $false }
     }
 
     $useRest = $false
     $allTuples = [System.Collections.Generic.List[hashtable]]::new()
+    $truncated = $false
 
-    $surfaceATuples = script:Get-SurfaceACorpusGraphQL `
+    $surfaceAResult = script:Get-SurfaceACorpusGraphQL `
         -Owner $RepoOwner -Repo $RepoName -WindowDays $WindowDays `
         -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
 
-    if ($null -eq $surfaceATuples) {
+    if ($surfaceAResult.IsError) {
         $useRest = $true
     }
     else {
-        foreach ($t in $surfaceATuples) { $allTuples.Add($t) }
+        foreach ($t in $surfaceAResult.Tuples) { $allTuples.Add($t) }
+        if ($surfaceAResult.Truncated) { $truncated = $true }
     }
 
     if (-not $useRest) {
         if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
-            Write-Warning "phase-containment-rolling-history-core: timed out before corpus Surface B fetch"
-            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout' }
+            # T1 (issue #772 P4): Surface A already succeeded and fetched
+            # data — preserve those partials instead of discarding them, and
+            # use the fetch path's own Source rather than the empty 'timeout'
+            # shape (which is reserved for the pre-fetch guards below/above,
+            # where no surface has produced data yet).
+            Write-Warning "phase-containment-rolling-history-core: timed out before corpus Surface B fetch — returning Surface A partials (Truncated)"
+            return [PSCustomObject]@{
+                Tuples    = $allTuples.ToArray()
+                FetchedAt = (Get-Date)
+                Source    = 'graphql'
+                Truncated = $true
+            }
         }
 
-        $surfaceBTuples = script:Get-SurfaceBCorpusGraphQL `
+        $surfaceBResult = script:Get-SurfaceBCorpusGraphQL `
             -Owner $RepoOwner -Repo $RepoName -WindowDays $WindowDays `
             -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
 
-        if ($null -eq $surfaceBTuples) {
+        if ($surfaceBResult.IsError) {
             $useRest = $true
             $allTuples.Clear()
         }
         else {
-            foreach ($t in $surfaceBTuples) { $allTuples.Add($t) }
+            foreach ($t in $surfaceBResult.Tuples) { $allTuples.Add($t) }
+            if ($surfaceBResult.Truncated) { $truncated = $true }
         }
     }
 
@@ -1012,14 +1127,18 @@ function Get-PhaseContainmentCommentCorpus {
     if ($useRest) {
         if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
             Write-Warning "phase-containment-rolling-history-core: timed out before corpus REST fallback"
-            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout' }
+            return [PSCustomObject]@{ Tuples = @(); FetchedAt = (Get-Date); Source = 'timeout'; Truncated = $false }
         }
 
-        $restTuples = script:Get-PhaseContainmentCorpusRest `
+        $restResult = script:Get-PhaseContainmentCorpusRest `
             -WindowDays $WindowDays -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
 
+        # M2 (reset-on-discard): any GraphQL-surface Truncated state
+        # accumulated above is intentionally overwritten here, not combined
+        # — the REST run owns its own truncation state from scratch.
         $allTuples.Clear()
-        foreach ($t in $restTuples) { $allTuples.Add($t) }
+        foreach ($t in $restResult.Tuples) { $allTuples.Add($t) }
+        $truncated = $restResult.Truncated
         $sourceLabel = 'rest'
     }
 
@@ -1027,6 +1146,7 @@ function Get-PhaseContainmentCommentCorpus {
         Tuples    = $allTuples.ToArray()
         FetchedAt = (Get-Date)
         Source    = $sourceLabel
+        Truncated = $truncated
     }
 }
 
@@ -1060,7 +1180,9 @@ function Get-PhaseContainmentHistory {
     .PARAMETER TimeoutSeconds
         Per-run budget in seconds. Default: 30.
     .OUTPUTS
-        PSCustomObject with Entries, FetchedAt, Source, CacheAge.
+        PSCustomObject with Entries, FetchedAt, Source, CacheAge, Truncated,
+        InvalidEntryCount. Truncated/InvalidEntryCount are always present
+        (issue #772 D1) so StrictMode consumers never throw reading them.
     #>
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
@@ -1080,10 +1202,12 @@ function Get-PhaseContainmentHistory {
         if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
             Write-Warning "phase-containment-rolling-history-core: timed out before repo resolution"
             return [PSCustomObject]@{
-                Entries   = @()
-                FetchedAt = (Get-Date)
-                Source    = 'timeout'
-                CacheAge  = [timespan]::Zero
+                Entries           = @()
+                FetchedAt         = (Get-Date)
+                Source            = 'timeout'
+                CacheAge          = [timespan]::Zero
+                Truncated         = $false
+                InvalidEntryCount = 0
             }
         }
         # PF2-F2 fix: use 2>$null, not 2>&1 — see Get-SurfaceACorpusGraphQL
@@ -1095,10 +1219,12 @@ function Get-PhaseContainmentHistory {
         if ($LASTEXITCODE -ne 0) {
             Write-Warning "phase-containment-rolling-history-core: gh repo view failed (exit $LASTEXITCODE)"
             return [PSCustomObject]@{
-                Entries   = @()
-                FetchedAt = (Get-Date)
-                Source    = 'repo-resolution-failed'
-                CacheAge  = [timespan]::Zero
+                Entries           = @()
+                FetchedAt         = (Get-Date)
+                Source            = 'repo-resolution-failed'
+                CacheAge          = [timespan]::Zero
+                Truncated         = $false
+                InvalidEntryCount = 0
             }
         }
         try {
@@ -1109,10 +1235,12 @@ function Get-PhaseContainmentHistory {
         catch {
             Write-Warning "phase-containment-rolling-history-core: failed to parse repo view: $_"
             return [PSCustomObject]@{
-                Entries   = @()
-                FetchedAt = (Get-Date)
-                Source    = 'repo-resolution-failed'
-                CacheAge  = [timespan]::Zero
+                Entries           = @()
+                FetchedAt         = (Get-Date)
+                Source            = 'repo-resolution-failed'
+                CacheAge          = [timespan]::Zero
+                Truncated         = $false
+                InvalidEntryCount = 0
             }
         }
     }
@@ -1129,9 +1257,16 @@ function Get-PhaseContainmentHistory {
         if ($cacheData.ContainsKey('entries') -and $null -ne $cacheData['entries']) {
             $cachedEntries = @($cacheData['entries'])
         }
+        # P7: cache-hit InvalidEntryCount — read from the cached payload so a
+        # cache hit still surfaces prior rejections, defaulting to 0 only
+        # when reading a legacy cache file written before this field existed.
+        $cachedInvalidEntryCount = 0
+        if ($cacheData.ContainsKey('invalid_entry_count') -and $null -ne $cacheData['invalid_entry_count']) {
+            $cachedInvalidEntryCount = [int]$cacheData['invalid_entry_count']
+        }
         # Compute cache age
         try {
-            $genAt = [datetime]::Parse([string]$cacheData['generated_at'], $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+            $genAt = [datetime]::Parse((script:ConvertTo-PhaseContainmentIsoString -Value $cacheData['generated_at']), $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
             $genAtUtc = $genAt.Kind -eq [System.DateTimeKind]::Utc ? $genAt : $genAt.ToUniversalTime()
             $cacheAge = (Get-Date).ToUniversalTime() - $genAtUtc
         }
@@ -1139,59 +1274,78 @@ function Get-PhaseContainmentHistory {
             $cacheAge = [timespan]::Zero
         }
         return [PSCustomObject]@{
-            Entries   = $cachedEntries
-            FetchedAt = (Get-Date)
-            Source    = 'cache'
-            CacheAge  = $cacheAge
+            Entries           = $cachedEntries
+            FetchedAt         = (Get-Date)
+            Source            = 'cache'
+            CacheAge          = $cacheAge
+            # A truncated run is never cached (see the cache-write guard
+            # below), so a cache hit is by construction a complete snapshot.
+            Truncated         = $false
+            InvalidEntryCount = $cachedInvalidEntryCount
         }
     }
 
     # ---- GraphQL fetch ----
-    $useRest      = $false
-    $rawEntries   = [System.Collections.Generic.List[hashtable]]::new()
+    $useRest           = $false
+    $rawEntries        = [System.Collections.Generic.List[hashtable]]::new()
+    $truncated         = $false
+    $invalidEntryCount = 0
 
     if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
         Write-Warning "phase-containment-rolling-history-core: timed out before GraphQL fetch"
         return [PSCustomObject]@{
-            Entries   = @()
-            FetchedAt = (Get-Date)
-            Source    = 'timeout'
-            CacheAge  = [timespan]::Zero
+            Entries           = @()
+            FetchedAt         = (Get-Date)
+            Source            = 'timeout'
+            CacheAge          = [timespan]::Zero
+            Truncated         = $false
+            InvalidEntryCount = 0
         }
     }
 
-    $surfaceAEntries = script:Get-SurfaceAEntriesGraphQL `
+    $surfaceAResult = script:Get-SurfaceAEntriesGraphQL `
         -Owner $RepoOwner -Repo $RepoName -WindowDays $WindowDays `
         -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
 
-    if ($null -eq $surfaceAEntries) {
+    if ($surfaceAResult.IsError) {
         $useRest = $true
     }
     else {
-        foreach ($e in $surfaceAEntries) { $rawEntries.Add($e) }
+        foreach ($e in $surfaceAResult.Entries) { $rawEntries.Add($e) }
+        if ($surfaceAResult.Truncated) { $truncated = $true }
+        $invalidEntryCount += $surfaceAResult.InvalidEntryCount
     }
 
     if (-not $useRest) {
         if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
-            Write-Warning "phase-containment-rolling-history-core: timed out before Surface B fetch"
+            # T1 (issue #772 P4): Surface A already succeeded and fetched
+            # data — preserve those partials (and their InvalidEntryCount)
+            # instead of discarding them, using the fetch path's own Source
+            # rather than the empty 'timeout' shape.
+            Write-Warning "phase-containment-rolling-history-core: timed out before Surface B fetch — returning Surface A partials (Truncated)"
+            $dedupedPartial = Invoke-PhaseContainmentDedup -RawEntries $rawEntries.ToArray()
             return [PSCustomObject]@{
-                Entries   = @()
-                FetchedAt = (Get-Date)
-                Source    = 'timeout'
-                CacheAge  = [timespan]::Zero
+                Entries           = $dedupedPartial
+                FetchedAt         = (Get-Date)
+                Source            = 'graphql'
+                CacheAge          = [timespan]::Zero
+                Truncated         = $true
+                InvalidEntryCount = $invalidEntryCount
             }
         }
 
-        $surfaceBEntries = script:Get-SurfaceBEntriesGraphQL `
+        $surfaceBResult = script:Get-SurfaceBEntriesGraphQL `
             -Owner $RepoOwner -Repo $RepoName -WindowDays $WindowDays `
             -Stopwatch $stopwatch -TimeoutSeconds $TimeoutSeconds
 
-        if ($null -eq $surfaceBEntries) {
+        if ($surfaceBResult.IsError) {
             $useRest = $true
             $rawEntries.Clear()
         }
         else {
-            foreach ($e in $surfaceBEntries) { $rawEntries.Add($e) }
+            foreach ($e in $surfaceBResult.Entries) { $rawEntries.Add($e) }
+            if ($surfaceBResult.Truncated) { $truncated = $true }
+            $invalidEntryCount += $surfaceBResult.InvalidEntryCount
         }
     }
 
@@ -1201,36 +1355,49 @@ function Get-PhaseContainmentHistory {
         if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
             Write-Warning "phase-containment-rolling-history-core: timed out before REST fallback"
             return [PSCustomObject]@{
-                Entries   = @()
-                FetchedAt = (Get-Date)
-                Source    = 'timeout'
-                CacheAge  = [timespan]::Zero
+                Entries           = @()
+                FetchedAt         = (Get-Date)
+                Source            = 'timeout'
+                CacheAge          = [timespan]::Zero
+                Truncated         = $false
+                InvalidEntryCount = 0
             }
         }
 
-        $restEntries = script:Get-PhaseContainmentEntriesRest `
+        $restResult = script:Get-PhaseContainmentEntriesRest `
             -WindowDays $WindowDays `
             -Stopwatch $stopwatch `
             -TimeoutSeconds $TimeoutSeconds
 
+        # M2 (reset-on-discard): $rawEntries/$truncated/$invalidEntryCount
+        # accumulated from a discarded GraphQL surface are intentionally
+        # overwritten here, not combined — the REST run owns its own state.
         $rawEntries.Clear()
-        foreach ($e in $restEntries) { $rawEntries.Add($e) }
-        $sourceLabel = 'rest'
+        foreach ($e in $restResult.Entries) { $rawEntries.Add($e) }
+        $truncated         = $restResult.Truncated
+        $invalidEntryCount = $restResult.InvalidEntryCount
+        $sourceLabel       = 'rest'
     }
 
     # ---- Dedup ----
     $dedupedEntries = Invoke-PhaseContainmentDedup -RawEntries $rawEntries.ToArray()
 
-    # ---- Write cache (only if non-empty) ----
-    if ($dedupedEntries.Count -gt 0) {
-        script:Write-PhaseContainmentCache -CachePath $CachePath -Entries $dedupedEntries
+    # ---- Write cache (only if non-empty AND not truncated) ----
+    # P7: a truncated run must not poison the 1-hour cache with an incomplete
+    # snapshot — skipping the write here is what lets M2's reset-on-discard
+    # actually matter (a fully-completed REST run after a discarded
+    # truncated GraphQL attempt reports Truncated=$false and DOES cache).
+    if ($dedupedEntries.Count -gt 0 -and -not $truncated) {
+        script:Write-PhaseContainmentCache -CachePath $CachePath -Entries $dedupedEntries -InvalidEntryCount $invalidEntryCount
     }
 
     return [PSCustomObject]@{
-        Entries   = $dedupedEntries
-        FetchedAt = (Get-Date)
-        Source    = $sourceLabel
-        CacheAge  = [timespan]::Zero
+        Entries           = $dedupedEntries
+        FetchedAt         = (Get-Date)
+        Source            = $sourceLabel
+        CacheAge          = [timespan]::Zero
+        Truncated         = $truncated
+        InvalidEntryCount = $invalidEntryCount
     }
 }
 
@@ -1268,16 +1435,26 @@ function Get-PhaseContainmentRollup {
         When provided, actual count mismatch marks DataUntrustworthy=$true for that stage.
     .PARAMETER WindowLabel
         Optional label for the window (for display purposes only).
+    .PARAMETER Truncated
+        Issue #772 C11: when set, forces RelaxationEligible=$false for every
+        stage (regardless of any other guard) with
+        RelaxationEligibleReason='fetch truncated'. This is the authoritative
+        withholding decision — it happens here, in the rollup's own data
+        object, not deferred to a renderer, so any non-renderer consumer
+        reading the rollup also sees the correct withholding.
     .OUTPUTS
         PSCustomObject with Stages, LeakageMatrix, LeakageMatrixByFixType,
-        ApparatusMetaCount, WindowEntryCount.
+        ApparatusMetaCount, WindowEntryCount. Each Stages[stage] carries
+        RelaxationEligibleReason alongside RelaxationEligible, mirroring the
+        existing DataUntrustworthy/DataUntrustworthyReason pattern.
     #>
     [CmdletBinding()]
     [OutputType([PSCustomObject])]
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Entries,
         [hashtable]$SustainedCounts = $null,
-        [string]$WindowLabel = ''
+        [string]$WindowLabel = '',
+        [switch]$Truncated
     )
 
     # Stage → catchable_phase mapping
@@ -1408,17 +1585,30 @@ function Get-PhaseContainmentRollup {
             }
         }
 
+        # C11: a truncated fetch forces RelaxationEligible=$false for EVERY
+        # stage, unconditionally — overriding whatever the guards above
+        # computed. A truncated/partial corpus must never present a clean
+        # relaxation signal regardless of insufficient-data/denominator-zero/
+        # data-untrustworthy state, matching the design intent that no known
+        # silent-degradation path can present a wrong number as clean.
+        $relaxationEligibleReason = $null
+        if ($Truncated) {
+            $relaxationEligible       = $false
+            $relaxationEligibleReason = 'fetch truncated'
+        }
+
         $stages[$stage] = [PSCustomObject]@{
-            Stage                    = $stage
-            N                        = $n
-            Denominator              = $denominator
-            DenominatorZero          = $denominatorZero
-            EscapeRate               = $escapeRate
-            IrreducibleRate          = $irreducibleRate
-            InsufficientData         = $insufficientData
-            RelaxationEligible       = $relaxationEligible
-            DataUntrustworthy        = $dataUntrustworthy
-            DataUntrustworthyReason  = $dataUntrustworthyReason
+            Stage                     = $stage
+            N                         = $n
+            Denominator               = $denominator
+            DenominatorZero           = $denominatorZero
+            EscapeRate                = $escapeRate
+            IrreducibleRate           = $irreducibleRate
+            InsufficientData          = $insufficientData
+            RelaxationEligible        = $relaxationEligible
+            RelaxationEligibleReason  = $relaxationEligibleReason
+            DataUntrustworthy         = $dataUntrustworthy
+            DataUntrustworthyReason   = $dataUntrustworthyReason
         }
     }
 

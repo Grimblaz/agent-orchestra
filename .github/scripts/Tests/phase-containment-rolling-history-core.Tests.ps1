@@ -186,10 +186,11 @@ seed: false
 
         $allBodies = @($page1Bodies) + @($page2Body)
 
-        $result = Invoke-PhaseContainmentCommentScan -CommentBodies $allBodies -IssueOrPrNumber 762
+        $scanResult = Invoke-PhaseContainmentCommentScan -CommentBodies $allBodies -IssueOrPrNumber 762
 
-        $result | Should -HaveCount 1
-        $result[0].finding_key | Should -Be 'code-review:762:F1'
+        $scanResult.Entries | Should -HaveCount 1
+        $scanResult.Entries[0].finding_key | Should -Be 'code-review:762:F1'
+        $scanResult.InvalidEntryCount | Should -Be 0
     }
 
     It 'collects entries from multiple pages when both pages have valid blocks' {
@@ -225,9 +226,10 @@ seed: false
 <!-- /phase-containment-762 -->
 "@
 
-        $result = Invoke-PhaseContainmentCommentScan -CommentBodies @($page1Body, $page2Body) -IssueOrPrNumber 762
+        $scanResult = Invoke-PhaseContainmentCommentScan -CommentBodies @($page1Body, $page2Body) -IssueOrPrNumber 762
 
-        $result | Should -HaveCount 2
+        $scanResult.Entries | Should -HaveCount 2
+        $scanResult.InvalidEntryCount | Should -Be 0
     }
 }
 
@@ -249,9 +251,14 @@ escape_distance: 2
 "@
 
         # Redirect warning stream to suppress console noise; still validates behavior
-        $result = Invoke-PhaseContainmentCommentScan -CommentBodies @($malformedBody) -IssueOrPrNumber 762 3>$null
+        $scanResult = Invoke-PhaseContainmentCommentScan -CommentBodies @($malformedBody) -IssueOrPrNumber 762 3>$null
 
-        @($result) | Should -HaveCount 0
+        @($scanResult.Entries) | Should -HaveCount 0
+        # P8: the drop must be counted toward InvalidEntryCount, not just
+        # silently skipped — this is a validation-failure drop (missing
+        # required fields), not a parse failure, so it exercises the "every
+        # validation-failure drop, not just Rule 12" requirement.
+        $scanResult.InvalidEntryCount | Should -Be 1
     }
 
     It 'processes valid entries even when a preceding comment has a malformed block' {
@@ -278,10 +285,11 @@ seed: false
 <!-- /phase-containment-762 -->
 "@
 
-        $result = Invoke-PhaseContainmentCommentScan -CommentBodies @($malformedBody, $validBody) -IssueOrPrNumber 762 3>$null
+        $scanResult = Invoke-PhaseContainmentCommentScan -CommentBodies @($malformedBody, $validBody) -IssueOrPrNumber 762 3>$null
 
-        $result | Should -HaveCount 1
-        $result[0].finding_key | Should -Be 'code-review:762:F1'
+        $scanResult.Entries | Should -HaveCount 1
+        $scanResult.Entries[0].finding_key | Should -Be 'code-review:762:F1'
+        $scanResult.InvalidEntryCount | Should -Be 1
     }
 }
 
@@ -307,10 +315,10 @@ seed: false
 <!-- /phase-containment-762 -->
 "@
 
-        $result = Invoke-PhaseContainmentCommentScan -CommentBodies @($body) -IssueOrPrNumber 762
+        $scanResult = Invoke-PhaseContainmentCommentScan -CommentBodies @($body) -IssueOrPrNumber 762
 
-        $result | Should -HaveCount 1
-        $result[0].apparatus_meta | Should -Be $true
+        $scanResult.Entries | Should -HaveCount 1
+        $scanResult.Entries[0].apparatus_meta | Should -Be $true
     }
 
     It 'sets apparatus_meta to $false when the block declares apparatus_meta: false' {
@@ -329,10 +337,10 @@ seed: false
 <!-- /phase-containment-762 -->
 "@
 
-        $result = Invoke-PhaseContainmentCommentScan -CommentBodies @($body) -IssueOrPrNumber 762
+        $scanResult = Invoke-PhaseContainmentCommentScan -CommentBodies @($body) -IssueOrPrNumber 762
 
-        $result | Should -HaveCount 1
-        $result[0].apparatus_meta | Should -Be $false
+        $scanResult.Entries | Should -HaveCount 1
+        $scanResult.Entries[0].apparatus_meta | Should -Be $false
     }
 }
 
@@ -622,7 +630,8 @@ seed: false
             -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
             -Stopwatch $stopwatch -TimeoutSeconds 30
 
-        $findingKeys = @($result | ForEach-Object { $_['finding_key'] })
+        $result.Truncated | Should -Be $false
+        $findingKeys = @($result.Entries | ForEach-Object { $_['finding_key'] })
         $findingKeys | Should -Contain 'code-review:901:F1'
         # The page-2 node must be processed — this is the regression guard for F10.
         $findingKeys | Should -Contain 'code-review:902:F1'
@@ -657,7 +666,7 @@ seed: false
 
         # The call returned (did not exhaust the timeout) and the single page's entry is present.
         $stopwatch.Elapsed.TotalSeconds | Should -BeLessThan 5
-        $findingKeys = @($result | ForEach-Object { $_['finding_key'] })
+        $findingKeys = @($result.Entries | ForEach-Object { $_['finding_key'] })
         $findingKeys | Should -Contain 'code-review:905:F1'
     }
 }
@@ -748,7 +757,8 @@ seed: false
             -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
             -Stopwatch $stopwatch -TimeoutSeconds 30
 
-        $findingKeys = @($result | ForEach-Object { $_['finding_key'] })
+        $result.Truncated | Should -Be $false
+        $findingKeys = @($result.Entries | ForEach-Object { $_['finding_key'] })
         $findingKeys | Should -Contain 'code-review:901:F1'
         # The page-2 node must be processed — this is the regression guard for F10.
         $findingKeys | Should -Contain 'code-review:902:F1'
@@ -801,13 +811,16 @@ Describe 'Wrapper foreach loops — M7 per-tuple isolation (issue #782 post-revi
             if ($IssueOrPrNumber -eq 960) {
                 throw 'simulated scan failure for tuple 960'
             }
-            return , @(@{ finding_key = 'plan-stress-test:961:F1' })
+            return [PSCustomObject]@{
+                Entries           = @(@{ finding_key = 'plan-stress-test:961:F1' })
+                InvalidEntryCount = 0
+            }
         }
 
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $result = script:Get-PhaseContainmentEntriesRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
 
-        $findingKeys = @($result | ForEach-Object { $_['finding_key'] })
+        $findingKeys = @($result.Entries | ForEach-Object { $_['finding_key'] })
         # Tuple 961's entry must survive even though tuple 960's scan threw —
         # this is the per-tuple isolation the M7 fix restores.
         $findingKeys | Should -Contain 'plan-stress-test:961:F1'
@@ -1442,7 +1455,7 @@ apparatus_meta: false
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $result = script:Get-PhaseContainmentEntriesRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
 
-        $entry = $result | Where-Object { $_['finding_key'] -eq 'plan-stress-test:980:F1' }
+        $entry = $result.Entries | Where-Object { $_['finding_key'] -eq 'plan-stress-test:980:F1' }
         $entry | Should -Not -BeNullOrEmpty
         # "Real" createdAt: non-empty and actually parses as a date. Not
         # asserting byte-exact string equality against the mock literal —
@@ -1488,7 +1501,7 @@ apparatus_meta: false
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
         $result = script:Get-PhaseContainmentEntriesRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
 
-        $entry = $result | Where-Object { $_['finding_key'] -eq 'code-review:981:F1' }
+        $entry = $result.Entries | Where-Object { $_['finding_key'] -eq 'code-review:981:F1' }
         $entry | Should -Not -BeNullOrEmpty
         $entry['createdAt'] | Should -Not -BeNullOrEmpty
         { [datetime]::Parse($entry['createdAt']) } | Should -Not -Throw
@@ -1557,9 +1570,9 @@ apparatus_meta: false
         }
 
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-        $rawEntries = script:Get-PhaseContainmentEntriesRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+        $restResult = script:Get-PhaseContainmentEntriesRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
 
-        $deduped = Invoke-PhaseContainmentDedup -RawEntries $rawEntries
+        $deduped = Invoke-PhaseContainmentDedup -RawEntries $restResult.Entries
         $winner = $deduped | Where-Object { $_['finding_key'] -eq 'plan-stress-test:982:F1' }
 
         $winner | Should -Not -BeNullOrEmpty
@@ -1609,9 +1622,10 @@ Describe 'Get-PhaseContainmentCorpusRest — null-comment alignment (#772 D3)' {
         }
 
         $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-        $tuples = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+        $corpusResult = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
 
-        $tuple = $tuples | Where-Object { $_['Number'] -eq 983 }
+        $corpusResult.Truncated | Should -Be $false
+        $tuple = $corpusResult.Tuples | Where-Object { $_['Number'] -eq 983 }
         $tuple | Should -Not -BeNullOrEmpty
 
         $bodies = @($tuple['Bodies'])
@@ -1636,5 +1650,623 @@ Describe 'Get-PhaseContainmentCorpusRest — null-comment alignment (#772 D3)' {
         $createdAtValues[0] | Should -Not -BeNullOrEmpty
         $createdAtValues[1] | Should -Not -BeNullOrEmpty
         [datetime]::Parse($createdAtValues[0]) | Should -BeLessThan ([datetime]::Parse($createdAtValues[1]))
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #772 D1: total Truncated/InvalidEntryCount telemetry.
+#
+# Deterministic truncation testing (P5): a TimeoutSeconds=0 fixture only
+# reaches the pre-fetch guards (nothing has been fetched yet), so it cannot
+# drive the "partials accumulated, THEN the loop-top stopwatch guard trips"
+# in-loop sites. Instead, these tests use a `gh` mock that Start-Sleep's past
+# a small TimeoutSeconds budget (e.g. 1s) inside the FIRST successful call,
+# so the *next* loop-top stopwatch check (which runs before any further gh
+# call) observes an already-exhausted budget and trips deterministically —
+# no second gh call is ever made. Verified lawful against
+# wall-clock-fixture-guard.Tests.ps1: that guard's $script:AbsoluteSeedPattern
+# only matches an absolute ISO-date literal assigned to
+# `skip_first_observed_at`; it does not scan for Start-Sleep at all, so a
+# sleeping `gh` mock is outside its detection surface.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-SurfaceACorpusGraphQL — Truncated flagging (issue #772 D1/P5)' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'sets Truncated=$true when the outer search-pagination stopwatch guard trips after page 1' {
+        # Page 1: hasNextPage=true (would normally trigger a 2nd search call),
+        # but the mock sleeps past the 1s budget WHILE answering the FIRST
+        # call, so the loop-top guard trips on the way back around — no 2nd
+        # gh invocation ever happens.
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            Start-Sleep -Milliseconds 1200
+            $payload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $true; endCursor = 'SEARCHCURSOR1' }
+                        nodes    = @(
+                            @{
+                                number   = 1001
+                                comments = @{
+                                    nodes    = @(@{ body = 'no marker here'; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceACorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 1 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $true
+    }
+
+    It 'sets Truncated=$true when the per-issue comment-pagination stopwatch guard trips mid-issue' {
+        # Single search page (hasNextPage=false) so the outer loop never
+        # revisits its own top-check. The issue's inline page-1 comments
+        # carry the marker plus hasNextPage=true, so the per-issue comment
+        # pagination while-loop is entered. That paginated gh call sleeps
+        # past budget while answering, so the while-loop's OWN loop-top
+        # guard trips on the way back around.
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue\(number:') {
+                Start-Sleep -Milliseconds 1200
+                $pagePayload = @{
+                    data = @{
+                        repository = @{
+                            issue = @{
+                                comments = @{
+                                    nodes    = @(@{ body = 'page 2 comment'; createdAt = '2024-01-01T12:05:00Z' })
+                                    pageInfo = @{ hasNextPage = $true; endCursor = 'ISSUECURSOR2' }
+                                }
+                            }
+                        }
+                    }
+                }
+                return ($pagePayload | ConvertTo-Json -Depth 12)
+            }
+            $searchPayload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        nodes    = @(
+                            @{
+                                number   = 1002
+                                comments = @{
+                                    nodes    = @(@{ body = '<!-- plan-issue-1002 -->'; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $true; endCursor = 'ISSUECURSOR1' }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($searchPayload | ConvertTo-Json -Depth 12)
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceACorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 1 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $true
+    }
+}
+
+Describe 'Get-PhaseContainmentCorpusRest — Truncated flagging (issue #772 D1/C5)' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'sets Truncated=$true when the per-item stopwatch guard trips mid-list (REST per-item break)' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match '^issue list') {
+                return (@(@{ number = 1010 }, @{ number = 1011 }) | ConvertTo-Json)
+            }
+            if ($joined -match 'issue view 1010') {
+                # Sleep past budget while answering the FIRST item's view
+                # call — the foreach loop's next top-check (before item 2)
+                # trips the per-item break.
+                Start-Sleep -Milliseconds 1200
+                return (@{ comments = @(@{ body = '<!-- plan-issue-1010 -->' }) } | ConvertTo-Json -Depth 6)
+            }
+            if ($joined -match 'issue view 1011') {
+                return (@{ comments = @(@{ body = '<!-- plan-issue-1011 -->' }) } | ConvertTo-Json -Depth 6)
+            }
+            if ($joined -match '^pr list') { return '[]' }
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 1 3>$null
+
+        $result.Truncated | Should -Be $true
+        # Item 1011 must NOT have been reached — the break fires before it.
+        ($result.Tuples | Where-Object { $_['Number'] -eq 1011 }) | Should -BeNullOrEmpty
+    }
+
+    It 'sets Truncated=$true when a REST surface is skipped entirely because the budget was already exhausted (surface-budget skip)' {
+        # Pre-expire the shared stopwatch before the call even starts — both
+        # the Surface A and Surface B `if ($Stopwatch...-lt $TimeoutSeconds)`
+        # guards must observe an already-exhausted budget and skip their
+        # blocks entirely (no gh call at all).
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        Start-Sleep -Milliseconds 1100
+
+        $script:ghCalled = $false
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $script:ghCalled = $true
+            $global:LASTEXITCODE = 0
+            return '[]'
+        }
+
+        $result = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 1 3>$null
+
+        $result.Truncated | Should -Be $true
+        $result.Tuples    | Should -HaveCount 0
+        $script:ghCalled  | Should -Be $false -Because 'both REST surface blocks must be skipped entirely once the budget is already exhausted'
+    }
+
+    It 'sets Truncated=$true when a REST list call returns exactly the discovery-cap ($limit=20) rows' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match '^issue list') {
+                # Exactly 20 rows == $limit — a possible-undercount signal:
+                # more items may exist beyond what the REST fallback can see.
+                $issues = 1..20 | ForEach-Object { @{ number = (1100 + $_) } }
+                return ($issues | ConvertTo-Json)
+            }
+            if ($joined -match '^issue view') {
+                return (@{ comments = @() } | ConvertTo-Json -Depth 6)
+            }
+            if ($joined -match '^pr list') { return '[]' }
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.Truncated | Should -Be $true
+    }
+
+    It 'does NOT set Truncated when a REST list call returns fewer than the discovery cap' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match '^issue list') {
+                return (@(@{ number = 1201 }) | ConvertTo-Json)
+            }
+            if ($joined -match '^issue view') {
+                return (@{ comments = @() } | ConvertTo-Json -Depth 6)
+            }
+            if ($joined -match '^pr list') { return '[]' }
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.Truncated | Should -Be $false
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #772 T1/P4: per-site timeout disposition — the two inter-surface
+# timeout returns (one in Get-PhaseContainmentCommentCorpus, one in
+# Get-PhaseContainmentHistory) that fire when Surface A already succeeded
+# must preserve the accumulated Surface A partials + Truncated=$true with
+# the fetch path's own Source, NOT the empty Source='timeout' shape.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentCommentCorpus — T1 partial-preservation on inter-surface timeout' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'returns Surface A partials with Source=graphql and Truncated=$true instead of an empty Source=timeout when the budget exhausts before Surface B fetch' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'is:issue') {
+                # Surface A completes cleanly (single page, no internal
+                # truncation) but consumes enough wall-clock time that the
+                # CALLER's budget is exhausted by the time it returns.
+                Start-Sleep -Milliseconds 1200
+                $payload = @{
+                    data = @{
+                        search = @{
+                            pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            nodes    = @(
+                                @{
+                                    number   = 1301
+                                    comments = @{
+                                        nodes    = @(@{ body = '<!-- plan-issue-1301 -->'; createdAt = '2024-01-01T12:00:00Z' })
+                                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            if ($joined -match 'is:pr') {
+                throw 'Surface B must not be fetched once the T1 site returns early'
+            }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -TimeoutSeconds 1 3>$null
+
+        $result.Source    | Should -Be 'graphql'
+        $result.Truncated | Should -Be $true
+        ($result.Tuples | Where-Object { $_['Number'] -eq 1301 }) | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-PhaseContainmentHistory — T1 partial-preservation on inter-surface timeout' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+        $tempCache = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-t1.json'
+        if (Test-Path -LiteralPath $tempCache) { Remove-Item -LiteralPath $tempCache -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'returns Surface A partial Entries with Source=graphql and Truncated=$true instead of an empty Source=timeout when the budget exhausts before Surface B fetch' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'is:issue') {
+                Start-Sleep -Milliseconds 1200
+                $body = @"
+<!-- plan-issue-1302 -->
+<!-- phase-containment-1302 -->
+finding_key: plan-stress-test:1302:F1
+introduced_phase: plan
+catchable_phase: plan
+caught_stage: plan-stress-test
+escape_distance: 0
+severity: low
+systemic_fix_type: plan-template
+category: pattern
+apparatus_meta: false
+<!-- /phase-containment-1302 -->
+"@
+                $payload = @{
+                    data = @{
+                        search = @{
+                            pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            nodes    = @(
+                                @{
+                                    number   = 1302
+                                    comments = @{
+                                        nodes    = @(@{ body = $body; createdAt = '2024-01-01T12:00:00Z' })
+                                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            if ($joined -match 'is:pr') {
+                throw 'Surface B must not be fetched once the T1 site returns early'
+            }
+            return '{}'
+        }
+
+        $cachePath = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-t1.json'
+        $result = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -TimeoutSeconds 1 -CachePath $cachePath 3>$null
+
+        $result.Source    | Should -Be 'graphql'
+        $result.Truncated | Should -Be $true
+        ($result.Entries | Where-Object { $_['finding_key'] -eq 'plan-stress-test:1302:F1' }) | Should -Not -BeNullOrEmpty
+        # A truncated run must not have written the cache (P7).
+        Test-Path -LiteralPath $cachePath | Should -Be $false
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #772 M2: reset-on-discard — when accumulated GraphQL Truncated state
+# is discarded on fall-to-REST, the REST run must own its own Truncated
+# state, not inherit a stale $true from the discarded GraphQL attempt.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentCommentCorpus — reset-on-discard (issue #772 M2)' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'returns REST-only tuples (not the discarded Surface A tuple) with Truncated reflecting REST''s own state when Surface B errors outright' {
+        # NOTE: a GraphQL-timeout-driven Truncated=$true on Surface A cannot
+        # coexist with "proceeding past the T1 guard to call Surface B" —
+        # both checks share the same monotonic $Stopwatch and the same
+        # $TimeoutSeconds threshold, so if Surface A's OWN pagination guard
+        # already tripped, the outer T1 "before Surface B fetch" guard
+        # necessarily also observes an exhausted budget and returns early
+        # (this is exercised by the T1 Describe block above). The
+        # realistically-reachable reset-on-discard scenario is therefore:
+        # Surface A succeeds cleanly and fast (Truncated=$false, real
+        # budget remaining), Surface B fails OUTRIGHT (not a timeout), and
+        # REST completes. This still proves the discard is real (Surface
+        # A's tuple is gone, REST's own tuple is what survives) and that
+        # Truncated is REST's own value, not inherited.
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'is:issue') {
+                $payload = @{
+                    data = @{
+                        search = @{
+                            pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            nodes    = @(
+                                @{
+                                    number   = 1401
+                                    comments = @{
+                                        nodes    = @(@{ body = '<!-- plan-issue-1401 -->'; createdAt = '2024-01-01T12:00:00Z' })
+                                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            if ($joined -match 'is:pr') {
+                # Surface B fails outright -> forces fall-to-REST, discarding
+                # Surface A's already-accumulated tuple.
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            if ($joined -match '^issue list') { return (@(@{ number = 1402 }) | ConvertTo-Json) }
+            if ($joined -match 'issue view 1402') { return (@{ comments = @(@{ body = '<!-- plan-issue-1402 -->' }) } | ConvertTo-Json -Depth 6) }
+            if ($joined -match '^pr list')    { return '[]' }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentCommentCorpus -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -TimeoutSeconds 30 3>$null
+
+        $result.Source    | Should -Be 'rest'
+        $result.Truncated | Should -Be $false
+        # Surface A's tuple (#1401) must be gone — discarded by the
+        # $allTuples.Clear() on fall-to-REST — and REST's own tuple (#1402)
+        # is what survives.
+        ($result.Tuples | Where-Object { $_['Number'] -eq 1401 }) | Should -BeNullOrEmpty
+        ($result.Tuples | Where-Object { $_['Number'] -eq 1402 }) | Should -Not -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-PhaseContainmentHistory — InvalidEntryCount does not leak across the fall-to-REST discard boundary (issue #772 M2)' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+        $tempCache = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-m2.json'
+        if (Test-Path -LiteralPath $tempCache) { Remove-Item -LiteralPath $tempCache -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'reports InvalidEntryCount=0 (REST''s own count) not 1 (Surface A''s discarded count) when Surface A had a drop but Surface B errors outright' {
+        # Surface A scans a body with ONE malformed block (InvalidEntryCount
+        # contribution = 1) then Surface B fails outright, discarding Surface
+        # A's $rawEntries/$invalidEntryCount. REST then completes with a
+        # clean body (zero drops). If the discard boundary leaked/accumulated
+        # instead of resetting, the final count would incorrectly read 1.
+        $malformedBody = @"
+<!-- plan-issue-1403 -->
+<!-- phase-containment-1403 -->
+finding_key: plan-stress-test:1403:BADKEY
+introduced_phase: NOT-A-VALID-PHASE
+<!-- /phase-containment-1403 -->
+"@
+        $cleanRestBody = '<!-- plan-issue-1404 -->'
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'is:issue') {
+                $payload = @{
+                    data = @{
+                        search = @{
+                            pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            nodes    = @(
+                                @{
+                                    number   = 1403
+                                    comments = @{
+                                        nodes    = @(@{ body = $malformedBody; createdAt = '2024-01-01T12:00:00Z' })
+                                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            if ($joined -match 'is:pr') {
+                $global:LASTEXITCODE = 1
+                return 'boom'
+            }
+            if ($joined -match '^issue list') { return (@(@{ number = 1404 }) | ConvertTo-Json) }
+            if ($joined -match 'issue view 1404') { return (@{ comments = @(@{ body = $cleanRestBody }) } | ConvertTo-Json -Depth 6) }
+            if ($joined -match '^pr list')    { return '[]' }
+            return '{}'
+        }
+
+        $cachePath = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-m2.json'
+        $result = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -CachePath $cachePath -TimeoutSeconds 30 3>$null
+
+        $result.Source            | Should -Be 'rest'
+        $result.InvalidEntryCount | Should -Be 0
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #772 P8/P7: InvalidEntryCount accuracy and cache-survival.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentHistory — InvalidEntryCount cache-survival (issue #772 P7)' {
+    BeforeAll {
+        $script:CachePathP7 = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-p7.json'
+    }
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $script:CachePathP7) { Remove-Item -LiteralPath $script:CachePathP7 -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'persists a nonzero InvalidEntryCount into the cache payload and returns it on the subsequent cache-hit' {
+        $validBody = @"
+<!-- plan-issue-1500 -->
+<!-- phase-containment-1500 -->
+finding_key: plan-stress-test:1500:F1
+introduced_phase: plan
+catchable_phase: plan
+caught_stage: plan-stress-test
+escape_distance: 0
+severity: low
+systemic_fix_type: plan-template
+category: pattern
+apparatus_meta: false
+<!-- /phase-containment-1500 -->
+<!-- phase-containment-1500 -->
+finding_key: plan-stress-test:1500:BADKEY
+introduced_phase: NOT-A-VALID-PHASE
+<!-- /phase-containment-1500 -->
+"@
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'is:issue') {
+                $payload = @{
+                    data = @{
+                        search = @{
+                            pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            nodes    = @(
+                                @{
+                                    number   = 1500
+                                    comments = @{
+                                        nodes    = @(@{ body = $validBody; createdAt = '2024-01-01T12:00:00Z' })
+                                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            if ($joined -match 'is:pr') {
+                $payload = @{ data = @{ search = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = @() } } }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            return '{}'
+        }
+
+        $first = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -CachePath $script:CachePathP7 3>$null
+
+        $first.Source            | Should -Be 'graphql'
+        $first.Truncated         | Should -Be $false
+        $first.InvalidEntryCount | Should -Be 1
+        Test-Path -LiteralPath $script:CachePathP7 | Should -Be $true
+
+        # Second call within the fresh cache window must hit cache and
+        # return the SAME InvalidEntryCount, not silently default to 0.
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            throw 'gh must not be called on a cache hit'
+        }
+
+        $second = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -CachePath $script:CachePathP7 3>$null
+
+        $second.Source            | Should -Be 'cache'
+        $second.InvalidEntryCount | Should -Be 1
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Issue #772 C11: rollup -Truncated withholding — forces
+# RelaxationEligible=$false for every stage, unconditionally.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-PhaseContainmentRollup — Truncated forces RelaxationEligible=$false for every stage (issue #772 C11)' {
+    BeforeAll {
+        function script:New-TruncatedRollupEntry {
+            param([string]$FindingKey, [string]$Stage = 'code-review', [string]$CatchablePhase = 'implementation')
+            return [PSCustomObject]@{
+                finding_key       = $FindingKey
+                introduced_phase  = 'implementation'
+                catchable_phase   = $CatchablePhase
+                caught_stage      = $Stage
+                escape_distance   = 0
+                severity          = 'low'
+                systemic_fix_type = 'none'
+                category          = 'pattern'
+                apparatus_meta    = $false
+                seed              = $false
+                createdAt         = '2024-01-01T12:00:00Z'
+                surface           = 'pr'
+                issueOrPrNumber   = 900
+            }
+        }
+    }
+
+    It 'sets RelaxationEligible=$false and RelaxationEligibleReason=fetch truncated for a stage that would otherwise be clean/eligible' {
+        $entries = 1..6 | ForEach-Object { script:New-TruncatedRollupEntry -FindingKey "code-review:900:F$_" }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries -Truncated
+
+        $stage = $result.Stages['code-review']
+        $stage.RelaxationEligible       | Should -Be $false
+        $stage.RelaxationEligibleReason | Should -Be 'fetch truncated'
+    }
+
+    It 'does not set RelaxationEligibleReason when -Truncated is not supplied (regression guard)' {
+        $entries = 1..6 | ForEach-Object { script:New-TruncatedRollupEntry -FindingKey "code-review:901:F$_" }
+
+        $result = Get-PhaseContainmentRollup -Entries $entries
+
+        $stage = $result.Stages['code-review']
+        $stage.RelaxationEligible       | Should -Be $true
+        $stage.RelaxationEligibleReason | Should -BeNullOrEmpty
     }
 }
