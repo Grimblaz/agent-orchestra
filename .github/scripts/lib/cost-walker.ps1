@@ -618,3 +618,72 @@ function Get-CostWalkerCurrentSessionId {
     if ($null -eq $bestFile) { return '' }
     return $bestFile.BaseName
 }
+
+function Test-CostWalkerSessionTranscriptExists {
+    <#
+    .SYNOPSIS
+        Checks whether a persisted session id's transcript file exists on THIS
+        machine (issue #824 s4 verify-then-select gate).
+    .DESCRIPTION
+        The startup harvest reads a candidate PR's `session_id` from a (editable)
+        GitHub comment before deciding whether to spend its one-per-startup
+        expensive re-walk on it. This function is the "verify" half of
+        verify-then-select: it answers a pure local-filesystem question — does
+        any identity-matched slug directory (script:Get-IdentityMatchedSlugDirs,
+        the same D2 identity resolution Get-CostWalkerCurrentSessionId and
+        Invoke-CostTranscriptWalk use, which already walks every directory under
+        ProjectsRoot — including worktree slug directories — and admits only
+        those whose first-event cwd resolves to the same git remote identity as
+        RepoRoot) contain a "{SessionId}.jsonl" file. A session id that resolves
+        to no local file on this machine is structurally a foreign/cross-machine
+        capture that this harvest must never act on.
+
+        This is a filename existence check only — it does not open or validate
+        the file's contents. The original capturing session already verified
+        content-side admission when it wrote the transcript.
+    .PARAMETER SessionId
+        The persisted session identity to look for (a transcript file's BaseName).
+    .PARAMETER Branch
+        Accepted for signature parity with Get-CostWalkerCurrentSessionId (mirrors
+        its resolution shape). Not used to filter here — SessionId already
+        uniquely names the candidate transcript file.
+    .PARAMETER ParentCwd
+        Kept for signature parity with the sibling walker functions; not read by
+        this function's own logic (identity resolution below is keyed off
+        RepoRoot, not ParentCwd).
+    .PARAMETER RepoRoot
+        Absolute path to the repository root; used to resolve this machine's git
+        remote identity for Get-IdentityMatchedSlugDirs.
+    .PARAMETER ProjectsRoot
+        Root directory containing project slug directories. Defaults to
+        ~/.claude/projects.
+    .OUTPUTS
+        [bool] $true when a matching "{SessionId}.jsonl" file exists under any
+        identity-matched slug directory; otherwise $false.
+    #>
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$SessionId,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Branch,
+        [Parameter(Mandatory)][string]$ParentCwd,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [string]$ProjectsRoot = ''
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SessionId)) { return $false }
+
+    if (-not $ProjectsRoot) {
+        $ProjectsRoot = Join-Path ([System.Environment]::GetFolderPath('UserProfile')) '.claude' 'projects'
+    }
+
+    $slugDirs = script:Get-IdentityMatchedSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $RepoRoot
+    foreach ($slugDir in $slugDirs) {
+        $candidatePath = Join-Path $slugDir "$SessionId.jsonl"
+        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
+            return $true
+        }
+    }
+
+    return $false
+}

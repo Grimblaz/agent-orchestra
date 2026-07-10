@@ -219,6 +219,16 @@ function script:ConvertFrom-CostPatternYaml {
                 $result['pr'] = [int](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
             }
 
+            # Additive post-#824 s4 field: stamped by the startup harvest onto a
+            # candidate's persisted block after a re-walk attempt that did not
+            # promote it to end-of-session (e.g. a null-tail/cross-tool row that
+            # stays 'partial' forever). Its presence lets the s4 selection filter
+            # skip/deprioritize the row on future scans instead of re-consuming
+            # the one-re-walk-per-startup budget on a row that can never promote.
+            if ($line -match '^upgrade_attempted_at\s*:\s*(.+)$') {
+                $result['upgrade_attempted_at'] = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
             # cost_pattern_data block
             if ($line -match '^\s*cost_pattern_data\s*:\s*$') {
                 $j = $i + 1

@@ -927,5 +927,28 @@ totals:
             $entry['head_ref']      | Should -Be 'feature/issue-824-baseline-eligibility'
             $entry['pr']            | Should -Be 824
         }
+
+        It 'parses upgrade_attempted_at when the startup harvest has stamped a candidate block (issue #824 s4)' {
+            $commentBody = New-CostPatternComment -ExtraTopLevel 'upgrade_attempted_at: 2026-07-01T00:00:00Z'
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($commentBody)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.timed_out | Should -Be $false
+            $result.entries.Count | Should -Be 1
+            $result.entries[0]['upgrade_attempted_at'] | Should -Be '2026-07-01T00:00:00Z'
+        }
+
+        It 'leaves upgrade_attempted_at unset (key absent) when the block never carried the field' {
+            $commentBody = New-CostPatternComment
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($commentBody)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.entries.Count | Should -Be 1
+            $result.entries[0].ContainsKey('upgrade_attempted_at') | Should -Be $false
+        }
     }
 }

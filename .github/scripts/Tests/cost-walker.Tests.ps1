@@ -882,6 +882,71 @@ Describe 'Invoke-CostTranscriptWalk' {
             Remove-Item -Recurse -Force $tmp
         }
     }
+
+    Context 'Test-CostWalkerSessionTranscriptExists (issue #824 s4)' {
+        BeforeAll {
+            $script:HarvestTestRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
+        }
+
+        It 'returns $true when an identity-matched slug dir contains {SessionId}.jsonl' {
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-transcript-exists-$([System.Guid]::NewGuid())"
+            $slugDir = Join-Path $tmp (Get-CostTranscriptSlug -CwdPath $script:HarvestTestRepoRoot)
+            $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+            $sessionId = [System.Guid]::NewGuid().ToString()
+            $events = @(script:New-AssistantEvent -Cwd $script:HarvestTestRepoRoot -Branch 'feature/harvest-exists')
+            script:Write-TestJsonl -Path (Join-Path $slugDir "$sessionId.jsonl") -Events $events
+
+            $result = Test-CostWalkerSessionTranscriptExists -SessionId $sessionId -Branch 'feature/harvest-exists' -ParentCwd $script:HarvestTestRepoRoot -RepoRoot $script:HarvestTestRepoRoot -ProjectsRoot $tmp
+            $result | Should -Be $true
+            Remove-Item -Recurse -Force $tmp
+        }
+
+        It 'returns $false when no identity-matched slug dir contains {SessionId}.jsonl' {
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-transcript-exists-$([System.Guid]::NewGuid())"
+            $slugDir = Join-Path $tmp (Get-CostTranscriptSlug -CwdPath $script:HarvestTestRepoRoot)
+            $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+            $events = @(script:New-AssistantEvent -Cwd $script:HarvestTestRepoRoot -Branch 'feature/harvest-exists')
+            script:Write-TestJsonl -Path (Join-Path $slugDir 'unrelated-session.jsonl') -Events $events
+
+            $result = Test-CostWalkerSessionTranscriptExists -SessionId ([System.Guid]::NewGuid().ToString()) -Branch 'feature/harvest-exists' -ParentCwd $script:HarvestTestRepoRoot -RepoRoot $script:HarvestTestRepoRoot -ProjectsRoot $tmp
+            $result | Should -Be $false
+            Remove-Item -Recurse -Force $tmp
+        }
+
+        It 'returns $false (fail-closed) when SessionId is empty' {
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-transcript-exists-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmp -Force
+
+            $result = Test-CostWalkerSessionTranscriptExists -SessionId '' -Branch 'feature/harvest-exists' -ParentCwd $script:HarvestTestRepoRoot -RepoRoot $script:HarvestTestRepoRoot -ProjectsRoot $tmp
+            $result | Should -Be $false
+            Remove-Item -Recurse -Force $tmp
+        }
+
+        It 'returns $false when a same-named transcript exists only under a different-remote (non-identity-matched) slug dir' {
+            $tmpProj = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-transcript-exists-foreign-$([System.Guid]::NewGuid())"
+            $tmpProjects = Join-Path $tmpProj 'projects'
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+
+            $otherRepoPath = Join-Path $tmpProj 'other-repo'
+            $null = New-Item -ItemType Directory -Path $otherRepoPath -Force
+            $null = & git init $otherRepoPath 2>&1
+            $null = & git -C $otherRepoPath remote add origin 'https://github.com/fake-org/different-repo-transcript-exists-test'
+
+            $otherSlug = Get-CostTranscriptSlug -CwdPath $otherRepoPath
+            $otherDir = Join-Path $tmpProjects $otherSlug
+            $null = New-Item -ItemType Directory -Path $otherDir -Force
+
+            $sessionId = [System.Guid]::NewGuid().ToString()
+            $events = @(script:New-AssistantEvent -Cwd $otherRepoPath -Branch 'feature/harvest-exists')
+            script:Write-TestJsonl -Path (Join-Path $otherDir "$sessionId.jsonl") -Events $events
+
+            $result = Test-CostWalkerSessionTranscriptExists -SessionId $sessionId -Branch 'feature/harvest-exists' -ParentCwd $script:HarvestTestRepoRoot -RepoRoot $script:HarvestTestRepoRoot -ProjectsRoot $tmpProjects
+            $result | Should -Be $false
+            Remove-Item -Recurse -Force $tmpProj
+        }
+    }
 }
 
 Describe 'Resolve-CostWalkerRepoIdentity' {
