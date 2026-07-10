@@ -50,6 +50,18 @@ $script:ValidCategories        = @(
 
 #endregion
 
+#region finding_key format (issue #772 D4)
+
+# Must stay byte-identical to the "pattern" literal in
+# skills/calibration-pipeline/schemas/phase-containment.schema.json (finding_key
+# property) — the schema is the authoritative source, this is the sole consumer.
+# Drift between the two is asserted by the "finding_key pattern drift" test in
+# phase-containment-core.Tests.ps1 (follows the Get-PhaseContainmentEnumDriftStatus
+# precedent below).
+$script:FindingKeyPattern = '^(code-review|design-challenge|plan-stress-test):.+'
+
+#endregion
+
 #region Get-PhaseContainmentBlock
 
 function Get-PhaseContainmentBlock {
@@ -296,8 +308,10 @@ function Test-PhaseContainmentEntry {
         $errors.Add("escape_distance must be a non-negative integer. Got: $escapeDistance")
     }
 
-    # Rules 9-12 require valid ordinals/projections — skip if enum errors already found
-    # (the ordinal lookup would throw on invalid values)
+    # Rules 9-11 require valid ordinals/projections — skip if enum errors already found
+    # (the ordinal lookup would throw on invalid values). Rule 12 (finding_key format,
+    # below) does not depend on ordinals/projections and always runs regardless of
+    # enum errors found here.
     $enumErrorsFound = $errors.Count -gt 0
     if (-not $enumErrorsFound) {
         $introducedOrdinal  = $script:PhaseOrdinals[$Entry['introduced_phase']]
@@ -332,6 +346,17 @@ function Test-PhaseContainmentEntry {
                 )
             }
         }
+    }
+
+    # Rule 12: finding_key must match the surface-prefixed format (case-sensitive —
+    # issue #772 D4). Uses -cmatch to mirror the schema's ECMA-262 case-sensitive
+    # "pattern" semantics; PowerShell's default -match is case-insensitive and would
+    # diverge (e.g. silently accepting "Code-Review:x").
+    if (-not ($Entry['finding_key'] -cmatch $script:FindingKeyPattern)) {
+        $val = $Entry['finding_key']
+        $errors.Add(
+            "finding_key '$val' does not match expected format. Expected pattern: $script:FindingKeyPattern"
+        )
     }
 
     $isValid = $errors.Count -eq 0

@@ -356,6 +356,81 @@ Describe 'apparatus_meta: true entry' {
     }
 }
 
+Describe 'Test-PhaseContainmentEntry - finding_key format (Rule 12, issue #772 D4)' {
+    It 'returns IsValid=$false when finding_key has no recognized surface prefix' {
+        $entry = @{
+            finding_key       = 'foo:bar'
+            introduced_phase  = 'experience'
+            catchable_phase   = 'design'
+            caught_stage      = 'code-review'
+            escape_distance   = 2
+            severity          = 'medium'
+            systemic_fix_type = 'skill'
+            category          = 'pattern'
+        }
+        $result = Test-PhaseContainmentEntry -Entry $entry
+        $result.IsValid | Should -Be $false
+        $result.Errors  | Should -Match 'finding_key'
+    }
+
+    It 'returns IsValid=$false for a bare key with no surface prefix at all' {
+        $entry = @{
+            finding_key       = 'gh-1234'
+            introduced_phase  = 'experience'
+            catchable_phase   = 'design'
+            caught_stage      = 'code-review'
+            escape_distance   = 2
+            severity          = 'medium'
+            systemic_fix_type = 'skill'
+            category          = 'pattern'
+        }
+        $result = Test-PhaseContainmentEntry -Entry $entry
+        $result.IsValid | Should -Be $false
+        $result.Errors  | Should -Match 'finding_key'
+    }
+
+    It 'returns IsValid=$false when the surface prefix has the wrong case (case-sensitive -cmatch)' {
+        $entry = @{
+            finding_key       = 'Code-Review:x'
+            introduced_phase  = 'experience'
+            catchable_phase   = 'design'
+            caught_stage      = 'code-review'
+            escape_distance   = 2
+            severity          = 'medium'
+            systemic_fix_type = 'skill'
+            category          = 'pattern'
+        }
+        $result = Test-PhaseContainmentEntry -Entry $entry
+        $result.IsValid | Should -Be $false
+        $result.Errors  | Should -Match 'finding_key'
+    }
+
+    It 'returns IsValid=$true for a well-formed lowercase code-review finding_key' {
+        $entry = @{
+            finding_key       = 'code-review:gh-5555'
+            introduced_phase  = 'experience'
+            catchable_phase   = 'design'
+            caught_stage      = 'code-review'
+            escape_distance   = 2
+            severity          = 'medium'
+            systemic_fix_type = 'skill'
+            category          = 'pattern'
+        }
+        $result = Test-PhaseContainmentEntry -Entry $entry
+        $result.IsValid | Should -Be $true
+        $result.Errors  | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'finding_key pattern drift guard (issue #772 D4)' {
+    It 'schema "pattern" literal for finding_key equals the validator regex constant (Get-PhaseContainmentEnumDriftStatus precedent)' {
+        $schemaPath = Join-Path $script:RepoRoot 'skills/calibration-pipeline/schemas/phase-containment.schema.json'
+        $schema     = Get-Content -LiteralPath $schemaPath -Raw | ConvertFrom-Json
+        $schemaPattern = $schema.properties.finding_key.pattern
+        $schemaPattern | Should -Be $script:FindingKeyPattern
+    }
+}
+
 Describe 'Invalid enum value' {
     It 'returns IsValid=$false when severity is an unknown value "ultra"' {
         $entry = @{

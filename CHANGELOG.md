@@ -2,6 +2,12 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.7] — 2026-07-10
+
+### Fixed
+
+- `phase-containment.schema.json` `finding_key` now enforces a `{surface}:...` format pattern; `Test-PhaseContainmentEntry` gained Rule 12 (case-sensitive match) to reject malformed keys before they reach the escape-rate ledger (#772).
+
 ## [3.3.6] — 2026-07-08
 
 ### Added
