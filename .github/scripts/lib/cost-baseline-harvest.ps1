@@ -200,6 +200,14 @@ function script:Test-CostBaselineHarvestCandidateGate {
     .PARAMETER ProjectsRoot
         Root directory containing project slug directories, passed through to
         Test-CostWalkerSessionTranscriptExists.
+    .PARAMETER Slug
+        The harvesting session's own cost-transcript slug, passed through to
+        Test-CostWalkerSessionTranscriptExists so its verify-then-select check
+        can reach the same worktree-glob and primary-slug-fallback directory
+        set the session_id writer (Get-CostWalkerCurrentSessionId) used at
+        capture time (M3 fix, issue #824 post-review). Omitting this reverts
+        to the narrower identity-only resolution and silently reintroduces
+        the worktree-origin blind spot M3 exists to close.
     .OUTPUTS
         [hashtable] @{ Passed = [bool]; LiveHeadRef = [string] }
         LiveHeadRef is only meaningful when Passed is $true.
@@ -210,7 +218,8 @@ function script:Test-CostBaselineHarvestCandidateGate {
         [Parameter(Mandatory)][AllowEmptyString()][string]$CandidateHeadRefHint,
         [Parameter(Mandatory)][string]$ParentCwd,
         [Parameter(Mandatory)][string]$RepoRoot,
-        [Parameter(Mandatory)][AllowEmptyString()][string]$ProjectsRoot
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ProjectsRoot,
+        [AllowEmptyString()][string]$Slug = ''
     )
 
     $failedGate = @{ Passed = $false; LiveHeadRef = '' }
@@ -225,7 +234,8 @@ function script:Test-CostBaselineHarvestCandidateGate {
             -Branch $CandidateHeadRefHint `
             -ParentCwd $ParentCwd `
             -RepoRoot $RepoRoot `
-            -ProjectsRoot $ProjectsRoot
+            -ProjectsRoot $ProjectsRoot `
+            -Slug $Slug
     }
     catch { $transcriptExists = $false }
     if (-not $transcriptExists) { return $failedGate }
@@ -394,7 +404,8 @@ function Invoke-CostBaselineHarvest {
                 -CandidateHeadRefHint ([string]$candidate['head_ref']) `
                 -ParentCwd $ParentCwd `
                 -RepoRoot $RepoRoot `
-                -ProjectsRoot $ProjectsRoot
+                -ProjectsRoot $ProjectsRoot `
+                -Slug $Slug
             if (-not $gate['Passed']) { continue }
             $liveHeadRef = $gate['LiveHeadRef']
 

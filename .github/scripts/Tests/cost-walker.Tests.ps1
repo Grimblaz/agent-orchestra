@@ -946,6 +946,102 @@ Describe 'Invoke-CostTranscriptWalk' {
             $result | Should -Be $false
             Remove-Item -Recurse -Force $tmpProj
         }
+
+        It 'returns $true for a worktree-origin transcript whose worktree cwd no longer exists on disk, when -Slug is supplied (M3, issue #824 post-review fix)' {
+            # Simulates the permanently-unharvestable bug: a sibling worktree was
+            # removed by post-merge cleanup, so Get-IdentityMatchedSlugDirs alone
+            # fail-closes (it can no longer `git remote get-url` from the deleted
+            # worktree cwd recorded in the transcript's own first-event cwd). Only
+            # the worktree-slug glob branch of script:Get-CostWalkerCandidateSlugDirs
+            # (unlocked by passing -Slug) can still find this directory.
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-transcript-exists-worktree-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+
+            $primarySlug = Get-CostTranscriptSlug -CwdPath $script:HarvestTestRepoRoot
+            $worktreeDir = Join-Path $tmpProjects "$primarySlug--claude-worktrees-deadbeef"
+            $null = New-Item -ItemType Directory -Path $worktreeDir -Force
+
+            $deletedWorktreeCwd = Join-Path ([IO.Path]::GetTempPath()) "deleted-worktree-$([System.Guid]::NewGuid())"
+            # Deliberately do NOT create $deletedWorktreeCwd on disk — its absence is
+            # what makes `git -C $deletedWorktreeCwd remote get-url origin` fail and
+            # Get-IdentityMatchedSlugDirs fail-closed-exclude this directory.
+
+            $sessionId = [System.Guid]::NewGuid().ToString()
+            $events = @(script:New-AssistantEvent -Cwd $deletedWorktreeCwd -Branch 'feature/harvest-worktree')
+            script:Write-TestJsonl -Path (Join-Path $worktreeDir "$sessionId.jsonl") -Events $events
+
+            $result = Test-CostWalkerSessionTranscriptExists -SessionId $sessionId -Branch 'feature/harvest-worktree' -ParentCwd $script:HarvestTestRepoRoot -RepoRoot $script:HarvestTestRepoRoot -Slug $primarySlug -ProjectsRoot $tmpProjects
+            $result | Should -Be $true
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+
+        It 'returns $false when SessionId does not match the canonical GUID shape (M9, issue #824 post-review fix)' {
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-transcript-exists-badid-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmp -Force
+
+            foreach ($badId in @('not-a-guid', '00000000-0000-0000-0000-00000000000Z', "$([System.Guid]::NewGuid().ToString())/../evil")) {
+                $result = Test-CostWalkerSessionTranscriptExists -SessionId $badId -Branch 'feature/harvest-exists' -ParentCwd $script:HarvestTestRepoRoot -RepoRoot $script:HarvestTestRepoRoot -ProjectsRoot $tmp
+                $result | Should -Be $false -Because "SessionId '$badId' does not match the canonical GUID shape"
+            }
+            Remove-Item -Recurse -Force $tmp
+        }
+
+        It 'rejects a path-traversal SessionId even when the traversal target file actually exists on disk (M9, issue #824 post-review fix)' {
+            # Proves the vulnerability concretely rather than trusting an absent-file
+            # no-op: an identity-matched slug dir plus a sibling file placed exactly
+            # where an unsanitized "../evil-file.jsonl" traversal would land. Pre-fix,
+            # this SessionId reaches Join-Path/Test-Path unvalidated and the traversal
+            # target IS found ($true — the vulnerable behavior). Post-fix, the
+            # SessionId is rejected by shape before any path is ever constructed.
+            # Deliberately omits -Slug (not needed here and not yet available
+            # pre-fix) — identity matching alone resolves the primary slug dir on
+            # both sides of the fix, isolating this test to the M9 shape guard.
+            $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-transcript-exists-traversal-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+
+            $slug = Get-CostTranscriptSlug -CwdPath $script:HarvestTestRepoRoot
+            $slugDir = Join-Path $tmpProjects $slug
+            $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+            # A throwaway event whose cwd resolves to the real repo root, so
+            # Get-IdentityMatchedSlugDirs admits $slugDir on identity alone.
+            $events = @(script:New-AssistantEvent -Cwd $script:HarvestTestRepoRoot -Branch 'feature/harvest-exists')
+            script:Write-TestJsonl -Path (Join-Path $slugDir 'session.jsonl') -Events $events
+
+            # Traversal target sits one level ABOVE the slug dir, inside $tmpProjects.
+            $null = Set-Content -Path (Join-Path $tmpProjects 'evil-file.jsonl') -Value '{}' -Encoding utf8NoBOM
+
+            $traversalId = '../evil-file'
+            $result = Test-CostWalkerSessionTranscriptExists -SessionId $traversalId -Branch 'feature/harvest-exists' -ParentCwd $script:HarvestTestRepoRoot -RepoRoot $script:HarvestTestRepoRoot -ProjectsRoot $tmpProjects
+            $result | Should -Be $false -Because 'a traversal SessionId must be rejected by shape before Join-Path ever runs'
+            Remove-Item -Recurse -Force $tmpProjects
+        }
+    }
+
+    Context 'Get-CostWalkerCurrentSessionId admission predicate parity (M14, issue #824 post-review fix)' {
+        It 'returns a non-empty session_id for an event whose cwd differs from ParentCwd but whose branch matches (mirrors the walk''s branch-only predicate)' {
+            # D2: Invoke-CostTranscriptWalk's own per-event filter
+            # (script:Test-CostWalkerAssistantMatchesStrictFilter) dropped its cwd
+            # check once identity was enforced at the slug-dir level — it is
+            # branch-only today. Get-CostWalkerCurrentSessionId previously applied
+            # an EXTRA per-event cwd check on top of that (stricter than the walk
+            # it claims to mirror), so a session the walk fully admits could still
+            # resolve to '' here and get an empty session_id persisted.
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-sessid-cwd-differs-$([System.Guid]::NewGuid())"
+            $slug = 'test--repo'
+            $slugDir = Join-Path $tmp $slug
+            $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+            $sessionUuid = [System.Guid]::NewGuid().ToString()
+            # cwd deliberately differs from $script:TestCwd (the ParentCwd passed below);
+            # branch matches.
+            $events = @(script:New-AssistantEvent -Cwd '/c/some/other/worktree/path' -Branch $script:TestBranch)
+            script:Write-TestJsonl -Path (Join-Path $slugDir "$sessionUuid.jsonl") -Events $events
+
+            $result = Get-CostWalkerCurrentSessionId -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp
+            $result | Should -Be $sessionUuid
+            Remove-Item -Recurse -Force $tmp
+        }
     }
 }
 

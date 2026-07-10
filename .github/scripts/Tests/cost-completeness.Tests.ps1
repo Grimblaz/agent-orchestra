@@ -530,6 +530,43 @@ Describe 'Resolve-BaselineEligibility' {
         }
     }
 
+    Context 'M16 — stale exclude_reason cleared on eligible transition (issue #824 post-review)' {
+        # DD1 specifies exclude_reason: null on the eligible branch. Get-SessionCompleteness
+        # populates exclude_reason (e.g. "session completeness: partial") before this
+        # function re-evaluates eligibility; a real caller passes that populated result
+        # straight through, so both eligible branches must clear the stale reason.
+
+        It 'mid-session eligible clears a stale exclude_reason from Get-SessionCompleteness' {
+            $result = script:New-BaselineCompletenessResult `
+                -Completeness 'partial' -StopReason 'tool_use' `
+                -ExcludedFromRollingBaseline $true -ExcludeReason 'session completeness: partial'
+            $events = @(script:New-BaselineAssistantEvent -Branch 'feature/x')
+
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events $events -Branch 'feature/x'
+
+            $out.excluded_from_rolling_baseline | Should -Be $false
+            $out.exclude_reason | Should -Be $null -Because 'DD1: eligible rows must not carry a contradictory stale exclude_reason'
+        }
+
+        It 'end-of-session eligible clears a stale exclude_reason from Get-SessionCompleteness' {
+            $result = script:New-BaselineCompletenessResult `
+                -Completeness 'complete' -StopReason 'end_turn' `
+                -ExcludedFromRollingBaseline $false -ExcludeReason 'session completeness: partial'
+
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events @() -Branch 'feature/x'
+
+            $out.excluded_from_rolling_baseline | Should -Be $false
+            $out.exclude_reason | Should -Be $null -Because 'DD1: eligible rows must not carry a contradictory stale exclude_reason'
+        }
+
+        It 'excluded (ineligible) rows still preserve their exclude_reason' {
+            $result = script:New-BaselineCompletenessResult -Completeness 'partial' -StopReason 'max_tokens' -ExcludeReason 'session completeness: partial'
+            $out = Resolve-BaselineEligibility -CompletenessResult $result -TokenSum 500 -Events @() -Branch 'feature/x'
+            $out.excluded_from_rolling_baseline | Should -Be $true
+            $out.exclude_reason | Should -Be 'session completeness: partial'
+        }
+    }
+
     Context 'key parity and in-place mutation' {
         It 'preserves all original keys, adds capture_point, and mutates the same hashtable instance' {
             $result = script:New-BaselineCompletenessResult -Completeness 'complete' -StopReason 'end_turn' -ExcludedFromRollingBaseline $false

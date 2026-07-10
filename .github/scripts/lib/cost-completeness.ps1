@@ -381,5 +381,16 @@ function Resolve-BaselineEligibility {
     $CompletenessResult['excluded_from_rolling_baseline'] = -not $eligible
     $CompletenessResult['capture_point'] = $capturePoint
 
+    # M16 fix (issue #824 post-review): DD1 specifies exclude_reason: null on the
+    # eligible branch. Get-SessionCompleteness may have populated exclude_reason
+    # (e.g. "session completeness: partial") before this function re-evaluates
+    # eligibility using the mid-session TokenSum/phase-marker predicate; without
+    # this clear, an eligible row carries a stale, contradictory exclude_reason
+    # alongside excluded_from_rolling_baseline: false. Covers both eligible
+    # branches (mid-session-partial and complete/end-of-session) via one gate.
+    if ($eligible) {
+        $CompletenessResult['exclude_reason'] = $null
+    }
+
     return $CompletenessResult
 }
