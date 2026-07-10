@@ -76,6 +76,50 @@ severity: medium
         $result[0] | Should -Match 'gh-1111'
         $result[1] | Should -Match 'gh-2222'
     }
+
+    It 'skips an unclosed block when a later open tag precedes the next close tag, and warns (D6 pair-matching: open1 open2 close1 close2)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-1111
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-2222
+<!-- /phase-containment-772 -->
+<!-- /phase-containment-772 -->
+"@
+        $warnMsgs = $null
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772' -WarningVariable warnMsgs -WarningAction SilentlyContinue
+        $result | Should -Not -BeNullOrEmpty
+        $result.Count | Should -Be 1
+        $result[0] | Should -Match 'gh-2222'
+        $result[0] | Should -Not -Match 'gh-1111'
+        $warnMsgs.Count | Should -BeGreaterThan 0
+        ($warnMsgs -join ' ') | Should -Match 'malformed'
+    }
+
+    It 'returns $null when a close tag appears with no preceding open tag (close-before-open)' {
+        $text = @"
+<!-- /phase-containment-772 -->
+finding_key: code-review:gh-5555
+"@
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772'
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'parses back-to-back well-formed blocks unchanged (D6 regression guard: open1 close1 open2 close2)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-6666
+<!-- /phase-containment-772 -->
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-7777
+<!-- /phase-containment-772 -->
+"@
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772'
+        $result | Should -Not -BeNullOrEmpty
+        $result.Count | Should -Be 2
+        $result[0] | Should -Match 'gh-6666'
+        $result[1] | Should -Match 'gh-7777'
+    }
 }
 
 Describe 'ConvertFrom-PhaseContainmentYaml - non-recursion guard' {

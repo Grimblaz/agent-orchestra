@@ -38,8 +38,11 @@
         is observationally distinct from a verified-clean run.
 
     -ScaffoldBackfill renders ready-to-paste phase-containment blocks per
-    gap, with BOTH the open and closing tags (M7 — an unclosed block
-    silently stops the core scanner), introduced_phase/catchable_phase set
+    gap, with BOTH the open and closing tags (M7 — an unclosed block is
+    dropped as malformed and no longer corrupts the following block; a
+    genuinely unclosed block with no later open tag — i.e. the final block
+    in the text — still silently drops entirely, so the both-tags scaffold
+    rationale stands), introduced_phase/catchable_phase set
     to TODO-human placeholders (fail the schema enum on purpose), and
     escape_distance: -1 (fails the schema minimum:0 on purpose) — so the
     scaffold stays paste-safe until a human sets the phases and recomputes

@@ -68,6 +68,15 @@ function Get-PhaseContainmentBlock {
         The ID suffix for the marker, e.g. '762' matches <!-- phase-containment-762 -->.
     .OUTPUTS
         [string[]] Array of raw YAML content strings, or $null if no blocks found.
+    .NOTES
+        Pair-matching (issue #772 D6): if a later open tag appears before the
+        next close tag, the earlier open tag is treated as an unclosed,
+        malformed block. That block is skipped (with a Write-Warning) and the
+        scan resumes from the later open tag, so an unclosed block can no
+        longer silently absorb the following block's content. A genuinely
+        unclosed *final* block (no later open tag anywhere after it) still
+        hits the "no close tag found" case below and is dropped silently —
+        that case is unchanged.
     #>
     param(
         [Parameter(Mandatory)][string]$Text,
@@ -86,7 +95,18 @@ function Get-PhaseContainmentBlock {
 
         $contentStart = $startIdx + $openTag.Length
         $endIdx = $Text.IndexOf($closeTag, $contentStart, [System.StringComparison]::Ordinal)
-        if ($endIdx -lt 0) { break }  # Unclosed block — stop scanning
+        if ($endIdx -lt 0) { break }  # Unclosed final block — stop scanning
+
+        # Pair-match: if another open tag appears before this open tag's
+        # close tag, this open tag is unclosed/malformed. Skip only this
+        # block (warn) and resume scanning from the later open tag instead
+        # of letting the unclosed block absorb the next block's content.
+        $nextOpenIdx = $Text.IndexOf($openTag, $contentStart, [System.StringComparison]::Ordinal)
+        if ($nextOpenIdx -ge 0 -and $nextOpenIdx -lt $endIdx) {
+            Write-Warning "Skipping malformed phase-containment-$Id block at position ${startIdx}: a later open tag was found before its close tag (unclosed block)."
+            $searchFrom = $nextOpenIdx
+            continue
+        }
 
         $raw = $Text.Substring($contentStart, $endIdx - $contentStart).Trim()
 
