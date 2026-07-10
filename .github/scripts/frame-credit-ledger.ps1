@@ -1327,6 +1327,37 @@ function script:Get-FCLTokenSumFromBucket {
     return $sum
 }
 
+# Predicate for issue #824 DD7's recurrence guard: warns when the current
+# capture is baseline-ineligible AND the rolling history is healthy (fetched,
+# non-empty, not timed out, not a partial fetch) AND every entry in that
+# history is also excluded — i.e. no recent capture has been eligible, which
+# is a signal distinct from cold start (empty history) or a degraded fetch.
+function script:Test-FCLRecurrenceGuardShouldWarn {
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][bool]$CurrentExcluded,
+        [hashtable]$RollingResult = $null
+    )
+
+    if (-not $CurrentExcluded) { return $false }
+    if ($null -eq $RollingResult) { return $false }
+    if ($RollingResult['timed_out'] -eq $true) { return $false }
+    if ($RollingResult.ContainsKey('partial_fetch') -and $RollingResult['partial_fetch'] -eq $true) { return $false }
+
+    $entries = @($RollingResult['entries'])
+    if ($entries.Count -eq 0) { return $false }
+
+    foreach ($entry in $entries) {
+        if ($null -eq $entry) { continue }
+        if ($entry['excluded_from_rolling_baseline'] -eq $false) {
+            return $false
+        }
+    }
+
+    return $true
+}
+
 # ---------------------------------------------------------------------------
 # Invoke-FrameCreditLedger
 # ---------------------------------------------------------------------------
@@ -1853,11 +1884,52 @@ function Invoke-FrameCreditLedger {
             }
 
             # 6e. Completeness + preservation
+
+            # Compute current token sum from attribution (populated predicate, issue #777 s2).
+            # Use totals['tokens'] as the authoritative full-session sum (includes overhead +
+            # unattributed tokens that are never placed into any port bucket — CR2).
+            # Fall back to ports-only sum if totals is unavailable (e.g., old data format).
+            # Computed BEFORE Get-SessionCompleteness/Resolve-BaselineEligibility (issue #824
+            # s3) so the eligibility wrapper's mid-session predicate has TokenSum available.
+            [long]$currentTokenSum = 0
+            $currentTotalsTokens = if ($null -ne $costAttribution -and $costAttribution.ContainsKey('totals') -and
+                                        $null -ne $costAttribution['totals'] -and $costAttribution['totals'].ContainsKey('tokens')) {
+                $costAttribution['totals']['tokens']
+            } else { $null }
+            if ($null -ne $currentTotalsTokens) {
+                $currentTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $currentTotalsTokens
+            } elseif ($null -ne $costAttribution -and $costAttribution.ContainsKey('ports')) {
+                foreach ($portBucket in $costAttribution['ports'].Values) {
+                    if ($null -ne $portBucket -and $portBucket.ContainsKey('tokens')) {
+                        $currentTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $portBucket['tokens']
+                    }
+                }
+            }
+
             $completenessParameters = @{ Events = $costEvents }
             if (-not [string]::IsNullOrWhiteSpace($costBranch)) {
                 $completenessParameters['Branch'] = [string]$costBranch
             }
             $completeness = Get-SessionCompleteness @completenessParameters
+
+            # Issue #824 s3: resolve rolling-baseline eligibility + capture_point disclosure.
+            # Reassigns $completeness to the SAME (in-place-mutated) hashtable exactly once,
+            # before it reaches all three consumers below: Format-CostPatternMarkdown,
+            # Format-CostPatternYaml, and Resolve-CostDataPreservation (plan stress-test M1 —
+            # every consumer must read one post-eligibility object, not a stale copy).
+            $completeness = Resolve-BaselineEligibility -CompletenessResult $completeness -TokenSum $currentTokenSum -Events $costEvents -Branch ([string]$costBranch)
+
+            # Capture-time session identity (issue #824 s3), persisted into the YAML block so
+            # the s4 harvest can re-walk and verify the originating transcript next session.
+            # Derived from the transcript FILE's name on disk (grounding fix — real transcript
+            # events carry no embedded sessionId field; see Get-CostWalkerCurrentSessionId's
+            # docstring), reusing the same identity parameters already resolved above for the
+            # walkers themselves (do not recompute).
+            $currentSessionId = ''
+            if (-not [string]::IsNullOrWhiteSpace($slug) -and -not [string]::IsNullOrWhiteSpace($costBranch)) {
+                $currentSessionId = Get-CostWalkerCurrentSessionId -Slug $slug -Branch ([string]$costBranch) -ParentCwd $repoRoot
+            }
+
             $priorCostData = $null
             $priorComment = $null
             if ($null -ne $script:PrComments) {
@@ -1889,25 +1961,8 @@ function Invoke-FrameCreditLedger {
 
             # Fix #760-D1-b: wire the Resolve-CostDataPreservation result instead of discarding it.
             # This drives the skip-when-absent gate below (AC1 + AC2).
-
-            # Compute current token sum from attribution (populated predicate, issue #777 s2).
-            # Use totals['tokens'] as the authoritative full-session sum (includes overhead +
-            # unattributed tokens that are never placed into any port bucket — CR2).
-            # Fall back to ports-only sum if totals is unavailable (e.g., old data format).
-            [long]$currentTokenSum = 0
-            $currentTotalsTokens = if ($null -ne $costAttribution -and $costAttribution.ContainsKey('totals') -and
-                                        $null -ne $costAttribution['totals'] -and $costAttribution['totals'].ContainsKey('tokens')) {
-                $costAttribution['totals']['tokens']
-            } else { $null }
-            if ($null -ne $currentTotalsTokens) {
-                $currentTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $currentTotalsTokens
-            } elseif ($null -ne $costAttribution -and $costAttribution.ContainsKey('ports')) {
-                foreach ($portBucket in $costAttribution['ports'].Values) {
-                    if ($null -ne $portBucket -and $portBucket.ContainsKey('tokens')) {
-                        $currentTokenSum += script:Get-FCLTokenSumFromBucket -Bucket $portBucket['tokens']
-                    }
-                }
-            }
+            # (currentTokenSum is computed earlier, above the completeness/eligibility calls —
+            # issue #824 s3 reorder — and reused here unchanged, per DD3/M9.)
 
             # Compute prior token sum from parsed prior YAML (if available).
             # cost-rolling-history ConvertFrom-CostPatternYaml does not parse totals.tokens, so
@@ -1925,6 +1980,15 @@ function Invoke-FrameCreditLedger {
             }
 
             $preservationResult = Resolve-CostDataPreservation -Current $completeness -Prior $priorCostData -CurrentTokenSum $currentTokenSum -PriorTokenSum $priorTokenSum
+
+            # Issue #824 s3 DD7: recurrence guard. Warns once when the current capture is
+            # baseline-ineligible AND every entry in the already-fetched rolling history is
+            # also ineligible — a signal distinct from cold start (empty history) or a
+            # degraded/timed-out fetch, which must stay silent (see
+            # script:Test-FCLRecurrenceGuardShouldWarn for the full predicate).
+            if (script:Test-FCLRecurrenceGuardShouldWarn -CurrentExcluded ([bool]$completeness['excluded_from_rolling_baseline']) -RollingResult $rollingResult) {
+                [Console]::Error.WriteLine('frame-credit-ledger: all recent captures baseline-ineligible — possible eligibility regression')
+            }
 
             # Fix #760-D1-a: skip-when-absent gate — if preservation says to use_prior, reuse the
             # prior comment's cost section verbatim.  This fires when the projects root is absent
@@ -2015,7 +2079,7 @@ function Invoke-FrameCreditLedger {
                 # 6g. Render fresh cost section
                 if ((script:Get-FCLRemainingCostBudgetSeconds -Stopwatch $costStopwatch -BudgetSeconds $costBudgetSeconds) -gt 0) {
                     $costMarkdown = Format-CostPatternMarkdown -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -RollingMeta $rollingResult -Pr $Pr -Branch ([string]$costBranch)
-                    $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$costBranch)
+                    $costYaml = Format-CostPatternYaml -Attribution $costAttribution -Completeness $completeness -AnomalyFlags $anomalyFlags -Pr $Pr -Branch ([string]$costBranch) -SessionId $currentSessionId -HeadRef ([string]$costBranch)
                     $costSection = $costMarkdown + "`n" + $costYaml
                 }
 

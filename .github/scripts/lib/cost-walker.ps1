@@ -502,3 +502,119 @@ function Invoke-CostTranscriptWalk {
 
     return $included
 }
+
+function Get-CostWalkerCurrentSessionId {
+    <#
+    .SYNOPSIS
+        Derives the current capture's session identity from transcript file names
+        (issue #824 s3).
+    .DESCRIPTION
+        Real Claude Code transcript JSONL lines carry no embedded session-identity
+        field (Invoke-CostTranscriptWalk's own events are plain hashtables filtered
+        purely by type/cwd/gitBranch — see its docstring). The session identity is
+        instead the JSONL file's own name on disk: per
+        Documents/Design/peer-to-peer-dispatch-research.md's
+        {slugDir}/{sessionId}/... path convention, a transcript file's BaseName
+        (filename without the .jsonl extension) IS the session's UUID.
+
+        Resolves the same candidate slug directories Invoke-CostTranscriptWalk
+        searches — script:Get-IdentityMatchedSlugDirs, the worktree-slug glob, and
+        the primary-slug backward-compat fallback (mirrors Invoke-CostTranscriptWalk's
+        own directory-resolution logic so this returns an identity consistent with
+        what the walk itself would admit) — then, among the *.jsonl files directly
+        under those directories, finds the ones containing at least one event
+        matching the walk's own admission predicate: type -eq 'assistant' AND cwd
+        matches ParentCwd AND gitBranch matches Branch (reusing
+        script:Test-CostWalkerEventCwdMatchesParent and
+        script:Test-CostWalkerAssistantMatchesStrictFilter — no predicate logic is
+        reimplemented here).
+
+        Returns the BaseName of the matching file with the most recent
+        LastWriteTime, or '' when no file matches (e.g. synthetic/test fixtures
+        that never touch disk, or no session has produced a matching event yet).
+    .PARAMETER Slug
+        Pre-computed slug string for the project directory.
+    .PARAMETER Branch
+        Git branch name to filter events by.
+    .PARAMETER ParentCwd
+        Working directory path; normalized before comparison.
+    .PARAMETER ProjectsRoot
+        Root directory containing project slug directories. Defaults to ~/.claude/projects.
+    .OUTPUTS
+        [string] the matching transcript file's BaseName (session UUID), or ''.
+    #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [AllowEmptyString()][string]$Slug = '',
+        [Parameter(Mandatory)][string]$Branch,
+        [Parameter(Mandatory)][string]$ParentCwd,
+        [string]$ProjectsRoot = ''
+    )
+
+    if (-not $ProjectsRoot) {
+        $ProjectsRoot = Join-Path ([System.Environment]::GetFolderPath('UserProfile')) '.claude' 'projects'
+    }
+
+    $normalizedParentCwd = Get-NormalizedPath -Path $ParentCwd
+
+    $slugDirs = [System.Collections.Generic.List[string]]::new()
+
+    $identityDirs = script:Get-IdentityMatchedSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $ParentCwd
+    foreach ($d in $identityDirs) {
+        $slugDirs.Add($d)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Slug)) {
+        $worktreeDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "$Slug--claude-worktrees-*" } |
+            Where-Object { $slugDirs -notcontains $_.FullName })
+        foreach ($wtd in $worktreeDirs) {
+            $slugDirs.Add($wtd.FullName)
+        }
+
+        $primarySlugDir = script:Resolve-CostWalkerPrimarySlugDir -ProjectsRoot $ProjectsRoot -Slug $Slug
+        if ($null -ne $primarySlugDir -and $slugDirs -notcontains $primarySlugDir) {
+            $slugDirs.Add($primarySlugDir)
+        }
+    }
+
+    if ($slugDirs.Count -eq 0) {
+        return ''
+    }
+
+    $bestFile = $null
+    foreach ($slugDir in $slugDirs) {
+        $jsonlFiles = @(Get-ChildItem -Path $slugDir -Filter '*.jsonl' -File -ErrorAction SilentlyContinue)
+
+        foreach ($file in $jsonlFiles) {
+            $lines = @(Get-Content -Path $file.FullName -Encoding utf8 -ErrorAction SilentlyContinue)
+            $fileMatches = $false
+
+            foreach ($line in $lines) {
+                $trimmed = $line.Trim()
+                if ([string]::IsNullOrEmpty($trimmed)) { continue }
+
+                $parsedEvent = $null
+                try {
+                    $parsedEvent = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+                }
+                catch { continue }
+
+                if ($parsedEvent['type'] -ne 'assistant') { continue }
+                if (-not (script:Test-CostWalkerEventCwdMatchesParent -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd)) { continue }
+                if (-not (script:Test-CostWalkerAssistantMatchesStrictFilter -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch)) { continue }
+
+                $fileMatches = $true
+                break
+            }
+
+            if ($fileMatches -and ($null -eq $bestFile -or $file.LastWriteTime -gt $bestFile.LastWriteTime)) {
+                $bestFile = $file
+            }
+        }
+    }
+
+    if ($null -eq $bestFile) { return '' }
+    return $bestFile.BaseName
+}

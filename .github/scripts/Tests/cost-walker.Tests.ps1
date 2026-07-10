@@ -815,6 +815,73 @@ Describe 'Invoke-CostTranscriptWalk' {
             Remove-Item -Recurse -Force $tmpProj
         }
     }
+
+    Context 'Get-CostWalkerCurrentSessionId (issue #824 s3)' {
+        It 'returns the BaseName of the transcript file containing a matching admitted event' {
+            # Real Claude Code transcripts have no embedded session-identity field on
+            # events — the session id IS the JSONL file's own name on disk.
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-sessid-$([System.Guid]::NewGuid())"
+            $slug = 'test--repo'
+            $slugDir = Join-Path $tmp $slug
+            $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+            $sessionUuid = [System.Guid]::NewGuid().ToString()
+            $events = @(script:New-AssistantEvent -Cwd $script:TestCwd -Branch $script:TestBranch)
+            script:Write-TestJsonl -Path (Join-Path $slugDir "$sessionUuid.jsonl") -Events $events
+
+            $result = Get-CostWalkerCurrentSessionId -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp
+            $result | Should -Be $sessionUuid
+            Remove-Item -Recurse -Force $tmp
+        }
+
+        It 'returns the most-recently-written matching file''s BaseName when multiple sessions match' {
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-sessid-$([System.Guid]::NewGuid())"
+            $slug = 'test--repo'
+            $slugDir = Join-Path $tmp $slug
+            $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+            $olderUuid = [System.Guid]::NewGuid().ToString()
+            $newerUuid = [System.Guid]::NewGuid().ToString()
+            $events = @(script:New-AssistantEvent -Cwd $script:TestCwd -Branch $script:TestBranch)
+
+            script:Write-TestJsonl -Path (Join-Path $slugDir "$olderUuid.jsonl") -Events $events
+            $olderFile = Get-Item (Join-Path $slugDir "$olderUuid.jsonl")
+            $olderFile.LastWriteTime = (Get-Date).AddMinutes(-10)
+
+            script:Write-TestJsonl -Path (Join-Path $slugDir "$newerUuid.jsonl") -Events $events
+            $newerFile = Get-Item (Join-Path $slugDir "$newerUuid.jsonl")
+            $newerFile.LastWriteTime = (Get-Date)
+
+            $result = Get-CostWalkerCurrentSessionId -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp
+            $result | Should -Be $newerUuid
+            Remove-Item -Recurse -Force $tmp
+        }
+
+        It 'returns empty string when no transcript file contains a matching event (empty-result case)' {
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-sessid-$([System.Guid]::NewGuid())"
+            $slug = 'test--repo'
+            $slugDir = Join-Path $tmp $slug
+            $null = New-Item -ItemType Directory -Path $slugDir -Force
+
+            $sessionUuid = [System.Guid]::NewGuid().ToString()
+            # Branch does not match — no event is admitted.
+            $events = @(script:New-AssistantEvent -Cwd $script:TestCwd -Branch 'other/branch')
+            script:Write-TestJsonl -Path (Join-Path $slugDir "$sessionUuid.jsonl") -Events $events
+
+            $result = Get-CostWalkerCurrentSessionId -Slug $slug -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp
+            $result | Should -Be ''
+            Remove-Item -Recurse -Force $tmp
+        }
+
+        It 'returns empty string when the slug directory does not exist' {
+            $tmp = Join-Path ([IO.Path]::GetTempPath()) "cost-walker-sessid-$([System.Guid]::NewGuid())"
+            $null = New-Item -ItemType Directory -Path $tmp -Force
+
+            $result = Get-CostWalkerCurrentSessionId -Slug 'nonexistent-slug' -Branch $script:TestBranch -ParentCwd $script:TestCwd -ProjectsRoot $tmp
+            $result | Should -Be ''
+            Remove-Item -Recurse -Force $tmp
+        }
+    }
 }
 
 Describe 'Resolve-CostWalkerRepoIdentity' {

@@ -424,6 +424,167 @@ some_legacy_field: value
             $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = $previousNoSleep
         }
     }
+
+    # -------------------------------------------------------------------------
+    # Issue #824 s3 — caller-wiring invoker. Does NOT stub Resolve-BaselineEligibility,
+    # Format-CostPatternMarkdown, or Format-CostPatternYaml, so the real wrapper and
+    # real renderers (dot-sourced from cost-completeness.ps1 / cost-pattern-renderer.ps1
+    # by the orchestrator) run against a controllable synthetic completeness/attribution/
+    # rolling-history shape. Resolve-CostDataPreservation IS stubbed, but only to capture
+    # the $Current object and $CurrentTokenSum it receives (the M1 load-bearing-consumer
+    # assertion) — its own return value is fixed so the fresh-render branch always fires.
+    # -------------------------------------------------------------------------
+    $script:InvokeOrchestratorWithRealEligibility = {
+        param(
+            [string]$PrBody = $script:V4AllCoveredBody,
+            [object[]]$Comments = @(),
+            [string]$CostBranch = 'feature/issue-824-baseline-eligibility',
+            [string]$Completeness = 'partial',
+            [AllowNull()][string]$StopReason = 'tool_use',
+            [long]$TokenSum = 500,
+            [string]$SessionIdEventValue = 'sess-824-abc',
+            [object[]]$RollingEntries = @(),
+            [bool]$RollingTimedOut = $false,
+            [bool]$RollingPartialFetch = $false
+        )
+
+        $bodyJson = (@{ body = $PrBody; comments = $Comments } | ConvertTo-Json -Compress -Depth 5)
+        $capturedRepoRoot = $script:RepoRoot
+
+        $previousInline = $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
+        $previousNoSleep = $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP
+        try {
+        $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = '1'
+        $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = '1'
+
+        . $script:OrchestratorPath -Pr 467 -Mode 'warn'
+
+        function git {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'rev-parse --show-toplevel') {
+                $global:LASTEXITCODE = 0
+                return $capturedRepoRoot
+            }
+            if ($joined -match 'config --get remote\.origin\.url') {
+                $global:LASTEXITCODE = 0
+                return 'https://github.com/example/example.git'
+            }
+            if ($joined -match 'rev-parse --abbrev-ref HEAD') {
+                $global:LASTEXITCODE = 0
+                return $CostBranch
+            }
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+
+        function gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'pr view \d+ --json baseRefOid') {
+                $global:LASTEXITCODE = 0
+                return '{"baseRefOid":"abc123"}'
+            }
+            if ($joined -match 'pr view \d+ --json body') {
+                $global:LASTEXITCODE = 0
+                return $bodyJson
+            }
+            if ($joined -match 'issue view \d+ --json comments') {
+                $global:LASTEXITCODE = 0
+                return '{"comments":[]}'
+            }
+            if ($joined -match '(issue|pr) comment \d+ --body') {
+                $global:LASTEXITCODE = 0
+                return 'https://github.com/example/example/pull/467#issuecomment-1'
+            }
+            if ($joined -match 'api repos/[^/]+/[^/]+ ') {
+                $global:LASTEXITCODE = 0
+                return '{"owner":{"login":"example"},"name":"example"}'
+            }
+            if ($joined -match 'api -X PATCH repos/[^/]+/[^/]+/issues/comments/\d+') {
+                $global:LASTEXITCODE = 0
+                return '{"html_url":"https://github.com/example/example/pull/467#issuecomment-2"}'
+            }
+            if ($joined -match 'pr edit \d+ --body-file') {
+                $global:LASTEXITCODE = 0
+                return ''
+            }
+            $global:LASTEXITCODE = 0
+            return ''
+        }
+
+        function Get-CostTranscriptSlug {
+            param([string]$CwdPath)
+            return 'test-slug'
+        }
+        function Invoke-CostTranscriptWalk {
+            param([string]$Slug, [string]$Branch, [string]$ParentCwd, [Nullable[int]]$IssueNumber = $null)
+            return @(@{ type = 'assistant'; gitBranch = $Branch; message = @{ usage = @{ input_tokens = 0; output_tokens = 0 }; content = @() } })
+        }
+        # Real transcript events carry no embedded sessionId field (issue #824 s3
+        # grounding fix) — the session identity is derived from the transcript FILE's
+        # name on disk instead. This caller-wiring test controls that derived value
+        # directly via a function override, mirroring how the walker functions above
+        # are overridden rather than exercising real file discovery.
+        function Get-CostWalkerCurrentSessionId {
+            param([string]$Slug, [string]$Branch, [string]$ParentCwd, [string]$ProjectsRoot = '')
+            return $SessionIdEventValue
+        }
+        function Invoke-CostCopilotWalk {
+            param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+            return @()
+        }
+        function Get-CostAttribution {
+            param([object[]]$Events, [string]$RateTablePath = '')
+            return @{
+                ports                 = @{}
+                orchestrator_overhead = @{
+                    tokens               = @{ input = [long]$TokenSum; output = 0; cache_creation = 0; cache_read = 0 }
+                    cost_estimate_usd    = 0.0
+                    cache_read_hit_ratio = 0.0
+                }
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{
+                    total_cost_usd = 0.0
+                    tokens         = @{ input = [long]$TokenSum; output = 0; cache_creation = 0; cache_read = 0 }
+                }
+            }
+        }
+        function Get-CostRollingHistory {
+            param([int]$TimeoutSeconds = 10)
+            $r = @{ timed_out = $RollingTimedOut; entries = $RollingEntries }
+            if ($RollingPartialFetch) { $r['partial_fetch'] = $true }
+            return $r
+        }
+        function Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
+        function Get-SessionCompleteness {
+            param([object[]]$Events, [string]$ExcludeReason = '', [string]$Branch = '')
+            return @{ completeness = $Completeness; stop_reason = $StopReason; excluded_from_rolling_baseline = $true; exclude_reason = $null }
+        }
+        function Resolve-CostDataPreservation {
+            param($Current, $Prior, [long]$CurrentTokenSum = 0, [long]$PriorTokenSum = 0)
+            $script:FCLS3CapturedPreservationCurrent = $Current
+            $script:FCLS3CapturedPreservationTokenSum = $CurrentTokenSum
+            return @{ use_prior = $false; notice = $null }
+        }
+        function Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
+
+        $script:FCLS3CapturedPreservationCurrent = $null
+        $script:FCLS3CapturedPreservationTokenSum = $null
+        $script:FrameCreditLedgerRepoRoot = $capturedRepoRoot
+        $result = Invoke-FrameCreditLedger -Pr 467 -Mode 'warn'
+        return @{
+            ExitCode                 = 0
+            Comment                  = if ($null -ne $result.Comment) { [string]$result.Comment } else { '' }
+            CapturedPreservationCurrent  = $script:FCLS3CapturedPreservationCurrent
+            CapturedPreservationTokenSum = $script:FCLS3CapturedPreservationTokenSum
+        }
+        }
+        finally {
+            $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = $previousInline
+            $env:FRAME_CREDIT_LEDGER_TEST_NO_SLEEP = $previousNoSleep
+        }
+    }
 }
 
 Describe 'frame-credit-ledger cost integration' {
@@ -777,6 +938,89 @@ Describe 'frame-credit-ledger cost integration' {
                 -CostYaml "<!-- cost-pattern-data`npr: 467`n-->"
             $result.ExitCode | Should -Be 0
             $result.Comment | Should -Match '<!-- cost-pattern-data'
+        }
+    }
+
+    Context 'Baseline eligibility caller wiring (issue #824 s3)' {
+
+        It 'markdown header, YAML flag, and preservation input all agree on an eligible mid-session capture, and the block carries session_id/head_ref' {
+            $result = & $script:InvokeOrchestratorWithRealEligibility `
+                -Completeness 'partial' `
+                -StopReason 'tool_use' `
+                -TokenSum 500 `
+                -SessionIdEventValue 'sess-824-eligible' `
+                -CostBranch 'feature/issue-824-baseline-eligibility'
+
+            $result.ExitCode | Should -Be 0
+
+            # Markdown header carries the self-contained eligible-partial disclosure (M6).
+            $result.Comment | Should -Match 'mid-session capture — baseline-eligible'
+
+            # YAML flag agrees: not excluded, capture_point is the mid-session value.
+            $result.Comment | Should -Match 'excluded_from_rolling_baseline: false'
+            $result.Comment | Should -Match 'capture_point: pr-creation-mid-session'
+
+            # Additive targeting keys persisted (issue #824 s3 point 4).
+            $result.Comment | Should -Match 'session_id: sess-824-eligible'
+            $result.Comment | Should -Match 'head_ref: feature/issue-824-baseline-eligibility'
+
+            # Load-bearing M1 consumer: Resolve-CostDataPreservation received the SAME
+            # post-eligibility object the renderers used — not a stale pre-eligibility copy.
+            $result.CapturedPreservationCurrent | Should -Not -BeNullOrEmpty
+            $result.CapturedPreservationCurrent['excluded_from_rolling_baseline'] | Should -Be $false
+            $result.CapturedPreservationCurrent['capture_point'] | Should -Be 'pr-creation-mid-session'
+            $result.CapturedPreservationTokenSum | Should -Be 500
+        }
+
+        It 'markdown header, YAML flag, and preservation input all agree on an excluded mid-session capture (named partial reason)' {
+            $result = & $script:InvokeOrchestratorWithRealEligibility `
+                -Completeness 'partial' `
+                -StopReason 'refusal' `
+                -TokenSum 500
+
+            $result.ExitCode | Should -Be 0
+            $result.Comment | Should -Not -Match 'baseline-eligible'
+            $result.Comment | Should -Match 'excluded_from_rolling_baseline: true'
+            $result.Comment | Should -Match 'capture_point: n/a'
+            $result.CapturedPreservationCurrent['excluded_from_rolling_baseline'] | Should -Be $true
+            $result.CapturedPreservationCurrent['capture_point'] | Should -Be 'n/a'
+        }
+    }
+
+    Context 'Recurrence guard predicate (issue #824 s3 DD7)' {
+
+        BeforeAll {
+            . $script:OrchestratorPath -Pr 0 -Mode 'warn' -ErrorAction SilentlyContinue 2>$null
+        }
+
+        It 'warns when current is excluded and every rolling-history entry is also excluded (healthy, non-empty)' {
+            $rolling = @{ timed_out = $false; entries = @(@{ excluded_from_rolling_baseline = $true }, @{ excluded_from_rolling_baseline = $true }) }
+            Test-FCLRecurrenceGuardShouldWarn -CurrentExcluded $true -RollingResult $rolling | Should -Be $true
+        }
+
+        It 'stays silent when current is eligible, regardless of history' {
+            $rolling = @{ timed_out = $false; entries = @(@{ excluded_from_rolling_baseline = $true }) }
+            Test-FCLRecurrenceGuardShouldWarn -CurrentExcluded $false -RollingResult $rolling | Should -Be $false
+        }
+
+        It 'stays silent on cold start (empty rolling history)' {
+            $rolling = @{ timed_out = $false; entries = @() }
+            Test-FCLRecurrenceGuardShouldWarn -CurrentExcluded $true -RollingResult $rolling | Should -Be $false
+        }
+
+        It 'stays silent on a timed-out rolling-history fetch' {
+            $rolling = @{ timed_out = $true; entries = @(@{ excluded_from_rolling_baseline = $true }) }
+            Test-FCLRecurrenceGuardShouldWarn -CurrentExcluded $true -RollingResult $rolling | Should -Be $false
+        }
+
+        It 'stays silent on a partial-fetch rolling history' {
+            $rolling = @{ timed_out = $false; entries = @(@{ excluded_from_rolling_baseline = $true }); partial_fetch = $true }
+            Test-FCLRecurrenceGuardShouldWarn -CurrentExcluded $true -RollingResult $rolling | Should -Be $false
+        }
+
+        It 'stays silent when at least one rolling-history entry is eligible' {
+            $rolling = @{ timed_out = $false; entries = @(@{ excluded_from_rolling_baseline = $true }, @{ excluded_from_rolling_baseline = $false }) }
+            Test-FCLRecurrenceGuardShouldWarn -CurrentExcluded $true -RollingResult $rolling | Should -Be $false
         }
     }
 }
