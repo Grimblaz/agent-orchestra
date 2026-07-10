@@ -2,6 +2,19 @@
 
 All notable changes to agent-orchestra will be documented in this file.
 
+## [3.3.8] — 2026-07-10
+
+### Fixed
+
+- `phase-containment.schema.json` `finding_key` now enforces a `{surface}:...` format pattern; `Test-PhaseContainmentEntry` gained Rule 12 (case-sensitive match) to reject malformed keys before they reach the escape-rate ledger.
+- The escape-rate report and emission-check now flag every silent-truncation path (GraphQL/REST pagination breaks, REST per-item and list-level fetch failures, the REST discovery cap) via a total `Truncated`/`InvalidEntryCount` telemetry contract present on every return shape; a degraded run is no longer cached as clean.
+- The phase marker hunt now paginates up to 5 additional comment pages before giving up on a markerless issue/PR (was: dropped after page 1), and resumes unbounded collection after a marker is found so a ledger block on a later page is never missed.
+- REST-sourced ledger entries now carry real `createdAt` timestamps (was: hardcoded empty), restoring latest-annotation-wins dedup under the REST fallback path.
+- `Get-PhaseContainmentBlock` now pair-matches open/close marker tags so an unclosed block no longer silently corrupts the following block's fields; skipped blocks are counted and warned.
+- The report renderer was extracted to a production `Format-PhaseContainmentReport` function and gated by a new Pester spec exercising the same acceptance literals the retired `Invoke-CEGate762.ps1` harness checked (deleted — it had drifted from production on the data-untrustworthy branch).
+
+Closes #772.
+
 ## [3.3.7] — 2026-07-09
 
 ### Fixed
@@ -33,7 +46,7 @@ Add a Quality-first, shift-left governing-principle section to CLAUDE.md: qualit
 
 ### Changed
 
-- Retired the `product_alignment_prosecution`` review mode; the design-challenge adapter's new `pass-lenses`` key is now the sole source of pass identity, with no-fork Pester pins guarding the pairing (issue #797).
+- Retired the `product_alignment_prosecution` review mode; the design-challenge adapter's new `pass-lenses` key is now the sole source of pass identity, with no-fork Pester pins guarding the pairing (issue #797).
 
 ## [3.3.2] — 2026-07-05
 
