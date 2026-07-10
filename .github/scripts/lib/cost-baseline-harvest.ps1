@@ -54,6 +54,15 @@
 # Private helpers (script-scope so tests can dot-source and call them)
 # ---------------------------------------------------------------------------
 
+# F1 (issue #824 post-fix cycle 2): the composite `<!-- frame-credit-ledger-
+# $Pr -->` comment is posted by frame-enforce.yml's own
+# frame-credit-ledger.ps1 run under secrets.GITHUB_TOKEN, so its real
+# author.login is always this repo's own CI identity — empirically
+# confirmed via `gh pr view --json comments` against real merged PRs
+# (#829, #822, #815). See Get-CostBaselineHarvestCompositeComment's
+# .DESCRIPTION for the full threat model this identity check protects.
+$script:CostBaselineHarvestKnownAutomationLogins = @('github-actions')
+
 function script:Get-CostBaselineHarvestPortsTokenSum {
     <#
     .SYNOPSIS
@@ -224,13 +233,32 @@ function script:Get-CostBaselineHarvestCompositeComment {
         where Find-OrUpsertComment itself gives up on patching and posts a
         new comment instead.
 
-        M19 (issue #824 post-review fix): fail-closed authorship check,
-        mirroring the existing authorAssociation gate in
-        Resolve-FCLOverrideMarker (frame-credit-ledger-core.ps1) — a
-        matching comment from a non-OWNER/MEMBER/COLLABORATOR author (or one
-        with no resolvable authorAssociation) is treated as not-found, so an
-        arbitrary PR commenter cannot forge a capture_point/pr pair to steer
-        the harvest's one-per-startup budget at an arbitrary PR.
+        M19 (issue #824 post-review fix), corrected by the post-fix cycle 2
+        F1 fix: fail-closed authorship check on the composite comment. This
+        gate protects a different threat model than
+        Resolve-FCLOverrideMarker's (frame-credit-ledger-core.ps1) — that
+        function gates a human-authored override *directive* embedded in a
+        comment body, so requiring OWNER/MEMBER/COLLABORATOR is the right
+        bar for a human to assert. This gate instead reads a *data* comment
+        that `.github/workflows/frame-enforce.yml` posts itself (via
+        frame-credit-ledger.ps1 -> Find-OrUpsertComment) under
+        `secrets.GITHUB_TOKEN`, so its real, legitimate author is the
+        repo's own `github-actions` automation identity with
+        `authorAssociation: NONE` — empirically confirmed via `gh pr view
+        --json comments` against real merged PRs (#829, #822, #815).
+        Requiring OWNER/MEMBER/COLLABORATOR here rejected every real
+        candidate outright (association NONE never satisfies that set),
+        permanently starving the one-per-startup budget against real
+        production data. The real threat this gate defends against is an
+        arbitrary human PR commenter forging a look-alike
+        `<!-- frame-credit-ledger-$Pr -->` marker with a fabricated
+        capture_point/pr pair to steer the harvest — so the gate accepts a
+        comment when EITHER its authorAssociation is in
+        OWNER/MEMBER/COLLABORATOR (a trusted human) OR its author.login
+        matches the repo's own known CI poster identity, `github-actions`
+        (the trusted automation actually posting this comment). Anyone
+        else — including any other NONE-association human commenter — is
+        still treated as not-found (fail-closed).
     .OUTPUTS
         [hashtable] @{ Found = [bool]; Body = [string]; Marker = [string] }
     #>
@@ -268,8 +296,18 @@ function script:Get-CostBaselineHarvestCompositeComment {
 
     $authorizedAssociations = @('OWNER', 'MEMBER', 'COLLABORATOR')
     $authorAssociation = if ($selected.PSObject.Properties['authorAssociation']) { [string]$selected.authorAssociation } else { '' }
-    if ([string]::IsNullOrWhiteSpace($authorAssociation) -or $authorAssociation.ToUpperInvariant() -notin $authorizedAssociations) {
-        [Console]::Error.WriteLine("cost-baseline-harvest: composite comment for PR $Pr matched marker but author association is '$authorAssociation' (not OWNER/MEMBER/COLLABORATOR) — treated as not found (fail-closed)")
+    $authorLogin = if ($selected.PSObject.Properties['author'] -and $null -ne $selected.author -and $selected.author.PSObject.Properties['login']) { [string]$selected.author.login } else { '' }
+
+    $isAuthorizedAssociation = (-not [string]::IsNullOrWhiteSpace($authorAssociation)) -and ($authorAssociation.ToUpperInvariant() -in $authorizedAssociations)
+    # F1 (issue #824 post-fix cycle 2): recognize the repo's own known CI
+    # poster identity explicitly instead of widening authorizedAssociations
+    # to include NONE — see this function's .DESCRIPTION for why NONE alone
+    # is not safe to accept (would also accept an arbitrary human
+    # commenter, since NONE is common to both).
+    $isKnownAutomationIdentity = $authorLogin -in $script:CostBaselineHarvestKnownAutomationLogins
+
+    if (-not ($isAuthorizedAssociation -or $isKnownAutomationIdentity)) {
+        [Console]::Error.WriteLine("cost-baseline-harvest: composite comment for PR $Pr matched marker but author '$authorLogin' (association: '$authorAssociation') is neither OWNER/MEMBER/COLLABORATOR nor the known CI poster identity — treated as not found (fail-closed)")
         return $notFound
     }
 
@@ -589,7 +627,15 @@ function Invoke-CostBaselineHarvest {
             # genuinely been tried and starving every candidate behind it.
             $reWalkIsEmpty = [string]::IsNullOrWhiteSpace($reWalkCostSection)
 
-            $reWalkCompleteness = $renderResult['Completeness']
+            # F2 (issue #824 post-fix cycle 2): guarded the same way as the
+            # TokenSum access a few lines below — $renderResult is $null
+            # whenever Invoke-CostSessionRender threw and was caught above,
+            # and indexing into $null throws unconditionally (not only
+            # under strict mode). An unguarded throw here escapes to the
+            # function-level catch, which fail-opens as a silent no-op and
+            # resets Attempted to $false — recreating the M11
+            # budget-starvation bug for this specific sub-case.
+            $reWalkCompleteness = if ($null -ne $renderResult) { $renderResult['Completeness'] } else { $null }
             $reWalkCapturePoint = if ($null -ne $reWalkCompleteness -and $reWalkCompleteness -is [hashtable] -and $reWalkCompleteness.ContainsKey('capture_point')) {
                 [string]$reWalkCompleteness['capture_point']
             }
@@ -603,16 +649,32 @@ function Invoke-CostBaselineHarvest {
 
             $shouldPromote = (-not $reWalkIsEmpty) -and ($reWalkCapturePoint -eq 'end-of-session') -and ($reWalkTokenSum -ge $persistedTokenSum)
 
+            # F3 (issue #824 post-fix cycle 2): these two early-return paths
+            # cannot use the in-comment upgrade_attempted_at stamp (there is
+            # no comment, or no matched section, to splice a stamp into).
+            # Neither path is durably recorded across process runs — the
+            # harvest already accepts best-effort/re-attempted-next-startup
+            # for every other failure class, and a comment-not-found or a
+            # regex-format-drift condition is exactly the kind of transient
+            # or externally-caused state that is reasonable to keep
+            # retrying rather than build local persistence for. What DOES
+            # matter is that these two paths are no longer silently
+            # indistinguishable from each other (or from a routine
+            # "transcript unavailable" outcome) in the Signal text, since
+            # they point at different root causes an operator would
+            # investigate differently: a deleted/missing comment (self-
+            # healing on its own once the comment reappears) versus a
+            # comment-format drift (needs an actual investigation/fix).
             $fetchResult = script:Get-CostBaselineHarvestCompositeComment -Pr $candidatePr
             if ($null -eq $fetchResult -or -not $fetchResult['Found']) {
-                $result.Signal = "upgrade expected for #$candidatePr — composite comment unavailable"
+                $result.Signal = "upgrade expected for #$candidatePr — composite comment not found (may be deleted; will retry)"
                 return $result
             }
 
             $compositeBody = $fetchResult['Body']
             $sectionMatch = [regex]::Match($compositeBody, $script:FCLCostPatternSectionRegex)
             if (-not $sectionMatch.Success) {
-                $result.Signal = "upgrade expected for #$candidatePr — composite comment cost section not found"
+                $result.Signal = "upgrade expected for #$candidatePr — cost section format mismatch (needs investigation)"
                 return $result
             }
 

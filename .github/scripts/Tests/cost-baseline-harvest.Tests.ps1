@@ -853,8 +853,197 @@ Describe 'Invoke-CostBaselineHarvest' {
             $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
 
             $result.Promoted | Should -Be $false
-            $result.Signal | Should -Be "upgrade expected for #$pr — composite comment unavailable"
+            $result.Signal | Should -Be "upgrade expected for #$pr — composite comment not found (may be deleted; will retry)"
             $script:UpsertCalled | Should -Be $false
+        }
+    }
+
+    Context 'post-fix cycle 2 (F1/F2/F3)' {
+        It 'F1: accepts a composite comment authored by github-actions with authorAssociation NONE (real production shape)' {
+            $pr = 1001
+            $body = New-HarvestCompositeCommentBody -Pr $pr
+
+            function global:Get-CostRollingHistory {
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/f1-accept"}'
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{ comments = @(@{ body = $body; author = @{ login = 'github-actions' }; authorAssociation = 'NONE' }) } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                return @{
+                    CostSection  = "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: end-of-session`nports:`n  - name: implement-code`n-->"
+                    Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
+                    TokenSum     = 999
+                }
+            }
+            $script:UpsertCalled = $false
+            function global:Find-OrUpsertComment { $script:UpsertCalled = $true; return $null }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            $result.Promoted | Should -Be $true
+            $script:UpsertCalled | Should -Be $true
+        }
+
+        It 'F1: still rejects a comment from an arbitrary non-bot, non-authorized commenter (forgery protection holds)' {
+            $pr = 1002
+            $body = New-HarvestCompositeCommentBody -Pr $pr
+
+            function global:Get-CostRollingHistory {
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/f1-reject"}'
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{ comments = @(@{ body = $body; author = @{ login = 'some-random-user' }; authorAssociation = 'NONE' }) } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                return @{
+                    CostSection  = "## Cost Pattern`n<!-- cost-pattern-data`ncapture_point: end-of-session`nports:`n  - name: implement-code`n-->"
+                    Completeness = @{ completeness = 'complete'; capture_point = 'end-of-session' }
+                    TokenSum     = 999
+                }
+            }
+            $script:UpsertCalled = $false
+            function global:Find-OrUpsertComment { $script:UpsertCalled = $true; return $null }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            $result.Promoted | Should -Be $false
+            $script:UpsertCalled | Should -Be $false
+        }
+
+        It 'F2: does not crash and reaches the terminal-state stamp path when Invoke-CostSessionRender throws' {
+            $pr = 1003
+            $originalBody = New-HarvestCompositeCommentBody -Pr $pr -PortReportsMarker '### Port Reports (F2 null-guard)'
+
+            function global:Get-CostRollingHistory {
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/f2-null-guard"}'
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                throw 'simulated render failure'
+            }
+            $script:UpsertedBody = $null
+            function global:Find-OrUpsertComment {
+                param($Type, $Number, $Marker, $Body)
+                $script:UpsertedBody = $Body
+                return $null
+            }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            $result.Attempted | Should -Be $true
+            $result.Signal | Should -Be "upgrade expected for #$pr — transcript unavailable"
+            $script:UpsertedBody | Should -Not -BeNullOrEmpty
+            $script:UpsertedBody | Should -Match '### Port Reports \(F2 null-guard\)'
+            $script:UpsertedBody | Should -Match 'upgrade_attempted_at: \d{4}-\d{2}-\d{2}T'
+        }
+
+        It 'F3: signals a distinguishable "not found (may be deleted; will retry)" outcome when no composite comment matches' {
+            $pr = 1004
+
+            function global:Get-CostRollingHistory {
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/f3-not-found"}'
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{ comments = @() } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                return @{ CostSection = ''; Completeness = @{}; TokenSum = 0 }
+            }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            $result.Signal | Should -Be "upgrade expected for #$pr — composite comment not found (may be deleted; will retry)"
+        }
+
+        It 'F3: signals a distinguishable "cost section format mismatch (needs investigation)" outcome when the marker matches but the cost-pattern-data section regex does not' {
+            $pr = 1005
+            $malformedBody = @"
+<!-- frame-credit-ledger-$pr -->
+### Port Reports (F3 regex-mismatch)
+- implement-code: passed
+
+## Cost Pattern
+this section is missing the cost-pattern-data HTML comment entirely
+
+_end of comment_
+"@
+
+            function global:Get-CostRollingHistory {
+                return @{ timed_out = $false; entries = @(New-HarvestCandidateEntry -Pr $pr) }
+            }
+            function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+            function global:Test-CostWalkerSessionTranscriptExists { return $true }
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -match "pr view $pr --json state") {
+                    return '{"state":"MERGED","mergedAt":"2026-06-01T00:00:00Z","mergeCommit":{"oid":"abc"},"headRefName":"feature/f3-regex-mismatch"}'
+                }
+                if ($joined -match "pr view $pr --json comments") {
+                    return (@{ comments = @(@{ body = $malformedBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+                }
+                return ''
+            }
+            function global:Invoke-CostSessionRender {
+                param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot)
+                return @{ CostSection = ''; Completeness = @{}; TokenSum = 0 }
+            }
+
+            $result = Invoke-CostBaselineHarvest -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+            $result.Signal | Should -Be "upgrade expected for #$pr — cost section format mismatch (needs investigation)"
         }
     }
 
