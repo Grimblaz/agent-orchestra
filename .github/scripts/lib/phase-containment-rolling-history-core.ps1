@@ -1786,3 +1786,158 @@ function Get-PhaseContainmentRollup {
         WindowEntryCount        = $windowEntryCount
     }
 }
+
+# -------------------------------------------------------------------------
+# Public function: Format-PhaseContainmentReport
+# -------------------------------------------------------------------------
+
+function Format-PhaseContainmentReport {
+    <#
+    .SYNOPSIS
+        Renders the phase-containment escape-rate ledger report as text lines.
+    .DESCRIPTION
+        Issue #772 D5a: behavior-preserving extraction of the per-stage and
+        leakage-matrix rendering previously inline in
+        phase-containment-report.ps1. Takes a single context object carrying
+        the already-computed rollup plus fetch metadata and returns the
+        report body as an array of lines; the caller is responsible for
+        writing them out (e.g. via Write-Output).
+    .PARAMETER Context
+        A hashtable or PSCustomObject with fields:
+          Rollup            [PSCustomObject] — Get-PhaseContainmentRollup return object
+          Source            [string]         — 'graphql' | 'rest' | 'timeout' | 'repo-resolution-failed'
+          Truncated         [bool]
+          WindowDays        [int]
+          FetchedAt         [datetime]
+          InvalidEntryCount [int]
+    .OUTPUTS
+        [string[]] — the report lines.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][object]$Context
+    )
+
+    # Normalize field access for both hashtable and PSCustomObject
+    $rollup            = if ($Context -is [hashtable]) { $Context['Rollup'] }            else { $Context.Rollup }
+    $source            = if ($Context -is [hashtable]) { $Context['Source'] }            else { $Context.Source }
+    $truncated         = if ($Context -is [hashtable]) { $Context['Truncated'] }         else { $Context.Truncated }
+    $windowDays        = if ($Context -is [hashtable]) { $Context['WindowDays'] }        else { $Context.WindowDays }
+    $fetchedAt         = if ($Context -is [hashtable]) { $Context['FetchedAt'] }         else { $Context.FetchedAt }
+    $invalidEntryCount = if ($Context -is [hashtable]) { $Context['InvalidEntryCount'] } else { $Context.InvalidEntryCount }
+
+    $lines = [System.Collections.Generic.List[string]]::new()
+
+    # ---- Render header ----
+
+    $headerSuffix = if ($truncated) { ' (TRUNCATED — results incomplete)' } else { '' }
+
+    $lines.Add('')
+    $lines.Add('Phase-Containment Escape-Rate Ledger')
+    $lines.Add("Window: ${windowDays}d | Fetched: $($fetchedAt.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')) UTC | Source: $source$headerSuffix")
+    $lines.Add("Total entries processed: $($rollup.WindowEntryCount) | Apparatus-meta entries: $($rollup.ApparatusMetaCount)")
+    if ($invalidEntryCount -gt 0) {
+        $lines.Add("WARNING: $invalidEntryCount phase-containment block(s) dropped as invalid/unparseable during this fetch — see gh Action run logs for details.")
+    }
+    $lines.Add('')
+
+    # ---- Render per-stage results ----
+
+    $stageOrder = @('design-challenge', 'plan-stress-test', 'code-review')
+
+    foreach ($stageName in $stageOrder) {
+        $stage = $rollup.Stages[$stageName]
+
+        # Map stage name to catchable_phase label for clarity
+        $catchableLabel = switch ($stageName) {
+            'design-challenge' { 'catchable=design' }
+            'plan-stress-test' { 'catchable=plan' }
+            'code-review'      { 'catchable=implementation' }
+        }
+
+        $lines.Add("Stage: $stageName")
+        $lines.Add("  Denominator ($catchableLabel): $($stage.Denominator)")
+
+        if ($stage.DataUntrustworthy) {
+            $lines.Add("  DATA UNTRUSTWORTHY -- relaxation signal withheld (entry count mismatch)")
+            if ($null -ne $stage.DataUntrustworthyReason) {
+                $lines.Add("  Reason: $($stage.DataUntrustworthyReason)")
+            }
+        }
+
+        if ($stage.DenominatorZero) {
+            $lines.Add("  Escape rate:        N/A (denominator=0)")
+            $lines.Add("  Irreducible rate:   N/A")
+            $lines.Add("  Relaxation signal:  WITHHELD (denominator=0)")
+        }
+        elseif ($stage.InsufficientData) {
+            $lines.Add("  Escape rate:        INSUFFICIENT DATA (n=$($stage.N) < 5)")
+            $lines.Add("  Irreducible rate:   INSUFFICIENT DATA")
+            $lines.Add("  Relaxation signal:  WITHHELD (n<5)")
+        }
+        elseif ($stage.DataUntrustworthy) {
+            $escapeDisplay      = if ($null -ne $stage.EscapeRate)      { '{0:P1}' -f $stage.EscapeRate }      else { 'N/A' }
+            $irreducibleDisplay = if ($null -ne $stage.IrreducibleRate) { '{0:P1}' -f $stage.IrreducibleRate } else { 'N/A' }
+            $lines.Add("  Escape rate:        $escapeDisplay")
+            $lines.Add("  Irreducible rate:   $irreducibleDisplay")
+            $lines.Add("  Relaxation signal:  WITHHELD (data untrustworthy)")
+        }
+        else {
+            $escapeCount      = [int][Math]::Round($stage.EscapeRate      * $stage.Denominator)
+            $irreducibleCount = [int][Math]::Round($stage.IrreducibleRate * $stage.Denominator)
+
+            $escapeDisplay      = '{0:F2} ({1} of {2} escaped)' -f $stage.EscapeRate, $escapeCount, $stage.Denominator
+            $irreducibleDisplay = '{0:F2} ({1} of {2} irreducible)' -f $stage.IrreducibleRate, $irreducibleCount, $stage.Denominator
+
+            $lines.Add("  Escape rate:        $escapeDisplay")
+            $lines.Add("  Irreducible rate:   $irreducibleDisplay")
+
+            if ($null -eq $stage.RelaxationEligible) {
+                $lines.Add("  Relaxation signal:  WITHHELD")
+            }
+            elseif ($stage.RelaxationEligible -eq $true) {
+                $lines.Add("  Relaxation signal:  ELIGIBLE (escape_rate ~0, no critical findings)")
+            }
+            elseif ($stage.RelaxationEligibleReason -eq 'fetch truncated') {
+                # P9: checked BEFORE the EscapeRate reason-guess below so a
+                # truncated run never falls through to the misleading
+                # "NOT ELIGIBLE (escape_rate > 0)" text.
+                $lines.Add("  Relaxation signal:  WITHHELD (fetch truncated)")
+            }
+            else {
+                # Determine reason
+                if ($stage.EscapeRate -ge 0.05) {
+                    $lines.Add("  Relaxation signal:  NOT ELIGIBLE (escape_rate > 0)")
+                }
+                else {
+                    $lines.Add("  Relaxation signal:  NOT ELIGIBLE (critical severity finding in window)")
+                }
+            }
+        }
+
+        $lines.Add('')
+    }
+
+    # ---- Render leakage matrix ----
+
+    $leakageMatrix = $rollup.LeakageMatrix
+    if ($leakageMatrix.Count -gt 0) {
+        $lines.Add('Leakage matrix (introduced x caught combinations):')
+
+        # Sort by count descending, then key name
+        $sorted = $leakageMatrix.GetEnumerator() |
+            Sort-Object { -$_.Value }, { $_.Key }
+
+        foreach ($pair in $sorted) {
+            $lines.Add(('  {0,-45} {1} findings' -f "$($pair.Key -replace [char]0x00D7, ' -> '):", $pair.Value))
+        }
+    }
+    else {
+        $lines.Add('Leakage matrix: (no entries in window)')
+    }
+
+    $lines.Add('')
+
+    return $lines.ToArray()
+}
