@@ -291,6 +291,41 @@ seed: false
         $scanResult.Entries[0].finding_key | Should -Be 'code-review:762:F1'
         $scanResult.InvalidEntryCount | Should -Be 1
     }
+
+    It 'counts a D6 parser-level pair-match skip toward InvalidEntryCount (issue #772/#831 M4)' {
+        # open1 (gh-F1) open2 (gh-F2) close1 close2 -- open1 is unclosed/
+        # malformed per D6 pair-matching and is dropped by
+        # Get-PhaseContainmentBlock's own pair-match BEFORE this function's
+        # parse/validation loop ever sees it. Prior to the M4 fix, this skip
+        # was invisible to InvalidEntryCount.
+        $body = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:772:F1
+<!-- phase-containment-772 -->
+finding_key: code-review:772:F2
+introduced_phase: design
+catchable_phase: design
+caught_stage: code-review
+escape_distance: 2
+severity: high
+systemic_fix_type: skill
+category: architecture
+apparatus_meta: false
+seed: false
+<!-- /phase-containment-772 -->
+<!-- /phase-containment-772 -->
+"@
+
+        $scanResult = Invoke-PhaseContainmentCommentScan -CommentBodies @($body) -IssueOrPrNumber 772 3>$null
+
+        # Only the valid, later block (F2) is returned as an entry.
+        $scanResult.Entries | Should -HaveCount 1
+        $scanResult.Entries[0].finding_key | Should -Be 'code-review:772:F2'
+        # The D6 parser-level skip of the F1 block must be folded in here too.
+        $scanResult.InvalidEntryCount | Should -Be 1 -Because (
+            "the malformed/unclosed F1 block was dropped by Get-PhaseContainmentBlock's own D6 pair-match, not by this function's parse/validation loop, but must still be reflected in InvalidEntryCount"
+        )
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -1768,6 +1803,168 @@ Describe 'Get-SurfaceACorpusGraphQL — Truncated flagging (issue #772 D1/P5)' {
         $result.IsError   | Should -Be $false
         $result.Truncated | Should -Be $true
     }
+
+    It 'sets Truncated=$true when the post-marker-find unbounded pagination gh call fails (non-zero exit) (issue #772/#831 M1)' {
+        # Marker already found on page 1 (hasNextPage=true) -- falls straight
+        # through to the UNBOUNDED post-marker-find pagination pass. That
+        # pass's own gh call fails; prior to the M1 fix this `break`d out
+        # silently without ever flagging the run as degraded.
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'issue\(number:') {
+                $global:LASTEXITCODE = 1
+                return ''
+            }
+            $global:LASTEXITCODE = 0
+            $searchPayload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        nodes    = @(
+                            @{
+                                number   = 1003
+                                comments = @{
+                                    nodes    = @(@{ body = '<!-- plan-issue-1003 -->'; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $true; endCursor = 'M1ACUR1' }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($searchPayload | ConvertTo-Json -Depth 12)
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceACorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $true -Because 'a gh failure mid post-marker-find pagination must flag the run as degraded, not silently truncate'
+        $result.Tuples    | Should -HaveCount 1
+        $result.Tuples[0]['Number'] | Should -Be 1003
+    }
+
+    It 'sets Truncated=$true when the post-marker-find unbounded pagination response fails to parse (issue #772/#831 M1)' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'issue\(number:') {
+                return 'not valid json {{{'
+            }
+            $searchPayload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        nodes    = @(
+                            @{
+                                number   = 1004
+                                comments = @{
+                                    nodes    = @(@{ body = '<!-- plan-issue-1004 -->'; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $true; endCursor = 'M1ACUR2' }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($searchPayload | ConvertTo-Json -Depth 12)
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceACorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $true -Because 'a parse failure mid post-marker-find pagination must flag the run as degraded, not silently truncate'
+    }
+}
+
+Describe 'Get-SurfaceBCorpusGraphQL — Truncated flagging (issue #772/#831 M1)' {
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+    }
+
+    It 'sets Truncated=$true when the post-marker-find unbounded pagination gh call fails (non-zero exit)' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'pullRequest\(number:') {
+                $global:LASTEXITCODE = 1
+                return ''
+            }
+            $global:LASTEXITCODE = 0
+            $searchPayload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        nodes    = @(
+                            @{
+                                number   = 1013
+                                comments = @{
+                                    nodes    = @(@{ body = '<!-- judge-rulings pr-1013 -->'; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $true; endCursor = 'M1BCUR1' }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($searchPayload | ConvertTo-Json -Depth 12)
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceBCorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $true -Because 'a gh failure mid post-marker-find pagination must flag the run as degraded, not silently truncate'
+        $result.Tuples    | Should -HaveCount 1
+        $result.Tuples[0]['Number'] | Should -Be 1013
+    }
+
+    It 'sets Truncated=$true when the post-marker-find unbounded pagination response fails to parse' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'pullRequest\(number:') {
+                return 'not valid json {{{'
+            }
+            $searchPayload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        nodes    = @(
+                            @{
+                                number   = 1014
+                                comments = @{
+                                    nodes    = @(@{ body = '<!-- judge-rulings pr-1014 -->'; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $true; endCursor = 'M1BCUR2' }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($searchPayload | ConvertTo-Json -Depth 12)
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceBCorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $true -Because 'a parse failure mid post-marker-find pagination must flag the run as degraded, not silently truncate'
+    }
 }
 
 Describe 'Get-PhaseContainmentCorpusRest — Truncated flagging (issue #772 D1/C5)' {
@@ -1873,6 +2070,126 @@ Describe 'Get-PhaseContainmentCorpusRest — Truncated flagging (issue #772 D1/C
         $result = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
 
         $result.Truncated | Should -Be $false
+    }
+
+    It 'sets Truncated=$true when a REST per-item issue view fails (non-zero exit) (issue #772/#831 M2)' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match '^issue list') {
+                $global:LASTEXITCODE = 0
+                return (@(@{ number = 1020 }, @{ number = 1021 }) | ConvertTo-Json)
+            }
+            if ($joined -match 'issue view 1020') {
+                $global:LASTEXITCODE = 1
+                return ''
+            }
+            if ($joined -match 'issue view 1021') {
+                $global:LASTEXITCODE = 0
+                return (@{ comments = @(@{ body = '<!-- plan-issue-1021 -->' }) } | ConvertTo-Json -Depth 6)
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match '^pr list') { return '[]' }
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.Truncated | Should -Be $true -Because 'a per-item view failure must flag the run as degraded, not silently drop the item'
+        # Per-item isolation preserved: item 1021 must still be processed
+        # despite item 1020's failure.
+        ($result.Tuples | Where-Object { $_['Number'] -eq 1021 }) | Should -Not -BeNullOrEmpty
+    }
+
+    It 'sets Truncated=$true when a REST per-item issue view response fails to parse (issue #772/#831 M2)' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match '^issue list') {
+                return (@(@{ number = 1030 }) | ConvertTo-Json)
+            }
+            if ($joined -match 'issue view 1030') {
+                return 'not valid json {{{'
+            }
+            if ($joined -match '^pr list') { return '[]' }
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.Truncated | Should -Be $true -Because 'a per-item parse failure must flag the run as degraded, not silently drop the item'
+    }
+
+    It 'sets Truncated=$true when the REST issue-list call itself fails (non-zero exit) (issue #772/#831 M2)' {
+        $script:ghCalledIssueView = $false
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match '^issue list') {
+                $global:LASTEXITCODE = 1
+                return ''
+            }
+            if ($joined -match '^issue view') { $script:ghCalledIssueView = $true }
+            $global:LASTEXITCODE = 0
+            if ($joined -match '^pr list') { return '[]' }
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.Truncated | Should -Be $true -Because 'the entire Surface A REST corpus silently returning zero tuples on a list-call failure must flag the run as degraded'
+        $result.Tuples    | Should -HaveCount 0
+        $script:ghCalledIssueView | Should -Be $false -Because 'no per-item view calls should happen when the list call itself failed'
+    }
+
+    It 'sets Truncated=$true when a REST per-item PR view fails (non-zero exit) (issue #772/#831 M2)' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match '^issue list') { return '[]' }
+            if ($joined -match '^pr list') {
+                return (@(@{ number = 1040 }, @{ number = 1041 }) | ConvertTo-Json)
+            }
+            if ($joined -match 'pr view 1040') {
+                $global:LASTEXITCODE = 1
+                return ''
+            }
+            if ($joined -match 'pr view 1041') {
+                return (@{ comments = @(@{ body = '<!-- judge-rulings pr-1041 -->' }) } | ConvertTo-Json -Depth 6)
+            }
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.Truncated | Should -Be $true -Because 'a per-item PR view failure must flag the run as degraded, not silently drop the item'
+        ($result.Tuples | Where-Object { $_['Number'] -eq 1041 }) | Should -Not -BeNullOrEmpty
+    }
+
+    It 'sets Truncated=$true when the REST PR-list call itself fails (non-zero exit) (issue #772/#831 M2)' {
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match '^issue list') { $global:LASTEXITCODE = 0; return '[]' }
+            if ($joined -match '^pr list') {
+                $global:LASTEXITCODE = 1
+                return ''
+            }
+            $global:LASTEXITCODE = 0
+            return '{}'
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-PhaseContainmentCorpusRest -WindowDays 30 -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.Truncated | Should -Be $true -Because 'the entire Surface B REST corpus silently returning zero tuples on a list-call failure must flag the run as degraded'
+        $result.Tuples    | Should -HaveCount 0
     }
 }
 
@@ -2220,6 +2537,80 @@ introduced_phase: NOT-A-VALID-PHASE
 
         $second.Source            | Should -Be 'cache'
         $second.InvalidEntryCount | Should -Be 1
+    }
+}
+
+Describe 'Get-PhaseContainmentHistory — M1 cache-write guard (issue #772/#831 M1)' {
+    BeforeAll {
+        $script:CachePathM1 = Join-Path $env:TEMP '.phase-containment-cache-Grimblaz-agent-orchestra-m1.json'
+    }
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+        if (Test-Path -LiteralPath $script:CachePathM1) { Remove-Item -LiteralPath $script:CachePathM1 -Force -ErrorAction SilentlyContinue }
+    }
+
+    It 'does NOT write the cache when a post-marker-find pagination gh failure degrades an otherwise-successful GraphQL run' {
+        # Issue 1601's page-1 comments already carry a full, valid
+        # phase-containment block (hasNextPage=false -- no further paging
+        # needed), so the corpus is non-empty. Issue 1602's page-1 carries
+        # only the plan-issue marker with hasNextPage=true; the follow-up
+        # post-marker-find pagination call for #1602 fails (exit 1). Before
+        # the M1 fix, that failure was invisible to Truncated, so this
+        # otherwise-nonempty, actually-degraded run would pass the
+        # cache-write guard and get served as "clean" from the cache for up
+        # to an hour.
+        $blockBody = "<!-- plan-issue-1601 -->`n<!-- phase-containment-1601 -->`nfinding_key: code-review:1601:F1`nintroduced_phase: design`ncatchable_phase: design`ncaught_stage: code-review`nescape_distance: 2`nseverity: high`nsystemic_fix_type: skill`ncategory: architecture`napparatus_meta: false`nseed: false`n<!-- /phase-containment-1601 -->"
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            if ($joined -match 'issue\(number: 1602') {
+                $global:LASTEXITCODE = 1
+                return ''
+            }
+            $global:LASTEXITCODE = 0
+            if ($joined -match 'is:issue') {
+                $payload = @{
+                    data = @{
+                        search = @{
+                            pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                            nodes    = @(
+                                @{
+                                    number   = 1601
+                                    comments = @{
+                                        nodes    = @(@{ body = $blockBody; createdAt = '2024-01-01T12:00:00Z' })
+                                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                                    }
+                                },
+                                @{
+                                    number   = 1602
+                                    comments = @{
+                                        nodes    = @(@{ body = '<!-- plan-issue-1602 -->'; createdAt = '2024-01-01T12:00:00Z' })
+                                        pageInfo = @{ hasNextPage = $true; endCursor = 'M1CACHECUR2' }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            if ($joined -match 'is:pr') {
+                $payload = @{ data = @{ search = @{ pageInfo = @{ hasNextPage = $false; endCursor = $null }; nodes = @() } } }
+                return ($payload | ConvertTo-Json -Depth 12)
+            }
+            return '{}'
+        }
+
+        $result = Get-PhaseContainmentHistory -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra' -WindowDays 30 -CachePath $script:CachePathM1 3>$null
+
+        $result.Source    | Should -Be 'graphql'
+        $result.Truncated | Should -Be $true -Because 'issue #1602''s post-marker-find pagination failure must surface as Truncated'
+        $result.Entries   | Should -HaveCount 1 -Because 'issue #1601''s valid block must still be present despite issue #1602''s pagination failure (partial preservation)'
+        Test-Path -LiteralPath $script:CachePathM1 | Should -Be $false -Because 'a truncated/degraded run must never be written to the 1-hour cache -- writing it would serve the degraded snapshot as "clean" for up to an hour'
     }
 }
 

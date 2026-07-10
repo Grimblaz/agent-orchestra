@@ -78,21 +78,30 @@ function Get-PhaseContainmentBlock {
         The full text to search within (e.g., a GitHub issue comment body).
     .PARAMETER Id
         The ID suffix for the marker, e.g. '762' matches <!-- phase-containment-762 -->.
+    .PARAMETER SkippedCount
+        Optional [ref] counter incremented once per pair-match skip (issue
+        #772 D6 malformed/unclosed block). Callers that need to fold
+        parser-layer skips into their own drop counters (e.g.
+        Invoke-PhaseContainmentCommentScan's InvalidEntryCount) pass a [ref]
+        here; existing callers that omit it are unaffected.
     .OUTPUTS
         [string[]] Array of raw YAML content strings, or $null if no blocks found.
     .NOTES
         Pair-matching (issue #772 D6): if a later open tag appears before the
         next close tag, the earlier open tag is treated as an unclosed,
-        malformed block. That block is skipped (with a Write-Warning) and the
-        scan resumes from the later open tag, so an unclosed block can no
-        longer silently absorb the following block's content. A genuinely
-        unclosed *final* block (no later open tag anywhere after it) still
-        hits the "no close tag found" case below and is dropped silently —
-        that case is unchanged.
+        malformed block. That block is skipped (with a Write-Warning, and —
+        issue #772/#831 M4 — an increment of the optional -SkippedCount [ref]
+        counter) and the scan resumes from the later open tag, so an
+        unclosed block can no longer silently absorb the following block's
+        content. A genuinely unclosed *final* block (no later open tag
+        anywhere after it) still hits the "no close tag found" case below
+        and is dropped silently, without incrementing -SkippedCount — that
+        case is unchanged (tracked separately, not required for this fix).
     #>
     param(
         [Parameter(Mandatory)][string]$Text,
-        [Parameter(Mandatory)][string]$Id
+        [Parameter(Mandatory)][string]$Id,
+        [ref]$SkippedCount
     )
 
     $openTag  = "<!-- phase-containment-$Id -->"
@@ -116,6 +125,7 @@ function Get-PhaseContainmentBlock {
         $nextOpenIdx = $Text.IndexOf($openTag, $contentStart, [System.StringComparison]::Ordinal)
         if ($nextOpenIdx -ge 0 -and $nextOpenIdx -lt $endIdx) {
             Write-Warning "Skipping malformed phase-containment-$Id block at position ${startIdx}: a later open tag was found before its close tag (unclosed block)."
+            if ($null -ne $SkippedCount) { $SkippedCount.Value++ }
             $searchFrom = $nextOpenIdx
             continue
         }

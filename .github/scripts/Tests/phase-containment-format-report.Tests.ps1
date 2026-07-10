@@ -230,7 +230,16 @@ Describe 'Format-PhaseContainmentReport — DataUntrustworthy branch (SustainedC
         # a stage with n>=5 still has a real rate to show. The retired
         # Invoke-CEGate762.ps1 harness rendered a hardcoded "N/A (data
         # untrustworthy)" here — that text never reflected production.
-        $script:MismatchedReportText.Contains('Escape rate:        28.6%') | Should -BeTrue -Because (
+        #
+        # M8 fix (issue #772/#831 post-fix review): compute the expected
+        # percentage with production's own culture-sensitive '{0:P1}' format
+        # call (same as phase-containment-rolling-history-core.ps1's
+        # DataUntrustworthy-branch escapeDisplay) instead of a hardcoded
+        # en-US literal, so this assertion stays self-consistent on
+        # non-en-US CI runners where '{0:P1}' renders with a different
+        # decimal separator / percent-symbol placement.
+        $expectedEscapeDisplay = '{0:P1}' -f $script:MismatchedRollup.Stages['design-challenge'].EscapeRate
+        $script:MismatchedReportText.Contains("Escape rate:        $expectedEscapeDisplay") | Should -BeTrue -Because (
             "production formats the untrustworthy-branch rate as a percentage (P1 format) when EscapeRate is non-null.`nActual report:`n$script:MismatchedReportText"
         )
         $script:MismatchedReportText.Contains('N/A (data untrustworthy)') | Should -BeFalse -Because (

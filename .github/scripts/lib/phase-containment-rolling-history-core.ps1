@@ -150,6 +150,12 @@ function Invoke-PhaseContainmentCommentScan {
         entry hashtables plus a count of every dropped block (issue #772
         D1/P8 — both the parse-failure drop and every validation-failure
         drop, Rules 1-12, count toward InvalidEntryCount, not just Rule 12).
+        Issue #772/#831 M4: Get-PhaseContainmentBlock's own D6 pair-match
+        skip (a malformed/unclosed block dropped before it is even
+        returned here) is threaded in via its -SkippedCount [ref] parameter
+        and folded into InvalidEntryCount too, so parser-layer drops are
+        not invisible to callers that trust this count as the complete
+        picture of scan-time data loss.
     .PARAMETER CommentBodies
         Array of comment body strings to scan.
     .PARAMETER IssueOrPrNumber
@@ -181,7 +187,14 @@ function Invoke-PhaseContainmentCommentScan {
         $body = $CommentBodies[$i]
         $createdAt = if ($i -lt $CreatedAtValues.Count) { $CreatedAtValues[$i] } else { '' }
 
-        $yamlBlocks = Get-PhaseContainmentBlock -Text $body -Id $id
+        # M4 fix (issue #772/#831 post-fix review): thread the D6 pair-match
+        # skip count out of Get-PhaseContainmentBlock so a malformed/
+        # unclosed block that never reaches this loop still counts toward
+        # InvalidEntryCount, alongside the parse-failure and
+        # validation-failure drops below.
+        $parserSkippedCount = 0
+        $yamlBlocks = Get-PhaseContainmentBlock -Text $body -Id $id -SkippedCount ([ref]$parserSkippedCount)
+        $invalidEntryCount += $parserSkippedCount
         if ($null -eq $yamlBlocks) { continue }
 
         foreach ($yamlText in $yamlBlocks) {
@@ -516,7 +529,18 @@ function script:Get-SurfaceACorpusGraphQL {
                     # PF2-F2 fix: see the Surface A search-page call above for
                     # the same stderr/ConvertFrom-Json rationale.
                     $pageOutput = & gh api graphql -f "query=$pageQuery" 2>$null
-                    if ($LASTEXITCODE -ne 0) { break }
+                    if ($LASTEXITCODE -ne 0) {
+                        # M1 fix (issue #772/#831 post-fix review): a gh
+                        # failure here silently truncates the UNBOUNDED
+                        # post-marker-find collection pass — the marker was
+                        # already confirmed present, so a break here can drop
+                        # a later phase-containment-{N} block without ever
+                        # flagging the run as degraded. Match the sibling
+                        # timeout exit above.
+                        Write-Warning "phase-containment-rolling-history-core: post-marker-find pagination gh call failed for issue #$issueNum (exit $LASTEXITCODE)"
+                        $truncated = $true
+                        break
+                    }
 
                     try {
                         $pageParsed = ($pageOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
@@ -532,7 +556,11 @@ function script:Get-SurfaceACorpusGraphQL {
                         $cursor = if ([bool]$pi['hasNextPage']) { [string]$pi['endCursor'] } else { $null }
                     }
                     catch {
+                        # M1 fix: same rationale as the gh-exit-failure branch
+                        # above — a parse failure here silently truncates the
+                        # unbounded post-marker-find collection pass.
                         Write-Warning "phase-containment-rolling-history-core: failed to parse pagination response for issue #${issueNum}: $_"
+                        $truncated = $true
                         break
                     }
                 }
@@ -820,7 +848,15 @@ function script:Get-SurfaceBCorpusGraphQL {
                     # PF2-F2 fix: see the Surface A search-page call for the
                     # same stderr/ConvertFrom-Json rationale.
                     $pageOutput = & gh api graphql -f "query=$pageQuery" 2>$null
-                    if ($LASTEXITCODE -ne 0) { break }
+                    if ($LASTEXITCODE -ne 0) {
+                        # M1 fix (issue #772/#831 post-fix review): see the
+                        # identical Surface A rationale above — a gh failure
+                        # here silently truncates the UNBOUNDED post-marker-
+                        # find collection pass.
+                        Write-Warning "phase-containment-rolling-history-core: post-marker-find pagination gh call failed for PR #$prNum (exit $LASTEXITCODE)"
+                        $truncated = $true
+                        break
+                    }
 
                     try {
                         $pageParsed = ($pageOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
@@ -836,7 +872,9 @@ function script:Get-SurfaceBCorpusGraphQL {
                         $cursor = if ([bool]$pi['hasNextPage']) { [string]$pi['endCursor'] } else { $null }
                     }
                     catch {
+                        # M1 fix: see the identical Surface A rationale above.
                         Write-Warning "phase-containment-rolling-history-core: failed to parse pagination response for PR #${prNum}: $_"
+                        $truncated = $true
                         break
                     }
                 }
@@ -971,7 +1009,15 @@ function script:Get-PhaseContainmentCorpusRest {
                     # PF2-F2 fix: see Get-SurfaceACorpusGraphQL identical
                     # stderr/ConvertFrom-Json rationale.
                     $viewOutput = & gh issue view $num --json comments 2>$null
-                    if ($LASTEXITCODE -ne 0) { continue }
+                    if ($LASTEXITCODE -ne 0) {
+                        # M2 fix (issue #772/#831 post-fix review): a per-item
+                        # view failure silently dropped this issue's comments
+                        # from the corpus without ever flagging the run as
+                        # degraded.
+                        Write-Warning "phase-containment-rolling-history-core: REST failed to fetch issue #$num comments (exit $LASTEXITCODE)"
+                        $truncated = $true
+                        continue
+                    }
                     try {
                         $data     = ($viewOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
                         $comments = @($data['comments'])
@@ -1009,13 +1055,29 @@ function script:Get-PhaseContainmentCorpusRest {
                         $tuples.Add(@{ Number = $num; Surface = 'issue'; Bodies = $bodies; CreatedAtValues = $createdAtValues })
                     }
                     catch {
+                        # M2 fix: same rationale as the view-failure branch
+                        # above — a per-item parse failure silently dropped
+                        # this issue without flagging the run as degraded.
                         Write-Warning "phase-containment-rolling-history-core: REST failed to parse issue #$num comments: $_"
+                        $truncated = $true
                     }
                 }
             }
             catch {
+                # M2 fix: a list-level parse failure silently dropped the
+                # ENTIRE Surface A REST corpus without flagging the run as
+                # degraded — same failure class as the per-item drops above.
                 Write-Warning "phase-containment-rolling-history-core: REST issue list parse failed: $_"
+                $truncated = $true
             }
+        }
+        else {
+            # M2 fix: the `gh issue list` call itself failing (non-zero
+            # exit) previously fell through this `if` with no `else` at
+            # all — silently returning zero Surface A tuples with no
+            # warning and no Truncated flag.
+            Write-Warning "phase-containment-rolling-history-core: REST issue list call failed (exit $LASTEXITCODE)"
+            $truncated = $true
         }
     }
     else {
@@ -1045,7 +1107,13 @@ function script:Get-PhaseContainmentCorpusRest {
                     # PF2-F2 fix: see Get-SurfaceACorpusGraphQL identical
                     # stderr/ConvertFrom-Json rationale.
                     $viewOutput = & gh pr view $num --json comments 2>$null
-                    if ($LASTEXITCODE -ne 0) { continue }
+                    if ($LASTEXITCODE -ne 0) {
+                        # M2 fix (issue #772/#831 post-fix review): see the
+                        # identical Surface A rationale above.
+                        Write-Warning "phase-containment-rolling-history-core: REST failed to fetch PR #$num comments (exit $LASTEXITCODE)"
+                        $truncated = $true
+                        continue
+                    }
                     try {
                         $data     = ($viewOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
                         $comments = @($data['comments'])
@@ -1067,13 +1135,22 @@ function script:Get-PhaseContainmentCorpusRest {
                         $tuples.Add(@{ Number = $num; Surface = 'pr'; Bodies = $bodies; CreatedAtValues = $createdAtValues })
                     }
                     catch {
+                        # M2 fix: see the identical Surface A rationale above.
                         Write-Warning "phase-containment-rolling-history-core: REST failed to parse PR #$num comments: $_"
+                        $truncated = $true
                     }
                 }
             }
             catch {
+                # M2 fix: see the identical Surface A list-level rationale above.
                 Write-Warning "phase-containment-rolling-history-core: REST PR list parse failed: $_"
+                $truncated = $true
             }
+        }
+        else {
+            # M2 fix: see the identical Surface A list-level rationale above.
+            Write-Warning "phase-containment-rolling-history-core: REST PR list call failed (exit $LASTEXITCODE)"
+            $truncated = $true
         }
     }
     else {

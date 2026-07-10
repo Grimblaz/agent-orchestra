@@ -120,6 +120,45 @@ finding_key: code-review:gh-7777
         $result[0] | Should -Match 'gh-6666'
         $result[1] | Should -Match 'gh-7777'
     }
+
+    It 'increments the optional -SkippedCount [ref] once per pair-match skip (issue #772/#831 M4)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-1111
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-2222
+<!-- /phase-containment-772 -->
+<!-- /phase-containment-772 -->
+"@
+        $skipped = 0
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772' -SkippedCount ([ref]$skipped) -WarningAction SilentlyContinue
+        $result | Should -Not -BeNullOrEmpty
+        $skipped | Should -Be 1 -Because 'exactly one malformed/unclosed block (gh-1111) was skipped by the D6 pair-match'
+    }
+
+    It 'does not increment -SkippedCount when no pair-match skip occurs' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-6666
+<!-- /phase-containment-772 -->
+"@
+        $skipped = 0
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772' -SkippedCount ([ref]$skipped)
+        $result | Should -Not -BeNullOrEmpty
+        $skipped | Should -Be 0
+    }
+
+    It 'does not throw when -SkippedCount is omitted, even when a pair-match skip occurs (back-compat)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-1111
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-2222
+<!-- /phase-containment-772 -->
+<!-- /phase-containment-772 -->
+"@
+        { Get-PhaseContainmentBlock -Text $text -Id '772' -WarningAction SilentlyContinue } | Should -Not -Throw
+    }
 }
 
 Describe 'ConvertFrom-PhaseContainmentYaml - non-recursion guard' {
