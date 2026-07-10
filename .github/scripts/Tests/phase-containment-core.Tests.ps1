@@ -159,6 +159,28 @@ finding_key: code-review:gh-2222
 "@
         { Get-PhaseContainmentBlock -Text $text -Id '772' -WarningAction SilentlyContinue } | Should -Not -Throw
     }
+
+    It 'a final unclosed block emits a warning and increments SkippedCount (issue #833 GH-2)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-8888
+"@
+        $skipped = 0
+        $warnMsgs = $null
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772' -SkippedCount ([ref]$skipped) -WarningVariable warnMsgs -WarningAction SilentlyContinue
+        $result | Should -BeNullOrEmpty
+        $skipped | Should -Be 1 -Because 'the trailing unclosed block (gh-8888) has no close tag anywhere after it and should be counted as skipped'
+        $warnMsgs.Count | Should -BeGreaterThan 0
+        ($warnMsgs -join ' ') | Should -Match 'malformed'
+    }
+
+    It 'does not throw when -SkippedCount is omitted for a final unclosed block (back-compat)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-8888
+"@
+        { Get-PhaseContainmentBlock -Text $text -Id '772' -WarningAction SilentlyContinue } | Should -Not -Throw
+    }
 }
 
 Describe 'ConvertFrom-PhaseContainmentYaml - non-recursion guard' {

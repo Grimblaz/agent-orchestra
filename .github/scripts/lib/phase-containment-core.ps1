@@ -94,9 +94,10 @@ function Get-PhaseContainmentBlock {
         counter) and the scan resumes from the later open tag, so an
         unclosed block can no longer silently absorb the following block's
         content. A genuinely unclosed *final* block (no later open tag
-        anywhere after it) still hits the "no close tag found" case below
-        and is dropped silently, without incrementing -SkippedCount — that
-        case is unchanged (tracked separately, not required for this fix).
+        anywhere after it, so no close tag is ever found) hits the same
+        "no close tag found" case below and — issue #772/#833 GH-2 — is now
+        also warned and counted via -SkippedCount, matching the mid-scan
+        case, before the scan stops.
     #>
     param(
         [Parameter(Mandatory)][string]$Text,
@@ -116,7 +117,15 @@ function Get-PhaseContainmentBlock {
 
         $contentStart = $startIdx + $openTag.Length
         $endIdx = $Text.IndexOf($closeTag, $contentStart, [System.StringComparison]::Ordinal)
-        if ($endIdx -lt 0) { break }  # Unclosed final block — stop scanning
+        if ($endIdx -lt 0) {
+            # Unclosed final block — no close tag found anywhere after this
+            # open tag. Warn and count it the same way the mid-scan
+            # pair-match case does (issue #772/#833 GH-2), then stop
+            # scanning; there is nothing left to resume from.
+            Write-Warning "Skipping malformed phase-containment-$Id block at position ${startIdx}: no close tag found (unclosed final block)."
+            if ($null -ne $SkippedCount) { $SkippedCount.Value++ }
+            break
+        }
 
         # Pair-match: if another open tag appears before this open tag's
         # close tag, this open tag is unclosed/malformed. Skip only this
