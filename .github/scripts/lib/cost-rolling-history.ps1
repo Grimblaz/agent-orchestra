@@ -198,6 +198,27 @@ function script:ConvertFrom-CostPatternYaml {
                 $result['rendered_at'] = $parsedAt
             }
 
+            # Additive post-#824 baseline-eligibility fields (issue #824 s2). capture_point/
+            # session_id/head_ref are new top-level scalars the s4 harvest needs to select
+            # and re-walk mid-session captures. pr was already emitted by the renderer
+            # (cost-pattern-renderer.ps1) but had no matcher here — the harvest needs it to
+            # resolve its upsert target.
+            if ($line -match '^capture_point\s*:\s*(.+)$') {
+                $result['capture_point'] = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
+            if ($line -match '^session_id\s*:\s*(.+)$') {
+                $result['session_id'] = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
+            if ($line -match '^head_ref\s*:\s*(.+)$') {
+                $result['head_ref'] = [string](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
+            if ($line -match '^pr\s*:\s*(.+)$') {
+                $result['pr'] = [int](script:ConvertFrom-CostPatternYamlScalar -Value $Matches[1])
+            }
+
             # cost_pattern_data block
             if ($line -match '^\s*cost_pattern_data\s*:\s*$') {
                 $j = $i + 1

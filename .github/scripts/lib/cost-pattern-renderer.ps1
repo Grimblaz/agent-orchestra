@@ -293,7 +293,24 @@ function script:Build-CostPatternHeader {
     $excludeReason = $Completeness['exclude_reason']
     $stopReason = $Completeness['stop_reason']
 
-    # partial session
+    # eligible-partial session (issue #824 M6): a mid-session capture that
+    # Resolve-BaselineEligibility promoted to baseline-eligible. Self-contained —
+    # always carries the mid-session disclosure and appends its own anomaly-count
+    # or timed-out qualifier here, so it never falls through to the excluded-partial
+    # string below or the "within rolling baseline" string for complete sessions.
+    if ($completenessValue -eq 'partial' -and $excluded -eq $false) {
+        $disclosure = 'mid-session capture — baseline-eligible; totals may understate the final turn'
+        if ($null -ne $RollingMeta -and $RollingMeta['timed_out'] -eq $true) {
+            return "## Cost Pattern `u{26A0} $disclosure; rolling-history fetch timed out — anomaly review unavailable for this run; per-port table shown below"
+        }
+        if ($null -ne $AnomalyFlags -and $AnomalyFlags.Count -gt 0) {
+            $n = $AnomalyFlags.Count
+            return "## Cost Pattern `u{26A0} $disclosure ($n anomalies vs rolling baseline)"
+        }
+        return "## Cost Pattern `u{26A0} $disclosure"
+    }
+
+    # partial session (excluded from rolling-baseline aggregation)
     if ($completenessValue -eq 'partial') {
         $reason = if ($stopReason) { $stopReason } else { 'unknown stop reason' }
         return "## Cost Pattern `u{26A0} session incomplete ($reason); cost-fields show partial data; this run is excluded from rolling-history aggregation"
@@ -677,6 +694,14 @@ function Format-CostPatternYaml {
         PR number.
     .PARAMETER Branch
         Branch name.
+    .PARAMETER SessionId
+        Additive post-#824 field: the capture-time session identity (used by the s4
+        harvest to re-walk and verify the originating transcript). Empty string when
+        the caller has no session identity to persist.
+    .PARAMETER HeadRef
+        Additive post-#824 field: the capture-time head_ref (used by the s4 harvest
+        as the walk key for a bounded next-session upgrade). Empty string when the
+        caller has no head_ref to persist.
     .OUTPUTS
         [string] The <!-- cost-pattern-data ... --> block.
     #>
@@ -687,7 +712,9 @@ function Format-CostPatternYaml {
         [Parameter(Mandatory)][hashtable]$Completeness,
         [AllowEmptyCollection()][hashtable[]]$AnomalyFlags = @(),
         [int]$Pr = 0,
-        [string]$Branch = ''
+        [string]$Branch = '',
+        [string]$SessionId = '',
+        [string]$HeadRef = ''
     )
 
     $inv = [System.Globalization.CultureInfo]::InvariantCulture
@@ -726,6 +753,17 @@ function Format-CostPatternYaml {
     $null = $sb.AppendLine('phase_scope: branch-session-only')
     $null = $sb.AppendLine("pr: $Pr")
     $null = $sb.AppendLine("branch: $Branch")
+
+    # Additive post-#824 baseline-eligibility fields (issue #824 s2). capture_point is
+    # sourced from the eligibility result the caller passes in via $Completeness (added
+    # in place by Resolve-BaselineEligibility); session_id/head_ref are capture-time
+    # targeting keys the s4 harvest uses to re-walk and verify the originating transcript.
+    # Must render before the ports: block — the parser's ports loop treats the next
+    # zero-indent top-level key as the end of the block.
+    $capturePointValue = if ($Completeness.ContainsKey('capture_point')) { [string]$Completeness['capture_point'] } else { 'n/a' }
+    $null = $sb.AppendLine("capture_point: $capturePointValue")
+    $null = $sb.AppendLine("session_id: $SessionId")
+    $null = $sb.AppendLine("head_ref: $HeadRef")
 
     # ports array
     $null = $sb.AppendLine('ports:')

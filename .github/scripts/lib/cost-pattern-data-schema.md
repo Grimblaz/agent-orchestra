@@ -25,6 +25,9 @@ This document defines the schema for the `<!-- cost-pattern-data ... -->` YAML b
 | `install_status` | string | Additive post-#488 Copilot collection status, such as `ok` or `missing-or-fallback`. Missing v1 values default to `ok`. |
 | `unmapped_session_count` | integer | Additive post-#488 count of Copilot sessions found but not mapped to the current PR branch. Missing v1 values default to `0`. |
 | `degraded_reason` | string (optional) | Additive post-#794 field, present only when telemetry coverage is genuinely degraded (no cost events attributed). One of `env-absent` (the Claude transcript root does not exist — the expected/routine `frame-enforce.yml` CI shape, not an anomaly), `budget-exceeded` (a walker's timeout budget was exceeded), or `no-transcript-found` (the transcript root exists but the walk legitimately found nothing for this session). Absent/`null` for a normal, populated render. |
+| `capture_point` | string | Additive post-#824 field sourced from `Resolve-BaselineEligibility`'s eligibility result. One of `pr-creation-mid-session` (populated capture taken while the PR was still open), `end-of-session` (capture taken after the session completed), or `n/a` (excluded from rolling-baseline aggregation). Missing v1 values default to `n/a`. |
+| `session_id` | string | Additive post-#824 field: the capture-time session identity. Used by the s4 next-session harvest to verify the originating transcript is present on the harvesting machine before selecting a mid-session capture for upgrade. Empty when the capturing run has no session identity to persist. |
+| `head_ref` | string | Additive post-#824 field: the capture-time git head_ref. Used by the s4 next-session harvest as the walk key to re-walk and upgrade a mid-session capture to `end-of-session`. Empty when the capturing run has no head_ref to persist. |
 
 ## `ports` — Per-Port Token and Cost Breakdown
 

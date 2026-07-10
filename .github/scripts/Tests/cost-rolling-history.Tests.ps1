@@ -860,4 +860,72 @@ totals:
             $entry['unmapped_session_count'] | Should -Be $Unmapped -Because $Scenario
         }
     }
+
+    Context 'baseline-eligibility additive fields round-trip (issue #824 s2)' {
+
+        BeforeAll {
+            $script:RendererLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-pattern-renderer.ps1'
+            if (Test-Path $script:RendererLibPath) {
+                . $script:RendererLibPath
+            }
+        }
+
+        It 'capture_point, session_id, head_ref, and pr survive a render->parse round trip' {
+            # True render->parse round trip: renders via the real Format-CostPatternYaml
+            # (not a hand-typed fixture) and parses the result back via the real
+            # Get-CostRollingHistory -> ConvertFrom-CostPatternYaml pipeline. The renderer
+            # already emitted `pr:` before this fix; the parser had no matcher for it.
+            $attribution = @{
+                ports                 = @{
+                    'implement-code' = @{
+                        tokens               = @{ input = 100; output = 50; cache_creation = 0; cache_read = 0 }
+                        dispatch_count       = 1
+                        cost_estimate_usd    = 0.01
+                        cache_read_hit_ratio = 0.0
+                        mixed_regime         = $false
+                    }
+                }
+                orchestrator_overhead = @{
+                    tokens               = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 }
+                    cost_estimate_usd    = 0.001
+                    cache_read_hit_ratio = 0.0
+                }
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{
+                    tokens            = @{ input = 110; output = 55; cache_creation = 0; cache_read = 0 }
+                    cost_estimate_usd = 0.011
+                }
+            }
+            $completeness = @{
+                completeness                   = 'partial'
+                stop_reason                    = 'tool_use'
+                excluded_from_rolling_baseline = $false
+                exclude_reason                 = $null
+                capture_point                  = 'pr-creation-mid-session'
+            }
+
+            $rendered = Format-CostPatternYaml `
+                -Attribution $attribution `
+                -Completeness $completeness `
+                -Pr 824 `
+                -Branch 'feature/issue-824-baseline-eligibility' `
+                -SessionId 'session-abc-123' `
+                -HeadRef 'feature/issue-824-baseline-eligibility'
+
+            $commentBody = "Some PR comment text before the block.`n$rendered`nSome text after the block."
+            $graphqlResp = New-GraphQLResponse -CommentBodies @($commentBody)
+            Install-GhMock -GraphQLResponse $graphqlResp
+
+            $result = Get-CostRollingHistory -CachePath $script:TestCachePath -RepoRoot $script:RepoRoot -TimeoutSeconds 30
+
+            $result.timed_out | Should -Be $false
+            $result.entries.Count | Should -Be 1
+            $entry = $result.entries[0]
+
+            $entry['capture_point'] | Should -Be 'pr-creation-mid-session'
+            $entry['session_id']    | Should -Be 'session-abc-123'
+            $entry['head_ref']      | Should -Be 'feature/issue-824-baseline-eligibility'
+            $entry['pr']            | Should -Be 824
+        }
+    }
 }
