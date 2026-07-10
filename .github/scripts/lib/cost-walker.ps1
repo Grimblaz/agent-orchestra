@@ -335,6 +335,65 @@ function script:Get-IdentityMatchedSlugDirs {
     return $matched
 }
 
+function script:Get-CostWalkerCandidateSlugDirs {
+    <#
+    .SYNOPSIS
+        Resolves the candidate slug-directory list shared by Invoke-CostTranscriptWalk
+        and Get-CostWalkerCurrentSessionId (issue #824 refactor pass).
+    .DESCRIPTION
+        Combines D2 identity-matched dirs (script:Get-IdentityMatchedSlugDirs), the
+        worktree-slug glob, and the primary-slug backward-compat fallback into one
+        list, so the two callers can never independently re-derive (and silently
+        diverge on) this resolution.
+
+        RepoRoot falls back to ParentCwd when blank — this preserves
+        Get-CostWalkerCurrentSessionId's pre-refactor behavior for callers that omit
+        RepoRoot, while letting a caller that HAS a distinct RepoRoot (e.g. a
+        worktree checkout) get the same identity resolution
+        Invoke-CostTranscriptWalk itself always used.
+    .OUTPUTS
+        [System.Collections.Generic.List[string]]
+    #>
+    param(
+        [Parameter(Mandatory)][string]$ProjectsRoot,
+        [AllowEmptyString()][string]$RepoRoot = '',
+        [Parameter(Mandatory)][string]$ParentCwd,
+        [AllowEmptyString()][string]$Slug = ''
+    )
+
+    $resolvedRepoRoot = if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot } else { $ParentCwd }
+
+    $slugDirs = [System.Collections.Generic.List[string]]::new()
+
+    # D2: discover all slug dirs in ProjectsRoot that belong to the same git repo (identity match).
+    $identityDirs = script:Get-IdentityMatchedSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $resolvedRepoRoot
+    foreach ($d in $identityDirs) {
+        $slugDirs.Add($d)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Slug)) {
+        # Also include worktree directories for the primary slug (backward compat / graceful
+        # fallback for worktree slugs that may not have first-event cwd pointing to the main
+        # repo root).
+        $worktreeDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -like "$Slug--claude-worktrees-*" } |
+            Where-Object { $slugDirs -notcontains $_.FullName })
+        foreach ($wtd in $worktreeDirs) {
+            $slugDirs.Add($wtd.FullName)
+        }
+
+        # Backward compat: include explicit slug dir when identity resolution is unavailable
+        # (e.g., tests without a real git repo). In production, identity matching already
+        # finds this dir; dedup guard prevents double-counting.
+        $primarySlugDir = script:Resolve-CostWalkerPrimarySlugDir -ProjectsRoot $ProjectsRoot -Slug $Slug
+        if ($null -ne $primarySlugDir -and $slugDirs -notcontains $primarySlugDir) {
+            $slugDirs.Add($primarySlugDir)
+        }
+    }
+
+    return $slugDirs
+}
+
 function Invoke-CostTranscriptWalk {
     <#
     .SYNOPSIS
@@ -381,38 +440,10 @@ function Invoke-CostTranscriptWalk {
 
     $included = [System.Collections.Generic.List[object]]::new()
 
-    # Collect all slug directories to search
-    $slugDirs = [System.Collections.Generic.List[string]]::new()
-
-    $resolvedRepoRoot = if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot } else { $ParentCwd }
-
-    # D2: discover all slug dirs in ProjectsRoot that belong to the same git repo (identity match).
-    $identityDirs = script:Get-IdentityMatchedSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $resolvedRepoRoot
-
-    foreach ($d in $identityDirs) {
-        $slugDirs.Add($d)
-    }
-
-    # Also include worktree directories for the primary slug (backward compat / graceful fallback
-    # for worktree slugs that may not have first-event cwd pointing to the main repo root).
-    if (-not [string]::IsNullOrWhiteSpace($Slug)) {
-        $worktreeDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like "$Slug--claude-worktrees-*" } |
-            Where-Object { $slugDirs -notcontains $_.FullName })
-        foreach ($wtd in $worktreeDirs) {
-            $slugDirs.Add($wtd.FullName)
-        }
-    }
-
-    # Backward compat: include explicit slug dir when identity resolution is unavailable
-    # (e.g., tests without a real git repo). In production, identity matching already
-    # finds this dir; dedup guard prevents double-counting.
-    if (-not [string]::IsNullOrWhiteSpace($Slug)) {
-        $primarySlugDir = script:Resolve-CostWalkerPrimarySlugDir -ProjectsRoot $ProjectsRoot -Slug $Slug
-        if ($null -ne $primarySlugDir -and $slugDirs -notcontains $primarySlugDir) {
-            $slugDirs.Add($primarySlugDir)
-        }
-    }
+    # Collect all slug directories to search (D2 identity match + worktree glob + primary-slug
+    # backward-compat fallback — shared with Get-CostWalkerCurrentSessionId via
+    # script:Get-CostWalkerCandidateSlugDirs so the two callers can never diverge).
+    $slugDirs = script:Get-CostWalkerCandidateSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $RepoRoot -ParentCwd $ParentCwd -Slug $Slug
 
     if ($slugDirs.Count -eq 0) {
         return $included
@@ -540,6 +571,12 @@ function Get-CostWalkerCurrentSessionId {
         Working directory path; normalized before comparison.
     .PARAMETER ProjectsRoot
         Root directory containing project slug directories. Defaults to ~/.claude/projects.
+    .PARAMETER RepoRoot
+        Repo root used for D2 identity resolution (script:Get-IdentityMatchedSlugDirs).
+        Falls back to ParentCwd when omitted, matching this function's pre-refactor
+        behavior — pass this explicitly when the caller's repo root differs from its
+        parent cwd (e.g. a worktree checkout) so identity resolution agrees with
+        Invoke-CostTranscriptWalk's own -RepoRoot-based resolution for the same session.
     .OUTPUTS
         [string] the matching transcript file's BaseName (session UUID), or ''.
     #>
@@ -549,7 +586,8 @@ function Get-CostWalkerCurrentSessionId {
         [AllowEmptyString()][string]$Slug = '',
         [Parameter(Mandatory)][string]$Branch,
         [Parameter(Mandatory)][string]$ParentCwd,
-        [string]$ProjectsRoot = ''
+        [string]$ProjectsRoot = '',
+        [AllowEmptyString()][string]$RepoRoot = ''
     )
 
     if (-not $ProjectsRoot) {
@@ -558,26 +596,10 @@ function Get-CostWalkerCurrentSessionId {
 
     $normalizedParentCwd = Get-NormalizedPath -Path $ParentCwd
 
-    $slugDirs = [System.Collections.Generic.List[string]]::new()
-
-    $identityDirs = script:Get-IdentityMatchedSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $ParentCwd
-    foreach ($d in $identityDirs) {
-        $slugDirs.Add($d)
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($Slug)) {
-        $worktreeDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -like "$Slug--claude-worktrees-*" } |
-            Where-Object { $slugDirs -notcontains $_.FullName })
-        foreach ($wtd in $worktreeDirs) {
-            $slugDirs.Add($wtd.FullName)
-        }
-
-        $primarySlugDir = script:Resolve-CostWalkerPrimarySlugDir -ProjectsRoot $ProjectsRoot -Slug $Slug
-        if ($null -ne $primarySlugDir -and $slugDirs -notcontains $primarySlugDir) {
-            $slugDirs.Add($primarySlugDir)
-        }
-    }
+    # Shared with Invoke-CostTranscriptWalk via script:Get-CostWalkerCandidateSlugDirs
+    # (issue #824 refactor pass) — see that helper's docstring for the RepoRoot
+    # fallback-to-ParentCwd rule.
+    $slugDirs = script:Get-CostWalkerCandidateSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $RepoRoot -ParentCwd $ParentCwd -Slug $Slug
 
     if ($slugDirs.Count -eq 0) {
         return ''

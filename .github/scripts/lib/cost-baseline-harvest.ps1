@@ -163,6 +163,104 @@ function script:Get-CostBaselineHarvestCompositeComment {
     return @{ Found = $true; Body = [string]$matching.body; Marker = $marker }
 }
 
+function script:Test-CostBaselineHarvestCandidateGate {
+    <#
+    .SYNOPSIS
+        Runs the verify-then-select (M14) and untrusted-read-back (M16) gates for
+        one harvest candidate (issue #824 refactor pass — extracted from
+        Invoke-CostBaselineHarvest's per-candidate loop body to keep that function
+        under the size/complexity guidance in refactoring-methodology).
+    .DESCRIPTION
+        Pure gate check: no budget-cap bookkeeping and no re-walk side effect —
+        the caller still owns deciding what "Passed" means for its own
+        Attempted/Pr state and for spending the one-re-walk-per-startup budget.
+    .PARAMETER CandidatePr
+        The candidate's persisted PR number (already parsed by the caller).
+    .PARAMETER CandidateSessionId
+        The candidate's persisted session_id (verify-then-select target).
+    .PARAMETER CandidateHeadRefHint
+        The candidate's persisted head_ref — used only as a hint for the local
+        transcript-existence check, never as authorization (see M16 below).
+    .PARAMETER ParentCwd
+        The harvesting session's own parent cwd, passed through to
+        Test-CostWalkerSessionTranscriptExists.
+    .PARAMETER RepoRoot
+        The harvesting session's own repo root, passed through to
+        Test-CostWalkerSessionTranscriptExists.
+    .PARAMETER ProjectsRoot
+        Root directory containing project slug directories, passed through to
+        Test-CostWalkerSessionTranscriptExists.
+    .OUTPUTS
+        [hashtable] @{ Passed = [bool]; LiveHeadRef = [string] }
+        LiveHeadRef is only meaningful when Passed is $true.
+    #>
+    param(
+        [Parameter(Mandatory)][int]$CandidatePr,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CandidateSessionId,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$CandidateHeadRefHint,
+        [Parameter(Mandatory)][string]$ParentCwd,
+        [Parameter(Mandatory)][string]$RepoRoot,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$ProjectsRoot
+    )
+
+    $failedGate = @{ Passed = $false; LiveHeadRef = '' }
+
+    # Verify-then-select (M14): a session id with no local transcript on
+    # this machine is skipped WITHOUT spending a gh call or the re-walk
+    # budget — cheap candidates keep moving until one is actionable.
+    $transcriptExists = $false
+    try {
+        $transcriptExists = Test-CostWalkerSessionTranscriptExists `
+            -SessionId $CandidateSessionId `
+            -Branch $CandidateHeadRefHint `
+            -ParentCwd $ParentCwd `
+            -RepoRoot $RepoRoot `
+            -ProjectsRoot $ProjectsRoot
+    }
+    catch { $transcriptExists = $false }
+    if (-not $transcriptExists) { return $failedGate }
+
+    # Untrusted read-back (M16): the persisted head_ref is only a hint
+    # for the local check above — bind to a live merge-commit/state
+    # check before acting, and use the LIVE headRefName (not the
+    # comment's) as the walk key below.
+    $liveJson = $null
+    try { $liveJson = & gh pr view $CandidatePr --json 'state,mergedAt,mergeCommit,headRefName' 2>$null }
+    catch { $liveJson = $null }
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($liveJson)) { return $failedGate }
+
+    $liveInfo = $null
+    try { $liveInfo = ($liveJson | Out-String) | ConvertFrom-Json -ErrorAction Stop }
+    catch { $liveInfo = $null }
+    if ($null -eq $liveInfo -or [string]$liveInfo.state -ne 'MERGED') { return $failedGate }
+
+    $liveHeadRef = [string]$liveInfo.headRefName
+    if ([string]::IsNullOrWhiteSpace($liveHeadRef)) { return $failedGate }
+
+    return @{ Passed = $true; LiveHeadRef = $liveHeadRef }
+}
+
+function script:Merge-CostBaselineHarvestSection {
+    <#
+    .SYNOPSIS
+        Splices a replacement Cost Pattern section into a composite comment body
+        at a previously matched section location (issue #824 refactor pass —
+        shared by the promote and stamp outcomes below, which previously each
+        rebuilt this same substring-splice inline).
+    .OUTPUTS
+        [string] The composite comment body with the section replaced.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Body,
+        [Parameter(Mandatory)][System.Text.RegularExpressions.Match]$SectionMatch,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Replacement
+    )
+
+    return $Body.Substring(0, $SectionMatch.Index) +
+        $Replacement +
+        $Body.Substring($SectionMatch.Index + $SectionMatch.Length)
+}
+
 function script:Add-CostBaselineHarvestUpgradeAttemptedStamp {
     <#
     .SYNOPSIS
@@ -278,40 +376,17 @@ function Invoke-CostBaselineHarvest {
             $candidatePr = 0
             if (-not [int]::TryParse([string]$candidate['pr'], [ref]$candidatePr)) { continue }
 
-            $candidateSessionId = [string]$candidate['session_id']
-            $candidateHeadRefHint = [string]$candidate['head_ref']
-
-            # Verify-then-select (M14): a session id with no local transcript on
-            # this machine is skipped WITHOUT spending a gh call or the re-walk
-            # budget — cheap candidates keep moving until one is actionable.
-            $transcriptExists = $false
-            try {
-                $transcriptExists = Test-CostWalkerSessionTranscriptExists `
-                    -SessionId $candidateSessionId `
-                    -Branch $candidateHeadRefHint `
-                    -ParentCwd $ParentCwd `
-                    -RepoRoot $RepoRoot `
-                    -ProjectsRoot $ProjectsRoot
-            }
-            catch { $transcriptExists = $false }
-            if (-not $transcriptExists) { continue }
-
-            # Untrusted read-back (M16): the persisted head_ref is only a hint
-            # for the local check above — bind to a live merge-commit/state
-            # check before acting, and use the LIVE headRefName (not the
-            # comment's) as the walk key below.
-            $liveJson = $null
-            try { $liveJson = & gh pr view $candidatePr --json 'state,mergedAt,mergeCommit,headRefName' 2>$null }
-            catch { $liveJson = $null }
-            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($liveJson)) { continue }
-
-            $liveInfo = $null
-            try { $liveInfo = ($liveJson | Out-String) | ConvertFrom-Json -ErrorAction Stop }
-            catch { $liveInfo = $null }
-            if ($null -eq $liveInfo -or [string]$liveInfo.state -ne 'MERGED') { continue }
-
-            $liveHeadRef = [string]$liveInfo.headRefName
-            if ([string]::IsNullOrWhiteSpace($liveHeadRef)) { continue }
+            # Verify-then-select (M14) + untrusted read-back (M16) — see
+            # script:Test-CostBaselineHarvestCandidateGate's docstring.
+            $gate = script:Test-CostBaselineHarvestCandidateGate `
+                -CandidatePr $candidatePr `
+                -CandidateSessionId ([string]$candidate['session_id']) `
+                -CandidateHeadRefHint ([string]$candidate['head_ref']) `
+                -ParentCwd $ParentCwd `
+                -RepoRoot $RepoRoot `
+                -ProjectsRoot $ProjectsRoot
+            if (-not $gate['Passed']) { continue }
+            $liveHeadRef = $gate['LiveHeadRef']
 
             # Budget cap: this candidate is now selected. Exactly one expensive
             # re-walk fires per Invoke-CostBaselineHarvest call, whatever the
@@ -371,9 +446,7 @@ function Invoke-CostBaselineHarvest {
                 # reports elsewhere in the composite comment) and never a new
                 # sibling comment (would double-count this PR in
                 # Get-CostRollingHistory's one-entry-per-block-bearing-body scan).
-                $newBody = $compositeBody.Substring(0, $sectionMatch.Index) +
-                    $reWalkCostSection.TrimEnd() +
-                    $compositeBody.Substring($sectionMatch.Index + $sectionMatch.Length)
+                $newBody = script:Merge-CostBaselineHarvestSection -Body $compositeBody -SectionMatch $sectionMatch -Replacement $reWalkCostSection.TrimEnd()
 
                 $upserted = $false
                 try {
@@ -401,9 +474,7 @@ function Invoke-CostBaselineHarvest {
                 $timestampIso = [System.DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ', [System.Globalization.CultureInfo]::InvariantCulture)
                 $stampedSection = script:Add-CostBaselineHarvestUpgradeAttemptedStamp -Section $sectionMatch.Groups['section'].Value -TimestampIso $timestampIso
 
-                $newBody = $compositeBody.Substring(0, $sectionMatch.Index) +
-                    $stampedSection +
-                    $compositeBody.Substring($sectionMatch.Index + $sectionMatch.Length)
+                $newBody = script:Merge-CostBaselineHarvestSection -Body $compositeBody -SectionMatch $sectionMatch -Replacement $stampedSection
 
                 try { $null = Find-OrUpsertComment -Type 'pr' -Number $candidatePr -Marker $fetchResult['Marker'] -Body $newBody }
                 catch { }

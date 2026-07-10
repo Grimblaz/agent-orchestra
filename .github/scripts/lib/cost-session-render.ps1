@@ -230,7 +230,7 @@ function Invoke-CostSessionRender {
         # walkers themselves (do not recompute).
         $currentSessionId = ''
         if (-not [string]::IsNullOrWhiteSpace($Slug) -and -not [string]::IsNullOrWhiteSpace($Branch)) {
-            $currentSessionId = Get-CostWalkerCurrentSessionId -Slug $Slug -Branch ([string]$Branch) -ParentCwd $ParentCwd
+            $currentSessionId = Get-CostWalkerCurrentSessionId -Slug $Slug -Branch ([string]$Branch) -ParentCwd $ParentCwd -RepoRoot $RepoRoot
         }
 
         $priorCostData = $null
