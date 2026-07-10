@@ -218,6 +218,22 @@ Any failure (file absent, parse error, `gh` timeout, network error, missing `con
 
 See `platforms/claude.md` for the Claude Code tool invocation note.
 
+### Step 7d — Baseline-eligibility harvest (Claude-only, fail-open)
+
+<!-- scope: claude-only -->
+
+Like Step 7c, this step runs outside the Step 4 run-once guard: it can act again on later session starts, not just the first, because the underlying data it reads is already cached for an hour. Copilot: silent skip (no analog).
+
+**What it does (plain summary)**: Some pull requests get their AI-usage cost numbers written down partway through a work session — before that session actually finished — because the PR happened to be created mid-session. Those numbers are a fair estimate at the time but not exact. This step checks, at the start of a later session, whether any recently-merged PR is still carrying one of those mid-session estimates and, when it is safe to do so, re-counts that PR's session from scratch and quietly swaps in the exact end-of-session numbers.
+
+**Invocation**: Call `Invoke-CostBaselineHarvest` (`.github/scripts/lib/cost-baseline-harvest.ps1`) with the current session's `ParentCwd` (its own working directory) and `RepoRoot` (the repo root), and optionally `Slug` — the function resolves `Slug` itself from `RepoRoot` when it is omitted. See `platforms/claude.md` for the Claude Code tool invocation note.
+
+**Fail-open contract**: Any failure — no GitHub access, no matching local session transcript, a re-count that comes back empty, or a comment write that fails — leaves this step a silent no-op. Never block session startup on this harvest, and never surface an error to the user.
+
+**Budget**: At most one expensive re-count runs per `Invoke-CostBaselineHarvest` call. The function narrows down to eligible candidates first (recently merged, still carrying a mid-session estimate, not already attempted), then walks them until it finds the first one that both has a matching local session transcript and is confirmed still merged by a fresh GitHub lookup — only that one candidate spends the re-count budget, whatever the outcome. See the function's own doc comment in `cost-baseline-harvest.ps1` for the full selection and promotion mechanics.
+
+**What surfaces to the user**: Silent by default. Step 7c speaks up on every successful snapshot; this step is quieter — it speaks up only when it actually upgrades a PR's numbers, showing a single line: `upgraded #{pr} to end-of-session`. Every other outcome (no eligible candidate this session, a candidate that was checked but didn't qualify for the upgrade, or any failure) stays silent, because those are all expected fail-open outcomes rather than something the user needs to act on — surfacing them would just be startup noise for a background housekeeping task.
+
 ### Step 8 — Continue with the user's request
 
 After the automatic startup path is complete, continue with the user's original request only after completing any other applicable startup steps below, including Step 7b and Step 9 when they apply. In hook-driven runs, this means consuming any injected `additionalContext`, recording the run-once marker, and then proceeding. This automatic run-once guard applies only to the cleanup-detector plus Claude drift-check path; explicit or manual detector runs still remain allowed after the automatic guard fires.
