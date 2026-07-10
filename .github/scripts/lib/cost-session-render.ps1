@@ -24,6 +24,31 @@
     caller (the cost-rate-table path, walker timeout env-var names, the cost
     budget) stay as internal defaults, resolved inside the function exactly as
     they were resolved inline before this extraction.
+.NOTES
+    Dependencies (must already be dot-sourced by the caller — this file does
+    not dot-source them itself, matching cost-baseline-harvest.ps1's own
+    caller-owns-dependencies convention). This list is authoritative and was
+    empirically verified (issue #824 post-review fix, Group 1) by
+    dot-sourcing exactly this set in a fresh process and confirming
+    Invoke-CostSessionRender runs its real logic (no
+    CommandNotFoundException) rather than silently no-op'ing via its own
+    internal fail-open try/catch:
+      - lib/path-normalize.ps1        (Get-NormalizedPath — used by cost-walker.ps1)
+      - lib/cost-walker.ps1           (Invoke-CostTranscriptWalk, Get-CostWalkerCurrentSessionId)
+      - lib/cost-walker-copilot.ps1   (Invoke-CostCopilotWalk, Resolve-CostCopilotOutfileTemplate)
+      - lib/cost-attribution.ps1      (Get-CostAttribution, Get-EventProvider)
+      - lib/cost-anomaly.ps1          (Get-CostAnomalyFlags)
+      - lib/cost-rolling-history.ps1  (Get-CostPatternDataFromComment, ConvertFrom-CostPatternYaml)
+      - lib/cost-checkpoint-core.ps1  (Get-MostRecentRegimeCheckpoint)
+      - lib/cost-completeness.ps1     (Get-SessionCompleteness, Resolve-BaselineEligibility, Resolve-CostDataPreservation)
+      - lib/cost-pattern-renderer.ps1 (Format-CostPatternMarkdown, Format-CostPatternYaml)
+      - lib/cost-fcl-helpers.ps1      (the script:-scoped FCL cost-pipeline
+                                        helpers this function calls directly —
+                                        see that file's own header for the
+                                        full list and the issue #824
+                                        post-review root-cause history)
+    This file (cost-session-render.ps1) is dot-sourced last, after all of the
+    above.
 #>
 
 function Invoke-CostSessionRender {
@@ -95,14 +120,23 @@ function Invoke-CostSessionRender {
     # undeclared until its first real assignment, matching exactly where the
     # pre-extraction inline block first assigned each one. PowerShell variable
     # names are case-insensitive; pre-declaring a local (even to $null) before
-    # its real assignment can shadow a same-named OUTER/closure variable that
-    # a later-called (possibly test-mocked) function reads — reads of a
-    # genuinely never-assigned variable are already safe (silently $null, no
-    # exception), so no pre-declaration is needed for the catch/return path
-    # below; $costSection is the one exception because a legitimate non-
-    # exception code path (the 6g budget-exhaustion edge case) can also leave
-    # it unassigned this iteration, matching the original inline block's own
-    # pre-declaration of $costSection at the same outer position.
+    # its real assignment CAN shadow a same-named OUTER/closure variable that
+    # a later-called (possibly test-mocked) function reads — this is not
+    # theoretical: the existing test suite (cost-integration.Tests.ps1's
+    # "Baseline eligibility caller wiring" context) mocks Get-SessionCompleteness
+    # as a closure that reads a bare `$Completeness` scriptblock parameter by
+    # name; PowerShell variable lookup is case-insensitive, so pre-declaring
+    # this function's own local `$completeness` before that mock is CALLED
+    # shadows the outer `$Completeness` and silently breaks the mock (issue
+    # #824 post-review fix M17 regression, caught empirically — see git
+    # history for the RED reproduction). Reads of a genuinely never-assigned
+    # variable are already safe (silently $null, no exception) under DEFAULT
+    # (non-strict) PowerShell, so no pre-declaration is needed for the
+    # catch/return path below; $costSection is the one exception because a
+    # legitimate non-exception code path (the 6g budget-exhaustion edge case)
+    # can also leave it unassigned this iteration, matching the original
+    # inline block's own pre-declaration of $costSection at the same outer
+    # position.
     $costSection = ''
     $degradedMarker = "<!-- cost-pattern-data-degraded-$Pr -->"
 
@@ -335,7 +369,7 @@ function Invoke-CostSessionRender {
                 # fires, even though the underlying data (rolling-baseline YAML) survives.
                 $sectionMatch = [regex]::Match(
                     $priorComment.body,
-                    '(?ms)(?<section>^##\s+Cost Pattern\b.*?<!--\s*cost-pattern-data[\s\S]*?-->)'
+                    $script:FCLCostPatternSectionRegex
                 )
                 $priorSection = if ($sectionMatch.Success) {
                     $sectionMatch.Groups['section'].Value.TrimEnd()
@@ -402,6 +436,41 @@ function Invoke-CostSessionRender {
         $costSection = ''
     }
     $costStopwatch.Stop()
+
+    # M17 (issue #824 post-review fix): guarantee every return-surface local
+    # exists before the return statement below reads it, so this function's
+    # own fail-open contract holds even under Set-StrictMode (a genuinely
+    # unassigned read throws under strict mode, which would defeat the catch
+    # block above — the catch sets $costSection = '' specifically so a
+    # composition failure never propagates, but the return statement itself
+    # could still throw on any local the try block never reached). This guard
+    # is placed HERE — after the try/catch has already fully run — rather
+    # than as an upfront pre-declaration before the try block, because an
+    # upfront pre-declaration would create these locals in THIS function's
+    # scope before any inner call (e.g. Get-SessionCompleteness) executes,
+    # and PowerShell's case-insensitive, call-stack-based variable lookup
+    # means a test mock reading a same-named bare variable from an ancestor
+    # scope (cost-integration.Tests.ps1's Get-SessionCompleteness mock reads
+    # a bare $Completeness scriptblock parameter) would then resolve to THIS
+    # function's own (still-$null) local instead of continuing up to the
+    # real outer value — silently shadowing it. Placing the guard after the
+    # try/catch avoids that entirely: by this point every inner call has
+    # already resolved its own variable lookups using the correct (no-shadow)
+    # scope chain, so filling in a safe default here cannot retroactively
+    # change what any already-completed inner call saw. Uses
+    # `Get-Variable -Scope 0` (strictly this function's own local scope, no
+    # ancestor walk) rather than `Test-Path variable:...` — the latter has
+    # the identical ancestor-walk behavior as a bare variable read and would
+    # reintroduce the same shadowing hazard this guard exists to avoid.
+    if ($null -eq (Get-Variable -Name 'completeness' -Scope 0 -ErrorAction SilentlyContinue)) { $completeness = $null }
+    if ($null -eq (Get-Variable -Name 'costAttribution' -Scope 0 -ErrorAction SilentlyContinue)) { $costAttribution = $null }
+    if ($null -eq (Get-Variable -Name 'currentTokenSum' -Scope 0 -ErrorAction SilentlyContinue)) { [long]$currentTokenSum = 0 }
+    if ($null -eq (Get-Variable -Name 'currentSessionId' -Scope 0 -ErrorAction SilentlyContinue)) { $currentSessionId = '' }
+    if ($null -eq (Get-Variable -Name 'usePriorCostSection' -Scope 0 -ErrorAction SilentlyContinue)) { $usePriorCostSection = $false }
+    if ($null -eq (Get-Variable -Name 'shouldRetractDegraded' -Scope 0 -ErrorAction SilentlyContinue)) { $shouldRetractDegraded = $false }
+    if ($null -eq (Get-Variable -Name 'retractDegradedBody' -Scope 0 -ErrorAction SilentlyContinue)) { $retractDegradedBody = $null }
+    if ($null -eq (Get-Variable -Name 'shouldPostDegraded' -Scope 0 -ErrorAction SilentlyContinue)) { $shouldPostDegraded = $false }
+    if ($null -eq (Get-Variable -Name 'postDegradedBody' -Scope 0 -ErrorAction SilentlyContinue)) { $postDegradedBody = $null }
 
     return @{
         CostSection           = $costSection

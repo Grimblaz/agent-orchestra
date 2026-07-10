@@ -24,8 +24,17 @@
       - Get-CostRollingHistory        (cost-rolling-history.ps1)
       - Test-CostWalkerSessionTranscriptExists, Get-CostTranscriptSlug
                                        (cost-walker.ps1)
-      - Invoke-CostSessionRender      (cost-session-render.ps1)
+      - Invoke-CostSessionRender      (cost-session-render.ps1 — see that
+                                       file's own .NOTES for its full
+                                       transitive dependency list)
       - Find-OrUpsertComment          (find-or-upsert-comment.ps1)
+      - script:Get-FCLTokenSumFromBucket, $script:FCLCostPatternSectionRegex
+                                       (cost-fcl-helpers.ps1 — issue #824
+                                       post-review fix M13/M18: this file
+                                       calls these directly, in addition to
+                                       Invoke-CostSessionRender's own
+                                       transitive need for the rest of that
+                                       lib file's contents)
 #>
 
 # ---------------------------------------------------------------------------
@@ -45,6 +54,11 @@ function script:Get-CostBaselineHarvestPortsTokenSum {
         per-port `tokens` buckets. This is the "persisted" side of the token
         no-downgrade guard; the "re-walk" side comes straight from
         Invoke-CostSessionRender's totals-first TokenSum.
+
+        M13 (issue #824 post-review fix): delegates the per-bucket token-field
+        summation to the relocated, shared script:Get-FCLTokenSumFromBucket
+        (lib/cost-fcl-helpers.ps1) instead of hardcoding its own copy of the
+        token-field list, so the two sums cannot drift out of sync.
     #>
     param([AllowNull()]$Ports)
 
@@ -56,11 +70,7 @@ function script:Get-CostBaselineHarvestPortsTokenSum {
         if ($null -eq $portBucket -or $portBucket -isnot [hashtable] -or -not $portBucket.ContainsKey('tokens')) { continue }
         $tokens = $portBucket['tokens']
         if ($null -eq $tokens -or $tokens -isnot [hashtable]) { continue }
-        foreach ($tokenField in @('input', 'output', 'cache_creation', 'cache_read')) {
-            if ($tokens.ContainsKey($tokenField) -and $null -ne $tokens[$tokenField]) {
-                $sum += [long]$tokens[$tokenField]
-            }
-        }
+        $sum += script:Get-FCLTokenSumFromBucket -Bucket $tokens
     }
     return $sum
 }
@@ -434,7 +444,7 @@ function Invoke-CostBaselineHarvest {
             }
 
             $compositeBody = $fetchResult['Body']
-            $sectionMatch = [regex]::Match($compositeBody, '(?ms)(?<section>^##\s+Cost Pattern\b.*?<!--\s*cost-pattern-data[\s\S]*?-->)')
+            $sectionMatch = [regex]::Match($compositeBody, $script:FCLCostPatternSectionRegex)
             if (-not $sectionMatch.Success) {
                 $result.Signal = "upgrade expected for #$candidatePr — composite comment cost section not found"
                 return $result

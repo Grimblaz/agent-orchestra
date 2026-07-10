@@ -18,7 +18,15 @@ BeforeAll {
     $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
     $script:LibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-baseline-harvest.ps1'
     $script:RendererLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-pattern-renderer.ps1'
+    # Issue #824 post-review fix (M13): Get-CostBaselineHarvestPortsTokenSum now
+    # delegates to the relocated script:Get-FCLTokenSumFromBucket, and the
+    # section-splice tests use the relocated $script:FCLCostPatternSectionRegex
+    # (M18) — both must be dot-sourced before cost-baseline-harvest.ps1 itself.
+    $script:FclHelpersLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-fcl-helpers.ps1'
 
+    if (Test-Path $script:FclHelpersLibPath) {
+        . $script:FclHelpersLibPath
+    }
     if (Test-Path $script:LibPath) {
         . $script:LibPath
     }
