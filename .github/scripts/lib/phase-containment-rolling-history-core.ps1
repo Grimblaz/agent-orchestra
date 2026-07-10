@@ -402,12 +402,98 @@ function script:Get-SurfaceACorpusGraphQL {
                 $allBodiesText = $commentBodies -join "`n"
                 $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$issueNum\s*-->") -or
                              ($allBodiesText -match "<!--\s*plan-issue-$issueNum\s*-->")
-                if (-not $hasMarker) { continue }
 
-                # Paginate comments if needed
                 $pageInfo = $commentBlock['pageInfo']
                 $cursor   = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
 
+                if (-not $hasMarker) {
+                    # #772 D2: capped incremental marker hunt. Page 1 carried
+                    # no marker — keep paginating up to K=5 ADDITIONAL pages
+                    # (6 total incl. page 1), re-checking the marker over the
+                    # accumulated bodies after each hunted page. As soon as
+                    # the marker is found, stop hunting and fall through to
+                    # the UNBOUNDED pagination below (P6 — the K=5 cap bounds
+                    # only the markerless search, never post-find block
+                    # collection; a phase-containment-{N} block can sit on
+                    # any later page).
+                    $huntPagesUsed = 0
+                    $maxHuntPages  = 5
+                    $huntTimedOut  = $false
+                    $huntFailed    = $false
+
+                    while (-not $hasMarker -and $huntPagesUsed -lt $maxHuntPages -and $null -ne $cursor) {
+                        if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+                            Write-Warning "phase-containment-rolling-history-core: timed out mid-hunt for issue #$issueNum"
+                            $huntTimedOut = $true
+                            break
+                        }
+
+                        $huntQuery = @"
+{
+  repository(owner: "$Owner", name: "$Repo") {
+    issue(number: $issueNum) {
+      comments(first: 100, after: "$cursor") {
+        nodes { body createdAt }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+"@
+                        # PF2-F2 fix: see the Surface A search-page call above
+                        # for the same stderr/ConvertFrom-Json rationale.
+                        $huntOutput = & gh api graphql -f "query=$huntQuery" 2>$null
+                        if ($LASTEXITCODE -ne 0) {
+                            $huntFailed = $true
+                            break
+                        }
+
+                        try {
+                            $huntParsed   = ($huntOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+                            $huntComments = $huntParsed['data']['repository']['issue']['comments']
+                            foreach ($cn in @($huntComments['nodes'])) {
+                                if ($null -ne $cn) {
+                                    $commentBodies.Add([string]$cn['body'])
+                                    $cnCreatedAtHunt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                    $commentCreatedAt.Add($cnCreatedAtHunt)
+                                }
+                            }
+                            $huntPi = $huntComments['pageInfo']
+                            $cursor = if ([bool]$huntPi['hasNextPage']) { [string]$huntPi['endCursor'] } else { $null }
+                        }
+                        catch {
+                            Write-Warning "phase-containment-rolling-history-core: failed to parse hunt pagination response for issue #${issueNum}: $_"
+                            $huntFailed = $true
+                            break
+                        }
+
+                        $huntPagesUsed++
+                        $allBodiesText = $commentBodies -join "`n"
+                        $hasMarker = ($allBodiesText -match "<!--\s*design-phase-complete-$issueNum\s*-->") -or
+                                     ($allBodiesText -match "<!--\s*plan-issue-$issueNum\s*-->")
+                    }
+
+                    if (-not $hasMarker) {
+                        # Possible-undercount signal (M6): a mid-hunt timeout,
+                        # a hunt-page fetch/parse failure, or exhausting the
+                        # K=5 cap while more pages remained unfetched. Natural
+                        # exhaustion — the thread ran out of pages within the
+                        # cap (or had none to begin with) — is NOT a
+                        # truncation; there was nothing left to fetch, so the
+                        # drop is a correct exclusion, not a degradation.
+                        if ($huntTimedOut -or $huntFailed -or ($huntPagesUsed -ge $maxHuntPages -and $null -ne $cursor)) {
+                            Write-Warning "phase-containment-rolling-history-core: capped marker hunt exhausted without a marker for issue #$issueNum — possible undercount"
+                            $truncated = $true
+                        }
+                        continue
+                    }
+                }
+
+                # Marker found (page 1 or via the capped hunt above) — resume
+                # UNBOUNDED pagination to collect all remaining comment pages
+                # (#772 P6): a phase-containment-{N} block can sit on any
+                # page, not just near the marker, so the K=5 cap governs only
+                # the markerless search above, never this collection pass.
                 while ($null -ne $cursor) {
                     if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
                         Write-Warning "phase-containment-rolling-history-core: timed out paginating issue #$issueNum"
@@ -626,12 +712,92 @@ function script:Get-SurfaceBCorpusGraphQL {
                 # Check whether this PR has a judge-rulings block (marks review pipeline)
                 $allBodiesText = $commentBodies -join "`n"
                 $hasJudgeRulings = ($allBodiesText -match '<!--\s*judge-rulings')
-                if (-not $hasJudgeRulings) { continue }
 
-                # Paginate comments if needed
                 $pageInfo = $commentBlock['pageInfo']
                 $cursor   = if ([bool]$pageInfo['hasNextPage']) { [string]$pageInfo['endCursor'] } else { $null }
 
+                if (-not $hasJudgeRulings) {
+                    # #772 D2: capped incremental marker hunt (Surface B
+                    # mirror of the Surface A hunt above — see its comments
+                    # for the full rationale). Page 1 carried no
+                    # judge-rulings marker — keep paginating up to K=5
+                    # ADDITIONAL pages, re-checking the marker after each
+                    # hunted page. Found → fall through to UNBOUNDED
+                    # pagination below (P6). Cap exhausted with more pages
+                    # remaining, or a mid-hunt timeout/failure → drop + flag
+                    # (M6). Natural exhaustion within the cap is not a
+                    # truncation.
+                    $huntPagesUsed = 0
+                    $maxHuntPages  = 5
+                    $huntTimedOut  = $false
+                    $huntFailed    = $false
+
+                    while (-not $hasJudgeRulings -and $huntPagesUsed -lt $maxHuntPages -and $null -ne $cursor) {
+                        if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
+                            Write-Warning "phase-containment-rolling-history-core: timed out mid-hunt for PR #$prNum"
+                            $huntTimedOut = $true
+                            break
+                        }
+
+                        $huntQuery = @"
+{
+  repository(owner: "$Owner", name: "$Repo") {
+    pullRequest(number: $prNum) {
+      comments(first: 100, after: "$cursor") {
+        nodes { body createdAt }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}
+"@
+                        # PF2-F2 fix: see the Surface A search-page call for
+                        # the same stderr/ConvertFrom-Json rationale.
+                        $huntOutput = & gh api graphql -f "query=$huntQuery" 2>$null
+                        if ($LASTEXITCODE -ne 0) {
+                            $huntFailed = $true
+                            break
+                        }
+
+                        try {
+                            $huntParsed   = ($huntOutput | Out-String) | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+                            $huntComments = $huntParsed['data']['repository']['pullRequest']['comments']
+                            foreach ($cn in @($huntComments['nodes'])) {
+                                if ($null -ne $cn) {
+                                    $commentBodies.Add([string]$cn['body'])
+                                    $cnCreatedAtBHunt = if ($cn.ContainsKey('createdAt')) { [string]$cn['createdAt'] } else { '' }
+                                    $commentCreatedAt.Add($cnCreatedAtBHunt)
+                                }
+                            }
+                            $huntPi = $huntComments['pageInfo']
+                            $cursor = if ([bool]$huntPi['hasNextPage']) { [string]$huntPi['endCursor'] } else { $null }
+                        }
+                        catch {
+                            Write-Warning "phase-containment-rolling-history-core: failed to parse hunt pagination response for PR #${prNum}: $_"
+                            $huntFailed = $true
+                            break
+                        }
+
+                        $huntPagesUsed++
+                        $allBodiesText = $commentBodies -join "`n"
+                        $hasJudgeRulings = ($allBodiesText -match '<!--\s*judge-rulings')
+                    }
+
+                    if (-not $hasJudgeRulings) {
+                        # Possible-undercount signal (M6) — see the Surface A
+                        # hunt's identical rationale. Natural exhaustion
+                        # within the cap is not a truncation.
+                        if ($huntTimedOut -or $huntFailed -or ($huntPagesUsed -ge $maxHuntPages -and $null -ne $cursor)) {
+                            Write-Warning "phase-containment-rolling-history-core: capped marker hunt exhausted without a marker for PR #$prNum — possible undercount"
+                            $truncated = $true
+                        }
+                        continue
+                    }
+                }
+
+                # Marker found (page 1 or via the capped hunt above) — resume
+                # UNBOUNDED pagination to collect all remaining comment pages
+                # (#772 P6) — see the Surface A rationale above.
                 while ($null -ne $cursor) {
                     if ($Stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) {
                         Write-Warning "phase-containment-rolling-history-core: timed out paginating PR #$prNum"

@@ -2270,3 +2270,389 @@ Describe 'Get-PhaseContainmentRollup — Truncated forces RelaxationEligible=$fa
         $stage.RelaxationEligibleReason | Should -BeNullOrEmpty
     }
 }
+
+# ---------------------------------------------------------------------------
+# 14. D2 — capped incremental marker hunt (issue #772 s5 / F11)
+#
+# Get-SurfaceACorpusGraphQL / Get-SurfaceBCorpusGraphQL: when page 1 of an
+# issue's/PR's comments carries no phase marker but hasNextPage is true, hunt
+# up to K=5 ADDITIONAL pages, re-checking the marker after each. Found ->
+# resume UNBOUNDED pagination past the cap to collect the rest of the thread
+# (P6 — a phase-containment-{N} block can sit on any later page, not just
+# near the marker). Cap exhausted with more pages remaining, or a mid-hunt
+# timeout -> drop the tuple and set Truncated (M6, possible undercount).
+# Natural exhaustion (ran out of real pages within the cap) is NOT a
+# truncation -- nothing was left to fetch.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-SurfaceACorpusGraphQL — D2 capped marker hunt (issue #772)' {
+    BeforeAll {
+        # Outer search page: one issue node whose OWN inline comments page
+        # (i.e. "page 1" of that issue's comment thread) is controlled by
+        # $Page1Body/$HasNextPage/$EndCursor. The outer search pagination
+        # itself is single-page (hasNextPage=false) for every test here —
+        # D2 concerns the PER-ISSUE comment hunt, not outer search paging.
+        function script:New-D2ASearchPage {
+            param([int]$IssueNumber, [string]$Page1Body, [bool]$HasNextPage, [string]$EndCursor)
+            $payload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        nodes    = @(
+                            @{
+                                number   = $IssueNumber
+                                comments = @{
+                                    nodes    = @(@{ body = $Page1Body; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $HasNextPage; endCursor = $EndCursor }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+
+        # A single per-issue comment page (used for both hunt pages and the
+        # post-find unbounded resume pages — same GraphQL query shape).
+        function script:New-D2AIssuePage {
+            param([string]$Body, [bool]$HasNextPage, [string]$EndCursor)
+            $payload = @{
+                data = @{
+                    repository = @{
+                        issue = @{
+                            comments = @{
+                                nodes    = @(@{ body = $Body; createdAt = '2024-01-01T12:05:00Z' })
+                                pageInfo = @{ hasNextPage = $HasNextPage; endCursor = $EndCursor }
+                            }
+                        }
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+
+        # Routes a per-issue `gh api graphql` call to the fixture keyed by
+        # its `after: "<cursor>"` value. The outer search call carries no
+        # `issue(number:` fragment, so it always returns $global:d2ASearch.
+        function script:Install-D2AGhMock {
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -notmatch 'issue\(number:') {
+                    return $global:d2ASearch
+                }
+                if ($joined -match 'after: "([^"]*)"') {
+                    return $global:d2APageMap[$Matches[1]]
+                }
+                return '{}'
+            }
+        }
+    }
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+        Remove-Variable -Name d2ASearch, d2APageMap -Scope Global -ErrorAction SilentlyContinue
+    }
+
+    It '(a) marker found on page 1 -> unbounded resume collects a later block (regression)' {
+        $issueNum  = 951
+        $blockBody = "<!-- phase-containment-$issueNum -->`nfinding_key: code-review:${issueNum}:F1`nintroduced_phase: design`ncatchable_phase: design`ncaught_stage: code-review`nescape_distance: 2`nseverity: high`nsystemic_fix_type: skill`ncategory: architecture`napparatus_meta: false`nseed: false`n<!-- /phase-containment-$issueNum -->"
+
+        $global:d2ASearch = script:New-D2ASearchPage -IssueNumber $issueNum `
+            -Page1Body "<!-- plan-issue-$issueNum -->" -HasNextPage $true -EndCursor 'A1CUR1'
+        $global:d2APageMap = @{
+            'A1CUR1' = (script:New-D2AIssuePage -Body $blockBody -HasNextPage $false -EndCursor $null)
+        }
+        script:Install-D2AGhMock
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceACorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $false
+        $result.Tuples    | Should -HaveCount 1
+        $allBodies = $result.Tuples[0]['Bodies'] -join "`n"
+        $allBodies | Should -Match "phase-containment-$issueNum"
+    }
+
+    It '(b) marker found on hunt page 2 of 5 -> hunt stops and unbounded resume captures a block on page 8 (P6, critical)' {
+        $issueNum   = 952
+        $markerBody = "<!-- plan-issue-$issueNum -->"
+        $blockBody  = "<!-- phase-containment-$issueNum -->`nfinding_key: code-review:${issueNum}:F1`nintroduced_phase: design`ncatchable_phase: design`ncaught_stage: code-review`nescape_distance: 2`nseverity: high`nsystemic_fix_type: skill`ncategory: architecture`napparatus_meta: false`nseed: false`n<!-- /phase-containment-$issueNum -->"
+
+        # page 1 (search-inline): no marker, hasNextPage -> B2CUR1
+        $global:d2ASearch = script:New-D2ASearchPage -IssueNumber $issueNum `
+            -Page1Body 'no marker on page 1' -HasNextPage $true -EndCursor 'B2CUR1'
+
+        $global:d2APageMap = @{
+            # hunt page 1 (page 2 overall): still no marker
+            'B2CUR1' = (script:New-D2AIssuePage -Body 'no marker hunt page 1' -HasNextPage $true -EndCursor 'B2CUR2')
+            # hunt page 2 (page 3 overall): marker found here -> hunt stops
+            'B2CUR2' = (script:New-D2AIssuePage -Body $markerBody -HasNextPage $true -EndCursor 'B2CUR3')
+            # unbounded resume, pages 4-7: filler, no block yet
+            'B2CUR3' = (script:New-D2AIssuePage -Body 'filler page 4' -HasNextPage $true -EndCursor 'B2CUR4')
+            'B2CUR4' = (script:New-D2AIssuePage -Body 'filler page 5' -HasNextPage $true -EndCursor 'B2CUR5')
+            'B2CUR5' = (script:New-D2AIssuePage -Body 'filler page 6' -HasNextPage $true -EndCursor 'B2CUR6')
+            'B2CUR6' = (script:New-D2AIssuePage -Body 'filler page 7' -HasNextPage $true -EndCursor 'B2CUR7')
+            # page 8 overall: the phase-containment block, well beyond the
+            # K=5 hunt cap -- proves post-find pagination is unbounded.
+            'B2CUR7' = (script:New-D2AIssuePage -Body $blockBody -HasNextPage $false -EndCursor $null)
+        }
+        script:Install-D2AGhMock
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceACorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $false
+        $result.Tuples    | Should -HaveCount 1
+        $tuple = $result.Tuples[0]
+        $tuple['Number'] | Should -Be $issueNum
+        $allBodies = $tuple['Bodies'] -join "`n"
+        $escapedMarker = [regex]::Escape($markerBody)
+        $allBodies | Should -Match $escapedMarker
+        # The load-bearing P6 assertion: the block that sits 5 pages past
+        # the marker (and past the K=5 hunt cap) must actually be captured,
+        # not just that the tuple survived.
+        $allBodies | Should -Match "phase-containment-$issueNum"
+        $allBodies | Should -Match "code-review:${issueNum}:F1"
+    }
+
+    It '(c) hunt exhausts K=5 additional pages markerless -> tuple dropped, Truncated=$true' {
+        $issueNum = 953
+
+        $global:d2ASearch = script:New-D2ASearchPage -IssueNumber $issueNum `
+            -Page1Body 'no marker page 1' -HasNextPage $true -EndCursor 'C1'
+
+        $global:d2APageMap = @{
+            'C1' = (script:New-D2AIssuePage -Body 'no marker hunt 1' -HasNextPage $true -EndCursor 'C2')
+            'C2' = (script:New-D2AIssuePage -Body 'no marker hunt 2' -HasNextPage $true -EndCursor 'C3')
+            'C3' = (script:New-D2AIssuePage -Body 'no marker hunt 3' -HasNextPage $true -EndCursor 'C4')
+            'C4' = (script:New-D2AIssuePage -Body 'no marker hunt 4' -HasNextPage $true -EndCursor 'C5')
+            # 5th (last allowed) hunt page: still no marker, and still MORE
+            # pages remain (hasNextPage=true) -- this is the cap-exhausted
+            # case, distinct from natural exhaustion.
+            'C5' = (script:New-D2AIssuePage -Body 'no marker hunt 5' -HasNextPage $true -EndCursor 'C6')
+        }
+        script:Install-D2AGhMock
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceACorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $true
+        ($result.Tuples | Where-Object { $_['Number'] -eq $issueNum }) | Should -BeNullOrEmpty
+    }
+
+    It '(d) mid-hunt timeout -> tuple dropped, Truncated=$true' {
+        $issueNum = 954
+
+        $global:d2ASearch = script:New-D2ASearchPage -IssueNumber $issueNum `
+            -Page1Body 'no marker page 1' -HasNextPage $true -EndCursor 'D1'
+
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -notmatch 'issue\(number:') {
+                return $global:d2ASearch
+            }
+            # Sleep past the 1s budget while answering the FIRST hunt page —
+            # the hunt while-loop's own next top-check trips deterministically.
+            Start-Sleep -Milliseconds 1200
+            $payload = @{
+                data = @{
+                    repository = @{
+                        issue = @{
+                            comments = @{
+                                nodes    = @(@{ body = 'no marker hunt 1'; createdAt = '2024-01-01T12:05:00Z' })
+                                pageInfo = @{ hasNextPage = $true; endCursor = 'D2' }
+                            }
+                        }
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceACorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 1 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $true
+        ($result.Tuples | Where-Object { $_['Number'] -eq $issueNum }) | Should -BeNullOrEmpty
+    }
+
+    It '(e) markerless single-page issue (no hasNextPage) -> dropped, Truncated stays $false (not a degradation)' {
+        $issueNum = 955
+
+        $global:d2ASearch = script:New-D2ASearchPage -IssueNumber $issueNum `
+            -Page1Body 'no marker, only page' -HasNextPage $false -EndCursor $null
+        $global:d2APageMap = @{}
+        script:Install-D2AGhMock
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceACorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $false -Because 'there was nothing more to fetch -- correctly excluded, not a truncation'
+        ($result.Tuples | Where-Object { $_['Number'] -eq $issueNum }) | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'Get-SurfaceBCorpusGraphQL — D2 capped marker hunt (issue #772)' {
+    BeforeAll {
+        function script:New-D2BSearchPage {
+            param([int]$PrNumber, [string]$Page1Body, [bool]$HasNextPage, [string]$EndCursor)
+            $payload = @{
+                data = @{
+                    search = @{
+                        pageInfo = @{ hasNextPage = $false; endCursor = $null }
+                        nodes    = @(
+                            @{
+                                number   = $PrNumber
+                                comments = @{
+                                    nodes    = @(@{ body = $Page1Body; createdAt = '2024-01-01T12:00:00Z' })
+                                    pageInfo = @{ hasNextPage = $HasNextPage; endCursor = $EndCursor }
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+
+        function script:New-D2BPrPage {
+            param([string]$Body, [bool]$HasNextPage, [string]$EndCursor)
+            $payload = @{
+                data = @{
+                    repository = @{
+                        pullRequest = @{
+                            comments = @{
+                                nodes    = @(@{ body = $Body; createdAt = '2024-01-01T12:05:00Z' })
+                                pageInfo = @{ hasNextPage = $HasNextPage; endCursor = $EndCursor }
+                            }
+                        }
+                    }
+                }
+            }
+            return ($payload | ConvertTo-Json -Depth 12)
+        }
+
+        function script:Install-D2BGhMock {
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+                $joined = $Args -join ' '
+                $global:LASTEXITCODE = 0
+                if ($joined -notmatch 'pullRequest\(number:') {
+                    return $global:d2BSearch
+                }
+                if ($joined -match 'after: "([^"]*)"') {
+                    return $global:d2BPageMap[$Matches[1]]
+                }
+                return '{}'
+            }
+        }
+    }
+
+    AfterEach {
+        if (Get-Command 'gh' -CommandType Function -ErrorAction SilentlyContinue) {
+            Remove-Item -Path Function:gh -ErrorAction SilentlyContinue
+        }
+        Remove-Variable -Name d2BSearch, d2BPageMap -Scope Global -ErrorAction SilentlyContinue
+    }
+
+    It '(b) marker (judge-rulings) found on hunt page 2 of 5 -> hunt stops and unbounded resume captures a block on page 8 (P6, critical)' {
+        $prNum      = 962
+        $markerBody = '<!-- judge-rulings pr-962 -->'
+        $blockBody  = "<!-- phase-containment-$prNum -->`nfinding_key: code-review:${prNum}:F1`nintroduced_phase: design`ncatchable_phase: design`ncaught_stage: code-review`nescape_distance: 2`nseverity: high`nsystemic_fix_type: skill`ncategory: architecture`napparatus_meta: false`nseed: false`n<!-- /phase-containment-$prNum -->"
+
+        $global:d2BSearch = script:New-D2BSearchPage -PrNumber $prNum `
+            -Page1Body 'no judge-rulings on page 1' -HasNextPage $true -EndCursor 'BB2CUR1'
+
+        $global:d2BPageMap = @{
+            'BB2CUR1' = (script:New-D2BPrPage -Body 'no judge-rulings hunt page 1' -HasNextPage $true -EndCursor 'BB2CUR2')
+            'BB2CUR2' = (script:New-D2BPrPage -Body $markerBody -HasNextPage $true -EndCursor 'BB2CUR3')
+            'BB2CUR3' = (script:New-D2BPrPage -Body 'filler page 4' -HasNextPage $true -EndCursor 'BB2CUR4')
+            'BB2CUR4' = (script:New-D2BPrPage -Body 'filler page 5' -HasNextPage $true -EndCursor 'BB2CUR5')
+            'BB2CUR5' = (script:New-D2BPrPage -Body 'filler page 6' -HasNextPage $true -EndCursor 'BB2CUR6')
+            'BB2CUR6' = (script:New-D2BPrPage -Body 'filler page 7' -HasNextPage $true -EndCursor 'BB2CUR7')
+            'BB2CUR7' = (script:New-D2BPrPage -Body $blockBody -HasNextPage $false -EndCursor $null)
+        }
+        script:Install-D2BGhMock
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceBCorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $false
+        $result.Tuples    | Should -HaveCount 1
+        $tuple = $result.Tuples[0]
+        $tuple['Number'] | Should -Be $prNum
+        $allBodies = $tuple['Bodies'] -join "`n"
+        $escapedMarker = [regex]::Escape($markerBody)
+        $allBodies | Should -Match $escapedMarker
+        $allBodies | Should -Match "phase-containment-$prNum"
+        $allBodies | Should -Match "code-review:${prNum}:F1"
+    }
+
+    It '(c) hunt exhausts K=5 additional pages markerless -> tuple dropped, Truncated=$true' {
+        $prNum = 963
+
+        $global:d2BSearch = script:New-D2BSearchPage -PrNumber $prNum `
+            -Page1Body 'no judge-rulings page 1' -HasNextPage $true -EndCursor 'BC1'
+
+        $global:d2BPageMap = @{
+            'BC1' = (script:New-D2BPrPage -Body 'no marker hunt 1' -HasNextPage $true -EndCursor 'BC2')
+            'BC2' = (script:New-D2BPrPage -Body 'no marker hunt 2' -HasNextPage $true -EndCursor 'BC3')
+            'BC3' = (script:New-D2BPrPage -Body 'no marker hunt 3' -HasNextPage $true -EndCursor 'BC4')
+            'BC4' = (script:New-D2BPrPage -Body 'no marker hunt 4' -HasNextPage $true -EndCursor 'BC5')
+            'BC5' = (script:New-D2BPrPage -Body 'no marker hunt 5' -HasNextPage $true -EndCursor 'BC6')
+        }
+        script:Install-D2BGhMock
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceBCorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $true
+        ($result.Tuples | Where-Object { $_['Number'] -eq $prNum }) | Should -BeNullOrEmpty
+    }
+
+    It '(e) markerless single-page PR (no hasNextPage) -> dropped, Truncated stays $false (not a degradation)' {
+        $prNum = 964
+
+        $global:d2BSearch = script:New-D2BSearchPage -PrNumber $prNum `
+            -Page1Body 'no judge-rulings, only page' -HasNextPage $false -EndCursor $null
+        $global:d2BPageMap = @{}
+        script:Install-D2BGhMock
+
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $result = script:Get-SurfaceBCorpusGraphQL `
+            -Owner 'Grimblaz' -Repo 'agent-orchestra' -WindowDays 30 `
+            -Stopwatch $stopwatch -TimeoutSeconds 30 3>$null
+
+        $result.IsError   | Should -Be $false
+        $result.Truncated | Should -Be $false -Because 'there was nothing more to fetch -- correctly excluded, not a truncation'
+        ($result.Tuples | Where-Object { $_['Number'] -eq $prNum }) | Should -BeNullOrEmpty
+    }
+}
