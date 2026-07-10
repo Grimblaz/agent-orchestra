@@ -48,9 +48,27 @@ Describe 'safe-operations §2b-bis / §2b-ter board-positioning contract' -Tag '
             -Because '§2b-ter residue format must name both standalone and parent-edge placement options'
     }
 
-    It '§2b-ter lever-mapping table documents priority label and parent-edge mechanisms' {
-        $script:Content | Should -Match '(?is)2b-ter.{0,800}Add-FollowUpIssue' `
-            -Because '§2b-ter must document Add-FollowUpIssue as the parent-edge mechanism in the lever-mapping table'
+    It '§2b-ter lever-mapping table Parent-edge row documents Set-IssueParent as the attach-existing mechanism (#800 A2 / PF7)' {
+        # Tightened per #800 s4 (PF7, judge ruling: sustained/medium). The prior assertion
+        # was '(?is)2b-ter.{0,800}Add-FollowUpIssue' — a loose proximity match that is
+        # satisfied by ANY Add-FollowUpIssue mention within 800 chars of the "2b-ter"
+        # heading, including unrelated prose at §2b-ter:144/:148/:169 (create-then-attach
+        # guidance, the automated-path carve-out). That loose match would keep passing
+        # even after #800 s5 rewrites the lever-mapping table's Parent-edge row to name
+        # Set-IssueParent (the new standalone attach-existing script from #800 A2) —
+        # silently certifying a now-false "Add-FollowUpIssue is the parent-edge mechanism"
+        # claim. This assertion targets the "Parent edge" table row specifically by its
+        # literal leading cell text and requires the Mechanism cell to name
+        # Set-IssueParent, not Add-FollowUpIssue.
+        #
+        # STATUS: #800 s5 (the doc-fix step that rewrote this row) has landed and this
+        # suite is GREEN. Kept as a standing regression guard against reverting the
+        # Parent-edge row back to Add-FollowUpIssue.
+        $script:Content | Should -Match '(?m)^\|\s*\*\*Parent edge\*\*\s*\(`Set-IssueParent -ParentIssueNumber N`\)' `
+            -Because '§2b-ter lever-mapping table Parent-edge row must name Set-IssueParent as the attach-existing mechanism (#800 A2)'
+
+        $script:Content | Should -Not -Match '(?m)^\|\s*\*\*Parent edge\*\*.*Add-FollowUpIssue' `
+            -Because 'the Parent-edge row must not still reference Add-FollowUpIssue once #800 s5 lands (regression guard against reverting to the stale mechanism)'
     }
 
     It '§2b-ter lever table pins correct Get-PriorityKey numeric values matching render-portfolio.ps1' {

@@ -120,6 +120,8 @@ Warnings are **additive** `⚠️` lines appended after the zones. They never fa
 
 **Integrity warnings** flag possible fetch truncation: when an umbrella's `subIssues.totalCount` does not equal the number of `nodes` actually returned (`⚠️ umbrella #N: subIssues.totalCount=X but only Y nodes returned (possible truncation)`). This is the safety net for the connection-cap dependency below — it is a warn tier, so the board still renders.
 
+**Orphan-claim warnings** (`OrphanClaimWarnings`, computed by `Get-PortfolioBuckets` in `render-portfolio.ps1`) are a warn-only tier that fires for an **open** issue with `.parent == null` whose body nonetheless claims a parent — detected via the `<!-- parent-link-mode: text-fallback -->` marker or either producer regex (first-line `Parent: #N`, or the mid-line `placement=parent #N` §2b-ter residue) — surfacing the board-vs-body mismatch (`⚠️ open issue #N claims a parent (#M) but has no sub-issue link`).
+
 A separate **unresolved** warning fires when a listed umbrella could not be fully resolved (issue not found, or incomplete blocker data).
 
 ---

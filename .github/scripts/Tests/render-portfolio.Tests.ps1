@@ -83,7 +83,8 @@ function New-IssueState {
         [string]    $ClosedAt     = $null,
         [string]    $CreatedAt    = '2025-01-01T00:00:00Z',
         [hashtable] $Parent       = $null,
-        [hashtable] $SubIssues    = $null
+        [hashtable] $SubIssues    = $null,
+        [string]    $Body         = $null
     )
     return [PSCustomObject]@{
         number        = $Number
@@ -97,6 +98,7 @@ function New-IssueState {
         totalCount    = 1  # default rendered count = totalCount (no overflow)
         parent        = $Parent
         subIssues     = $SubIssues
+        body          = $Body
     }
 }
 
@@ -567,6 +569,157 @@ Describe 'Get-PortfolioBuckets v2' {
         $rcNums = @($buckets.RecentlyClosed | ForEach-Object { $_.number })
         $rcNums | Should -Contain 700 -Because '#700 closed within 14-day window must appear in RecentlyClosed'
         $rcNums | Should -Not -Contain 701 -Because '#701 closed 30 days ago is outside the window'
+    }
+}
+
+# ===========================================================================
+Describe 'Get-PortfolioBuckets v2 — OrphanClaimWarnings (#800 B1)' {
+# ===========================================================================
+# Warn-only detector: OPEN issues where .parent is $null but the body claims a
+# parent via one of two per-producer patterns, or carries the text-fallback
+# marker. Per-producer regex discipline is the load-bearing invariant here —
+# a 5-pass adversarial plan stress-test (plan-issue-800 PF1, judge ruling:
+# sustained/critical) caught that a uniformly first-line-anchored design would
+# silently miss the real §2b-ter mid-line residue format. Case (c) below is
+# that exact regression guard and must never be weakened or removed.
+
+    It '(a) fires on an OPEN issue with the text-fallback marker + null parent' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        $orphan = New-IssueState -Number 900 -State 'OPEN' -Parent $null `
+            -SubIssues @{ totalCount = 0; nodes = @() } `
+            -Body "<!-- parent-link-mode: text-fallback -->`nParent: #761"
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $orphan)
+
+        $buckets.OrphanClaimWarnings | Should -Not -BeNullOrEmpty -Because 'text-fallback marker + null parent must fire (a)'
+        ($buckets.OrphanClaimWarnings -join "`n") | Should -Match '#900' -Because 'the warning must name the orphaned issue #900'
+    }
+
+    It '(b) fires on an OPEN issue with a first-line Parent: #N claim + null parent' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        $orphan = New-IssueState -Number 901 -State 'OPEN' -Parent $null `
+            -SubIssues @{ totalCount = 0; nodes = @() } `
+            -Body "Parent: #762`n`nSome other body content."
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $orphan)
+
+        $buckets.OrphanClaimWarnings | Should -Not -BeNullOrEmpty -Because 'first-line Parent: #N claim + null parent must fire (b)'
+        ($buckets.OrphanClaimWarnings -join "`n") | Should -Match '#901' -Because 'the warning must name the orphaned issue #901'
+        ($buckets.OrphanClaimWarnings -join "`n") | Should -Match '#762' -Because 'the warning must interpolate the claimed parent #762'
+    }
+
+    It '(c) CRITICAL REGRESSION GUARD — fires on an OPEN issue with mid-line "Board positioning: ...placement=parent #N; ..." residue + null parent (PF1)' {
+        # This is exactly the real §2b-ter positioning-residue format
+        # (skills/safe-operations/SKILL.md:163): "Board positioning: priority=<h|m|l>;
+        # placement=<standalone|parent #N>; rationale=<one line>". An earlier
+        # uniformly-line-anchored design would NEVER match this because the token
+        # appears mid-line, not at column 0 — the plan stress-test caught this as a
+        # critical defect. This test must exist and must pass against the current
+        # implementation; do not weaken or skip it.
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        $orphan = New-IssueState -Number 902 -State 'OPEN' -Parent $null `
+            -SubIssues @{ totalCount = 0; nodes = @() } `
+            -Body "Some intro text.`n`nBoard positioning: priority=medium; placement=parent #761; rationale=tracked under umbrella 761`n`nMore body content."
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $orphan)
+
+        $buckets.OrphanClaimWarnings | Should -Not -BeNullOrEmpty `
+            -Because 'PF1 regression guard: mid-line "placement=parent #N" residue + null parent MUST fire even though it is not first-line-anchored'
+        ($buckets.OrphanClaimWarnings -join "`n") | Should -Match '#902' -Because 'the warning must name the orphaned issue #902'
+        ($buckets.OrphanClaimWarnings -join "`n") | Should -Match '#761' -Because 'the warning must interpolate the claimed parent #761 from the mid-line residue'
+    }
+
+    It '(d) does NOT fire on a correctly-attached child even if the body also contains claim text' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' -SubIssues @{
+            totalCount = 1
+            nodes = @( @{ number = 903; state = 'OPEN' } )
+        }
+        $attachedChild = New-IssueState -Number 903 -State 'OPEN' -Parent @{ number = 476 } `
+            -SubIssues @{ totalCount = 0; nodes = @() } `
+            -Body "<!-- parent-link-mode: text-fallback -->`nParent: #476`n`nBoard positioning: priority=medium; placement=parent #476; rationale=x"
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $attachedChild)
+
+        $orphanNums = @(($buckets.OrphanClaimWarnings) | Where-Object { $_ -match '#903' })
+        $orphanNums | Should -BeNullOrEmpty -Because 'a correctly-attached child (.parent set) must never be flagged, regardless of stray claim text in its body (d)'
+    }
+
+    It '(e) does NOT fire on a CLOSED issue matching the same claim conditions' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        $closedOrphan = New-IssueState -Number 904 -State 'CLOSED' -Parent $null `
+            -SubIssues @{ totalCount = 0; nodes = @() } `
+            -Body "<!-- parent-link-mode: text-fallback -->`nParent: #761"
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $closedOrphan)
+
+        $orphanNums = @(($buckets.OrphanClaimWarnings) | Where-Object { $_ -match '#904' })
+        $orphanNums | Should -BeNullOrEmpty -Because 'a CLOSED issue must never be flagged even if it matches the same claim conditions (e — OPEN-only invariant)'
+    }
+
+    It '(f) does NOT fire on a mid-body prose mention of "Parent: #5" that is not the body first line' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        $proseIssue = New-IssueState -Number 905 -State 'OPEN' -Parent $null `
+            -SubIssues @{ totalCount = 0; nodes = @() } `
+            -Body "Some discussion.`n`n...see the note about Parent: #5 in the other thread..."
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $proseIssue)
+
+        $orphanNums = @(($buckets.OrphanClaimWarnings) | Where-Object { $_ -match '#905' })
+        $orphanNums | Should -BeNullOrEmpty -Because 'a mid-body prose mention of "Parent: #N" that is NOT the first line must not fire — proves the first-line anchor excludes prose mentions elsewhere in the body (f)'
+    }
+
+    It 'digit-only interpolation: emitted message contains only the clean captured digit group, never regex artifacts' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        $orphan = New-IssueState -Number 906 -State 'OPEN' -Parent $null `
+            -SubIssues @{ totalCount = 0; nodes = @() } `
+            -Body "Board positioning: priority=medium; placement=parent #761; rationale=tracked under umbrella 761"
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $orphan)
+
+        $warning = @($buckets.OrphanClaimWarnings | Where-Object { $_ -match '#906' })[0]
+        $warning | Should -Not -BeNullOrEmpty
+        $warning | Should -Match '#761\b' -Because 'the claimed parent number must interpolate cleanly as #761'
+        $warning | Should -Not -Match '#761\d' -Because 'no trailing digits or artifacts may be appended to the captured group'
+        $warning | Should -Not -Match "`n" -Because 'interpolation must never carry a newline (log-injection guard, consistent with M9 elsewhere in this renderer)'
+        $warning | Should -Not -Match '\(\?' -Because 'no raw regex syntax may leak into the interpolated message'
+    }
+
+    It 'M11: an OrphanClaimWarnings entry renders into Format-PortfolioMarkdown output' {
+        # Render-surface coverage gap (M11): prior tests only asserted the bucket
+        # computation and the CI ::warning:: emission; nothing asserted the warning
+        # text actually reaches the rendered Markdown board via Format-PortfolioMarkdown.
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        $orphan = New-IssueState -Number 907 -State 'OPEN' -Parent $null `
+            -SubIssues @{ totalCount = 0; nodes = @() } `
+            -Body "Parent: #762`n`nSome other body content."
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $orphan)
+        $output  = Format-PortfolioMarkdown -bucketModel $buckets -timestamp '2026-06-25T00:00:00Z'
+
+        $output | Should -Match '⚠️ open issue #907 claims a parent \(#762\) but has no sub-issue link' `
+            -Because 'M11: OrphanClaimWarnings entries must actually appear in the rendered Markdown output, not only in the bucket model'
+    }
+
+    It 'M12: the marker-only #unknown fallback fires when the text-fallback marker is present but neither claim regex captures a digit' {
+        $spec = ConvertFrom-SequenceSpec -yamlText (New-ValidSpecYaml -Umbrellas @(476))
+        $umbrella476 = New-IssueState -Number 476 -State 'OPEN' -SubIssues @{ totalCount = 0; nodes = @() }
+        $orphan = New-IssueState -Number 908 -State 'OPEN' -Parent $null `
+            -SubIssues @{ totalCount = 0; nodes = @() } `
+            -Body "<!-- parent-link-mode: text-fallback -->`nNo parseable claim text here at all."
+
+        $buckets = Get-PortfolioBuckets -spec $spec -issueStateObjects @($umbrella476, $orphan)
+
+        $warning = @($buckets.OrphanClaimWarnings | Where-Object { $_ -match '#908' })[0]
+        $warning | Should -Not -BeNullOrEmpty -Because 'the text-fallback marker alone must still fire the detector'
+        $warning | Should -Match '#unknown' -Because 'M12: neither claim regex captured a digit, so the message must fall back to the literal #unknown token'
     }
 }
 
@@ -2249,6 +2402,121 @@ umbrellas: [101]
             finally {
                 Remove-Item function:global:gh -ErrorAction SilentlyContinue
                 if (Test-Path $tempSpecLeaf2) { Remove-Item $tempSpecLeaf2 -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It 'OrphanClaimWarnings ::warning:: is emitted to the information stream when GITHUB_ACTIONS=true (#800 B1)' {
+            # Fixture: umbrella #900 is itself the orphan-claiming issue (OPEN, parent
+            # null, body carries the text-fallback marker + first-line Parent: #761
+            # claim). Get-PortfolioBuckets stays pure; the CI ::warning:: emission lives
+            # at render-portfolio.ps1:1050-1054, gated on $env:GITHUB_ACTIONS -eq 'true'.
+            $previousGithubActions = $env:GITHUB_ACTIONS
+            $orphanJson = '{"data":{"repository":{"issue":{"number":900,"title":"Orphan claim umbrella","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","body":"Parent: #761\n<!-- parent-link-mode: text-fallback -->","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"parent":null,"subIssues":{"totalCount":0,"nodes":[]}}}}}'
+            $probeJson  = '{"data":{"repository":{"issue":{"parent":null,"subIssues":{"totalCount":0}}}}}'
+
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+                if ($ghArgs -contains 'edit') { $script:GhEditCallCount++; $global:LASTEXITCODE = 0; return }
+                if ($ghArgs -contains 'list') {
+                    if ($ghArgs -contains 'closed') { $global:LASTEXITCODE = 0; return '[]' }
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":900,"title":"Orphan claim umbrella","labels":[],"createdAt":"2026-01-01T00:00:00Z"}]'
+                }
+                if ($ghArgs -contains 'api') {
+                    $queryStr = $ghArgs | Where-Object { $_ -like 'query=*' } | Select-Object -Last 1
+                    $issueNum = 0
+                    if ($queryStr -match 'issue\(number:\s*(\d+)') { $issueNum = [int]$Matches[1] }
+                    $global:LASTEXITCODE = 0
+                    if ($issueNum -eq 704) { return $probeJson }
+                    return $orphanJson
+                }
+                if ($ghArgs -contains 'view') {
+                    $global:LASTEXITCODE = 0
+                    return '{"body":"# Control Tower\n\nNo portfolio block yet."}'
+                }
+                $global:LASTEXITCODE = 0
+            }
+
+            $tempSpecOrphan = New-TempSpecPath
+            @'
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [900]
+'@ | Set-Content -Path $tempSpecOrphan -Encoding UTF8
+
+            try {
+                $env:GITHUB_ACTIONS = 'true'
+                # Capture information stream (6) — Write-Host output goes here (M6 convention).
+                $output = Invoke-PortfolioRender -specPath $tempSpecOrphan 6>&1
+                $annotations = @($output | Where-Object { $_ -match '::warning::' -and $_ -match '#900' })
+                $annotations.Count | Should -BeGreaterThan 0 `
+                    -Because 'an OrphanClaimWarnings entry must be echoed as a CI ::warning:: annotation when GITHUB_ACTIONS=true (#800 B1)'
+                $annotations[0].ToString() | Should -Match '#761' -Because 'the annotation must interpolate the claimed parent #761'
+            }
+            finally {
+                Remove-Item function:global:gh -ErrorAction SilentlyContinue
+                if ($null -eq $previousGithubActions) {
+                    Remove-Item env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
+                } else {
+                    $env:GITHUB_ACTIONS = $previousGithubActions
+                }
+                if (Test-Path $tempSpecOrphan) { Remove-Item $tempSpecOrphan -Force -ErrorAction SilentlyContinue }
+            }
+        }
+
+        It 'OrphanClaimWarnings ::warning:: is NOT emitted when GITHUB_ACTIONS is unset, even though the board still warns (#800 B1)' {
+            # Same orphan-claim fixture as above; only the environment differs.
+            $previousGithubActions = $env:GITHUB_ACTIONS
+            $orphanJson = '{"data":{"repository":{"issue":{"number":900,"title":"Orphan claim umbrella","state":"OPEN","closedAt":null,"createdAt":"2026-01-01T00:00:00Z","body":"Parent: #761\n<!-- parent-link-mode: text-fallback -->","labels":{"totalCount":0,"nodes":[]},"blockedBy":{"totalCount":0,"nodes":[]},"parent":null,"subIssues":{"totalCount":0,"nodes":[]}}}}}'
+            $probeJson  = '{"data":{"repository":{"issue":{"parent":null,"subIssues":{"totalCount":0}}}}}'
+
+            function global:gh {
+                param([Parameter(ValueFromRemainingArguments)][string[]]$ghArgs)
+                if ($ghArgs -contains 'edit') { $script:GhEditCallCount++; $global:LASTEXITCODE = 0; return }
+                if ($ghArgs -contains 'list') {
+                    if ($ghArgs -contains 'closed') { $global:LASTEXITCODE = 0; return '[]' }
+                    $global:LASTEXITCODE = 0
+                    return '[{"number":900,"title":"Orphan claim umbrella","labels":[],"createdAt":"2026-01-01T00:00:00Z"}]'
+                }
+                if ($ghArgs -contains 'api') {
+                    $queryStr = $ghArgs | Where-Object { $_ -like 'query=*' } | Select-Object -Last 1
+                    $issueNum = 0
+                    if ($queryStr -match 'issue\(number:\s*(\d+)') { $issueNum = [int]$Matches[1] }
+                    $global:LASTEXITCODE = 0
+                    if ($issueNum -eq 704) { return $probeJson }
+                    return $orphanJson
+                }
+                if ($ghArgs -contains 'view') {
+                    $global:LASTEXITCODE = 0
+                    return '{"body":"# Control Tower\n\nNo portfolio block yet."}'
+                }
+                $global:LASTEXITCODE = 0
+            }
+
+            $tempSpecOrphan2 = New-TempSpecPath
+            @'
+schema_version: 2
+control_tower: 704
+recently_closed_days: 14
+umbrellas: [900]
+'@ | Set-Content -Path $tempSpecOrphan2 -Encoding UTF8
+
+            try {
+                Remove-Item env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
+                $output = Invoke-PortfolioRender -specPath $tempSpecOrphan2 6>&1
+                $annotations = @($output | Where-Object { $_ -match '::warning::' })
+                $annotations.Count | Should -Be 0 `
+                    -Because 'no ::warning:: annotation may be emitted when GITHUB_ACTIONS is unset, even though the same orphan claim exists (#800 B1 gating)'
+            }
+            finally {
+                Remove-Item function:global:gh -ErrorAction SilentlyContinue
+                if ($null -eq $previousGithubActions) {
+                    Remove-Item env:GITHUB_ACTIONS -ErrorAction SilentlyContinue
+                } else {
+                    $env:GITHUB_ACTIONS = $previousGithubActions
+                }
+                if (Test-Path $tempSpecOrphan2) { Remove-Item $tempSpecOrphan2 -Force -ErrorAction SilentlyContinue }
             }
         }
     }
