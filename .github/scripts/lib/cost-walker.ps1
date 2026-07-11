@@ -80,7 +80,12 @@ function script:Test-CostWalkerEventCwdMatchesParent {
     $eventCwd = $TranscriptEvent['cwd']
     if ($null -eq $eventCwd) { return $false }
 
-    if (([string]$eventCwd).StartsWith($script:CostWalkerCopilotOtelCwdPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    # C3 (issue #825 post-review fix): guard against an unmarshaled (null-coerced-to-'')
+    # $script:CostWalkerCopilotOtelCwdPrefix — ''.StartsWith(anything) is $true in .NET,
+    # so an unguarded call here would misclassify every real cwd as the sentinel. A
+    # null/empty prefix must mean "no sentinel matches", not "everything matches".
+    if (-not [string]::IsNullOrEmpty($script:CostWalkerCopilotOtelCwdPrefix) -and
+        ([string]$eventCwd).StartsWith($script:CostWalkerCopilotOtelCwdPrefix, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
 
     $normalizedEventCwd = Get-NormalizedPath -Path ([string]$eventCwd)
     return $normalizedEventCwd -eq $NormalizedParentCwd
@@ -364,7 +369,13 @@ function script:Get-CostWalkerFirstEventCwd {
             if ($null -eq $ev) { continue }
             if (-not [string]::IsNullOrEmpty([string]$ev['cwd'])) {
                 $cwd = [string]$ev['cwd']
-                if (-not $cwd.StartsWith($script:CostWalkerCopilotOtelCwdPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                # C3 (issue #825 post-review fix): same null/empty-prefix guard as
+                # Test-CostWalkerEventCwdMatchesParent above — an unguarded StartsWith('')
+                # would misclassify every real cwd as the sentinel and this function would
+                # return $null for every candidate.
+                $isSentinelCwd = -not [string]::IsNullOrEmpty($script:CostWalkerCopilotOtelCwdPrefix) -and
+                    $cwd.StartsWith($script:CostWalkerCopilotOtelCwdPrefix, [System.StringComparison]::OrdinalIgnoreCase)
+                if (-not $isSentinelCwd) {
                     $firstCwd = $cwd
                     break
                 }
@@ -683,6 +694,15 @@ function Invoke-CostTranscriptWalk {
         failing corroboration. Always 0 when -AdmitCorroboratedFallback is not set. This
         is an additive, backward-compatible extension of the return contract: the
         function's own output stream (the events themselves) is unchanged.
+    .PARAMETER Tier2IssueNumber
+        Issue #825 post-review fix (C2). Optional override for the issue number fed
+        specifically into the Tier-2 corroboration gate
+        (script:Get-CostWalkerCorroboratedFallbackAdmission), kept independent from
+        -IssueNumber's phase-marker windowing use. -IssueNumber is resolved with a
+        PR-body fallback upstream (author-controllable free text), which is acceptable
+        for windowing but must never drive the trust-ladder's corroboration signal.
+        When omitted, falls back to -IssueNumber (preserves pre-fix behavior for callers
+        that do not supply this).
     #>
     [CmdletBinding()]
     param(
@@ -695,11 +715,23 @@ function Invoke-CostTranscriptWalk {
         [switch]$AdmitCorroboratedFallback,
         [Nullable[datetime]]$CorroborationWindowStart = $null,
         [Nullable[datetime]]$CorroborationWindowEnd = $null,
-        [ref]$RejectedDirCountVar
+        [ref]$RejectedDirCountVar,
+        [Nullable[int]]$Tier2IssueNumber = $null
     )
 
     if (-not $ProjectsRoot) {
-        $ProjectsRoot = Join-Path ([System.Environment]::GetFolderPath('UserProfile')) '.claude' 'projects'
+        # C8 (issue #825 post-review fix): honor the same test-only override
+        # cost-fcl-helpers.ps1's script:Test-FCLClaudeProjectsRootAbsent already
+        # respects, so a caller (e.g. Invoke-CostAttributionRepair via
+        # Invoke-CostSessionRender) can point an end-to-end test at a temp
+        # projects root instead of the real user profile.
+        $testProjectsRootOverride = [Environment]::GetEnvironmentVariable('FRAME_CREDIT_LEDGER_TEST_CLAUDE_PROJECTS_ROOT', 'Process')
+        $ProjectsRoot = if (-not [string]::IsNullOrWhiteSpace($testProjectsRootOverride)) {
+            $testProjectsRootOverride
+        }
+        else {
+            Join-Path ([System.Environment]::GetFolderPath('UserProfile')) '.claude' 'projects'
+        }
     }
 
     # Normalize the caller's CWD once for all comparisons
@@ -726,7 +758,18 @@ function Invoke-CostTranscriptWalk {
         $resolvedRepoRootForIdentity = if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot } else { $ParentCwd }
         $tier2TargetIdentity = script:Get-CostWalkerTargetIdentity -RepoRoot $resolvedRepoRootForIdentity
         $tier1AdmittedSet = [System.Collections.Generic.HashSet[string]]::new([string[]]@($slugDirs), [System.StringComparer]::OrdinalIgnoreCase)
-        $tier2Admission = script:Get-CostWalkerCorroboratedFallbackAdmission -ProjectsRoot $ProjectsRoot -TargetIdentity $tier2TargetIdentity -Tier1AdmittedDirs $tier1AdmittedSet -Branch $Branch -IssueNumber $IssueNumber
+        # C2 (issue #825 post-review fix): the Tier-2 corroboration gate uses
+        # Tier2IssueNumber (branch-prefix-only, never PR-body-derived) whenever the
+        # caller explicitly supplies it — including an explicit $null, which means
+        # "I resolved this branch-only and got nothing; do NOT fall back to the
+        # (possibly PR-body-derived) -IssueNumber". Falling back to -IssueNumber only
+        # happens for callers that predate this parameter entirely (never mention it),
+        # via ContainsKey rather than a null check — a null-check-only fallback would
+        # silently re-admit the exact PR-body-derived value this fix exists to reject
+        # whenever a caller resolves Tier2IssueNumber to $null (branch didn't match)
+        # and still threads that resolved $null through explicitly.
+        $tier2EffectiveIssueNumber = if ($PSBoundParameters.ContainsKey('Tier2IssueNumber')) { $Tier2IssueNumber } else { $IssueNumber }
+        $tier2Admission = script:Get-CostWalkerCorroboratedFallbackAdmission -ProjectsRoot $ProjectsRoot -TargetIdentity $tier2TargetIdentity -Tier1AdmittedDirs $tier1AdmittedSet -Branch $Branch -IssueNumber $tier2EffectiveIssueNumber
         $tier2AdmittedFiles = $tier2Admission.AdmittedFiles
         $rejectedDirCount = $tier2Admission.RejectedDirCount
     }

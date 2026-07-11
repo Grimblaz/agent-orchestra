@@ -1224,7 +1224,8 @@ Describe 'Invoke-CostAttributionRepair (issue #825 s3)' {
             param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot, $PrBody, [switch]$AdmitCorroboratedFallback, $CorroborationWindowStart, $CorroborationWindowEnd)
             $script:CapturedAdmit = [bool]$AdmitCorroboratedFallback
             return @{
-                CostSection = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`npr: $Pr`nbranch: $Branch`n-->"
+                CostSection     = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`npr: $Pr`nbranch: $Branch`n-->"
+                CostEventsCount = 1
             }
         }
         $script:UpsertedBody = $null
@@ -1302,7 +1303,7 @@ Describe 'Invoke-CostAttributionRepair (issue #825 s3)' {
         }
         function global:Invoke-CostSessionRender {
             param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot, $PrBody, [switch]$AdmitCorroboratedFallback, $CorroborationWindowStart, $CorroborationWindowEnd)
-            return @{ CostSection = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`npr: $Pr`nbranch: $Branch`n-->" }
+            return @{ CostSection = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`npr: $Pr`nbranch: $Branch`n-->"; CostEventsCount = 1 }
         }
         $script:UpsertCalled = $false
         function global:Find-OrUpsertComment { $script:UpsertCalled = $true; return $null }
@@ -1366,7 +1367,8 @@ Describe 'Invoke-CostSessionRender AdmitCorroboratedFallback wiring, composed th
                 [switch]$AdmitCorroboratedFallback,
                 [Nullable[datetime]]$CorroborationWindowStart = $null,
                 [Nullable[datetime]]$CorroborationWindowEnd = $null,
-                [ref]$RejectedDirCountVar
+                [ref]$RejectedDirCountVar,
+                [Nullable[int]]$Tier2IssueNumber = $null
             )
             $script:CapturedWalkParams = $PSBoundParameters
             if ($null -ne $RejectedDirCountVar) { $RejectedDirCountVar.Value = 0 }
@@ -1459,7 +1461,8 @@ Describe 'Invoke-CostSessionRender AdmitCorroboratedFallback wiring, composed th
                 [switch]$AdmitCorroboratedFallback,
                 [Nullable[datetime]]$CorroborationWindowStart = $null,
                 [Nullable[datetime]]$CorroborationWindowEnd = $null,
-                [ref]$RejectedDirCountVar
+                [ref]$RejectedDirCountVar,
+                [Nullable[int]]$Tier2IssueNumber = $null
             )
             if ($null -ne $RejectedDirCountVar) { $RejectedDirCountVar.Value = 0 }
 
@@ -1530,5 +1533,321 @@ Describe 'Invoke-CostSessionRender AdmitCorroboratedFallback wiring, composed th
         # the M8 window bound actually took effect through this call path.
         $script:UpsertedBody | Should -Match 'input:\s*100'
         $script:UpsertedBody | Should -Not -Match 'input:\s*200'
+    }
+
+    It 'C10 regression pin: threads the branch-only Tier2IssueNumber (not the PR-body-derived IssueNumber) into the Tier-2 gate when the branch does not name an issue but the PR body does' {
+        # Resolve-FCLLinkedIssueNumber checks the branch prefix FIRST and only
+        # consults the PR body when the branch does not match — so the only
+        # fixture shape where the two resolutions can actually diverge is a
+        # non-issue-prefixed branch alongside a PR body that names an issue.
+        # IssueNumber (IssueNumber-windowing, body-inclusive) must still resolve
+        # via the body; Tier2IssueNumber (corroboration) must NOT — proving C2's
+        # fix rejects the PR-body-derived number specifically for Tier 2.
+        $pr = 823
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: unknown`npr: $pr`nbranch: HEAD`n-->"
+
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return '{"state":"MERGED","headRefName":"chore/unrelated-branch-name","body":"Fixes #999","createdAt":"2026-06-01T00:00:00Z","mergedAt":"2026-06-05T00:00:00Z"}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+
+        $script:CapturedWalkParams = $null
+        function global:Invoke-CostTranscriptWalk {
+            param(
+                [string]$Slug, [string]$Branch, [string]$ParentCwd, [string]$ProjectsRoot = '',
+                [Nullable[int]]$IssueNumber = $null, [string]$RepoRoot = '',
+                [switch]$AdmitCorroboratedFallback,
+                [Nullable[datetime]]$CorroborationWindowStart = $null,
+                [Nullable[datetime]]$CorroborationWindowEnd = $null,
+                [ref]$RejectedDirCountVar,
+                [Nullable[int]]$Tier2IssueNumber = $null
+            )
+            $script:CapturedWalkParams = $PSBoundParameters
+            if ($null -ne $RejectedDirCountVar) { $RejectedDirCountVar.Value = 0 }
+            return @(@{ type = 'assistant'; gitBranch = $Branch; uuid = 'evt-1'; message = @{ content = @() } })
+        }
+        function global:Invoke-CostCopilotWalk {
+            param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+            return @()
+        }
+        function global:Get-CostAttribution {
+            param([object[]]$Events, [string]$RateTablePath = '')
+            return @{
+                ports                 = @{}
+                orchestrator_overhead = @{ tokens = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 }; cost_estimate_usd = 0.0; cache_read_hit_ratio = 0.0 }
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{ total_cost_usd = 0.0; tokens = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 } }
+            }
+        }
+        function global:Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
+        function global:Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
+        function global:Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
+        function global:Get-CostWalkerCurrentSessionId { param([string]$Slug, [string]$Branch, [string]$ParentCwd, [string]$RepoRoot = '') return '' }
+        function global:Find-OrUpsertComment { return $null }
+
+        $previousInline = $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
+        $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = '1'
+        try {
+            $null = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+        }
+        finally {
+            $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = $previousInline
+        }
+
+        $script:CapturedWalkParams | Should -Not -BeNullOrEmpty
+        $script:CapturedWalkParams['IssueNumber'] | Should -Be 999
+        $script:CapturedWalkParams.ContainsKey('Tier2IssueNumber') | Should -Be $true
+        $script:CapturedWalkParams['Tier2IssueNumber'] | Should -BeNullOrEmpty
+    }
+}
+
+# ---------------------------------------------------------------------------
+# End-to-end regression pins (issue #825 post-review fix cycle, C1/C8/C9): the
+# ENTIRE real pipeline (real Invoke-CostSessionRender -> real
+# Invoke-CostTranscriptWalk -> real Get-CostAttribution) through
+# Invoke-CostAttributionRepair, not the mocked-Invoke-CostTranscriptWalk
+# composition tests above. Only Get-CostRollingHistory, Get-MostRecentRegimeCheckpoint,
+# Get-CostAnomalyFlags, Invoke-CostCopilotWalk, gh, and Find-OrUpsertComment are
+# mocked — everything that decides HOW MANY events get attributed runs for real.
+# This is what makes C8 (the real walker honoring the test-only projects-root
+# override) and C9 (the real walker's own M7 dedup guard, reached through this
+# exact composition path) provable at all.
+# ---------------------------------------------------------------------------
+Describe 'Invoke-CostAttributionRepair end-to-end regression pins (issue #825 post-review fix)' {
+
+    BeforeAll {
+        $script:E2EPathNormalizeLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/path-normalize.ps1'
+        $script:E2EWalkerLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-walker.ps1'
+        $script:E2ECompletenessLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-completeness.ps1'
+        $script:E2ERendererLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-pattern-renderer.ps1'
+        $script:E2ESessionRenderLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-session-render.ps1'
+
+        # Deliberately NOT dot-sourcing cost-walker-copilot.ps1 or cost-attribution.ps1
+        # here: dot-sourcing runs their function definitions into this BeforeAll's own
+        # (Describe-container) scope, which sits BETWEEN each It's scope and true global
+        # scope in PowerShell's function-resolution walk. A same-named `function
+        # global:X` mock defined inside an It body is resolved AFTER that container
+        # scope, so it would be silently shadowed by the real dot-sourced version the
+        # moment production code (reached via the real, dot-sourced Invoke-CostTranscriptWalk
+        # / Invoke-CostSessionRender) calls Invoke-CostCopilotWalk or Get-CostAttribution —
+        # this was empirically confirmed: the REAL Invoke-CostCopilotWalk ran instead of
+        # the mock and scanned this machine's actual git reflog, which is what made these
+        # tests slow/resource-heavy before this fix. Every It below mocks both functions
+        # instead, and neither one needs to be real for what these two tests verify.
+        foreach ($libPath in @(
+                $script:E2EPathNormalizeLibPath, $script:E2EWalkerLibPath,
+                $script:E2ECompletenessLibPath, $script:E2ERendererLibPath,
+                $script:E2ESessionRenderLibPath
+            )) {
+            if (Test-Path $libPath) { . $libPath }
+        }
+
+        function script:Write-E2ETestJsonl {
+            param([string]$Path, [hashtable[]]$Events)
+            $dir = Split-Path -Parent $Path
+            if (-not (Test-Path $dir)) { $null = New-Item -ItemType Directory -Path $dir -Force }
+            $Events | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 10 } | Set-Content -Path $Path -Encoding utf8NoBOM
+        }
+    }
+
+    It 'C8 regression pin: writes nothing when the REAL re-walk (real Invoke-CostTranscriptWalk, pointed at a temp projects root with no matching transcripts via the test-only env override) finds no activity' {
+        $pr = 824
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -PortReportsMarker '### Port Reports (C8 real empty re-walk)' -CostSection "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: unknown`npr: $pr`nbranch: HEAD`n-->"
+
+        $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-c8-empty-$([System.Guid]::NewGuid())"
+        $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+
+        # Get-CostTranscriptSlug and Get-CostWalkerCurrentSessionId are deliberately left
+        # REAL here (not mocked — see the BeforeAll comment on why a same-named global
+        # mock would be silently shadowed by cost-walker.ps1's own dot-sourced version
+        # anyway). Both are safe unmocked for this scenario: whatever real slug they
+        # resolve for $script:RepoRoot, $tmpProjects is freshly empty so no directory
+        # will ever match it.
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return '{"state":"MERGED","headRefName":"feature/issue-824-empty","body":"Fixes #824","createdAt":"2026-06-01T00:00:00Z","mergedAt":"2026-06-05T00:00:00Z"}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+        function global:Invoke-CostCopilotWalk {
+            param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+            return @()
+        }
+        function global:Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
+        function global:Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
+        function global:Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
+        # Get-CostWalkerCurrentSessionId is left REAL too (same shadowing reason as
+        # Get-CostTranscriptSlug above — it's defined in cost-walker.ps1 alongside
+        # Invoke-CostTranscriptWalk, which this Describe needs real). It does not honor
+        # the test-only projects-root override (out of C8's scope — only
+        # Invoke-CostTranscriptWalk was fixed), so it scans this machine's real
+        # ~/.claude/projects; that is slower but bounded, and its return value is purely
+        # informational (persisted session_id metadata) — not read by any assertion below.
+        $script:E2EUpsertCalled = $false
+        function global:Find-OrUpsertComment { $script:E2EUpsertCalled = $true; return $null }
+
+        $previousInline = $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
+        $previousProjectsRoot = $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_PROJECTS_ROOT
+        $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = '1'
+        $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_PROJECTS_ROOT = $tmpProjects
+        try {
+            $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd $script:RepoRoot -RepoRoot $script:RepoRoot
+        }
+        finally {
+            $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = $previousInline
+            $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_PROJECTS_ROOT = $previousProjectsRoot
+            Remove-Item -Recurse -Force $tmpProjects -ErrorAction SilentlyContinue
+        }
+
+        # Proves the C8 wiring: without the projects-root override reaching the REAL
+        # Invoke-CostTranscriptWalk, the walk would fall back to the real user profile
+        # and this assertion would be unreliable (machine-dependent). With it wired,
+        # the temp root is authoritative and guaranteed empty.
+        $result.Attempted | Should -Be $true
+        $result.Upserted | Should -Be $false
+        $result.Signal | Should -Match 'no matching transcripts'
+        $script:E2EUpsertCalled | Should -Be $false
+    }
+
+    It 'C9 regression pin: single-counts (not double-counts) a spanning session admitted via both the primary Tier-1 dir and a Tier-2-corroborated worktree dir sharing the same session id' {
+        $remoteProbe = @(& git -C $script:RepoRoot remote get-url origin 2>&1) | Select-Object -First 1
+        if ($global:LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($remoteProbe)) {
+            Set-ItResult -Skipped -Because 'cannot resolve test repo remote for Tier-2 identity resolution'
+            return
+        }
+
+        $pr = 825
+        $branch = 'feature/issue-825-spanning-session'
+        $sessionId = 'spanning-session-825'
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -PortReportsMarker '### Port Reports (C9 spanning session)' -CostSection "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: unknown`npr: $pr`nbranch: HEAD`n-->"
+
+        $tmpProjects = Join-Path ([IO.Path]::GetTempPath()) "cost-c9-spanning-$([System.Guid]::NewGuid())"
+        $null = New-Item -ItemType Directory -Path $tmpProjects -Force
+        $missingCwd = Join-Path ([IO.Path]::GetTempPath()) "cost-c9-missing-worktree-$([System.Guid]::NewGuid())"
+
+        # Real (non-mocked) slug derivation — resolved BEFORE Get-CostTranscriptSlug is
+        # mocked below, so the primary dir's name matches exactly what the real walk's
+        # primary-slug fallback (script:Resolve-CostWalkerPrimarySlugDir) looks for.
+        $primarySlug = Get-CostTranscriptSlug -CwdPath $script:RepoRoot
+        $primaryDir = Join-Path $tmpProjects $primarySlug
+        $null = New-Item -ItemType Directory -Path $primaryDir -Force
+
+        $candidateDir = Join-Path $tmpProjects 'corroborated-worktree-candidate'
+        $null = New-Item -ItemType Directory -Path $candidateDir -Force
+
+        # Primary dir's session file: a phase marker naming issue 825 (M14 cross-file
+        # corroboration signal, consumed by the Tier-2 candidate below) plus the
+        # session's own admitted assistant event (strict cwd+branch match).
+        $phaseMarkerEvent = @{
+            type      = 'user'
+            message   = @{ content = '<command-name>/plan</command-name><command-args>825</command-args>' }
+            gitBranch = 'main'
+            timestamp = '2026-06-01T00:00:00Z'
+        }
+        $primaryAssistantEvent = @{
+            type      = 'assistant'
+            uuid      = 'evt-spanning-1'
+            timestamp = '2026-06-02T00:00:00Z'
+            cwd       = $script:RepoRoot
+            gitBranch = $branch
+            message   = @{ usage = @{ input_tokens = 10; output_tokens = 5 }; content = @() }
+        }
+        # Tier-2 candidate: SAME session id (file BaseName) and SAME event uuid as the
+        # primary dir's event — simulating a deleted-worktree checkout of the identical
+        # session. cwd points at a path that does not exist on disk (M9 cwd-absent
+        # trigger); branch matches (Tier-2 branch-matched-file signal).
+        $candidateAssistantEvent = @{
+            type      = 'assistant'
+            uuid      = 'evt-spanning-1'
+            timestamp = '2026-06-02T00:05:00Z'
+            cwd       = $missingCwd
+            gitBranch = $branch
+            message   = @{ usage = @{ input_tokens = 10; output_tokens = 5 }; content = @() }
+        }
+
+        script:Write-E2ETestJsonl -Path (Join-Path $primaryDir "$sessionId.jsonl") -Events @($phaseMarkerEvent, $primaryAssistantEvent)
+        script:Write-E2ETestJsonl -Path (Join-Path $candidateDir "$sessionId.jsonl") -Events @($candidateAssistantEvent)
+
+        # Get-CostTranscriptSlug and Get-CostWalkerCurrentSessionId are deliberately left
+        # REAL (see the BeforeAll comment — a same-named global mock would be silently
+        # shadowed by cost-walker.ps1's own dot-sourced version anyway). This is exactly
+        # what we want here: $primaryDir was named using this same real function against
+        # this same $script:RepoRoot, so the real re-resolution inside
+        # Invoke-CostAttributionRepair lands on the identical slug/dir.
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return (@{ state = 'MERGED'; headRefName = $branch; body = 'Fixes #825'; createdAt = '2026-06-01T00:00:00Z'; mergedAt = '2026-06-05T00:00:00Z' } | ConvertTo-Json -Compress)
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+        function global:Invoke-CostCopilotWalk {
+            param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+            return @()
+        }
+        # Deterministic token accounting keyed on the REAL walk's own event count: 100
+        # input tokens per DISTINCT admitted event, so single-counting (100) reads
+        # differently from double-counting (200) in the final rendered/upserted body.
+        function global:Get-CostAttribution {
+            param([object[]]$Events, [string]$RateTablePath = '')
+            $inputTokens = @($Events).Count * 100
+            return @{
+                ports                 = @{}
+                orchestrator_overhead = @{ tokens = @{ input = $inputTokens; output = 0; cache_creation = 0; cache_read = 0 }; cost_estimate_usd = 0.0; cache_read_hit_ratio = 0.0 }
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{ total_cost_usd = 0.0; tokens = @{ input = $inputTokens; output = 0; cache_creation = 0; cache_read = 0 } }
+            }
+        }
+        function global:Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
+        function global:Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
+        function global:Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
+        # Get-CostWalkerCurrentSessionId is left REAL too — see the C8 test's comment
+        # above; its return value here is purely informational and unread by any assertion.
+        $script:E2EUpsertedBody = $null
+        function global:Find-OrUpsertComment {
+            param($Type, $Number, $Marker, $Body)
+            $script:E2EUpsertedBody = $Body
+            return $null
+        }
+
+        $previousInline = $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
+        $previousProjectsRoot = $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_PROJECTS_ROOT
+        $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = '1'
+        $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_PROJECTS_ROOT = $tmpProjects
+        try {
+            $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd $script:RepoRoot -RepoRoot $script:RepoRoot
+        }
+        finally {
+            $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = $previousInline
+            $env:FRAME_CREDIT_LEDGER_TEST_CLAUDE_PROJECTS_ROOT = $previousProjectsRoot
+            Remove-Item -Recurse -Force $tmpProjects -ErrorAction SilentlyContinue
+            Remove-Item -Recurse -Force $missingCwd -ErrorAction SilentlyContinue
+        }
+
+        $result.Attempted | Should -Be $true
+        $result.Upserted | Should -Be $true
+        $script:E2EUpsertedBody | Should -Not -BeNullOrEmpty
+        $script:E2EUpsertedBody | Should -Match 'input:\s*100'
+        $script:E2EUpsertedBody | Should -Not -Match 'input:\s*200'
     }
 }

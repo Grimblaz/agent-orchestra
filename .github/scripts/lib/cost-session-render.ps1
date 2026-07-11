@@ -192,6 +192,25 @@ function Invoke-CostSessionRender {
                 # Issue #825 s3: opt-in Tier-2 corroborated-fallback trust ladder,
                 # this caller only (M10 — never set by the live PR-create path).
                 $walkParameters['AdmitCorroboratedFallback'] = $true
+
+                # C2 (issue #825 post-review fix): a SECOND, branch-prefix-ONLY
+                # resolution (PrBody forced empty) feeds specifically the Tier-2
+                # corroboration gate. $resolvedIssueNumber (body-inclusive, below)
+                # stays reserved for phase-marker windowing, where trusting the PR
+                # body is legitimate — the Tier-2 trust ladder must not accept an
+                # author-controllable PR-body issue reference as its corroboration
+                # signal. Scoped to the AdmitCorroboratedFallback branch only —
+                # Tier2IssueNumber is meaningless (and unconsumed) on the live
+                # PR-create path, which never turns Tier 2 on. Set UNCONDITIONALLY
+                # (even when $null) — cost-walker.ps1's Tier2 gate distinguishes an
+                # explicitly-supplied $null (fail closed) from an omitted parameter
+                # (legacy fallback to -IssueNumber) via ContainsKey; omitting this key
+                # here whenever resolution comes back empty would silently re-admit
+                # the PR-body-derived -IssueNumber as the Tier-2 fallback, defeating
+                # this fix for the exact case it targets (branch doesn't match the
+                # issue-prefix pattern, so only the PR body names an issue).
+                $tier2ResolvedIssueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody '' -Branch ([string]$Branch)
+                $walkParameters['Tier2IssueNumber'] = if ($null -ne $tier2ResolvedIssueNumber) { [int]$tier2ResolvedIssueNumber } else { $null }
             }
             if ($null -ne $CorroborationWindowStart) {
                 # Issue #825 s3 (post-review fix, M8 wiring gap): bounds Tier-2

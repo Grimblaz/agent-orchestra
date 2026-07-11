@@ -875,10 +875,10 @@ function Invoke-CostAttributionRepair {
         }
 
         # 1. Live merge-state + REAL head ref — never the persisted `branch:` field (M2/M15).
-        # createdAt/mergedAt ride along on this same call (no extra API round-trip) for
-        # step 3's M8 corroboration-window bound.
+        # createdAt/mergedAt/commits ride along on this same call (no extra API
+        # round-trip) for step 3's M8 corroboration-window bound.
         $liveJson = $null
-        try { $liveJson = & gh pr view $Pr --json 'state,headRefName,body,createdAt,mergedAt' 2>$null } catch { $liveJson = $null }
+        try { $liveJson = & gh pr view $Pr --json 'state,headRefName,body,createdAt,mergedAt,commits' 2>$null } catch { $liveJson = $null }
         if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($liveJson)) {
             $result.Signal = "repair skipped for #$Pr — gh pr view failed"
             return $result
@@ -898,13 +898,39 @@ function Invoke-CostAttributionRepair {
         }
         $prBody = [string]$liveInfo.body
 
-        # M8 corroboration-window bound (issue #825 s3 post-review fix): the PR's own
-        # first-branch-appearance -> merge lifetime. An unparseable/absent timestamp
-        # degrades that one bound to $null (unenforced), matching the walker's own
-        # "a $null bound is not enforced" contract — never blocks the repair.
+        # M8 corroboration-window bound (issue #825 s3/s4 post-review fix, C4): the PR's
+        # own first-branch-appearance -> merge lifetime. "First branch appearance" is the
+        # earliest commit's authoredDate, NOT the PR's createdAt — createdAt only reflects
+        # when the PR object itself was opened on GitHub, which can trail the branch's real
+        # start by the bulk of a multi-day session (the #814 flagship case: session ran
+        # 2026-07-04T16:20Z, PR wasn't opened until 2026-07-06T05:12Z near the very end).
+        # Using createdAt as the window start would silently exclude nearly all real
+        # activity from corroboration. Falls back to createdAt only when the commits list
+        # is empty or unparseable. An unparseable/absent timestamp still degrades that one
+        # bound to $null (unenforced), matching the walker's own "a $null bound is not
+        # enforced" contract — never blocks the repair.
         [Nullable[datetime]]$corroborationWindowStart = $null
         [Nullable[datetime]]$corroborationWindowEnd = $null
-        try { if (-not [string]::IsNullOrWhiteSpace([string]$liveInfo.createdAt)) { $corroborationWindowStart = [datetime]$liveInfo.createdAt } } catch { $corroborationWindowStart = $null }
+        try {
+            $earliestCommitDate = $null
+            if ($null -ne $liveInfo.commits -and @($liveInfo.commits).Count -gt 0) {
+                $authoredDates = @(
+                    $liveInfo.commits | ForEach-Object {
+                        try { [datetime]$_.authoredDate } catch { $null }
+                    } | Where-Object { $null -ne $_ }
+                )
+                if ($authoredDates.Count -gt 0) {
+                    $earliestCommitDate = ($authoredDates | Sort-Object)[0]
+                }
+            }
+            if ($null -ne $earliestCommitDate) {
+                $corroborationWindowStart = $earliestCommitDate
+            }
+            elseif (-not [string]::IsNullOrWhiteSpace([string]$liveInfo.createdAt)) {
+                $corroborationWindowStart = [datetime]$liveInfo.createdAt
+            }
+        }
+        catch { $corroborationWindowStart = $null }
         try { if (-not [string]::IsNullOrWhiteSpace([string]$liveInfo.mergedAt)) { $corroborationWindowEnd = [datetime]$liveInfo.mergedAt } } catch { $corroborationWindowEnd = $null }
 
         # 2. Locate the composite comment's Cost Pattern section; only act on a
@@ -947,7 +973,13 @@ function Invoke-CostAttributionRepair {
         catch { $renderResult = $null }
 
         $reWalkCostSection = if ($null -ne $renderResult) { [string]$renderResult['CostSection'] } else { '' }
-        if ([string]::IsNullOrWhiteSpace($reWalkCostSection)) {
+        # C1 fix (issue #825 post-review): the honest-unknown renderer always returns a
+        # non-empty, populated-looking section even on a zero-event walk, so gating on
+        # IsNullOrWhiteSpace($reWalkCostSection) never fires on the real "no matching
+        # transcripts" path. Gate on actual walk activity instead — CostEventsCount is the
+        # ground truth the render result already carries.
+        $reWalkEventsCount = if ($null -ne $renderResult) { [int]$renderResult['CostEventsCount'] } else { 0 }
+        if ($null -eq $renderResult -or $reWalkEventsCount -le 0) {
             $result.Signal = "repair found no activity for #$Pr — machine holds no matching transcripts; nothing written"
             return $result
         }
