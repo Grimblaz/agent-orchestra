@@ -165,13 +165,13 @@ foreach ($body in $rawBodies) {
             if ([string]::IsNullOrWhiteSpace($entry.disposition_rationale)) {
                 Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel missing required disposition_rationale"
             }
-            # v2: ac_cross_check required on >=medium dismiss/defer entries
-            if ($payload.schema_version -eq 2) {
+            # v2/v3: ac_cross_check required on >=medium dismiss/defer entries
+            if ($payload.schema_version -in @(2, 3)) {
                 $mediumOrAbove = @('medium', 'high', 'critical')
                 $dismissOrDefer = @('dismiss', 'defer')
                 if ($entry.disposition -in $dismissOrDefer -and $entry.severity -in $mediumOrAbove) {
                     if ($null -eq $entry.ac_cross_check) {
-                        Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel (v2) dismiss/defer entry at severity '$($entry.severity)' is missing required ac_cross_check"
+                        Add-RdvFinding "review-dispositions-${PullRequestNumber}: $entryLabel (v$($payload.schema_version)) dismiss/defer entry at severity '$($entry.severity)' is missing required ac_cross_check"
                     }
                 }
             }

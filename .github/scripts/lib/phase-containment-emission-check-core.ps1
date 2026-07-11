@@ -111,7 +111,7 @@ function script:Get-BlockScalarSpans {
         return , $spans.ToArray()
     }
 
-    $keyLinePattern = '(?m)^([ \t]*)\S[^\r\n]*:[ \t]*[|>][+-]?\d?[ \t]*$'
+    $keyLinePattern = '(?m)^([ \t]*)\S[^\r\n]*:[ \t]*[|>][+-]?\d?[ \t]*\r?$'
     $keyLineMatches = [regex]::Matches($Text, $keyLinePattern)
     foreach ($keyMatch in $keyLineMatches) {
         $keyIndent = $keyMatch.Groups[1].Value.Length

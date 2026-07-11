@@ -394,9 +394,9 @@ Write in this order (atomic marker first, engagement-record second):
    ~~~
 
    > **v3 per-entry requirements** (carried over unchanged from v2): For entries with `disposition: dismiss` or `disposition: defer` and `severity` ≥ medium, `ac_cross_check` is required. The `ac_cross_check` object records which arms ran (`file_arm`, `term_arm`), the result tier (`matched-high | matched-ambiguous | no-match`), the matched AC reference if any, the source, and the routing outcome. Legacy `schema_version: 1` entries are exempt from this check. `artifact_citation` covers non-AC inherited artifacts; `ac_cross_check.ac_ref` is the AC-specific channel.
-
+   >
    > **`stage` field values**: The `stage` field records which pipeline stage produced this entry: `code-review` for the post-judge disposition gate, `ce` for CE Gate defect deferral. Both stages use the same `ac_cross_check` pre-condition at severity ≥ medium.
-
+   >
    > **In-session schema audit (before posting)**: Before posting the `review-dispositions-{PR}` comment to the PR, run a warn-only schema check using `.github/scripts/lib/review-dispositions-validator-core.ps1 -PullRequestNumber {PR} -InMemoryMarkers @($rawMarkerText)`. Surface any `findings` as warnings. This catches v3 schema violations (e.g., missing `ac_cross_check` on dismiss/defer entries at severity ≥ medium) before the marker is committed to the PR timeline. The validator is warn-only and never blocks posting.
 
 2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired `AskUserQuestion` appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.

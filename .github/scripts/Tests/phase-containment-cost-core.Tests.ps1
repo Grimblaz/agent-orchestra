@@ -741,3 +741,171 @@ Describe 'Format-ReviewCostSection - new-section ordering per stage block' {
         $deferIdx | Should -BeLessThan $perSourceIdx -Because "actual lines:`n$($reportLines -join "`n")"
     }
 }
+
+Describe 'Get-ReviewCostRollup - EXT-F3 regression: stale timestamp must not survive a null-timestamp replacement (PR #843 external review)' {
+    # PR #843 external review (EXT-F3, low): in the review-dispositions
+    # per-key dedup loop, when a later body's CreatedAt is null/unparseable,
+    # $shouldReplace stays true (array-order fallback) and
+    # $perKeyLatestEntry[$key] IS replaced — but $perKeyLatestCreatedAt[$key]
+    # was only updated inside the "$null -ne $createdAtDt" branch, so a
+    # STALE timestamp from a PRIOR (already-overwritten) entry survived and
+    # could wrongly win or lose a later comparison. The fix removes the
+    # stale timestamp whenever the entry is replaced with a null timestamp.
+    It 'does not let a stale timestamp from an overwritten entry reject a later, genuinely-latest candidate' {
+        # Same stable_finding_key across three re-review rounds on PR 700:
+        #   Round 1 (idx0, ts=2026-01-03): disposition escalate. Establishes
+        #     perKeyLatestCreatedAt[key] = Jan 3 (the "stale" value).
+        #   Round 2 (idx1, no timestamp): disposition dismiss. Array-order
+        #     fallback replaces the entry with "dismiss" regardless of
+        #     timestamp comparison (both buggy and fixed code agree here) —
+        #     but the BUG leaves perKeyLatestCreatedAt[key] at the stale Jan 3
+        #     instead of clearing it.
+        #   Round 3 (idx2, ts=2026-01-02 -- earlier than the stale Jan 3, but
+        #     the true last-processed/array-order-latest round): disposition
+        #     incorporate.
+        #     - BUGGY: compares Jan 2 (round 3) against the STALE Jan 3 (left
+        #       over from round 1, even though round 2's entry is what's
+        #       actually stored) -> Jan 2 >= Jan 3 is false -> round 3 is
+        #       wrongly rejected -> final entry stays "dismiss" (round 2).
+        #     - FIXED: round 2's null timestamp cleared any stale value, so
+        #       round 3 has no existing timestamp to compare against and the
+        #       array-order fallback applies -> round 3's "incorporate" wins.
+        $round1Body = @'
+<!-- review-dispositions-700 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "gh-700111"
+    pass: 1
+    disposition: escalate
+    classification: routine
+    severity: low
+    stage: code-review
+    disposition_rationale: "Round 1 disposition."
+```
+'@
+        $round2Body = @'
+<!-- review-dispositions-700 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "gh-700111"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: low
+    stage: code-review
+    disposition_rationale: "Round 2 disposition (no timestamp on this comment)."
+```
+'@
+        $round3Body = @'
+<!-- review-dispositions-700 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "gh-700111"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    disposition_rationale: "Round 3 disposition."
+```
+'@
+        $tuple = @{
+            Number          = 700
+            Surface         = 'pr'
+            Bodies          = @($round1Body, $round2Body, $round3Body)
+            CreatedAtValues = @('2026-01-03T00:00:00Z', '', '2026-01-02T00:00:00Z')
+        }
+        $result = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(700)
+
+        # Fixed behavior: round 3 ("incorporate") wins -> dismiss numerator is 0.
+        $result.CodeReview.PostJudgeDismissRate.N | Should -Be 1
+        $result.CodeReview.PostJudgeDismissRate.Numerator | Should -Be 0
+    }
+}
+
+Describe 'Get-ReviewCostRollup / Select-LatestByCreatedAt - EXT-F4 regression: culture-sensitive DateTime.Parse (PR #843 external review)' {
+    # PR #843 external review (EXT-F4): both CreatedAt-parsing sites passed
+    # $null as the IFormatProvider to [datetime]::Parse, which resolves to
+    # CurrentCulture rather than an explicit invariant parse. GitHub's own
+    # ISO-8601 `Z`-suffixed timestamps happen to parse the same regardless
+    # of culture, but the code should not rely on that — these tests force
+    # a non-invariant thread culture (fr-FR, day/month-swapped format) and
+    # assert the parse still resolves the way an invariant (month/day)
+    # parse would, proving the fix pins InvariantCulture rather than
+    # inheriting whatever culture the host process happens to run under.
+    BeforeEach {
+        $script:OriginalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = [System.Globalization.CultureInfo]::GetCultureInfo('fr-FR')
+    }
+    AfterEach {
+        [System.Threading.Thread]::CurrentThread.CurrentCulture = $script:OriginalCulture
+    }
+
+    It 'Select-LatestByCreatedAt picks the invariant (month/day) latest candidate under a day/month CurrentCulture' {
+        # Under invariant (MM/dd) parsing: idx0 = March 1, 2026; idx1 = Jan 1, 2026 -> idx0 is later.
+        # Under fr-FR (dd/MM) parsing:     idx0 = Jan 3, 2026;   idx1 = March 1, 2026 -> idx1 would be later.
+        $createdAtValues = @('03/01/2026 00:00:00', '01/03/2026 00:00:00')
+        $winner = Select-LatestByCreatedAt -CreatedAtValues $createdAtValues -CandidateIndices @(0, 1)
+
+        $winner | Should -Be 0
+    }
+
+    It 'Get-ReviewCostRollup dedup resolves per-key latest-wins using invariant date parsing, not CurrentCulture' {
+        # Same stable_finding_key across two bodies; the round with the
+        # invariant-latest timestamp ("March 1, 2026") must win. Under the
+        # pre-fix CurrentCulture (fr-FR, dd/MM) parse the OTHER round's
+        # timestamp would be read as later, flipping the winner.
+        $bodyA = @'
+<!-- review-dispositions-701 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "gh-701111"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: low
+    stage: code-review
+    disposition_rationale: "Round A: invariant-latest (March 1, 2026)."
+```
+'@
+        $bodyB = @'
+<!-- review-dispositions-701 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "gh-701111"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    disposition_rationale: "Round B: invariant-earlier (Jan 1, 2026)."
+```
+'@
+        $tuple = @{
+            Number          = 701
+            Surface         = 'pr'
+            Bodies          = @($bodyA, $bodyB)
+            CreatedAtValues = @('03/01/2026 00:00:00', '01/03/2026 00:00:00')
+        }
+        $result = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(701)
+
+        # Round A ("dismiss") is invariant-latest and must win -> numerator 1.
+        $result.CodeReview.PostJudgeDismissRate.N | Should -Be 1
+        $result.CodeReview.PostJudgeDismissRate.Numerator | Should -Be 1
+    }
+}

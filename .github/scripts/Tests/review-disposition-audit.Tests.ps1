@@ -286,6 +286,29 @@ entries:
         $allMessages | Should -Match 'ac_cross_check'
     }
 
+    It 'v3 dismiss entry missing ac_cross_check at severity medium emits warning' {
+        $body = @'
+<!-- review-dispositions-42 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: medium
+    disposition_rationale: "Dismissed without running AC cross-check."
+```
+'@
+        $result = script:Run-Validator -PR 42 -Bodies @($body)
+
+        $result.status | Should -Be 'findings'
+        $allMessages = (@($result.findings) | ForEach-Object { $_.message }) -join "`n"
+        $allMessages | Should -Match 'ac_cross_check'
+    }
+
     It 'v1 entry without ac_cross_check passes validator (legacy exemption)' {
         # v1 marker should NOT warn about missing ac_cross_check even for dismiss entries
         $body = @'

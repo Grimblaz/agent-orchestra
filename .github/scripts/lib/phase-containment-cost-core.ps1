@@ -196,7 +196,7 @@ function script:Select-LatestByCreatedAt {
         $dt = $null
         if (-not [string]::IsNullOrWhiteSpace($raw)) {
             try {
-                $dt = [datetime]::Parse($raw, $null, [System.Globalization.DateTimeStyles]::RoundtripKind)
+                $dt = [datetime]::Parse($raw, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
             }
             catch {
                 $dt = $null
@@ -437,7 +437,7 @@ function Get-ReviewCostRollup {
                 $createdAtRaw = if ($i -lt $createdAtValues.Count) { [string]$createdAtValues[$i] } else { '' }
                 $createdAtDt = $null
                 if (-not [string]::IsNullOrWhiteSpace($createdAtRaw)) {
-                    try { $createdAtDt = [datetime]::Parse($createdAtRaw, $null, [System.Globalization.DateTimeStyles]::RoundtripKind) } catch { $createdAtDt = $null }
+                    try { $createdAtDt = [datetime]::Parse($createdAtRaw, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind) } catch { $createdAtDt = $null }
                 }
 
                 foreach ($entry in $tally.Entries) {
@@ -460,7 +460,16 @@ function Get-ReviewCostRollup {
                             ReviewerSource = [string]::IsNullOrWhiteSpace($entry.ReviewerSource) ? 'local' : $entry.ReviewerSource
                             CouldNotVerify = $false
                         }
-                        if ($null -ne $createdAtDt) { $perKeyLatestCreatedAt[$key] = $createdAtDt }
+                        if ($null -ne $createdAtDt) {
+                            $perKeyLatestCreatedAt[$key] = $createdAtDt
+                        }
+                        elseif ($perKeyLatestCreatedAt.ContainsKey($key)) {
+                            # No timestamp for this replacement: clear any
+                            # stale value from a prior (now-overwritten)
+                            # entry so it can never wrongly win or lose a
+                            # later comparison (EXT-F3, PR #843).
+                            $perKeyLatestCreatedAt.Remove($key) | Out-Null
+                        }
                     }
                 }
             }

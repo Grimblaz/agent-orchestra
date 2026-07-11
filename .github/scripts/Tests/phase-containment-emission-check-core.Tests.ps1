@@ -2409,3 +2409,28 @@ Describe 'Get-DispositionTally - AC8 regression: Get-SustainedFindingCount publi
         }
     }
 }
+
+Describe 'Get-BlockScalarSpans - EXT-F1 regression: CRLF-terminated key line is detected' {
+    # PR #843 external review (EXT-F1, low, defense-in-depth): the key-line
+    # pattern ended `[ \t]*$`, which in .NET multiline mode does not match
+    # before `\r\n` (only before a bare `\n`), so a CRLF-terminated
+    # `key: |`/`key: >` header was silently missed and its content lines
+    # were never excluded as block-scalar spans. Not currently exploitable
+    # in production (GitHub normalizes comment bodies to LF) but hardened
+    # here since this function's whole purpose is defending against
+    # untrusted input.
+
+    It 'detects a block-scalar span for a CRLF-terminated `key: |` header' {
+        $text = "disposition_rationale: |`r`n  line one`r`n  line two`r`n"
+        $spans = Get-BlockScalarSpans -Text $text
+
+        $spans.Count | Should -Be 1
+    }
+
+    It 'detects a block-scalar span for a CRLF-terminated `key: >` header' {
+        $text = "disposition_rationale: >`r`n  line one`r`n  line two`r`n"
+        $spans = Get-BlockScalarSpans -Text $text
+
+        $spans.Count | Should -Be 1
+    }
+}
