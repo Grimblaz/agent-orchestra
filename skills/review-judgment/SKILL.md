@@ -232,7 +232,7 @@ The `stable_finding_key` is what the resume-read mechanism uses to detect prior 
 
 ### Routine Findings — Silent Recording
 
-For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 2` (current emission format); write `severity` and `stage` for all entries, and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ medium:
+For routine findings, the agent records the disposition silently in the `review-dispositions-{PR}` accumulator without firing an `AskUserQuestion`. Use `schema_version: 3` (current emission format); write `severity`, `stage`, and `reviewer_source` (the reviewer identity or class that produced the finding — use `local` for pipeline-native prosecution/defense/judge findings; external-tool identities are populated once issue #834 ships) for all entries, and include `ac_cross_check` for any `dismiss` or `defer` entry with severity ≥ medium:
 
 > **Pre-condition**: for any `dismiss` entry with severity ≥ medium, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
 
@@ -242,8 +242,9 @@ For routine findings, the agent records the disposition silently in the `review-
   pass: 1
   disposition: incorporate   # or dismiss — agent's judgment based on judge ruling
   classification: routine
-  severity: medium           # v2: required field
-  stage: code-review         # v2: required field
+  severity: medium           # v3: required field
+  stage: code-review         # v3: required field
+  reviewer_source: local     # v3: required field — local for pipeline-native findings; external identity populated once #834 ships
   disposition_rationale: "Trivial null-guard already required by the existing type contract; no maintainer choice required."
   artifact_citation: "src/types/index.ts:18 (NonNullable<T> constraint)"
 ```
@@ -269,7 +270,7 @@ Capture the engineer's choice verbatim.
 
 > **Pre-condition**: if the engineer chooses `dismiss` with severity ≥ medium, run the AC cross-check (see § AC Cross-Check — Blocking Pre-Condition) before writing this entry.
 
-Record as (v2 format — include `severity`, `stage`, and `ac_cross_check` for dismiss/defer entries with severity ≥ medium):
+Record as (v3 format — include `severity`, `stage`, `reviewer_source`, and `ac_cross_check` for dismiss/defer entries with severity ≥ medium):
 
 ```yaml
 - stable_finding_key: "src/auth/session.ts:88:token-expiry-not-checked-b7c1a2f3"
@@ -277,8 +278,9 @@ Record as (v2 format — include `severity`, `stage`, and `ac_cross_check` for d
   pass: 2
   disposition: incorporate   # or dismiss or escalate per engineer choice
   classification: load-bearing
-  severity: high             # v2: required field
-  stage: code-review         # v2: required field
+  severity: high             # v3: required field
+  stage: code-review         # v3: required field
+  reviewer_source: local     # v3: required field — local for pipeline-native findings; external identity populated once #834 ships
   disposition_rationale: "Engineer chose incorporate: the expiry check was confirmed missing and the fix is bounded to one function."
 ```
 
@@ -364,13 +366,13 @@ This enables re-review of a PR without re-asking for findings already dispositio
 
 Write in this order (atomic marker first, engagement-record second):
 
-1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 2`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). v2 adds per-entry `severity`, `ac_cross_check`, and `stage` fields. This is the atomic per-finding record.
+1. **`<!-- review-dispositions-{PR} -->`** — Post as a PR comment. Payload: `schema_version: 3`, `passes_run: [...]`, `entries: [...]` (all findings, routine and load-bearing, one entry per finding). v2 added per-entry `severity`, `ac_cross_check`, and `stage` fields; v3 adds per-entry `reviewer_source` (the reviewer identity or class — `local` for pipeline-native findings; external identities arrive with issue #834). This is the atomic per-finding record.
 
    ~~~
    <!-- review-dispositions-{PR} -->
 
    ```yaml
-   schema_version: 2
+   schema_version: 3
    passes_run: [1, 2, 3, 4, 5]
    entries:
      - stable_finding_key: "..."
@@ -379,6 +381,7 @@ Write in this order (atomic marker first, engagement-record second):
        classification: routine
        severity: medium
        stage: code-review
+       reviewer_source: local
        disposition_rationale: "..."
        ac_cross_check:
          file_arm: false
@@ -390,11 +393,11 @@ Write in this order (atomic marker first, engagement-record second):
    ```
    ~~~
 
-   > **v2 per-entry requirements**: For entries with `disposition: dismiss` or `disposition: defer` and `severity` ≥ medium, `ac_cross_check` is required. The `ac_cross_check` object records which arms ran (`file_arm`, `term_arm`), the result tier (`matched-high | matched-ambiguous | no-match`), the matched AC reference if any, the source, and the routing outcome. Legacy `schema_version: 1` entries are exempt from this check. `artifact_citation` covers non-AC inherited artifacts; `ac_cross_check.ac_ref` is the AC-specific channel.
+   > **v3 per-entry requirements** (carried over unchanged from v2): For entries with `disposition: dismiss` or `disposition: defer` and `severity` ≥ medium, `ac_cross_check` is required. The `ac_cross_check` object records which arms ran (`file_arm`, `term_arm`), the result tier (`matched-high | matched-ambiguous | no-match`), the matched AC reference if any, the source, and the routing outcome. Legacy `schema_version: 1` entries are exempt from this check. `artifact_citation` covers non-AC inherited artifacts; `ac_cross_check.ac_ref` is the AC-specific channel.
 
    > **`stage` field values**: The `stage` field records which pipeline stage produced this entry: `code-review` for the post-judge disposition gate, `ce` for CE Gate defect deferral. Both stages use the same `ac_cross_check` pre-condition at severity ≥ medium.
 
-   > **In-session schema audit (before posting)**: Before posting the `review-dispositions-{PR}` comment to the PR, run a warn-only schema check using `.github/scripts/lib/review-dispositions-validator-core.ps1 -PullRequestNumber {PR} -InMemoryMarkers @($rawMarkerText)`. Surface any `findings` as warnings. This catches v2 schema violations (e.g., missing `ac_cross_check` on dismiss/defer entries at severity ≥ medium) before the marker is committed to the PR timeline. The validator is warn-only and never blocks posting.
+   > **In-session schema audit (before posting)**: Before posting the `review-dispositions-{PR}` comment to the PR, run a warn-only schema check using `.github/scripts/lib/review-dispositions-validator-core.ps1 -PullRequestNumber {PR} -InMemoryMarkers @($rawMarkerText)`. Surface any `findings` as warnings. This catches v3 schema violations (e.g., missing `ac_cross_check` on dismiss/defer entries at severity ≥ medium) before the marker is committed to the PR timeline. The validator is warn-only and never blocks posting.
 
 2. **`<!-- engagement-record-review-{PR} -->`** — Post as a separate PR comment (not the same comment as review-dispositions). Payload follows `skills/engagement-record-emission/SKILL.md` shape at `schema_version: 4`, `phase: review`. Load-bearing findings that fired `AskUserQuestion` appear in `load_bearing_decisions[]` with their `engineer_choice` and `audit_rationale`. Routine findings do not appear in the engagement-record.
 
