@@ -108,11 +108,34 @@ function script:Test-CostWalkerAssistantMatchesStrictFilter {
 }
 
 function script:Add-CostWalkerAssistantEventAndSubagents {
+    <#
+    .SYNOPSIS
+        Adds an admitted assistant event (and its subagent transcript events) to
+        the walk's result list, applying the composite dedup key.
+    .DESCRIPTION
+        M7 (issue #825 s1): events are attributed once across ALL admitted slug
+        dirs using a composite `session_id` + event `uuid` key (never `session_id`
+        alone, which would under-count a legitimately split spanning session that
+        reuses the same file BaseName but has distinct event uuids). SessionId is
+        the originating JSONL file's own BaseName (the session id convention
+        documented on Get-CostWalkerCurrentSessionId). An event with no uuid is
+        never deduped (always added) — this preserves pre-#825 behavior for
+        synthetic/test events that omit it.
+    #>
     param(
         [Parameter(Mandatory)]$Included,
         [Parameter(Mandatory)]$TranscriptEvent,
-        [Parameter(Mandatory)][string]$SlugDir
+        [Parameter(Mandatory)][string]$SlugDir,
+        [Parameter(Mandatory)][string]$SessionId,
+        [Parameter(Mandatory)]$SeenKeys
     )
+
+    $eventUuid = [string]$TranscriptEvent['uuid']
+    if (-not [string]::IsNullOrEmpty($eventUuid)) {
+        $dedupKey = "$SessionId|$eventUuid"
+        if ($SeenKeys.Contains($dedupKey)) { return }
+        [void]$SeenKeys.Add($dedupKey)
+    }
 
     $Included.Add($TranscriptEvent)
 
@@ -135,6 +158,12 @@ function script:Add-CostWalkerAssistantEventAndSubagents {
                         if ([string]::IsNullOrEmpty($subTrimmed)) { continue }
                         try {
                             $subagEvent = $subTrimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+                            $subUuid = [string]$subagEvent['uuid']
+                            if (-not [string]::IsNullOrEmpty($subUuid)) {
+                                $subKey = "$SessionId|$subUuid"
+                                if ($SeenKeys.Contains($subKey)) { continue }
+                                [void]$SeenKeys.Add($subKey)
+                            }
                             $Included.Add($subagEvent)
                         }
                         catch {
@@ -267,6 +296,61 @@ function script:Resolve-CostWalkerRepoIdentity {
     return $u
 }
 
+function script:Get-CostWalkerTargetIdentity {
+    <#
+    .SYNOPSIS
+        Resolves the target (ledger) repo's identity from its git remote (issue #825
+        s1 extraction — shared by Get-IdentityMatchedSlugDirs and the Tier-2
+        corroborated-fallback resolver so both agree on what "matches" means).
+    .OUTPUTS
+        [string] normalized 'host/path' identity, or $null when unresolvable.
+    #>
+    param([Parameter(Mandatory)][string]$RepoRoot)
+
+    try {
+        $rawUrl = @(& git -C $RepoRoot remote get-url origin 2>$null) | Select-Object -First 1
+        if ($global:LASTEXITCODE -eq 0) {
+            return script:Resolve-CostWalkerRepoIdentity -RawUrl ([string]$rawUrl)
+        }
+    } catch { }
+    return $null
+}
+
+function script:Get-CostWalkerFirstEventCwd {
+    <#
+    .SYNOPSIS
+        Finds the first non-empty, non-sentinel cwd recorded by any event in a slug
+        directory's JSONL files (issue #825 s1 extraction — shared by
+        Get-IdentityMatchedSlugDirs and the Tier-2 corroborated-fallback resolver).
+    .OUTPUTS
+        [string] the first usable cwd, or $null when no JSONL file in the directory
+        records one.
+    #>
+    param([Parameter(Mandatory)][string]$SlugDirPath)
+
+    $firstCwd = $null
+    $jsonls = @(Get-ChildItem -Path $SlugDirPath -Filter '*.jsonl' -File -ErrorAction SilentlyContinue | Select-Object -First 5)
+    foreach ($jf in $jsonls) {
+        if ($null -ne $firstCwd) { break }
+        $lines = @(Get-Content -Path $jf.FullName -Encoding utf8 -ErrorAction SilentlyContinue | Select-Object -First 20)
+        foreach ($ln in $lines) {
+            $trimmed = $ln.Trim()
+            if ([string]::IsNullOrEmpty($trimmed)) { continue }
+            try {
+                $ev = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+                if (-not [string]::IsNullOrEmpty([string]$ev['cwd'])) {
+                    $cwd = [string]$ev['cwd']
+                    if (-not $cwd.StartsWith($script:CostWalkerCopilotOtelCwdPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $firstCwd = $cwd
+                        break
+                    }
+                }
+            } catch { }
+        }
+    }
+    return $firstCwd
+}
+
 function script:Get-IdentityMatchedSlugDirs {
     param(
         [Parameter(Mandatory)][string]$ProjectsRoot,
@@ -274,13 +358,7 @@ function script:Get-IdentityMatchedSlugDirs {
     )
 
     # Resolve target repo identity once from the ledger's repo root.
-    $targetIdentity = $null
-    try {
-        $rawUrl = @(& git -C $RepoRoot remote get-url origin 2>$null) | Select-Object -First 1
-        if ($global:LASTEXITCODE -eq 0) {
-            $targetIdentity = script:Resolve-CostWalkerRepoIdentity -RawUrl ([string]$rawUrl)
-        }
-    } catch { }
+    $targetIdentity = script:Get-CostWalkerTargetIdentity -RepoRoot $RepoRoot
 
     if ($null -eq $targetIdentity) {
         # Can't resolve target identity — fail-closed: return empty list, no slug dirs admitted.
@@ -292,26 +370,7 @@ function script:Get-IdentityMatchedSlugDirs {
     $allDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue)
     foreach ($dir in $allDirs) {
         # Find the first event with a cwd field in any JSONL file in this slug dir.
-        $firstCwd = $null
-        $jsonls = @(Get-ChildItem -Path $dir.FullName -Filter '*.jsonl' -File -ErrorAction SilentlyContinue | Select-Object -First 5)
-        foreach ($jf in $jsonls) {
-            if ($null -ne $firstCwd) { break }
-            $lines = @(Get-Content -Path $jf.FullName -Encoding utf8 -ErrorAction SilentlyContinue | Select-Object -First 20)
-            foreach ($ln in $lines) {
-                $trimmed = $ln.Trim()
-                if ([string]::IsNullOrEmpty($trimmed)) { continue }
-                try {
-                    $ev = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop
-                    if (-not [string]::IsNullOrEmpty([string]$ev['cwd'])) {
-                        $cwd = [string]$ev['cwd']
-                        if (-not $cwd.StartsWith($script:CostWalkerCopilotOtelCwdPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
-                            $firstCwd = $cwd
-                            break
-                        }
-                    }
-                } catch { }
-            }
-        }
+        $firstCwd = script:Get-CostWalkerFirstEventCwd -SlugDirPath $dir.FullName
 
         if ($null -eq $firstCwd) { continue }  # fail-closed: no usable cwd found
 
@@ -335,6 +394,164 @@ function script:Get-IdentityMatchedSlugDirs {
     return $matched
 }
 
+function script:Test-CostWalkerDirHasBranchMatchFile {
+    <#
+    .SYNOPSIS
+        Lists JSONL files within a slug directory that contain at least one
+        'assistant' event whose gitBranch equals the target branch (issue #825 s1,
+        Tier-2 corroborated-fallback trust ladder — signal (i)).
+    .OUTPUTS
+        [System.Collections.Generic.List[string]] full paths of matching files.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$SlugDirPath,
+        [Parameter(Mandatory)][string]$Branch
+    )
+
+    $matchedFiles = [System.Collections.Generic.List[string]]::new()
+    $jsonlFiles = @(Get-ChildItem -Path $SlugDirPath -Filter '*.jsonl' -File -ErrorAction SilentlyContinue)
+    foreach ($file in $jsonlFiles) {
+        $lines = @(Get-Content -Path $file.FullName -Encoding utf8 -ErrorAction SilentlyContinue)
+        foreach ($line in $lines) {
+            $trimmed = $line.Trim()
+            if ([string]::IsNullOrEmpty($trimmed)) { continue }
+            $ev = $null
+            try { $ev = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop } catch { continue }
+            if ($ev['type'] -eq 'assistant' -and $null -ne $ev['gitBranch'] -and [string]$ev['gitBranch'] -eq $Branch) {
+                $matchedFiles.Add($file.FullName)
+                break
+            }
+        }
+    }
+    return $matchedFiles
+}
+
+function script:Test-CostWalkerFileHasIssueMarker {
+    <#
+    .SYNOPSIS
+        Reports whether a JSONL file contains a phase marker (<command-args>) naming
+        the given issue number (issue #825 s1, Tier-2 corroborated-fallback trust
+        ladder — signal (ii)).
+    #>
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][int]$IssueNumber
+    )
+
+    $lines = @(Get-Content -Path $FilePath -Encoding utf8 -ErrorAction SilentlyContinue)
+    foreach ($line in $lines) {
+        $trimmed = $line.Trim()
+        if ([string]::IsNullOrEmpty($trimmed)) { continue }
+        $ev = $null
+        try { $ev = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop } catch { continue }
+        if ($ev['type'] -ne 'user') { continue }
+        $marker = script:Get-CostWalkerPhaseMarker -TranscriptEvent $ev
+        if ($null -ne $marker -and $marker.IssueId -eq $IssueNumber) { return $true }
+    }
+    return $false
+}
+
+function script:Get-CostWalkerCorroboratedFallbackAdmission {
+    <#
+    .SYNOPSIS
+        Resolves the Tier-2 corroborated-fallback admission set (issue #825 s1,
+        plan-issue-825 Step 1). Opt-in behind -AdmitCorroboratedFallback on
+        Invoke-CostTranscriptWalk; Tier 1 (script:Get-IdentityMatchedSlugDirs) is
+        never touched or reconsidered by this function.
+    .DESCRIPTION
+        Strict cwd-absent trigger (M9): a candidate slug directory is only eligible
+        for Tier-2 admission when its recorded first-event cwd does NOT exist on
+        disk. A directory whose cwd exists but resolves to a mismatched or
+        unresolvable identity was already excluded (terminally, or fail-closed) by
+        Tier 1 and is never reconsidered here — that is the "positively-mismatched
+        identity -> terminal reject, probe-miss -> fail-closed" split from the plan.
+
+        For each cwd-absent candidate directory, files with at least one
+        branch-matched assistant event (signal (i)) are corroboration candidates. A
+        candidate file is admitted only when it also satisfies signal (ii): its own
+        phase markers name the target issue, OR (M14 cross-file corroboration) a
+        sibling file with the SAME BaseName (the same session id) inside an
+        already-admitted Tier-1 directory names the target issue. Same-file/
+        same-session scoping (M11) means an unrelated co-located session's phase
+        marker in the same directory never corroborates a different session's
+        branch-matched file.
+
+        A directory contributes to the returned rejected-dir count (M6) only when
+        it had at least one branch-matched file and NONE of those files achieved
+        corroboration — a directory that admits at least one file is not counted as
+        rejected even if it also has non-corroborated siblings.
+    .OUTPUTS
+        [hashtable] @{ AdmittedFiles = [List[string]]; RejectedDirCount = [int] }
+    #>
+    param(
+        [Parameter(Mandatory)][string]$ProjectsRoot,
+        [AllowNull()][string]$TargetIdentity,
+        [Parameter(Mandatory)]$Tier1AdmittedDirs,
+        [Parameter(Mandatory)][string]$Branch,
+        [Nullable[int]]$IssueNumber
+    )
+
+    $admittedFiles = [System.Collections.Generic.List[string]]::new()
+    $rejectedDirCount = 0
+
+    if ([string]::IsNullOrEmpty($TargetIdentity) -or $null -eq $IssueNumber -or [int]$IssueNumber -le 0) {
+        # No resolvable target identity or no issue to corroborate against: Tier 2 admits
+        # nothing (fail-closed) rather than guessing.
+        return @{ AdmittedFiles = $admittedFiles; RejectedDirCount = $rejectedDirCount }
+    }
+
+    $resolvedIssueNumber = [int]$IssueNumber
+    $allDirs = @(Get-ChildItem -Path $ProjectsRoot -Directory -ErrorAction SilentlyContinue)
+
+    foreach ($dir in $allDirs) {
+        if ($Tier1AdmittedDirs.Contains($dir.FullName)) { continue }
+
+        $firstCwd = script:Get-CostWalkerFirstEventCwd -SlugDirPath $dir.FullName
+        if ($null -eq $firstCwd) { continue }  # no usable cwd recorded at all; skip silently
+
+        if (Test-Path -LiteralPath $firstCwd) {
+            # M9: cwd present — not the strict Tier-2 trigger. Tier 1 already made the
+            # terminal (mismatched identity) or fail-closed (unresolvable identity) call
+            # for this directory; Tier 2 never reconsiders it.
+            continue
+        }
+
+        $branchMatchedFiles = script:Test-CostWalkerDirHasBranchMatchFile -SlugDirPath $dir.FullName -Branch $Branch
+        if ($branchMatchedFiles.Count -eq 0) { continue }  # never branch-matched; not a rejection candidate
+
+        $dirAdmittedAny = $false
+        foreach ($filePath in $branchMatchedFiles) {
+            $sessionId = [System.IO.Path]::GetFileNameWithoutExtension($filePath)
+
+            $corroborated = script:Test-CostWalkerFileHasIssueMarker -FilePath $filePath -IssueNumber $resolvedIssueNumber
+
+            if (-not $corroborated) {
+                # M14: cross-file corroboration via a sibling identity-matched (Tier-1)
+                # transcript of the SAME session (same file BaseName / session id).
+                foreach ($tier1Dir in $Tier1AdmittedDirs) {
+                    $siblingPath = Join-Path $tier1Dir "$sessionId.jsonl"
+                    if ((Test-Path -LiteralPath $siblingPath -PathType Leaf) -and
+                        (script:Test-CostWalkerFileHasIssueMarker -FilePath $siblingPath -IssueNumber $resolvedIssueNumber)) {
+                        $corroborated = $true
+                        break
+                    }
+                }
+            }
+
+            if ($corroborated) {
+                $admittedFiles.Add($filePath)
+                $dirAdmittedAny = $true
+            }
+        }
+
+        if (-not $dirAdmittedAny) {
+            $rejectedDirCount++
+        }
+    }
+
+    return @{ AdmittedFiles = $admittedFiles; RejectedDirCount = $rejectedDirCount }
+}
+
 function script:Get-CostWalkerCandidateSlugDirs {
     <#
     .SYNOPSIS
@@ -351,6 +568,15 @@ function script:Get-CostWalkerCandidateSlugDirs {
         RepoRoot, while letting a caller that HAS a distinct RepoRoot (e.g. a
         worktree checkout) get the same identity resolution
         Invoke-CostTranscriptWalk itself always used.
+
+        M23 (issue #825 s1 plan note): the worktree-slug glob branch below admits a
+        directory purely because its NAME matches "$Slug--claude-worktrees-*" — a
+        weaker, name-derived gate than the identity check above — and it stays
+        as-is because it is backward-compat scaffolding for worktree slugs whose
+        first-event cwd may not point at the main repo root; the opt-in Tier-2
+        corroborated-fallback ladder (script:Get-CostWalkerCorroboratedFallbackAdmission)
+        is the actual hardened path for admitting a slug dir whose identity can no
+        longer be verified.
     .OUTPUTS
         [System.Collections.Generic.List[string]]
     #>
@@ -418,6 +644,27 @@ function Invoke-CostTranscriptWalk {
     .PARAMETER IssueNumber
         Optional GitHub issue number. When supplied, enables upstream phase-marker windowing
         and admits only assistant events inside matching issue windows on main/empty branches.
+    .PARAMETER AdmitCorroboratedFallback
+        Issue #825 s1. Opt-in switch (default off — the live PR-create path keeps its
+        pre-#825 fail-closed behavior, M10). When set, enables the Tier-2
+        corroborated-fallback trust ladder: a slug dir whose recorded first-event cwd no
+        longer exists on disk (e.g. a deleted sibling worktree) is admitted anyway when
+        BOTH its gitBranch events match -Branch and its (or a same-session sibling's)
+        phase markers name -IssueNumber. See
+        script:Get-CostWalkerCorroboratedFallbackAdmission for the full ladder contract.
+    .PARAMETER CorroborationWindowStart
+    .PARAMETER CorroborationWindowEnd
+        Issue #825 s1, M8. Optional bounds on Tier-2-admitted events only (Tier 1 is
+        unbounded, unchanged): an admitted Tier-2 event whose timestamp falls outside
+        [CorroborationWindowStart, CorroborationWindowEnd] is excluded, defeating
+        same-repo reused-branch collisions outside the PR's actual
+        first-branch-appearance -> merge lifetime. A $null bound is not enforced.
+    .PARAMETER RejectedDirCountVar
+        Issue #825 s1, M6. Optional [ref] output — when supplied, its .Value is set to
+        the count of Tier-2 branch-matched candidate directories that were rejected for
+        failing corroboration. Always 0 when -AdmitCorroboratedFallback is not set. This
+        is an additive, backward-compatible extension of the return contract: the
+        function's own output stream (the events themselves) is unchanged.
     #>
     [CmdletBinding()]
     param(
@@ -426,7 +673,11 @@ function Invoke-CostTranscriptWalk {
         [Parameter(Mandatory)][string]$ParentCwd,
         [string]$ProjectsRoot = '',
         [Nullable[int]]$IssueNumber = $null,
-        [string]$RepoRoot = ''
+        [string]$RepoRoot = '',
+        [switch]$AdmitCorroboratedFallback,
+        [Nullable[datetime]]$CorroborationWindowStart = $null,
+        [Nullable[datetime]]$CorroborationWindowEnd = $null,
+        [ref]$RejectedDirCountVar
     )
 
     if (-not $ProjectsRoot) {
@@ -439,13 +690,31 @@ function Invoke-CostTranscriptWalk {
     $targetIssueNumber = if ($phaseMarkerMode) { [int]$IssueNumber } else { $null }
 
     $included = [System.Collections.Generic.List[object]]::new()
+    # M7: composite session_id+uuid dedup guard, shared across every admitted dir/tier.
+    $seenDedupKeys = [System.Collections.Generic.HashSet[string]]::new()
 
     # Collect all slug directories to search (D2 identity match + worktree glob + primary-slug
     # backward-compat fallback — shared with Get-CostWalkerCurrentSessionId via
     # script:Get-CostWalkerCandidateSlugDirs so the two callers can never diverge).
     $slugDirs = script:Get-CostWalkerCandidateSlugDirs -ProjectsRoot $ProjectsRoot -RepoRoot $RepoRoot -ParentCwd $ParentCwd -Slug $Slug
 
-    if ($slugDirs.Count -eq 0) {
+    # Issue #825 s1: resolve the opt-in Tier-2 corroborated-fallback admission set BEFORE the
+    # main Tier-1 walk loop below (which is otherwise completely unmodified — Tier 1 stays
+    # unchanged per the plan's non-goal). Tier-2-admitted files are walked in their own block
+    # after Tier 1, using the corroboration + merge-window predicate instead of Tier 1's.
+    $rejectedDirCount = 0
+    $tier2AdmittedFiles = [System.Collections.Generic.List[string]]::new()
+    if ($AdmitCorroboratedFallback) {
+        $resolvedRepoRootForIdentity = if (-not [string]::IsNullOrWhiteSpace($RepoRoot)) { $RepoRoot } else { $ParentCwd }
+        $tier2TargetIdentity = script:Get-CostWalkerTargetIdentity -RepoRoot $resolvedRepoRootForIdentity
+        $tier1AdmittedSet = [System.Collections.Generic.HashSet[string]]::new([string[]]@($slugDirs), [System.StringComparer]::OrdinalIgnoreCase)
+        $tier2Admission = script:Get-CostWalkerCorroboratedFallbackAdmission -ProjectsRoot $ProjectsRoot -TargetIdentity $tier2TargetIdentity -Tier1AdmittedDirs $tier1AdmittedSet -Branch $Branch -IssueNumber $IssueNumber
+        $tier2AdmittedFiles = $tier2Admission.AdmittedFiles
+        $rejectedDirCount = $tier2Admission.RejectedDirCount
+    }
+    if ($null -ne $RejectedDirCountVar) { $RejectedDirCountVar.Value = $rejectedDirCount }
+
+    if ($slugDirs.Count -eq 0 -and $tier2AdmittedFiles.Count -eq 0) {
         return $included
     }
 
@@ -455,6 +724,7 @@ function Invoke-CostTranscriptWalk {
 
         foreach ($file in $jsonlFiles) {
             $lines = @(Get-Content -Path $file.FullName -Encoding utf8 -ErrorAction SilentlyContinue)
+            $sessionId = $file.BaseName
             $currentWindowIssue = $null
             $currentWindowPortHint = $null
             foreach ($line in $lines) {
@@ -487,7 +757,7 @@ function Invoke-CostTranscriptWalk {
 
                     if ($eventType -eq 'assistant') {
                         if (script:Test-CostWalkerAssistantMatchesStrictFilter -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch) {
-                            script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir
+                            script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir -SessionId $sessionId -SeenKeys $seenDedupKeys
                             continue
                         }
 
@@ -496,7 +766,7 @@ function Invoke-CostTranscriptWalk {
                         if (-not (script:Test-CostWalkerPhaseMarkerBranchAllowed -Branch $parsedEvent['gitBranch'])) { continue }
 
                         $parsedEvent['_phase_marker_port'] = $currentWindowPortHint
-                        script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir
+                        script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir -SessionId $sessionId -SeenKeys $seenDedupKeys
                     }
                     elseif ($null -eq $eventType) {
                         Write-Warning "cost-walker: event with null type in $($file.FullName) — skipping"
@@ -515,7 +785,7 @@ function Invoke-CostTranscriptWalk {
                     if (-not (script:Test-CostWalkerAssistantMatchesStrictFilter -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch)) { continue }
 
                     # Event passes filter — include it and traverse Agent subagents.
-                    script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir
+                    script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $slugDir -SessionId $sessionId -SeenKeys $seenDedupKeys
                 }
                 elseif ($null -eq $eventType) {
                     Write-Warning "cost-walker: event with null type in $($file.FullName) — skipping"
@@ -528,6 +798,43 @@ function Invoke-CostTranscriptWalk {
                     Write-Warning "cost-walker: unknown event type '$eventType' in $($file.FullName) — skipping"
                 }
             }
+        }
+    }
+
+    # Issue #825 s1: walk the Tier-2 corroborated-fallback admitted files (opt-in, empty unless
+    # -AdmitCorroboratedFallback was set). Uses the same branch-only per-event predicate as Tier
+    # 1 (script:Test-CostWalkerAssistantMatchesStrictFilter) plus the M8 merge-window bound,
+    # which never applies to Tier 1.
+    foreach ($filePath in $tier2AdmittedFiles) {
+        $tier2SessionId = [System.IO.Path]::GetFileNameWithoutExtension($filePath)
+        $tier2SlugDir = Split-Path -Parent $filePath
+        $tier2Lines = @(Get-Content -Path $filePath -Encoding utf8 -ErrorAction SilentlyContinue)
+
+        foreach ($line in $tier2Lines) {
+            $trimmed = $line.Trim()
+            if ([string]::IsNullOrEmpty($trimmed)) { continue }
+
+            $parsedEvent = $null
+            try {
+                $parsedEvent = $trimmed | ConvertFrom-Json -AsHashtable -ErrorAction Stop
+            }
+            catch {
+                Write-Warning "cost-walker: failed to parse JSON line in ${filePath}: $_"
+                continue
+            }
+
+            if ($parsedEvent['type'] -ne 'assistant') { continue }
+            if (-not (script:Test-CostWalkerAssistantMatchesStrictFilter -TranscriptEvent $parsedEvent -NormalizedParentCwd $normalizedParentCwd -Branch $Branch)) { continue }
+
+            if ($null -ne $CorroborationWindowStart -or $null -ne $CorroborationWindowEnd) {
+                $eventTimestamp = $null
+                try { $eventTimestamp = [datetime]$parsedEvent['timestamp'] } catch { }
+                if ($null -eq $eventTimestamp) { continue }  # M8: unparseable timestamp inside a bounded walk is excluded, not assumed in-window
+                if ($null -ne $CorroborationWindowStart -and $eventTimestamp -lt $CorroborationWindowStart) { continue }
+                if ($null -ne $CorroborationWindowEnd -and $eventTimestamp -gt $CorroborationWindowEnd) { continue }
+            }
+
+            script:Add-CostWalkerAssistantEventAndSubagents -Included $included -TranscriptEvent $parsedEvent -SlugDir $tier2SlugDir -SessionId $tier2SessionId -SeenKeys $seenDedupKeys
         }
     }
 
