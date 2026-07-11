@@ -1430,6 +1430,92 @@ Describe 'Invoke-CostSessionRender AdmitCorroboratedFallback wiring, composed th
         $script:UpsertedBody | Should -Not -Match 'session_completeness: unknown'
     }
 
+    It 'derives the corroboration window start from the earliest commit authoredDate, not createdAt, when the PR has commits (M8 primary-branch coverage)' {
+        # Gap: every other test's gh mock returns a commits-less JSON payload,
+        # so only the createdAt fallback branch (Invoke-CostAttributionRepair
+        # ln ~929) was ever exercised. This test supplies out-of-order commit
+        # authoredDate values that predate createdAt by a multi-day span, and
+        # proves the resolved window start is the EARLIEST authoredDate, not
+        # createdAt — the primary branch (ln ~922-928) that was previously
+        # uncovered.
+        $pr = 822
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: unknown`npr: $pr`nbranch: HEAD`n-->"
+
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                # createdAt trails the branch's real first commit by several
+                # days (the #814 flagship gotcha this window bound exists
+                # for) and the commits array is deliberately out of order so
+                # a naive "first element" read would pick the wrong one.
+                return '{"state":"MERGED","headRefName":"feature/issue-822-commits","body":"Fixes #822","createdAt":"2026-06-04T00:00:00Z","mergedAt":"2026-06-08T00:00:00Z","commits":[{"authoredDate":"2026-05-30T08:00:00Z"},{"authoredDate":"2026-05-28T10:00:00Z"},{"authoredDate":"2026-05-31T14:00:00Z"}]}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+
+        $script:CapturedWalkParams = $null
+        function global:Invoke-CostTranscriptWalk {
+            param(
+                [string]$Slug, [string]$Branch, [string]$ParentCwd, [string]$ProjectsRoot = '',
+                [Nullable[int]]$IssueNumber = $null, [string]$RepoRoot = '',
+                [switch]$AdmitCorroboratedFallback,
+                [Nullable[datetime]]$CorroborationWindowStart = $null,
+                [Nullable[datetime]]$CorroborationWindowEnd = $null,
+                [ref]$RejectedDirCountVar,
+                [Nullable[int]]$Tier2IssueNumber = $null
+            )
+            $script:CapturedWalkParams = $PSBoundParameters
+            if ($null -ne $RejectedDirCountVar) { $RejectedDirCountVar.Value = 0 }
+            return @(@{ type = 'assistant'; gitBranch = $Branch; uuid = 'evt-1'; message = @{ content = @() } })
+        }
+        function global:Invoke-CostCopilotWalk {
+            param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+            return @()
+        }
+        function global:Get-CostAttribution {
+            param([object[]]$Events, [string]$RateTablePath = '')
+            return @{
+                ports                 = @{}
+                orchestrator_overhead = @{ tokens = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 }; cost_estimate_usd = 0.0; cache_read_hit_ratio = 0.0 }
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{ total_cost_usd = 0.0; tokens = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 } }
+            }
+        }
+        function global:Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
+        function global:Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
+        function global:Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
+        function global:Get-CostWalkerCurrentSessionId { param([string]$Slug, [string]$Branch, [string]$ParentCwd, [string]$RepoRoot = '') return '' }
+        $script:UpsertedBody = $null
+        function global:Find-OrUpsertComment {
+            param($Type, $Number, $Marker, $Body)
+            $script:UpsertedBody = $Body
+            return $null
+        }
+
+        $previousInline = $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
+        $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = '1'
+        try {
+            $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+        }
+        finally {
+            $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = $previousInline
+        }
+
+        $script:CapturedWalkParams | Should -Not -BeNullOrEmpty
+        # The earliest of the three out-of-order authoredDate values, NOT
+        # createdAt (2026-06-04) and NOT the first array element (05-30).
+        $script:CapturedWalkParams['CorroborationWindowStart'].ToUniversalTime() | Should -Be ([datetime]'2026-05-28T10:00:00Z').ToUniversalTime()
+        $script:CapturedWalkParams['CorroborationWindowEnd'].ToUniversalTime() | Should -Be ([datetime]'2026-06-08T00:00:00Z').ToUniversalTime()
+        $result.Attempted | Should -Be $true
+        $result.Upserted | Should -Be $true
+    }
+
     It 'excludes a fixture event timestamped outside the PR''s createdAt->mergedAt window, specifically through Invoke-CostAttributionRepair''s own call path (M8 post-review fix)' {
         # Distinct from cost-walker.Tests.ps1's own M8 unit test (which hand-supplies
         # a window directly to Invoke-CostTranscriptWalk): this proves
