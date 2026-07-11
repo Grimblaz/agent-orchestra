@@ -1067,3 +1067,468 @@ _end of comment_
         }
     }
 }
+
+# ---------------------------------------------------------------------------
+# Invoke-CostAttributionRepair (issue #825, Step 3) — targeted, maintainer-
+# invoked single-PR re-attribution repair. Deliberately a SEPARATE Describe
+# from Invoke-CostBaselineHarvest above: this function is not part of, and
+# never calls into, script:Select-CostBaselineHarvestCandidates' automatic
+# candidate loop or Invoke-CostBaselineHarvest's own promote/stamp machinery.
+#
+# The #814/#815 degraded fixture (M13): the real pre-#824 CI-written blocks
+# for those PRs carry ONLY session_completeness/pr/branch (branch reads the
+# literal string "HEAD", never a real ref) — no head_ref/session_id/
+# capture_point. $script:PreV4DegradedCostSection reproduces that exact
+# shape so the AC3 regression proves something real rather than a strawman.
+# ---------------------------------------------------------------------------
+Describe 'Invoke-CostAttributionRepair (issue #825 s3)' {
+
+    BeforeAll {
+        $script:PreV4DegradedCostSection = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: unknown`npr: 814`nbranch: HEAD`n-->"
+    }
+
+    It 'resolves the PR''s REAL head ref via gh pr view and passes it (never the persisted branch: HEAD field) to Invoke-CostSessionRender (M2/M15)' {
+        $pr = 814
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection $script:PreV4DegradedCostSection
+
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return '{"state":"MERGED","headRefName":"feature/issue-814-real-branch","body":"Fixes #814"}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+        $script:CapturedBranch = $null
+        function global:Invoke-CostSessionRender {
+            param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot, $PrBody, [switch]$AdmitCorroboratedFallback, $CorroborationWindowStart, $CorroborationWindowEnd)
+            $script:CapturedBranch = $Branch
+            return @{ CostSection = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`npr: $Pr`nbranch: $Branch`n-->" }
+        }
+        function global:Find-OrUpsertComment { return $null }
+
+        $null = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+        $script:CapturedBranch | Should -Be 'feature/issue-814-real-branch'
+        $script:CapturedBranch | Should -Not -Be 'HEAD'
+    }
+
+    It 'skips a PR that is not MERGED, without ever calling Invoke-CostSessionRender' {
+        $pr = 815
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 0
+            return '{"state":"OPEN","headRefName":"feature/still-open","body":""}'
+        }
+        $script:RenderCallCount = 0
+        function global:Invoke-CostSessionRender { $script:RenderCallCount++; return @{ CostSection = '' } }
+
+        $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+        $result.Attempted | Should -Be $false
+        $result.Upserted | Should -Be $false
+        $script:RenderCallCount | Should -Be 0
+    }
+
+    It 'skips when the gh pr view call itself fails' {
+        $pr = 816
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $global:LASTEXITCODE = 1
+            return ''
+        }
+
+        { Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo' } | Should -Not -Throw
+        $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+        $result.Attempted | Should -Be $false
+    }
+
+    It 'skips when no composite comment is found for the PR' {
+        $pr = 817
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return '{"state":"MERGED","headRefName":"feature/no-comment","body":""}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @() } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+        $script:RenderCallCount = 0
+        function global:Invoke-CostSessionRender { $script:RenderCallCount++; return @{ CostSection = '' } }
+
+        $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+        $result.Attempted | Should -Be $false
+        $script:RenderCallCount | Should -Be 0
+    }
+
+    It 'leaves an already-populated (non-unknown) persisted block untouched' {
+        $pr = 818
+        $populatedSection = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`npr: $pr`nbranch: feature/already-good`n-->"
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection $populatedSection
+
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return '{"state":"MERGED","headRefName":"feature/already-good","body":""}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+        $script:RenderCallCount = 0
+        function global:Invoke-CostSessionRender { $script:RenderCallCount++; return @{ CostSection = '' } }
+
+        $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+        $result.Attempted | Should -Be $false
+        $result.Signal | Should -Match 'not session_completeness: unknown'
+        $script:RenderCallCount | Should -Be 0
+    }
+
+    It 'reproduces the pre-#824 #814/#815 degraded fixture shape and upserts a populated re-walk (populated-beats-empty-unknown, M13)' {
+        $pr = 814
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -PortReportsMarker '### Port Reports (must survive repair)' -CostSection $script:PreV4DegradedCostSection
+
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return '{"state":"MERGED","headRefName":"feature/issue-814-real-branch","body":"Fixes #814"}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+        $script:CapturedAdmit = $false
+        function global:Invoke-CostSessionRender {
+            param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot, $PrBody, [switch]$AdmitCorroboratedFallback, $CorroborationWindowStart, $CorroborationWindowEnd)
+            $script:CapturedAdmit = [bool]$AdmitCorroboratedFallback
+            return @{
+                CostSection = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`npr: $Pr`nbranch: $Branch`n-->"
+            }
+        }
+        $script:UpsertedBody = $null
+        function global:Find-OrUpsertComment {
+            param($Type, $Number, $Marker, $Body)
+            $script:UpsertedBody = $Body
+            return $null
+        }
+
+        $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+        $result.Attempted | Should -Be $true
+        $result.Upserted | Should -Be $true
+        $result.Signal | Should -Be "repaired #$pr — attribution re-walked and upserted"
+        $script:CapturedAdmit | Should -Be $true
+        $script:UpsertedBody | Should -Not -BeNullOrEmpty
+        $script:UpsertedBody | Should -Match '### Port Reports \(must survive repair\)'
+        $script:UpsertedBody | Should -Match 'session_completeness: complete'
+        $script:UpsertedBody | Should -Not -Match 'session_completeness: unknown'
+        (@([regex]::Matches($script:UpsertedBody, '<!--\s*cost-pattern-data')).Count) | Should -Be 1
+    }
+
+    It 'reports honestly and writes nothing when the re-walk finds no matching transcripts on this machine' {
+        $pr = 815
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -PortReportsMarker '### Port Reports (must survive no-op)' -CostSection $script:PreV4DegradedCostSection
+
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return '{"state":"MERGED","headRefName":"feature/issue-815-real-branch","body":"Fixes #815"}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+        function global:Invoke-CostSessionRender {
+            param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot, $PrBody, [switch]$AdmitCorroboratedFallback, $CorroborationWindowStart, $CorroborationWindowEnd)
+            return @{ CostSection = '' }
+        }
+        $script:UpsertCalled = $false
+        function global:Find-OrUpsertComment { $script:UpsertCalled = $true; return $null }
+
+        $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+        $result.Attempted | Should -Be $true
+        $result.Upserted | Should -Be $false
+        $result.Signal | Should -Match 'no matching transcripts'
+        $script:UpsertCalled | Should -Be $false
+    }
+
+    It 'skips the write and signals a concurrent-change race when the section changed since the earlier read' {
+        $pr = 819
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection $script:PreV4DegradedCostSection
+        $changedBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`npr: $pr`nbranch: someone-else-raced-us`n-->"
+
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        $script:FetchCallCount = 0
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return '{"state":"MERGED","headRefName":"feature/race","body":""}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                $script:FetchCallCount++
+                $body = if ($script:FetchCallCount -eq 1) { $originalBody } else { $changedBody }
+                return (@{ comments = @(@{ body = $body; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+        function global:Invoke-CostSessionRender {
+            param($Pr, $Branch, $Slug, $ParentCwd, $RepoRoot, $PrBody, [switch]$AdmitCorroboratedFallback, $CorroborationWindowStart, $CorroborationWindowEnd)
+            return @{ CostSection = "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: complete`npr: $Pr`nbranch: $Branch`n-->" }
+        }
+        $script:UpsertCalled = $false
+        function global:Find-OrUpsertComment { $script:UpsertCalled = $true; return $null }
+
+        $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+
+        $result.Upserted | Should -Be $false
+        $result.Signal | Should -Match 'concurrent change'
+        $script:UpsertCalled | Should -Be $false
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Composition/wiring regression (issue #825 s3): proves -AdmitCorroboratedFallback
+# actually reaches Invoke-CostTranscriptWalk when Invoke-CostAttributionRepair
+# calls the REAL (dot-sourced, not mocked) Invoke-CostSessionRender. This is the
+# specific regression this slice's grounding surfaced: cost-session-render.ps1
+# (as landed by s2) accepted no -AdmitCorroboratedFallback parameter at all and
+# never threaded one into its own walkParameters hashtable, so s3's own plan
+# text ("call Invoke-CostSessionRender with -AdmitCorroboratedFallback on") was
+# not actually possible before this slice's own edit to that file. Only
+# Invoke-CostTranscriptWalk is mocked (to capture what it actually receives,
+# without touching the real filesystem); Resolve-BaselineEligibility and the
+# Format-CostPattern* renderers run for REAL (dot-sourced from
+# cost-completeness.ps1 / cost-pattern-renderer.ps1), matching the established
+# "does NOT stub" convention already used by cost-integration.Tests.ps1's own
+# issue #824 s3 caller-wiring invoker.
+# ---------------------------------------------------------------------------
+Describe 'Invoke-CostSessionRender AdmitCorroboratedFallback wiring, composed through Invoke-CostAttributionRepair (issue #825 s3)' {
+
+    BeforeAll {
+        $script:SessionRenderLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-session-render.ps1'
+        $script:CompletenessLibPath = Join-Path $script:RepoRoot '.github/scripts/lib/cost-completeness.ps1'
+        if (Test-Path $script:CompletenessLibPath) { . $script:CompletenessLibPath }
+        if (Test-Path $script:SessionRenderLibPath) { . $script:SessionRenderLibPath }
+    }
+
+    It 'threads -AdmitCorroboratedFallback through to the real Invoke-CostTranscriptWalk call' {
+        $pr = 820
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: unknown`npr: $pr`nbranch: HEAD`n-->"
+
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return '{"state":"MERGED","headRefName":"feature/issue-820-wiring","body":"Fixes #820","createdAt":"2026-06-01T00:00:00Z","mergedAt":"2026-06-05T00:00:00Z"}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+
+        $script:CapturedWalkParams = $null
+        function global:Invoke-CostTranscriptWalk {
+            param(
+                [string]$Slug, [string]$Branch, [string]$ParentCwd, [string]$ProjectsRoot = '',
+                [Nullable[int]]$IssueNumber = $null, [string]$RepoRoot = '',
+                [switch]$AdmitCorroboratedFallback,
+                [Nullable[datetime]]$CorroborationWindowStart = $null,
+                [Nullable[datetime]]$CorroborationWindowEnd = $null,
+                [ref]$RejectedDirCountVar
+            )
+            $script:CapturedWalkParams = $PSBoundParameters
+            if ($null -ne $RejectedDirCountVar) { $RejectedDirCountVar.Value = 0 }
+            return @(@{ type = 'assistant'; gitBranch = $Branch; uuid = 'evt-1'; message = @{ content = @() } })
+        }
+        function global:Invoke-CostCopilotWalk {
+            param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+            return @()
+        }
+        function global:Get-CostAttribution {
+            param([object[]]$Events, [string]$RateTablePath = '')
+            return @{
+                ports                 = @{}
+                orchestrator_overhead = @{ tokens = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 }; cost_estimate_usd = 0.0; cache_read_hit_ratio = 0.0 }
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{ total_cost_usd = 0.0; tokens = @{ input = 10; output = 5; cache_creation = 0; cache_read = 0 } }
+            }
+        }
+        function global:Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
+        function global:Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
+        function global:Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
+        function global:Get-CostWalkerCurrentSessionId { param([string]$Slug, [string]$Branch, [string]$ParentCwd, [string]$RepoRoot = '') return '' }
+        $script:UpsertedBody = $null
+        function global:Find-OrUpsertComment {
+            param($Type, $Number, $Marker, $Body)
+            $script:UpsertedBody = $Body
+            return $null
+        }
+
+        # Inline-execute the walker call (no isolated runspace) so the mocked
+        # Invoke-CostTranscriptWalk's $script:CapturedWalkParams assignment
+        # lands in THIS scope rather than a cloned runspace's own copy —
+        # matches the established FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
+        # convention used throughout cost-integration.Tests.ps1.
+        $previousInline = $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
+        $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = '1'
+        try {
+            $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+        }
+        finally {
+            $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = $previousInline
+        }
+
+        $script:CapturedWalkParams | Should -Not -BeNullOrEmpty
+        $script:CapturedWalkParams['AdmitCorroboratedFallback'] | Should -Be $true
+        $script:CapturedWalkParams['Branch'] | Should -Be 'feature/issue-820-wiring'
+        # M8 wiring gap fix: the PR's own createdAt/mergedAt (fetched on the same
+        # gh pr view call as headRefName, no extra API round-trip) must reach the
+        # walker call as the corroboration window — not stay $null/unbounded.
+        # .ToUniversalTime() normalizes Kind (ConvertFrom-Json's date coercion
+        # preserves Utc Kind; a bare string-literal [datetime] cast in this test
+        # converts to Local Kind) so the comparison is instant-equality, not a
+        # Kind/offset-display mismatch.
+        $script:CapturedWalkParams['CorroborationWindowStart'].ToUniversalTime() | Should -Be ([datetime]'2026-06-01T00:00:00Z').ToUniversalTime()
+        $script:CapturedWalkParams['CorroborationWindowEnd'].ToUniversalTime() | Should -Be ([datetime]'2026-06-05T00:00:00Z').ToUniversalTime()
+        $result.Attempted | Should -Be $true
+        $result.Upserted | Should -Be $true
+        $script:UpsertedBody | Should -Match 'session_completeness'
+        $script:UpsertedBody | Should -Not -Match 'session_completeness: unknown'
+    }
+
+    It 'excludes a fixture event timestamped outside the PR''s createdAt->mergedAt window, specifically through Invoke-CostAttributionRepair''s own call path (M8 post-review fix)' {
+        # Distinct from cost-walker.Tests.ps1's own M8 unit test (which hand-supplies
+        # a window directly to Invoke-CostTranscriptWalk): this proves
+        # Invoke-CostAttributionRepair itself DERIVES the window from the target
+        # PR's real createdAt/mergedAt and that a real walker honoring that window
+        # would exclude an out-of-window event reached through this exact call
+        # path — not merely that the switch/window values are captured in transit.
+        $pr = 821
+        $originalBody = New-HarvestCompositeCommentBody -Pr $pr -CostSection "## Cost Pattern`n<!-- cost-pattern-data`nsession_completeness: unknown`npr: $pr`nbranch: HEAD`n-->"
+
+        function global:Get-CostTranscriptSlug { param($CwdPath) return 'test-slug' }
+        function global:gh {
+            param([Parameter(ValueFromRemainingArguments = $true)]$Args)
+            $joined = $Args -join ' '
+            $global:LASTEXITCODE = 0
+            if ($joined -match "pr view $pr --json state,headRefName,body") {
+                return '{"state":"MERGED","headRefName":"feature/issue-821-window","body":"Fixes #821","createdAt":"2026-06-01T00:00:00Z","mergedAt":"2026-06-05T00:00:00Z"}'
+            }
+            if ($joined -match "pr view $pr --json comments") {
+                return (@{ comments = @(@{ body = $originalBody; authorAssociation = 'OWNER' }) } | ConvertTo-Json -Depth 6 -Compress)
+            }
+            return ''
+        }
+
+        function global:Invoke-CostTranscriptWalk {
+            param(
+                [string]$Slug, [string]$Branch, [string]$ParentCwd, [string]$ProjectsRoot = '',
+                [Nullable[int]]$IssueNumber = $null, [string]$RepoRoot = '',
+                [switch]$AdmitCorroboratedFallback,
+                [Nullable[datetime]]$CorroborationWindowStart = $null,
+                [Nullable[datetime]]$CorroborationWindowEnd = $null,
+                [ref]$RejectedDirCountVar
+            )
+            if ($null -ne $RejectedDirCountVar) { $RejectedDirCountVar.Value = 0 }
+
+            # Two Tier-2 candidate events from a same-repo reused-branch-name
+            # collision scenario (M8's own threat model): one inside the PR's
+            # real lifetime, one from 3 days BEFORE it was even created (the
+            # kind of stale, same-branch-name event M8 exists to exclude).
+            # This mock applies the IDENTICAL window predicate cost-walker.ps1's
+            # own Tier-2 loop applies (see Invoke-CostTranscriptWalk's
+            # CorroborationWindowStart/End handling) so a non-null window
+            # reaching this call actually changes what gets admitted — proving
+            # the wiring, not just capturing it in transit.
+            $inWindowEvent = @{ type = 'assistant'; gitBranch = $Branch; uuid = 'evt-in-window'; timestamp = '2026-06-02T00:00:00Z'; message = @{ content = @() } }
+            $outOfWindowEvent = @{ type = 'assistant'; gitBranch = $Branch; uuid = 'evt-out-of-window'; timestamp = '2026-05-29T00:00:00Z'; message = @{ content = @() } }
+
+            $admitted = [System.Collections.Generic.List[object]]::new()
+            foreach ($ev in @($inWindowEvent, $outOfWindowEvent)) {
+                $ts = [datetime]$ev['timestamp']
+                if ($null -ne $CorroborationWindowStart -and $ts -lt $CorroborationWindowStart) { continue }
+                if ($null -ne $CorroborationWindowEnd -and $ts -gt $CorroborationWindowEnd) { continue }
+                $admitted.Add($ev)
+            }
+            return $admitted
+        }
+        function global:Invoke-CostCopilotWalk {
+            param([string]$Branch, [string]$RepoRoot, [string]$OtelJsonlPath, [string]$WorkspaceFolderBasename = '')
+            return @()
+        }
+        # Encodes admitted-event count into input tokens (100 per event) so the
+        # final rendered/upserted body distinguishes "both events admitted"
+        # (200) from "only the in-window event admitted" (100) without needing
+        # the real cost-attribution.ps1 pipeline dot-sourced.
+        function global:Get-CostAttribution {
+            param([object[]]$Events, [string]$RateTablePath = '')
+            $inputTokens = @($Events).Count * 100
+            return @{
+                ports                 = @{}
+                orchestrator_overhead = @{ tokens = @{ input = $inputTokens; output = 0; cache_creation = 0; cache_read = 0 }; cost_estimate_usd = 0.0; cache_read_hit_ratio = 0.0 }
+                dispatches            = @{ general_purpose_count = 0; unattributed_count = 0 }
+                totals                = @{ total_cost_usd = 0.0; tokens = @{ input = $inputTokens; output = 0; cache_creation = 0; cache_read = 0 } }
+            }
+        }
+        function global:Get-CostRollingHistory { param([int]$TimeoutSeconds = 10) return @{ timed_out = $false; entries = @() } }
+        function global:Get-MostRecentRegimeCheckpoint { param([string]$Path) return $null }
+        function global:Get-CostAnomalyFlags { param($ThisRun, [object[]]$RollingHistory, $RegimeCheckpoint) return @() }
+        function global:Get-CostWalkerCurrentSessionId { param([string]$Slug, [string]$Branch, [string]$ParentCwd, [string]$RepoRoot = '') return '' }
+        $script:UpsertedBody = $null
+        function global:Find-OrUpsertComment {
+            param($Type, $Number, $Marker, $Body)
+            $script:UpsertedBody = $Body
+            return $null
+        }
+
+        $previousInline = $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE
+        $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = '1'
+        try {
+            $result = Invoke-CostAttributionRepair -Pr $pr -ParentCwd 'C:\fake\cwd' -RepoRoot 'C:\fake\repo'
+        }
+        finally {
+            $env:FRAME_CREDIT_LEDGER_TEST_WALKER_INLINE = $previousInline
+        }
+
+        $result.Attempted | Should -Be $true
+        $result.Upserted | Should -Be $true
+        $script:UpsertedBody | Should -Not -BeNullOrEmpty
+        # Only the in-window event (100 input tokens) reached attribution — the
+        # pre-createdAt event (which would make it 200) was excluded, proving
+        # the M8 window bound actually took effect through this call path.
+        $script:UpsertedBody | Should -Match 'input:\s*100'
+        $script:UpsertedBody | Should -Not -Match 'input:\s*200'
+    }
+}

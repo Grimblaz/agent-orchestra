@@ -91,6 +91,26 @@ function Invoke-CostSessionRender {
     .PARAMETER IsOrchestrated
         Whether this PR is orchestrated-origin (gates both degraded-comment
         decisions, matching the pre-extraction inline behavior).
+    .PARAMETER AdmitCorroboratedFallback
+        Issue #825 s3. Opt-in switch, off by default — threaded straight through
+        to Invoke-CostTranscriptWalk's own -AdmitCorroboratedFallback (added by
+        s1). The live PR-creation caller never sets this (M10: that path stays
+        fail-closed). The s3 targeted-repair entry point
+        (Invoke-CostAttributionRepair, cost-baseline-harvest.ps1) is the one
+        caller that turns it on, for one maintainer-named PR at a time.
+    .PARAMETER CorroborationWindowStart
+    .PARAMETER CorroborationWindowEnd
+        Issue #825 s3 (post-review fix, M8 wiring gap). Threaded straight
+        through to Invoke-CostTranscriptWalk's own -CorroborationWindowStart/
+        -End (added by s1, bounds Tier-2-admitted events only). $null by
+        default and never set by the live PR-creation caller. Invoke-
+        CostAttributionRepair is the one caller that supplies these — the
+        target PR's own createdAt/mergedAt — so the M8 same-repo reused-
+        branch-name collision guard is actually enforced on the one path that
+        ships in issue #825 (the automatic-drain path where this would also
+        matter is deferred to #841). Without this, Tier-2 admission on the
+        shipped path runs unbounded despite the walker itself supporting the
+        bound.
     .OUTPUTS
         [hashtable] with keys: CostSection, Completeness, TokenSum, Attribution,
         SessionId, CostEventsCount, UsePriorCostSection, DegradedMarker,
@@ -107,7 +127,10 @@ function Invoke-CostSessionRender {
         [Parameter(Mandatory)][string]$RepoRoot,
         [AllowEmptyString()][string]$PrBody = '',
         [AllowNull()]$PriorComments = $null,
-        [bool]$IsOrchestrated = $false
+        [bool]$IsOrchestrated = $false,
+        [switch]$AdmitCorroboratedFallback,
+        [Nullable[datetime]]$CorroborationWindowStart = $null,
+        [Nullable[datetime]]$CorroborationWindowEnd = $null
     )
 
     $costBudgetSeconds = 19
@@ -148,12 +171,13 @@ function Invoke-CostSessionRender {
         $copilotOtelJsonlPath = ''
         # Issue #825 s2, M6: out-parameter ref for the walker's Tier-2
         # rejected-dir count (see cost-walker.ps1's -RejectedDirCountVar,
-        # added by s1). AdmitCorroboratedFallback is not set by this caller
-        # (M10 — the live PR-create path stays fail-closed), so this stays 0
-        # today; the s3 targeted-repair entry point is the caller that turns
-        # the switch on and produces a nonzero count. Threaded through
-        # regardless so the annotation wiring below is already correct once
-        # s3 lands.
+        # added by s1). AdmitCorroboratedFallback defaults off (this
+        # function's own switch, threaded straight through below) so this
+        # stays 0 for the live PR-create caller (M10 — that path stays
+        # fail-closed); the s3 targeted-repair entry point
+        # (Invoke-CostAttributionRepair) is the one caller that turns the
+        # switch on and produces a nonzero count. Threaded through
+        # regardless so the annotation wiring below is correct either way.
         $rejectedDirCountRef = [ref]0
         if (-not [string]::IsNullOrWhiteSpace($Slug) -and -not [string]::IsNullOrWhiteSpace($Branch)) {
             $resolvedIssueNumber = script:Resolve-FCLLinkedIssueNumber -PrBody $PrBody -Branch ([string]$Branch)
@@ -163,6 +187,23 @@ function Invoke-CostSessionRender {
                 ParentCwd           = $ParentCwd
                 RepoRoot            = $RepoRoot  # D2: used by identity-based slug discovery
                 RejectedDirCountVar = $rejectedDirCountRef
+            }
+            if ($AdmitCorroboratedFallback) {
+                # Issue #825 s3: opt-in Tier-2 corroborated-fallback trust ladder,
+                # this caller only (M10 — never set by the live PR-create path).
+                $walkParameters['AdmitCorroboratedFallback'] = $true
+            }
+            if ($null -ne $CorroborationWindowStart) {
+                # Issue #825 s3 (post-review fix, M8 wiring gap): bounds Tier-2
+                # admission to the caller-supplied window (Invoke-
+                # CostAttributionRepair passes the target PR's own
+                # createdAt/mergedAt). A $null bound is not enforced by the
+                # walker (see cost-walker.ps1), matching that function's own
+                # contract.
+                $walkParameters['CorroborationWindowStart'] = $CorroborationWindowStart
+            }
+            if ($null -ne $CorroborationWindowEnd) {
+                $walkParameters['CorroborationWindowEnd'] = $CorroborationWindowEnd
             }
             if ($null -ne $resolvedIssueNumber) {
                 $walkParameters['IssueNumber'] = [int]$resolvedIssueNumber
