@@ -725,6 +725,178 @@ $script:WriterContractProseMentionBody = @'
 
 #endregion
 
+#region Fixtures: Get-DispositionTally — review-dispositions marker (issue #768 s3)
+
+# Basic joint-projection fixture: 3 entries spanning v1 (no severity/stage/
+# reviewer_source), v2 (severity+stage, no reviewer_source), and v3
+# (severity+stage+reviewer_source) shapes in one body — proves mixed
+# v1/v2/v3 payloads parse together and the v1 entry's absent stage defaults
+# to 'code-review'.
+$script:ReviewDispositionsBasicBody = @'
+Some PR chatter above the marker.
+
+<!-- review-dispositions-900 -->
+
+```yaml
+schema_version: 3
+passes_run: [1, 2]
+entries:
+  - stable_finding_key: "file.ps1:10:abc123"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Fixed inline."
+  - stable_finding_key: "file.ps1:22:def456"
+    pass: 2
+    disposition: dismiss
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: gemini
+    disposition_rationale: "Not applicable."
+  - stable_finding_key: "file.ps1:33:ghi789"
+    pass: 1
+    disposition: defer
+    classification: routine
+    disposition_rationale: "Partial AC match, deferred (v1 shape: no severity/stage/reviewer_source)."
+```
+'@
+
+# stage: ce exclusion fixture: one code-review entry, one ce entry. Only the
+# code-review entry should survive Get-DispositionTally's stage filter.
+$script:ReviewDispositionsStageCeExclusionBody = @'
+<!-- review-dispositions-901 -->
+
+```yaml
+schema_version: 2
+passes_run: [1]
+entries:
+  - stable_finding_key: "a.ps1:1:aaa"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    disposition_rationale: "Real code-review entry."
+  - stable_finding_key: "a.ps1:2:bbb"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: low
+    stage: ce
+    disposition_rationale: "CE Gate defect deferral entry, must be excluded from the code-review surface."
+```
+'@
+
+# Decoy 1 (M3/collision guard): a v2 entry carrying a nested
+# ac_cross_check.source field. Must NOT be misread as reviewer_source — it is
+# a different key entirely, not merely a position collision. This entry has
+# no reviewer_source field of its own, so ReviewerSource must come back null.
+$script:ReviewDispositionsAcCrossCheckSourceDecoyBody = @'
+<!-- review-dispositions-902 -->
+
+```yaml
+schema_version: 2
+passes_run: [1]
+entries:
+  - stable_finding_key: "b.ps1:5:ccc"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: medium
+    stage: code-review
+    disposition_rationale: "No AC match found."
+    ac_cross_check:
+      file_arm: false
+      term_arm: true
+      result: no-match
+      source: issue
+      routed: defer
+```
+'@
+
+# Decoy 2 (M3/decoy hardening): disposition_rationale is a block scalar whose
+# text quotes the literal substring "disposition: dismiss" describing a
+# DIFFERENT, unrelated finding's history in prose. The real disposition
+# (incorporate) is written first per field order, so the first-key-anchored-
+# match rule must return incorporate, never let the rationale's embedded text
+# inflate/flip the count.
+$script:ReviewDispositionsRationaleBlockScalarDecoyBody = @'
+<!-- review-dispositions-903 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "c.ps1:8:ddd"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: medium
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: |
+      Distinct from the earlier finding on this same file where
+      disposition: dismiss was chosen; this one was kept and fixed inline.
+```
+'@
+
+# Decoy 3 (M3/decoy hardening): reviewer_source's value carries an injected
+# raw newline followed by a fake "disposition: dismiss" fragment. Must not be
+# split into a phantom second entry (entry boundaries are anchored to
+# `- stable_finding_key:` / `- finding_id:` only), and must not corrupt the
+# real disposition already matched earlier in the same entry.
+$script:ReviewDispositionsInjectedNewlineDecoyBody = @'
+<!-- review-dispositions-904 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "d.ps1:12:eee"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: "x
+  disposition: dismiss"
+    disposition_rationale: "Fixed inline."
+```
+'@
+
+# Decoy 4 (M3/decoy hardening): a prose mention of the marker convention with
+# no real block anywhere in the body. Must return could-not-verify, never be
+# miscounted as a real entry.
+$script:ReviewDispositionsProseMentionOnlyBody = @'
+This PR uses the standard `<!-- review-dispositions-905 -->` marker
+convention for tracking review dispositions, same as every other PR in this
+repo. No YAML payload is attached to this particular chatter comment.
+'@
+
+# Fail-loud: ordinary PR chatter with no review-dispositions mention at all.
+$script:ReviewDispositionsNoMarkerBody = @'
+LGTM, thanks for the fix!
+'@
+
+# Fail-loud: a real, vocab-gate-passing head with a fenced YAML block that
+# carries zero segmentable entries (e.g. an `entries: []` payload). Zero
+# entries means zero data to isolate, not a confident empty result.
+$script:ReviewDispositionsZeroEntriesBody = @'
+<!-- review-dispositions-906 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries: []
+```
+'@
+
+#endregion
+
 }
 
 Describe 'Get-SustainedFindingCount - code-review surface (live fixtures)' {
@@ -1793,14 +1965,23 @@ Describe 'Add-JudgeRulingsBlock - sibling append primitive with entry-level posi
 # the ambiguity-walk detector, and the two $keyAnchor counting-side copies
 # in Get-JudgeRulingsSustainedCountInternal / Get-DesignChallengeSustainedCountInternal)
 # are unaffected by this consolidation and must still stay byte-identical.
+#
+# issue #768 s3: the count intentionally rises from four to five literal
+# copies. Get-ReviewDispositionsTallyInternal (new, backs Get-DispositionTally's
+# code-review branch) needs the SAME real-YAML-key-position anchor to read
+# `disposition:`/`reviewer_source:` only at a genuine key position within
+# each per-entry span, so it declares its own local $keyAnchor copy rather
+# than reaching across functions for one of the existing four. This is a
+# tracked, expected addition (the same kind of evolution the GH-5 and 811 M1
+# fixes above went through), not untracked drift.
 # ---------------------------------------------------------------------------
 
 Describe 'Key-anchor pattern — all literal copies stay byte-identical (PF2-F1 drift guard)' {
-    It 'finds exactly four literal copies of the key-anchor pattern, all byte-identical' {
+    It 'finds exactly five literal copies of the key-anchor pattern, all byte-identical' {
         $srcPath = Join-Path $PSScriptRoot '..' 'lib' 'phase-containment-emission-check-core.ps1'
         $src = Get-Content -LiteralPath $srcPath -Raw
         $copies = [regex]::Matches($src, [regex]::Escape('(?:^\s*(?:-\s+)?|[{,]\s*)'))
-        $copies.Count | Should -Be 4
+        $copies.Count | Should -Be 5
         @($copies.Value | Select-Object -Unique).Count | Should -Be 1
     }
 }
@@ -1933,5 +2114,161 @@ Describe '811-D1 s4: writer/reader round-trip — prose-marker-mention fixture (
         $result.ParseStatus | Should -Be 'ok'
         $result.Reason | Should -Be 'ok'
         $result.SustainedCount | Should -Be 1
+    }
+}
+
+# ---------------------------------------------------------------------------
+# issue #768 s3: Get-DispositionTally — per-entry segmented tally across all
+# three surfaces, plus the AC8 byte-identical regression for
+# Get-SustainedFindingCount.
+# ---------------------------------------------------------------------------
+
+Describe 'Get-DispositionTally - code-review surface (review-dispositions marker, joint per-entry projection)' {
+    It 'segments a mixed v1/v2/v3 body into 3 per-entry tuples with the correct joint fields' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsBasicBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 3
+
+        $result.Entries[0].StableFindingKey | Should -Be 'file.ps1:10:abc123'
+        $result.Entries[0].Disposition | Should -Be 'incorporate'
+        $result.Entries[0].Stage | Should -Be 'code-review'
+        $result.Entries[0].ReviewerSource | Should -Be 'local'
+
+        $result.Entries[1].StableFindingKey | Should -Be 'file.ps1:22:def456'
+        $result.Entries[1].Disposition | Should -Be 'dismiss'
+        $result.Entries[1].ReviewerSource | Should -Be 'gemini'
+
+        # v1-shaped entry: no severity/stage/reviewer_source fields at all.
+        # stage must default to 'code-review'; reviewer_source must be null,
+        # not miscounted or defaulted to a guessed value.
+        $result.Entries[2].StableFindingKey | Should -Be 'file.ps1:33:ghi789'
+        $result.Entries[2].Disposition | Should -Be 'defer'
+        $result.Entries[2].Stage | Should -Be 'code-review'
+        $result.Entries[2].ReviewerSource | Should -BeNullOrEmpty
+    }
+
+    It 'can build the AC1 marginal (dismiss/defer counts) from the same Entries data' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsBasicBody
+        $dismissCount = @($result.Entries | Where-Object { $_.Disposition -eq 'dismiss' }).Count
+        $deferCount = @($result.Entries | Where-Object { $_.Disposition -eq 'defer' }).Count
+        $dismissCount | Should -Be 1
+        $deferCount | Should -Be 1
+    }
+
+    It 'can build the AC2 per-source x disposition joint table from the same Entries data' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsBasicBody
+        $byGemini = @($result.Entries | Where-Object { $_.ReviewerSource -eq 'gemini' })
+        $byGemini.Count | Should -Be 1
+        $byGemini[0].Disposition | Should -Be 'dismiss'
+    }
+
+    It 'excludes a stage: ce entry, keeping only the stage: code-review entry' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsStageCeExclusionBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].StableFindingKey | Should -Be 'a.ps1:1:aaa'
+        $result.Entries[0].Stage | Should -Be 'code-review'
+    }
+}
+
+Describe 'Get-DispositionTally - code-review surface decoy hardening (M3, judge-sustained)' {
+    It 'does not misread a nested ac_cross_check.source field as reviewer_source (collision guard)' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsAcCrossCheckSourceDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].ReviewerSource | Should -BeNullOrEmpty
+        $result.Entries[0].Disposition | Should -Be 'dismiss'
+    }
+
+    It 'does not let a disposition_rationale block scalar quoting "disposition: dismiss" inflate or flip the real disposition' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsRationaleBlockScalarDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].Disposition | Should -Be 'incorporate'
+    }
+
+    It 'does not split an injected-newline reviewer_source value into a phantom second entry' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsInjectedNewlineDecoyBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.Entries.Count | Should -Be 1
+        $result.Entries[0].Disposition | Should -Be 'incorporate'
+    }
+
+    It 'returns could-not-verify (never miscounted as a real entry) for a bare prose mention of the marker convention' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsProseMentionOnlyBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+        $result.Entries.Count | Should -Be 0
+    }
+}
+
+Describe 'Get-DispositionTally - code-review surface fail-loud paths (DD3)' {
+    It 'returns could-not-verify for a body with no review-dispositions marker at all' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsNoMarkerBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'returns could-not-verify for a real head with zero segmentable entries, never a confident zero' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body $script:ReviewDispositionsZeroEntriesBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+
+    It 'returns could-not-verify for an empty body' {
+        $result = Get-DispositionTally -Surface 'code-review' -Body ''
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'Get-DispositionTally - design-challenge surface (sustained, defense-sustained pair)' {
+    It 'returns SustainedCount=6, DefenseSustainedCount=0 for the live #782 design block (no defense-sustained concept in this marker shape)' {
+        $result = Get-DispositionTally -Surface 'design-challenge' -Body $script:Design782Body
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 6
+        $result.DefenseSustainedCount | Should -Be 0
+    }
+
+    It 'returns SustainedCount=2, DefenseSustainedCount=0 for the incorporate/escalate/dismiss fixture' {
+        $result = Get-DispositionTally -Surface 'design-challenge' -Body $script:DesignDismissBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+        $result.DefenseSustainedCount | Should -Be 0
+    }
+}
+
+Describe 'Get-DispositionTally - plan-stress-test surface (sustained, defense-sustained pair)' {
+    It 'returns SustainedCount=2, DefenseSustainedCount=1 for the by-analogy judge-rulings fixture' {
+        $result = Get-DispositionTally -Surface 'plan-stress-test' -Body $script:PlanStressTestBody
+        $result.ParseStatus | Should -Be 'ok'
+        $result.SustainedCount | Should -Be 2
+        $result.DefenseSustainedCount | Should -Be 1
+    }
+
+    It 'returns could-not-verify for an unrecognized/malformed body, never a confident zero' {
+        $result = Get-DispositionTally -Surface 'plan-stress-test' -Body $script:MalformedBody
+        $result.ParseStatus | Should -Be 'could-not-verify'
+    }
+}
+
+Describe 'Get-DispositionTally - AC8 regression: Get-SustainedFindingCount public output stays byte-identical' {
+    It 'still returns exactly {SustainedCount; ParseStatus} (no new properties leaked) across a fixed corpus' {
+        $fixedCorpus = @(
+            @{ Surface = 'code-review'; Body = $script:Pr775Body; ExpectedCount = 2 }
+            @{ Surface = 'code-review'; Body = $script:Pr778Body; ExpectedCount = 10 }
+            @{ Surface = 'code-review'; Body = $script:Pr781Body; ExpectedCount = 4 }
+            @{ Surface = 'design-challenge'; Body = $script:Design782Body; ExpectedCount = 6 }
+            @{ Surface = 'design-challenge'; Body = $script:DesignDismissBody; ExpectedCount = 2 }
+            @{ Surface = 'plan-stress-test'; Body = $script:PlanStressTestBody; ExpectedCount = 2 }
+        )
+
+        foreach ($case in $fixedCorpus) {
+            $result = Get-SustainedFindingCount -Surface $case.Surface -Body $case.Body
+            $result.ParseStatus | Should -Be 'ok'
+            $result.SustainedCount | Should -Be $case.ExpectedCount
+
+            # Byte-identical shape assertion (AC8): exactly two properties,
+            # SustainedCount and ParseStatus — DefenseSustainedCount must
+            # never leak into this function's public output.
+            $propertyNames = @($result.PSObject.Properties.Name | Sort-Object)
+            $propertyNames | Should -Be @('ParseStatus', 'SustainedCount')
+        }
     }
 }
