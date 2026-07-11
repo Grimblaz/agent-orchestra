@@ -469,3 +469,166 @@ Describe 'Get-ReviewCostRollup - forward gap (value-present PRs with no cost mar
         $result.ForwardGapCount | Should -Be 0
     }
 }
+
+# ---------------------------------------------------------------------------
+# Format-ReviewCostSection (issue #768 s5, TDD red-green)
+# ---------------------------------------------------------------------------
+
+Describe 'Format-ReviewCostSection - distinct noise-column labeling (no-merge invariant, M17 scope)' {
+    BeforeAll {
+        # A second review-dispositions PR (150) so the code-review post-judge
+        # dismiss-rate aggregate crosses n>=5 (2 entries here + PR100's 4 = 6
+        # total, 2 dismissed) and renders a real number instead of
+        # INSUFFICIENT DATA, so this test can assert the two noise labels
+        # never share a value.
+        $script:CostReviewDispositionsPr150Body = @'
+<!-- review-dispositions-150 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/qux.ts:5:issue-aaaa1111"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Fixed."
+  - stable_finding_key: "src/quux.ts:15:issue-bbbb2222"
+    pass: 1
+    disposition: dismiss
+    classification: routine
+    severity: low
+    stage: code-review
+    reviewer_source: local
+    disposition_rationale: "Not applicable."
+```
+'@
+
+        # PR 100 + PR 150 supply code-review post-judge dismiss-rate data
+        # (N=6, Numerator=2). PR 200's round-two body supplies code-review
+        # defense-kill data (N=5, Numerator=0) via a judge-rulings body.
+        # Combining both on the code-review stage's block lets this test
+        # assert the two rates render under DIFFERENT labels with DIFFERENT
+        # values, never sharing a column.
+        $tuplePr100 = @{ Number = 100; Surface = 'pr'; Bodies = @($script:CostReviewDispositionsPr100Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $tuplePr150 = @{ Number = 150; Surface = 'pr'; Bodies = @($script:CostReviewDispositionsPr150Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $tuplePr200 = @{ Number = 200; Surface = 'pr'; Bodies = @($script:CostJudgeRulingsPr200RoundTwoBody); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $script:LabelRollup = Get-ReviewCostRollup -Tuples @($tuplePr100, $tuplePr150, $tuplePr200) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(100, 150, 200)
+        $script:LabelReportText = (Format-ReviewCostSection -Rollup $script:LabelRollup) -join "`n"
+    }
+
+    It 'renders the defense-kill rate and post-judge dismiss-rate as two distinctly labeled lines with different values' {
+        $script:LabelReportText.Contains('Defense-kill rate: 0.00 (0 of 5)') | Should -BeTrue -Because (
+            "code-review defense-kill rate is 0 defense-sustained of 5 dispositioned judge-rulings entries (PR 200 round two).`nActual report:`n$script:LabelReportText"
+        )
+        $script:LabelReportText.Contains('Post-judge dismiss-rate: 0.33 (2 of 6)') | Should -BeTrue -Because (
+            "code-review post-judge dismiss-rate is 2 dismissed of 6 dispositioned review-dispositions entries (PR 100 + PR 150).`nActual report:`n$script:LabelReportText"
+        )
+    }
+
+    It 'never merges the two noise labels under a shared column' {
+        $script:LabelReportText.Contains('Defense-kill rate: 0.33 (2 of 6)') | Should -BeFalse -Because (
+            "the post-judge dismiss-rate's value must never leak onto the defense-kill rate's label.`nActual report:`n$script:LabelReportText"
+        )
+        $script:LabelReportText.Contains('Post-judge dismiss-rate: 0.00 (0 of 5)') | Should -BeFalse -Because (
+            "the defense-kill rate's value must never leak onto the post-judge dismiss-rate's label.`nActual report:`n$script:LabelReportText"
+        )
+    }
+}
+
+Describe 'Format-ReviewCostSection - INSUFFICIENT DATA rendering' {
+    It 'renders INSUFFICIENT DATA for a thin (n<5) design-challenge dismiss-rate' {
+        $tuple = @{ Number = 600; Surface = 'issue'; Bodies = @($script:CostThinFindingDispositionsIssue600Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $rollup = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @()
+        $reportText = (Format-ReviewCostSection -Rollup $rollup) -join "`n"
+
+        $reportText.Contains('Dismiss-rate (over dispositioned findings): INSUFFICIENT DATA (n=2 < 5)') | Should -BeTrue -Because (
+            "the design-challenge fixture has only 2 dispositioned findings.`nActual report:`n$reportText"
+        )
+    }
+}
+
+Describe 'Format-ReviewCostSection - COST DATA UNAVAILABLE rendering (distinct from INSUFFICIENT DATA)' {
+    It 'renders COST DATA UNAVAILABLE (fetch {source}) and never INSUFFICIENT DATA when the corpus fetch failed' {
+        $rollup = Get-ReviewCostRollup -Tuples @() -Source 'timeout' -Truncated $false -ValuePresentPrNumbers @(1, 2, 3)
+        $reportText = (Format-ReviewCostSection -Rollup $rollup) -join "`n"
+
+        $reportText.Contains('COST DATA UNAVAILABLE (fetch timeout)') | Should -BeTrue -Because (
+            "Source='timeout' must render the fetch-failure state.`nActual report:`n$reportText"
+        )
+        $reportText.Contains('INSUFFICIENT DATA') | Should -BeFalse -Because (
+            "a fetch failure must never be rendered as (or confused with) a thin-data n<5 result.`nActual report:`n$reportText"
+        )
+    }
+}
+
+Describe 'Format-ReviewCostSection - forward-gap line' {
+    It 'renders the exact forward-gap line with the rollup ForwardGapCount' {
+        $rollup = Get-ReviewCostRollup -Tuples @() -Source 'timeout' -Truncated $false -ValuePresentPrNumbers @(1, 2, 3)
+        $reportText = (Format-ReviewCostSection -Rollup $rollup) -join "`n"
+
+        $reportText.Contains('PRs with value data but no cost marker: 3') | Should -BeTrue -Because (
+            "all 3 value-present PRs have no cost marker when the fetch fails entirely.`nActual report:`n$reportText"
+        )
+    }
+
+    It 'renders a zero forward-gap line when every value-present PR has a cost marker' {
+        $tuple = @{ Number = 100; Surface = 'pr'; Bodies = @($script:CostReviewDispositionsPr100Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $rollup = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(100)
+        $reportText = (Format-ReviewCostSection -Rollup $rollup) -join "`n"
+
+        $reportText.Contains('PRs with value data but no cost marker: 0') | Should -BeTrue -Because (
+            "Actual report:`n$reportText"
+        )
+    }
+}
+
+Describe 'Format-ReviewCostSection - per-reviewer-source sub-table (n<5 flagging)' {
+    It 'renders each reviewer_source row flagged INSUFFICIENT DATA when its own n is below 5' {
+        $tuple = @{ Number = 100; Surface = 'pr'; Bodies = @($script:CostReviewDispositionsPr100Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $rollup = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(100)
+        $reportText = (Format-ReviewCostSection -Rollup $rollup) -join "`n"
+
+        $reportText.Contains('local: INSUFFICIENT DATA (n=3 < 5)') | Should -BeTrue -Because (
+            "the local reviewer_source group has 3 entries (below 5).`nActual report:`n$reportText"
+        )
+        $reportText.Contains('gemini-code-assist: INSUFFICIENT DATA (n=1 < 5)') | Should -BeTrue -Because (
+            "the gemini-code-assist reviewer_source group has 1 entry (below 5).`nActual report:`n$reportText"
+        )
+    }
+}
+
+Describe 'Format-ReviewCostSection - design-challenge comparability caveat (M17)' {
+    It 'renders the convergence-filtered comparability caveat alongside the design-challenge dismiss-rate' {
+        $tuple = @{ Number = 700; Surface = 'issue'; Bodies = @($script:CostWellPopulatedFindingDispositionsIssue700Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $rollup = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @()
+        $reportText = (Format-ReviewCostSection -Rollup $rollup) -join "`n"
+
+        $reportText.Contains('Dismiss-rate (over dispositioned findings): 0.40 (2 of 5)') | Should -BeTrue -Because (
+            "Actual report:`n$reportText"
+        )
+        $reportText.Contains('convergence-filtered findings are excluded from this denominator') | Should -BeTrue -Because (
+            "judge-sustained M17 requires an explicit comparability caveat next to the design-challenge dismiss-rate.`nActual report:`n$reportText"
+        )
+    }
+}
+
+Describe 'Format-ReviewCostSection - new-section ordering per stage block' {
+    It 'orders the code-review block as defense-kill rate, then post-judge dismiss-rate, then defer count, then the per-source sub-table' {
+        $tuple = @{ Number = 100; Surface = 'pr'; Bodies = @($script:CostReviewDispositionsPr100Body); CreatedAtValues = @('2026-01-01T00:00:00Z') }
+        $rollup = Get-ReviewCostRollup -Tuples @($tuple) -Source 'graphql' -Truncated $false -ValuePresentPrNumbers @(100)
+        $reportLines = Format-ReviewCostSection -Rollup $rollup
+
+        $defenseKillIdx  = ($reportLines | Select-String -Pattern '^\s*Defense-kill rate:' | Select-Object -First 1).LineNumber
+        $postJudgeIdx    = ($reportLines | Select-String -Pattern '^\s*Post-judge dismiss-rate:' | Select-Object -First 1).LineNumber
+        $deferIdx        = ($reportLines | Select-String -Pattern '^\s*Defer count:' | Select-Object -First 1).LineNumber
+        $perSourceIdx    = ($reportLines | Select-String -Pattern '^\s*Per-reviewer-source' | Select-Object -First 1).LineNumber
+
+        $defenseKillIdx | Should -BeLessThan $postJudgeIdx -Because "actual lines:`n$($reportLines -join "`n")"
+        $postJudgeIdx | Should -BeLessThan $deferIdx -Because "actual lines:`n$($reportLines -join "`n")"
+        $deferIdx | Should -BeLessThan $perSourceIdx -Because "actual lines:`n$($reportLines -join "`n")"
+    }
+}

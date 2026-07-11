@@ -545,3 +545,162 @@ function Get-ReviewCostRollup {
 }
 
 #endregion
+
+#region Private: rate value display (issue #768 s5)
+
+function script:Format-CostRateDisplayValue {
+    <#
+    .SYNOPSIS
+        Renders a single cost rate sub-section's value as one of three
+        honest states, or a numeric rate — never a confident-looking zero.
+    .DESCRIPTION
+        Checks FetchState BEFORE the n<5 gate: a corpus fetch failure
+        (Rollup.FetchState 'unavailable') renders
+        "COST DATA UNAVAILABLE (fetch {source})", a state distinct from a
+        genuine thin-data "INSUFFICIENT DATA (n=X < 5)" result — the two
+        must never be confused with each other or with a confident zero
+        (issue #768 s5, judge-sustained M15).
+    .PARAMETER RateSection
+        A New-CostRateSubSection object (N, Numerator, Rate,
+        InsufficientData, CouldNotVerifyCount).
+    .PARAMETER FetchUnavailable
+        Whether the corpus fetch itself failed (Rollup.FetchState 'unavailable').
+    .PARAMETER FetchSource
+        The Rollup.FetchSource value, interpolated into the
+        COST DATA UNAVAILABLE state text.
+    .OUTPUTS
+        [string]
+    #>
+    param(
+        [Parameter(Mandatory)][object]$RateSection,
+        [Parameter(Mandatory)][bool]$FetchUnavailable,
+        [Parameter(Mandatory)][string]$FetchSource
+    )
+    if ($FetchUnavailable) {
+        return "COST DATA UNAVAILABLE (fetch $FetchSource)"
+    }
+    if ($RateSection.InsufficientData) {
+        return "INSUFFICIENT DATA (n=$($RateSection.N) < 5)"
+    }
+    $display = '{0:F2} ({1} of {2})' -f $RateSection.Rate, $RateSection.Numerator, $RateSection.N
+    if ($RateSection.CouldNotVerifyCount -gt 0) {
+        $display += " [could-not-verify: $($RateSection.CouldNotVerifyCount)]"
+    }
+    return $display
+}
+
+#endregion
+
+#region Format-ReviewCostSection
+
+function Format-ReviewCostSection {
+    <#
+    .SYNOPSIS
+        Renders the Get-ReviewCostRollup output as a per-stage review-cost
+        table (issue #768 s5), meant to be printed immediately after
+        Format-PhaseContainmentReport's value report output.
+    .DESCRIPTION
+        Presentation-only: never computes rates itself (Get-ReviewCostRollup
+        owns aggregation) and never touches the frozen value renderer in
+        phase-containment-rolling-history-core.ps1. Stage order mirrors
+        Format-PhaseContainmentReport's own stage order (design-challenge,
+        plan-stress-test, code-review) so the two sections read as one
+        coherent pass.
+
+        Per stage block, lines render in this order (issue #768 s5
+        new-section ordering): a value-side reference line (pointing back
+        at that stage's block in the value report above), the
+        defense-kill rate (judge-rulings; code-review and plan-stress-test
+        only), the post-judge dismiss-rate / dismiss-rate
+        (review-dispositions for code-review, finding_dispositions for
+        design-challenge), the defer count (code-review only), then the
+        code-review per-reviewer-source sub-table. A stage with no
+        applicable field for one of these positions simply omits that line.
+
+        Two noise concepts are ALWAYS distinctly labeled and never merged
+        under one label: "Defense-kill rate" (judge-rulings) and
+        "Post-judge dismiss-rate" (review-dispositions). The
+        design-challenge dismiss-rate line is explicitly labeled
+        "Dismiss-rate (over dispositioned findings)" and is immediately
+        followed by a comparability caveat noting that convergence-filtered
+        findings are excluded from that denominator, so a reader cannot
+        compare it apples-to-apples against the code-review post-judge
+        dismiss-rate without that caveat (judge-sustained M17).
+
+        Three honest, never-a-confident-zero states render via
+        Format-CostRateDisplayValue: INSUFFICIENT DATA (n<5, per
+        sub-section), COST DATA UNAVAILABLE (fetch {source}) (checked
+        BEFORE the n<5 gate, so a corpus fetch failure is never mistaken
+        for a thin-data n=0 result), and the forward-gap line ("PRs with
+        value data but no cost marker: N"), rendered unconditionally at the
+        end of the section regardless of fetch state.
+    .PARAMETER Rollup
+        The Get-ReviewCostRollup return object.
+    .OUTPUTS
+        [string[]] — the report lines.
+    #>
+    [CmdletBinding()]
+    [OutputType([string[]])]
+    param(
+        [Parameter(Mandatory)][object]$Rollup
+    )
+
+    $fetchUnavailable = $Rollup.FetchState -eq 'unavailable'
+    $lines = [System.Collections.Generic.List[string]]::new()
+
+    $lines.Add('')
+    $lines.Add('Review Cost (presentation-only)')
+    $lines.Add('')
+
+    # ---- design-challenge ----
+    $lines.Add('Stage: design-challenge')
+    $lines.Add('  Value-side reference: see the Stage: design-challenge block in the report above.')
+    $designRate = $Rollup.DesignChallenge.DismissRate
+    $lines.Add("  Dismiss-rate (over dispositioned findings): $(Format-CostRateDisplayValue -RateSection $designRate -FetchUnavailable $fetchUnavailable -FetchSource $Rollup.FetchSource)")
+    $lines.Add('  Comparability caveat: convergence-filtered findings are excluded from this denominator; do not compare this rate directly against the code-review post-judge dismiss-rate without accounting for that exclusion.')
+    $lines.Add('')
+
+    # ---- plan-stress-test ----
+    $lines.Add('Stage: plan-stress-test')
+    $lines.Add('  Value-side reference: see the Stage: plan-stress-test block in the report above.')
+    $planRate = $Rollup.PlanStressTest.DefenseKillRate
+    $lines.Add("  Defense-kill rate: $(Format-CostRateDisplayValue -RateSection $planRate -FetchUnavailable $fetchUnavailable -FetchSource $Rollup.FetchSource)")
+    $lines.Add('')
+
+    # ---- code-review ----
+    $lines.Add('Stage: code-review')
+    $lines.Add('  Value-side reference: see the Stage: code-review block in the report above.')
+    $codeReviewDefenseRate = $Rollup.CodeReview.DefenseKillRate
+    $lines.Add("  Defense-kill rate: $(Format-CostRateDisplayValue -RateSection $codeReviewDefenseRate -FetchUnavailable $fetchUnavailable -FetchSource $Rollup.FetchSource)")
+    $codeReviewDismissRate = $Rollup.CodeReview.PostJudgeDismissRate
+    $lines.Add("  Post-judge dismiss-rate: $(Format-CostRateDisplayValue -RateSection $codeReviewDismissRate -FetchUnavailable $fetchUnavailable -FetchSource $Rollup.FetchSource)")
+    if ($fetchUnavailable) {
+        $lines.Add("  Defer count: COST DATA UNAVAILABLE (fetch $($Rollup.FetchSource))")
+    }
+    else {
+        $lines.Add("  Defer count: $($Rollup.CodeReview.DeferCount)")
+    }
+    $lines.Add('  Per-reviewer-source (code-review):')
+    if ($fetchUnavailable) {
+        $lines.Add("    COST DATA UNAVAILABLE (fetch $($Rollup.FetchSource))")
+    }
+    elseif ($Rollup.CodeReview.PerSource.Count -eq 0) {
+        $lines.Add('    (no per-source data in window)')
+    }
+    else {
+        foreach ($sourceName in $Rollup.CodeReview.PerSource.Keys) {
+            $sourceRate = $Rollup.CodeReview.PerSource[$sourceName]
+            $valueText = Format-CostRateDisplayValue -RateSection $sourceRate -FetchUnavailable $false -FetchSource $Rollup.FetchSource
+            $lines.Add("    ${sourceName}: $valueText")
+        }
+    }
+    $lines.Add('')
+
+    # ---- forward gap (always rendered, independent of fetch state) ----
+    $lines.Add("PRs with value data but no cost marker: $($Rollup.ForwardGapCount)")
+    $lines.Add('')
+
+    return $lines.ToArray()
+}
+
+#endregion
