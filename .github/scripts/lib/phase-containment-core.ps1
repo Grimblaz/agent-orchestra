@@ -50,6 +50,18 @@ $script:ValidCategories        = @(
 
 #endregion
 
+#region finding_key format (issue #772 D4)
+
+# Must stay byte-identical to the "pattern" literal in
+# skills/calibration-pipeline/schemas/phase-containment.schema.json (finding_key
+# property) — the schema is the authoritative source, this is the sole consumer.
+# Drift between the two is asserted by the "finding_key pattern drift" test in
+# phase-containment-core.Tests.ps1 (follows the Get-PhaseContainmentEnumDriftStatus
+# precedent below).
+$script:FindingKeyPattern = '^(code-review|design-challenge|plan-stress-test):.+'
+
+#endregion
+
 #region Get-PhaseContainmentBlock
 
 function Get-PhaseContainmentBlock {
@@ -66,12 +78,31 @@ function Get-PhaseContainmentBlock {
         The full text to search within (e.g., a GitHub issue comment body).
     .PARAMETER Id
         The ID suffix for the marker, e.g. '762' matches <!-- phase-containment-762 -->.
+    .PARAMETER SkippedCount
+        Optional [ref] counter incremented once per pair-match skip (issue
+        #772 D6 malformed/unclosed block). Callers that need to fold
+        parser-layer skips into their own drop counters (e.g.
+        Invoke-PhaseContainmentCommentScan's InvalidEntryCount) pass a [ref]
+        here; existing callers that omit it are unaffected.
     .OUTPUTS
         [string[]] Array of raw YAML content strings, or $null if no blocks found.
+    .NOTES
+        Pair-matching (issue #772 D6): if a later open tag appears before the
+        next close tag, the earlier open tag is treated as an unclosed,
+        malformed block. That block is skipped (with a Write-Warning, and —
+        issue #772/#831 M4 — an increment of the optional -SkippedCount [ref]
+        counter) and the scan resumes from the later open tag, so an
+        unclosed block can no longer silently absorb the following block's
+        content. A genuinely unclosed *final* block (no later open tag
+        anywhere after it, so no close tag is ever found) hits the same
+        "no close tag found" case below and — issue #772/#833 GH-2 — is now
+        also warned and counted via -SkippedCount, matching the mid-scan
+        case, before the scan stops.
     #>
     param(
         [Parameter(Mandatory)][string]$Text,
-        [Parameter(Mandatory)][string]$Id
+        [Parameter(Mandatory)][string]$Id,
+        [ref]$SkippedCount
     )
 
     $openTag  = "<!-- phase-containment-$Id -->"
@@ -86,7 +117,27 @@ function Get-PhaseContainmentBlock {
 
         $contentStart = $startIdx + $openTag.Length
         $endIdx = $Text.IndexOf($closeTag, $contentStart, [System.StringComparison]::Ordinal)
-        if ($endIdx -lt 0) { break }  # Unclosed block — stop scanning
+        if ($endIdx -lt 0) {
+            # Unclosed final block — no close tag found anywhere after this
+            # open tag. Warn and count it the same way the mid-scan
+            # pair-match case does (issue #772/#833 GH-2), then stop
+            # scanning; there is nothing left to resume from.
+            Write-Warning "Skipping malformed phase-containment-$Id block at position ${startIdx}: no close tag found (unclosed final block)."
+            if ($null -ne $SkippedCount) { $SkippedCount.Value++ }
+            break
+        }
+
+        # Pair-match: if another open tag appears before this open tag's
+        # close tag, this open tag is unclosed/malformed. Skip only this
+        # block (warn) and resume scanning from the later open tag instead
+        # of letting the unclosed block absorb the next block's content.
+        $nextOpenIdx = $Text.IndexOf($openTag, $contentStart, [System.StringComparison]::Ordinal)
+        if ($nextOpenIdx -ge 0 -and $nextOpenIdx -lt $endIdx) {
+            Write-Warning "Skipping malformed phase-containment-$Id block at position ${startIdx}: a later open tag was found before its close tag (unclosed block)."
+            if ($null -ne $SkippedCount) { $SkippedCount.Value++ }
+            $searchFrom = $nextOpenIdx
+            continue
+        }
 
         $raw = $Text.Substring($contentStart, $endIdx - $contentStart).Trim()
 
@@ -276,8 +327,10 @@ function Test-PhaseContainmentEntry {
         $errors.Add("escape_distance must be a non-negative integer. Got: $escapeDistance")
     }
 
-    # Rules 9-12 require valid ordinals/projections — skip if enum errors already found
-    # (the ordinal lookup would throw on invalid values)
+    # Rules 9-11 require valid ordinals/projections — skip if enum errors already found
+    # (the ordinal lookup would throw on invalid values). Rule 12 (finding_key format,
+    # below) does not depend on ordinals/projections and always runs regardless of
+    # enum errors found here.
     $enumErrorsFound = $errors.Count -gt 0
     if (-not $enumErrorsFound) {
         $introducedOrdinal  = $script:PhaseOrdinals[$Entry['introduced_phase']]
@@ -312,6 +365,17 @@ function Test-PhaseContainmentEntry {
                 )
             }
         }
+    }
+
+    # Rule 12: finding_key must match the surface-prefixed format (case-sensitive —
+    # issue #772 D4). Uses -cmatch to mirror the schema's ECMA-262 case-sensitive
+    # "pattern" semantics; PowerShell's default -match is case-insensitive and would
+    # diverge (e.g. silently accepting "Code-Review:x").
+    if (-not ($Entry['finding_key'] -cmatch $script:FindingKeyPattern)) {
+        $val = $Entry['finding_key']
+        $errors.Add(
+            "finding_key '$val' does not match expected format. Expected pattern: $script:FindingKeyPattern"
+        )
     }
 
     $isValid = $errors.Count -eq 0

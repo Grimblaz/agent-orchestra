@@ -65,8 +65,7 @@ An optional, skippable worth-it check that runs **once per issue after the issue
 ## Related Guidance
 
 - Load `bdd-scenarios` when scenario IDs, G/W/T formatting, service annotations, or runner classification are needed.
-- Load `browser-canvas-testing` when a CE scenario depends on canvas interaction in browser tools.
-- Load `webapp-testing` when the work shifts from exploratory CE evidence to browser E2E automation design.
+- Load `browser-canvas-testing` when a CE scenario depends on canvas interaction in browser tools; load `webapp-testing` when the work shifts from exploratory CE evidence to browser E2E automation design.
 
 ## Gotchas
 

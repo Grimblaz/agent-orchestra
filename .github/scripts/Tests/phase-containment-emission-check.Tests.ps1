@@ -732,4 +732,33 @@ finding_dispositions:
         $report | Should -Match 'Source: repo-resolution-failed'
         $report | Should -Match 'Corpus fetch did not complete'
     }
+
+    It 'renders an INCOMPLETE banner but still scans the partial tuples (issue #772 D1) when the corpus is Truncated' {
+        # Unlike the timeout/repo-resolution-failed early-return above (which
+        # scans nothing), a Truncated corpus still carries partial tuples and
+        # must still be scanned -- this is the load-bearing distinction the
+        # not-clean branch must preserve.
+        $prBody = @'
+<!-- judge-rulings pr=775 -->
+judge_ruling: sustained
+judge_ruling: sustained
+-->
+'@
+
+        Mock Get-PhaseContainmentCommentCorpus {
+            return [PSCustomObject]@{
+                Tuples    = @(@{ Number = 775; Surface = 'pr'; Bodies = @($prBody); CreatedAtValues = @('2024-01-01T00:00:00Z') })
+                FetchedAt = (Get-Date)
+                Source    = 'graphql'
+                Truncated = $true
+            }
+        }
+
+        $report = Invoke-PhaseContainmentEmissionCheckCorpus -WindowDays 30 -RepoOwner 'Grimblaz' -RepoName 'agent-orchestra'
+
+        $report | Should -Match 'INCOMPLETE: corpus fetch truncated'
+        # Still scanned, not skipped: the gap line for PR 775 must render.
+        $report | Should -Match 'code-review #775: GAP -- sustained=2 blocks=0 missing=2'
+        $report | Should -Match 'Surfaces scanned: 1 \| Sustained counted: 2 \| Blocks matched: 0'
+    }
 }

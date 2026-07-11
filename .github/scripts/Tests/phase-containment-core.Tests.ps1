@@ -76,6 +76,111 @@ severity: medium
         $result[0] | Should -Match 'gh-1111'
         $result[1] | Should -Match 'gh-2222'
     }
+
+    It 'skips an unclosed block when a later open tag precedes the next close tag, and warns (D6 pair-matching: open1 open2 close1 close2)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-1111
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-2222
+<!-- /phase-containment-772 -->
+<!-- /phase-containment-772 -->
+"@
+        $warnMsgs = $null
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772' -WarningVariable warnMsgs -WarningAction SilentlyContinue
+        $result | Should -Not -BeNullOrEmpty
+        $result.Count | Should -Be 1
+        $result[0] | Should -Match 'gh-2222'
+        $result[0] | Should -Not -Match 'gh-1111'
+        $warnMsgs.Count | Should -BeGreaterThan 0
+        ($warnMsgs -join ' ') | Should -Match 'malformed'
+    }
+
+    It 'returns $null when a close tag appears with no preceding open tag (close-before-open)' {
+        $text = @"
+<!-- /phase-containment-772 -->
+finding_key: code-review:gh-5555
+"@
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772'
+        $result | Should -BeNullOrEmpty
+    }
+
+    It 'parses back-to-back well-formed blocks unchanged (D6 regression guard: open1 close1 open2 close2)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-6666
+<!-- /phase-containment-772 -->
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-7777
+<!-- /phase-containment-772 -->
+"@
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772'
+        $result | Should -Not -BeNullOrEmpty
+        $result.Count | Should -Be 2
+        $result[0] | Should -Match 'gh-6666'
+        $result[1] | Should -Match 'gh-7777'
+    }
+
+    It 'increments the optional -SkippedCount [ref] once per pair-match skip (issue #772/#831 M4)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-1111
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-2222
+<!-- /phase-containment-772 -->
+<!-- /phase-containment-772 -->
+"@
+        $skipped = 0
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772' -SkippedCount ([ref]$skipped) -WarningAction SilentlyContinue
+        $result | Should -Not -BeNullOrEmpty
+        $skipped | Should -Be 1 -Because 'exactly one malformed/unclosed block (gh-1111) was skipped by the D6 pair-match'
+    }
+
+    It 'does not increment -SkippedCount when no pair-match skip occurs' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-6666
+<!-- /phase-containment-772 -->
+"@
+        $skipped = 0
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772' -SkippedCount ([ref]$skipped)
+        $result | Should -Not -BeNullOrEmpty
+        $skipped | Should -Be 0
+    }
+
+    It 'does not throw when -SkippedCount is omitted, even when a pair-match skip occurs (back-compat)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-1111
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-2222
+<!-- /phase-containment-772 -->
+<!-- /phase-containment-772 -->
+"@
+        { Get-PhaseContainmentBlock -Text $text -Id '772' -WarningAction SilentlyContinue } | Should -Not -Throw
+    }
+
+    It 'a final unclosed block emits a warning and increments SkippedCount (issue #833 GH-2)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-8888
+"@
+        $skipped = 0
+        $warnMsgs = $null
+        $result = Get-PhaseContainmentBlock -Text $text -Id '772' -SkippedCount ([ref]$skipped) -WarningVariable warnMsgs -WarningAction SilentlyContinue
+        $result | Should -BeNullOrEmpty
+        $skipped | Should -Be 1 -Because 'the trailing unclosed block (gh-8888) has no close tag anywhere after it and should be counted as skipped'
+        $warnMsgs.Count | Should -BeGreaterThan 0
+        ($warnMsgs -join ' ') | Should -Match 'malformed'
+    }
+
+    It 'does not throw when -SkippedCount is omitted for a final unclosed block (back-compat)' {
+        $text = @"
+<!-- phase-containment-772 -->
+finding_key: code-review:gh-8888
+"@
+        { Get-PhaseContainmentBlock -Text $text -Id '772' -WarningAction SilentlyContinue } | Should -Not -Throw
+    }
 }
 
 Describe 'ConvertFrom-PhaseContainmentYaml - non-recursion guard' {
@@ -309,6 +414,81 @@ Describe 'apparatus_meta: true entry' {
         }
         $result = Test-PhaseContainmentEntry -Entry $entry
         $result.IsValid | Should -Be $true
+    }
+}
+
+Describe 'Test-PhaseContainmentEntry - finding_key format (Rule 12, issue #772 D4)' {
+    It 'returns IsValid=$false when finding_key has no recognized surface prefix' {
+        $entry = @{
+            finding_key       = 'foo:bar'
+            introduced_phase  = 'experience'
+            catchable_phase   = 'design'
+            caught_stage      = 'code-review'
+            escape_distance   = 2
+            severity          = 'medium'
+            systemic_fix_type = 'skill'
+            category          = 'pattern'
+        }
+        $result = Test-PhaseContainmentEntry -Entry $entry
+        $result.IsValid | Should -Be $false
+        $result.Errors  | Should -Match 'finding_key'
+    }
+
+    It 'returns IsValid=$false for a bare key with no surface prefix at all' {
+        $entry = @{
+            finding_key       = 'gh-1234'
+            introduced_phase  = 'experience'
+            catchable_phase   = 'design'
+            caught_stage      = 'code-review'
+            escape_distance   = 2
+            severity          = 'medium'
+            systemic_fix_type = 'skill'
+            category          = 'pattern'
+        }
+        $result = Test-PhaseContainmentEntry -Entry $entry
+        $result.IsValid | Should -Be $false
+        $result.Errors  | Should -Match 'finding_key'
+    }
+
+    It 'returns IsValid=$false when the surface prefix has the wrong case (case-sensitive -cmatch)' {
+        $entry = @{
+            finding_key       = 'Code-Review:x'
+            introduced_phase  = 'experience'
+            catchable_phase   = 'design'
+            caught_stage      = 'code-review'
+            escape_distance   = 2
+            severity          = 'medium'
+            systemic_fix_type = 'skill'
+            category          = 'pattern'
+        }
+        $result = Test-PhaseContainmentEntry -Entry $entry
+        $result.IsValid | Should -Be $false
+        $result.Errors  | Should -Match 'finding_key'
+    }
+
+    It 'returns IsValid=$true for a well-formed lowercase code-review finding_key' {
+        $entry = @{
+            finding_key       = 'code-review:gh-5555'
+            introduced_phase  = 'experience'
+            catchable_phase   = 'design'
+            caught_stage      = 'code-review'
+            escape_distance   = 2
+            severity          = 'medium'
+            systemic_fix_type = 'skill'
+            category          = 'pattern'
+        }
+        $result = Test-PhaseContainmentEntry -Entry $entry
+        $result.IsValid | Should -Be $true
+        $result.Errors  | Should -BeNullOrEmpty
+    }
+}
+
+Describe 'finding_key pattern drift guard (issue #772 D4)' {
+    It 'schema "pattern" literal for finding_key equals the validator regex constant (Get-PhaseContainmentEnumDriftStatus precedent)' {
+        $schemaPath = Join-Path $script:RepoRoot 'skills/calibration-pipeline/schemas/phase-containment.schema.json'
+        $schema     = Get-Content -LiteralPath $schemaPath -Raw | ConvertFrom-Json
+        $schemaPattern = $schema.properties.finding_key.pattern
+        $schemaPattern | Should -Be $script:FindingKeyPattern
     }
 }
 
