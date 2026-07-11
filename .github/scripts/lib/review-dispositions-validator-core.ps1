@@ -8,7 +8,7 @@
 .DESCRIPTION
     Finds <!-- review-dispositions-{PR} --> comments on a GitHub PR, parses their YAML
     payloads, and validates against the review-dispositions payload schema:
-      - schema_version must be 1 or 2 (`{1,2}`). v1 entries are exempt from ac_cross_check checks.
+      - schema_version must be 1, 2, or 3 (`{1,2,3}`). v1 entries are exempt from ac_cross_check checks.
       - passes_run must be a non-empty subset of [1,2,3,4,5]
       - entries[] must each carry stable_finding_key, pass, disposition, classification,
         disposition_rationale
@@ -120,8 +120,8 @@ foreach ($body in $rawBodies) {
     }
 
     # schema_version
-    if ($null -eq $payload.schema_version -or $payload.schema_version -notin @(1, 2)) {
-        Add-RdvFinding "review-dispositions-${PullRequestNumber}: schema_version must be 1 or 2, got: $($payload.schema_version)"
+    if ($null -eq $payload.schema_version -or $payload.schema_version -notin @(1, 2, 3)) {
+        Add-RdvFinding "review-dispositions-${PullRequestNumber}: schema_version must be 1, 2, or 3, got: $($payload.schema_version)"
     }
 
     # passes_run

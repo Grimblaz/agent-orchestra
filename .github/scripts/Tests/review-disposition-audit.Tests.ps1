@@ -308,12 +308,55 @@ entries:
         $result.status | Should -Be 'clean'
     }
 
-    It 'schema_version 3 emits warning mentioning schema_version (out of range)' {
+    It 'v3 entry with reviewer_source validates (status clean)' {
         $body = @'
 <!-- review-dispositions-42 -->
 
 ```yaml
 schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    disposition_rationale: "v3 entry tagged with reviewer_source."
+    reviewer_source: local
+```
+'@
+        $result = script:Run-Validator -PR 42 -Bodies @($body)
+
+        $result.status       | Should -Be 'clean'
+        $result.marker_count | Should -Be 1
+    }
+
+    It 'v3 entry without reviewer_source validates (status clean, field is optional)' {
+        $body = @'
+<!-- review-dispositions-42 -->
+
+```yaml
+schema_version: 3
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    disposition_rationale: "v3 entry with no reviewer_source supplied."
+```
+'@
+        $result = script:Run-Validator -PR 42 -Bodies @($body)
+
+        $result.status       | Should -Be 'clean'
+        $result.marker_count | Should -Be 1
+    }
+
+    It 'schema_version 4 emits warning mentioning schema_version (out of range)' {
+        $body = @'
+<!-- review-dispositions-42 -->
+
+```yaml
+schema_version: 4
 passes_run: [1]
 entries:
   - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
@@ -328,6 +371,34 @@ entries:
         $result.status | Should -Be 'findings'
         $allMessages = (@($result.findings) | ForEach-Object { $_.message }) -join "`n"
         $allMessages | Should -Match 'schema_version'
+    }
+
+    It 'schema_version 4 error text no longer claims "1 or 2" and instead spans 1, 2, or 3' {
+        $body = @'
+<!-- review-dispositions-42 -->
+
+```yaml
+schema_version: 4
+passes_run: [1]
+entries:
+  - stable_finding_key: "src/auth.ts:10:null-check-a1b2c3d4"
+    pass: 1
+    disposition: incorporate
+    classification: routine
+    disposition_rationale: "Future version."
+```
+'@
+        $result = script:Run-Validator -PR 42 -Bodies @($body)
+
+        $allMessages = (@($result.findings) | ForEach-Object { $_.message }) -join "`n"
+        $allMessages | Should -Match 'schema_version must be 1, 2, or 3, got: 4'
+    }
+
+    It 'validator header comment documents schema_version acceptance of 1, 2, or 3 (no stale "1 or 2" text)' {
+        $validatorContent = Get-Content -Path $script:ValidatorScript -Raw
+
+        $validatorContent | Should -Match 'schema_version must be 1, 2, or 3'
+        $validatorContent | Should -Not -Match 'schema_version must be 1 or 2'
     }
 }
 

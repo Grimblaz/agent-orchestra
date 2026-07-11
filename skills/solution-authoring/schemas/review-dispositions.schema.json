@@ -7,8 +7,8 @@
   "properties": {
     "schema_version": {
       "type": "integer",
-      "enum": [1, 2],
-      "description": "Schema version. 1 = legacy; 2 = includes severity, ac_cross_check, and stage per-entry fields."
+      "enum": [1, 2, 3],
+      "description": "Schema version. 1 = legacy; 2 = includes severity, ac_cross_check, and stage per-entry fields; 3 = adds optional reviewer_source per-entry field."
     },
     "passes_run": {
       "type": "array",
@@ -74,6 +74,10 @@
             "type": "string",
             "enum": ["code-review", "ce"],
             "description": "v2: Which review stage produced this entry."
+          },
+          "reviewer_source": {
+            "type": "string",
+            "description": "v3: Optional. Identifies the reviewer/source that produced this disposition entry, for review-cost accounting (e.g. 'local' for pipeline-origin findings). Distinct from the nested ac_cross_check.source field, which records the AC cross-check's evidence source and is unrelated to reviewer identity. Absent on v1/v2 entries."
           },
           "ac_cross_check": {
             "type": "object",
